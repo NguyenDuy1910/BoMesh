@@ -1,20 +1,21 @@
 "use client";
 
-import { ShieldCheck, Users } from "lucide-react";
+import { Users } from "lucide-react";
 import { useState } from "react";
 
 import { CommandBar, FilterTrigger } from "@/components/layout/CommandBar";
 import { Avatar } from "@/components/ui/Avatar";
-import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { CellTitle, DataTable, type Column } from "@/components/ui/DataTable";
 import { Dialog } from "@/components/ui/Dialog";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
+import { PageLoadingSkeleton } from "@/components/ui/Skeleton";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { workspaceDirectoryApi, memberName, type PlatformUser } from "@/modules/workspace-control/directory";
+import { SectionHeader } from "@/modules/workspace-control/components/SectionHeader";
+import { workspaceDirectoryApi, memberName, memberStatus, roleNames, type Member } from "@/modules/workspace-control/directory";
+import { pluralize } from "@/modules/workspace-control/format";
 import { useControlPlaneData } from "@/modules/workspace-control/queries";
-import { ControlPlaneLoadingSkeleton } from "@/modules/workspace-control/components/ControlPlaneLoadingSkeleton";
 
 /**
  * Identities across every workspace.
@@ -26,13 +27,17 @@ import { ControlPlaneLoadingSkeleton } from "@/modules/workspace-control/compone
 export function PlatformUsersPage() {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
-  const users = useControlPlaneData(() => workspaceDirectoryApi.platform.users(search));
-  const [selected, setSelected] = useState<PlatformUser | null>(null);
+  const users = useControlPlaneData(() => workspaceDirectoryApi.platform.users(search), search);
+  const [selected, setSelected] = useState<Member | null>(null);
   const rows = (users.data?.items ?? []).filter(
-    (row) => !status || String(row.status) === status,
+    (row) => !status || memberStatus(row) === status,
   );
+  const filtered = Boolean(search || status);
 
-  const columns: Column<PlatformUser>[] = [
+  /* Columns show only what `GET /platform/users` (OpenAPI `UserPage`) returns:
+     identity, roles, groups and status. Workspace memberships are not part of
+     that record, so they are not guessed at here. */
+  const columns: Column<Member>[] = [
     {
       key: "email",
       label: "User",
@@ -42,57 +47,59 @@ export function PlatformUsersPage() {
         <CellTitle icon={<Avatar name={memberName(row)} size="md" />} subtitle={row.email} title={memberName(row)} />
       ),
     },
+    { key: "roles", label: "Roles", priority: "medium", render: (row) => roleNames(row) || "—" },
     {
-      key: "memberships",
-      label: "Workspaces",
-      priority: "medium",
-      render: (row) => row.memberships.length
-        ? row.memberships.map((item) => item.workspace_name).join(", ")
-        : "No membership",
-    },
-    {
-      key: "platform_roles",
-      label: "Platform scope",
+      key: "groups",
+      label: "Groups",
       priority: "low",
-      render: (row) => row.platform_roles.length
-        ? <span className="flex flex-wrap gap-1">{row.platform_roles.map((role) => <Badge key={role} tone="info">{role}</Badge>)}</span>
-        : "—",
+      render: (row) => row.groups.map((group) => group.display_name).join(", ") || "—",
     },
     {
       key: "status",
       label: "Status",
       width: 110,
-      render: (row) => <StatusBadge status={row.status ? "active" : "suspended"} />,
+      render: (row) => <StatusBadge status={memberStatus(row)} />,
     },
   ];
 
-  if (users.error) return <ErrorState description={users.error} onAction={users.reload} />;
-  if (!users.data) return <ControlPlaneLoadingSkeleton variant="platform-users" />;
-
   return <>
-    <CommandBar
-      count={`${rows.length} users`}
-      filters={
-        <FilterTrigger
-          label="Filter by status"
-          onChange={setStatus}
-          options={[
-            { value: "", label: "All statuses" },
-            { value: "true", label: "Active" },
-            { value: "false", label: "Suspended" },
-          ]}
-          value={status}
-        />
-      }
-      search={{ value: search, onChange: setSearch, placeholder: "Search users…", label: "Search platform users" }}
-    />
-    <DataTable
-      ariaLabel="Platform users"
-      columns={columns}
-      data={rows}
-      emptyState={<EmptyState description="Clear the search or status filter." icon={<Users size={20} />} title="No matching users" />}
-      onRowClick={setSelected}
-    />
+    <SectionHeader section="platform-users" />
+    {users.error ? (
+      <ErrorState description={users.error} onAction={users.reload} />
+    ) : !users.data ? (
+      <PageLoadingSkeleton controls label="Loading users" />
+    ) : <>
+      <CommandBar
+        count={pluralize(rows.length, "user")}
+        filters={
+          <FilterTrigger
+            label="Filter by status"
+            onChange={setStatus}
+            options={[
+              { value: "", label: "All statuses" },
+              { value: "active", label: "Active" },
+              { value: "suspended", label: "Suspended" },
+            ]}
+            value={status}
+          />
+        }
+        search={{ value: search, onChange: setSearch, placeholder: "Search users…", label: "Search platform users", debounceMs: 250 }}
+      />
+      <DataTable
+        ariaLabel="Platform users"
+        columns={columns}
+        data={rows}
+        emptyState={
+          <EmptyState
+            description={filtered ? "Try a different search or status." : "People appear here once they have an account."}
+            icon={<Users size={20} />}
+            size="sm"
+            title={filtered ? "No matching users" : "No users yet"}
+          />
+        }
+        onRowClick={setSelected}
+      />
+    </>}
     <Dialog
       footer={<Button onClick={() => setSelected(null)} variant="secondary">Close</Button>}
       onClose={() => setSelected(null)}
@@ -108,31 +115,12 @@ export function PlatformUsersPage() {
           </div>
         </div>
         <dl className="mt-5 grid grid-cols-[8rem_1fr] gap-x-4 gap-y-3 text-sm">
-          <dt className="text-[var(--text-tertiary)]">Workspaces</dt>
-          <dd>
-            {selected.memberships.length ? (
-              <ul className="grid gap-1">
-                {selected.memberships.map((item) => (
-                  <li key={item.workspace_id}>
-                    {item.workspace_name}
-                    <span className="text-[var(--text-tertiary)]">
-                      {item.role_names.length ? ` · ${item.role_names.join(", ")}` : " · no role"}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            ) : "No membership"}
-          </dd>
-          <dt className="text-[var(--text-tertiary)]">Platform scope</dt>
-          <dd>
-            {selected.platform_roles.length ? (
-              <span className="inline-flex items-center gap-1">
-                <ShieldCheck size={14} />{selected.platform_roles.join(", ")}
-              </span>
-            ) : "None"}
-          </dd>
+          <dt className="text-[var(--text-tertiary)]">Roles</dt>
+          <dd>{roleNames(selected) || "None"}</dd>
+          <dt className="text-[var(--text-tertiary)]">Groups</dt>
+          <dd>{selected.groups.map((group) => group.display_name).join(", ") || "None"}</dd>
           <dt className="text-[var(--text-tertiary)]">Status</dt>
-          <dd><StatusBadge status={selected.status ? "active" : "suspended"} /></dd>
+          <dd><StatusBadge status={memberStatus(selected)} /></dd>
           <dt className="text-[var(--text-tertiary)]">User ID</dt>
           <dd className="font-mono text-xs">{selected.id}</dd>
         </dl>

@@ -1,18 +1,18 @@
 "use client";
 
-import { ArrowUpDown, Check, ListFilter, Plus, Upload } from "lucide-react";
+import { ArrowUpDown, Check, FolderPlus, ListFilter, LoaderCircle, Plug, Plus, Upload } from "lucide-react";
 import { Fragment, useMemo, useRef, useState } from "react";
 
 import { SplitView } from "@/components/layout/SplitView";
-import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Dropdown, DropdownItem, DropdownLabel, DropdownSeparator } from "@/components/ui/Dropdown";
 import { ErrorState } from "@/components/ui/ErrorState";
-import { Tooltip } from "@/components/ui/Tooltip";
 import { useToast } from "@/components/ui/Toast";
 import { useAuthSession } from "@/lib/hooks/useAuthSession";
 import { hasSessionPermission } from "@/lib/auth/session";
 import { useRouteState } from "@/lib/hooks/useRouteState";
+import { SectionHeader } from "@/modules/workspace-control/components/SectionHeader";
+import { pluralize } from "@/modules/workspace-control/format";
 import { authorizeConnection, AuthorizationCancelled, PopupBlocked } from "@/modules/knowledge/authorize";
 import { describeConnector, type KnowledgeConnector } from "@/modules/knowledge/connectors";
 import {
@@ -20,6 +20,7 @@ import {
   sourcesApi,
   type Connection,
 } from "@/modules/knowledge/integrations-api";
+import { canRetryIndexing } from "@/modules/knowledge/document-facts";
 import { knowledgeActions, useConnections, useConnectorCatalogue, useKnowledge } from "@/modules/knowledge/queries";
 import type { WorkspaceKnowledgeDocument } from "@/modules/knowledge/workspace-repository";
 
@@ -94,8 +95,17 @@ const FILTERS: Record<KnowledgeTab, readonly FilterGroup[]> = {
       label: "Outcome",
       options: [
         { value: "complete", label: "Completed" },
-        { value: "partial", label: "Still running" },
+        { value: "running", label: "In progress" },
         { value: "failed", label: "Failed" },
+      ],
+    },
+    {
+      key: "type",
+      label: "Kind",
+      options: [
+        { value: "", label: "All" },
+        { value: "document", label: "Documents" },
+        { value: "source", label: "Sources" },
       ],
     },
   ],
@@ -128,12 +138,19 @@ const SEARCH_COPY: Record<KnowledgeTab, { placeholder: string; label: string }> 
   activity: { placeholder: "Search activity…", label: "Search sync activity" },
 };
 
+/** What the filter and sort menus name, for assistive technology. */
+const SUBJECT: Record<KnowledgeTab, string> = {
+  documents: "documents",
+  sources: "connected accounts",
+  activity: "sync activity",
+};
+
 /**
  * Knowledge.
  *
  * One shell, three subviews, and a selection that lives in the address. The
- * rail, the toolbar and the scope stay put whichever subview is showing — only
- * the surface below the toolbar is replaced, which is what makes moving
+ * header, the tab bar and the scope stay put whichever subview is showing —
+ * only the surface below the tab bar is replaced, which is what makes moving
  * between documents, sources and activity feel like staying in one place.
  */
 export function KnowledgeScreen() {
@@ -157,7 +174,7 @@ export function KnowledgeScreen() {
 
   const [search, setSearch] = useState("");
   const [statusByTab, setStatusByTab] = useState<Record<string, string>>({});
-  const [type, setType] = useState("");
+  const [typeByTab, setTypeByTab] = useState<Record<string, string>>({});
   const [sortByTab, setSortByTab] = useState<Record<string, string>>({});
   const [expanded, setExpanded] = useState(false);
   const [selection, setSelection] = useState<string[]>([]);
@@ -173,8 +190,10 @@ export function KnowledgeScreen() {
 
   const tab = (knowledgeTabs.some((item) => item.id === tabParam) ? tabParam : "documents") as KnowledgeTab;
   const status = statusByTab[tab] ?? "";
+  const type = typeByTab[tab] ?? "";
   const sort = sortByTab[tab] ?? DEFAULT_SORT[tab];
   const setStatus = (value: string) => setStatusByTab((current) => ({ ...current, [tab]: value }));
+  const setType = (value: string) => setTypeByTab((current) => ({ ...current, [tab]: value }));
   const setSort = (value: string) => setSortByTab((current) => ({ ...current, [tab]: value }));
   const snapshot = query.data;
   const documents = useMemo(() => snapshot?.documents ?? [], [snapshot]);
@@ -184,6 +203,13 @@ export function KnowledgeScreen() {
     () => collections.find((collection) => collection.name === scope)?.id ?? null,
     [collections, scope],
   );
+  const requestUpload = () => {
+    if (scopeCollectionId ?? snapshot?.personalCollectionId) {
+      uploadRef.current?.click();
+      return;
+    }
+    setCreatingCollection(true);
+  };
   const connections = useMemo(() => integrations.data?.connections ?? [], [integrations.data]);
   const sources = useMemo(() => integrations.data?.sources ?? [], [integrations.data]);
   const runs = useMemo(() => integrations.data?.runs ?? [], [integrations.data]);
@@ -221,6 +247,14 @@ export function KnowledgeScreen() {
     setExpanded(false);
   };
 
+  /** Opening a document from Activity is a move to the list it lives in. */
+  const openDocumentById = (documentId: string) => {
+    const document = documents.find((item) => item.id === documentId);
+    if (!document) return;
+    setTab("documents");
+    openDocument(document);
+  };
+
   const browseCollection = (name: string) => {
     setScope(name);
     setSelection([]);
@@ -243,11 +277,28 @@ export function KnowledgeScreen() {
     }
   };
 
-  const reindex = (ids: string[]) =>
+  /**
+   * Retry the failed ones among `targets`. A selection mixes states, so the
+   * rest are left alone and the toast says how many were actually retried.
+   */
+  const retryIndexing = (targets: WorkspaceKnowledgeDocument[]) =>
     act(async () => {
-      await Promise.all(ids.map((id) => knowledgeActions.reindex(id)));
-      toast({ title: ids.length === 1 ? "Document re-indexed" : `${ids.length} documents re-indexed`, variant: "success" });
-    }, "The document could not be re-indexed.");
+      const retried = await knowledgeActions.retryIndexing(targets);
+      const skipped = targets.length - retried;
+      if (!retried) {
+        toast({ title: "Nothing to retry", description: "None of these documents failed to index." });
+        return;
+      }
+      toast({
+        title: retried === 1 ? "Retrying indexing" : `Retrying ${retried} documents`,
+        description: skipped
+          ? `${pluralize(skipped, "other document")} in the selection didn’t fail, so ${skipped === 1 ? "it was" : "they were"} left as ${skipped === 1 ? "it is" : "they are"}.`
+          : retried === 1
+            ? "It shows as Indexing until it can be searched."
+            : "They show as Indexing until they can be searched.",
+        variant: "success",
+      });
+    }, "Indexing could not be retried. Try again in a moment.");
 
   const removeDocuments = async () => {
     const ids = removalIds ?? [];
@@ -258,7 +309,9 @@ export function KnowledgeScreen() {
       if (selectedId && ids.includes(selectedId)) setSelectedId("");
       toast({
         title: ids.length === 1 ? "Removed from knowledge" : `${ids.length} documents removed`,
-        description: "It stops appearing in answers within a minute. The file itself is untouched in its source.",
+        description: ids.length === 1
+          ? "It stops appearing in answers within a minute."
+          : "They stop appearing in answers within a minute.",
         variant: "success",
       });
     }, "The document could not be removed.");
@@ -270,7 +323,7 @@ export function KnowledgeScreen() {
     act(async () => {
       await work();
       integrations.reload();
-    }, "The connection could not be changed.");
+    }, "The connected account could not be changed.");
 
   const reconnect = (connection: Connection) =>
     connectionAction(async () => {
@@ -323,17 +376,14 @@ export function KnowledgeScreen() {
   const isPicked = (key: FilterGroup["key"], value: string) =>
     (key === "type" ? type : status) === value;
 
-  /* The same four controls on every subview, so the strip keeps its shape. */
+  const connectSource = () => { setTab("sources"); setConnectionId(""); setConnectorKey(""); };
+
+  /* Filter and sort on every subview, so the tab bar keeps its shape. */
   const toolbarActions = (
     <>
-      {tab === "documents" && canCreateCollection && (
-        <Button icon={<Plus aria-hidden="true" size={16} />} onClick={() => setCreatingCollection(true)} size="sm">
-          New collection
-        </Button>
-      )}
       <Dropdown
         align="right"
-        ariaLabel={`Filter ${tab === "activity" ? "activity" : tab}`}
+        ariaLabel={`Filter ${SUBJECT[tab]}`}
         buttonClassName="knowledge-icon-button"
         label={<ListFilter aria-hidden="true" size={18} />}
         showChevron={false}
@@ -367,7 +417,7 @@ export function KnowledgeScreen() {
 
       <Dropdown
         align="right"
-        ariaLabel={`Sort ${tab === "activity" ? "activity" : tab}`}
+        ariaLabel={`Sort ${SUBJECT[tab]}`}
         buttonClassName="knowledge-icon-button"
         label={<ArrowUpDown aria-hidden="true" size={18} />}
         showChevron={false}
@@ -379,33 +429,54 @@ export function KnowledgeScreen() {
           </DropdownItem>
         ))}
       </Dropdown>
-
-      {/* Uploading and connecting add to the workspace, not to the subview
-          that happens to be open, so both stay available throughout. */}
-      <Tooltip label="Upload files" side="bottom">
-        <Button
-          aria-label="Upload files"
-          className="knowledge-icon-button"
-          icon={<Upload size={18} />}
-          iconOnly
-          loading={busy}
-          onClick={() => uploadRef.current?.click()}
-          variant="ghost"
-        />
-      </Tooltip>
-
-      <Tooltip label="Connect a source" side="bottom">
-        <Button
-          aria-label="Connect a source"
-          className="knowledge-icon-button"
-          icon={<Plus size={18} />}
-          iconOnly
-          onClick={() => { setTab("sources"); setConnectionId(""); }}
-          variant="ghost"
-        />
-      </Tooltip>
     </>
   );
+
+  /* The page's one primary action. Uploading, organizing and connecting all
+     add to the workspace rather than to the open subview, so they share one
+     labelled menu in the header instead of three icons in the tab bar. */
+  const addMenu = (
+    <Dropdown
+      align="right"
+      buttonClassName="knowledge-add-trigger"
+      disabled={busy}
+      label={busy ? (
+        <>
+          <LoaderCircle aria-hidden="true" className="motion-safe:animate-spin" size={16} />
+          Uploading…
+        </>
+      ) : (
+        <>
+          <Plus aria-hidden="true" size={16} />
+          Add
+        </>
+      )}
+      showChevron={!busy}
+    >
+      <DropdownItem onClick={requestUpload}>
+        <Upload aria-hidden="true" size={16} />
+        Upload files
+      </DropdownItem>
+      {canCreateCollection && (
+        <DropdownItem onClick={() => setCreatingCollection(true)}>
+          <FolderPlus aria-hidden="true" size={16} />
+          New collection
+        </DropdownItem>
+      )}
+      <DropdownItem onClick={connectSource}>
+        <Plug aria-hidden="true" size={16} />
+        Connect a source
+      </DropdownItem>
+    </Dropdown>
+  );
+
+  const health = snapshot && integrations.data
+    ? [
+      pluralize(snapshot.documentCount, "document"),
+      pluralize(connections.length, "connected account"),
+      pluralize(sources.length, "source"),
+    ].join(" · ")
+    : undefined;
 
   const documentsSurface = (
     <SplitView
@@ -415,7 +486,7 @@ export function KnowledgeScreen() {
           expanded={expanded}
           onClose={() => setSelectedId("")}
           onExpand={() => setExpanded((value) => !value)}
-          onReindex={() => void reindex([selected.id])}
+          onRetryIndexing={canRetryIndexing(selected) ? () => void retryIndexing([selected]) : undefined}
           onRequestRemove={() => setRemovalIds([selected.id])}
         />
       ) : null}
@@ -425,17 +496,22 @@ export function KnowledgeScreen() {
           compact={Boolean(selected)}
           documents={rows}
           filtered={filtered}
-          loading={query.loading}
+          loading={!snapshot && !query.error}
           onClearFilters={clearFilters}
           onClearSelection={() => setSelection([])}
-          onConnectSource={() => { setTab("sources"); setConnectionId(""); }}
+          onConnectSource={connectSource}
           onOpenCollection={browseCollection}
           onOpenDocument={openDocument}
-          onReindexSelection={() => void reindex(selection)}
+          onRetryIndexingSelection={() =>
+            void retryIndexing(documents.filter((document) => selection.includes(document.id)))}
           onRemoveSelection={() => setRemovalIds(selection)}
           onToggleDocument={(id, checked) =>
             setSelection((current) => checked ? [...new Set([...current, id])] : current.filter((item) => item !== id))}
-          onUpload={() => uploadRef.current?.click()}
+          onCreateCollection={canCreateCollection ? () => setCreatingCollection(true) : undefined}
+          onUpload={requestUpload}
+          retryableSelectionCount={documents.filter(
+            (document) => selection.includes(document.id) && canRetryIndexing(document),
+          ).length}
           onWidenScope={() => setScope("")}
           scope={scope}
           search={search}
@@ -450,12 +526,7 @@ export function KnowledgeScreen() {
 
   return (
     <section aria-label="Workspace knowledge" className="document-workspace">
-      {snapshot && (
-        <p className="knowledge-health">
-          <span aria-hidden="true" className="knowledge-health__dot" />
-          {snapshot.documentCount.toLocaleString()} documents · {connections.length} connected {connections.length === 1 ? "account" : "accounts"} · {sources.length} {sources.length === 1 ? "source" : "sources"}
-        </p>
-      )}
+      <SectionHeader actions={addMenu} className="document-workspace__head" description={health} section="knowledge" />
 
       <KnowledgeToolbar
         actions={toolbarActions}
@@ -467,15 +538,29 @@ export function KnowledgeScreen() {
         tab={tab}
       />
 
+      {/* A failed load and a failed action are different problems: reloading
+          fixes the first, but would not repeat the second — so the action
+          failure is dismissed rather than offered a "Retry" that does nothing. */}
       {(query.error || integrations.error || error) && (
-        <ErrorState
-          actionLabel="Retry"
-          className="mx-[var(--page-gutter)] mb-3"
-          description={error ?? query.error ?? integrations.error ?? ""}
-          layout="inline"
-          onAction={() => { setError(null); query.reload(); integrations.reload(); }}
-          title="Knowledge action failed"
-        />
+        <div className="mx-[var(--page-gutter)] mt-[var(--space-5)] grid gap-[var(--space-2)]">
+          {(query.error || integrations.error) && (
+            <ErrorState
+              actionLabel="Retry"
+              description={query.error ?? integrations.error ?? ""}
+              layout="inline"
+              onAction={() => { query.reload(); integrations.reload(); }}
+              title="Knowledge couldn’t be loaded"
+            />
+          )}
+          {error && (
+            <ErrorState
+              actionLabel="Dismiss"
+              description={error}
+              layout="inline"
+              onAction={() => setError(null)}
+            />
+          )}
+        </div>
       )}
 
       {tab === "documents" && documentsSurface}
@@ -499,7 +584,7 @@ export function KnowledgeScreen() {
           onRemove={() => connectionAction(async () => {
             await connectionsApi.remove(selectedConnection.id);
             setConnectionId("");
-            toast({ title: "Connection removed", variant: "success" });
+            toast({ title: "Connected account removed", variant: "success" });
           })}
           onRemoveSource={(source) => connectionAction(async () => {
             await sourcesApi.remove(source.id);
@@ -557,11 +642,12 @@ export function KnowledgeScreen() {
 
       {tab === "activity" && (
         <SyncActivityView
-          connections={connections}
-          runs={runs}
+          collections={collections}
+          documents={documents}
+          kind={type}
+          onOpenDocument={openDocumentById}
           search={search}
           sort={sort}
-          sources={sources}
           status={status}
         />
       )}
@@ -579,12 +665,20 @@ export function KnowledgeScreen() {
               throw new Error("Choose a collection before uploading.");
             }
             await knowledgeActions.upload(file, target);
-            toast({ title: "Document uploaded", variant: "success" });
+            toast(file.name.toLowerCase().endsWith(".zip")
+              ? {
+                  title: `${file.name} uploaded`,
+                  description: "Its files are extracted and indexed one by one. Each appears here as its own document.",
+                  variant: "success",
+                }
+              : { title: "Document uploaded", variant: "success" });
           }, "Upload failed.");
           setBusy(false);
           event.target.value = "";
         }}
         ref={uploadRef}
+        // Knowledge formats and archives of them; images are not knowledge yet.
+        accept=".csv,.docx,.htm,.html,.json,.jsonl,.log,.markdown,.md,.pdf,.pptx,.rst,.sql,.tsv,.txt,.xlsx,.xml,.yaml,.yml,.zip"
         type="file"
       />
 
@@ -602,8 +696,10 @@ export function KnowledgeScreen() {
         onClose={() => setCreatingCollection(false)}
         onCreate={async ({ title, description }) => {
           const collection = await knowledgeActions.createCollection(title, description);
+          setScope(collection.title);
           toast({
             action: { label: "View collection", onClick: () => setScope(collection.title) },
+            description: "Upload files or connect a source to fill it.",
             title: `${collection.title} created`,
             variant: "success",
           });
@@ -615,8 +711,8 @@ export function KnowledgeScreen() {
         confirmLabel={removalIds?.length === 1 ? "Remove document" : "Remove documents"}
         description={
           removalIds?.length === 1
-            ? "It stops appearing in workspace knowledge and in answers. The file itself is untouched in its source, and re-syncing brings it back unless it is also excluded in Scope."
-            : `${removalIds?.length ?? 0} documents stop appearing in workspace knowledge and in answers. The files themselves are untouched in their sources.`
+            ? "It stops appearing in answers. The original file stays in its source."
+            : `${removalIds?.length ?? 0} documents stop appearing in answers. The original files stay in their sources.`
         }
         onClose={() => setRemovalIds(null)}
         onConfirm={removeDocuments}

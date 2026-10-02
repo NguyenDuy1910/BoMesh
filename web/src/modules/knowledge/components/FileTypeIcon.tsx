@@ -1,4 +1,4 @@
-import { FileSpreadsheet, FileText, FileType2, Files } from "lucide-react";
+import { FileArchive, FileSpreadsheet, FileText, FileType2, Files } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import type { KnowledgeDocumentKind } from "@/modules/knowledge/workspace-repository";
@@ -15,6 +15,7 @@ const presentation = {
   pdf: { Icon: FileType2, tone: "pdf", label: "PDF" },
   document: { Icon: FileText, tone: "document", label: "Document" },
   spreadsheet: { Icon: FileSpreadsheet, tone: "sheet", label: "Spreadsheet" },
+  archive: { Icon: FileArchive, tone: "text", label: "Archive" },
   unsupported: { Icon: Files, tone: "text", label: "File" },
 } as const satisfies Record<KnowledgeDocumentKind, { Icon: typeof FileText; tone: string; label: string }>;
 

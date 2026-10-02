@@ -21,7 +21,6 @@ export { PersonRow } from "./PersonRow";
 export { SearchField } from "./SearchField";
 export { SettingRow } from "./SettingRow";
 export { StarterPrompt } from "./StarterPrompt";
-export { StatusPill, type StatusTone } from "./StatusPill";
 export { TableCell, TableHeader, TableRow, type TableColumn } from "./Table";
 export { ThinkingIndicator } from "./ThinkingIndicator";
 export { Toggle } from "./Toggle";

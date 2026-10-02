@@ -1,6 +1,13 @@
-import { ProductLoadingSkeleton } from "@/components/ui/ProductLoadingSkeleton";
+import { PageLoadingSkeleton } from "@/components/ui/Skeleton";
 
-/** This fallback replaces only the product route outlet, never its shell. */
+/** Shared by every product route; the rail around it is already real. */
 export default function ProductLoading() {
-  return <ProductLoadingSkeleton />;
+  return (
+    <PageLoadingSkeleton
+      className="mx-auto w-full max-w-3xl px-[var(--page-gutter)] pt-[var(--space-5)]"
+      controls
+      heading
+      label="Loading page"
+    />
+  );
 }

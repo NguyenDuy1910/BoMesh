@@ -90,21 +90,6 @@ export interface IngestionSource {
   schedule: IngestionSchedule | null;
 }
 
-export interface IngestionRun {
-  [key: string]: unknown;
-  id: string;
-  workflow_id: string;
-  run_id: string;
-  source_id: string;
-  integration_connection_id: string;
-  connector_key: string;
-  trigger_type: "manual" | "scheduled" | "webhook" | "initial" | null;
-  status: "running" | "completed" | "failed" | "cancelled" | "terminated" | "timed_out" | "unknown";
-  started_at: string;
-  finished_at: string | null;
-  history_length: number;
-}
-
 export interface CollectionGrant {
   [key: string]: unknown;
   item_id?: string | null;
@@ -131,23 +116,6 @@ export interface DirectoryGroup {
   display_name: string;
   status: string;
   member_count: number;
-}
-
-export interface CollectionUploadResponse {
-  document: {
-    id: string;
-    parent_item_id: string | null;
-    file_name: string;
-    content_type: string;
-    size_bytes: number;
-    status: "pending" | "processing" | "ready" | "failed" | "unsupported";
-    indexed: boolean;
-    upload_status: "pending" | "available" | "failed" | null;
-    created_at: string;
-    uploaded_at: string | null;
-  };
-  ingestion_status: "ready" | "failed";
-  created: boolean;
 }
 
 /** Collections carry their description in metadata rather than a column. */

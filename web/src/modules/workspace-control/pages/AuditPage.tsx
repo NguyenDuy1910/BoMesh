@@ -9,21 +9,26 @@ import { CellTitle, DataTable, type Column } from "@/components/ui/DataTable";
 import { Dialog } from "@/components/ui/Dialog";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
+import { PageLoadingSkeleton } from "@/components/ui/Skeleton";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { describeAuditAction, formatDateTime, formatRelative } from "@/modules/workspace-control/format";
+import { SectionHeader } from "@/modules/workspace-control/components/SectionHeader";
+import { describeAuditAction, formatDateTime, formatRelative, pluralize } from "@/modules/workspace-control/format";
 import { workspaceDirectoryApi, type AuditEvent } from "@/modules/workspace-control/directory";
 import { useControlPlaneData } from "@/modules/workspace-control/queries";
-import { ControlPlaneLoadingSkeleton } from "@/modules/workspace-control/components/ControlPlaneLoadingSkeleton";
 
 export function AuditPage() {
-  return <ActivityTable platform={false} />;
+  return <>
+    <SectionHeader section="activity" />
+    <ActivityTable platform={false} />
+  </>;
 }
 
 /** Who did what, where, and how it went — from the durable audit trail. */
 export function ActivityTable({ platform }: { platform: boolean }) {
   const [search, setSearch] = useState("");
-  const events = useControlPlaneData(async () =>
-    platform ? workspaceDirectoryApi.platform.audit(search) : workspaceDirectoryApi.auditLogs(search),
+  const events = useControlPlaneData(
+    async () => (platform ? workspaceDirectoryApi.platform.audit(search) : workspaceDirectoryApi.auditLogs(search)),
+    search,
   );
   const [outcome, setOutcome] = useState("");
   const [workspace, setWorkspace] = useState("");
@@ -56,7 +61,7 @@ export function ActivityTable({ platform }: { platform: boolean }) {
       render: (row) => (
         <CellTitle
           icon={<Avatar name={actorOf(row)} size="sm" />}
-          subtitle={row.resource_id ?? row.resource_type}
+          subtitle={row.actor.display_name ? row.actor.email : undefined}
           title={actorOf(row)}
         />
       ),
@@ -64,7 +69,7 @@ export function ActivityTable({ platform }: { platform: boolean }) {
     ...(platform
       ? [{
           key: "workspace",
-          label: "Workspace",
+          label: "Tenant",
           priority: "medium" as const,
           width: 160,
           render: (row: AuditEvent) => row.workspace?.name ?? "Platform",
@@ -87,17 +92,19 @@ export function ActivityTable({ platform }: { platform: boolean }) {
   ];
 
   if (events.error) return <ErrorState description={events.error} onAction={events.reload} />;
-  if (!events.data) return <ControlPlaneLoadingSkeleton variant="audit" />;
+  if (!events.data) return <PageLoadingSkeleton controls label="Loading activity" />;
+
+  const filtered = Boolean(search || outcome || workspace);
 
   return <>
     <CommandBar
-      count={`${rows.length} events`}
+      count={pluralize(rows.length, "event")}
       filters={<>
         {platform && (
           <FilterTrigger
-            label="Filter by workspace"
+            label="Filter by tenant"
             onChange={setWorkspace}
-            options={[{ value: "", label: "All workspaces" }, ...workspaces.map(([value, label]) => ({ value, label }))]}
+            options={[{ value: "", label: "All tenants" }, ...workspaces.map(([value, label]) => ({ value, label }))]}
             value={workspace}
           />
         )}
@@ -112,13 +119,20 @@ export function ActivityTable({ platform }: { platform: boolean }) {
           value={outcome}
         />
       </>}
-      search={{ value: search, onChange: setSearch, placeholder: "Search activity…", label: "Search activity" }}
+      search={{ value: search, onChange: setSearch, placeholder: "Search activity…", label: "Search activity", debounceMs: 250 }}
     />
     <DataTable
       ariaLabel={platform ? "Platform activity" : "Workspace activity"}
       columns={columns}
       data={rows}
-      emptyState={<EmptyState description="Administrative changes and sync events appear here without private content." icon={<ScrollText size={20} />} title="No matching activity" />}
+      emptyState={
+        <EmptyState
+          description={filtered ? "Try a different search or filter." : "Administrative changes and sync events appear here."}
+          icon={<ScrollText size={20} />}
+          size="sm"
+          title={filtered ? "No matching activity" : "No activity yet"}
+        />
+      }
       onRowClick={setSelected}
     />
     <Dialog onClose={() => setSelected(null)} open={Boolean(selected)} title="Activity details">
@@ -128,8 +142,10 @@ export function ActivityTable({ platform }: { platform: boolean }) {
           <dt className="text-[var(--text-tertiary)]">Action</dt><dd className="font-mono text-xs">{selected.action}</dd>
           <dt className="text-[var(--text-tertiary)]">Resource</dt>
           <dd>{selected.resource_type}{selected.resource_id ? ` · ${selected.resource_id}` : ""}</dd>
-          <dt className="text-[var(--text-tertiary)]">Workspace</dt>
-          <dd>{selected.workspace ? selected.workspace.name ?? selected.workspace.id : "Platform"}</dd>
+          {platform && <>
+            <dt className="text-[var(--text-tertiary)]">Tenant</dt>
+            <dd>{selected.workspace ? selected.workspace.name ?? selected.workspace.id : "Platform"}</dd>
+          </>}
           <dt className="text-[var(--text-tertiary)]">Outcome</dt>
           <dd><StatusBadge status={selected.outcome === "success" ? "success" : "failed"} /></dd>
           <dt className="text-[var(--text-tertiary)]">Recorded</dt><dd>{formatDateTime(selected.created_at)}</dd>

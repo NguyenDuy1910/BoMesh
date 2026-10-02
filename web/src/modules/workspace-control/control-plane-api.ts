@@ -148,39 +148,3 @@ export function uploadCollectionFile<T>(
     request.send(form);
   });
 }
-
-/** Retry indexing from a previously stored native upload. */
-export async function retryCollectionDocument<T>(documentId: string): Promise<T> {
-  const configuration = getApiConfiguration();
-  if (!configuration) {
-    throw new ControlPlaneApiError(
-      `Workspace access is not configured. Set the ${appBrand.productName} API, tenant, and user environment values.`,
-    );
-  }
-  let response: Response;
-  try {
-    response = await fetch(
-      `${configuration.apiUrl}/api/v1/documents/${encodeURIComponent(documentId)}/content`,
-      {
-        method: "PUT",
-        cache: "no-store",
-        headers: {
-          Accept: "application/json",
-          ...requestIdentityHeaders(configuration),
-        },
-      },
-    );
-  } catch {
-    throw new ControlPlaneApiError(
-      `The indexing retry could not reach the ${appBrand.productName} API.`,
-    );
-  }
-  const payload = await response.json().catch(() => null) as { detail?: unknown } | T | null;
-  if (!response.ok) {
-    const detail = payload && typeof payload === "object" && "detail" in payload && typeof payload.detail === "string"
-      ? payload.detail
-      : `Indexing retry failed with status ${response.status}`;
-    throw new ControlPlaneApiError(detail, response.status);
-  }
-  return payload as T;
-}

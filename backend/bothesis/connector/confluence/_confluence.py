@@ -5,6 +5,7 @@ from collections.abc import Callable
 from collections.abc import Iterator
 from typing import Any
 from urllib.parse import parse_qsl
+from urllib.parse import quote
 from urllib.parse import urlencode
 from urllib.parse import urlsplit
 from urllib.parse import urlunsplit
@@ -153,6 +154,22 @@ class FinxConfluence:
         # Execute a CQL query and yield all results across pages.
         cql_url = self.build_cql_url(cql, expand)
         yield from self._paginate_url(cql_url, limit)
+
+    def space_root_pages(self, space_key: str, limit: int = 50) -> Iterator[dict[str, Any]]:
+        # A space's top-level pages, each with its child count for a picker.
+        yield from self._paginate_url(
+            f"rest/api/space/{quote(space_key, safe='')}/content/page"
+            "?depth=root&expand=children.page",
+            limit,
+        )
+
+    def child_pages(self, page_id: str, limit: int = 50) -> Iterator[dict[str, Any]]:
+        # One page's direct children, each with its own child count.
+        yield from self._paginate_url(
+            f"rest/api/content/{quote(page_id, safe='')}/child/page"
+            "?expand=children.page",
+            limit,
+        )
 
     def paginated_page_retrieval(
         self,

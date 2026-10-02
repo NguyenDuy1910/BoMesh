@@ -15,13 +15,13 @@ export const knowledgeTabs = [
 export type KnowledgeTab = (typeof knowledgeTabs)[number]["id"];
 
 /**
- * The one line Knowledge is operated from.
+ * The tab bar Knowledge is operated from.
  *
  * Where you are (the three subviews), what you are looking at (scope), how you
- * narrow it (search) and what you do to it (the quiet icon controls) share a
- * single strip. Splitting them into a tab row and a filter row below spends
- * two bands of the page on navigation that fits in one, and makes the scope
- * read as a property of the page rather than of the list.
+ * narrow it (search) and how you order it (the quiet filter and sort menus)
+ * share the page's one tab bar. Splitting them into a tab row and a filter row
+ * below spends two bands of the page on navigation that fits in one, and makes
+ * the scope read as a property of the page rather than of the list.
  */
 export function KnowledgeToolbar({
   tab,
@@ -40,19 +40,19 @@ export function KnowledgeToolbar({
     placeholder: string;
     label: string;
   };
+  /** Filter and sort. The same on every subview, so the bar keeps its shape. */
   actions?: React.ReactNode;
 }) {
   return (
-    <div className="knowledge-bar">
+    <div className="tab-bar knowledge-bar">
       <Tabs
         activeTab={tab}
         ariaLabel="Knowledge views"
-        className="knowledge-bar__tabs"
         onChange={onTabChange}
         tabs={knowledgeTabs.slice()}
         variant="underline"
       />
-      <div className="knowledge-bar__utilities">
+      <div className="tab-bar__end">
         {scope}
         <SearchInput
           ariaLabel={search.label}
@@ -62,7 +62,7 @@ export function KnowledgeToolbar({
           placeholder={search.placeholder}
           value={search.value}
         />
-        {actions && <div className="knowledge-bar__actions">{actions}</div>}
+        {actions}
       </div>
     </div>
   );

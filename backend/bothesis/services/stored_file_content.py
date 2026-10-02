@@ -9,7 +9,12 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from bothesis.connector.file import FileProcessingError, FileProcessor, ProcessedFile
+from bothesis.connector.file import (
+    FileNoTextError,
+    FileProcessingError,
+    FileProcessor,
+    ProcessedFile,
+)
 from bothesis.connector.protocol import (
     AccessPolicy,
     DocumentKind,
@@ -72,8 +77,15 @@ class StoredFileContentService:
                     path,
                     **self._processing_arguments(document, user_id=user_id),
                 )
+            except FileNoTextError as exc:
+                raise DocumentProcessingError(
+                    "the file has no text to index; scanned PDFs and text inside images"
+                    " are not supported yet"
+                ) from exc
             except FileProcessingError as exc:
-                raise DocumentProcessingError("document source processing failed") from exc
+                raise DocumentProcessingError(
+                    "the file could not be read; it may be damaged or in a format that cannot be parsed"
+                ) from exc
             return self._canonical_content(document, processed, user_id=user_id)
 
     async def direct_file_data(
@@ -181,8 +193,6 @@ class StoredFileContentService:
     @staticmethod
     def _document_kind(content_type: str | None) -> DocumentKind:
         normalized = (content_type or "").casefold()
-        if normalized.startswith("image/"):
-            return DocumentKind.IMAGE
         if normalized == "application/pdf":
             return DocumentKind.PDF
         if normalized in {"text/html", "application/xhtml+xml"}:

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
+import asyncio
+import logging
+from contextlib import asynccontextmanager, suppress
 from typing import Any
 
 from fastapi import FastAPI
@@ -110,14 +112,32 @@ _ROUTERS = (
 )
 
 
+log = logging.getLogger(__name__)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    """Close every client the runtime opened when the process shuts down."""
+    """Resume interrupted direct ingestions; close every client at shutdown."""
 
+    resuming = asyncio.create_task(_resume_direct_ingestions())
     try:
         yield
     finally:
+        resuming.cancel()
+        with suppress(asyncio.CancelledError):
+            await resuming
         await get_runtime().aclose()
+
+
+async def _resume_direct_ingestions() -> None:
+    # Startup must not wait for, or fail on, the database.
+    try:
+        resumed = await get_runtime().document_service().resume_direct_ingestions()
+    except Exception:  # noqa: BLE001 - best effort; a later retry recovers the rest
+        log.warning("direct ingestions could not be resumed", exc_info=True)
+        return
+    if resumed:
+        log.info("resumed %d interrupted direct ingestions", resumed)
 
 
 def create_app() -> FastAPI:

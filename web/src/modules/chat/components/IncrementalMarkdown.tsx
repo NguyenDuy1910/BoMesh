@@ -116,7 +116,7 @@ function MarkdownCitation({ children, ...properties }: HTMLAttributes<HTMLElemen
 
   return (
     <button
-      aria-label={`Show source ${source.index}: ${source.title}`}
+      aria-label={source.title ? `Source ${source.index}: ${source.title}` : `Source ${source.index}`}
       aria-pressed={rendering.activeCitationId === source.id}
       className={clsx(
         "answer-citation-chip",

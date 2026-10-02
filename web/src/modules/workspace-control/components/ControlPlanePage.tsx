@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
 import { Button } from "@/components/ui/Button";
-import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { resolveSection } from "@/modules/workspace-control/navigation";
@@ -80,17 +79,16 @@ export function ControlPlanePage({ section: rawSection }: { section: string }) {
       return (
         <>
           <PageHeader
-            description="This address is not part of the workspace control surface. It may have been renamed."
+            description="This address doesn't match a page. It may have been renamed."
             title="Page not found"
           />
-          <Card>
-            <EmptyState
-              action={<Button onClick={() => router.push("/workspace-control")}>Go to the overview</Button>}
-              description="Use the navigation, or press ⌘K to search for what you were looking for."
-              icon={<Compass className="h-5 w-5" />}
-              title="Nothing lives here"
-            />
-          </Card>
+          <EmptyState
+            action={<Button onClick={() => router.push("/workspace-control")}>Go to overview</Button>}
+            description="Use the navigation, or press ⌘K to search."
+            icon={<Compass className="h-5 w-5" />}
+            size="sm"
+            title="Find what you were looking for"
+          />
         </>
       );
   }

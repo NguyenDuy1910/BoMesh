@@ -1,12 +1,13 @@
 "use client";
 
-import { useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { getApiConfiguration } from "@/lib/api/config";
 import { apiRequest } from "@/lib/api/request";
 import { apiRevision, invalidateApiData, subscribeApiData } from "@/lib/api/revision";
 import { useApiQuery } from "@/lib/hooks/useApiQuery";
-import { retryCollectionDocument, uploadCollectionFile } from "@/modules/workspace-control/control-plane-api";
+import { afterVisibleDelay, usePolling } from "@/lib/hooks/usePolling";
+import { uploadCollectionFile } from "@/modules/workspace-control/control-plane-api";
 import { knowledgeApi } from "@/modules/knowledge/knowledge-api";
 import {
   lastActivityLabel,
@@ -28,8 +29,16 @@ import {
   type Connection,
   type ConnectorCapability,
   type Source,
-  type SourceRun,
 } from "@/modules/knowledge/integrations-api";
+import {
+  ingestionsApi,
+  type Ingestion,
+  type IngestionEvent,
+  type IngestionSummary,
+  type IngestionWindow,
+} from "@/modules/knowledge/ingestions-api";
+import { canRetryIndexing } from "@/modules/knowledge/document-facts";
+import { ACTIVE_STATUSES, isActive } from "@/modules/knowledge/ingestion-state";
 
 /**
  * Everything the Knowledge shell reads.
@@ -41,7 +50,7 @@ import {
  */
 export function useKnowledge() {
   const revision = useSyncExternalStore(subscribeApiData, apiRevision, () => 0);
-  return useApiQuery<KnowledgeSnapshot>(async () => {
+  const query = useApiQuery<KnowledgeSnapshot>(async () => {
     const home = await knowledgeApi.home();
     const collections = home.collections;
     // Documents live inside Collections, so the workspace view is the union of
@@ -62,6 +71,19 @@ export function useKnowledge() {
       personalCollectionId: home.personal_collection_id,
     };
   }, revision);
+
+  // While anything listed is still indexing, read again a few seconds after
+  // each answer arrives, so "Indexing" becomes "Indexed" without a reload.
+  // Re-arming on every new snapshot, rather than on an interval, means a slow
+  // read is never overlapped by the next one.
+  const { data, reload } = query;
+  const indexing = data?.documents.some((document) => document.state === "indexing") ?? false;
+  useEffect(() => {
+    if (!indexing) return;
+    return afterVisibleDelay(3000, reload);
+  }, [data, indexing, reload]);
+
+  return query;
 }
 
 export interface KnowledgeSnapshot {
@@ -89,9 +111,28 @@ export const knowledgeActions = {
     await uploadCollectionFile(collectionId, file, { idempotencyKey: crypto.randomUUID() });
     invalidateApiData();
   },
-  async reindex(documentId: string) {
-    await retryCollectionDocument(documentId);
+  /**
+   * Index again the documents whose last indexing failed.
+   *
+   * Only a failed document with an ingestion behind it can be retried; the rest
+   * of a selection is left alone rather than rejected, and the count retried is
+   * returned so the caller can say what actually happened.
+   */
+  async retryIndexing(documents: WorkspaceKnowledgeDocument[]) {
+    const retryable = documents.filter(canRetryIndexing);
+    await Promise.all(retryable.map((document) => ingestionsApi.retry(document.latestIngestion!.id)));
+    if (retryable.length) invalidateApiData();
+    return retryable.length;
+  },
+  async retryIngestion(id: string) {
+    const next = await ingestionsApi.retry(id);
     invalidateApiData();
+    return next;
+  },
+  async cancelIngestion(id: string) {
+    const next = await ingestionsApi.cancel(id);
+    invalidateApiData();
+    return next;
   },
   async remove(documentId: string) {
     await apiRequest(`/documents/${documentId}`, { method: "DELETE" });
@@ -134,17 +175,18 @@ export function useConnectorCatalogue() {
 export interface ConnectionsSnapshot {
   connections: Connection[];
   sources: Source[];
-  runs: SourceRun[];
+  /** Source syncs only, newest first. The Activity tab reads its own live feed. */
+  runs: Ingestion[];
   /** False in the design preview, where there is no registry to connect against. */
   live: boolean;
 }
 
 /**
- * Connected accounts, what they synchronize, and how those runs went.
+ * Connected accounts, what they synchronize, and how those syncs went.
  *
  * One load, because the three are read together everywhere: a source is shown
  * with the account behind it, and an account is shown with how much depends on
- * it. Sync activity is best-effort — Temporal being down should not empty the
+ * it. Sync history is best-effort — it being unavailable should not empty the
  * list of connections.
  */
 export function useConnections() {
@@ -156,7 +198,9 @@ export function useConnections() {
       connectionsApi.list(),
       sourcesApi.list(),
     ]);
-    const runs = await sourcesApi.allRuns().catch(() => ({ items: [] as SourceRun[] }));
+    const runs = await ingestionsApi
+      .list({ kind: "source", page_size: 50 })
+      .catch(() => ({ items: [] as Ingestion[] }));
     return {
       connections: connections.items,
       sources: sources.items,
@@ -164,4 +208,123 @@ export function useConnections() {
       live: true,
     };
   });
+}
+
+export interface LiveIngestions {
+  /** Newest first. */
+  items: Ingestion[];
+  /** Everything the caller may see, beyond the page that was read. */
+  total: number;
+  summary: IngestionSummary | null;
+  /** When the last answer arrived, on this machine's clock. */
+  receivedAt: number;
+  error: string | null;
+  refresh: () => void;
+}
+
+const LIVE_PAGE = 100;
+
+/**
+ * The ingestion feed and its charts, kept current.
+ *
+ * Every 2 seconds while anything is queued or running, every 15 while the
+ * pipeline is idle, and not at all while the tab is hidden. The newest page is
+ * normally enough to hold everything in flight; when the summary counts more
+ * active work than that page shows, the active ones are read directly, so a
+ * lane is never missing because a burst of newer uploads pushed it off page 1.
+ */
+export function useLiveIngestions(range: IngestionWindow): LiveIngestions {
+  const [state, setState] = useState<Omit<LiveIngestions, "error" | "refresh"> | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const busy = useRef(false);
+
+  const refresh = usePolling(
+    async (signal) => {
+      try {
+        const [page, summary] = await Promise.all([
+          ingestionsApi.list({ page_size: LIVE_PAGE }, signal),
+          ingestionsApi.summary(range, signal),
+        ]);
+        const byId = new Map(page.items.map((item) => [item.id, item]));
+        const listedActive = page.items.filter(isActive).length;
+        if (summary.active > listedActive && page.total > page.items.length) {
+          const pages = await Promise.all(
+            ACTIVE_STATUSES.map((status) => ingestionsApi.list({ status, page_size: LIVE_PAGE }, signal)),
+          );
+          for (const item of pages.flatMap((extra) => extra.items)) {
+            if (!byId.has(item.id)) byId.set(item.id, item);
+          }
+        }
+        if (signal.aborted) return;
+        const items = [...byId.values()];
+        busy.current = summary.active > 0 || items.some(isActive);
+        setState({ items, total: page.total, summary, receivedAt: Date.now() });
+        setError(null);
+      } catch (cause) {
+        if (signal.aborted) return;
+        setError(cause instanceof Error ? cause.message : "Activity could not be loaded.");
+      }
+    },
+    () => (busy.current ? 2000 : 15000),
+    range,
+  );
+
+  return {
+    items: state?.items ?? [],
+    total: state?.total ?? 0,
+    summary: state?.summary ?? null,
+    receivedAt: state?.receivedAt ?? 0,
+    error,
+    refresh,
+  };
+}
+
+export interface IngestionDetail {
+  ingestion: Ingestion | null;
+  events: IngestionEvent[];
+  receivedAt: number;
+  error: string | null;
+  refresh: () => void;
+}
+
+/**
+ * One ingestion and its timeline, re-read every 1.5 seconds while it is
+ * queued or running and left alone once it has finished. Mount it under a
+ * `key` of the ingestion id so switching ingestions starts from empty.
+ */
+export function useIngestionDetail(id: string): IngestionDetail {
+  const [state, setState] = useState<Omit<IngestionDetail, "error" | "refresh"> | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const live = useRef(true);
+
+  const refresh = usePolling(
+    async (signal) => {
+      try {
+        const [ingestion, timeline] = await Promise.all([
+          ingestionsApi.get(id, signal),
+          ingestionsApi.events(id, signal),
+        ]);
+        if (signal.aborted) return;
+        live.current = isActive(ingestion);
+        setState({ ingestion, events: timeline.items, receivedAt: Date.now() });
+        setError(null);
+      } catch (cause) {
+        if (signal.aborted) return;
+        // Stop rather than hammer an ingestion that cannot be read; the panel
+        // offers to try again.
+        live.current = false;
+        setError(cause instanceof Error ? cause.message : "This activity could not be loaded.");
+      }
+    },
+    () => (live.current ? 1500 : null),
+    id,
+  );
+
+  return {
+    ingestion: state?.ingestion ?? null,
+    events: state?.events ?? [],
+    receivedAt: state?.receivedAt ?? 0,
+    error,
+    refresh,
+  };
 }

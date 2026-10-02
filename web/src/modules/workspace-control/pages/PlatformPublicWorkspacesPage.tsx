@@ -1,12 +1,16 @@
 "use client";
 
 import { NotBackedYet } from "@/components/ui/NotBackedYet";
+import { SectionHeader } from "@/modules/workspace-control/components/SectionHeader";
 
 export function PlatformPublicWorkspacesPage() {
   return (
-    <NotBackedYet
-      description="Guest entry now uses the public workspace configured by the deployment. A platform endpoint for listing and changing public workspaces is not available yet."
-      title="Public workspace policy is deployment-managed"
-    />
+    <>
+      <SectionHeader section="platform-public-workspaces" />
+      <NotBackedYet
+        description="Guests land in the public workspace this deployment is configured with. Choosing and changing public workspaces will be managed here."
+        title="Public workspace settings aren't available yet"
+      />
+    </>
   );
 }

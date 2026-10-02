@@ -12,6 +12,7 @@ from bothesis.connector.file import (
     DEFAULT_MAX_ARCHIVE_BYTES,
     DEFAULT_MAX_FILE_BYTES,
     DEFAULT_MAX_TEXT_CHARACTERS,
+    FileNoTextError,
     FileProcessingError,
     FileSizeLimitError,
     FileTextLimitError,
@@ -30,7 +31,6 @@ from bothesis.connector.protocol import (
     AccessPolicy,
     DocumentKind,
     Hierarchy,
-    ImagePart,
     SourceIdentity,
     SourceProvider,
     StorageObject,
@@ -186,32 +186,22 @@ class FileProcessor:
             raise FileTextLimitError(
                 f"Extracted text exceeds {self.max_text_characters} characters: {file_name}"
             )
-        if (
-            resolved_kind == DocumentKind.IMAGE
-            and not text.strip()
-            and not any(isinstance(part, ImagePart) for part in item.content)
-        ):
-            raise FileProcessingError(
-                f"Docling returned no image content for {file_name}"
-            )
-        if not text.strip() and resolved_kind != DocumentKind.IMAGE:
-            raise FileProcessingError(f"No extractable content found in {file_name}")
-        chunks = ()
-        if text.strip():
-            try:
-                chunks = tuple(
-                    self._chunker.chunk(
-                        document,
-                        item_id=resolved_id,
-                        strategy=(
-                            "line"
-                            if _extension(file_name) in _LINE_SENSITIVE_EXTENSIONS
-                            else "hybrid"
-                        ),
-                    )
+        if not text.strip():
+            raise FileNoTextError(f"No extractable content found in {file_name}")
+        try:
+            chunks = tuple(
+                self._chunker.chunk(
+                    document,
+                    item_id=resolved_id,
+                    strategy=(
+                        "line"
+                        if _extension(file_name) in _LINE_SENSITIVE_EXTENSIONS
+                        else "hybrid"
+                    ),
                 )
-            except DoclingChunkingError as exc:
-                raise FileProcessingError(str(exc)) from exc
+            )
+        except DoclingChunkingError as exc:
+            raise FileProcessingError(str(exc)) from exc
         return ProcessedFile(
             file_name=file_name,
             text=text,
@@ -229,7 +219,7 @@ class FileProcessor:
                 f"File exceeds {self.max_file_bytes} byte limit: {size_bytes} bytes"
             )
         extension = _extension(file_name)
-        if extension not in FinxFileExtensions.ALL_ALLOWED_EXTENSIONS:
+        if extension not in FinxFileExtensions.KNOWLEDGE_EXTENSIONS:
             raise UnsupportedFileTypeError(
                 f"Unsupported file extension {extension or '<none>'}"
             )
@@ -272,6 +262,8 @@ def _file_error(exc: DoclingProcessingError) -> FileProcessingError:
         return FileTextLimitError(message)
     if "byte limit" in normalized or "file exceeds" in normalized:
         return FileSizeLimitError(message)
+    if "no extractable content" in normalized:
+        return FileNoTextError(message)
     return FileProcessingError(message)
 
 
@@ -288,8 +280,6 @@ def _extension(file_name: str) -> str:
 
 def _document_kind(mime_type: str | None) -> DocumentKind:
     normalized = (mime_type or "").casefold()
-    if normalized.startswith("image/"):
-        return DocumentKind.IMAGE
     if normalized == "application/pdf":
         return DocumentKind.PDF
     if normalized in {"text/html", "application/xhtml+xml"}:

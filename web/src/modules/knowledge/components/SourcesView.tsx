@@ -2,7 +2,7 @@
 
 import { ChevronRight, Plus, RefreshCw, RotateCcw, TriangleAlert } from "lucide-react";
 
-import { StatusPill } from "@/components/patterns/StatusPill";
+import { StatusPill } from "@/components/ui/StatusPill";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Tooltip } from "@/components/ui/Tooltip";
@@ -109,15 +109,15 @@ export function SourcesView({
             <strong>
               {broken.length === 1
                 ? `${broken[0].display_name} has stopped updating`
-                : `${broken.length} accounts have stopped updating`}
+                : `${broken.length} connected accounts have stopped updating`}
             </strong>
             <p>
-              Everything already indexed still answers questions. Anything changed
-              since the account lapsed is missing until it is connected again.
+              Indexed documents still answer questions, but anything changed since
+              then is missing until you reconnect.
             </p>
           </div>
           {broken.length === 1 && (
-            <Button onClick={() => onReconnect(broken[0])}>Reconnect</Button>
+            <Button onClick={() => onReconnect(broken[0])} variant="secondary">Reconnect</Button>
           )}
         </div>
       )}
@@ -126,8 +126,7 @@ export function SourcesView({
         // Saying this outright is better than an empty list that looks broken.
         // Inventing connections to fill it would be worse than either.
         <p className="knowledge-muted">
-          This is the design preview. Connected accounts are read from a running
-          deployment, so there are none to show here.
+          Design preview: connected accounts appear only on a running deployment.
         </p>
       )}
 
@@ -183,9 +182,9 @@ export function SourcesView({
                     </Tooltip>
                   ) : (
                     <>
-                      <Tooltip label="Add knowledge from this account" side="top">
+                      <Tooltip label="Add a source from this account" side="top">
                         <Button
-                          aria-label={`Add knowledge from ${connection.display_name}`}
+                          aria-label={`Add a source from ${connection.display_name}`}
                           icon={<Plus size={16} />}
                           iconOnly
                           onClick={() => onAddKnowledge(connection)}
@@ -215,11 +214,11 @@ export function SourcesView({
           <EmptyState
             description={
               search || status
-                ? "No connected account matches the current search and filters."
-                : "Connect one below to start building workspace knowledge."
+                ? "Try a different search or clear the filters."
+                : "Connect one from the connectors below."
             }
             size="sm"
-            title="No connected accounts"
+            title={search || status ? "No matching connected accounts" : "No connected accounts yet"}
           />
         )}
       </section>
@@ -228,7 +227,7 @@ export function SourcesView({
         catalogue={catalogue.data ?? []}
         connectedKeys={connections.map((connection) => connection.connector_key)}
         error={catalogue.error}
-        loading={catalogue.loading}
+        loading={!catalogue.data && !catalogue.error}
         onConnect={onConnect}
         onOpen={onOpenConnector}
         onRetry={catalogue.reload}

@@ -36,7 +36,7 @@ export function DocumentViewer({
   actions,
   onExpand,
   onClose,
-  onReindex = () => undefined,
+  onRetryIndexing,
   onRequestRemove = () => undefined,
   expanded = false,
   showAgentView = true,
@@ -47,7 +47,8 @@ export function DocumentViewer({
   actions?: React.ReactNode;
   onExpand?: () => void;
   onClose?: () => void;
-  onReindex?: () => void;
+  /** Set only when there is a failed indexing to retry. */
+  onRetryIndexing?: () => void;
   onRequestRemove?: () => void;
   onToggleAnswerAvailability?: (included: boolean) => void;
   expanded?: boolean;
@@ -95,8 +96,8 @@ export function DocumentViewer({
             label={<MoreHorizontal aria-hidden="true" size={16} />}
             showChevron={false}
           >
-            <DropdownItem disabled={document.state === "unsupported"} onClick={onReindex}>
-              <RefreshCw aria-hidden="true" size={16} />Re-index document
+            <DropdownItem disabled={!onRetryIndexing} onClick={onRetryIndexing}>
+              <RefreshCw aria-hidden="true" size={16} />Retry indexing
             </DropdownItem>
             <DropdownSeparator />
             <DropdownItem destructive onClick={onRequestRemove}>
@@ -167,7 +168,7 @@ export function DocumentViewer({
         document={document}
         key={document.id}
         onPageChange={setPage}
-        onReindex={onReindex}
+        onRetryIndexing={onRetryIndexing}
         onSearchChange={setSearch}
         onZoomChange={setZoom}
         page={page}
@@ -179,7 +180,7 @@ export function DocumentViewer({
       <DocumentDetailsDrawer
         document={document}
         onClose={() => setDetailsOpen(false)}
-        onReindex={onReindex}
+        onRetryIndexing={onRetryIndexing}
         onRequestRemove={onRequestRemove}
         open={detailsOpen}
         showLifecycleActions={showLifecycleActions}

@@ -157,19 +157,6 @@ export const knowledgeConnectors: readonly KnowledgeConnector[] = [
     },
   },
   {
-    key: "file",
-    name: "Uploaded files",
-    description: "Files added by workspace members",
-    overview: {
-      summary:
-        "Holds the documents people upload directly to this workspace. Nothing is fetched from anywhere: a file is read once when it arrives, and stays until someone removes it.",
-      reads: [
-        "PDF, DOCX, XLSX, TXT and Markdown files uploaded to a collection",
-      ],
-    },
-    setup: NO_SETUP,
-  },
-  {
     key: "google_drive",
     name: "Google Drive",
     description: "Files and shared drives",

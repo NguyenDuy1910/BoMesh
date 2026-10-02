@@ -208,7 +208,7 @@ Table items {
   mime_type varchar(255)
   size_bytes bigint
   storage_key text [note: 'Durable object key only; no raw bytes']
-  metadata jsonb [not null, default: `{}`]
+  metadata jsonb [not null, default: `{}`, note: 'Uploads: purpose, file_name, storage, archive lineage, and ingestion = {id, trigger_type, created_at, started_at, finished_at, cancelled?, phases?} (the upload\'s own latest Ingestion)']
   inherit_access boolean [not null, default: true, note: 'Only a Collection may end inheritance; a Document always inherits']
   status varchar(16) [not null, default: 'pending', note: 'Raw resource lifecycle: pending | processing | ready | failed | unsupported | deleted']
   index_status varchar(16) [note: 'Document-only derived search lifecycle: pending | processing | ready | failed | unsupported']
@@ -275,7 +275,7 @@ Table item_uploads {
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
   indexes { (tenant_id, owner_user_id, idempotency_key) [unique] }
-  Note: 'Native uploads require an authenticated owner. Guest conversations can exist, but private upload ownership is never inferred from a guest session.'
+  Note: 'Uploads require an authenticated owner. Guest conversations can exist, but private upload ownership is never inferred from a guest session.'
 }
 
 Table message_items {

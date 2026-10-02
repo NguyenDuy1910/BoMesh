@@ -6,14 +6,16 @@
  * split exists because the screen shows a person "18 pages · 1.1 MB · synced
  * 8 minutes ago", and none of those are columns.
  */
-export type KnowledgeDocumentKind = "pdf" | "document" | "spreadsheet" | "unsupported";
+import type { Ingestion } from "@/modules/knowledge/ingestions-api";
+
+export type KnowledgeDocumentKind = "pdf" | "document" | "spreadsheet" | "archive" | "unsupported";
 
 /**
  * Where a document sits in its own lifecycle.
  *
  * `unsupported` is separate from `failed` on purpose: a failed index can be
  * retried and may succeed, while an unsupported format never will. Offering
- * "Re-index" for the second one would be a lie.
+ * "Retry indexing" for the second one would be a lie.
  */
 export type KnowledgeDocumentState =
   | "indexed"
@@ -73,6 +75,11 @@ export interface WorkspaceKnowledgeDocument {
   failureReason?: string;
   /** Diagnostics, kept behind a disclosure in the details drawer. */
   indexingNote?: string;
+  /**
+   * The last time the pipeline took this document in. Absent for a document a
+   * connector wrote, which is indexed inside its source's sync instead.
+   */
+  latestIngestion?: Pick<Ingestion, "id" | "status" | "error" | "attempt">;
   /** Retrieval-ready passages. Falls back to `agentView` lines. */
   sections?: KnowledgeAgentSection[];
   sheets?: KnowledgeSheet[];

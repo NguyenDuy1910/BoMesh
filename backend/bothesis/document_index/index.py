@@ -13,6 +13,7 @@ from bothesis.document_index import (
     ContextualChunk,
     EmbeddingService,
     IndexingContext,
+    IndexProgress,
 )
 from bothesis.document_index._qdrant import _QdrantBackend
 from bothesis.document_index.payload import (
@@ -60,6 +61,7 @@ class ItemIndex:
         chunks: Sequence[Chunk],
         *,
         context: IndexingContext,
+        progress: IndexProgress | None = None,
     ) -> int:
         """Contextualize, embed, and replace all indexed content for one Item."""
 
@@ -69,10 +71,13 @@ class ItemIndex:
             item,
             context,
             semantic_contextualizer=self._semantic_contextualizer,
+            progress=progress,
         )
         texts = [record.payload.contextual_text for record in records]
         vectors: list[list[float]] = []
         for start in range(0, len(texts), self._embedding_batch_size):
+            if progress is not None:
+                progress("embedding", len(vectors), len(texts))
             vectors.extend(
                 await embedder.embed_documents(
                     texts[start : start + self._embedding_batch_size]
@@ -81,12 +86,16 @@ class ItemIndex:
         if len(vectors) != len(records) or any(not vector for vector in vectors):
             raise ValueError("every contextual chunk requires one embedding")
 
+        if progress is not None:
+            progress("storing", 0, len(records))
         await self._backend.replace_item_points(
             item_id=item.id,
             tenant_id=context.tenant_id,
             records=records,
             vectors=vectors,
         )
+        if progress is not None:
+            progress("storing", len(records), len(records))
         return len(records)
 
     async def search_item_content(

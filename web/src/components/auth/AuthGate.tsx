@@ -4,15 +4,11 @@ import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
 import { AuthPromptProvider } from "@/components/auth/AuthPrompt";
-import { AuthLoadingSkeleton } from "@/components/auth/AuthLoadingSkeleton";
 import { ErrorState } from "@/components/ui/ErrorState";
+import { PageLoadingSkeleton } from "@/components/ui/Skeleton";
 import { getStoredAuthSession, isGuestSession } from "@/lib/auth/session";
 import { useAuthSession } from "@/lib/hooks/useAuthSession";
 import { createSession } from "@/modules/auth/api";
-import { ChatLoadingSkeleton } from "@/modules/chat/components/ChatLoadingSkeleton";
-import { WorkspaceDiscoveryLoadingSkeleton } from "@/modules/auth/components/WorkspaceDiscoveryLoadingSkeleton";
-import { LibraryLoadingSkeleton } from "@/modules/library/LibraryLoadingSkeleton";
-import { ControlPlaneLoadingSkeleton, type ControlPlaneLoadingVariant } from "@/modules/workspace-control/components/ControlPlaneLoadingSkeleton";
 
 const publicPathPrefix = "/auth/";
 
@@ -94,40 +90,28 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 }
 
 function RouteLoading({ pathname }: { pathname: string }) {
-  if (pathname === "/app") return <ChatLoadingSkeleton />;
-  if (pathname === "/library") return <LibraryLoadingSkeleton />;
-  if (pathname === "/workspaces") return <WorkspaceDiscoveryLoadingSkeleton />;
+  if (pathname === "/app") return <LoadingPage label="Loading chat" />;
+  if (pathname === "/library") return <LoadingPage label="Loading library" />;
+  if (pathname === "/workspaces") return <LoadingPage label="Loading workspaces" />;
   if (pathname === "/workspace-control" || pathname.startsWith("/workspace-control/")) {
-    const variant = controlLoadingVariant(pathname);
-    return variant ? <ControlPlaneLoadingSkeleton variant={variant} /> : <AuthLoadingSkeleton />;
+    return <LoadingPage label="Loading workspace control" />;
   }
-  return <AuthLoadingSkeleton />;
+  return <LoadingPage label="Checking session" centered />;
 }
 
-function controlLoadingVariant(pathname: string): ControlPlaneLoadingVariant | undefined {
-  const sections = pathname.replace(/^\/workspace-control\/?/, "").split("/");
-  const section = sections[0];
-  if (!section) return "overview";
-  if (section === "settings") return "settings";
-  if (section === "access") return "access";
-  if (section === "activity") return "audit";
-  if (section === "knowledge") return "knowledge";
-  if (section !== "platform") return undefined;
-
-  switch (sections[1] ?? "tenants") {
-    case "tenants":
-      return "platform-tenants";
-    case "users":
-      return "platform-users";
-    case "integrations":
-      return "integrations";
-    case "audit":
-      return "audit";
-    case "system":
-      return "platform-system";
-    default:
-      return undefined;
-  }
+/* Nothing is known yet — not even which shell will render — so this is the
+   only place a heading and control row are placeholders too. */
+function LoadingPage({ label, centered = false }: { label: string; centered?: boolean }) {
+  return (
+    <div className={centered ? "grid min-h-dvh place-content-center bg-[var(--surface-canvas)]" : "min-h-full"}>
+      <PageLoadingSkeleton
+        className="mx-auto w-[min(48rem,100vw)] px-[var(--page-gutter)] pt-[var(--space-5)]"
+        controls
+        heading
+        label={label}
+      />
+    </div>
+  );
 }
 
 function protectedRouteReason(pathname: string): string | undefined {

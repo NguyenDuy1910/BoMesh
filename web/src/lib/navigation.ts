@@ -75,9 +75,9 @@ export const workspaceControlRailTail: readonly RailItem[] = [
 export const platformControlRailItems: readonly RailItem[] = [
   { id: "tenants", label: "Tenants", href: "/workspace-control/platform", icon: Building2, kind: "destination" },
   { id: "users", label: "Users", href: "/workspace-control/platform/users", icon: Users, kind: "destination" },
-  { id: "public-workspaces", label: "Public Workspaces", href: "/workspace-control/platform/public-workspaces", icon: LayoutGrid, kind: "destination" },
-  { id: "models", label: "Models & Capabilities", href: "/workspace-control/platform/models", icon: Bot, kind: "destination" },
-  { id: "integrations", label: "Integrations", href: "/workspace-control/platform/integrations", icon: Plug, kind: "destination" },
+  { id: "public-workspaces", label: "Public workspaces", href: "/workspace-control/platform/public-workspaces", icon: LayoutGrid, kind: "destination" },
+  { id: "models", label: "Models & capabilities", href: "/workspace-control/platform/models", icon: Bot, kind: "destination" },
+  { id: "integrations", label: "Connectors", href: "/workspace-control/platform/integrations", icon: Plug, kind: "destination" },
   { id: "usage", label: "Usage", href: "/workspace-control/platform/usage", icon: ChartColumn, kind: "destination" },
   { id: "audit", label: "Audit", href: "/workspace-control/platform/audit", icon: Activity, kind: "destination" },
   { id: "system", label: "System", href: "/workspace-control/platform/system", icon: Settings, kind: "destination" },

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import os
 from collections.abc import AsyncIterator
@@ -33,7 +34,6 @@ from bothesis.db.models import (
     User,
 )
 from bothesis.agent.models import AgentContext
-from bothesis.agent.protocol import ExtensionItem, Response
 from bothesis.storage import (
     ObjectNotFoundError,
     ObjectStorageError,
@@ -43,7 +43,6 @@ from bothesis.storage import (
 from bothesis.services import (
     COLLECTION_EDITOR_ROLE,
     COLLECTION_OWNER_ROLE,
-    COLLECTION_READ_PERMISSION,
     COLLECTION_UPDATE_PERMISSION,
     COLLECTION_VIEWER_ROLE,
     PLATFORM_ADMIN_ROLE,
@@ -58,6 +57,7 @@ from bothesis.services import (
     AuthorizationError,
     DocumentNotFoundError,
     DocumentProcessingError,
+    UploadConflictError,
     UploadTooLargeError,
     UploadValidationError,
     VerifiedGoogleIdentity,
@@ -73,7 +73,6 @@ from bothesis.services.identity_access.identity_store import IdentityStoreServic
 from bothesis.services.identity_access.jwt_tokens import JwtTokenService
 from bothesis.services.identity_access.passwords import PasswordCredentialService
 from bothesis.services.citation import CitationService
-from bothesis.services.identity_access.authorization import AuthorizationService
 from bothesis.services.identity_access.role_assignments import RoleAssignmentService
 from bothesis.services.identity_access.roles import RoleService
 from bothesis.services.identity_access.users import UserService
@@ -83,7 +82,8 @@ from bothesis.services.integration_credential import IntegrationCredentialServic
 from bothesis.services.item import ItemService
 from bothesis.services.item_catalog import ItemCatalogService
 from bothesis.services.sandbox_session import SandboxSessionService
-from bothesis.services.document_upload import DocumentUploadService
+from bothesis.services.documents import DocumentService
+from bothesis.services.document_presentation import DocumentPresenter
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -1256,6 +1256,15 @@ class _UploadStorage:
         )
 
 
+class _PresignedUploadStorage:
+    async def head(self, key: str) -> StoredObject:
+        return StoredObject(
+            size_bytes=15,
+            content_type="text/plain",
+            etag=f"etag-{key}",
+            version_id="version-finalized",
+        )
+
 class _UnavailableIngestion:
     async def index_upload(self, *_: object, **__: object) -> Item:
         raise DocumentProcessingError("indexing is outside this integration test")
@@ -1265,7 +1274,7 @@ class _RecordingIndexWorkflow:
     def __init__(self) -> None:
         self.requests: list[object] = []
 
-    async def start_native_upload_indexing(self, input: object) -> dict[str, bool]:
+    async def start_ingestion(self, input: object, **_: object) -> dict[str, bool]:
         self.requests.append(input)
         return {"started": True}
 
@@ -1274,14 +1283,21 @@ def _uploads(
     session_factory: async_sessionmaker[AsyncSession],
     storage: _UploadStorage,
     workflows: _RecordingIndexWorkflow | None = None,
+    ingestion: object | None = None,
     **kwargs: object,
-) -> DocumentUploadService:
-    return DocumentUploadService(
+) -> DocumentService:
+    return DocumentService(
         session_factory,
-        object_storage=storage,
-        ingestion_service=_UnavailableIngestion(),  # type: ignore[arg-type]
-        document_source=object(),  # type: ignore[arg-type]
+        object_storage=storage,  # type: ignore[arg-type]
+        ingestion=ingestion or _UnavailableIngestion(),  # type: ignore[arg-type]
+        content=object(),  # type: ignore[arg-type]
         workflows=workflows or _RecordingIndexWorkflow(),  # type: ignore[arg-type]
+        presenter=DocumentPresenter(
+            object_storage=lambda: storage,
+            preview=SimpleNamespace(resolve=lambda *_, **__: None),  # type: ignore[arg-type]
+            citation_url_seconds=300,
+            preview_url_seconds=300,
+        ),
         **kwargs,
     )
 
@@ -1303,7 +1319,6 @@ async def _collection_upload_contexts(
         await join_tenant(
             session, outsider, other_tenant.id, role_code="upload-outsider"
         )
-        owner_context = await auth.get_context(owner.id, tenant_id=tenant.id)
         editor_context = await auth.get_context(editor.id, tenant_id=tenant.id)
         viewer_context = await auth.get_context(viewer.id, tenant_id=tenant.id)
         outsider_context = await auth.get_context(
@@ -1396,6 +1411,130 @@ async def test_collection_upload_is_authorized_parented_and_retry_safe(
     assert external_resource is None
     assert visible.id == first.item.id
 
+
+class _RecordingIngestion:
+    def __init__(self) -> None:
+        self.indexed: list[UUID] = []
+
+    async def index_upload(self, document_id: UUID, **_: object) -> None:
+        self.indexed.append(document_id)
+
+
+@pytest.mark.asyncio
+async def test_own_uploads_are_processed_directly_and_workspace_uploads_are_managed(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    workspace_id, editor, _, _ = await _collection_upload_contexts(session_factory)
+    workflows = _RecordingIndexWorkflow()
+    ingestion = _RecordingIngestion()
+    documents = _uploads(session_factory, _UploadStorage(), workflows, ingestion)
+    async with session_factory.begin() as session:
+        personal_id = await ItemService(session).ensure_personal_collection(
+            editor.user_id,
+            editor.tenant_id,
+            collection_id=ItemService.upload_collection_id(editor.tenant_id, editor.user_id),
+            title="My uploads",
+            system_kind="personal_uploads",
+        )
+    personal = {"id": personal_id}
+
+    mine = await documents.upload_to_collection(
+        editor, personal["id"], idempotency_key="chat-1", file_name="notes.txt",
+        content_type="text/plain", content=_AsyncUpload(b"my notes"),
+        purpose="conversation_attachment",
+    )
+    for _ in range(100):
+        if ingestion.indexed:
+            break
+        await asyncio.sleep(0.01)
+    shared = await documents.upload_to_collection(
+        editor, workspace_id, idempotency_key="kb-1", file_name="policy.txt",
+        content_type="text/plain", content=_AsyncUpload(b"workspace policy"),
+    )
+
+    # The user's own upload never touches Temporal; the workspace one only does.
+    assert ingestion.indexed == [mine.item.id]
+    assert mine.item.metadata_["ingestion"]["mode"] == "direct"
+    assert [request.document_id for request in workflows.requests] == [str(shared.item.id)]
+    assert shared.item.metadata_["ingestion"]["mode"] == "managed"
+    with pytest.raises(UploadValidationError, match="workspace collection"):
+        await documents.upload_to_collection(
+            editor, personal["id"], idempotency_key="zip-1", file_name="bulk.zip",
+            content_type="application/zip", content=_AsyncUpload(b"PK"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_an_image_is_a_conversation_attachment_never_knowledge(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    workspace_id, editor, _, _ = await _collection_upload_contexts(session_factory)
+    workflows = _RecordingIndexWorkflow()
+    ingestion = _RecordingIngestion()
+    documents = _uploads(session_factory, _UploadStorage(), workflows, ingestion)
+    async with session_factory.begin() as session:
+        personal_id = await ItemService(session).ensure_personal_collection(
+            editor.user_id,
+            editor.tenant_id,
+            collection_id=ItemService.upload_collection_id(editor.tenant_id, editor.user_id),
+            title="My uploads",
+            system_kind="personal_uploads",
+        )
+
+    for collection_id in (workspace_id, personal_id):
+        with pytest.raises(UploadValidationError, match="images are not supported as knowledge"):
+            await documents.upload_to_collection(
+                editor, collection_id, idempotency_key=f"kb-image-{collection_id}",
+                file_name="chart.png", content_type="image/png", content=_AsyncUpload(b"png"),
+            )
+    attached = await documents.upload_to_collection(
+        editor, personal_id, idempotency_key="chat-image", file_name="chart.png",
+        content_type="image/png", content=_AsyncUpload(b"png"),
+        purpose="conversation_attachment",
+    )
+    await asyncio.sleep(0.05)
+
+    # Kept for the agent to open; never indexed, so no Ingestion at all.
+    assert attached.item.upload.status == "available"
+    assert attached.item.index_status == "unsupported"
+    assert "ingestion" not in attached.item.metadata_
+    assert ingestion.indexed == [] and workflows.requests == []
+    with pytest.raises(UploadConflictError, match="not processed as knowledge"):
+        await documents.retry_ingestion(editor, attached.item.id)
+
+
+
+@pytest.mark.asyncio
+async def test_presigned_finalization_presents_updated_document_after_session_closes(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    collection_id, editor, _, _ = await _collection_upload_contexts(session_factory)
+    storage = _PresignedUploadStorage()
+    workflows = _RecordingIndexWorkflow()
+    uploads = _uploads(session_factory, storage, workflows)
+    async with session_factory.begin() as session:
+        document, created = await ItemService(session).create_or_get_collection_upload(
+            editor.user_id,
+            editor.tenant_id,
+            collection_id,
+            idempotency_key="presigned-finalization",
+            file_name="policy.txt",
+            mime_type="text/plain",
+            size_bytes=15,
+            document_type="text",
+            metadata={"purpose": "knowledge"},
+        )
+
+    result = await uploads.finalize_document_content(editor, document.id)
+
+    assert created is True
+    # A workspace Collection's upload is managed ingestion, queued once.
+    assert result["ingestion"]["mode"] == "managed"
+    assert result["ingestion"]["status"] == "pending"
+    assert result["document"]["id"] == document.id
+    assert result["document"]["status"] == "available"
+    assert isinstance(result["document"]["updated_at"], datetime)
+    assert len(workflows.requests) == 1
 
 @pytest.mark.asyncio
 async def test_collection_upload_rejects_tenant_permission_and_collection_states(
@@ -1570,7 +1709,7 @@ class InMemoryObjectStorage:
 
 
 class StubUploads:
-    """Stand in for ``DocumentUploadService.upload_to_collection``.
+    """Stand in for ``DocumentService.upload_to_collection``.
 
     ``ArtifactService.publish`` only needs the shape of the result
     (``item.id``/``item.title``/``item.status`` and ``created``); the real
@@ -1682,7 +1821,7 @@ async def test_conversation_files_keep_every_revision_under_a_private_collection
     service = ArtifactService(
         session_factory,
         object_storage=lambda: storage,
-        uploads=lambda: uploads,
+        documents=lambda: uploads,
         max_content_bytes=1_000_000,
         download_url_seconds=60,
     )

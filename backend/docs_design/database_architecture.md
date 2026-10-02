@@ -101,6 +101,20 @@ the private `item_uploads.status`; indexing is represented by the separate
 public `Ingestion` resource. This API mapping is transport behavior, not a
 claim that the current database columns have already migrated.
 
+An upload's own Ingestion is recorded on its Item as `metadata.ingestion =
+{id, mode, trigger_type, created_at, started_at, finished_at, phases, error,
+cancelled?}`. It is opened when the bytes become available or on retry, and the
+shared ingestion core keeps it current: `index_status` transitions set the
+times, and the core writes its phases and a user-safe error as it runs.
+`mode` is `managed` (a Temporal ingestion) or `direct` (a user's own upload,
+processed by the API process). This is the one durable state of a document's
+processing for both runners; `id` is the same for both and, for a managed
+run, names its Temporal execution. A Document therefore reports its latest
+Ingestion without a new table, even after Temporal's retention has dropped
+the run. Connector-written Items have no such record; their Source's
+Ingestion indexed them. Temporal is the live source for managed execution
+detail (attempts, retries, queueing), not a second store of document state.
+
 ### Provider-neutral ingestion
 
 ```text

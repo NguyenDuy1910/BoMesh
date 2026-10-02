@@ -1,8 +1,8 @@
-import { Badge, type BadgeTone } from "@/components/ui/Badge";
+import { StatusPill, type StatusTone } from "@/components/ui/StatusPill";
 
 interface StatusPresentation {
   label: string;
-  tone: BadgeTone;
+  tone: StatusTone;
   /** True while the backend is still working on this record. */
   moving?: boolean;
 }
@@ -62,7 +62,7 @@ const statuses: Record<string, StatusPresentation> = {
  */
 export type StatusVocabulary = Record<string, StatusPresentation>;
 
-export function statusPresentation(
+function statusPresentation(
   status?: string | null,
   vocabulary?: StatusVocabulary,
 ): StatusPresentation {
@@ -78,6 +78,7 @@ export function statusPresentation(
   );
 }
 
+/** A backend status string, rendered with the product-wide state visual. */
 export function StatusBadge({
   status,
   label,
@@ -93,35 +94,8 @@ export function StatusBadge({
 }) {
   const presentation = statusPresentation(status, vocabulary);
   return (
-    <Badge className={className} dot pulse={presentation.moving} tone={presentation.tone}>
+    <StatusPill className={className} pulse={presentation.moving} tone={presentation.tone}>
       {label ?? presentation.label}
-    </Badge>
+    </StatusPill>
   );
-}
-
-/**
- * A document is only useful once it can be retrieved, so its two backend
- * fields (`status` and `indexed`) collapse into one thing the admin cares
- * about: can the assistant answer from this yet?
- */
-export function DocumentStatusBadge({
-  status,
-  indexed,
-}: {
-  status?: string | null;
-  indexed?: boolean;
-}) {
-  const key = String(status ?? "").toLowerCase();
-  if (key === "ready") {
-    return indexed ? (
-      <Badge dot tone="success">
-        Searchable
-      </Badge>
-    ) : (
-      <Badge dot tone="neutral">
-        Stored, not indexed
-      </Badge>
-    );
-  }
-  return <StatusBadge status={status} />;
 }

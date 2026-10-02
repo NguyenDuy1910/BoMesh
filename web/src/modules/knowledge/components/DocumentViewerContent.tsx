@@ -20,7 +20,8 @@ interface DocumentViewerContentProps {
   onPageChange: (page: number) => void;
   onZoomChange: (zoom: number) => void;
   onSearchChange: (value: string) => void;
-  onReindex: () => void;
+  /** Set only when there is a failed indexing to retry. */
+  onRetryIndexing?: () => void;
 }
 
 /**
@@ -39,7 +40,7 @@ export function DocumentViewerContent({
   onPageChange,
   onZoomChange,
   onSearchChange,
-  onReindex,
+  onRetryIndexing,
 }: DocumentViewerContentProps) {
   const facts = documentFacts(document);
 
@@ -65,10 +66,16 @@ export function DocumentViewerContent({
         <div className="knowledge-notice knowledge-notice--danger" role="alert">
           <TriangleAlert aria-hidden="true" size={16} />
           <div>
-            <strong>This document could not be indexed</strong>
+            <strong>
+              {document.latestIngestion && document.latestIngestion.attempt > 1
+                ? `Indexing failed after ${document.latestIngestion.attempt} attempts`
+                : "This document could not be indexed"}
+            </strong>
             <p>{document.failureReason ?? "BoThesis could not read the file, so it never appears in an answer."}</p>
           </div>
-          <Button onClick={onReindex} size="sm" variant="secondary">Retry</Button>
+          {onRetryIndexing && (
+            <Button onClick={onRetryIndexing} size="sm" variant="secondary">Retry indexing</Button>
+          )}
         </div>
       )}
 

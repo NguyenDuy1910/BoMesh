@@ -1,9 +1,17 @@
-"""The application service that ingests, refreshes, and removes Item content."""
+"""The shared ingestion core: ingest, refresh, and remove Item content.
+
+Every way content enters the system ends here — a connector Source sync, a
+Document indexed by managed (Temporal) ingestion, or a user's own upload run
+directly by ``DocumentService``. Runners orchestrate; this module processes.
+"""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Mapping, Sequence
+from contextlib import suppress
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -20,12 +28,10 @@ from bothesis.connector.protocol import (
     DocumentKind,
 )
 from bothesis.db.models import ExternalResource, IngestionSource, Item
-from bothesis.document_index import IndexingContext, ItemIndex
+from bothesis.document_index import IndexingContext, IndexProgress, ItemIndex
 from bothesis.services.citation import CitationService
 from bothesis.services.item import ItemService
 from bothesis.services import (
-    COLLECTION_READ_PERMISSION,
-    COLLECTION_UPDATE_PERMISSION,
     CHUNKER_VERSION,
     PARSER_VERSION,
     AuthContext,
@@ -37,6 +43,107 @@ from bothesis.services import (
 from bothesis.services.preview import KnowledgePreview
 
 log = logging.getLogger(__name__)
+
+#: How often a running upload's phases are written to its Ingestion record.
+_PHASE_PERSIST_SECONDS = 1.0
+INTERRUPTED_MESSAGE = "Processing was interrupted before it finished."
+
+
+class PhaseRecorder:
+    """Where one ingestion run is in the pipeline; an ``IndexProgress`` observer.
+
+    Each call is ``(phase, done, total)``; a new phase closes the previous one.
+    It is runner-agnostic: the managed Activity heartbeats :meth:`snapshot`,
+    and :meth:`ItemIngestionService.index_upload` keeps :attr:`phases` on the
+    Document's Ingestion record, so both runners report the same way.
+    """
+
+    def __init__(self) -> None:
+        self.phases: list[dict[str, Any]] = []
+        #: Bumped on every report; readers compare it to skip unchanged state.
+        self.version = 0
+
+    def __call__(self, phase: str, done: int, total: int) -> None:
+        now = datetime.now(UTC).isoformat()
+        if not self.phases or self.phases[-1]["phase"] != phase:
+            self._finish(now, completed=True)
+            self.phases.append(
+                {"phase": phase, "started_at": now, "finished_at": None, "done": 0, "total": 0}
+            )
+        self.phases[-1]["done"] = done
+        self.phases[-1]["total"] = total
+        self.version += 1
+
+    def close(self, *, completed: bool = False) -> list[dict[str, Any]]:
+        """End the phase in flight; only a run that succeeded finished its work."""
+
+        self._finish(datetime.now(UTC).isoformat(), completed=completed)
+        self.version += 1
+        return self.phases
+
+    def snapshot(self) -> dict[str, Any]:
+        current = self.phases[-1] if self.phases else None
+        return {
+            "phase": current["phase"] if current else "queued",
+            "done": current["done"] if current else 0,
+            "total": current["total"] if current else 0,
+            "phases": self.phases,
+        }
+
+    def _finish(self, now: str, *, completed: bool) -> None:
+        # Progress is reported before each unit of work, so a phase that handed
+        # over to the next got through all of it; one cut short by a failure or
+        # a cancel keeps the count it reached.
+        if self.phases and self.phases[-1]["finished_at"] is None:
+            self.phases[-1]["finished_at"] = now
+            if completed:
+                self.phases[-1]["done"] = self.phases[-1]["total"]
+
+
+def failure_message(exc: BaseException) -> str:
+    """The reason a person is shown: a processing error's own words, else generic."""
+
+    if not isinstance(exc, DocumentProcessingError):
+        return INTERRUPTED_MESSAGE
+    text = str(exc).strip() or "The document could not be processed"
+    text = text[0].upper() + text[1:]
+    return text if text.endswith((".", "!", "?")) else f"{text}."
+
+
+def progress_from_phases(phases: Sequence[Mapping[str, Any]], *, status: str) -> dict[str, Any]:
+    """The Ingestion ``progress`` a run's recorded phases describe.
+
+    Running: the phase in flight with its counts. Finished: what the run got
+    through — chunks (or archive files) found, processed and stored.
+    """
+
+    def counts(phase: str, discovered: int = 0, processed: int = 0, indexed: int = 0) -> dict[str, Any]:
+        return {
+            "phase": phase,
+            "discovered_count": discovered,
+            "processed_count": processed,
+            "indexed_count": indexed,
+            "deleted_count": 0,
+            "failed_count": 0,
+        }
+
+    if status == "pending" or (status == "running" and not phases):
+        return counts("queued")
+    if status == "running":
+        current = phases[-1]
+        done, total = int(current.get("done") or 0), int(current.get("total") or 0)
+        phase = str(current.get("phase"))
+        return counts(phase, total, done, done if phase == "storing" else 0)
+    by_phase = {phase.get("phase"): phase for phase in phases}
+    found = by_phase.get("contextualizing") or by_phase.get("embedding") or by_phase.get("expanding") or {}
+    processed = by_phase.get("embedding") or by_phase.get("expanding") or {}
+    stored = by_phase.get("storing") or {}
+    return counts(
+        "failed" if status == "timed_out" else status,
+        int(found.get("total") or 0),
+        int(processed.get("done") or 0),
+        int(stored.get("done") or 0),
+    )
 
 
 class ItemIngestionService:
@@ -61,61 +168,63 @@ class ItemIngestionService:
         self._ingestion_source_id = ingestion_source_id
         self._preview = preview
 
-    # ---- Upload-facing ----
-
     async def index_upload(
-        self,
-        document_id: UUID,
-        *,
-        access: AuthContext,
-        source: StoredFileContent,
-    ) -> Item:
-        """Canonicalize and index an available upload under a retry-safe lock."""
-
-        engine = self._require_engine()
-        lock_key = self._advisory_lock_key(document_id)
-        async with advisory_lock_scope(lock_key, engine=engine):
-            return await self._index_upload_under_lock(
-                document_id,
-                access=access,
-                source=source,
-            )
-
-    async def index_available_upload(
         self,
         document_id: UUID,
         *,
         owner_user_id: UUID,
         tenant_id: UUID,
         source: StoredFileContent,
+        progress: PhaseRecorder | None = None,
     ) -> Item:
-        """Index a durable upload from the worker after its bytes are available.
+        """Parse, chunk, contextualize, embed and index one stored upload.
 
-        This is an internal lifecycle entry point for the native-upload
-        workflow. It verifies the immutable upload owner and tenant without
-        treating a background worker as a chat or HTTP caller. User-facing
-        requests continue through :meth:`index_upload`, which enforces the
-        caller's current Collection permission.
+        The one indexing entry point for stored uploads, whichever runner
+        calls it: the managed ingestion Activity, or ``DocumentService``
+        running a user's own upload directly. It verifies the immutable upload
+        owner and tenant; callers authorize before they get here. The run's
+        phases and a user-safe failure reason are kept on the Document's
+        Ingestion record as it goes.
         """
 
+        recorder = progress if progress is not None else PhaseRecorder()
         access = AuthContext(
             user_id=owner_user_id,
-            email="native-upload-indexer@bothesis.internal",
+            email="ingestion@bothesis.internal",
             display_name=None,
             tenant_id=tenant_id,
             permission_codes=(),
             group_ids=(),
         )
-        engine = self._require_engine()
-        lock_key = self._advisory_lock_key(document_id)
-        async with advisory_lock_scope(lock_key, engine=engine):
-            return await self._index_available_upload_under_lock(
-                document_id,
-                owner_user_id=owner_user_id,
-                tenant_id=tenant_id,
-                access=access,
-                source=source,
-            )
+        persisting = asyncio.create_task(self._persist_phases(document_id, recorder))
+        error: str | None = None
+        try:
+            async with advisory_lock_scope(
+                self._advisory_lock_key(document_id), engine=self._require_engine()
+            ):
+                document = await self._index_upload_under_lock(
+                    document_id,
+                    owner_user_id=owner_user_id,
+                    tenant_id=tenant_id,
+                    access=access,
+                    source=source,
+                    progress=recorder,
+                )
+            recorder.close(completed=True)
+            return document
+        except asyncio.CancelledError:
+            recorder.close()
+            raise
+        except Exception as exc:
+            recorder.close()
+            error = failure_message(exc)
+            raise
+        finally:
+            persisting.cancel()
+            with suppress(asyncio.CancelledError):
+                await persisting
+            with suppress(Exception):
+                await self._update_record(document_id, phases=recorder.phases, error=error)
 
     async def remove_upload(
         self,
@@ -266,6 +375,7 @@ class ItemIngestionService:
         *,
         context: IndexingContext,
         processing_metadata: Mapping[str, Any] | None = None,
+        progress: IndexProgress | None = None,
     ) -> int:
         """Index canonical connector output through the source-neutral path."""
 
@@ -284,6 +394,7 @@ class ItemIngestionService:
                 item,
                 chunks,
                 context=context,
+                progress=progress,
             )
 
             async with transaction_scope(self._session_factory) as session:
@@ -309,31 +420,11 @@ class ItemIngestionService:
         self,
         document_id: UUID,
         *,
-        access: AuthContext,
-        source: StoredFileContent,
-    ) -> Item:
-        document = await self._load_upload(
-            document_id,
-            access=access,
-            permission=COLLECTION_UPDATE_PERMISSION,
-        )
-        assert access.tenant_id is not None
-        await self._index_loaded_upload(
-            document,
-            access=access,
-            tenant_id=access.tenant_id,
-            source=source,
-        )
-        return await self._load_upload(document.id, access=access)
-
-    async def _index_available_upload_under_lock(
-        self,
-        document_id: UUID,
-        *,
         owner_user_id: UUID,
         tenant_id: UUID,
         access: AuthContext,
         source: StoredFileContent,
+        progress: IndexProgress | None = None,
     ) -> Item:
         document = await self._load_owned_available_upload(
             document_id,
@@ -345,12 +436,26 @@ class ItemIngestionService:
             access=access,
             tenant_id=tenant_id,
             source=source,
+            progress=progress,
         )
         return await self._load_owned_available_upload(
             document_id,
             owner_user_id=owner_user_id,
             tenant_id=tenant_id,
         )
+
+    async def _persist_phases(self, document_id: UUID, recorder: PhaseRecorder) -> None:
+        seen = recorder.version
+        while True:
+            await asyncio.sleep(_PHASE_PERSIST_SECONDS)
+            if recorder.version != seen:
+                seen = recorder.version
+                with suppress(Exception):
+                    await self._update_record(document_id, phases=recorder.phases)
+
+    async def _update_record(self, document_id: UUID, **fields: Any) -> None:
+        async with transaction_scope(self._session_factory) as session:
+            await ItemService(session).update_ingestion_record(document_id, **fields)
 
     async def _index_loaded_upload(
         self,
@@ -359,10 +464,16 @@ class ItemIngestionService:
         access: AuthContext,
         tenant_id: UUID,
         source: StoredFileContent,
+        progress: IndexProgress | None = None,
     ) -> None:
         if self._index_is_current(document):
             return
         try:
+            # The run has started: parsing is its first step, not a prelude.
+            async with transaction_scope(self._session_factory) as session:
+                await ItemService(session).mark_index_processing(document.id)
+            if progress is not None:
+                progress("parsing", 0, 0)
             canonical = await source.canonicalize(document, access=access)
         except Exception as exc:
             async with transaction_scope(self._session_factory) as session:
@@ -384,27 +495,8 @@ class ItemIngestionService:
                 connector_key="file",
             ),
             processing_metadata=self._upload_processing_metadata(document),
+            progress=progress,
         )
-
-    async def _load_upload(
-        self,
-        document_id: UUID,
-        *,
-        access: AuthContext,
-        permission: str = COLLECTION_READ_PERMISSION,
-    ) -> Item:
-        if access.tenant_id is None:
-            raise DocumentUnavailableError("an active tenant is required")
-        async with transaction_scope(self._session_factory) as session:
-            document = await ItemService(session).get_upload_for_access(
-                document_id,
-                access,
-                permission=permission,
-            )
-            assert document.upload is not None
-            if document.upload.status != "available":
-                raise DocumentUnavailableError("document content is not available")
-            return document
 
     async def _load_owned_available_upload(
         self,
@@ -664,4 +756,10 @@ class ItemIngestionService:
         return "child"
 
 
-__all__ = ["ItemIngestionService"]
+__all__ = [
+    "INTERRUPTED_MESSAGE",
+    "ItemIngestionService",
+    "PhaseRecorder",
+    "failure_message",
+    "progress_from_phases",
+]

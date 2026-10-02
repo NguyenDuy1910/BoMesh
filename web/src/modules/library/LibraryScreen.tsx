@@ -10,12 +10,14 @@ import { DocumentRow } from "@/components/patterns";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { PageLoadingSkeleton } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
 import { useRouteState } from "@/lib/hooks/useRouteState";
 import { DocumentViewer } from "@/modules/knowledge/components/DocumentViewer";
 import { FileTypeIcon } from "@/modules/knowledge/components/FileTypeIcon";
+import { pluralize } from "@/modules/workspace-control/format";
 import { libraryActions, useLibrary } from "./queries";
-import { LibraryLoadingSkeleton } from "./LibraryLoadingSkeleton";
 
 /**
  * The documents that belong to this person rather than to the workspace.
@@ -49,59 +51,60 @@ export function LibraryScreen() {
     setType("");
   };
 
-  if (query.loading) return <LibraryLoadingSkeleton />;
-
   const list = (
-    <div className="library-list px-[var(--page-gutter)] pb-5">
-      <h2 className="document-heading">{query.data?.collectionTitle ?? "My documents"}</h2>
-      {!rows.length ? (
-        <EmptyState
-          action={
-            hasFilters ? (
-              <Button onClick={clearFilters} variant="secondary">Clear filters</Button>
-            ) : (
-              <Button icon={<Upload aria-hidden="true" size={16} />} loading={busy} onClick={openUpload}>
+    <div className="library-list">
+      <div className="knowledge-list-heading">
+        <h2 className="knowledge-eyebrow">{query.data?.collectionTitle ?? "My documents"}</h2>
+        {query.data && <span>{pluralize(rows.length, "document")}</span>}
+      </div>
+      {!query.data && !query.error ? (
+        <PageLoadingSkeleton label="Loading your documents" />
+      ) : !rows.length ? (
+        hasFilters ? (
+          <EmptyState
+            action={<Button onClick={clearFilters} variant="secondary">Clear filters</Button>}
+            description="Try a different search or clear the filters."
+            size="sm"
+            title="No matching documents"
+          />
+        ) : (
+          <EmptyState
+            action={
+              <Button icon={<Upload aria-hidden="true" size={16} />} loading={busy} onClick={openUpload} variant="secondary">
                 Upload a file
               </Button>
-            )
-          }
-          className="library-empty-state"
-          description={
-            hasFilters
-              ? "Try a different search or clear the filters."
-              : "Upload a document, or save one from a conversation."
-          }
-          icon={!hasFilters ? <FileUp size={20} /> : undefined}
-          title={hasFilters ? "No results" : "Your library is empty"}
-        />
-      ) : (
-        rows.map((item) => (
-          <DocumentRow
-            icon={<FileTypeIcon kind={item.kind} />}
-            key={item.id}
-            layout={selected ? "narrow" : "full"}
-            meta={item.source}
-            onSelect={() => { setSelectedId(item.id); setExpanded(false); }}
-            selected={item.id === selectedId}
-            title={item.title}
-            updated={item.updatedLabel}
+            }
+            className="library-empty-state"
+            description="Upload a document, or save one from a conversation."
+            icon={<FileUp size={20} />}
+            title="No documents yet"
           />
-        ))
+        )
+      ) : (
+        <div className="knowledge-rows">
+          {rows.map((item) => (
+            <DocumentRow
+              icon={<FileTypeIcon kind={item.kind} />}
+              key={item.id}
+              layout={selected ? "narrow" : "full"}
+              meta={item.source}
+              onSelect={() => { setSelectedId(item.id); setExpanded(false); }}
+              selected={item.id === selectedId}
+              title={item.title}
+              updated={item.updatedLabel}
+            />
+          ))}
+        </div>
       )}
     </div>
   );
 
   return (
     <section aria-label="Personal library" className="document-workspace">
-      <div className="px-[var(--page-gutter)] pt-4">
-        <Button icon={<ArrowLeft aria-hidden="true" size={16} />} onClick={() => router.push("/app")} variant="ghost">
-          Back to chat
-        </Button>
-      </div>
-      <CommandBar
-        action={
+      <PageHeader
+        actions={
           <Button
-            disabled={query.loading}
+            disabled={!query.data}
             icon={<Upload aria-hidden="true" size={16} />}
             loading={busy}
             onClick={openUpload}
@@ -109,7 +112,22 @@ export function LibraryScreen() {
             Upload
           </Button>
         }
-        count={`${rows.length} ${rows.length === 1 ? "document" : "documents"}`}
+        className="document-workspace__head"
+        description="Documents you uploaded or saved from conversations."
+        eyebrow={
+          <Button
+            className="-ml-2.5"
+            icon={<ArrowLeft aria-hidden="true" size={16} />}
+            onClick={() => router.push("/app")}
+            size="sm"
+            variant="ghost"
+          >
+            Back to chat
+          </Button>
+        }
+        title="Library"
+      />
+      <CommandBar
         filters={
           <FilterTrigger
             label="Filter by type"
@@ -125,14 +143,30 @@ export function LibraryScreen() {
         }
         search={{ value: search, onChange: setSearch, placeholder: "Search your documents…", label: "Search library" }}
       />
-      {error || query.error ? (
-        <div className="px-[var(--page-gutter)]">
-          <ErrorState
-            description={error ?? query.error ?? ""}
-            onAction={() => { setError(null); query.reload(); }}
-          />
+      {/* Reloading fixes a failed load; it would not repeat a failed upload,
+          so that one is dismissed instead of offered a "Retry". */}
+      {(query.error || error) && (
+        <div className="mx-[var(--page-gutter)] mt-[var(--space-5)] grid gap-[var(--space-2)]">
+          {query.error && (
+            <ErrorState
+              actionLabel="Retry"
+              description={query.error}
+              layout="inline"
+              onAction={query.reload}
+              title="Your library couldn’t be loaded"
+            />
+          )}
+          {error && (
+            <ErrorState
+              actionLabel="Dismiss"
+              description={error}
+              layout="inline"
+              onAction={() => setError(null)}
+              title="Upload failed"
+            />
+          )}
         </div>
-      ) : null}
+      )}
       <SplitView
         detail={selected ? (
           <DocumentViewer
@@ -157,16 +191,16 @@ export function LibraryScreen() {
             await libraryActions.upload(file, collectionId);
             toast({ title: `${file.name} uploaded`, variant: "success" });
           } catch (cause) {
-            const message = cause instanceof Error ? cause.message : "Upload failed.";
-            setError(message);
-            toast({ title: "Upload failed", description: message, variant: "error" });
+            setError(cause instanceof Error ? cause.message : "The file could not be uploaded.");
           } finally {
             setBusy(false);
             event.target.value = "";
           }
         }}
         ref={upload}
-        accept=".avif,.bmp,.csv,.docx,.gif,.htm,.html,.jpeg,.jpg,.json,.jsonl,.log,.markdown,.md,.pdf,.png,.pptx,.rst,.sql,.tif,.tiff,.tsv,.txt,.webp,.xlsx,.xml,.yaml,.yml"
+        // Your own uploads are processed directly; archives are bulk ingestion
+        // and belong in a workspace collection. Images are not knowledge yet.
+        accept=".csv,.docx,.htm,.html,.json,.jsonl,.log,.markdown,.md,.pdf,.pptx,.rst,.sql,.tsv,.txt,.xlsx,.xml,.yaml,.yml"
         type="file"
       />
     </section>

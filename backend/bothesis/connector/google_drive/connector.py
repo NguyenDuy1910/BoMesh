@@ -571,9 +571,9 @@ class GoogleDriveConnector(BaseSourceConnector):
         if name is None:
             return False
         extension = name.rpartition(".")[2].casefold()
-        if extension and f".{extension}" in FinxFileExtensions.ALL_ALLOWED_EXTENSIONS:
+        if extension and f".{extension}" in FinxFileExtensions.KNOWLEDGE_EXTENSIONS:
             return True
-        return _extension_for_mime(mime_type) is not None
+        return _extension_for_mime(mime_type) in FinxFileExtensions.KNOWLEDGE_EXTENSIONS
 
 
 def _required_url(value: Any) -> str:
@@ -636,8 +636,6 @@ def _file_name(file: dict[str, Any], extension: str | None) -> str:
 
 
 def _document_kind(mime_type: str) -> DocumentKind:
-    if mime_type.startswith("image/"):
-        return DocumentKind.IMAGE
     if mime_type == "application/pdf":
         return DocumentKind.PDF
     if mime_type in {"text/html", "application/xhtml+xml"}:

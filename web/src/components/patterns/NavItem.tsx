@@ -40,7 +40,7 @@ export function NavItem({
   trailing?: React.ReactNode;
 }) {
   const className = cn(
-    "relative flex w-full min-w-0 items-center gap-2.5 rounded-[var(--radius-sm)] px-2.5",
+    "relative flex w-full min-w-0 items-center gap-3 rounded-[var(--radius-sm)] px-2.5",
     "text-[length:var(--text-size-nav)] font-medium leading-[var(--text-lh-nav)]",
     "transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)]",
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]",

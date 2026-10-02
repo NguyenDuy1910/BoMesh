@@ -55,6 +55,16 @@ class CheckpointedSourceConnectorAdapter(BaseSourceConnector):
         await asyncio.to_thread(validator)
         return True
 
+    async def list_resources(
+        self, *, parent_id: str | None = None, search: str | None = None
+    ) -> list[dict[str, Any]]:
+        """A picker's listing, when the wrapped connector can browse on its own."""
+
+        lister = getattr(self.connector, "list_resources", None)
+        if lister is None:
+            raise NotImplementedError(f"{self.source} cannot list resources")
+        return await asyncio.to_thread(lister, parent_id, search)
+
     async def list_scopes(self) -> list[ConnectorScope]:
         return [scope.model_copy(deep=True) for scope in self.scopes]
 

@@ -11,7 +11,8 @@ interface DocumentDetailsDrawerProps {
   document: WorkspaceKnowledgeDocument;
   open: boolean;
   onClose: () => void;
-  onReindex?: () => void;
+  /** Set only when there is a failed indexing to retry. */
+  onRetryIndexing?: () => void;
   onRequestRemove?: () => void;
   showLifecycleActions?: boolean;
 }
@@ -28,7 +29,7 @@ export function DocumentDetailsDrawer({
   document,
   open,
   onClose,
-  onReindex,
+  onRetryIndexing,
   onRequestRemove,
   showLifecycleActions = true,
 }: DocumentDetailsDrawerProps) {
@@ -97,11 +98,11 @@ export function DocumentDetailsDrawer({
       {showLifecycleActions && (
         <footer className="knowledge-details__actions">
           <button
-            disabled={document.state === "unsupported"}
-            onClick={onReindex}
+            disabled={!onRetryIndexing}
+            onClick={onRetryIndexing}
             type="button"
           >
-            <RefreshCw aria-hidden="true" size={16} />Re-index document
+            <RefreshCw aria-hidden="true" size={16} />Retry indexing
           </button>
           <button className="knowledge-details__danger" onClick={onRequestRemove} type="button">
             <Trash2 aria-hidden="true" size={16} />Remove from knowledge

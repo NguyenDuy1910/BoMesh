@@ -521,22 +521,19 @@ class IntegrationConnectionService:
         parent_id: str | None = None,
         search: str | None = None,
     ) -> dict[str, Any]:
-        """What this authorized account can reach, for a resource picker."""
+        """What this connection's account can reach, for a resource picker."""
 
         connection = await self._readable(actor, integration_connection_id)
         provider = self._providers.for_connector(connection.connector_key)
+        if connection.provider_account_id is None:
+            # No provider sign-in to ask, but a credential that can read the
+            # site (a Confluence API token) can list it through the connector.
+            return await self._list_with_runtime(
+                connection, parent_id=parent_id, search=search
+            )
         if provider is None:
             raise ControlPlaneValidationError(
                 f"{connection.connector_key} cannot list resources"
-            )
-        if connection.provider_account_id is None:
-            # Discovery asks the provider what an account can reach, so there
-            # has to be an account. A connection configured with an API token
-            # names its resource directly instead.
-            raise ControlPlaneValidationError(
-                f"{connection.display_name} was configured with a credential "
-                "rather than an authorized account, so its resources cannot be "
-                "listed"
             )
         capability = (connector_key or connection.connector_key).strip().casefold()
         if provider.definition.capability(capability) is None:
@@ -569,6 +566,35 @@ class IntegrationConnectionService:
                 }
                 for resource in resources
             ],
+        }
+
+    async def _list_with_runtime(
+        self,
+        connection: IntegrationConnection,
+        *,
+        parent_id: str | None,
+        search: str | None,
+    ) -> dict[str, Any]:
+        if "resource_discovery" not in self._definition(
+            connection.connector_key
+        ).capabilities:
+            raise ControlPlaneValidationError(
+                f"{connection.display_name} names its resource directly, so its "
+                "contents cannot be listed"
+            )
+        runtime = await self.runtime_for(connection, source_config={})
+        try:
+            resources = await runtime.list_resources(
+                parent_id=parent_id, search=search
+            )
+        except Exception as exc:
+            raise ControlPlaneExternalUnavailableError(
+                f"{connection.connector_key} contents could not be listed: {exc}"
+            ) from exc
+        return {
+            "connector_key": connection.connector_key,
+            "parent_id": parent_id,
+            "resources": resources,
         }
 
     async def resource_source_config(
@@ -927,9 +953,20 @@ class IntegrationConnectionService:
                 source.status = SOURCE_READY
                 source.status_detail = None
 
-    @staticmethod
-    def _payload(connection: IntegrationConnection) -> dict[str, Any]:
+    def _payload(self, connection: IntegrationConnection) -> dict[str, Any]:
         sources = connection.__dict__.get("ingestion_sources", ())
+        # Browsable when a provider sign-in can be asked, or when the connector
+        # can list the site with the credential it already holds. A connection
+        # whose connector is no longer registered is still listed, just not
+        # browsable.
+        try:
+            lists_itself = (
+                "resource_discovery"
+                in self._registry.get(connection.connector_key).capabilities
+            )
+        except LookupError:
+            lists_itself = False
+        browsable = connection.provider_account_id is not None or lists_itself
         credential = connection.__dict__.get("credential")
         # A cleared credential is a record that a secret once existed, not a
         # secret. Reporting it as configured would say this connection works.
@@ -947,6 +984,7 @@ class IntegrationConnectionService:
                 "resource_id": connection.provider_resource_id,
                 "resource_label": connection.provider_resource_label,
             },
+            "browsable": browsable,
             "config": dict(connection.config),
             "scopes": list(connection.scopes or ()),
             "credential_configured": has_credential,

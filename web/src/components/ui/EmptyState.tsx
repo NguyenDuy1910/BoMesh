@@ -13,8 +13,11 @@ interface EmptyStateProps {
   className?: string;
 }
 
-const sizePadding = {
-  sm: "py-6",
+/* `sm` is the in-section empty: it sits in a list's place, so it starts on the
+   page gutter like the rows it replaces. `md`/`lg` stand in for a whole page
+   and are centred. */
+const sizeClass = {
+  sm: "ctl-empty--sm py-5",
   md: "py-10",
   lg: "",
 } as const;
@@ -28,7 +31,7 @@ export function EmptyState({
   className,
 }: EmptyStateProps) {
   return (
-    <div className={cn("ctl-empty", sizePadding[size], className)}>
+    <div className={cn("ctl-empty", sizeClass[size], className)}>
       {icon && (
         <span aria-hidden="true" className="ctl-empty__icon">
           {icon}

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import Any, Protocol, runtime_checkable
+from collections.abc import Callable, Sequence
+from typing import Any, Protocol, TypeAlias, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -60,6 +60,12 @@ class IndexingContext(BaseModel):
             return None
         value = value.strip()
         return value or None
+
+
+#: ``(phase, done, total)`` while one Item is indexed: ``contextualizing`` and
+#: ``embedding`` count chunks, ``storing`` reports the whole write. It is an
+#: observer only; it must not raise or block.
+IndexProgress: TypeAlias = Callable[[str, int, int], None]
 
 
 @runtime_checkable
@@ -156,6 +162,7 @@ __all__ = [
     "ContextualChunk",
     "ContextualChunkBuilder",
     "EmbeddingService",
+    "IndexProgress",
     "IndexingContext",
     "ItemContentIndex",
     "ItemIndex",

@@ -27,6 +27,8 @@ interface CommandBarProps {
     placeholder: string;
     /** Names the field for assistive technology; there is no visible label. */
     label: string;
+    /** Server-side searches debounce; client-side filtering stays instant. */
+    debounceMs?: number;
   };
   /** Selects and toggles that narrow the collection. */
   filters?: React.ReactNode;
@@ -51,7 +53,7 @@ export function CommandBar({
 }: CommandBarProps) {
   return (
     <div className="utility-bar">
-      {search && <SearchInput ariaLabel={search.label} className="utility-bar__search" debounceMs={0} onChange={search.onChange} placeholder={search.placeholder} value={search.value} />}
+      {search && <SearchInput ariaLabel={search.label} className="utility-bar__search" debounceMs={search.debounceMs ?? 0} onChange={search.onChange} placeholder={search.placeholder} value={search.value} />}
 
       {filters && <div className="flex shrink-0 items-center gap-1">{filters}</div>}
 

@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Any
-from uuid import NAMESPACE_URL, UUID, uuid5
 
 
 def connection_payload(value: dict[str, Any]) -> dict[str, Any]:
     owner_type = value.get("owner_type", "user")
+    account = value.get("account") or {}
     return {
         "id": value["id"],
         "connector_key": value.get("connector_key", ""),
@@ -18,6 +18,16 @@ def connection_payload(value: dict[str, Any]) -> dict[str, Any]:
         "status": value.get("status", "error"),
         "source_count": value.get("source_count", 0),
         "config": value.get("config", {}),
+        # Only labels are public; the provider's own account and resource ids
+        # stay internal.
+        "account": {
+            "label": account.get("label"),
+            "resource_label": account.get("resource_label"),
+        },
+        "browsable": bool(value.get("browsable")),
+        "status_detail": value.get("status_detail"),
+        "connected_at": value.get("connected_at"),
+        "last_checked_at": value.get("last_checked_at"),
         "created_at": value["created_at"],
         "updated_at": value["updated_at"],
     }
@@ -34,29 +44,6 @@ def source_payload(value: dict[str, Any]) -> dict[str, Any]:
         "sync_mode": value.get("sync_mode", "manual"),
         "status": value.get("status", "failed"),
         "schedule": value.get("schedule"),
-    }
-
-
-def ingestion_id(workflow_id: str) -> UUID:
-    return uuid5(NAMESPACE_URL, f"bothesis:ingestion:{workflow_id}")
-
-
-def ingestion_payload(value: dict[str, Any]) -> dict[str, Any]:
-    raw_id = str(value.get("id") or value.get("workflow_id"))
-    now = datetime.now(UTC)
-    return {
-        "id": ingestion_id(raw_id),
-        "source_id": value.get("source_id"),
-        "document_id": value.get("document_id"),
-        "connection_id": value.get("integration_connection_id"),
-        "status": value.get("status", "pending"),
-        "trigger_type": value.get("trigger_type", "manual"),
-        "retry_of_ingestion_id": value.get("retry_of_ingestion_id"),
-        "progress": value.get("progress"),
-        "started_at": value.get("started_at"),
-        "finished_at": value.get("finished_at"),
-        "created_at": value.get("created_at") or value.get("started_at") or now,
-        "updated_at": value.get("updated_at") or value.get("finished_at") or value.get("started_at") or now,
     }
 
 
@@ -106,8 +93,6 @@ def approval_request_payload(value: dict[str, Any]) -> dict[str, Any]:
 __all__ = [
     "approval_request_payload",
     "connection_payload",
-    "ingestion_id",
-    "ingestion_payload",
     "role_payload",
     "source_payload",
     "user_payload",

@@ -27,7 +27,7 @@ make init
 
 `make init` performs the complete local bootstrap:
 
-1. Creates `backend/.env` when missing.
+1. Creates the root `.env` when missing.
 2. Writes local dependency endpoints and enables the backend's local development identity.
 3. Starts PostgreSQL, Qdrant, MinIO, Temporal, and the Temporal UI.
 4. Creates the configured MinIO bucket.
@@ -42,7 +42,7 @@ replaces the Qdrant collection. Never run it against retained data.
 
 ## Configure providers
 
-Add provider credentials to `backend/.env` before running a chat or embedding
+Add provider credentials to the root `.env` before running a chat or embedding
 workflow:
 
 ```dotenv
@@ -55,12 +55,20 @@ or a non-local object store, use [Operations and configuration](operations.md).
 
 ## Run the applications
 
-Start the API:
+Start the local stack, API, and Temporal ingestion worker with one command:
 
 ```bash
 cd backend
-uv run python main.py
+uv run main.py
 ```
+
+This runs `make services` first (which updates the root `.env` with local
+endpoints), then supervises the API and worker. Stopping the command stops the
+worker, but leaves the shared Compose containers running. Run `make init` once
+to initialize the database, seed accounts, and create the Qdrant collection;
+starting the API does not reset or create those schemas. For deployments with
+externally managed dependencies, run the API and worker separately instead of
+using this local entrypoint.
 
 Start the WebUI in a separate terminal:
 
@@ -68,10 +76,10 @@ Start the WebUI in a separate terminal:
 bun run web
 ```
 
-The WebUI has deterministic local API and development-identity defaults. The
-API accepts that identity only while `BOTHESIS_ALLOW_INSECURE_DEV_IDENTITY=true`;
-it is not an authentication mechanism for deployment. `bun run web` does not
-create or require `web/.env.local` (or any WebUI environment file).
+The WebUI loads its public configuration from the same root `.env`. The API
+accepts the development identity only while
+`BOTHESIS_ALLOW_INSECURE_DEV_IDENTITY=true`; it is not an authentication
+mechanism for deployment.
 
 ## Local service endpoints
 

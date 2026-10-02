@@ -4,9 +4,9 @@ import { Plus } from "lucide-react";
 
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
-import { Skeleton } from "@/components/ui/Skeleton";
-import type { KnowledgeConnector } from "@/modules/knowledge/connectors";
+import { PageLoadingSkeleton } from "@/components/ui/Skeleton";
 import type { ConnectorEntry } from "@/modules/knowledge/queries";
+import type { KnowledgeConnector } from "@/modules/knowledge/connectors";
 
 import { AppIcon } from "./AppIcon";
 
@@ -46,7 +46,12 @@ export function ConnectorDirectory({
   onConnect: (connector: KnowledgeConnector) => void;
 }) {
   const needle = search.trim().toLowerCase();
-  const available = catalogue.filter(({ connector }) =>
+  // A provider can expose one connector through multiple capability records;
+  // the directory is one row per connector, so collapse those records before
+  // React assigns list identity.
+  const available = Array.from(
+    new Map(catalogue.map((entry) => [entry.connector.key, entry])).values(),
+  ).filter(({ connector }) =>
     `${connector.name} ${connector.description}`.toLowerCase().includes(needle));
   const isConnected = (key: string) => connectedKeys.includes(key);
 
@@ -62,21 +67,10 @@ export function ConnectorDirectory({
           description={error}
           layout="inline"
           onAction={onRetry}
-          title="This deployment's connectors could not be read"
+          title="Connectors could not be loaded"
         />
       ) : loading ? (
-        <div aria-busy="true" className="knowledge-connectors">
-          <span className="sr-only">Loading connectors</span>
-          {Array.from({ length: 6 }).map((_, index) => (
-            <div className="knowledge-connectors__skeleton" key={index}>
-              <Skeleton className="h-10 w-10 rounded-[var(--radius-sm)]" />
-              <div className="min-w-0 flex-1 space-y-1.5">
-                <Skeleton className="h-3 w-[34%]" />
-                <Skeleton className="h-2.5 w-[58%]" />
-              </div>
-            </div>
-          ))}
-        </div>
+        <PageLoadingSkeleton label="Loading connectors" />
       ) : available.length ? (
         <div className="knowledge-connectors">
           {available.map(({ connector, capability }) => {
@@ -96,7 +90,7 @@ export function ConnectorDirectory({
                     <strong>{connector.name}</strong>
                     <small>
                       {!connectable
-                        ? "Not configured on this deployment"
+                        ? "Not available on this deployment"
                         : isConnected(connector.key)
                           ? `Connected · ${connector.description}`
                           : connector.description}
@@ -125,11 +119,11 @@ export function ConnectorDirectory({
         <EmptyState
           description={
             search
-              ? "No connector on this deployment matches this search."
-              : "This deployment has no connectors registered."
+              ? "Try a different search."
+              : "Connectors appear here once they are set up for this deployment."
           }
           size="sm"
-          title="Nothing to add"
+          title={search ? "No matching connectors" : "No connectors yet"}
         />
       )}
     </section>

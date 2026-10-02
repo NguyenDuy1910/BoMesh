@@ -24,6 +24,7 @@ from bothesis.document_index import (
     ChunkContextGenerator,
     ContextualChunk,
     IndexingContext,
+    IndexProgress,
     build_contextual_chunks,
 )
 
@@ -141,6 +142,7 @@ async def build_index_records(
     context: IndexingContext,
     *,
     semantic_contextualizer: ChunkContextGenerator | None = None,
+    progress: IndexProgress | None = None,
 ) -> list[_IndexedChunkRecord]:
     """Contextualize canonical chunks and build deterministic index records."""
 
@@ -148,6 +150,7 @@ async def build_index_records(
         chunks,
         item,
         semantic_contextualizer=semantic_contextualizer,
+        progress=progress,
     )
     return [
         _IndexedChunkRecord.from_contextual_chunk(chunk, context)

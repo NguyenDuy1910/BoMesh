@@ -10,7 +10,10 @@ from bothesis.connector.adapter import CheckpointedSourceConnectorAdapter
 from bothesis.connector.confluence import connector as confluence_module
 from bothesis.connector.confluence.checkpoint import ConfluenceCheckpoint
 from bothesis.connector.confluence.connector import ConfluenceConnector
-from bothesis.connector.confluence.utils import AttachmentProcessingResult
+from bothesis.connector.confluence.utils import (
+    AttachmentProcessingResult,
+    validate_attachment_filetype,
+)
 from bothesis.connector.protocol import (
     Chunk,
     CitationInfo,
@@ -18,11 +21,77 @@ from bothesis.connector.protocol import (
     ConnectorScope,
     DocumentItem,
     DocumentKind,
-    ImagePart,
     TablePart,
     TextPart,
 )
 from bothesis.connector.registry import ConnectorRegistry
+
+
+def test_confluence_validation_stops_after_first_result() -> None:
+    """Validation proves one query answers; it must not page through the site."""
+
+    pulled: list[int] = []
+
+    def every_page_on_the_site(**_kwargs):
+        # A real site pages for thousands of requests; a walk over all of them
+        # would show up here as 1000 pulls rather than as a hang.
+        for index in range(1000):
+            pulled.append(index)
+            yield {"id": str(index)}
+
+    connector = ConfluenceConnector("https://example.atlassian.net/wiki", is_cloud=True)
+    connector._confluence_client = SimpleNamespace(
+        paginated_cql_retrieval=every_page_on_the_site
+    )
+
+    connector.validate_connector_settings()
+
+    assert pulled == [0]
+
+
+def test_confluence_lists_spaces_then_pages_for_a_picker() -> None:
+    """A token connection can be browsed: spaces, a space's pages, a page's children."""
+
+    calls: list[tuple[str, str]] = []
+
+    def page(page_id: str, title: str, children: int) -> dict:
+        return {
+            "id": page_id,
+            "title": title,
+            "children": {"page": {"size": children}},
+            "_links": {"webui": f"/spaces/ENG/pages/{page_id}"},
+        }
+
+    client = SimpleNamespace(
+        retrieve_confluence_spaces=lambda: iter(
+            [{"key": "ENG", "name": "Engineering"}, {"key": "HR", "name": "People"}]
+        ),
+        space_root_pages=lambda key: calls.append(("space", key))
+        or iter([page("1", "Runbooks", 2)]),
+        child_pages=lambda page_id: calls.append(("page", page_id))
+        or iter([page("2", "On-call", 0)]),
+    )
+    connector = ConfluenceConnector("https://example.atlassian.net/wiki", is_cloud=True)
+    connector._confluence_client = client
+
+    spaces = connector.list_resources()
+    assert [(s["resource_type"], s["external_id"], s["has_children"]) for s in spaces] == [
+        ("space", "ENG", True),
+        ("space", "HR", True),
+    ]
+    assert [s["name"] for s in connector.list_resources(search="engin")] == ["Engineering"]
+
+    roots = connector.list_resources("ENG")
+    assert roots[0]["external_id"] == "page:1"
+    assert roots[0]["has_children"] is True
+    assert roots[0]["url"] == "https://example.atlassian.net/wiki/spaces/ENG/pages/1"
+
+    children = connector.list_resources("page:1")
+    assert children[0]["external_id"] == "page:2"
+    assert children[0]["has_children"] is False
+    # A page parent is resolved as a page, never mistaken for a space key.
+    assert calls == [("space", "ENG"), ("page", "1")]
+
 
 
 def test_confluence_cql_escapes_configured_values() -> None:
@@ -249,43 +318,12 @@ def test_confluence_attachment_preserves_docling_content_and_storage(
     assert item.original.key == "confluence/risk.pdf"
 
 
-def test_confluence_non_text_image_remains_a_document_item(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    connector = ConfluenceConnector(
-        "https://example.atlassian.net/wiki",
-        is_cloud=True,
-    )
-    connector._confluence_client = object()  # type: ignore[assignment]
-    image = ImagePart(element_id="doc_image_001")
-    monkeypatch.setattr(
-        confluence_module,
-        "convert_attachment_to_content",
-        lambda **_: AttachmentProcessingResult(
-            text="",
-            file_name="diagram.png",
-            content=[image],
-            mime_type="image/png",
-            size_bytes=50,
-        ),
-    )
+def test_confluence_image_attachments_are_not_knowledge() -> None:
+    image = {"title": "diagram.png", "metadata": {"mediaType": "image/png"}}
+    pdf = {"title": "risk.pdf", "metadata": {"mediaType": "application/pdf"}}
 
-    item = connector._convert_attachment_to_document(
-        page={"space": {"name": "Risk", "key": "RISK"}},
-        page_id="42",
-        attachment={
-            "id": "10",
-            "title": "diagram.png",
-            "metadata": {"mediaType": "image/png"},
-            "version": {"number": 1},
-            "_links": {"download": "/diagram.png"},
-        },
-        parent_doc=None,
-    )
-
-    assert isinstance(item, DocumentItem)
-    assert item.document_kind == DocumentKind.IMAGE
-    assert item.content == [image]
+    assert validate_attachment_filetype(image) is False
+    assert validate_attachment_filetype(pdf) is True
 
 
 @pytest.mark.asyncio

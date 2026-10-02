@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
-load_dotenv(BACKEND_ROOT / ".env", override=False)
+load_dotenv(BACKEND_ROOT.parent / ".env", override=False)
 
 from bothesis.agent.transports.openrouter import OpenRouterTransport
 from bothesis.connector.file import FileProcessor
@@ -76,7 +76,7 @@ def _parse_args() -> argparse.Namespace:
 def _required_environment(name: str) -> str:
     value = os.getenv(name, "").strip()
     if not value:
-        raise ValueError(f"{name} is required (backend/.env is loaded automatically)")
+        raise ValueError(f"{name} is required (root .env is loaded automatically)")
     return value
 
 

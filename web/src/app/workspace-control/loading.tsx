@@ -1,6 +1,6 @@
-import { ProductLoadingSkeleton } from "@/components/ui/ProductLoadingSkeleton";
+import { PageLoadingSkeleton } from "@/components/ui/Skeleton";
 
-/** The dynamic route has no resolved section yet, so do not imply one. */
+/** Renders inside the control-plane shell: rail and page gutter are already real. */
 export default function ControlPlaneLoading() {
-  return <ProductLoadingSkeleton />;
+  return <PageLoadingSkeleton controls heading label="Loading workspace control" />;
 }

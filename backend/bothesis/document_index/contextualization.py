@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Sequence
 
@@ -18,6 +19,7 @@ from bothesis.document_index import (
     ChunkContext,
     ChunkContextGenerator,
     ContextualChunk,
+    IndexProgress,
 )
 
 log = logging.getLogger(__name__)
@@ -25,6 +27,9 @@ log = logging.getLogger(__name__)
 _DOCUMENT_CONTEXT_MAX_CHARACTERS = 12_000
 _DOCUMENT_CONTEXT_METADATA_MAX_CHARACTERS = 3_000
 _DOCUMENT_CONTEXT_CHUNK_MAX_CHARACTERS = 2_000
+#: Context model calls in flight for one document. Each call is independent
+#: (~1s); issuing them one by one made this the slowest step of ingestion.
+_CONTEXTUALIZATION_CONCURRENCY = 8
 
 
 class ContextualChunkBuilder:
@@ -94,18 +99,26 @@ async def build_contextual_chunks(
     item: DocumentItem,
     *,
     semantic_contextualizer: ChunkContextGenerator | None = None,
+    progress: IndexProgress | None = None,
 ) -> list[ContextualChunk]:
     """Build retrieval text without modifying canonical evidence or citations."""
 
     validated = _validate_chunks(chunks, item)
     chunk_builder = ContextualChunkBuilder()
     summary = _metadata_scalar(item.metadata, "summary")
-    contextual: list[ContextualChunk] = []
-    for chunk in validated:
-        semantic_context: str | None = None
-        if semantic_contextualizer is not None:
+    total = len(validated)
+    finished = 0
+    if progress is not None:
+        progress("contextualizing", 0, total)
+    gate = asyncio.Semaphore(_CONTEXTUALIZATION_CONCURRENCY)
+
+    async def describe(chunk: Chunk) -> str | None:
+        nonlocal finished
+        if semantic_contextualizer is None:
+            return None
+        async with gate:
             try:
-                semantic_context = await semantic_contextualizer.describe(
+                return await semantic_contextualizer.describe(
                     chunk,
                     document_context=_document_context(
                         item,
@@ -123,19 +136,27 @@ async def build_contextual_chunks(
                     chunk.id,
                     type(exc).__name__,
                 )
-        contextual.append(
-            chunk_builder.contextualize(
-                chunk,
-                title=item.title,
-                source=item.source,
-                hierarchy=item.hierarchy,
-                access=item.access,
-                document_type=item.document_kind,
-                document_summary=summary,
-                semantic_context=semantic_context,
-            )
+                return None
+            finally:
+                finished += 1
+                if progress is not None:
+                    progress("contextualizing", finished, total)
+
+    # ``gather`` keeps the chunks' order whatever order the calls finish in.
+    contexts = await asyncio.gather(*(describe(chunk) for chunk in validated))
+    return [
+        chunk_builder.contextualize(
+            chunk,
+            title=item.title,
+            source=item.source,
+            hierarchy=item.hierarchy,
+            access=item.access,
+            document_type=item.document_kind,
+            document_summary=summary,
+            semantic_context=semantic_context,
         )
-    return contextual
+        for chunk, semantic_context in zip(validated, contexts, strict=True)
+    ]
 
 
 def _document_context(

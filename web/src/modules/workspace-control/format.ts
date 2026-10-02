@@ -33,7 +33,7 @@ export function formatRelative(value?: string | null, fallback = "Never") {
   if (Number.isNaN(date.getTime())) return "Unknown";
   const delta = Date.now() - date.getTime();
   if (delta < 0) return formatDateTime(value, fallback);
-  if (delta < MINUTE) return "Just now";
+  if (delta < MINUTE) return "just now";
   if (delta < HOUR) return `${Math.floor(delta / MINUTE)}m ago`;
   if (delta < DAY) return `${Math.floor(delta / HOUR)}h ago`;
   if (delta < 7 * DAY) return `${Math.floor(delta / DAY)}d ago`;

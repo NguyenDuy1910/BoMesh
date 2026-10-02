@@ -141,8 +141,8 @@ class ChatRequest(BaseModel):
     conversation_id: UUID | None = None
     history: list[ChatHistoryMessage] = Field(default_factory=list, max_length=24)
     collection_ids: list[UUID] = Field(default_factory=list, max_length=20)
-    # Stable identities for resources attached to this turn. Uploading them
-    # stores bytes only; the agent resolves content lazily when needed.
+    # Stable identities for resources attached to this turn. An attachment is
+    # processed directly on upload; the agent can read it before that finishes.
     attachment_ids: list[UUID] = Field(default_factory=list, max_length=10)
 
     @model_validator(mode="after")
@@ -167,6 +167,89 @@ class IngestionStatus(StrEnum):
     timed_out = "timed_out"
 
 
+IngestionPhase = Literal[
+    "queued", "downloading", "parsing", "contextualizing", "embedding", "storing",
+    "expanding", "syncing", "completed", "failed", "cancelled",
+]
+IngestionStatusValue = Literal[
+    "pending", "running", "completed", "failed", "cancelled", "timed_out"
+]
+
+
+class IngestionProgress(BaseModel):
+    phase: IngestionPhase
+    discovered_count: int = Field(default=0, ge=0)
+    processed_count: int = Field(default=0, ge=0)
+    indexed_count: int = Field(default=0, ge=0)
+    deleted_count: int = Field(default=0, ge=0)
+    failed_count: int = Field(default=0, ge=0)
+
+
+class Ingestion(BaseModel):
+    id: UUID
+    kind: Literal["document", "source"]
+    #: ``managed``: a Temporal ingestion (workspace knowledge, Sources);
+    #: ``direct``: a user's own upload processed by the API itself.
+    mode: Literal["managed", "direct"] = "managed"
+    title: str | None = None
+    document_id: UUID | None = None
+    collection_id: UUID | None = None
+    source_id: UUID | None = None
+    connection_id: UUID | None = None
+    connector_key: str | None = None
+    status: IngestionStatusValue
+    trigger_type: Literal["manual", "scheduled", "webhook", "initial", "upload", "retry"]
+    retry_of_ingestion_id: UUID | None = None
+    attempt: int = Field(default=1, ge=1)
+    error: str | None = None
+    progress: IngestionProgress | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    duration_ms: int | None = Field(default=None, ge=0)
+    created_at: datetime
+    updated_at: datetime
+
+
+class IngestionEvent(BaseModel):
+    id: str
+    type: Literal[
+        "queued", "started", "phase", "retrying", "completed", "failed", "cancelled", "timed_out"
+    ]
+    at: datetime
+    attempt: int | None = None
+    phase: IngestionPhase | None = None
+    message: str | None = None
+    duration_ms: int | None = Field(default=None, ge=0)
+
+
+class IngestionEventList(BaseModel):
+    items: list[IngestionEvent]
+
+
+class IngestionSummaryBucket(BaseModel):
+    start: datetime
+    started: int = Field(ge=0)
+    completed: int = Field(ge=0)
+    failed: int = Field(ge=0)
+
+
+class IngestionDurations(BaseModel):
+    p50: int = Field(ge=0)
+    p95: int = Field(ge=0)
+    max: int = Field(ge=0)
+
+
+class IngestionSummary(BaseModel):
+    window: Literal["1h", "24h", "7d"]
+    generated_at: datetime
+    bucket_seconds: int = Field(ge=1)
+    totals: dict[IngestionStatusValue, int]
+    by_kind: dict[Literal["document", "source"], int]
+    buckets: list[IngestionSummaryBucket]
+    duration_ms: IngestionDurations | None = None
+    active: int = Field(ge=0)
+
+
 class Document(BaseModel):
     id: UUID
     collection_id: UUID
@@ -175,7 +258,7 @@ class Document(BaseModel):
     size_bytes: int = Field(ge=0)
     purpose: Literal["knowledge", "conversation_attachment"]
     status: Literal["pending_content", "available", "failed"]
-    latest_ingestion_id: UUID | None = None
+    latest_ingestion: Ingestion | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -194,23 +277,6 @@ class DocumentContentInstructions(BaseModel):
     method: Literal["PUT"]
     headers: dict[str, str]
     expires_at: datetime
-
-
-class Ingestion(BaseModel):
-    id: UUID
-    source_id: UUID | None = None
-    document_id: UUID | None = None
-    connection_id: UUID | None = None
-    status: Literal[
-        "pending", "running", "completed", "failed", "cancelled", "timed_out"
-    ]
-    trigger_type: Literal["manual", "scheduled", "webhook", "initial", "upload", "retry"]
-    retry_of_ingestion_id: UUID | None = None
-    progress: dict[str, Any] | None = None
-    started_at: datetime | None = None
-    finished_at: datetime | None = None
-    created_at: datetime
-    updated_at: datetime
 
 
 class DocumentCreateResult(BaseModel):
@@ -425,6 +491,13 @@ class PageFields(BaseModel):
     total: int = Field(ge=0)
 
 
+class ConnectionAccount(BaseModel):
+    """Whose account a connection uses; never its secret or provider id."""
+
+    label: str | None = None
+    resource_label: str | None = None
+
+
 class Connection(BaseModel):
     id: UUID
     connector_key: str
@@ -434,6 +507,12 @@ class Connection(BaseModel):
     status: Literal["draft", "connected", "expired", "reauth_required", "revoked", "error", "disconnected"]
     source_count: int = Field(ge=0)
     config: dict[str, Any] = Field(default_factory=dict)
+    account: ConnectionAccount = Field(default_factory=ConnectionAccount)
+    # `GET /connections/{id}/resources` can list what this connection reaches.
+    browsable: bool = False
+    status_detail: str | None = None
+    connected_at: datetime | None = None
+    last_checked_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -697,7 +776,11 @@ __all__ = [
     "SchedulePatch",
     "Schedule",
     "Ingestion",
+    "IngestionEvent",
+    "IngestionEventList",
     "IngestionPage",
+    "IngestionProgress",
+    "IngestionSummary",
     "Workspace",
     "WorkspacePage",
     "WorkspaceUpdate",

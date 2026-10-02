@@ -182,6 +182,13 @@ class AtlassianConnectionProvider:
         return {}
 
     def source_config(self, resource: ProviderResource) -> Mapping[str, Any]:
+        # Pages are listed by the Confluence connector as ``page:<id>`` (see
+        # ConfluenceConnector.list_resources); a page brings its subtree along.
+        if resource.resource_type == "page":
+            return {
+                "page_id": resource.external_id.removeprefix("page:"),
+                "index_recursively": True,
+            }
         return {"space": resource.external_id}
 
     def site_config(self, cloud_id: str) -> dict[str, Any]:

@@ -39,15 +39,14 @@ init: reset-all ## Initialize the complete local Enterprise Agent environment.
 	@echo "  Tenant ID: $(DEV_TENANT_ID)"
 	@echo "  User ID:   $(DEV_USER_ID)"
 	@echo
-	@echo "Start the API with: cd backend && uv run python main.py"
-	@echo "Start the worker with: cd backend && uv run python -m bothesis.services.workflow.worker"
+	@echo "Start the local services, API, and ingestion worker with: cd backend && uv run main.py"
 
 reset-all: _temporal-reset db-reset db-seed-accounts qdrant-init status ## Reset all databases and Qdrant, apply the current design, and seed full-access test accounts.
 	@echo "PostgreSQL, Temporal, and Qdrant reset is complete."
 
-config: ## Create the local backend environment file and enforce local dependency endpoints.
+config: ## Create the root environment file and enforce local dependency endpoints.
 	@set -euo pipefail
-	@if [[ ! -f backend/.env ]]; then cp backend/.env.example backend/.env; fi
+	@if [[ ! -f .env ]]; then cp backend/.env.example .env; fi
 	@update_env() { \
 		local file="$$1" key="$$2" value="$$3" temp_file; \
 		temp_file="$$(mktemp)"; \
@@ -60,21 +59,21 @@ config: ## Create the local backend environment file and enforce local dependenc
 		awk -v key="$$key" '$$0 !~ "^" key "=" { print }' "$$file" > "$$temp_file"; \
 		mv "$$temp_file" "$$file"; \
 	}; \
-	update_env backend/.env DATABASE_URL "$(LOCAL_DATABASE_URL)"; \
-	update_env backend/.env QDRANT_URL "$(LOCAL_QDRANT_URL)"; \
-	update_env backend/.env QDRANT_COLLECTION "$(QDRANT_COLLECTION)"; \
-	update_env backend/.env BOTHESIS_TEMPORAL_TARGET "$(LOCAL_TEMPORAL_TARGET)"; \
-	update_env backend/.env BOTHESIS_TEMPORAL_NAMESPACE default; \
-	update_env backend/.env BOTHESIS_TEMPORAL_TLS false; \
-	update_env backend/.env BOTHESIS_OBJECT_STORAGE_PROVIDER aws_s3; \
-	update_env backend/.env BOTHESIS_OBJECT_STORAGE_BUCKET "$(LOCAL_S3_BUCKET)"; \
-	update_env backend/.env BOTHESIS_S3_ENDPOINT_URL "$(LOCAL_S3_ENDPOINT)"; \
-	update_env backend/.env BOTHESIS_S3_ADDRESSING_STYLE path; \
-	update_env backend/.env AWS_ACCESS_KEY_ID bothesis; \
-	update_env backend/.env AWS_SECRET_ACCESS_KEY bothesis; \
-	integration_key="$$(sed -n 's/^BOTHESIS_INTEGRATION_ENCRYPTION_KEY=//p' backend/.env | tail -n 1)"; \
-	legacy_plugin_key="$$(sed -n 's/^BOTHESIS_PLUGIN_ENCRYPTION_KEY=//p' backend/.env | tail -n 1)"; \
-	legacy_connector_key="$$(sed -n 's/^BOTHESIS_CONNECTOR_ENCRYPTION_KEY=//p' backend/.env | tail -n 1)"; \
+	update_env .env DATABASE_URL "$(LOCAL_DATABASE_URL)"; \
+	update_env .env QDRANT_URL "$(LOCAL_QDRANT_URL)"; \
+	update_env .env QDRANT_COLLECTION "$(QDRANT_COLLECTION)"; \
+	update_env .env BOTHESIS_TEMPORAL_TARGET "$(LOCAL_TEMPORAL_TARGET)"; \
+	update_env .env BOTHESIS_TEMPORAL_NAMESPACE default; \
+	update_env .env BOTHESIS_TEMPORAL_TLS false; \
+	update_env .env BOTHESIS_OBJECT_STORAGE_PROVIDER aws_s3; \
+	update_env .env BOTHESIS_OBJECT_STORAGE_BUCKET "$(LOCAL_S3_BUCKET)"; \
+	update_env .env BOTHESIS_S3_ENDPOINT_URL "$(LOCAL_S3_ENDPOINT)"; \
+	update_env .env BOTHESIS_S3_ADDRESSING_STYLE path; \
+	update_env .env AWS_ACCESS_KEY_ID bothesis; \
+	update_env .env AWS_SECRET_ACCESS_KEY bothesis; \
+	integration_key="$$(sed -n 's/^BOTHESIS_INTEGRATION_ENCRYPTION_KEY=//p' .env | tail -n 1)"; \
+	legacy_plugin_key="$$(sed -n 's/^BOTHESIS_PLUGIN_ENCRYPTION_KEY=//p' .env | tail -n 1)"; \
+	legacy_connector_key="$$(sed -n 's/^BOTHESIS_CONNECTOR_ENCRYPTION_KEY=//p' .env | tail -n 1)"; \
 	if [[ ! "$$integration_key" =~ ^[A-Za-z0-9_-]{43}=?$$ ]]; then \
 		if [[ "$$legacy_plugin_key" =~ ^[A-Za-z0-9_-]{43}=?$$ ]]; then \
 			integration_key="$$legacy_plugin_key"; \
@@ -83,13 +82,13 @@ config: ## Create the local backend environment file and enforce local dependenc
 		else \
 			integration_key="$$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '\n')"; \
 		fi; \
-		update_env backend/.env BOTHESIS_INTEGRATION_ENCRYPTION_KEY "$$integration_key"; \
+		update_env .env BOTHESIS_INTEGRATION_ENCRYPTION_KEY "$$integration_key"; \
 	fi; \
-	remove_env backend/.env BOTHESIS_PLUGIN_ENCRYPTION_KEY; \
-	remove_env backend/.env BOTHESIS_CONNECTOR_ENCRYPTION_KEY; \
-	update_env backend/.env BOTHESIS_ALLOW_INSECURE_DEV_IDENTITY true; \
-	update_env backend/.env BOTHESIS_PUBLIC_TENANT_CODE "$(DEV_TENANT_CODE)"
-	@echo "Configured the local backend environment file."
+	remove_env .env BOTHESIS_PLUGIN_ENCRYPTION_KEY; \
+	remove_env .env BOTHESIS_CONNECTOR_ENCRYPTION_KEY; \
+	update_env .env BOTHESIS_ALLOW_INSECURE_DEV_IDENTITY true; \
+	update_env .env BOTHESIS_PUBLIC_TENANT_CODE "$(DEV_TENANT_CODE)"
+	@echo "Configured the root environment file."
 
 services: config ## Start PostgreSQL, Qdrant, object storage, and Temporal.
 	@set -euo pipefail

@@ -6,7 +6,7 @@ interface PageHeaderProps {
   title: string;
   /** Small label above the title — the section this page belongs to. */
   eyebrow?: React.ReactNode;
-  description?: string;
+  description?: React.ReactNode;
   /** Facts about the record, shown beside the title. */
   metadata?: React.ReactNode;
   /** Exactly one primary action; everything else secondary or in a menu. */

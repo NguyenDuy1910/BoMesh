@@ -19,6 +19,10 @@ class UnsupportedFileTypeError(FileProcessingError):
     """Raised when a file format is outside the supported Docling boundary."""
 
 
+class FileNoTextError(FileProcessingError):
+    """Raised when a file holds no text to index (a scanned PDF, for one)."""
+
+
 class FileSizeLimitError(FileProcessingError):
     """Raised when source or expanded archive content exceeds its limit."""
 
@@ -39,19 +43,12 @@ class FinxFileExtensions:
     )
     OFFICE_EXTENSIONS = frozenset({".docx", ".pptx", ".xlsx"})
     PDF_EXTENSIONS = frozenset({".pdf"})
+    #: What the knowledge pipeline ingests: text, office documents and PDFs.
+    KNOWLEDGE_EXTENSIONS = TEXT_EXTENSIONS | OFFICE_EXTENSIONS | PDF_EXTENSIONS
+    #: Images are not knowledge in this phase: a conversation may attach one
+    #: for the model to look at, but no upload or source ever ingests it.
     IMAGE_EXTENSIONS = frozenset(
         {".avif", ".bmp", ".gif", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
-    )
-    TEXT_EXTRACTABLE_EXTENSIONS = TEXT_EXTENSIONS | OFFICE_EXTENSIONS | PDF_EXTENSIONS
-    ALL_ALLOWED_EXTENSIONS = TEXT_EXTRACTABLE_EXTENSIONS | IMAGE_EXTENSIONS
-
-
-class FinxMimeTypes:
-    IMAGE_MIME_TYPES = frozenset(
-        {
-            "image/avif", "image/bmp", "image/gif", "image/jpeg", "image/png",
-            "image/tiff", "image/webp",
-        }
     )
 
 
@@ -67,13 +64,12 @@ class ProcessedFile:
     chunks: tuple[Chunk, ...]
 
 
-from .file_connector import FileConnector, LocalFileConnector  # noqa: E402
 from .processing import FileProcessor  # noqa: E402
 
 __all__ = [
     "DEFAULT_MAX_ARCHIVE_BYTES", "DEFAULT_MAX_FILE_BYTES",
-    "DEFAULT_MAX_TEXT_CHARACTERS", "FileConnector", "FileProcessingError",
+    "DEFAULT_MAX_TEXT_CHARACTERS", "FileProcessingError",
     "FileProcessor", "FileSizeLimitError", "FileTextLimitError",
-    "FinxFileExtensions", "FinxMimeTypes", "LocalFileConnector",
+    "FileNoTextError", "FinxFileExtensions",
     "ProcessedFile", "UnsupportedFileTypeError",
 ]

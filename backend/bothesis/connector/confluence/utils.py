@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 import httpx
 from pydantic import BaseModel, Field
 
-from ..file import FileProcessor, FinxFileExtensions, FinxMimeTypes
+from ..file import FileProcessor, FinxFileExtensions
 from bothesis.connector.protocol import AnyContentPart, Chunk, RawObjectStore
 
 log = logging.getLogger(__name__)
@@ -41,15 +41,8 @@ def get_file_ext(filename: str) -> str:
 def validate_attachment_filetype(
     attachment: dict[str, Any],
 ) -> bool:
-    # Check if attachment MIME type or extension is in the allowed set.
-    media_type = attachment.get("metadata", {}).get("mediaType", "")
-    if media_type.startswith("image/"):
-        return media_type in FinxMimeTypes.IMAGE_MIME_TYPES
-
-    title = attachment.get("title", "")
-    extension = get_file_ext(title)
-
-    return extension in FinxFileExtensions.ALL_ALLOWED_EXTENSIONS
+    # Only files the knowledge pipeline reads; images are not knowledge.
+    return get_file_ext(attachment.get("title", "")) in FinxFileExtensions.KNOWLEDGE_EXTENSIONS
 
 
 class AttachmentProcessingResult(BaseModel):
@@ -132,7 +125,6 @@ def process_attachment(
     confluence_client: Any,
     attachment: dict[str, Any],
     parent_content_id: str | None,
-    allow_images: bool,
     storage: RawObjectStore | None = None,
     document_id: str | None = None,
     processor: FileProcessor | None = None,
@@ -157,13 +149,6 @@ def process_attachment(
 
         attachment_size = int(attachment.get("extensions", {}).get("fileSize") or 0)
 
-        if media_type.startswith("image/"):
-            if not allow_images:
-                return AttachmentProcessingResult(
-                    text=None,
-                    file_name=None,
-                    error="Image downloading is not enabled",
-                )
         if attachment_size > _ATTACHMENT_SIZE_THRESHOLD:
             log.warning(
                 "Skipping %s due to size. size=%d threshold=%d",
@@ -240,8 +225,7 @@ def process_attachment(
                     safe_doc_id = _safe_storage_part(
                         document_id or parent_content_id or "unknown"
                     )
-                    kind = "images" if media_type.startswith("image/") else "files"
-                    storage_key = f"{kind}/confluence/{safe_doc_id}/{safe_title}"
+                    storage_key = f"files/confluence/{safe_doc_id}/{safe_title}"
                     storage.put_path(path, storage_key, content_type=media_type)
                     log.info(
                         "Stored attachment: key=%s size=%d",
@@ -295,7 +279,6 @@ def convert_attachment_to_content(
     confluence_client: Any,
     attachment: dict[str, Any],
     page_id: str,
-    allow_images: bool,
     storage: RawObjectStore | None = None,
     document_id: str | None = None,
     processor: FileProcessor | None = None,
@@ -314,7 +297,6 @@ def convert_attachment_to_content(
         confluence_client,
         attachment,
         page_id,
-        allow_images,
         storage,
         document_id=document_id,
         processor=processor,

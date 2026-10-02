@@ -1,12 +1,16 @@
 "use client";
 
 import { NotBackedYet } from "@/components/ui/NotBackedYet";
+import { SectionHeader } from "@/modules/workspace-control/components/SectionHeader";
 
 export function ExperiencePage() {
   return (
-    <NotBackedYet
-      description="The workspace name shown to members, its welcome message, starter prompts and appearance will be edited here. No endpoint stores them yet, so nothing on this screen would persist."
-      title="Workspace experience is not stored yet"
-    />
+    <>
+      <SectionHeader section="experience" />
+      <NotBackedYet
+        description="Members currently see the default welcome screen and starter prompts. Custom welcome copy, prompts and appearance will be managed here."
+        title="Workspace experience settings aren't available yet"
+      />
+    </>
   );
 }

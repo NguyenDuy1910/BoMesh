@@ -37,10 +37,13 @@ from bothesis.services import (
     InvalidDocumentStateError,
     conversation_access_filter,
 )
+from bothesis.services.workflow import document_ingestion_id
 
 _ITEM_STATUSES = {"pending", "processing", "ready", "failed", "unsupported", "deleted"}
 _INDEX_STATUSES = {"pending", "processing", "ready", "failed", "unsupported"}
 _PARENT_RELATIONS = {"contains", "child", "attachment", "embedded"}
+#: Index states that end an Ingestion; entering one records ``finished_at``.
+_TERMINAL_INDEX_STATUSES = {"ready", "failed", "unsupported"}
 
 
 class ItemService:
@@ -260,7 +263,7 @@ class ItemService:
         document_type: str,
         metadata: Mapping[str, Any] | None = None,
     ) -> tuple[Item, bool]:
-        """Create one idempotent native upload under an existing collection."""
+        """Create one idempotent upload under an existing collection."""
 
         await IdentityStoreService(self._session).get_user(owner_user_id)
         await IdentityStoreService(self._session).get_tenant(tenant_id)
@@ -599,7 +602,7 @@ class ItemService:
         *,
         permission: str = COLLECTION_READ_PERMISSION,
     ) -> Item:
-        """Load a native upload through its governing collection permission."""
+        """Load an upload through its governing collection permission."""
 
         from bothesis.services.identity_access.authorization import AuthorizationService
 
@@ -625,6 +628,7 @@ class ItemService:
         owner_user_id: UUID,
         tenant_id: UUID,
         *,
+        ingestion_mode: str | None,
         storage_metadata: Mapping[str, Any] | None = None,
     ) -> Item:
         item = await self.get_owned_upload(
@@ -638,13 +642,20 @@ class ItemService:
         if item.upload.status not in {"pending", "failed"}:
             raise InvalidDocumentStateError("item is not awaiting uploaded content")
         item.status = "ready"
-        item.index_status = "pending"
         item.upload.status = "available"
         item.upload.error_code = None
         item.upload.uploaded_at = datetime.now(UTC)
         if storage_metadata:
             item.metadata_ = {**dict(item.metadata_), "storage": dict(storage_metadata)}
+        if ingestion_mode is None:
+            # Not knowledge (an image attached to a conversation): kept for
+            # the agent to open, never indexed, so it has no Ingestion.
+            item.index_status = "unsupported"
+        else:
+            item.index_status = "pending"
+            _begin_ingestion(item, trigger_type="upload", mode=ingestion_mode)
         await self._session.flush()
+        await self._session.refresh(item, attribute_names=["updated_at"])
         return item
 
     async def mark_upload_failed(
@@ -672,6 +683,35 @@ class ItemService:
         await self._session.flush()
         return item
 
+    async def restart_ingestion(self, item_id: UUID, *, ingestion_mode: str) -> Item:
+        """Open a retry Ingestion for an available upload."""
+
+        item = await self._get_internal(item_id)
+        if item.status == "deleted":
+            raise InvalidDocumentStateError("cannot retry a deleted item")
+        item.index_status = "pending"
+        _begin_ingestion(item, trigger_type="retry", mode=ingestion_mode)
+        await self._session.flush()
+        return item
+
+    async def update_ingestion_record(self, item_id: UUID, **fields: Any) -> Item:
+        """Merge ``fields`` (phases, error) into an upload's Ingestion record."""
+
+        item = await self._get_internal(item_id)
+        ingestion = item.metadata_.get("ingestion")
+        if isinstance(ingestion, dict):
+            item.metadata_ = {**dict(item.metadata_), "ingestion": {**ingestion, **fields}}
+            await self._session.flush()
+        return item
+
+    async def tombstone(self, item_id: UUID) -> Item:
+        """Remove an Item from normal reads; the row stays as lineage."""
+
+        item = await self._get_internal(item_id)
+        _tombstone(item)
+        await self._session.flush()
+        return item
+
     async def mark_index_processing(self, item_id: UUID) -> Item:
         return await self._set_index_status(item_id, "processing")
 
@@ -680,6 +720,12 @@ class ItemService:
 
     async def mark_index_failed(self, item_id: UUID) -> Item:
         return await self._set_index_status(item_id, "failed")
+
+    async def mark_ingestion_cancelled(self, item_id: UUID) -> Item:
+        """End a cancelled run: not indexed, and not a failure of the file."""
+
+        await self._set_index_status(item_id, "failed")
+        return await self.update_ingestion_record(item_id, cancelled=True)
 
     async def link_message(
         self,
@@ -733,8 +779,7 @@ class ItemService:
         item = await AuthorizationService(self._session).require_item(
             item_id, access=actor, permission=COLLECTION_UPDATE_PERMISSION
         )
-        item.status = "deleted"
-        item.deleted_at = datetime.now(UTC)
+        _tombstone(item)
         await self._session.flush()
         return item
 
@@ -745,6 +790,21 @@ class ItemService:
         if item.item_type != "document":
             raise InvalidDocumentStateError("only documents have an index lifecycle")
         item.index_status = _index_status(status)
+        ingestion = item.metadata_.get("ingestion")
+        if isinstance(ingestion, dict):
+            # Only uploads carry their own Ingestion; a connector Item is
+            # indexed inside its Source's Ingestion and has no record here.
+            now = datetime.now(UTC).isoformat()
+            if item.index_status == "processing":
+                # Set once per run: later steps re-enter processing.
+                ingestion = {
+                    **ingestion,
+                    "started_at": ingestion.get("started_at") or now,
+                    "finished_at": None,
+                }
+            elif item.index_status in _TERMINAL_INDEX_STATUSES:
+                ingestion = {**ingestion, "finished_at": now}
+            item.metadata_ = {**dict(item.metadata_), "ingestion": ingestion}
         await self._session.flush()
         return item
 
@@ -824,6 +884,36 @@ class ItemService:
         return parent
 
 
+def _begin_ingestion(item: Item, *, trigger_type: str, mode: str) -> None:
+    """Record a new Ingestion of an upload: the processing its bytes now await.
+
+    ``mode`` is ``managed`` (Temporal) or ``direct`` (run in-process for a
+    user's own upload). The id is the same either way, and for a managed run
+    it names the Temporal execution too.
+    """
+
+    if mode not in {"managed", "direct"}:
+        raise ValueError("ingestion mode must be managed or direct")
+    item.metadata_ = {
+        **dict(item.metadata_),
+        "ingestion": {
+            "id": str(document_ingestion_id(str(item.id))),
+            "mode": mode,
+            "trigger_type": trigger_type,
+            "created_at": datetime.now(UTC).isoformat(),
+            "started_at": None,
+            "finished_at": None,
+            "phases": [],
+            "error": None,
+        },
+    }
+
+
+def _tombstone(item: Item) -> None:
+    item.status = "deleted"
+    item.deleted_at = datetime.now(UTC)
+
+
 def _item_type(value: str) -> str:
     normalized = value.strip().casefold()
     if normalized not in {"collection", "document"}:
@@ -833,6 +923,26 @@ def _item_type(value: str) -> str:
 
 def _document_type(value: str) -> str:
     return _required_text(value, "document type", max_length=64).casefold()
+
+
+def document_type_for_content_type(content_type: str) -> str:
+    """The semantic document type of an upload, from its normalized MIME type."""
+
+    if content_type in {"application/zip", "application/x-zip-compressed"}:
+        return "archive"
+    if content_type.startswith("image/"):
+        return "image"
+    if content_type == "application/pdf":
+        return "pdf"
+    if content_type in {"text/html", "application/xhtml+xml"}:
+        return "web_page"
+    if content_type in {"text/markdown", "text/x-markdown"}:
+        return "markdown"
+    if content_type.startswith("audio/"):
+        return "audio"
+    if content_type.startswith("video/"):
+        return "video"
+    return "plain_text"
 
 
 def _parent_relation(value: str) -> str:

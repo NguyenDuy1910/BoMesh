@@ -16,7 +16,7 @@ interface ErrorStateProps {
 }
 
 export function ErrorState({
-  title = "Something went wrong",
+  title,
   description,
   actionLabel,
   onAction,
@@ -36,6 +36,7 @@ export function ErrorState({
       >
         <AlertTriangle aria-hidden="true" className="mt-px h-4 w-4 shrink-0" />
         <div className="min-w-0">
+          {title && <p className="font-semibold leading-5">{title}</p>}
           <p className="leading-5">{description}</p>
           {resolvedActionLabel && onAction && (
             <Button className="mt-2" onClick={onAction} size="sm" variant="ghost">
@@ -56,7 +57,7 @@ export function ErrorState({
         >
           <AlertTriangle className="h-5 w-5" />
         </span>
-        <h3 className="ctl-empty__title">{title}</h3>
+        <h3 className="ctl-empty__title">{title ?? "Something went wrong"}</h3>
         <p className="ctl-empty__desc">{description}</p>
         {resolvedActionLabel && onAction && (
           <div className="ctl-empty__actions">
