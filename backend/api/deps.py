@@ -13,11 +13,12 @@ from bothesis.runtime import AppRuntime
 from bothesis.services import AuthenticationError, AuthContext, AuthorizationError, JwtClaims
 from bothesis.services.workspace_control_plane import WorkspaceControlPlaneService
 from bothesis.services.integration_lifecycle import IntegrationLifecycleService
+from bothesis.services.ingestion import IngestionService
 from bothesis.services.artifact import ArtifactService
 from bothesis.services.chat import ChatService
 from bothesis.services.knowledge_query import KnowledgeQueryService
 from bothesis.services.knowledge_view import KnowledgeViewService
-from bothesis.services.workspace_documents import WorkspaceDocumentService
+from bothesis.services.documents import DocumentService
 
 from api.identity import RequestIdentity, resolve_auth_context
 from api.routers import ChatRequest
@@ -124,10 +125,10 @@ def get_knowledge_view_service(
     return runtime.knowledge_view_service()
 
 
-def get_workspace_document_service(
+def get_document_service(
     runtime: Annotated[AppRuntime, Depends(get_runtime)],
-) -> WorkspaceDocumentService:
-    return runtime.workspace_document_service()
+) -> DocumentService:
+    return runtime.document_service()
 
 
 def get_workspace_control_plane_service(
@@ -140,6 +141,12 @@ def get_integration_lifecycle_service(
     runtime: Annotated[AppRuntime, Depends(get_runtime)],
 ) -> IntegrationLifecycleService:
     return runtime.integration_lifecycle_service()
+
+
+def get_ingestion_service(
+    runtime: Annotated[AppRuntime, Depends(get_runtime)],
+) -> IngestionService:
+    return runtime.ingestion_lifecycle_service()
 
 
 def get_artifact_service(
@@ -162,13 +169,12 @@ ChatCaller = Annotated[AuthContext, Depends(get_chat_auth_context)]
 Chat = Annotated[ChatService, Depends(get_chat_service)]
 KnowledgeQuery = Annotated[KnowledgeQueryService, Depends(get_knowledge_query_service)]
 KnowledgeView = Annotated[KnowledgeViewService, Depends(get_knowledge_view_service)]
-Documents = Annotated[
-    WorkspaceDocumentService, Depends(get_workspace_document_service)
-]
+Documents = Annotated[DocumentService, Depends(get_document_service)]
 WorkspaceControlPlane = Annotated[WorkspaceControlPlaneService, Depends(get_workspace_control_plane_service)]
 ConnectionLifecycle = Annotated[
     IntegrationLifecycleService, Depends(get_integration_lifecycle_service)
 ]
+Ingestions = Annotated[IngestionService, Depends(get_ingestion_service)]
 Artifacts = Annotated[ArtifactService, Depends(get_artifact_service)]
 Health = Annotated[HealthService, Depends(get_health_service)]
 
@@ -181,6 +187,7 @@ __all__ = [
     "Documents",
     "Health",
     "ConnectionLifecycle",
+    "Ingestions",
     "KnowledgeQuery",
     "KnowledgeView",
     "OptionalTokenClaims",

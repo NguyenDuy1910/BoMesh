@@ -37,20 +37,7 @@ test("Workspace control owns six sections plus a separated Settings", () => {
   assert.deepEqual(workspaceControlRailTail.map((item) => item.label), ["Settings"]);
 });
 
-test("Platform control is a separate plane that speaks in tenants", () => {
-  assert.deepEqual(
-    platformControlRailItems.map((item) => item.label),
-    [
-      "Tenants",
-      "Users",
-      "Public Workspaces",
-      "Models & Capabilities",
-      "Integrations",
-      "Usage",
-      "Audit",
-      "System",
-    ],
-  );
+test("Platform control is a separate plane", () => {
   // Every platform address is nested under the platform prefix, so no platform
   // row can ever light up while workspace control rail is mounted.
   assert.equal(

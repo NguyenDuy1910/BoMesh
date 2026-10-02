@@ -1,7 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/cn";
-import { StatusPill, type StatusTone } from "./StatusPill";
+import { StatusPill, type StatusTone } from "@/components/ui/StatusPill";
 
 const DOT: Record<StatusTone, string> = {
   neutral: "bg-[var(--status-neutral-solid)]",

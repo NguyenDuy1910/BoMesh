@@ -14,7 +14,6 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any
 from uuid import UUID
-from uuid import NAMESPACE_URL, uuid5
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,10 +48,6 @@ from bothesis.services.workflow import (
     WorkflowExecutionNotFoundError,
 )
 from bothesis.services.workflow.service import TemporalWorkflowService
-
-RETRYABLE_WORKFLOW_STATUSES = frozenset(
-    {"failed", "cancelled", "terminated", "timed_out"}
-)
 
 
 class IntegrationLifecycleService:
@@ -247,7 +242,9 @@ class IntegrationLifecycleService:
             )
             workflow_input = self._workflow_input(source, actor)
         if schedule is not None:
-            source["schedule"] = await self._upsert_schedule(workflow_input, schedule)
+            source["schedule"] = await self._upsert_schedule(
+                workflow_input, schedule, **self._labels(source)
+            )
         return source
 
     async def get_source(self, actor: AuthContext, source_id: UUID) -> dict[str, Any]:
@@ -275,7 +272,9 @@ class IntegrationLifecycleService:
             await self._workflows.delete_schedule(str(source_id))
             source["schedule"] = None
         elif schedule is not None:
-            source["schedule"] = await self._upsert_schedule(workflow_input, schedule)
+            source["schedule"] = await self._upsert_schedule(
+                workflow_input, schedule, **self._labels(source)
+            )
         else:
             source["schedule"] = await self._workflows.describe_schedule(str(source_id))
         return source
@@ -291,7 +290,9 @@ class IntegrationLifecycleService:
         async with self._unit_of_work() as session:
             source = await self._sources(session).get_source(actor, source_id)
             workflow_input = self._workflow_input(source, actor)
-        result = await self._workflows.start_ingestion(workflow_input)
+        result = await self._workflows.start_ingestion(
+            workflow_input, **self._labels(source)
+        )
         async with self._unit_of_work() as session:
             await AuditService(session).record(
                 actor,
@@ -306,83 +307,8 @@ class IntegrationLifecycleService:
             )
         return result
 
-    # -- Ingestion jobs -----------------------------------------------------
-
-    async def list_ingestions(
-        self, actor: AuthContext, **filters: Any
-    ) -> dict[str, Any]:
-        tenant_id = require_tenant_permission(actor, SOURCE_MANAGE_PERMISSION)
-        return await self._workflows.list_ingestions(
-            tenant_id=str(tenant_id),
-            **{
-                key: str(value) if isinstance(value, UUID) else value
-                for key, value in filters.items()
-            },
-        )
-
-    async def get_ingestion(
-        self, actor: AuthContext, workflow_id: str
-    ) -> dict[str, Any]:
-        tenant_id = require_tenant_permission(actor, SOURCE_MANAGE_PERMISSION)
-        result = await self._describe_workflow(workflow_id)
-        if result["tenant_id"] != str(tenant_id):
-            raise ControlPlaneNotFoundError(f"ingestion workflow not found: {workflow_id}")
-        return result
-
-    async def get_ingestion_by_public_id(
-        self, actor: AuthContext, ingestion_id: UUID
-    ) -> dict[str, Any]:
-        """Resolve contract UUID to internal Temporal execution ID."""
-        tenant_id = require_tenant_permission(actor, SOURCE_MANAGE_PERMISSION)
-        page = 1
-        while True:
-            result = await self._workflows.list_ingestions(
-                tenant_id=str(tenant_id), page=page, page_size=100
-            )
-            for item in result["items"]:
-                internal = str(item.get("id") or item.get("workflow_id"))
-                if uuid5(NAMESPACE_URL, f"bothesis:ingestion:{internal}") == ingestion_id:
-                    return await self.get_ingestion(actor, internal)
-            if page * 100 >= result["total"]:
-                break
-            page += 1
-        raise ControlPlaneNotFoundError(f"ingestion not found: {ingestion_id}")
-
-    async def retry_ingestion_by_public_id(self, actor: AuthContext, ingestion_id: UUID) -> dict[str, Any]:
-        current = await self.get_ingestion_by_public_id(actor, ingestion_id)
-        return await self.retry_ingestion(actor, str(current["id"]))
-
-    async def cancel_ingestion_by_public_id(self, actor: AuthContext, ingestion_id: UUID) -> dict[str, Any]:
-        current = await self.get_ingestion_by_public_id(actor, ingestion_id)
-        return await self.cancel_ingestion(actor, str(current["id"]))
-
-    async def retry_ingestion(
-        self, actor: AuthContext, workflow_id: str
-    ) -> dict[str, Any]:
-        previous = await self.get_ingestion(actor, workflow_id)
-        if previous["status"] not in RETRYABLE_WORKFLOW_STATUSES:
-            raise ControlPlaneConflictError("only closed unsuccessful workflows can be retried")
-        return await self.ingest_source(actor, UUID(str(previous["source_id"])))
-
-    async def cancel_ingestion(
-        self, actor: AuthContext, workflow_id: str
-    ) -> dict[str, Any]:
-        current = await self.get_ingestion(actor, workflow_id)
-        if current["status"] != "running":
-            raise ControlPlaneConflictError("only running workflows can be cancelled")
-        return await self._workflows.cancel_ingestion(workflow_id)
-
-    async def list_source_ingestions(
-        self, actor: AuthContext, source_id: UUID, **filters: Any
-    ) -> dict[str, Any]:
-        async with self._unit_of_work() as session:
-            await self._sources(session).get_source(actor, source_id)
-        tenant_id = require_tenant_permission(actor, SOURCE_MANAGE_PERMISSION)
-        return await self._workflows.list_ingestions(
-            tenant_id=str(tenant_id),
-            source_id=str(source_id),
-            **filters,
-        )
+    # -- Ingestion status ----------------------------------------------------
+    # Reading, retrying and cancelling runs belongs to ``IngestionService``.
 
     async def get_source_status(
         self, actor: AuthContext, source_id: UUID
@@ -423,7 +349,7 @@ class IntegrationLifecycleService:
                 actor, source_id, sync_mode="scheduled"
             )
             workflow_input = self._workflow_input(source, actor)
-        return await self._upsert_schedule(workflow_input, values)
+        return await self._upsert_schedule(workflow_input, values, **self._labels(source))
 
     async def delete_source_schedule(
         self, actor: AuthContext, source_id: UUID
@@ -532,23 +458,30 @@ class IntegrationLifecycleService:
             connector_key=str(connection["connector_key"]),
         )
 
+    @staticmethod
+    def _labels(source: dict[str, Any]) -> dict[str, str | None]:
+        """What a run is shown as, and the Collection whose readers may see it."""
+
+        target = source.get("target_item_id")
+        return {
+            "title": source.get("display_name") or None,
+            "collection_id": str(target) if target else None,
+        }
+
     async def _upsert_schedule(
-        self, input: IngestionWorkflowInput, values: dict[str, Any]
+        self,
+        input: IngestionWorkflowInput,
+        values: dict[str, Any],
+        *,
+        title: str | None = None,
+        collection_id: str | None = None,
     ) -> dict[str, Any]:
         try:
-            return await self._workflows.upsert_schedule(input, values)
+            return await self._workflows.upsert_schedule(
+                input, values, title=title, collection_id=collection_id
+            )
         except ValueError as exc:
             raise ControlPlaneValidationError(str(exc)) from exc
-        except RPCError as exc:
-            raise ControlPlaneExternalUnavailableError("Temporal is unavailable") from exc
-
-    async def _describe_workflow(self, workflow_id: str) -> dict[str, Any]:
-        try:
-            return await self._workflows.describe_ingestion(workflow_id)
-        except WorkflowExecutionNotFoundError as exc:
-            raise ControlPlaneNotFoundError(
-                f"ingestion workflow not found: {workflow_id}"
-            ) from exc
         except RPCError as exc:
             raise ControlPlaneExternalUnavailableError("Temporal is unavailable") from exc
 
@@ -567,4 +500,4 @@ class IntegrationLifecycleService:
         )
 
 
-__all__ = ["RETRYABLE_WORKFLOW_STATUSES", "IntegrationLifecycleService"]
+__all__ = ["IntegrationLifecycleService"]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from itertools import islice
 from collections.abc import Generator
 from datetime import datetime
 from datetime import timedelta
@@ -28,7 +29,6 @@ from bothesis.connector.protocol import (
     DocumentItem,
     DocumentKind,
     Hierarchy,
-    ImagePart,
     SourceIdentity,
     SourceProvider,
     StorageObject,
@@ -43,6 +43,10 @@ from .utils import convert_attachment_to_content
 from .utils import datetime_from_string
 
 log = logging.getLogger(__name__)
+
+#: One picker listing; a site with more spaces than this is narrowed by search.
+_MAX_LISTED_RESOURCES = 250
+_PAGE_RESOURCE_PREFIX = "page:"
 
 _PAGE_EXPAND = (
     "body.storage.value,version,space,metadata.labels,history.lastUpdated,ancestors"
@@ -100,8 +104,6 @@ def _attachment_storage_object(
 
 def _attachment_document_kind(mime_type: str | None) -> DocumentKind:
     normalized = (mime_type or "").casefold()
-    if normalized.startswith("image/"):
-        return DocumentKind.IMAGE
     if normalized == "application/pdf":
         return DocumentKind.PDF
     if normalized in {"text/html", "application/xhtml+xml"}:
@@ -160,14 +162,9 @@ class ConfluenceConnector(
         self._seen_hierarchy_node_ids: set[str] = set()
         self._included_page_text_cache: dict[str, str | None] = {}
         self._user_display_name_cache: dict[str, str] = {}
-        self._allow_images: bool = False
         self._storage: RawObjectStore | None = None
         self._file_processor = FileProcessor()
         self._processed_chunks: dict[str, tuple[Chunk, ...]] = {}
-
-    def set_allow_images(self, is_enabled: bool) -> None:
-        # Enable or disable image attachment processing.
-        self._allow_images = is_enabled
 
     def set_storage(self, storage: RawObjectStore) -> None:
         self._storage = storage
@@ -644,7 +641,6 @@ class ConfluenceConnector(
             confluence_client=self.confluence_client,
             attachment=attachment,
             page_id=page_id,
-            allow_images=self._allow_images,
             storage=self._storage,
             document_id=stable_att_id,
             processor=self._file_processor,
@@ -678,60 +674,29 @@ class ConfluenceConnector(
 
         original = _attachment_storage_object(content)
         if not content.text:
-            if not content.mime_type or not content.mime_type.startswith("image/"):
-                return None
-            item = DocumentItem(
-                id=stable_att_id,
-                title=attachment_title,
-                source=SourceIdentity(
-                    connector_id=self._connector_id(),
-                    provider=SourceProvider.CONFLUENCE,
-                    external_id=stable_att_id,
-                    external_version=str(attachment.get("version", {}).get("number") or "") or None,
-                    etag=str(attachment.get("version", {}).get("when") or "") or None,
-                    url=attachment_url,
-                ),
-                hierarchy=Hierarchy(parent_id=stable_page_id, root_id=stable_page_id, depth=1),
-                access=parent_doc.access if parent_doc else AccessPolicy(),
-                metadata=metadata,
-                updated_at=(datetime_from_string(version_when) if version_when else None),
-                document_kind=DocumentKind.IMAGE,
-                content=(
-                    content.content
-                    or [
-                        ImagePart(
-                            element_id=f"{stable_att_id}::image",
-                            url=attachment_url,
-                            storage=content.storage_key,
-                            alt_text=attachment_title,
-                        )
-                    ]
-                ),
-                original=original,
-            )
-        else:
-            item = DocumentItem(
-                id=stable_att_id,
-                title=attachment_title,
-                source=SourceIdentity(
-                    connector_id=self._connector_id(),
-                    provider=SourceProvider.CONFLUENCE,
-                    external_id=stable_att_id,
-                    external_version=str(attachment.get("version", {}).get("number") or "") or None,
-                    etag=str(version_when or "") or None,
-                    url=attachment_url,
-                ),
-                hierarchy=Hierarchy(parent_id=stable_page_id, root_id=stable_page_id, depth=1),
-                access=parent_doc.access if parent_doc else AccessPolicy(),
-                metadata=metadata,
-                updated_at=(datetime_from_string(version_when) if version_when else None),
-                document_kind=_attachment_document_kind(content.mime_type),
-                content=(
-                    content.content
-                    or [TextPart(text=content.text, link=attachment_url)]
-                ),
-                original=original,
-            )
+            return None
+        item = DocumentItem(
+            id=stable_att_id,
+            title=attachment_title,
+            source=SourceIdentity(
+                connector_id=self._connector_id(),
+                provider=SourceProvider.CONFLUENCE,
+                external_id=stable_att_id,
+                external_version=str(attachment.get("version", {}).get("number") or "") or None,
+                etag=str(version_when or "") or None,
+                url=attachment_url,
+            ),
+            hierarchy=Hierarchy(parent_id=stable_page_id, root_id=stable_page_id, depth=1),
+            access=parent_doc.access if parent_doc else AccessPolicy(),
+            metadata=metadata,
+            updated_at=(datetime_from_string(version_when) if version_when else None),
+            document_kind=_attachment_document_kind(content.mime_type),
+            content=(
+                content.content
+                or [TextPart(text=content.text, link=attachment_url)]
+            ),
+            original=original,
+        )
 
         if content.chunks:
             self._processed_chunks[stable_att_id] = tuple(
@@ -1054,13 +1019,90 @@ class ConfluenceConnector(
 
     def validate_connector_settings(self) -> None:
         # Verify the connector can reach Confluence with current settings.
+        # One authenticated query answering is the proof; `limit` is only the
+        # page size of a generator that pages through every match, so consume
+        # a single item rather than walking the whole site.
         try:
             cql = f"type=page and space='{self.space}'" if self.space else "type=page"
-            list(
-                self.confluence_client.paginated_cql_retrieval(
-                    cql=cql, expand="version", limit=1
-                )
+            next(
+                iter(
+                    self.confluence_client.paginated_cql_retrieval(
+                        cql=cql, expand="version", limit=1
+                    )
+                ),
+                None,
             )
         except Exception:
             log.exception("Confluence connector settings validation failed")
             raise
+
+    def list_resources(
+        self, parent_id: str | None = None, search: str | None = None
+    ) -> list[dict[str, Any]]:
+        """What this account can read, for a picker: spaces, then their pages.
+
+        An API-token connection has no provider account to ask, but the token
+        itself can read the site, so discovery runs through the same client
+        ingestion uses. Pages are ``page:<id>`` so they never collide with a
+        space key when they come back as a ``parent_id`` (the Atlassian
+        provider's ``source_config`` reads the same prefix).
+        """
+
+        term = (search or "").strip().casefold()
+        if parent_id is None:
+            spaces: list[dict[str, Any]] = []
+            for space in self.confluence_client.retrieve_confluence_spaces():
+                key = str(space.get("key") or "").strip()
+                if not key:
+                    continue
+                name = str(space.get("name") or key)
+                if term and term not in f"{name} {key}".casefold():
+                    continue
+                spaces.append(
+                    self._resource("space", key, name, None, True, space)
+                )
+                if len(spaces) >= _MAX_LISTED_RESOURCES:
+                    break
+            return spaces
+        if parent_id.startswith(_PAGE_RESOURCE_PREFIX):
+            pages = self.confluence_client.child_pages(
+                parent_id.removeprefix(_PAGE_RESOURCE_PREFIX)
+            )
+        else:
+            pages = self.confluence_client.space_root_pages(parent_id)
+        listed: list[dict[str, Any]] = []
+        for page in islice(pages, _MAX_LISTED_RESOURCES):
+            title = str(page.get("title") or page.get("id"))
+            if term and term not in title.casefold():
+                continue
+            children = (page.get("children") or {}).get("page") or {}
+            listed.append(
+                self._resource(
+                    "page",
+                    f"{_PAGE_RESOURCE_PREFIX}{page['id']}",
+                    title,
+                    parent_id,
+                    bool(children.get("size") or children.get("results")),
+                    page,
+                )
+            )
+        return listed
+
+    def _resource(
+        self,
+        resource_type: str,
+        external_id: str,
+        name: str,
+        parent_id: str | None,
+        has_children: bool,
+        entry: dict[str, Any],
+    ) -> dict[str, Any]:
+        webui = (entry.get("_links") or {}).get("webui")
+        return {
+            "resource_type": resource_type,
+            "external_id": external_id,
+            "name": name,
+            "parent_id": parent_id,
+            "has_children": has_children,
+            "url": f"{self.wiki_base}{webui}" if webui else None,
+        }

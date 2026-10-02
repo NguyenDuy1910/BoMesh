@@ -34,7 +34,7 @@ from bothesis.services import (
 )
 from bothesis.services.audit import AuditService
 from bothesis.services.identity_access.authorization import AuthorizationService
-from bothesis.services.document_upload import DocumentUploadService
+from bothesis.services.documents import DocumentService
 from bothesis.services.identity_access.identity_store import resolve_agent_access
 from bothesis.services.item import ItemService
 from bothesis.storage import DocumentStorage, ObjectNotFoundError
@@ -94,7 +94,7 @@ class ArtifactService:
         session_factory: SessionFactory,
         *,
         object_storage: Callable[[], DocumentStorage],
-        uploads: Callable[[], DocumentUploadService],
+        documents: Callable[[], DocumentService],
         max_content_bytes: int,
         download_url_seconds: int,
     ) -> None:
@@ -102,7 +102,7 @@ class ArtifactService:
             raise ValueError("artifact limits must be greater than zero")
         self._sessions = session_factory
         self._object_storage = object_storage
-        self._uploads = uploads
+        self._documents = documents
         self._max_content_bytes = max_content_bytes
         self._download_url_seconds = download_url_seconds
 
@@ -353,7 +353,7 @@ class ArtifactService:
             _title(title) if title else item.title,
             suffix=Path(_stored_file_name(item)).suffix or ".md",
         )
-        upload = await self._uploads().upload_to_collection(
+        upload = await self._documents().upload_to_collection(
             access,
             collection_id,
             idempotency_key=f"artifact:{item.id}:r{current.revision_number}:{file_name}",

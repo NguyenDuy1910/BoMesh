@@ -11,7 +11,7 @@ from io import BytesIO
 from pathlib import Path
 
 import pypdfium2 as pdfium
-from PIL import Image, ImageOps, UnidentifiedImageError
+from PIL import Image
 
 from bothesis.db.models import Item
 from bothesis.services import (
@@ -36,12 +36,6 @@ log = logging.getLogger(__name__)
 
 _PDF_CONTENT_TYPES = frozenset({"application/pdf"})
 _PDF_EXTENSIONS = frozenset({".pdf"})
-_IMAGE_CONTENT_TYPES = frozenset(
-    {"image/avif", "image/bmp", "image/gif", "image/jpeg", "image/png", "image/tiff", "image/webp"}
-)
-_IMAGE_EXTENSIONS = frozenset(
-    {".avif", ".bmp", ".gif", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
-)
 
 
 class KnowledgePreview:
@@ -76,27 +70,15 @@ class KnowledgePreview:
         extension = Path(file_name).suffix.casefold() or source.suffix.casefold()
         if normalized_type in _PDF_CONTENT_TYPES or extension in _PDF_EXTENSIONS:
             return self._render_pdf(source)
-        if normalized_type in _IMAGE_CONTENT_TYPES or extension in _IMAGE_EXTENSIONS:
-            return self._render_image(source)
         return RenderedPreview(representation="original")
 
     @staticmethod
     def supports(*, file_name: str, content_type: str | None) -> bool:
+        """Whether a page preview is rendered: PDFs only (images are not knowledge)."""
+
         normalized_type = (content_type or "").split(";", 1)[0].strip().casefold()
         extension = Path(file_name).suffix.casefold()
-        return normalized_type in _PDF_CONTENT_TYPES or normalized_type in _IMAGE_CONTENT_TYPES or extension in _PDF_EXTENSIONS or extension in _IMAGE_EXTENSIONS
-
-    def _render_image(self, source: Path) -> RenderedPreview:
-        try:
-            with Image.open(source) as opened:
-                self._validate_dimensions(*opened.size)
-                image = ImageOps.exif_transpose(opened).copy()
-        except (OSError, UnidentifiedImageError, ValueError) as exc:
-            raise PreviewGenerationError("image preview rendering failed") from exc
-        try:
-            return RenderedPreview(representation="image", assets=(self._webp_asset(image, page=1),), page_count=1)
-        finally:
-            image.close()
+        return normalized_type in _PDF_CONTENT_TYPES or extension in _PDF_EXTENSIONS
 
     def _render_pdf(self, source: Path) -> RenderedPreview:
         try:

@@ -1,12 +1,16 @@
 "use client";
 
 import { NotBackedYet } from "@/components/ui/NotBackedYet";
+import { SectionHeader } from "@/modules/workspace-control/components/SectionHeader";
 
 export function PlatformModelsPage() {
   return (
-    <NotBackedYet
-      description="Which models and capabilities each workspace may use will be governed here. No endpoint stores that policy yet; the models a deployment can reach are currently fixed by its environment configuration."
-      title="Model availability is not stored yet"
-    />
+    <>
+      <SectionHeader section="platform-models" />
+      <NotBackedYet
+        description="Every tenant uses the models this deployment is configured with. Per-tenant model and capability policy will be managed here."
+        title="Model policy isn't available yet"
+      />
+    </>
   );
 }

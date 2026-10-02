@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from collections.abc import Mapping
 from typing import Any, Callable
 
@@ -12,6 +13,8 @@ from bothesis.connector.protocol import (
     SourceProvider,
 )
 from bothesis.services.preview import KnowledgePreview
+from bothesis.services.item_ingestion import progress_from_phases
+from bothesis.services.workflow import document_ingestion_id
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +35,77 @@ def public_document_status(status: str | None) -> str:
     return _PUBLIC_DOCUMENT_STATUS.get(status or "", "pending_content")
 
 
+#: An upload's internal index lifecycle, in the Ingestion contract's words.
+_INGESTION_STATUS = {
+    "pending": "pending",
+    "processing": "running",
+    "ready": "completed",
+    "failed": "failed",
+    "unsupported": "failed",
+}
+
+
+def document_ingestion(document: Any) -> dict[str, Any] | None:
+    """The latest Ingestion of one uploaded Document, or ``None``.
+
+    An upload's Ingestion is recorded on its Item when its bytes become
+    available (or a retry opens a new one) and is kept current by the core as
+    it runs — whether managed ingestion or a direct run processes it. A
+    Document a connector wrote has none of its own: its Source's Ingestion
+    indexed it. Content that never arrived has not started one either.
+    """
+
+    metadata = getattr(document, "metadata_", {}) or {}
+    index_status = getattr(document, "index_status", None)
+    record = metadata.get("ingestion")
+    if not isinstance(record, dict):
+        # Content availability is ``status == "ready"``; an index failure
+        # leaves it there, while content that never arrived is ``failed``.
+        if metadata.get("purpose") != "knowledge" or document.status != "ready":
+            return None
+        if index_status is None:
+            return None
+        # Uploaded before Ingestions were recorded: same identity, no times.
+        record = {
+            "id": str(document_ingestion_id(str(document.id))),
+            "mode": "managed",
+            "trigger_type": "upload",
+            "created_at": document.created_at.isoformat(),
+        }
+    created_at = record.get("created_at") or document.created_at.isoformat()
+    started_at = record.get("started_at")
+    finished_at = record.get("finished_at")
+    status = _INGESTION_STATUS.get(index_status or "", "pending")
+    if record.get("cancelled") and status == "failed":
+        status = "cancelled"
+    duration_ms = None
+    if started_at:
+        end = datetime.fromisoformat(finished_at) if finished_at else datetime.now(UTC)
+        duration_ms = max(0, round((end - datetime.fromisoformat(started_at)).total_seconds() * 1000))
+    return {
+        "id": record["id"],
+        "kind": "document",
+        "mode": record.get("mode", "managed"),
+        "title": str(metadata.get("file_name") or document.title or "document"),
+        "document_id": str(document.id),
+        "collection_id": str(document.parent_item_id) if document.parent_item_id else None,
+        "source_id": None,
+        "connection_id": None,
+        "connector_key": "file",
+        "status": status,
+        "trigger_type": record.get("trigger_type", "upload"),
+        "retry_of_ingestion_id": None,
+        "attempt": 1,
+        "error": record.get("error") if status == "failed" else None,
+        "progress": progress_from_phases(record.get("phases") or [], status=status),
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "duration_ms": duration_ms,
+        "created_at": created_at,
+        "updated_at": finished_at or started_at or created_at,
+    }
+
+
 class DocumentPresenter:
     """Turn one Item into metadata, preview, and citation-ready payloads."""
 
@@ -47,34 +121,6 @@ class DocumentPresenter:
         self._preview = preview
         self._citation_url_seconds = _bounded_seconds(citation_url_seconds)
         self._preview_url_seconds = _bounded_seconds(preview_url_seconds)
-
-    def metadata(self, document: Any) -> dict[str, Any]:
-        """Describe one uploaded document for the workspace document API."""
-
-        upload = _loaded_upload(document)
-        index_status = getattr(document, "index_status", None)
-        return {
-            "id": str(document.id),
-            "parent_item_id": (
-                str(document.parent_item_id) if document.parent_item_id else None
-            ),
-            "file_name": str(
-                document.metadata_.get("file_name") or document.title or "document"
-            ),
-            "content_type": document.mime_type or "application/octet-stream",
-            "size_bytes": document.size_bytes or 0,
-            "status": public_document_status(getattr(document, "status", None)),
-            "index_status": index_status,
-            "indexed": index_status == "ready",
-            "upload_status": upload.status if upload is not None else None,
-            "created_at": document.created_at.isoformat(),
-            "uploaded_at": (
-                upload.uploaded_at.isoformat()
-                if upload is not None and upload.uploaded_at
-                else None
-            ),
-            "preview": self.preview_payload(document),
-        }
 
     def contract_document(self, document: Any) -> dict[str, Any]:
         """Map internal Item/upload state to the public Document contract."""
@@ -98,7 +144,7 @@ class DocumentPresenter:
             "size_bytes": document.size_bytes or 0,
             "purpose": metadata.get("purpose", "knowledge"),
             "status": public_status,
-            "latest_ingestion_id": metadata.get("latest_ingestion_id"),
+            "latest_ingestion": document_ingestion(document),
             "created_at": document.created_at,
             "updated_at": document.updated_at,
         }
@@ -276,6 +322,7 @@ def _loaded_upload(document: Any) -> Any | None:
 
 __all__ = [
     "DocumentPresenter",
+    "document_ingestion",
     "payload_citation",
     "public_document_status",
     "viewer_elements",

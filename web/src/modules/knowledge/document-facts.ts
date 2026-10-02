@@ -1,4 +1,5 @@
-import type { StatusTone } from "@/components/patterns/StatusPill";
+import type { StatusTone } from "@/components/ui/StatusPill";
+import { canRetry } from "@/modules/knowledge/ingestion-state";
 
 import type {
   KnowledgeAgentSection,
@@ -31,6 +32,7 @@ const KIND_LABEL = {
   pdf: "PDF",
   document: "Document",
   spreadsheet: "Spreadsheet",
+  archive: "Archive",
   unsupported: "File",
 } as const;
 
@@ -59,7 +61,7 @@ export function documentFacts(document: WorkspaceKnowledgeDocument): DocumentFac
     modifiedLabel: document.modifiedAt ?? document.updatedLabel,
     indexedLabel: indexedLabel(document),
     sections,
-    pageable: document.kind !== "unsupported" && document.state !== "restricted",
+    pageable: document.kind !== "unsupported" && document.kind !== "archive" && document.state !== "restricted",
   };
 }
 
@@ -89,8 +91,22 @@ export interface DocumentStatus {
  * `unsupported` is deliberately neutral rather than red: nothing went wrong
  * and nothing can be retried, so an alarm colour would send the reader looking
  * for a fix that does not exist.
+ *
+ * An archive is never "Indexed": it is not read in answers. Its files are, as
+ * Documents of their own, so its lifecycle is extraction.
  */
 export function documentStatus(document: WorkspaceKnowledgeDocument): DocumentStatus {
+  if (document.kind === "archive") {
+    switch (document.state) {
+      case "indexed":
+        return { label: "Extracted", tone: "neutral" };
+      case "failed":
+      case "unsupported":
+        return { label: "Not extracted", tone: "danger" };
+      default:
+        return { label: "Extracting", tone: "warning" };
+    }
+  }
   switch (document.state) {
     case "indexed":
       return document.answerIncluded === false
@@ -109,8 +125,19 @@ export function documentStatus(document: WorkspaceKnowledgeDocument): DocumentSt
 
 /** Whether grounded answers can quote this document right now. */
 export function answerAvailability(document: WorkspaceKnowledgeDocument): string {
+  if (document.kind === "archive") return "Its files are added as separate documents";
   if (document.state !== "indexed") return "Not available in answers";
   return document.answerIncluded === false ? "Excluded from answers" : "Included in answers";
+}
+
+/**
+ * Whether "Retry indexing" can do anything for this document: it failed, and
+ * there is an ingestion to run again. A connector-written document has none —
+ * its source's next sync is what indexes it again.
+ */
+export function canRetryIndexing(document: WorkspaceKnowledgeDocument): boolean {
+  return document.state === "failed"
+    && Boolean(document.latestIngestion && canRetry(document.latestIngestion));
 }
 
 /**

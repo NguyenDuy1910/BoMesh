@@ -6,9 +6,11 @@ import {
   Download,
   Eye,
   FilePenLine,
-  LoaderCircle,
+  type LucideIcon,
 } from "lucide-react";
 import { memo, useCallback, useState } from "react";
+
+import { Button, type ButtonVariant } from "@/components/ui/Button";
 
 import {
   getArtifact,
@@ -17,7 +19,6 @@ import {
   type Collection,
 } from "../api";
 import { artifactFormatLabel, artifactSizeLabel, type TurnArtifact } from "../artifacts";
-import { ChatButton, type ChatButtonTone } from "./ChatButton";
 import { FileTypeIcon } from "./ResourceIcon";
 
 /**
@@ -134,20 +135,20 @@ function ArtifactCard({
               icon={Eye}
               label="Preview"
               onClick={() => onPreview(artifact)}
-              pressed={active}
-              tone="secondary"
+              selected={active}
+              variant="secondary"
             />
           )}
-          <ActionButton busy={busy === "download"} icon={Download} label="Download" onClick={download} tone="contextual" />
+          <ActionButton busy={busy === "download"} icon={Download} label="Download" onClick={download} variant="tertiary" />
           {onEdit && (
-            <ActionButton icon={FilePenLine} label="Continue editing" onClick={() => onEdit(artifact)} tone="soft" />
+            <ActionButton icon={FilePenLine} label="Continue editing" onClick={() => onEdit(artifact)} variant="tertiary" />
           )}
           <ActionButton
             busy={busy === "publish" && !collections}
             icon={BookUp}
             label="Save to knowledge"
             onClick={startPublish}
-            tone="success"
+            variant="tertiary"
           />
         </div>
         {collections && (
@@ -171,21 +172,22 @@ function ArtifactCard({
                 <option key={collection.id} value={collection.id}>{collection.title}</option>
               ))}
             </select>
-            <ChatButton
+            <Button
               loading={busy === "publish"}
-              tone="success"
+              size="sm"
               type="submit"
+              variant="primary"
             >
               Publish
-            </ChatButton>
-            <ChatButton
+            </Button>
+            <Button
               disabled={busy !== null}
               onClick={() => setCollections(undefined)}
-              tone="ghost"
-              type="button"
+              size="sm"
+              variant="ghost"
             >
               Cancel
-            </ChatButton>
+            </Button>
           </form>
         )}
         {error && <div className="artifact-card__note artifact-card__note--error" role="alert">{error}</div>}
@@ -200,29 +202,29 @@ function ActionButton({
   icon: Icon,
   label,
   onClick,
-  pressed,
-  tone,
+  selected,
+  variant,
 }: {
   busy?: boolean;
-  icon: typeof Download;
+  icon: LucideIcon;
   label: string;
   onClick: () => void;
-  pressed?: boolean;
-  tone: ChatButtonTone;
+  /** Only the Preview toggle has a pressed state; other actions leave it unset. */
+  selected?: boolean;
+  variant: ButtonVariant;
 }) {
   return (
-    <ChatButton
-      aria-pressed={pressed}
-      className={clsx("artifact-card__action", `artifact-card__action--${tone}`, pressed && "artifact-card__action--active")}
-      icon={busy ? <LoaderCircle aria-hidden="true" className="artifact-card__spinner" size={14} /> : <Icon aria-hidden="true" size={14} />}
+    <Button
+      aria-pressed={selected}
+      icon={<Icon aria-hidden="true" size={14} />}
       loading={busy}
       onClick={onClick}
-      title={label}
-      tone={tone}
-      type="button"
+      selected={selected}
+      size="sm"
+      variant={variant}
     >
       {label}
-    </ChatButton>
+    </Button>
   );
 }
 

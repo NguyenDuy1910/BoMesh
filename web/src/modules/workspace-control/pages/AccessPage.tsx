@@ -14,6 +14,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
+import { PageLoadingSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Tabs } from "@/components/ui/Tabs";
 import { useRouteState } from "@/lib/hooks/useRouteState";
@@ -28,8 +29,9 @@ import {
   type Permission,
   type Role,
 } from "@/modules/workspace-control/directory";
+import { SectionHeader } from "@/modules/workspace-control/components/SectionHeader";
+import { pluralize } from "@/modules/workspace-control/format";
 import { useControlPlaneData } from "@/modules/workspace-control/queries";
-import { Skeleton, TableSkeleton } from "@/components/ui/Skeleton";
 
 type AccessTab = "members" | "groups" | "roles";
 
@@ -46,10 +48,15 @@ export function AccessPage() {
 
   return (
     <>
-      <Tabs activeTab={tab} ariaLabel="Access sections" className="mb-4" onChange={setRouteTab} tabs={tabs} />
-      {tab === "members" && <MembersSection actorUserId={session?.user_id ?? null} />}
-      {tab === "groups" && <GroupsSection />}
-      {tab === "roles" && <RolesSection />}
+      <SectionHeader section="access" />
+      <div className="tab-bar">
+        <Tabs activeTab={tab} ariaLabel="Access sections" idBase="access" onChange={setRouteTab} tabs={tabs} variant="underline" />
+      </div>
+      <div aria-labelledby={`access-${tab}`} id={`access-${tab}-panel`} role="tabpanel">
+        {tab === "members" && <MembersSection actorUserId={session?.user_id ?? null} />}
+        {tab === "groups" && <GroupsSection />}
+        {tab === "roles" && <RolesSection />}
+      </div>
     </>
   );
 }
@@ -60,37 +67,37 @@ function MembersSection({ actorUserId }: { actorUserId: string | null }) {
   const error = members.error || roles.error;
 
   if (error) {
-    return <ErrorState description={error} layout="inline" onAction={() => { members.reload(); roles.reload(); }} />;
+    return <AccessDataError description={error} onRetry={() => { members.reload(); roles.reload(); }} />;
   }
-  if (!members.data || !roles.data) return <AccessDataLoading />;
+  if (!members.data || !roles.data) return <AccessDataLoading label="Loading members" />;
   return <MembersPanel actorUserId={actorUserId} roles={roles.data.items} rows={members.data.items} />;
 }
 
 function GroupsSection() {
   const groups = useControlPlaneData(() => workspaceDirectoryApi.groups());
 
-  if (groups.error) return <ErrorState description={groups.error} layout="inline" onAction={groups.reload} />;
-  if (!groups.data) return <AccessDataLoading columns={3} />;
+  if (groups.error) return <AccessDataError description={groups.error} onRetry={groups.reload} />;
+  if (!groups.data) return <AccessDataLoading label="Loading groups" />;
   return <GroupsPanel rows={groups.data.items} />;
 }
 
 function RolesSection() {
   const roles = useControlPlaneData(() => workspaceDirectoryApi.roles());
 
-  if (roles.error) return <ErrorState description={roles.error} layout="inline" onAction={roles.reload} />;
-  if (!roles.data) return <AccessDataLoading />;
+  if (roles.error) return <AccessDataError description={roles.error} onRetry={roles.reload} />;
+  if (!roles.data) return <AccessDataLoading label="Loading roles" />;
   return <RolesPanel rows={roles.data.items} />;
 }
 
-function AccessDataLoading({ columns = 4 }: { columns?: number }) {
-  return (
-    <section aria-busy="true" aria-label="Loading access records" role="status">
-      <span className="sr-only">Loading access records</span>
-      <div className="ctl-card overflow-hidden">
-        <TableSkeleton columns={columns} rows={6} />
-      </div>
-    </section>
-  );
+/* The tab's command bar is not rendered until its data arrives, so the
+   placeholder stands in for it too, at the command bar's distance from the
+   tab bar. */
+function AccessDataLoading({ label }: { label: string }) {
+  return <PageLoadingSkeleton className="pt-[var(--space-4)]" controls label={label} />;
+}
+
+function AccessDataError({ description, onRetry }: { description: string; onRetry: () => void }) {
+  return <ErrorState className="mt-[var(--space-4)]" description={description} layout="inline" onAction={onRetry} />;
 }
 
 function MembersPanel({
@@ -132,10 +139,12 @@ function MembersPanel({
     { key: "status", label: "Status", width: 110, render: (row) => <StatusBadge status={memberStatus(row)} /> },
   ];
 
+  const filtered = Boolean(search || status);
+
   return <>
     <CommandBar
       action={<Button icon={<UserPlus size={16} />} onClick={() => setOpen(true)}>Add member</Button>}
-      count={`${matching.length} members`}
+      count={pluralize(matching.length, "member")}
       filters={
         <FilterTrigger
           label="Filter by status"
@@ -154,7 +163,14 @@ function MembersPanel({
       ariaLabel="Workspace members"
       columns={columns}
       data={matching}
-      emptyState={<EmptyState description="Clear the filters or add a member." icon={<Users size={20} />} title="No matching members" />}
+      emptyState={
+        <EmptyState
+          description={filtered ? "Try a different search or status." : "Add a member to give them access to this workspace."}
+          icon={<Users size={20} />}
+          size="sm"
+          title={filtered ? "No matching members" : "No members yet"}
+        />
+      }
       onRowClick={setSelected}
     />
     <MemberDialog
@@ -185,7 +201,7 @@ function MemberDialog({
   if (!member) return null;
   const active = memberStatus(member) === "active";
   const isCurrentUser = member.id === actorUserId;
-  const currentRoleId = member.membership.roles[0]?.id ?? "";
+  const currentRoleId = member.roles[0]?.id ?? "";
   const pendingRole = roles.find((role) => role.id === pendingRoleId);
   const roleOptions = [
     ...(currentRoleId && !roles.some((role) => role.id === currentRoleId)
@@ -276,7 +292,7 @@ function MemberDialog({
         }
         destructive={active}
         onClose={() => setConfirmStatusChange(false)}
-        onConfirm={() => save({ status: !active })}
+        onConfirm={() => save({ status: active ? "suspended" : "active" })}
         open={confirmStatusChange}
         title={active ? "Suspend workspace access?" : "Restore workspace access?"}
       />
@@ -362,14 +378,21 @@ function GroupsPanel({ rows }: { rows: Group[] }) {
   return <>
     <CommandBar
       action={<Button icon={<Plus size={16} />} onClick={() => setOpen(true)}>Create group</Button>}
-      count={`${matching.length} groups`}
+      count={pluralize(matching.length, "group")}
       search={{ value: search, onChange: setSearch, placeholder: "Search groups…", label: "Search groups" }}
     />
     <DataTable
       ariaLabel="Access groups"
       columns={columns}
       data={matching}
-      emptyState={<EmptyState description="Clear the search or create a group." icon={<UsersRound size={20} />} title="No matching groups" />}
+      emptyState={
+        <EmptyState
+          description={search ? "Try a different search." : "Create a group to give several members the same access."}
+          icon={<UsersRound size={20} />}
+          size="sm"
+          title={search ? "No matching groups" : "No groups yet"}
+        />
+      }
     />
     <GroupDialog onClose={() => setOpen(false)} open={open} />
   </>;
@@ -437,7 +460,9 @@ function RolesPanel({ rows }: { rows: Role[] }) {
       label: "Role",
       primary: true,
       sortable: true,
-      render: (row) => <CellTitle subtitle={row.code} title={row.display_name} />,
+      // The role code is an internal identifier; what a reader needs beside
+      // the name is how much the role grants.
+      render: (row) => <CellTitle subtitle={pluralize(row.permission_codes.length, "permission")} title={row.display_name} />,
     },
     {
       key: "permission_codes",
@@ -463,13 +488,20 @@ function RolesPanel({ rows }: { rows: Role[] }) {
   return <>
     <CommandBar
       action={<Button icon={<Plus size={16} />} onClick={() => setOpen(true)}>Create role</Button>}
-      count={`${rows.length} roles`}
+      count={pluralize(rows.length, "role")}
     />
     <DataTable
       ariaLabel="Workspace roles"
       columns={columns}
       data={rows}
-      emptyState={<EmptyState description="Create a role to assign permissions." icon={<ShieldCheck size={20} />} title="No roles" />}
+      emptyState={
+        <EmptyState
+          description="Create a role to choose which permissions it grants."
+          icon={<ShieldCheck size={20} />}
+          size="sm"
+          title="No roles yet"
+        />
+      }
     />
     {open && <RoleDialog onClose={() => setOpen(false)} open />}
   </>;
@@ -527,12 +559,12 @@ function RoleDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
           <legend className="mb-2 text-sm font-medium">Permissions</legend>
           {catalogue.error ? (
             <ErrorState description={catalogue.error} layout="inline" onAction={catalogue.reload} />
-          ) : catalogue.loading ? (
+          ) : !catalogue.data ? (
             <div aria-busy="true" className="grid gap-2" role="status">
               <span className="sr-only">Loading permissions</span>
-              {Array.from({ length: 4 }).map((_, index) => (
-                <Skeleton className="h-10 w-full" key={index} />
-              ))}
+              <Skeleton className="h-9" />
+              <Skeleton className="h-9" />
+              <Skeleton className="h-9 w-2/3" />
             </div>
           ) : (
             <div className="grid gap-2">

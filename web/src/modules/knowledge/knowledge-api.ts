@@ -1,6 +1,7 @@
 /** The knowledge workspace endpoints: Collections, and the Items inside them. */
 
 import { apiRequest } from "@/lib/api/request";
+import type { Ingestion } from "@/modules/knowledge/ingestions-api";
 import type { ApiKnowledgeCollection, ApiKnowledgeDocument } from "@/modules/knowledge/view-model";
 
 export interface KnowledgeHome {
@@ -42,6 +43,45 @@ export const knowledgeApi = {
 };
 
 interface ContractCollection { id: string; title: string; description: string | null; parent_collection_id: string | null; document_count: number; source_count: number; updated_at: string; }
-interface ContractDocument { id: string; name: string; content_type: string; status: "pending_content" | "available" | "failed"; updated_at: string; }
+interface ContractDocument {
+  id: string;
+  name: string;
+  content_type: string;
+  status: "pending_content" | "available" | "failed";
+  /** Null when a connector wrote it, or its content never arrived. */
+  latest_ingestion: Ingestion | null;
+  updated_at: string;
+}
+
 const toCollection = (v: ContractCollection): ApiKnowledgeCollection => ({ ...v, parent_item_id: v.parent_collection_id });
-const toDocument = (v: ContractDocument): ApiKnowledgeDocument => ({ id: v.id, title: v.name, content_type: v.content_type, document_type: null, status: v.status === "available" ? "ready" : v.status === "failed" ? "failed" : "pending", updated_at: v.updated_at });
+
+/**
+ * Where a document is, read from the document and the last time the pipeline
+ * took it in. Available content with no ingestion behind it was written by a
+ * connector, inside its source's sync, so it is already indexed.
+ */
+function documentStatus(v: ContractDocument): ApiKnowledgeDocument["status"] {
+  if (v.status === "pending_content") return "pending";
+  if (v.status === "failed") return "failed";
+  switch (v.latest_ingestion?.status) {
+    case undefined:
+    case "completed":
+      return "ready";
+    case "pending":
+      return "pending";
+    case "running":
+      return "processing";
+    default:
+      return "failed";
+  }
+}
+
+const toDocument = (v: ContractDocument): ApiKnowledgeDocument => ({
+  id: v.id,
+  title: v.name,
+  content_type: v.content_type,
+  document_type: null,
+  status: documentStatus(v),
+  updated_at: v.updated_at,
+  latest_ingestion: v.latest_ingestion,
+});

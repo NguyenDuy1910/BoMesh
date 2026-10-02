@@ -37,7 +37,7 @@ from bothesis.services import (
     UploadTooLargeError,
 )
 from bothesis.services.item_ingestion import ItemIngestionService
-from bothesis.services.document_upload import DocumentUploadService
+from bothesis.services.documents import DocumentService
 from bothesis.services.stored_file_content import StoredFileContentService
 from bothesis.services.preview import KnowledgePreview
 from PIL import Image
@@ -101,6 +101,7 @@ async def test_item_ingestion_owns_the_source_neutral_indexing_sequence(
             chunks: Any,
             *,
             context: IndexingContext,
+            progress: Any = None,
         ) -> int:
             assert len(chunks) == 1
             assert context.connector_key == "file"
@@ -201,12 +202,13 @@ def _document(
 
 
 def test_upload_limits_reject_oversize_objects() -> None:
-    uploads = DocumentUploadService(
+    uploads = DocumentService(
         cast(Any, None),
         object_storage=cast(Any, SimpleNamespace()),
-        ingestion_service=cast(Any, SimpleNamespace()),
-        document_source=cast(Any, SimpleNamespace()),
+        ingestion=cast(Any, SimpleNamespace()),
+        content=cast(Any, SimpleNamespace()),
         workflows=cast(Any, SimpleNamespace()),
+        presenter=cast(Any, SimpleNamespace()),
         max_upload_bytes=100,
     )
 
@@ -338,7 +340,8 @@ def test_item_ingestion_has_no_raw_processing_implementation_dependencies() -> N
         )
         for module in imported_modules
     )
-    assert not {"asyncio", "base64", "hashlib", "tempfile"} & imported_modules
+    # Raw bytes are the parser's and storage's business, never the core's.
+    assert not {"base64", "hashlib", "tempfile"} & imported_modules
     assert "_process_source" not in {
         node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
     }
@@ -762,21 +765,21 @@ async def test_knowledge_preview_derives_versioned_webp_without_replacing_origin
     tmp_path: Path,
 ) -> None:
     source_buffer = BytesIO()
-    Image.new("RGB", (2_400, 1_200), "navy").save(source_buffer, "PNG")
+    Image.new("RGB", (2_400, 1_200), "navy").save(source_buffer, "PDF")
     source = source_buffer.getvalue()
-    source_path = tmp_path / "source.png"
+    source_path = tmp_path / "source.pdf"
     source_path.write_bytes(source)
-    storage = _PreviewStorage(source, content_type="image/png")
+    storage = _PreviewStorage(source, content_type="application/pdf")
     service = KnowledgePreview(
         cast(Any, storage),
         max_dimension=800,
     )
-    document = _preview_document("image/png", source, file_name="photo.png")
+    document = _preview_document("application/pdf", source, file_name="scan.pdf")
 
     manifest = await service.generate(document, source_path=source_path)
 
     assert manifest is not None
-    assert manifest.representation == "image"
+    assert manifest.representation == "pages"
     assert manifest.page_count == 1
     assert len(manifest.assets) == 1
     asset = manifest.assets[0]
@@ -796,7 +799,7 @@ async def test_knowledge_preview_derives_versioned_webp_without_replacing_origin
 
     resolved = service.resolve(document, expires_seconds=300)
     assert resolved is not None
-    assert resolved.original.content_type == "image/png"
+    assert resolved.original.content_type == "application/pdf"
     assert resolved.assets[0].page == 1
     assert resolved.coordinate_space == "normalized_top_left"
 

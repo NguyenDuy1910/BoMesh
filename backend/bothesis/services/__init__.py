@@ -641,19 +641,19 @@ class ArtifactValidationError(DocumentServiceError):
     """Raised when an artifact request or state transition is invalid."""
 
 
-class NativeUploadError(RuntimeError):
-    """Base error for a native document upload request."""
+class UploadError(RuntimeError):
+    """Base error for a Document upload request."""
 
 
-class UploadTooLargeError(NativeUploadError):
+class UploadTooLargeError(UploadError):
     pass
 
 
-class UploadConflictError(NativeUploadError):
+class UploadConflictError(UploadError):
     pass
 
 
-class UploadValidationError(NativeUploadError):
+class UploadValidationError(UploadError):
     pass
 
 
@@ -957,7 +957,7 @@ __all__ = [
     "KNOWLEDGE_READ_PERMISSION",
     "KnowledgePreviewView",
     "MESSAGE_ITEM_RELATIONS",
-    "NativeUploadError",
+    "UploadError",
     "OWNER_TENANT",
     "OWNER_TYPES",
     "OWNER_USER",

@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
-import { StatusPill } from "@/components/patterns/StatusPill";
+import { StatusPill } from "@/components/ui/StatusPill";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Dropdown, DropdownItem, DropdownSeparator } from "@/components/ui/Dropdown";
@@ -30,8 +30,9 @@ import {
   type Connection,
   type ConnectorCapability,
   type Source,
-  type SourceRun,
 } from "@/modules/knowledge/integrations-api";
+import type { Ingestion } from "@/modules/knowledge/ingestions-api";
+import { pluralize } from "@/modules/workspace-control/format";
 
 import { AppIcon } from "./AppIcon";
 import { SyncRunRow } from "./SyncRunRow";
@@ -63,7 +64,7 @@ export function ConnectionDetailView({
 }: {
   connection: Connection;
   sources: Source[];
-  runs: SourceRun[];
+  runs: Ingestion[];
   /** The registry's record for this connector, for what the account can feed. */
   capability?: ConnectorCapability;
   onBack: () => void;
@@ -96,48 +97,50 @@ export function ConnectionDetailView({
 
   return (
     <section
-      aria-label={`${connection.display_name} connection`}
+      aria-label={connection.display_name}
       className="knowledge-source-detail"
     >
-      <Button
-        className="-ml-2 self-start"
-        icon={<ArrowLeft size={16} />}
-        onClick={onBack}
-        size="sm"
-        variant="ghost"
-      >
-        Sources
-      </Button>
-
-      <header className="knowledge-source-detail__header">
-        <AppIcon connector={connection.connector_key} size="sm" />
-        <h2>{connection.display_name}</h2>
-        {state.attention && <StatusPill tone={state.tone}>{state.label}</StatusPill>}
+      <div className="knowledge-detail-intro">
         <Button
-          className="ml-auto"
-          icon={<Plus size={16} />}
-          onClick={onAddKnowledge}
+          className="-ml-2.5 self-start"
+          icon={<ArrowLeft size={16} />}
+          onClick={onBack}
           size="sm"
           variant="ghost"
         >
-          Add knowledge
+          Sources
         </Button>
-        <Dropdown
-          align="right"
-          ariaLabel="Connection actions"
-          buttonClassName="knowledge-icon-button"
-          label={<MoreHorizontal aria-hidden="true" size={18} />}
-          showChevron={false}
-          title="More"
-        >
-          <DropdownItem onClick={() => void act(onReconnect, "The account could not be reconnected.")}>
-            Reconnect
-          </DropdownItem>
-          <DropdownSeparator />
-          <DropdownItem onClick={() => setConfirming("disconnect")}>Disconnect</DropdownItem>
-          <DropdownItem onClick={() => setConfirming("remove")}>Remove connection</DropdownItem>
-        </Dropdown>
-      </header>
+
+        <header className="knowledge-source-detail__header">
+          <AppIcon connector={connection.connector_key} size="sm" />
+          <h2>{connection.display_name}</h2>
+          {state.attention && <StatusPill tone={state.tone}>{state.label}</StatusPill>}
+          <Button
+            className="ml-auto"
+            icon={<Plus size={16} />}
+            onClick={onAddKnowledge}
+            size="md"
+            variant="secondary"
+          >
+            Add source
+          </Button>
+          <Dropdown
+            align="right"
+            ariaLabel="Account actions"
+            buttonClassName="knowledge-icon-button"
+            label={<MoreHorizontal aria-hidden="true" size={18} />}
+            showChevron={false}
+            title="More"
+          >
+            <DropdownItem onClick={() => void act(onReconnect, "The account could not be reconnected.")}>
+              Reconnect
+            </DropdownItem>
+            <DropdownSeparator />
+            <DropdownItem onClick={() => setConfirming("disconnect")}>Disconnect</DropdownItem>
+            <DropdownItem onClick={() => setConfirming("remove")}>Remove account</DropdownItem>
+          </Dropdown>
+        </header>
+      </div>
 
       {broken && (
         <div className="knowledge-notice knowledge-notice--danger" role="alert">
@@ -147,19 +150,20 @@ export function ConnectionDetailView({
             <p>
               {connection.status_detail ?? "The account no longer authorizes BoThesis."}{" "}
               {documentsAtRisk
-                ? `${documentsAtRisk} ${documentsAtRisk === 1 ? "source has" : "sources have"} stopped updating. Everything already indexed is still searchable and still answers questions, but nothing changed in ${connection.display_name} since then is included.`
+                ? `${pluralize(documentsAtRisk, "source has", "sources have")} stopped updating. Indexed documents still answer questions, but anything changed since then is missing.`
                 : "Nothing is indexed from it yet."}
             </p>
           </div>
           <Button
             loading={busy}
             onClick={() => void act(onReconnect, "The account could not be reconnected.")}
+            variant="secondary"
           >
             Reconnect
           </Button>
         </div>
       )}
-      {error && <ErrorState className="mt-3" description={error} layout="inline" />}
+      {error && <ErrorState description={error} layout="inline" />}
 
       <div className="knowledge-source-detail__columns">
         <section aria-labelledby="connection-account-heading">
@@ -220,12 +224,8 @@ export function ConnectionDetailView({
               <dd>{relativeTime(connection.last_checked_at)}</dd>
             </div>
             <div>
-              <dt>Used by</dt>
-              <dd>
-                {documentsAtRisk
-                  ? `${documentsAtRisk} knowledge ${documentsAtRisk === 1 ? "source" : "sources"}`
-                  : "Nothing yet"}
-              </dd>
+              <dt>Sources</dt>
+              <dd>{documentsAtRisk ? pluralize(documentsAtRisk, "source") : "None yet"}</dd>
             </div>
           </dl>
         </section>
@@ -233,7 +233,7 @@ export function ConnectionDetailView({
 
       <section aria-labelledby="connection-sources-heading">
         <div className="knowledge-section-rule">
-          <h3 id="connection-sources-heading">Knowledge from this account</h3>
+          <h3 id="connection-sources-heading">Sources</h3>
         </div>
         {sources.length ? (
           <ul className="knowledge-source-list">
@@ -299,9 +299,9 @@ export function ConnectionDetailView({
           </ul>
         ) : (
           <EmptyState
-            description="Choose what this account should bring into workspace knowledge."
+            description="Add a source to choose what this account brings in."
             size="sm"
-            title="Nothing is synchronized yet"
+            title="No sources yet"
           />
         )}
       </section>
@@ -314,23 +314,23 @@ export function ConnectionDetailView({
           <ul className="knowledge-run-list">
             {runs.map((run) => (
               <SyncRunRow
-                key={`${run.id}:${run.id}`}
+                ingestion={run}
+                key={run.id}
                 label={sources.find((item) => item.id === run.source_id)?.display_name ?? undefined}
-                run={run}
               />
             ))}
           </ul>
         ) : (
-          <p className="knowledge-muted py-4">This account has not synced yet.</p>
+          <EmptyState size="sm" title="No activity yet" />
         )}
       </section>
 
       <ConfirmDialog
-        confirmLabel={confirming === "remove" ? "Remove connection" : "Disconnect"}
+        confirmLabel={confirming === "remove" ? "Remove account" : "Disconnect"}
         description={
           confirming === "remove"
-            ? `Removes ${connection.display_name} and its ${documentsAtRisk} ${documentsAtRisk === 1 ? "source" : "sources"}. Documents already indexed stay searchable, and nothing in ${connection.display_name} itself is touched.`
-            : `Stops every sync from ${connection.display_name} and forgets its sign-in. The ${documentsAtRisk} ${documentsAtRisk === 1 ? "source" : "sources"} built on it stay, so connecting the same account again resumes them.`
+            ? `Removes ${connection.display_name} and its ${pluralize(documentsAtRisk, "source")}. Indexed documents stay searchable.`
+            : `Stops syncing ${connection.display_name} and signs it out. Its ${pluralize(documentsAtRisk, "source")} resume when you reconnect.`
         }
         onClose={() => setConfirming(null)}
         onConfirm={async () => {
@@ -338,11 +338,11 @@ export function ConnectionDetailView({
           setConfirming(null);
           await act(
             action === "remove" ? onRemove : onDisconnect,
-            "The connection could not be changed.",
+            "The connected account could not be changed.",
           );
         }}
         open={confirming !== null}
-        title={confirming === "remove" ? "Remove this connection?" : "Disconnect this account?"}
+        title={confirming === "remove" ? "Remove this connected account?" : "Disconnect this account?"}
       />
     </section>
   );

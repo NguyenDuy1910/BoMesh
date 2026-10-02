@@ -50,7 +50,7 @@ from bothesis.services import AuthContext
 from bothesis.services.chat import ChatService
 from bothesis.services.conversation import ConversationService
 from bothesis.services.document_presentation import DocumentPresenter
-from bothesis.services.document_upload import DocumentUploadService
+from bothesis.services.documents import DocumentService
 from bothesis.services.item_ingestion import ItemIngestionService
 from bothesis.services.knowledge_query import KnowledgeQueryService
 from bothesis.services.knowledge_view import KnowledgeViewService
@@ -59,8 +59,8 @@ from bothesis.services.agent_runtime.item_resource_resolver import ItemResourceR
 from bothesis.services.agent_runtime.sandbox_workspace import SandboxWorkspace
 from bothesis.services.sandbox_session import SandboxSessionService
 from bothesis.services.stored_file_content import StoredFileContentService
+from bothesis.services.ingestion import IngestionService
 from bothesis.services.workflow.service import TemporalWorkflowService
-from bothesis.services.workspace_documents import WorkspaceDocumentService
 from bothesis.services.identity_access.jwt_tokens import JwtTokenService
 from bothesis.storage import S3DocumentStorage
 
@@ -77,7 +77,7 @@ class AppRuntime:
         self._presenter: DocumentPresenter | None = None
         self._workflows: TemporalWorkflowService | None = None
         self._ingestion: ItemIngestionService | None = None
-        self._uploads: DocumentUploadService | None = None
+        self._documents: DocumentService | None = None
         self._conversations: ConversationService | None = None
         self._artifacts: ArtifactService | None = None
         self._agent: Agent | None = None
@@ -124,12 +124,22 @@ class AppRuntime:
             presenter=self.document_presenter(),
         )
 
-    def workspace_document_service(self) -> WorkspaceDocumentService:
-        return WorkspaceDocumentService(
-            self.sessions(),
-            uploads=self.upload_service(),
-            presenter=self.document_presenter(),
-        )
+    def document_service(self) -> DocumentService:
+        """The one Document lifecycle; it also runs users' own uploads directly."""
+
+        if self._documents is None:
+            upload = self._config.upload
+            self._documents = DocumentService(
+                self.sessions(),
+                object_storage=self.object_storage(),
+                ingestion=self.ingestion_service(),
+                content=self.stored_file_content(),
+                workflows=self.workflow_service(),
+                presenter=self.document_presenter(),
+                max_upload_bytes=upload.max_upload_bytes,
+                upload_url_seconds=upload.upload_url_seconds,
+            )
+        return self._documents
 
     def workspace_control_plane_service(self) -> WorkspaceControlPlaneService:
         return WorkspaceControlPlaneService(
@@ -144,6 +154,14 @@ class AppRuntime:
             integration=self._config.integration,
             providers=self.connection_providers(),
             authorization=self.integration_authorization_service(),
+        )
+
+    def ingestion_lifecycle_service(self) -> IngestionService:
+        return IngestionService(
+            self.sessions(),
+            workflows=self.workflow_service(),
+            documents=self.document_service(),
+            sources=self.integration_lifecycle_service(),
         )
 
     def integration_authorization_service(self) -> IntegrationAuthorizationService:
@@ -266,12 +284,12 @@ class AppRuntime:
     def artifact_service(self) -> ArtifactService:
         if self._artifacts is None:
             artifact = self._config.artifact
-            # Storage and uploads are resolved lazily: the agent is composed
+            # Storage and documents are resolved lazily: the agent is composed
             # at startup, while object storage is only required by a request.
             self._artifacts = ArtifactService(
                 self.sessions(),
                 object_storage=self.object_storage,
-                uploads=self.upload_service,
+                documents=self.document_service,
                 max_content_bytes=artifact.max_content_bytes,
                 download_url_seconds=artifact.download_url_seconds,
             )
@@ -335,20 +353,6 @@ class AppRuntime:
                 preview=self.knowledge_preview(),
             )
         return self._ingestion
-
-    def upload_service(self) -> DocumentUploadService:
-        if self._uploads is None:
-            upload = self._config.upload
-            self._uploads = DocumentUploadService(
-                self.sessions(),
-                object_storage=self.object_storage(),
-                ingestion_service=self.ingestion_service(),
-                document_source=self.stored_file_content(),
-                workflows=self.workflow_service(),
-                max_upload_bytes=upload.max_upload_bytes,
-                upload_url_seconds=upload.upload_url_seconds,
-            )
-        return self._uploads
 
     def stored_file_content(self) -> StoredFileContentService:
         """The lazy source adapter used by explicit resource reads and ingestion."""
@@ -479,6 +483,10 @@ class AppRuntime:
     async def aclose(self) -> None:
         """Release every client this runtime opened."""
 
+        if self._documents is not None:
+            # Direct ingestions still running are interrupted, not lost: their
+            # state is durable and the next start resumes them.
+            await self._documents.aclose()
         if self._index is not None:
             await self._index.aclose()
         for transport in (

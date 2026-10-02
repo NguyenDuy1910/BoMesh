@@ -492,6 +492,63 @@ def test_the_completion_page_talks_to_exactly_one_origin() -> None:
     assert '"*"' not in body
 
 
+def test_a_connection_says_whose_account_it_is_without_the_provider_id() -> None:
+    """The UI needs the account and whether it can be browsed; never the provider id."""
+
+    from api.routers import Connection
+    from api.routers._mapping import connection_payload
+
+    public = Connection.model_validate(
+        connection_payload(
+            {
+                "id": "7e32c2b9-8f15-46f8-920e-0ccddf6b1d8e",
+                "connector_key": "confluence",
+                "display_name": "Galaxy FinX",
+                "owner_type": "tenant",
+                "status": "connected",
+                "account": {
+                    "id": "atlassian-account-123",
+                    "label": "duy@company.com",
+                    "resource_id": "cloud-1",
+                    "resource_label": "Galaxy FinX",
+                },
+                "browsable": True,
+                "last_checked_at": "2026-09-28T15:00:00+00:00",
+                "created_at": "2026-09-28T14:00:00+00:00",
+                "updated_at": "2026-09-28T15:00:00+00:00",
+            }
+        )
+    ).model_dump(mode="json")
+
+    assert public["account"] == {"label": "duy@company.com", "resource_label": "Galaxy FinX"}
+    assert public["browsable"] is True
+    assert "atlassian-account-123" not in str(public)
+    assert "cloud-1" not in str(public)
+    assert public["last_checked_at"].startswith("2026-09-28T15:00:00")
+
+
+def test_a_selected_confluence_page_becomes_a_page_subtree_source() -> None:
+    """A page picked in the browser must not be read as a space key."""
+
+    from bothesis.integrations import ProviderResource
+    from bothesis.integrations.atlassian import AtlassianConnectionProvider
+
+    provider = AtlassianConnectionProvider.__new__(AtlassianConnectionProvider)
+
+    def config(resource_type: str, external_id: str):
+        return provider.source_config(
+            ProviderResource(
+                capability="confluence",
+                resource_type=resource_type,
+                external_id=external_id,
+                name=external_id,
+            )
+        )
+
+    assert config("space", "ENG") == {"space": "ENG"}
+    assert config("page", "page:12345") == {"page_id": "12345", "index_recursively": True}
+
+
 def _page_body(origin: str) -> str:
     from api.routers.connections import _completion_page
 

@@ -24,6 +24,7 @@ from bothesis.services.citation import CitationService
 from bothesis.services.identity_access.authorization import AuthorizationService
 from bothesis.services.document_presentation import (
     DocumentPresenter,
+    document_ingestion,
     public_document_status,
     viewer_elements,
 )
@@ -390,7 +391,7 @@ def _document_payload(item: Item) -> dict[str, Any]:
         "size_bytes": item.size_bytes or 0,
         "purpose": (item.metadata_ or {}).get("purpose", "knowledge"),
         "status": public_document_status(item.status),
-        "latest_ingestion_id": None,
+        "latest_ingestion": document_ingestion(item),
         "created_at": item.created_at.isoformat(),
         "updated_at": item.updated_at.isoformat(),
         "document_type": item.document_type,

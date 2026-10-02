@@ -30,17 +30,22 @@ const TONE: Record<StatusTone, { shell: string; dot: string }> = {
 };
 
 /**
- * State, not decoration. At most one per row.
+ * The one visual for state — a row's lifecycle, a run's outcome, an account's
+ * health. Every page renders state through this, so "Failed" in Knowledge and
+ * "Failed" in Activity are the same object. At most one per row; counts and
+ * metadata use `Badge` instead.
  *
- * Access state uses `neutral` for members-only and `info` for everyone, so the
- * two are told apart by hue as well as by wording.
+ * `pulse` marks work still in progress (syncing, indexing). The label says
+ * so too, so the motion is never the only signal.
  */
 export function StatusPill({
   tone = "neutral",
+  pulse = false,
   children,
   className,
 }: {
   tone?: StatusTone;
+  pulse?: boolean;
   children: React.ReactNode;
   className?: string;
 }) {
@@ -48,13 +53,13 @@ export function StatusPill({
   return (
     <span
       className={cn(
-        "inline-flex shrink-0 items-center gap-1.5 rounded-[var(--radius-full)] py-[3px] pl-2 pr-2.5",
-        "text-[length:var(--text-size-meta)] leading-[var(--text-lh-meta)] ring-1 ring-inset",
+        "inline-flex shrink-0 items-center gap-1.5 rounded-[var(--radius-full)] py-0.5 pl-2 pr-2.5",
+        "text-[length:var(--text-size-meta)] font-medium leading-[var(--text-lh-meta)] ring-1 ring-inset",
         shell,
         className,
       )}
     >
-      <span aria-hidden="true" className={cn("h-1.5 w-1.5 rounded-full", dot)} />
+      <span aria-hidden="true" className={cn("h-1.5 w-1.5 rounded-full", dot, pulse && "motion-safe:animate-pulse")} />
       {children}
     </span>
   );

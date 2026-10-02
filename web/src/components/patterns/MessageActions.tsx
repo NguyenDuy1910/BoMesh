@@ -27,10 +27,10 @@ export function MessageActions({
   className?: string;
 }) {
   const actions: { id: string; icon: LucideIcon; label: string; run?: () => void }[] = [
-    { id: "copy", icon: Copy, label: "Copy answer", run: onCopy },
+    { id: "copy", icon: Copy, label: "Copy response", run: onCopy },
     { id: "retry", icon: RotateCcw, label: "Retry", run: onRetry },
-    { id: "good", icon: ThumbsUp, label: "Good answer", run: onGood },
-    { id: "bad", icon: ThumbsDown, label: "Poor answer", run: onBad },
+    { id: "good", icon: ThumbsUp, label: "Good response", run: onGood },
+    { id: "bad", icon: ThumbsDown, label: "Bad response", run: onBad },
     { id: "export", icon: Download, label: "Export", run: onExport },
   ];
   return (

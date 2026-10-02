@@ -9,7 +9,6 @@ from bothesis.connector import ConnectorDefinition
 from bothesis.connector.adapter import CheckpointedSourceConnectorAdapter
 from bothesis.connector.base import StaticCredentialsProvider
 from bothesis.connector.confluence.connector import ConfluenceConnector
-from bothesis.connector.file.file_connector import FileConnector
 from bothesis.connector.google_drive import GoogleDriveConnector
 from bothesis.connector.protocol import ConnectorScope
 
@@ -50,15 +49,10 @@ class ConnectorRegistry:
                     key="confluence",
                     display_name="Confluence",
                     authentication_type="credentials",
-                    capabilities=("knowledge_ingestion",),
+                    # A site API token can read spaces and pages directly, so
+                    # resources are browsable without a provider sign-in.
+                    capabilities=("knowledge_ingestion", "resource_discovery"),
                     factory=cls._confluence_factory,
-                ),
-                ConnectorDefinition(
-                    key="file",
-                    display_name="Managed files",
-                    authentication_type="none",
-                    capabilities=("knowledge_ingestion", "file_upload"),
-                    factory=cls._file_factory,
                 ),
                 ConnectorDefinition(
                     key="google_drive",
@@ -69,15 +63,6 @@ class ConnectorRegistry:
                 ),
             )
         )
-
-    @staticmethod
-    def _file_factory(
-        connection: Mapping[str, Any],
-        source: Mapping[str, Any],
-        credentials: Mapping[str, Any],
-    ) -> FileConnector:
-        del credentials
-        return FileConnector({**dict(connection), **dict(source)})
 
     @staticmethod
     def _confluence_factory(

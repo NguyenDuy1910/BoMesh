@@ -1,10 +1,12 @@
 "use client";
 
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { MessageSquare, X } from "lucide-react";
+import { X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { Input } from "@/components/ui/Input";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { ConversationRow, SearchField } from "@/components/patterns";
 import { RailCaption, RailGroup } from "@/components/rails";
 import type { ChatConversation } from "@/modules/chat/types";
@@ -111,17 +113,13 @@ function SidebarChatSearch({
   );
 }
 
-const SKELETON_WIDTHS = ["75%", "90%", "68%", "82%", "72%"];
+const SKELETON_WIDTHS = ["w-3/4", "w-11/12", "w-2/3", "w-5/6", "w-3/4"];
 
 function SkeletonRows() {
   return (
-    <div className="grid gap-2 px-3 py-1">
+    <div aria-busy="true" aria-label="Loading chats" className="grid gap-2 px-3 py-1" role="status">
       {SKELETON_WIDTHS.map((width, i) => (
-        <div
-          key={i}
-          className="h-3 animate-pulse rounded-full bg-[var(--border-default)]"
-          style={{ width }}
-        />
+        <Skeleton className={`h-3 ${width}`} key={i} />
       ))}
     </div>
   );
@@ -176,17 +174,13 @@ function RecentChatList({
           collapsed ? null : <SkeletonRows />
         ) : !hasConversations ? (
           !collapsed && (
-            <div className="grid gap-1 px-5 py-6 text-center text-[length:var(--text-size-ui)] text-[var(--text-tertiary)]">
-              <span className="mx-auto mb-1 grid h-7 w-7 place-items-center rounded-[var(--radius-sm)] bg-[var(--accent-soft)] text-[var(--text-accent)]">
-                <MessageSquare aria-hidden="true" size={16} />
-              </span>
-              <strong className="text-[var(--text-secondary)]">{searchQuery ? "No matching chats" : "Start a conversation"}</strong>
-              <span>
-                {searchQuery
-                  ? "Try another search term."
-                  : "Your conversations will appear here."}
-              </span>
-            </div>
+            // The rail's row inset, so the notice starts where a chat title would.
+            <EmptyState
+              className="px-5.5"
+              description={searchQuery ? "Try another search term." : "Your conversations will appear here."}
+              size="sm"
+              title={searchQuery ? "No matching chats" : "No chats yet"}
+            />
           )
         ) : (
           groupedConversations.map((group) => {

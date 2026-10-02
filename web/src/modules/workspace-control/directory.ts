@@ -40,22 +40,18 @@ export interface GroupRef {
   display_name: string;
 }
 
+/** A workspace member, exactly as `GET /users` returns it (OpenAPI `User`). */
 export interface Member {
   [key: string]: unknown;
   id: string;
   email: string;
   display_name: string | null;
-  status: boolean;
-  last_login_at: string | null;
-  created_at: string;
-  updated_at: string;
-  membership: {
-    status: string;
-    joined_at: string | null;
-    roles: RoleRef[];
-  };
+  status: MemberStatus;
+  roles: RoleRef[];
   groups: GroupRef[];
 }
+
+export type MemberStatus = "active" | "inactive" | "suspended";
 
 export interface Group {
   [key: string]: unknown;
@@ -105,16 +101,6 @@ export interface AuditEvent {
   workspace?: { id: string; name: string | null } | null;
 }
 
-export interface PlatformUser {
-  [key: string]: unknown;
-  id: string;
-  email: string;
-  display_name: string | null;
-  status: boolean;
-  platform_roles: string[];
-  memberships: { workspace_id: string; workspace_name: string; role_names: string[] }[];
-}
-
 export interface WorkspaceOverview {
   workspace: { id: string; code: string; name: string; status: string };
   metrics: Record<string, number>;
@@ -149,7 +135,7 @@ export const workspaceDirectoryApi = {
     controlPlaneRequest<Paginated<Member>>(`/users${queryString({ page_size: ALL, search })}`),
   async saveMember(
     userId: string,
-    patch: { display_name?: string; role_ids?: string[]; status?: boolean; group_ids?: string[] },
+    patch: { display_name?: string; role_ids?: string[]; status?: MemberStatus; group_ids?: string[] },
   ) {
     const saved = await controlPlaneRequest<Member>(`/users/${userId}`, {
       method: "PATCH",
@@ -204,7 +190,7 @@ export const workspaceDirectoryApi = {
         `/platform/workspaces${queryString({ page_size: ALL, search })}`,
       ),
     users: (search = "") =>
-      controlPlaneRequest<Paginated<PlatformUser>>(
+      controlPlaneRequest<Paginated<Member>>(
         `/platform/users${queryString({ page_size: ALL, search })}`,
       ),
     audit: (search = "") =>
@@ -233,11 +219,11 @@ export function memberName(member: { display_name: string | null; email: string 
   return member.display_name?.trim() || member.email;
 }
 
-/** The API models a member's lifecycle as a boolean; screens show a word. */
+/** Anything other than an active membership reads as suspended: it cannot reach the workspace. */
 export function memberStatus(member: Member): "active" | "suspended" {
-  return member.status && member.membership.status === "active" ? "active" : "suspended";
+  return member.status === "active" ? "active" : "suspended";
 }
 
 export function roleNames(member: Member): string {
-  return member.membership.roles.map((role) => role.display_name).join(", ");
+  return member.roles.map((role) => role.display_name).join(", ");
 }

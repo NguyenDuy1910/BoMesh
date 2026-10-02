@@ -2,7 +2,7 @@
 
 import { ArrowLeft, ChevronRight, KeyRound, Lock, ShieldCheck } from "lucide-react";
 
-import { StatusPill } from "@/components/patterns/StatusPill";
+import { StatusPill } from "@/components/ui/StatusPill";
 import { Button } from "@/components/ui/Button";
 import { accountLine, connectionState } from "@/modules/knowledge/connection-state";
 import type { KnowledgeConnector } from "@/modules/knowledge/connectors";
@@ -13,7 +13,7 @@ import { AppIcon } from "./AppIcon";
 /** The backend's capability keys, in the words an administrator uses. */
 const CAPABILITY_LABELS: Record<string, string> = {
   knowledge_ingestion: "Reads documents into workspace knowledge",
-  file_upload: "Accepts files uploaded here",
+  resource_discovery: "Lets you pick what to read from the account",
 };
 
 /**
@@ -79,43 +79,42 @@ export function ConnectorDetail({
 
   return (
     <section aria-label={connector.name} className="knowledge-connector-page">
-      <Button
-        className="-ml-2 self-start"
-        icon={<ArrowLeft size={16} />}
-        onClick={onBack}
-        size="sm"
-        variant="ghost"
-      >
-        Connectors
-      </Button>
+      <div className="knowledge-detail-intro">
+        <Button
+          className="-ml-2.5 self-start"
+          icon={<ArrowLeft size={16} />}
+          onClick={onBack}
+          size="sm"
+          variant="ghost"
+        >
+          Sources
+        </Button>
 
-      <header className="knowledge-connector-page__header">
-        <AppIcon className="knowledge-connector-page__mark" connector={connector.key} />
-        <div className="min-w-0 flex-1">
-          <h2>{connector.name}</h2>
-          <p>{connector.description}</p>
-        </div>
-        {available ? (
-          <Button onClick={onConnect}>
-            {connections.length ? "Connect another account" : "Connect"}
-          </Button>
-        ) : (
-          <StatusPill tone="neutral">Not on this deployment</StatusPill>
-        )}
-      </header>
+        <header className="knowledge-connector-page__header">
+          <AppIcon className="knowledge-connector-page__mark" connector={connector.key} />
+          <div className="min-w-0 flex-1">
+            <h2>{connector.name}</h2>
+            <p>{connector.description}</p>
+          </div>
+          {available ? (
+            <Button onClick={onConnect} variant="secondary">
+              {connections.length ? "Connect another account" : "Connect"}
+            </Button>
+          ) : (
+            <StatusPill tone="neutral">Not available</StatusPill>
+          )}
+        </header>
+      </div>
 
       {!available && (
         <p className="knowledge-connector-page__unavailable">
-          This deployment has no {connector.name} adapter, so there is nothing to connect yet.
-          Platform control adds one by registering it in the connector registry;
-          it appears here the moment they do.
+          {connector.name} isn’t available on this deployment yet. A platform admin can set it up.
         </p>
       )}
 
       {available && !overview && (
         <p className="knowledge-connector-page__unavailable">
-          {connector.name} is registered on this deployment. Connecting it asks for the account
-          it should read as, then for the content to index.
+          Connecting {connector.name} asks which account to use, then what to sync.
         </p>
       )}
 
@@ -195,7 +194,7 @@ export function ConnectorDetail({
       {connections.length > 0 && (
         <section aria-labelledby="connector-connections-heading">
           <div className="knowledge-section-rule">
-            <h3 id="connector-connections-heading">Connected in this workspace</h3>
+            <h3 id="connector-connections-heading">Connected accounts</h3>
           </div>
           <ul className="knowledge-source-list">
             {connections.map((connection) => {

@@ -1,21 +1,19 @@
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from types import SimpleNamespace
-from uuid import uuid4
 
 import pytest
-from docling.datamodel.base_models import ConversionStatus, DocumentStream, InputFormat
-from docling.models.inference_engines.vlm.api_openai_compatible_engine import (
-    ApiVlmEngine,
+from docling.datamodel.base_models import (
+    ConversionStatus,
+    DocumentStream,
 )
-from docling.models.stages.vlm_convert.vlm_convert_model import VlmConvertModel
 from docling_core.transforms.chunker import DocChunk, DocMeta
 from docling_core.transforms.chunker.line_chunker import LineBasedTokenChunker
 from docling_core.transforms.chunker.tokenizer.base import BaseTokenizer
 from docling_core.types.doc import (
     BoundingBox as DoclingBoundingBox,
+)
+from docling_core.types.doc import (
     DescriptionAnnotation,
     DocItemLabel,
     DoclingDocument,
@@ -26,11 +24,6 @@ from docling_core.types.doc import (
     TextItem,
 )
 
-from bothesis.connector.file.file_connector import (
-    FILE_SCOPE_VALUE,
-    FileConnector,
-    LocalFileConnector,
-)
 from bothesis.connector.file import UnsupportedFileTypeError
 from bothesis.connector.file.processing import FileProcessor
 from bothesis.connector.processing import (
@@ -40,13 +33,9 @@ from bothesis.connector.processing import (
     DoclingProcessor,
     DocumentMapper,
 )
-from bothesis.connector.processing.docling import _configured_converter
 from bothesis.connector.protocol import (
-    ConnectorScope,
     DocumentItem,
     DocumentKind,
-    ImagePart,
-    SourceCheckpoint,
     SourceIdentity,
     SourceProvider,
     StorageObject,
@@ -132,41 +121,16 @@ def test_file_processor_extracts_text_and_json_through_docling() -> None:
 def test_file_processor_rejects_unsupported_formats() -> None:
     with pytest.raises(UnsupportedFileTypeError):
         _file_processor().process_bytes(b"legacy", file_name="legacy.doc")
-
-
-def test_file_processor_keeps_a_non_text_image_as_a_document_item() -> None:
-    converted = DoclingDocument(name="diagram.png")
-    converted.add_picture()
-    processor = FileProcessor(
-        docling=DoclingProcessor(converter=_Converter(converted)),
-        chunker=DoclingChunker(hybrid_chunker=_DocumentChunker()),
-    )
-
-    result = processor.process_bytes(b"image-bytes", file_name="diagram.png")
-
-    assert result.item.document_kind == DocumentKind.IMAGE
-    assert any(isinstance(part, ImagePart) for part in result.item.content)
-    assert result.text == ""
-    assert result.chunks == ()
-
-
-def test_file_processor_accepts_remote_vlm_text_for_an_image() -> None:
-    converted = DoclingDocument(name="invoice.png")
-    converted.add_text(label=DocItemLabel.TEXT, text="Total: 42 USD")
-    processor = FileProcessor(
-        docling=DoclingProcessor(converter=_Converter(converted)),
-        chunker=DoclingChunker(hybrid_chunker=_DocumentChunker()),
-    )
-
-    result = processor.process_bytes(b"image-bytes", file_name="invoice.png")
-
-    assert result.item.document_kind == DocumentKind.IMAGE
-    assert result.text == "Total: 42 USD"
-    assert result.chunks[0].chunk_text == "Total: 42 USD"
+    # Images are not knowledge in this phase: nothing reaches the vision model.
+    converter = _Converter(DoclingDocument(name="unused"))
+    processor = FileProcessor(docling=DoclingProcessor(converter=converter))
+    with pytest.raises(UnsupportedFileTypeError):
+        processor.process_bytes(b"image-bytes", file_name="invoice.png")
+    assert converter.calls == []
 
 
 def test_docling_processor_reuses_converter_and_enforces_limits() -> None:
-    converted = DoclingDocument(name="policy.pdf")
+    converted = DoclingDocument(name="policy.docx")
     converted.add_text(label=DocItemLabel.TEXT, text="Policy")
     converter = _Converter(converted)
     processor = DoclingProcessor(
@@ -176,7 +140,7 @@ def test_docling_processor_reuses_converter_and_enforces_limits() -> None:
         page_range=(2, 5),
     )
 
-    assert processor.process_bytes(b"%PDF", file_name="policy.pdf") is converted
+    assert processor.process_bytes(b"PK", file_name="policy.docx") is converted
     source, arguments = converter.calls[0]
     assert isinstance(source, DocumentStream)
     assert arguments == {
@@ -193,46 +157,98 @@ def test_docling_processor_reuses_converter_and_enforces_limits() -> None:
         processor.process_bytes(b"x" * 33, file_name="large.pdf")
 
 
-def test_docling_pdf_pipeline_uses_openrouter_without_local_model_stages() -> None:
-    converter = _configured_converter(
-        api_key="secret",
-        base_url="https://openrouter.ai/api/v1",
-        model="qwen/qwen3-vl-30b-a3b-instruct",
-        timeout_seconds=30,
-        concurrency=2,
-        max_tokens=4096,
-    )
-    options = converter.format_to_options[InputFormat.PDF].pipeline_options
+def _text_pdf(pages: list[list[tuple[float, float, float, str]]]) -> bytes:
+    """A minimal typed PDF: each page lists (x, baseline, font size, text) in Helvetica."""
 
-    assert options.enable_remote_services is True
-    assert options.do_picture_classification is False
-    assert options.do_picture_description is False
-    assert options.do_chart_extraction is False
-    assert (
-        options.vlm_options.model_spec.response_format.value
-        == "deepseekocr_markdown"
-    )
-    assert str(options.vlm_options.engine_options.url) == (
-        "https://openrouter.ai/api/v1/chat/completions"
-    )
-    assert options.vlm_options.engine_options.params == {
-        "model": "qwen/qwen3-vl-30b-a3b-instruct",
-        "max_tokens": 4096,
+    objects = {
+        1: b"<< /Type /Catalog /Pages 2 0 R >>",
+        3: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
     }
+    kids = []
+    number = 4
+    for lines in pages:
+        stream = "".join(
+            f"BT /F1 {size} Tf {x} {y} Td ({text}) Tj ET\n" for x, y, size, text in lines
+        ).encode("latin-1")
+        objects[number] = (
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+            b"/Resources << /Font << /F1 3 0 R >> >> /Contents %d 0 R >>" % (number + 1)
+        )
+        objects[number + 1] = b"<< /Length %d >>\nstream\n%sendstream" % (len(stream), stream)
+        kids.append(number)
+        number += 2
+    objects[2] = b"<< /Type /Pages /Kids [%s] /Count %d >>" % (
+        b" ".join(b"%d 0 R" % kid for kid in kids),
+        len(kids),
+    )
+    output = bytearray(b"%PDF-1.4\n")
+    offsets = {}
+    for key in sorted(objects):
+        offsets[key] = len(output)
+        output += b"%d 0 obj\n%s\nendobj\n" % (key, objects[key])
+    xref = len(output)
+    output += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    for key in sorted(objects):
+        output += b"%010d 00000 n \n" % offsets[key]
+    output += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (
+        len(objects) + 1,
+        xref,
+    )
+    return bytes(output)
 
-    converter.initialize_pipeline(InputFormat.PDF)
-    pipeline = next(iter(converter.initialized_pipelines.values()))
-    assert len(pipeline.build_pipe) == 1
-    assert isinstance(pipeline.build_pipe[0], VlmConvertModel)
-    assert isinstance(pipeline.build_pipe[0].engine, ApiVlmEngine)
+
+def _handbook_page(number: int) -> list[tuple[float, float, float, str]]:
+    return [
+        (72, 750, 9, "ACME Employee Handbook"),
+        (72, 700, 20, f"Chapter {number}"),
+        (72, 660, 12, "Travel requests are approved by the"),
+        (72, 646, 12, "budget owner before booking any infor-"),
+        (72, 632, 12, "mation is shared with vendors."),
+        (72, 590, 12, "Receipts are kept for seven years."),
+        (300, 40, 9, f"Page {number}"),
+    ]
 
 
-def test_docling_pdf_requires_openrouter_key_before_conversion(monkeypatch) -> None:
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-    processor = DoclingProcessor(openrouter_api_key=None)
+def _texts(document: DoclingDocument) -> list[tuple[str, int, str]]:
+    return [
+        (type(item).__name__, item.prov[0].page_no, item.text)
+        for item, _ in document.iterate_items()
+        if isinstance(item, TextItem)
+    ]
 
-    with pytest.raises(DoclingProcessingError, match="OPENROUTER_API_KEY"):
-        processor.process_bytes(b"%PDF", file_name="policy.pdf")
+
+def test_a_pdf_is_read_from_its_own_text_layer_without_a_model() -> None:
+    converter = _Converter(DoclingDocument(name="unused"))
+    pdf = _text_pdf([_handbook_page(1), _handbook_page(2), _handbook_page(3)])
+
+    document = DoclingProcessor(converter=converter).process_bytes(pdf, file_name="handbook.pdf")
+
+    # Headings by size, paragraphs by spacing, a hyphenated word rejoined, and
+    # the running header and page numbers dropped from every page.
+    assert _texts(document)[:3] == [
+        ("SectionHeaderItem", 1, "Chapter 1"),
+        (
+            "TextItem",
+            1,
+            "Travel requests are approved by the budget owner before booking any"
+            " information is shared with vendors.",
+        ),
+        ("TextItem", 1, "Receipts are kept for seven years."),
+    ]
+    assert [page for _, page, _ in _texts(document)] == [1, 1, 1, 2, 2, 2, 3, 3, 3]
+    assert converter.calls == []
+    # Each paragraph keeps the box it occupies, for citation highlighting.
+    paragraph = next(item for item, _ in document.iterate_items() if item.text.startswith("Travel"))
+    box = paragraph.prov[0].bbox.to_top_left_origin(792)
+    # Top of "Travel" (baseline 660) to the descenders of the third line (baseline 632).
+    assert 60 < box.l < 80 and 118 < box.t < 128 and 155 < box.b < 165
+
+
+def test_a_pdf_without_a_text_layer_has_nothing_to_index() -> None:
+    scan = _text_pdf([[]])
+
+    with pytest.raises(DoclingProcessingError, match="No extractable content"):
+        DoclingProcessor().process_bytes(scan, file_name="scan.pdf")
 
 
 def test_document_mapper_preserves_structure_storage_and_normalized_provenance() -> None:
@@ -463,109 +479,3 @@ def _file_source(external_id: str) -> SourceIdentity:
         provider=SourceProvider.FILE,
         external_id=external_id,
     )
-
-
-@pytest.mark.asyncio
-async def test_file_connector_discovers_incrementally_and_preserves_acl(tmp_path) -> None:
-    file_path = tmp_path / "policy.txt"
-    file_path.write_text("Enterprise policy", encoding="utf-8")
-    record_path = tmp_path / "upload-1.json"
-    record_path.write_text(
-        json.dumps(
-            {
-                "external_id": "upload-1",
-                "path": "policy.txt",
-                "file_name": "Policy.txt",
-                    "provider_version": "revision-1",
-                "size_bytes": file_path.stat().st_size,
-                "uploaded_at": "2026-08-10T01:00:00Z",
-                "acl": {
-                    "user_emails": ["Owner@Example.com"],
-                    "user_group_ids": ["Finance"],
-                    "is_public": False,
-                },
-                "metadata": {"domains": ["finance", "policy"]},
-            }
-        ),
-        encoding="utf-8",
-    )
-    connector = FileConnector(
-        {"base_dir": str(tmp_path)},
-        processor=_file_processor(),
-    )
-    scope = ConnectorScope(
-        scope_type="source_provider",
-        scope_value=FILE_SCOPE_VALUE,
-        display_name="Files",
-    )
-
-    changes = await connector.discover_changes(SourceCheckpoint(), scope)
-    assert [change.item_id for change in changes] == ["upload-1"]
-    item = await connector.fetch_item("upload-1")
-    assert item.get_text_content() == "Enterprise policy"
-    assert item.source.external_version == "revision-1"
-    assert changes[0].provider_version == "revision-1"
-    assert changes[0].type.value == "created"
-    assert item.access.to_reader_ids() == [
-        "email:owner@example.com",
-        "external_group:finance",
-    ]
-    assert item.access.is_public is False
-
-    second_changes = await connector.discover_changes(connector.next_checkpoint(), scope)
-    assert second_changes == []
-
-    record_path.write_text(
-        record_path.read_text(encoding="utf-8").replace("revision-1", "revision-2"),
-        encoding="utf-8",
-    )
-    updated_changes = await connector.discover_changes(connector.next_checkpoint(), scope)
-    assert [(change.type.value, change.provider_version) for change in updated_changes] == [
-        ("updated", "revision-2")
-    ]
-
-
-@pytest.mark.asyncio
-async def test_file_connector_rejects_paths_outside_base_dir(tmp_path) -> None:
-    outside = tmp_path.parent / "outside.txt"
-    outside.write_text("secret", encoding="utf-8")
-    (tmp_path / "escape.json").write_text(
-        json.dumps({"external_id": "escape", "path": str(outside)}),
-        encoding="utf-8",
-    )
-    connector = FileConnector(
-        {"base_dir": str(tmp_path)},
-        processor=_file_processor(),
-    )
-    scope = ConnectorScope(
-        scope_type="file",
-        scope_value="escape",
-        display_name="escape",
-    )
-
-    with pytest.raises(ValueError, match="escapes base_dir"):
-        await connector.discover_changes(SourceCheckpoint(), scope)
-
-
-def test_local_file_connector_batches_real_documents(tmp_path) -> None:
-    paths = []
-    for index in range(3):
-        path = tmp_path / f"doc-{index}.txt"
-        path.write_text(f"content {index}", encoding="utf-8")
-        paths.append(path)
-
-    batches = list(
-        LocalFileConnector(
-            paths,
-            batch_size=2,
-            processor=_file_processor(),
-        ).load_from_state()
-    )
-
-    assert [len(batch) for batch in batches] == [2, 1]
-    assert [item.get_text_content() for batch in batches for item in batch] == [
-        "content 0",
-        "content 1",
-        "content 2",
-    ]
-    assert all(not item.access.is_public for batch in batches for item in batch)

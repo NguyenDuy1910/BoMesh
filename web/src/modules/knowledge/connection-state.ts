@@ -1,6 +1,6 @@
 "use client";
 
-import type { StatusTone } from "@/components/patterns/StatusPill";
+import type { StatusTone } from "@/components/ui/StatusPill";
 import type {
   Connection,
   ConnectionStatus,

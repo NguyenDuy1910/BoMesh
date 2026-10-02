@@ -95,7 +95,7 @@ npm --prefix web ci
 make init
 ```
 
-`make init` creates the missing backend environment file, starts PostgreSQL, Qdrant,
+`make init` creates the missing root `.env`, starts PostgreSQL, Qdrant,
 MinIO, and Temporal, creates the raw-object bucket, rebuilds the local database
 schema, seeds a development administrator, recreates the derived Qdrant
 collection, and registers Temporal Search Attributes.
@@ -106,7 +106,7 @@ collection, and registers Temporal Search Attributes.
 
 ### 2. Configure model access
 
-Set the required provider keys in `backend/.env`:
+Set the required provider keys in the root `.env`:
 
 ```dotenv
 OPENAI_API_KEY=...

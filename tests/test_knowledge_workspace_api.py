@@ -52,7 +52,7 @@ def _document(document_id: UUID, collection_id: UUID) -> dict[str, object]:
         "size_bytes": 100,
         "purpose": "knowledge",
         "status": "available",
-        "latest_ingestion_id": None,
+        "latest_ingestion": None,
         "created_at": "2026-09-12T09:00:00+00:00",
         "updated_at": "2026-09-12T10:00:00+00:00",
     }

@@ -293,7 +293,9 @@ class VectorIndexConfig:
     api_key: str | None = None
     collection: str | None = None
     prefer_grpc: bool = False
-    timeout_seconds: int = 20
+    #: Upper bound per Qdrant call; sized for index writes, which both the
+    #: API (direct uploads) and the worker (managed ingestion) perform.
+    timeout_seconds: int = 60
     embedding_batch_size: int = 32
 
     @classmethod
@@ -482,7 +484,7 @@ class ArtifactConfig:
 
 @dataclass(frozen=True, slots=True)
 class UploadConfig:
-    """Native upload size limits and presigned URL lifetimes."""
+    """Upload size limits and presigned URL lifetimes."""
 
     max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES
     processing_max_bytes: int = DEFAULT_PROCESSING_MAX_BYTES
@@ -549,7 +551,6 @@ class WorkerConfig:
     max_concurrent_activities: int = 4
     activity_rate_limit: float | None = None
     graceful_shutdown_seconds: int = 30
-    indexing_timeout_seconds: int = 60
 
     def __post_init__(self) -> None:
         if self.max_concurrent_activities < 1:

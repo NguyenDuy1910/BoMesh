@@ -1,6 +1,6 @@
 "use client";
 
-import { ExternalLink, FileQuestion } from "lucide-react";
+import { ExternalLink, FileArchive, FileQuestion } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Tabs } from "@/components/ui/Tabs";
@@ -196,11 +196,30 @@ export function UnsupportedRenderer({ document }: RendererProps) {
 }
 
 /**
+ * An archive is an upload record: what it contained became Documents of the
+ * same Collection, each read, indexed and cited on its own.
+ */
+export function ArchiveRenderer({ document }: RendererProps) {
+  return (
+    <div className="knowledge-unsupported">
+      <FileArchive aria-hidden="true" size={22} />
+      <h3>Archive</h3>
+      <p>
+        {document.state === "failed"
+          ? document.failureReason ?? "This archive could not be extracted, so none of its files were added."
+          : `The supported files in ${document.title} are added to ${document.collection} as separate documents. Open them from the collection to read or cite them.`}
+      </p>
+    </div>
+  );
+}
+
+/**
  * Format to renderer. A new format is an entry here; nothing else changes.
  */
 export const documentRenderers = {
   pdf: PdfRenderer,
   document: DocxRenderer,
   spreadsheet: SpreadsheetRenderer,
+  archive: ArchiveRenderer,
   unsupported: UnsupportedRenderer,
 } as const;

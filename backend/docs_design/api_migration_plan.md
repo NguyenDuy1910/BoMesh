@@ -56,7 +56,7 @@ Required design:
 - `Ingestion.id` is public UUID.
 - `temporal_workflow_id` and `temporal_run_id` are private nullable execution
   references.
-- Source-triggered and native-upload indexing create same Ingestion resource.
+- Source-triggered and document ingestion create the same Ingestion resource.
 - Retry creates a new execution for same logical ingestion attempt chain or a
   new retry record, with explicit `retry_of_ingestion_id` lineage.
 - API lookup always resolves `ingestion_id` before calling workflow adapter.
@@ -111,7 +111,7 @@ Required design:
 ### Collection read ownership
 
 Current Collection reads are split between `KnowledgeViewService`,
-`WorkspaceDocumentService`, and `ItemCatalogService`, with different permission
+`DocumentService`, and `ItemCatalogService`, with different permission
 ceilings. Final API needs one Collection application service that:
 
 - lists only Collections visible through workspace permission + Collection ACL;

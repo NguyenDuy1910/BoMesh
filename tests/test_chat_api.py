@@ -14,6 +14,7 @@ import httpx
 import pytest
 from openai import PermissionDeniedError
 from fastapi.testclient import TestClient
+from sqlalchemy.orm.exc import DetachedInstanceError
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
@@ -23,7 +24,6 @@ import native_responses as native
 import api.app as api_app
 import api.deps as api_deps
 import bothesis.runtime as runtime_module
-import bothesis.services.workspace_documents as workspace_documents_module
 from bothesis.agent import Agent, SessionConfiguration
 from bothesis.agent.models import AgentContext
 from bothesis.agent.protocol import (
@@ -48,13 +48,13 @@ from bothesis.document_index import ContextualChunk
 from bothesis.knowledge import Evidence, ItemKnowledgeRetriever
 from api.routers import ChatRequest
 from bothesis.services import AuthContext, AuthorizationError
-from bothesis.services.document_upload import DocumentUploadService
+from bothesis.services.documents import DocumentService
 from bothesis.services.document_presentation import (
     DocumentPresenter,
     payload_citation,
     viewer_elements,
 )
-from bothesis.services.workspace_documents import WorkspaceDocumentService
+from bothesis.services.item import ItemService
 from config import AppConfig, ModelConfig
 
 
@@ -171,34 +171,33 @@ def test_authenticated_chat_hides_guest_identity_tool() -> None:
     assert service._available_tool_names() == ("knowledge_search",)
 
 
-@pytest.mark.asyncio
-async def test_guest_cannot_create_private_upload_collection() -> None:
-    service = WorkspaceDocumentService(
+def _documents() -> DocumentService:
+    return DocumentService(
         object(),  # type: ignore[arg-type]
-        uploads=object(),  # type: ignore[arg-type]
+        object_storage=object(),  # type: ignore[arg-type]
+        ingestion=object(),  # type: ignore[arg-type]
+        content=object(),  # type: ignore[arg-type]
+        workflows=object(),  # type: ignore[arg-type]
         presenter=object(),  # type: ignore[arg-type]
     )
 
+
+@pytest.mark.asyncio
+async def test_guest_cannot_create_private_upload_collection() -> None:
     with pytest.raises(AuthorizationError, match="sign in is required"):
-        await service.ensure_personal_collection(guest_access())
+        await _documents().ensure_personal_collection(guest_access())
 
 
 @pytest.mark.asyncio
 async def test_guest_cannot_use_upload_lifecycle() -> None:
-    service = DocumentUploadService(
-        object(),  # type: ignore[arg-type]
-        object_storage=object(),  # type: ignore[arg-type]
-        ingestion_service=object(),  # type: ignore[arg-type]
-        document_source=object(),  # type: ignore[arg-type]
-        workflows=object(),  # type: ignore[arg-type]
-    )
+    service = _documents()
     access = guest_access()
 
     with pytest.raises(AuthorizationError, match="sign in is required"):
-        await service.start_upload(
+        await service.reserve_upload(
             access,
+            uuid4(),
             idempotency_key="guest-start",
-            collection_id=uuid4(),
             file_name="private.txt",
             content_type="text/plain",
             size_bytes=10,
@@ -213,12 +212,72 @@ async def test_guest_cannot_use_upload_lifecycle() -> None:
             content=object(),  # type: ignore[arg-type]
         )
     with pytest.raises(AuthorizationError, match="sign in is required"):
-        await service.complete_upload(access, uuid4())
+        await service.finalize_content(access, uuid4())
     with pytest.raises(AuthorizationError, match="sign in is required"):
-        await service.retry_indexing(access, uuid4())
+        await service.retry_ingestion(access, uuid4())
     with pytest.raises(AuthorizationError, match="sign in is required"):
         await service.delete_document(access, uuid4())
 
+
+
+@pytest.mark.asyncio
+async def test_finalized_document_loads_server_timestamp_before_presentation() -> None:
+    now = datetime.now(UTC)
+
+    class ExpiringDocument:
+        def __init__(self) -> None:
+            self.id = uuid4()
+            self.parent_item_id = uuid4()
+            self.title = "policy.txt"
+            self.mime_type = "text/plain"
+            self.size_bytes = 15
+            self.status = "pending"
+            self.index_status = "pending"
+            self.metadata_ = {"file_name": "policy.txt", "purpose": "knowledge"}
+            self.upload = SimpleNamespace(status="pending", error_code="old")
+            self.created_at = now
+            self._updated_at: datetime | None = None
+
+        @property
+        def updated_at(self) -> datetime:
+            if self._updated_at is None:
+                raise DetachedInstanceError("updated_at is expired")
+            return self._updated_at
+
+    class RefreshingSession:
+        async def flush(self) -> None:
+            return None
+
+        async def refresh(
+            self, item: ExpiringDocument, *, attribute_names: list[str]
+        ) -> None:
+            assert attribute_names == ["updated_at"]
+            item._updated_at = now
+
+    class DocumentItems(ItemService):
+        async def get_owned_upload(self, *_: Any, **__: Any) -> ExpiringDocument:
+            return document
+
+    document = ExpiringDocument()
+    items = DocumentItems(RefreshingSession())  # type: ignore[arg-type]
+    finalized = await items.mark_upload_available(
+        document.id,
+        uuid4(),
+        uuid4(),
+        ingestion_mode="managed",
+        storage_metadata={"etag": "etag-finalized"},
+    )
+    result = DocumentPresenter(
+        object_storage=lambda: None,
+        preview=SimpleNamespace(resolve=lambda *_, **__: None),
+        citation_url_seconds=300,
+        preview_url_seconds=300,
+    ).contract_document(finalized)
+
+    assert finalized.status == "ready"
+    assert finalized.upload.status == "available"
+    assert result["status"] == "available"
+    assert result["updated_at"] == now
 
 def test_public_chat_events_strip_provider_workspace_bindings() -> None:
     event = ResponseOutputItemDoneEvent(
@@ -607,7 +666,7 @@ def test_collection_upload_route_accepts_multipart_without_a_connector(
                 "size_bytes": 15,
                 "purpose": "knowledge",
                 "status": "available",
-                "latest_ingestion_id": None,
+                "latest_ingestion": None,
                 "created_at": now,
                 "updated_at": now,
             },
@@ -618,7 +677,7 @@ def test_collection_upload_route_accepts_multipart_without_a_connector(
     _override_caller(monkeypatch, resolve_access)
     monkeypatch.setitem(
         api_app.app.dependency_overrides,
-        api_deps.get_workspace_document_service,
+        api_deps.get_document_service,
         lambda: SimpleNamespace(create_document=create_document),
     )
     with TestClient(api_app.app) as client:
@@ -636,87 +695,6 @@ def test_collection_upload_route_accepts_multipart_without_a_connector(
     assert response.json()["document"]["collection_id"] == str(collection_id)
     assert response.json()["document"]["status"] == "available"
 
-
-@pytest.mark.asyncio
-async def test_collection_upload_reports_ingestion_dispatch_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    user_id = uuid4()
-    tenant_id = uuid4()
-    collection_id = uuid4()
-    now = datetime.now(UTC)
-    upload_record = SimpleNamespace(status="available", uploaded_at=now)
-    document = SimpleNamespace(
-        id=uuid4(),
-        parent_item_id=collection_id,
-        title="policy.txt",
-        mime_type="text/plain",
-        size_bytes=15,
-        status="ready",
-        index_status="failed",
-        metadata_={"file_name": "policy.txt"},
-        upload=upload_record,
-        created_at=now,
-    )
-    access = AuthContext(
-        user_id=user_id,
-        email="editor@example.test",
-        display_name="Editor",
-        tenant_id=tenant_id,
-        permission_codes=(),
-        group_ids=(),
-        role_codes=("editor",),
-    )
-
-    class Uploads:
-        attempts = 0
-
-        async def upload_to_collection(self, *_: Any, **__: Any) -> Any:
-            self.attempts += 1
-            document.index_status = "failed"
-            return SimpleNamespace(item=document, created=True)
-
-        async def retry_indexing(self, *_: Any, **__: Any) -> Any:
-            self.attempts += 1
-            document.index_status = "ready"
-            document.metadata_["processing"] = {"index_schema_version": "test"}
-            return document
-
-    async def record_audit(*_: Any, **__: Any) -> None:
-        return None
-
-    monkeypatch.setattr(workspace_documents_module.AuditService, "record", record_audit)
-    service = WorkspaceDocumentService(
-        _SessionContext,
-        uploads=Uploads(),
-        presenter=DocumentPresenter(
-            object_storage=lambda: None,
-            preview=SimpleNamespace(resolve=lambda *_, **__: None),
-            citation_url_seconds=300,
-            preview_url_seconds=300,
-        ),
-    )
-
-    result = await service.upload_to_collection(
-        access,
-        collection_id,
-        idempotency_key="dispatch-failure",
-        file_name="policy.txt",
-        content_type="text/plain",
-        content=SimpleNamespace(read=lambda *_: b""),
-    )
-
-    assert result["created"] is True
-    assert result["ingestion_status"] == "failed"
-    assert result["document"]["status"] == "available"
-    assert result["document"]["parent_item_id"] == str(collection_id)
-
-    retried = await service.retry_indexing(access, document.id)
-
-    assert retried["created"] is False
-    assert retried["ingestion_status"] == "ready"
-    assert retried["document"]["status"] == "available"
-    assert retried["document"]["indexed"] is True
 
 
 def test_qdrant_citation_does_not_synthesize_element_ranges() -> None:

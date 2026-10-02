@@ -6,21 +6,33 @@ import { SettingRow } from "@/components/patterns";
 import { Button } from "@/components/ui/Button";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { Input } from "@/components/ui/Input";
+import { PageLoadingSkeleton } from "@/components/ui/Skeleton";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 import { useAuthSession } from "@/lib/hooks/useAuthSession";
+import { SectionHeader } from "@/modules/workspace-control/components/SectionHeader";
 import { workspaceDirectoryApi, type Workspace } from "@/modules/workspace-control/directory";
 import { useControlPlaneData } from "@/modules/workspace-control/queries";
-import { ControlPlaneLoadingSkeleton } from "@/modules/workspace-control/components/ControlPlaneLoadingSkeleton";
 
 export function SettingsPage() {
   const session = useAuthSession();
   const tenantId = session?.active_workspace_id ?? null;
-  const query = useControlPlaneData(async () =>
-    tenantId ? workspaceDirectoryApi.workspace(tenantId) : null,
+  const query = useControlPlaneData(
+    async () => (tenantId ? workspaceDirectoryApi.workspace(tenantId) : null),
+    tenantId ?? "",
   );
-  if (query.error) return <ErrorState description={query.error} onAction={query.reload} />;
-  return query.data
-    ? <WorkspaceSettings key={query.data.id} workspace={query.data} />
-    : <ControlPlaneLoadingSkeleton variant="settings" />;
+
+  return (
+    <>
+      <SectionHeader section="settings" />
+      {query.error ? (
+        <ErrorState description={query.error} onAction={query.reload} />
+      ) : query.data ? (
+        <WorkspaceSettings key={query.data.id} workspace={query.data} />
+      ) : (
+        <PageLoadingSkeleton label="Loading workspace settings" />
+      )}
+    </>
+  );
 }
 
 function WorkspaceSettings({ workspace }: { workspace: Workspace }) {
@@ -46,17 +58,17 @@ function WorkspaceSettings({ workspace }: { workspace: Workspace }) {
         }
       }}
     >
-      <section className="configuration-section">
-        <h2>Workspace identity</h2>
+      <section aria-labelledby="settings-identity" className="configuration-section">
+        <h2 className="configuration-heading" id="settings-identity">Workspace identity</h2>
         <label className="configuration-field">Name
           <Input onChange={(event) => setName(event.target.value)} required value={name} />
         </label>
         <label className="configuration-field">Code
           <Input readOnly value={workspace.code} />
-          <span className="text-xs text-[var(--text-tertiary)]">Fixed at creation.</span>
+          <span className="text-[length:var(--text-size-meta)] text-[var(--text-tertiary)]">Fixed at creation.</span>
         </label>
         <SettingRow
-          control={<span className="text-sm capitalize">{workspace.status}</span>}
+          control={<StatusBadge status={workspace.status} />}
           description="Set by platform control."
           title="Status"
         />

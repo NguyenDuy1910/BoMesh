@@ -7,6 +7,7 @@
  * and no two screens word the same fact differently.
  */
 
+import type { Ingestion } from "@/modules/knowledge/ingestions-api";
 import { fileKind, formatBytes, formatRelative } from "@/modules/workspace-control/format";
 import type {
   KnowledgeDocumentKind,
@@ -31,6 +32,8 @@ export interface ApiKnowledgeDocument {
   updated_at: string;
   size_bytes?: number | null;
   source?: ApiKnowledgeSource | null;
+  /** Null for a document a connector wrote, or one whose content never arrived. */
+  latest_ingestion?: Ingestion | null;
 }
 
 export interface ApiKnowledgeCollection {
@@ -45,9 +48,13 @@ export interface ApiKnowledgeCollection {
 
 const SPREADSHEET = /sheet|excel|csv/i;
 const PDF = /pdf/i;
+const ARCHIVE = /(^|[/\s])(zip|x-zip-compressed|archive)(\s|$)|\.zip$/i;
 
 /** What a person calls the format, from the MIME type or the file name. */
 export function documentKind(document: ApiKnowledgeDocument): KnowledgeDocumentKind {
+  // An archive is checked first: "report.pdf.zip" is an archive of a PDF.
+  if (ARCHIVE.test(document.content_type ?? "") || ARCHIVE.test(document.title)
+    || document.document_type === "archive") return "archive";
   const hint = `${document.content_type ?? ""} ${document.document_type ?? ""} ${document.title}`;
   if (PDF.test(hint)) return "pdf";
   if (SPREADSHEET.test(hint)) return "spreadsheet";
@@ -92,6 +99,15 @@ export function toWorkspaceDocument(
     pagesLabel: "",
     fileTypeLabel: fileKind(document.title, document.document_type),
     externalUrl: document.source?.external_url ?? undefined,
+    latestIngestion: document.latest_ingestion
+      ? {
+          id: document.latest_ingestion.id,
+          status: document.latest_ingestion.status,
+          error: document.latest_ingestion.error,
+          attempt: document.latest_ingestion.attempt,
+        }
+      : undefined,
+    failureReason: document.latest_ingestion?.error ?? undefined,
     modifiedAt: document.updated_at,
     original: [],
     agentView: [],

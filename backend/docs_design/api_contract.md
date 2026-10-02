@@ -222,17 +222,71 @@ different storage-oriented values and must be mapped at the API boundary.
 There are no `/schedule/pause` or `/schedule/resume` commands. Pause/resume is
 `PATCH` with `{ "enabled": false|true }`.
 
+A `Connection` states whose account it uses through `account: {label,
+resource_label}`, whether its contents can be listed through `browsable`, and
+its health facts `status_detail`, `connected_at` and `last_checked_at`. The
+provider's own account and resource ids stay private (rule 4).
+
+`GET /connections/{connection_id}/resources` answers for every browsable
+connection. A provider sign-in is asked through its provider; a credential the
+connector can browse with (a connector declaring `resource_discovery`, e.g. a
+Confluence API token) is listed through the connector. Confluence lists spaces,
+then a space's top-level pages, then a page's children; pages are identified as
+`page:<id>`, and a selected page becomes a source covering that page and its
+subtree.
+
 ### Ingestions
 
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
-| GET | `/ingestions` | bearer | Workspace ingestion list |
-| GET | `/ingestions/{ingestion_id}` | bearer | Ingestion detail |
-| POST | `/ingestions/{ingestion_id}/retry` | bearer | Retry failed/cancelled ingestion |
-| POST | `/ingestions/{ingestion_id}/cancel` | bearer | Cancel running ingestion |
+| GET | `/ingestions` | bearer | Managed Ingestions (documents and sources), newest first, live |
+| GET | `/ingestions/summary` | bearer | Throughput, outcomes and durations for `1h`/`24h`/`7d` |
+| GET | `/ingestions/{ingestion_id}` | bearer | Ingestion detail with live progress |
+| GET | `/ingestions/{ingestion_id}/events` | bearer | Timeline: queued, attempts, phases, outcome |
+| POST | `/ingestions/{ingestion_id}/retry` | bearer | Retry failed/cancelled/timed-out ingestion |
+| POST | `/ingestions/{ingestion_id}/cancel` | bearer | Cancel pending/running ingestion |
 
-Responses expose `ingestion_id`; Temporal `workflow_id` remains an internal
-mapping only. Document retry and admin-item retry resolve to this one use-case.
+One resource, two kinds, two runners, one core. A `document` Ingestion
+processes one upload or expands one archive; a `source` Ingestion
+synchronizes one Source. Every kind runs the same ingestion core
+(`ItemIngestionService`), and `mode` says who ran it:
+
+- `managed`: one Temporal `IngestionWorkflow` (Sources, and uploads into
+  workspace Collections). Live state comes from Temporal through
+  `TemporalWorkflowService` only (search attributes `TenantId`, `CollectionId`,
+  `WorkflowCategory`, and a `title` memo). These are what `GET /ingestions`,
+  the summary and the Activity monitor show.
+- `direct`: a user's own upload (chat attachment, personal library) processed
+  by the API process on arrival. It is read from the Document's Ingestion
+  record; it is not listed by `GET /ingestions`, and it cannot be cancelled.
+
+`IngestionService` owns the resource for both runners and routes retry to the
+owning lifecycle (`DocumentService` for documents, in their original mode;
+`IntegrationLifecycleService.ingest_source` for Sources).
+
+Visibility follows the data a run touches. A document Ingestion is visible to
+readers of its Collection, and retry/cancel need Collection update. A source
+Ingestion needs `source.manage`. A run the caller may not see is `404`.
+
+`progress.phase` is where the run is: documents go `queued · parsing ·
+contextualizing · embedding · storing`, archives go `queued · downloading ·
+expanding`, sources go `syncing`. Counts are chunks, accepted files, or items.
+Live phase comes from the core's `PhaseRecorder`: a managed run heartbeats it
+(about every 2s), and every document run also writes it to the Document's
+Ingestion record, so finished phases, with durations, rebuild the timeline
+either way. `error` carries only messages written for people; infrastructure
+causes are logged, never returned.
+
+An Ingestion is one target's execution chain, not one attempt: a retry, or
+another manual sync of the same Source, is a new run under the same
+`ingestion_id`. Reads address its latest run, and `GET /ingestions` lists each
+Ingestion once, at that run, with `status` filters matched against it (a
+superseded failure is not "failed"). Scheduled syncs are separate Ingestions.
+
+Responses expose `ingestion_id`; the Temporal `workflow_id`, run id, event
+types and payloads stay internal. Retrying reuses the same ingestion id. The
+Web UI's Sync activity tab polls these endpoints (2s while anything runs, 15s
+otherwise); there is no push channel.
 
 ### Workspace IAM and governance
 

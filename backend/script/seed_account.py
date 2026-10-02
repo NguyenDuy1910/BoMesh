@@ -17,7 +17,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-load_dotenv(BACKEND_ROOT / ".env", override=False)
+load_dotenv(BACKEND_ROOT.parent / ".env", override=False)
 
 from bothesis.db.engine import get_session_factory, transaction_scope
 from bothesis.db.models import Tenant

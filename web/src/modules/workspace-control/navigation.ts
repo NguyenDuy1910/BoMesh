@@ -64,22 +64,24 @@ export const legacySectionAliases: Record<string, string> = {
   "platform/health": "platform-system",
 };
 
+/* One line each, stating what the page is for in product words. A line
+   promises only what the page actually shows. */
 const DESCRIPTIONS: Record<string, string> = {
-  overview: "What is configured in this workspace, and what needs attention.",
-  knowledge: "The documents and sources this workspace's agent can read.",
-  agent: "Identity, instructions, model, capabilities and tools.",
-  access: "Who can use this workspace, and what each person can reach.",
-  experience: "Branding, welcome copy and starter prompts.",
-  activity: "What changed here, who changed it, and whether it worked.",
-  settings: "Workspace identity, data region, retention and lifecycle.",
-  "platform-tenants": "Every tenant on this deployment. Users see these as workspaces.",
-  "platform-users": "Everyone signed in, their memberships and platform authority.",
-  "platform-public-workspaces": "Tenants published to everyone, and where new users land.",
-  "platform-models": "Which models and capabilities tenants are allowed to use.",
-  "platform-integrations": "Connector availability, and every running connection.",
+  overview: "Workspace health and what needs your attention.",
+  knowledge: "The collections, documents and sources the assistant answers from.",
+  agent: "How the assistant behaves in this workspace.",
+  access: "Members, groups and roles for this workspace.",
+  experience: "What members see when they open this workspace.",
+  activity: "Administrative changes and sync events in this workspace.",
+  settings: "This workspace's name and status.",
+  "platform-tenants": "Every tenant on this deployment. Members see each one as a workspace.",
+  "platform-users": "Everyone with an account, their workspaces and platform roles.",
+  "platform-public-workspaces": "Which tenant guests land in.",
+  "platform-models": "Which models and capabilities tenants may use.",
+  "platform-integrations": "The connectors this deployment supports.",
   "platform-usage": "Volume and cost across tenants.",
-  "platform-audit": "The immutable record, for investigation.",
-  "platform-system": "Operational health and deployment configuration.",
+  "platform-audit": "The complete audit record across tenants.",
+  "platform-system": "Service health for this deployment.",
 };
 
 /** Platform ids are prefixed so a workspace section can never collide with one. */

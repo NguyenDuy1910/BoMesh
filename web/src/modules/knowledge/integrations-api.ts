@@ -2,6 +2,7 @@
 
 import { apiRequest, queryString } from "@/lib/api/request";
 import { queryString as controlPlaneQueryString } from "@/modules/workspace-control/control-plane-api";
+import type { Ingestion } from "@/modules/knowledge/ingestions-api";
 import type { KnowledgeItem, Paginated } from "@/modules/workspace-control/collections";
 
 /**
@@ -73,29 +74,27 @@ export interface ConnectorCapability {
   available: boolean;
 }
 
+/** Whose account a connection uses (OpenAPI `Connection.account`). */
 export interface ConnectionAccount {
-  id: string | null;
   label: string | null;
-  resource_id: string | null;
   resource_label: string | null;
 }
 
+/** A connection exactly as `/connections` returns it (OpenAPI `Connection`). */
 export interface Connection {
   id: string;
   connector_key: string;
   display_name: string;
-  account: ConnectionAccount;
-  config: Record<string, unknown>;
-  scopes: string[];
-  credential_configured: boolean;
   owner_type: "workspace" | "user";
   owner_user_id: string | null;
   status: ConnectionStatus;
-  status_detail: string | null;
   source_count: number;
-  expires_at: string | null;
+  config: Record<string, unknown>;
+  account: ConnectionAccount;
+  /** Its contents can be listed for a resource picker. */
+  browsable: boolean;
+  status_detail: string | null;
   connected_at: string | null;
-  disconnected_at: string | null;
   last_checked_at: string | null;
   created_at: string;
   updated_at: string;
@@ -142,23 +141,6 @@ export interface Source {
   schedule: SourceSchedule | null;
 }
 
-/**
- * One ingestion run, as the workflow engine records it.
- *
- * A run is not a property of the source: it has its own identity, its own
- * outcome, and outlives the request that started it. That separation is what
- * lets a source stay `ready` while a run of it is failing.
- */
-export interface SourceRun {
-  id: string;
-  status: "running" | "completed" | "failed" | "cancelled" | "terminated" | "timed_out" | string;
-  source_id: string | null;
-  connection_id: string | null;
-  trigger_type: string | null;
-  started_at: string;
-  finished_at: string | null;
-}
-
 export const connectionsApi = {
   /** What this deployment can connect, and how each one is authorized. */
   providers: () =>
@@ -195,7 +177,6 @@ export const connectionsApi = {
     display_name: string;
     config: Record<string, unknown>;
     credentials?: Record<string, unknown>;
-    credential_type?: string;
     owner_type?: "workspace" | "user";
   }) =>
     apiRequest<Connection>("/connections", {
@@ -274,20 +255,17 @@ export const sourcesApi = {
 
   remove: (id: string) => apiRequest<void>(`/sources/${id}`, { method: "DELETE" }),
 
+  /** Starts a sync now; the Ingestion it answers with is the one to watch. */
   syncNow: (id: string) =>
-    apiRequest<SourceRun>(
+    apiRequest<Ingestion>(
       `/sources/${id}/ingestions`,
       { method: "POST" },
     ),
 
   runs: (id: string) =>
-    apiRequest<Paginated<SourceRun>>(
+    apiRequest<Paginated<Ingestion>>(
       `/sources/${id}/ingestions${queryString({ page_size: 20 })}`,
     ),
-
-  /** Every run in the workspace, newest first. */
-  allRuns: () =>
-    apiRequest<Paginated<SourceRun>>(`/ingestions${queryString({ page_size: 50 })}`),
 };
 
 /** Destination collections. A source has to land in one. */

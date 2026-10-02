@@ -22,8 +22,18 @@ assets from the same durable original during ingestion. Preview generation is
 independent of Docling content extraction and never enters canonical chunks or
 Qdrant payloads.
 
-Standalone images use `DocumentItem(document_kind="image")`; they are indexed
-from captions, OCR, or descriptions rather than binary payloads.
+Images are not knowledge in this phase: no upload, archive member or source
+attachment that is an image file is ingested (see `FinxFileExtensions`).
+Pictures inside a document stay part of that document's content.
+
+PDFs are read from their own text layer (`processing/pdf_text.py`, PDFium): no
+model call and no page images, about a millisecond per page. Lines become
+paragraphs and headings (by spacing and type size) with page and box
+provenance for citations; running headers, footers and page numbers are
+dropped. Scans, text inside pictures and table structure are not read: a PDF
+with no text layer fails with "the file has no text to index". The former
+remote-vision transcription is kept, commented out, at the end of
+`processing/docling.py`.
 
 `ConnectorPipeline` consumes `ItemChange` values and delegates Item writes and
 tombstones to `ItemIngestionService`. The service persists Item lineage,
@@ -47,9 +57,11 @@ collection scope, source, and hierarchy filters before evidence is returned.
 
 ## Uploads
 
-Personal and collection-scoped uploads use the same Docling processor,
-canonical chunks, `ItemIngestionService`, and `ItemIndex` as scheduled
-connectors. Collection uploads retain native upload lineage under their
-destination Item and never create an Integration Connection, Integration
-Credential, Ingestion Source, or External Resource. Indexed files remain
-tenant- and collection-permission filtered.
+Uploads use the same Docling processor, canonical chunks,
+`ItemIngestionService`, and `ItemIndex` as scheduled connectors; there is no
+file connector. A user's own uploads run that core directly in the API; uploads
+into workspace Collections run it through managed (Temporal) ingestion.
+Uploads keep their lineage under their destination Collection and never create
+an Integration Connection, Integration Credential, Ingestion Source, or
+External Resource. Indexed files remain tenant- and collection-permission
+filtered.

@@ -9,6 +9,7 @@ import {
   ArrowDown,
   FilePenLine,
   LibraryBig,
+  Lock,
   Menu,
   RefreshCw,
 } from "lucide-react";
@@ -24,8 +25,9 @@ import {
 } from "@/components/shell/ProductShell";
 import { getApiConfiguration } from "@/lib/api/config";
 import { getAuthSession } from "@/lib/auth/session";
-import { useAuthSession } from "@/lib/hooks/useAuthSession";
 import { WorkspaceMark } from "@/components/patterns";
+import { ErrorState } from "@/components/ui/ErrorState";
+import { PageLoadingSkeleton } from "@/components/ui/Skeleton";
 import {
   listCollections,
   releaseConversationDocument,
@@ -66,9 +68,8 @@ import { ArtifactCards } from "./ArtifactCard";
 import { AssistantTurn } from "./AssistantTurn";
 import { ChatComposer, type ComposerAttachment } from "./ChatComposer";
 import { ConversationReuse } from "./ConversationReuse";
-import { RecoveryNotice } from "./RecoveryNotice";
+import { ChatNotice, RecoveryNotice } from "./RecoveryNotice";
 import { RightActivityPanel } from "./RightActivityPanel";
-import { ChatLoadingSkeleton } from "./ChatLoadingSkeleton";
 
 const suggestions = [
   {
@@ -100,7 +101,6 @@ export default function ChatShell() {
   const searchParams = useSearchParams();
   const shellNavigation = useProductShellNavigation();
   const { setSidebarContent } = useProductShellSidebar();
-  const authSession = useAuthSession();
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [draftId, setDraftId] = useState(createDraftConversationId);
@@ -111,9 +111,7 @@ export default function ChatShell() {
   const restoreRequestRef = useRef(0);
   const visibleConversationRef = useRef(activeId ?? draftId);
   const handledProductActionRef = useRef<string | null>(null);
-  const scopeRef = useRef<string | null>(null);
   const requestedProductAction = searchParams.get("action");
-  const currentSession = authSession ?? getAuthSession();
 
   const refresh = useCallback(async (requestedId?: string | null) => {
     const requestId = ++restoreRequestRef.current;
@@ -145,33 +143,14 @@ export default function ChatShell() {
       router.replace("/auth/login");
       return;
     }
-    const conversationIdentity = currentSession?.user_id
-      ?? currentSession?.session_id
-      ?? configuration.userId;
-    const workspaceId = currentSession?.active_workspace_id ?? configuration.tenantId;
-    const sessionKind = currentSession?.session_kind ?? "user";
-    const scope = `${conversationIdentity}:${workspaceId}:${sessionKind}`;
-    const scopeChanged = scopeRef.current !== null && scopeRef.current !== scope;
-    scopeRef.current = scope;
+    const session = getAuthSession();
     setConversationUser(
-      conversationIdentity,
-      workspaceId,
-      sessionKind,
+      configuration.userId,
+      configuration.tenantId,
+      session?.session_kind ?? "user",
     );
-    if (scopeChanged) {
-      const nextDraftId = createDraftConversationId();
-      visibleConversationRef.current = nextDraftId;
-      setDraftId(nextDraftId);
-      setActiveId(null);
-      setInitialMessages([]);
-      setLoadError(null);
-      setIsLoading(true);
-      rememberSelectedConversation(null);
-      void refresh(null);
-      return;
-    }
     void refresh(readSelectedConversation());
-  }, [currentSession?.active_workspace_id, currentSession?.session_id, currentSession?.session_kind, currentSession?.user_id, refresh, router]);
+  }, [refresh, router]);
 
   useEffect(() => {
     if (!shellNavigation.mobileOpen) return;
@@ -318,21 +297,25 @@ export default function ChatShell() {
     return (
       <section aria-label="Chat" className="chat-main-pane relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[var(--surface-base)]">
         <button aria-label="Open conversation sidebar" className="chat-mobile-menu topbar__menu" onClick={shellNavigation.openMobile} type="button"><Menu aria-hidden="true" size={18} /></button>
-        <div
-          className={loadError ? "shell__route-boundary flex-1" : "flex min-h-0 flex-1 flex-col"}
-          role={loadError ? "alert" : undefined}
-        >
+        <div className="flex min-h-0 flex-1 flex-col">
           {loadError ? (
-            <>
-              <strong>{loadError}</strong>
-              <button onClick={() => {
-                setIsLoading(true);
-                setLoadError(null);
-                void refresh(readSelectedConversation());
-              }} type="button">Try again</button>
-            </>
+            <div className="mx-auto w-full max-w-[var(--chat-max)] px-[var(--page-gutter)] pt-[var(--space-8)]">
+              <ErrorState
+                actionLabel="Try again"
+                description={loadError}
+                onAction={() => {
+                  setIsLoading(true);
+                  setLoadError(null);
+                  void refresh(readSelectedConversation());
+                }}
+                title="Chats could not be loaded"
+              />
+            </div>
           ) : (
-            <ChatLoadingSkeleton />
+            <PageLoadingSkeleton
+              className="mx-auto w-full max-w-[var(--chat-max)] px-[var(--page-gutter)] pt-[var(--space-8)]"
+              label="Loading chat"
+            />
           )}
         </div>
       </section>
@@ -410,6 +393,7 @@ function ChatConversation({
   const isUploading = composerAttachments.some((item) => (
     item.progress !== "ready" && item.progress !== "failed"
   ));
+  const activeConnectorLabel = "permitted knowledge";
 
   useEffect(() => {
     for (const message of messages) {
@@ -656,6 +640,7 @@ function ChatConversation({
                   <MessageList
                     activeArtifactId={activity?.type === "artifact" ? activity.artifactId : undefined}
                     activeCitationId={activity?.type === "knowledge_document" ? activity.citationId : undefined}
+                    activityConnectorLabel={activeConnectorLabel}
                     isStreaming={isStreaming}
                     lastMessageId={lastMessage?.id}
                     messages={messages}
@@ -683,10 +668,22 @@ function ChatConversation({
               </button>
             )}
 
-            {error && !hasMessageError && <div className="chat-inner"><div className="error-box" role="alert">{error.message} Try again or start a new conversation.</div></div>}
-            {!isConfigured && (
-              <div className="chat-inner">
-                <div className="error-box" role="status">Chat is unavailable because workspace access has not been configured. Contact your administrator.</div>
+            {/* Conversation-level notices sit on the composer's rail, directly
+                above the input they explain. */}
+            {((error && !hasMessageError) || !isConfigured) && (
+              <div className="chat-notice-slot">
+                {error && !hasMessageError && (
+                  <ChatNotice detail={`${error.message} Try again or start a new conversation.`} title="Something went wrong" tone="danger" />
+                )}
+                {!isConfigured && (
+                  <ChatNotice
+                    detail="Workspace access hasn’t been set up, so messages can’t be sent. Contact your administrator."
+                    icon={Lock}
+                    role="status"
+                    title="Chat is unavailable"
+                    tone="neutral"
+                  />
+                )}
               </div>
             )}
             <ConversationReuse resources={reusableResources} />
@@ -718,6 +715,7 @@ function ChatConversation({
 function MessageList({
   activeArtifactId,
   activeCitationId,
+  activityConnectorLabel,
   isStreaming,
   lastMessageId,
   messages,
@@ -731,6 +729,7 @@ function MessageList({
 }: {
   activeArtifactId?: string;
   activeCitationId?: string;
+  activityConnectorLabel?: string;
   isStreaming: boolean;
   lastMessageId?: string;
   messages: ChatMessage[];
@@ -748,6 +747,7 @@ function MessageList({
         <MessageView
           activeArtifactId={activeArtifactId}
           activeCitationId={activeCitationId}
+          activityConnectorLabel={isStreaming && message.id === lastMessageId ? activityConnectorLabel : undefined}
           isStreaming={isStreaming && message.id === lastMessageId}
           key={message.id}
           message={message}
@@ -766,6 +766,7 @@ function MessageList({
 const MessageView = memo(function MessageView({
   activeArtifactId,
   activeCitationId,
+  activityConnectorLabel,
   isStreaming,
   message,
   onEditArtifact,
@@ -777,6 +778,7 @@ const MessageView = memo(function MessageView({
 }: {
   activeArtifactId?: string;
   activeCitationId?: string;
+  activityConnectorLabel?: string;
   isStreaming: boolean;
   message: ChatMessage;
   onEditArtifact: (artifact: TurnArtifact) => void;
@@ -865,7 +867,6 @@ const MessageView = memo(function MessageView({
             recovery={recovery}
           />
         )}
-        {streamError && !recovery && streamError !== "Response stopped." && <div className="error-box" role="alert">{streamError}</div>}
         {hasSettled && (
           <AnswerSources
             activeCitationId={activeCitationId}
@@ -877,12 +878,12 @@ const MessageView = memo(function MessageView({
           <div className="answer-footer">
             <div className="assistant-actions" aria-label="Assistant message actions" role="group">
               {text && (
-                <button aria-label={copied ? "Copied" : "Copy response"} className="assistant-action" onClick={() => void copy(text)} title={copied ? "Copied" : "Copy"} type="button">
+                <button aria-label={copied ? "Copied" : "Copy response"} className="assistant-action" onClick={() => void copy(text)} title={copied ? "Copied" : "Copy response"} type="button">
                   {copied ? <Check aria-hidden="true" size={14} /> : <Copy aria-hidden="true" size={14} />}
                 </button>
               )}
               {!recovery && (
-                <button aria-label="Regenerate response" className="assistant-action" onClick={() => onRegenerate(message.id)} title="Regenerate" type="button">
+                <button aria-label="Regenerate response" className="assistant-action" onClick={() => onRegenerate(message.id)} title="Regenerate response" type="button">
                   <RefreshCw aria-hidden="true" size={14} />
                 </button>
               )}

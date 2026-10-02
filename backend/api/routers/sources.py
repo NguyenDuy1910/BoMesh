@@ -7,7 +7,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Query, Response, status
 
-from api.deps import Caller, ConnectionLifecycle
+from api.deps import Caller, ConnectionLifecycle, Ingestions
 from api.routers import (
     Ingestion,
     IngestionPage,
@@ -19,7 +19,8 @@ from api.routers import (
     SourceStatus,
     SourceUpdate,
 )
-from api.routers._mapping import ingestion_payload, source_payload
+from api.routers._mapping import source_payload
+from bothesis.services.ingestion import ingestion_resource
 from bothesis.services import ControlPlaneNotFoundError
 
 router = APIRouter(prefix="/sources", tags=["sources"])
@@ -90,7 +91,7 @@ async def get_source_status(
         source_status=value.get("source_status", "failed"),
         connection_status=value.get("connection_status", "error"),
         latest_ingestion=(
-            ingestion_payload(value["workflow"])
+            ingestion_resource(value["workflow"])
             if value.get("workflow")
             else None
         ),
@@ -107,7 +108,7 @@ async def create_source_ingestion(
     source_id: UUID, caller: Caller, connections: ConnectionLifecycle
 ) -> Ingestion:
     return Ingestion.model_validate(
-        ingestion_payload(await connections.ingest_source(caller, source_id))
+        ingestion_resource(await connections.ingest_source(caller, source_id))
     )
 
 
@@ -115,18 +116,14 @@ async def create_source_ingestion(
 async def list_source_ingestions(
     source_id: UUID,
     caller: Caller,
-    connections: ConnectionLifecycle,
+    ingestions: Ingestions,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> IngestionPage:
-    value = await connections.list_source_ingestions(
-        caller, source_id, page=page, page_size=page_size
-    )
-    return IngestionPage(
-        items=[ingestion_payload(item) for item in value.get("items", [])],
-        page=value.get("page", page),
-        page_size=value.get("page_size", page_size),
-        total=value.get("total", 0),
+    return IngestionPage.model_validate(
+        await ingestions.list_ingestions(
+            caller, source_id=source_id, page=page, page_size=page_size
+        )
     )
 
 
@@ -137,12 +134,12 @@ async def get_source_ingestion(
     source_id: UUID,
     ingestion_id: UUID,
     caller: Caller,
-    connections: ConnectionLifecycle,
+    ingestions: Ingestions,
 ) -> Ingestion:
-    value = await connections.get_ingestion_by_public_id(caller, ingestion_id)
+    value = await ingestions.get_ingestion(caller, ingestion_id)
     if str(value.get("source_id")) != str(source_id):
         raise ControlPlaneNotFoundError(f"ingestion not found: {ingestion_id}")
-    return Ingestion.model_validate(ingestion_payload(value))
+    return Ingestion.model_validate(value)
 
 
 @router.get("/{source_id}/schedule", response_model=Schedule)

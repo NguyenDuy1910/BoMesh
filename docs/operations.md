@@ -8,8 +8,8 @@ boundaries that must be configured explicitly in deployment. Start with
 
 | File | Purpose |
 | --- | --- |
-| `backend/.env.example` | Complete backend configuration template. Copy values into ignored `backend/.env`. |
-| `web/.env.example` | Optional public WebUI configuration template for a non-default API endpoint or deployment. |
+| `backend/.env.example` | Complete backend configuration template used to create the ignored root `.env`. |
+| `web/.env.example` | Browser-only public-variable reference for deployments that inject WebUI configuration through the build. |
 | `deployment/compose.yml` | Local PostgreSQL, Qdrant, MinIO, and Temporal topology. Optional Compose overrides go in ignored `deployment/.env`. |
 
 Do not commit credentials, encryption keys, signed object URLs, or deployment
@@ -83,7 +83,7 @@ BOTHESIS_R2_SECRET_ACCESS_KEY=...
 
 Never persist a presigned URL. Store the Item's `storage_key` and generate a
 short-lived upload or download URL only at runtime. When using MinIO, the S3
-access key and secret in `backend/.env` must match the MinIO root credentials
+access key and secret in the root `.env` must match the MinIO root credentials
 used by Compose; a `SignatureDoesNotMatch` response means they do not match.
 
 Image and PDF ingestion may also write versioned WebP objects below the owning

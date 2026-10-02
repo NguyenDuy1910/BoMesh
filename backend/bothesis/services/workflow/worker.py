@@ -1,4 +1,4 @@
-"""Temporal worker bootstrap and explicit workflow/activity registration."""
+"""Temporal worker bootstrap: one workflow, its two Activities, shared clients."""
 
 from __future__ import annotations
 
@@ -15,24 +15,20 @@ from temporalio.worker.workflow_sandbox import (
 
 from config import AppConfig, get_config
 
-from bothesis.agent.transports.openrouter import OpenRouterTransport
-from bothesis.db.engine import get_session_factory
-from bothesis.document_index import ItemIndex, SemanticContextualizer
 from bothesis.runtime import AppRuntime
+from bothesis.services.archive_expansion import ArchiveExpansionService
 from bothesis.services.workflow import TemporalSettings
 from bothesis.services.workflow.client import TemporalClientProvider
-from bothesis.services.workflow.ingestion_activity import IngestionActivity
+from bothesis.services.workflow.ingestion_activity import IngestionActivities
 from bothesis.services.workflow.ingestion_workflow import IngestionWorkflow
-from bothesis.services.workflow.native_upload_indexing_activity import (
-    NativeUploadIndexingActivity,
-)
-from bothesis.services.workflow.native_upload_indexing_workflow import (
-    NativeUploadIndexingWorkflow,
-)
 
 
 class TemporalWorker:
-    """Register and run Enterprise Agent application workflows and Activities."""
+    """Register and run managed ingestion on clients the runtime owns.
+
+    The index, contextualizer, storage and parser are the ones the API uses
+    for direct uploads, so both runners produce the same representation.
+    """
 
     def __init__(
         self,
@@ -42,19 +38,17 @@ class TemporalWorker:
         self._settings = settings or TemporalSettings.from_environment()
         self._config = config or get_config()
         self._runtime = AppRuntime(self._config)
-        self._contextualization_transport: OpenRouterTransport | None = None
-        self._index: ItemIndex | None = None
 
     async def run(self) -> None:
         client = await TemporalClientProvider(self._settings).get()
+        await self._runtime.workflow_service().ensure_search_attributes()
         worker_config = self._config.worker
-        ingestion = self._configured_ingestion_activity()
-        native_upload_indexing = self._configured_native_upload_indexing_activity()
+        activities = self._activities()
         worker = Worker(
             client,
             task_queue=self._settings.task_queue,
-            workflows=[IngestionWorkflow, NativeUploadIndexingWorkflow],
-            activities=[ingestion.ingest_items, native_upload_indexing.index_upload],
+            workflows=[IngestionWorkflow],
+            activities=[activities.ingest_source, activities.ingest_document],
             # Importing a submodule of ``bothesis.services`` executes that
             # package's database-backed public boundary. Pass through only the
             # already-loaded workflow module and its lightweight contracts;
@@ -62,80 +56,42 @@ class TemporalWorker:
             workflow_runner=SandboxedWorkflowRunner(
                 restrictions=SandboxRestrictions.default.with_passthrough_modules(
                     "bothesis.services",
-                    "bothesis.services.workflow.ingestion_workflow",
-                    "bothesis.services.workflow.native_upload_indexing_workflow",
                     "bothesis.services.workflow",
+                    "bothesis.services.workflow.ingestion_workflow",
                 )
             ),
             max_concurrent_activities=worker_config.max_concurrent_activities,
             max_task_queue_activities_per_second=worker_config.activity_rate_limit,
-            graceful_shutdown_timeout=timedelta(
-                seconds=worker_config.graceful_shutdown_seconds
-            ),
+            # Heartbeats carry the live pipeline phase the monitor draws, so
+            # they are sent within ~2s instead of the SDK's 30s default.
+            default_heartbeat_throttle_interval=timedelta(seconds=1),
+            max_heartbeat_throttle_interval=timedelta(seconds=2),
+            graceful_shutdown_timeout=timedelta(seconds=worker_config.graceful_shutdown_seconds),
         )
         try:
             await worker.run()
         finally:
-            await self._close()
+            await self._runtime.aclose()
 
-    def _configured_ingestion_activity(self) -> IngestionActivity:
-        """Build the ingestion Activity from configuration, not the environment."""
-
-        model = self._config.model
-        index = self._config.vector_index
-        contextualizer = None
-        if model.contextualization_enabled:
-            self._contextualization_transport = OpenRouterTransport(
-                base_url=model.openrouter_base_url,
-                model=model.contextualization_model,
-            )
-            contextualizer = SemanticContextualizer(
-                self._contextualization_transport,
-                model_name=model.contextualization_model,
-            )
-        # Indexing runs longer than a request, so it uses its own client timeout.
-        self._index = ItemIndex(
-            collection_name=index.collection,
-            url=index.url,
-            api_key=index.api_key,
-            prefer_grpc=index.prefer_grpc,
-            timeout=self._config.worker.indexing_timeout_seconds,
-            embedder=OpenRouterTransport(base_url=model.openrouter_base_url),
-            semantic_contextualizer=contextualizer,
-            embedding_batch_size=index.embedding_batch_size,
-        )
-        return IngestionActivity(
-            get_session_factory(),
-            self._index,
-            self._runtime.object_storage(),
-            credential_encryption_key=(
-                self._config.integration.credential_encryption_key
+    def _activities(self) -> IngestionActivities:
+        runtime = self._runtime
+        return IngestionActivities(
+            runtime.sessions(),
+            index=runtime.item_index(),
+            raw_storage=runtime.object_storage(),
+            stored_content=runtime.stored_file_content(),
+            archives=ArchiveExpansionService(
+                runtime.sessions(), object_storage=runtime.object_storage()
             ),
-            providers=self._runtime.connection_providers(),
-            preview=self._runtime.knowledge_preview(),
+            workflows=runtime.workflow_service(),
+            providers=runtime.connection_providers(),
+            credential_encryption_key=self._config.integration.credential_encryption_key,
+            preview=runtime.knowledge_preview(),
         )
-
-    def _configured_native_upload_indexing_activity(
-        self,
-    ) -> NativeUploadIndexingActivity:
-        assert self._index is not None
-        return NativeUploadIndexingActivity(
-            get_session_factory(),
-            index=self._index,
-            source=self._runtime.stored_file_content(),
-            preview=self._runtime.knowledge_preview(),
-        )
-
-    async def _close(self) -> None:
-        if self._contextualization_transport is not None:
-            await self._contextualization_transport.aclose()
-        if self._index is not None:
-            await self._index.aclose()
-        await self._runtime.aclose()
 
 
 async def _main() -> None:
-    load_dotenv(Path(__file__).parents[2] / ".env", override=False)
+    load_dotenv(Path(__file__).resolve().parents[4] / ".env", override=False)
     await TemporalWorker().run()
 
 

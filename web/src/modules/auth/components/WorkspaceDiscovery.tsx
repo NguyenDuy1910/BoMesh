@@ -7,8 +7,10 @@ import { DirectoryRow } from "@/components/patterns";
 import { CommandBar } from "@/components/layout/CommandBar";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { PageLoadingSkeleton } from "@/components/ui/Skeleton";
 import { useWorkspaces, useWorkspaceSwitch } from "@/modules/auth/queries";
-import { WorkspaceDiscoveryLoadingSkeleton } from "./WorkspaceDiscoveryLoadingSkeleton";
+import { pluralize } from "@/modules/workspace-control/format";
 
 /**
  * The workspaces this person can open.
@@ -34,27 +36,14 @@ export function WorkspaceDiscovery() {
     }
   };
 
-  if (query.loading) return <WorkspaceDiscoveryLoadingSkeleton />;
-
-  if (query.error) {
-    return (
-      <section aria-label="Your workspaces" className="mx-auto w-full max-w-6xl p-[var(--page-gutter)]">
-        <h1 className="mb-5 text-[length:var(--text-size-h2)] font-semibold">Your workspaces</h1>
-        <ErrorState
-          actionLabel="Retry"
-          description={query.error}
-          onAction={query.reload}
-          title="Workspaces could not be loaded"
-        />
-      </section>
-    );
-  }
-
+  // `shell__page` gives this page the control pages' geometry: the same
+  // gutter, top offset and maximum width, so its title and list start on the
+  // same left edge as theirs.
   return (
-    <section aria-label="Your workspaces" className="mx-auto w-full max-w-6xl p-[var(--page-gutter)]">
-      <h1 className="mb-5 text-[length:var(--text-size-h2)] font-semibold">Your workspaces</h1>
+    <section aria-label="Your workspaces" className="shell__page">
+      <PageHeader description="The workspaces you're a member of." title="Your workspaces" />
       <CommandBar
-        count={`${rows.length} workspaces`}
+        count={query.data ? pluralize(rows.length, "workspace") : undefined}
         search={{
           value: search,
           onChange: setSearch,
@@ -62,26 +51,44 @@ export function WorkspaceDiscovery() {
           label: "Search workspaces",
         }}
       />
-      {switchError && <ErrorState className="mt-3" description={switchError} layout="inline" />}
-      {!rows.length ? (
-        <EmptyState
-          description="You belong to no workspace yet. An administrator can add you to one."
-          title="No workspaces"
+      {query.error ? (
+        <ErrorState
+          actionLabel="Retry"
+          description={query.error}
+          onAction={query.reload}
+          title="Workspaces could not be loaded"
         />
+      ) : !query.data ? (
+        <PageLoadingSkeleton label="Loading workspaces" />
       ) : (
-        <div className="divide-y divide-[var(--border-subtle)]">
-          {rows.map((item) => (
-            <DirectoryRow
-              description={item.role_codes.join(", ") || "Member"}
-              disabled={Boolean(switchingId)}
-              key={item.id}
-              loading={switchingId === item.id}
-              onOpen={() => void openWorkspace(item.id)}
-              provider={`Workspace code ${item.code}`}
-              title={item.name}
+        <>
+          {switchError && <ErrorState className="mb-[var(--space-3)]" description={switchError} layout="inline" />}
+          {!rows.length ? (
+            <EmptyState
+              description={term ? "Try a different search." : "An administrator can add you to one."}
+              size="sm"
+              title={term ? "No matching workspaces" : "No workspaces yet"}
             />
-          ))}
-        </div>
+          ) : (
+            // Rows keep their hover surface but pull it into the gutter, so
+            // their text lines up with the title above.
+            <div className="-mx-3 divide-y divide-[var(--border-subtle)]">
+              {rows.map((item) => (
+                <DirectoryRow
+                  // What this person may do there, read from the permissions
+                  // the session grants — never the role codes behind them.
+                  description={item.permissions.includes("tenant.manage") ? "Can manage this workspace" : "Member"}
+                  disabled={Boolean(switchingId)}
+                  key={item.id}
+                  loading={switchingId === item.id}
+                  onOpen={() => void openWorkspace(item.id)}
+                  provider={`Workspace code ${item.code}`}
+                  title={item.name}
+                />
+              ))}
+            </div>
+          )}
+        </>
       )}
     </section>
   );

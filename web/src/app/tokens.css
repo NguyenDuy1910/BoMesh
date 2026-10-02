@@ -224,6 +224,13 @@
   --code-surface: var(--palette-warm-950);
   --code-text: var(--palette-pearl-200);
   --code-muted: var(--palette-warm-500);
+  /* Code blocks sit on `--code-surface`, dark in both themes, so their rules
+     and controls need their own translucent-on-dark values rather than the
+     page's light borders. */
+  --code-border: rgb(255 255 255 / 8%);
+  --code-control-bg: rgb(255 255 255 / 6%);
+  --code-control-border: rgb(255 255 255 / 12%);
+  --code-control-hover: rgb(255 255 255 / 12%);
   --highlight-surface: #fff3c4;
   --highlight-border: #e5b94f;
 
@@ -241,7 +248,7 @@
   --radius-md: 0.625rem; /* 10px  cards, popovers, table shells  */
   --radius-lg: 0.75rem; /* 12px  panels, inspectors             */
   --radius-xl: 1rem; /* 16px  sheets, dialogs                */
-  --radius-2xl: 1.375rem; /* 22px  composer and message bubbles   */
+  --radius-2xl: 1.375rem; /* 22px  large feature surfaces          */
   --radius-full: 999px;
 
   /* Control height. Every interactive control resolves to one of these, so a
@@ -311,6 +318,13 @@
   --nav-w: 248px;
   --nav-w-collapsed: 60px;
   --header-h: 3.25rem;
+  /* A row of page tabs. Tabs are exactly this tall so their labels share a
+     centre line with the search field and buttons on the same row, and their
+     selected underline lands on the row's divider instead of above it. */
+  --tab-bar-h: 3.25rem;
+  /* Space between a page header and what it introduces, and between the
+     sections of one page. One value, so every page breathes the same way. */
+  --section-gap: var(--space-6);
   --page-gutter: clamp(1.25rem, 2.2vw, 2rem);
   --page-max: 84rem;
   --page-max-narrow: 56rem;
@@ -327,7 +341,6 @@
   --bp-nav: 1024px;
   --bp-inspector: 1280px;
 
-  --z-topbar: 10;
   --z-composer: 12;
   --z-activity: 30;
   --z-overlay: 35;

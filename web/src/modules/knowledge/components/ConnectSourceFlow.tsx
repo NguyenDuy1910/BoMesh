@@ -134,9 +134,9 @@ export function ConnectSourceFlow({
     (capability?.accepts_credentials ?? true) && Boolean(setup?.credentials.length);
   const usesAuthorization =
     canAuthorize && (connectionMethod === "authorization" || !canUseCredentials);
-  // Discovery needs an authorized account. A connector configured with a token
-  // names its resource by hand, which is what its scope fields are for.
-  const canDiscover = Boolean(connection?.account.id);
+  // A browsable connection offers its spaces/folders to pick from; otherwise
+  // its resource is named by hand, which is what the scope fields are for.
+  const canDiscover = Boolean(connection?.browsable);
 
   const loadCollections = useCallback(async () => {
     const page = await collectionsApi.list();
@@ -237,7 +237,6 @@ export function ConnectSourceFlow({
         display_name: displayName.trim(),
         config: submitted(setup.connection, connectionValues),
         credentials: submitted(setup.credentials, credentialValues),
-        credential_type: connector.key,
         owner_type: ownerType === "tenant" ? "workspace" : "user",
       });
       // Verification is part of connecting: a credential that cannot reach the
@@ -246,7 +245,7 @@ export function ConnectSourceFlow({
       await connectionsApi.validate(created.id);
       await afterConnected(await connectionsApi.get(created.id));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "The connection could not be verified.");
+      setError(cause instanceof Error ? cause.message : "The account could not be verified.");
     } finally {
       setBusy(false);
     }
@@ -448,8 +447,8 @@ export function ConnectSourceFlow({
                 <strong>Share with the workspace</strong>
                 <small>
                   {canManageWorkspace
-                    ? "Everyone here can ask about this knowledge without connecting the account themselves. Turn off to keep it to your own account."
-                    : "Only workspace control can connect an account for everyone. This one will be yours alone."}
+                    ? "Everyone in this workspace can ask about what it syncs."
+                    : "Only a workspace admin can share an account, so this one stays yours."}
                 </small>
               </span>
               <Toggle
@@ -500,7 +499,7 @@ export function ConnectSourceFlow({
               </p>
             ) : (
               <>
-                <FormField htmlFor={`${fieldId}-name`} label="Connection name" required>
+                <FormField htmlFor={`${fieldId}-name`} label="Account name" required>
                   <Input
                     id={`${fieldId}-name`}
                     onChange={(event) => setDisplayName(event.target.value)}

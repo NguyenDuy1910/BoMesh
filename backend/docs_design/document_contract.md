@@ -59,11 +59,42 @@ purpose=knowledge
 ```
 
 `purpose` is `knowledge` or `conversation_attachment`. It is business intent,
-not transport choice:
+not transport choice, and it does not decide how content is processed: every
+knowledge-format Document whose content becomes available is ingested by the
+same core (parse → chunk → contextualize → embed → index → cite), so retrieval
+reads one representation however the Document entered.
 
-- `knowledge` starts a durable Ingestion after content becomes available.
-- `conversation_attachment` keeps content available for scoped agent use and
-  does not index it eagerly.
+Knowledge formats are text (`.txt .md .markdown .rst .csv .tsv .json .jsonl
+.xml .yaml .yml .html .htm .log .sql`), Office (`.docx .pptx .xlsx`) and PDF.
+Extraction uses no model: a PDF is read from its own text layer, so a scanned
+PDF (no text layer) fails its Ingestion with "the file has no text to index",
+and text inside pictures or screenshots is not indexed.
+**Images are not knowledge in this phase.** An image (`.png .jpg .jpeg .gif
+.webp .bmp .tif .tiff .avif`) is accepted only as a `conversation_attachment`,
+for the model to look at in that conversation: it is stored and `available`,
+but never ingested (internal `index_status` `unsupported`, `latest_ingestion`
+null, retry `409`). As `knowledge`, or in any workspace Collection, it is
+rejected with `422`. Sources and archives skip image files the same way.
+
+## Who runs the ingestion
+
+The destination Collection decides, and `DocumentService` records the choice
+as the Ingestion's `mode`:
+
+| Destination | Mode | Runner |
+| --- | --- | --- |
+| The caller's own system Collection (`My uploads`, conversation artifacts): chat attachments, the personal library | `direct` | the API process runs the core right after the bytes land. No workflow infrastructure; interrupted runs resume at API startup |
+| A workspace Collection (Collection write access: workspace knowledge management) | `managed` | one Temporal ingestion, with durable retries, cancellation and the Activity monitor |
+
+Connector Sources are always managed (`source.manage`). A normal member needs
+no ingestion-management permission to upload for chat: their uploads land in
+their own Collection and run directly.
+
+For local development, `backend/main.py` starts the existing Compose services
+and runs the managed-ingestion Temporal worker alongside the API. The worker
+stops with the API; shared Compose infrastructure remains running. Deployed
+API and worker processes remain independently deployable; no HTTP contract
+depends on this local bootstrap.
 
 Both representations call one Document creation use-case. Direct upload stores
 and validates bytes within the request. JSON creation returns temporary upload
@@ -99,8 +130,8 @@ Response is `DocumentCreateResult`:
 Document; response shape stays unchanged.
 
 For direct `knowledge` upload, `document.status` is `available`, `upload` is
-null, and `ingestion` contains the created Ingestion. For
-`conversation_attachment`, `ingestion` remains null regardless of transport.
+null, and `latest_ingestion` is the created Ingestion. An image attachment has
+none.
 
 ## Content finalization
 
@@ -139,8 +170,17 @@ not a readable public state. Search/index processing remains on the separate
 pending | running | completed | failed | cancelled | timed_out
 ```
 
-Document responses may expose `latest_ingestion_id`, but do not duplicate
-Ingestion status as `index_status`, `processing`, or `ready`.
+Document responses embed `latest_ingestion` (an `Ingestion`, or `null`) rather
+than duplicating its state as `index_status`, `processing`, or `ready`. It is
+the Document's own Ingestion: an upload records one when its bytes become
+available and a new one on retry, on the Item (`metadata.ingestion`, with its
+`mode`), and the core keeps it current as it runs, whichever runner runs it:
+phases, counts, timestamps and a user-safe failure reason. It outlives the
+ingestion runtime's retention. For a managed run its `id` is also the
+execution `/ingestions` reports live. It is `null` for a Document a connector
+wrote (its Source's Ingestion indexed it) and for content that never arrived.
+Retrying goes through `POST /ingestions/{ingestion_id}/retry`, in the run's
+original mode; a direct run cannot be cancelled (`409`).
 
 State transitions are intentionally narrow:
 
@@ -153,8 +193,47 @@ failed -> available           (retry after valid object is present)
 available -> available       (idempotent finalization)
 ```
 
-`available` does not imply searchable. A `knowledge` Document starts a
-separate Ingestion; `conversation_attachment` does not start eager indexing.
+`available` does not imply searchable: indexing is the Ingestion's job. The
+agent can read an attachment's content before its Ingestion completes.
+
+## Archives
+
+A `.zip` may be created like any other file (multipart or presigned) into a
+**workspace Collection**, as `knowledge`: expanding it is bulk ingestion, so it
+is always managed. Into the caller's own Collection, or as a
+`conversation_attachment`, it is rejected with `422`. The response is the
+archive's own Document (`content_type` `application/zip`, internal
+`document_type` `archive`). An archive is an upload record, not knowledge: it
+is never canonicalized or indexed itself.
+
+Its Ingestion expands it. Each accepted member becomes an ordinary `knowledge`
+Document of the **same Collection** — its own Item, private upload record,
+object and Ingestion — and is parsed, contextually chunked, embedded, indexed
+and cited exactly like a file uploaded directly. Children are Collection
+children, not Document children, because retrieval scopes every chunk by its
+Document's Collection. Lineage is kept on the child as
+`metadata.archive = {document_id, name, path}`; the archive records
+`metadata.archive = {status, document_count, skipped_count, skipped[]}`.
+
+Safety and limits (defaults): at most 5,000 entries inspected, 500 Documents
+produced (the rest reported as skipped), 2 GiB expanded in total, 100 MiB per
+member, and a 200:1 compression ratio for members over 1 MiB. Traversing or
+absolute paths, symbolic links, encrypted and empty members, nested archives,
+hidden files and unsupported formats are skipped with a reason; archiving
+debris (`__MACOSX`, `.DS_Store`) is dropped silently. A bomb, an over-limit
+expansion or an unreadable archive fails the archive's Ingestion and adds no
+Documents. Member paths never choose a filesystem location.
+
+Expansion is idempotent: a child's identity derives from the archive and the
+member path, so a retried Ingestion resumes rather than duplicating.
+
+A successful expansion removes the archive Document (tombstone): what it held
+now lives in the Collection as ordinary Documents, so the archive no longer
+appears in Document reads. The tombstoned row stays as the children's lineage
+and keeps the skip report, and its Ingestion (phase `expanding`) stays visible
+in `/ingestions`. A failed expansion keeps the archive Document with a failed
+`latest_ingestion`, so the reason stays visible and retryable. Removing a child
+is independent of the archive.
 
 ## Idempotency
 
