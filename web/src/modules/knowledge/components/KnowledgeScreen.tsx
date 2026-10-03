@@ -300,6 +300,26 @@ export function KnowledgeScreen() {
       });
     }, "Indexing could not be retried. Try again in a moment.");
 
+  /**
+   * Index the selected documents again, whatever their last indexing did.
+   * The backend decides which can be; the toast says how many started and
+   * repeats its reasons for the rest, counted.
+   */
+  const reindexSelection = () =>
+    act(async () => {
+      const targets = documents.filter((document) => selection.includes(document.id));
+      const { started, refused } = await knowledgeActions.reindex(targets);
+      const reasons = [...refused].map(([reason, count]) => `${count.toLocaleString()} not started: ${reason}.`).join(" ");
+      if (started) setSelection([]);
+      toast({
+        title: started
+          ? `Re-indexing ${pluralize(started, "document")}`
+          : "Nothing re-indexed",
+        description: reasons || "They show as Indexing until they can be searched again.",
+        variant: started && !refused.size ? "success" : undefined,
+      });
+    }, "The documents couldn’t be re-indexed. Try again in a moment.");
+
   const removeDocuments = async () => {
     const ids = removalIds ?? [];
     if (!ids.length) return;
@@ -502,16 +522,13 @@ export function KnowledgeScreen() {
           onConnectSource={connectSource}
           onOpenCollection={browseCollection}
           onOpenDocument={openDocument}
-          onRetryIndexingSelection={() =>
-            void retryIndexing(documents.filter((document) => selection.includes(document.id)))}
+          onReindexSelection={() => void reindexSelection()}
           onRemoveSelection={() => setRemovalIds(selection)}
           onToggleDocument={(id, checked) =>
             setSelection((current) => checked ? [...new Set([...current, id])] : current.filter((item) => item !== id))}
+          onSelectDocuments={setSelection}
           onCreateCollection={canCreateCollection ? () => setCreatingCollection(true) : undefined}
           onUpload={requestUpload}
-          retryableSelectionCount={documents.filter(
-            (document) => selection.includes(document.id) && canRetryIndexing(document),
-          ).length}
           onWidenScope={() => setScope("")}
           scope={scope}
           search={search}

@@ -1,14 +1,16 @@
-"""Approval requests and audit-log resources."""
+"""Approval requests, audit-log, and access-session resources."""
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Query, status
 
 from api.deps import Caller, WorkspaceControlPlane
 from api.routers import (
+    AccessSessionPage,
+    AccessSessionRecord,
     ApprovalRequest,
     ApprovalRequestCreate,
     ApprovalRequestPage,
@@ -106,6 +108,34 @@ async def list_audit_logs(
     )
     return AuditLogPage(
         items=[AuditLog.model_validate(item) for item in value.get("items", [])],
+        page=value.get("page", page),
+        page_size=value.get("page_size", page_size),
+        total=value.get("total", 0),
+    )
+
+
+@router.get("/access-sessions", response_model=AccessSessionPage)
+async def list_access_sessions(
+    caller: Caller,
+    control_plane: WorkspaceControlPlane,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+    status: Literal["active", "ended"] | None = None,
+    user_id: UUID | None = None,
+    search: str | None = None,
+) -> AccessSessionPage:
+    value = await control_plane.list_access_sessions(
+        caller,
+        page=page,
+        page_size=page_size,
+        status=status,
+        user_id=user_id,
+        search=search,
+    )
+    return AccessSessionPage(
+        items=[
+            AccessSessionRecord.model_validate(item) for item in value.get("items", [])
+        ],
         page=value.get("page", page),
         page_size=value.get("page_size", page_size),
         total=value.get("total", 0),

@@ -30,6 +30,11 @@ read:  GET /knowledge/documents/{id}[?chunk=] ── authorize ──► signed 
 browser: fetch rendition directly from storage ─► render blocks ─► highlight cited element/rows
 ```
 
+Signed URLs are issued for the storage host as the client reaches it
+(`BOMESH_S3_PUBLIC_ENDPOINT_URL`, defaulting to the backend's own
+`BOMESH_S3_ENDPOINT_URL`): SigV4 signs the host, so a URL naming the backend's
+loopback address works on the same machine and fails on a phone.
+
 Rejected alternatives:
 
 - **Convert Office files to PDF (LibreOffice) and reuse page images.** A large

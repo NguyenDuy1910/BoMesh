@@ -22,7 +22,18 @@ DEV_TENANT_CODE ?= local
 DEV_USER_EMAIL ?= local-admin@bomesh.dev
 DEV_USER_IS_PLATFORM_ADMIN ?= true
 
-.PHONY: help init reset-all config services _temporal-reset db-init db-seed db-seed-accounts db-reset qdrant-init status
+FLUTTER ?= flutter
+APP_DIR := app
+APP_ENV ?= local
+APP_ENV_FILE := $(APP_DIR)/env/$(APP_ENV).json
+APP_PACKAGE_CONFIG := $(APP_DIR)/.dart_tool/package_config.json
+DEVICE ?= chrome
+WEB_PORT ?= 5174
+MODE ?= debug
+FLUTTER_RUN_FLAGS ?=
+FLUTTER_RUN := $(FLUTTER) run --$(MODE) --no-pub --dart-define-from-file=env/$(APP_ENV).json $(FLUTTER_RUN_FLAGS)
+
+.PHONY: help init reset-all config services _temporal-reset db-init db-seed db-seed-accounts qdrant-init status app-deps app-run app-web app-devices _app-env
 
 help: ## Show available local-development commands.
 	@echo "BoMesh local development"
@@ -176,3 +187,22 @@ status: ## Show the current local dependency and application health.
 	@echo
 	@curl --silent --show-error --max-time 10 http://127.0.0.1:8000/health || echo "API is not running yet."
 	@echo
+
+app-deps: $(APP_PACKAGE_CONFIG) ## Run flutter pub get only when pubspec.yaml/pubspec.lock changed.
+
+$(APP_PACKAGE_CONFIG): $(APP_DIR)/pubspec.yaml $(APP_DIR)/pubspec.lock
+	@cd $(APP_DIR) && $(FLUTTER) pub get
+	@touch $@
+
+_app-env:
+	@if [[ ! -f "$(APP_ENV_FILE)" ]]; then echo "Missing $(APP_ENV_FILE); create it or pass APP_ENV=<name>." >&2; exit 1; fi
+	@if [[ ! "$(MODE)" =~ ^(debug|profile|release)$$ ]]; then echo "MODE must be debug, profile, or release (got: $(MODE))." >&2; exit 1; fi
+
+app-run: app-deps _app-env ## Run Flutter on DEVICE=<id> (default chrome) in MODE=debug|profile|release with app/env/<APP_ENV>.json.
+	@cd $(APP_DIR) && $(FLUTTER_RUN) -d "$(DEVICE)"
+
+app-web: app-deps _app-env ## Serve Flutter web on 127.0.0.1:<WEB_PORT> (default 5174) with app/env/<APP_ENV>.json.
+	@cd $(APP_DIR) && $(FLUTTER_RUN) -d web-server --web-hostname=127.0.0.1 --web-port=$(WEB_PORT)
+
+app-devices: ## List Flutter devices and their ids for DEVICE=<id>.
+	@$(FLUTTER) devices

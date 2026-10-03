@@ -35,6 +35,7 @@ from bomesh.services import (
     timestamp,
 )
 from bomesh.services.audit import AuditService
+from bomesh.services.dashboard.activity import ActivityService
 from bomesh.services.identity_access import tenant_payload
 
 
@@ -46,12 +47,15 @@ class DashboardService:
         session: AsyncSession,
         *,
         audit: AuditService | None = None,
+        activity: ActivityService | None = None,
     ) -> None:
         self._session = session
         self._audit = audit or AuditService(session)
+        self._activity = activity or ActivityService(session)
 
-    async def overview(self, actor: AuthContext) -> dict[str, Any]:
+    async def overview(self, actor: AuthContext, *, tz: str = "UTC") -> dict[str, Any]:
         tenant_id = require_tenant_permission(actor, TENANT_READ_PERMISSION)
+        usage = await self._activity.usage(actor, tz=tz)
         tenant = await self._tenant(tenant_id)
         metrics = {
             "active_users": await self._count(
@@ -116,6 +120,21 @@ class DashboardService:
             if actor.has_permissions(AUDIT_READ_PERMISSION)
             else {"items": []}
         )
+        knowledge = (
+            await self._session.execute(
+                select(
+                    func.count().filter(Item.item_type == "collection"),
+                    func.count().filter(Item.item_type == "document"),
+                    func.count().filter(Item.index_status == "ready"),
+                    func.count().filter(Item.index_status.in_(("pending", "processing"))),
+                    func.count().filter(Item.index_status == "failed"),
+                ).where(
+                    Item.tenant_id == tenant_id,
+                    Item.status != "deleted",
+                    Item.deleted_at.is_(None),
+                )
+            )
+        ).one()
         return {
             "tenant": {
                 "id": str(tenant.id),
@@ -127,6 +146,14 @@ class DashboardService:
             "metrics": metrics,
             "attention": attention,
             "recent_activity": recent["items"],
+            "knowledge": dict(
+                zip(
+                    ("collections", "documents", "indexed", "indexing", "failed"),
+                    (int(value) for value in knowledge),
+                    strict=True,
+                )
+            ),
+            "usage": usage,
             "generated_at": timestamp(await self._session.scalar(select(func.now()))),
         }
 

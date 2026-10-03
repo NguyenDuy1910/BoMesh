@@ -16,7 +16,7 @@ follows `api_contract.md` and names current owning services.
 | POST | `/collections/{collection_id}/documents/upload` | direct multipart upload | knowledge/control plane UI | `DocumentService.upload_to_collection` | collection write ACL | rename; merge with reservation | `/collections/{collection_id}/documents` (`multipart/form-data`) |
 | POST | `/documents/uploads` | presigned Document reservation | chat upload UI | `DocumentService.reserve_upload` | caller + destination Collection | merge into Document creation | `/collections/{collection_id}/documents` (`application/json`) |
 | POST | `/documents/{document_id}/complete` | validate presigned object | chat upload UI | `DocumentService.finalize_content` | caller + Document ownership | rename method; remove Upload resource | `PUT /documents/{document_id}/content` |
-| POST | `/documents/{document_id}/retry` | document indexing retry | knowledge UI | `DocumentService.retry_ingestion` | caller | merge | `/ingestions/{ingestion_id}/retry` |
+| POST | `/documents/{document_id}/retry` | document indexing retry | knowledge UI | `IngestionService.retry_ingestion` → `DocumentService.restart_ingestion` | caller | merge | `/ingestions/{ingestion_id}/retry` |
 | POST | `/documents/search` | semantic search | knowledge UI | `KnowledgeQueryService.search` | permission-filtered | keep | same |
 | GET/DELETE | `/documents/{doc_id}` | document read/removal | chat/knowledge UI | `DocumentService` | caller + collection | rename ID | `/documents/{document_id}` |
 | GET/POST/PATCH/DELETE | `/admin/collections*` | Collection CRUD/ACL | control plane UI | `WorkspaceControlPlaneService`, `ItemCatalogService` | workspace access | merge | `/collections*` |

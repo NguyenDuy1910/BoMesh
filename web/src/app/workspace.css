@@ -233,6 +233,30 @@
   line-height: var(--text-lh-meta);
 }
 
+/* A select control leads the documents heading, on the same line as the row
+   checkboxes below it: the checkbox selects everything shown, the chevron
+   beside it selects by status or type. */
+.knowledge-list-heading__title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.knowledge-select-menu {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.125rem;
+}
+
+.knowledge-select-menu .knowledge-select-menu__trigger {
+  width: 1.5rem;
+  height: 1.5rem;
+  min-height: 0;
+  padding: 0;
+  color: var(--text-tertiary);
+}
+
 .knowledge-muted {
   color: var(--text-tertiary);
   font-size: var(--text-size-ui);

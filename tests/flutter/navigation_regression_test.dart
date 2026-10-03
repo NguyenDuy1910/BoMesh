@@ -61,8 +61,6 @@ void main() {
               builder: (_, _) => ChatSidebar(
                 controller: controller,
                 collapsed: false,
-                themeMode: ThemeMode.light,
-                onCycleTheme: () {},
               ),
             ),
           ),

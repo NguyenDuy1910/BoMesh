@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../../../core/api_client.dart';
+import '../../../core/uploads.dart';
 import '../../auth/session.dart';
 import '../models/chat_models.dart';
 import '../models/chat_stream.dart';
@@ -330,23 +331,15 @@ class ChatController extends ChangeNotifier {
     _notify();
   }
 
-  Future<void> addAttachment({
-    required String fileName,
-    required Uint8List bytes,
-  }) async {
+  Future<void> addAttachment(UploadSource source) async {
     if (_disposed || isGenerating || attachments.length >= 10) return;
-    final file = UploadFile(
-      fileName: fileName,
-      bytes: bytes,
-      contentType: _contentType(fileName),
-      idempotencyKey: newRequestId(),
-    );
+    final file = UploadFile(source: source, idempotencyKey: newRequestId());
     attachments = [
       ...attachments,
       ComposerAttachment(
         key: file.idempotencyKey,
-        fileName: fileName,
-        sizeBytes: bytes.length,
+        fileName: source.fileName,
+        sizeBytes: source.length,
         progress: UploadProgress.starting,
         upload: file,
       ),
@@ -710,28 +703,3 @@ String _titleFromMessage(String value) {
   return cleaned.length > 54 ? '${cleaned.substring(0, 51)}…' : cleaned;
 }
 
-String _contentType(String fileName) => switch (fileName
-    .split('.')
-    .last
-    .toLowerCase()) {
-  'pdf' => 'application/pdf',
-  'png' => 'image/png',
-  'jpg' || 'jpeg' => 'image/jpeg',
-  'gif' => 'image/gif',
-  'webp' => 'image/webp',
-  'avif' => 'image/avif',
-  'bmp' => 'image/bmp',
-  'tif' || 'tiff' => 'image/tiff',
-  'csv' => 'text/csv',
-  'tsv' => 'text/tab-separated-values',
-  'json' || 'jsonl' => 'application/json',
-  'html' || 'htm' => 'text/html',
-  'md' || 'markdown' => 'text/markdown',
-  'txt' || 'rst' || 'log' || 'sql' || 'yaml' || 'yml' || 'xml' => 'text/plain',
-  'docx' =>
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'pptx' =>
-    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  _ => 'application/octet-stream',
-};

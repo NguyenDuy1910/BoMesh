@@ -12,25 +12,44 @@ export interface KnowledgeHome {
 
 export interface KnowledgeCollectionPage {
   collection: ApiKnowledgeCollection;
-  child_collections: ApiKnowledgeCollection[];
+  /** Every document in the collection, across all of its pages. */
   documents: ApiKnowledgeDocument[];
   total: number;
-  page: number;
-  page_size: number;
 }
+
+/** The largest page `/documents` serves. */
+const DOCUMENT_PAGE_SIZE = 100;
 
 export const knowledgeApi = {
   home: async (): Promise<KnowledgeHome> => {
     const value = await apiRequest<{ collections: ContractCollection[]; recent_documents: ContractDocument[]; personal_collection_id: string | null }>("/knowledge/home");
     return { collections: value.collections.map(toCollection), recent_documents: value.recent_documents.map(toDocument), personal_collection_id: value.personal_collection_id };
   },
-  collection: async (collectionId: string, page = 1): Promise<KnowledgeCollectionPage> => {
-    const [collection, documents] = await Promise.all([
+  /**
+   * A collection and all of its documents. The list is read whole, so
+   * selecting "all" selects everything the collection holds, not one page.
+   */
+  collection: async (collectionId: string): Promise<KnowledgeCollectionPage> => {
+    const documentsPage = (page: number) =>
+      apiRequest<{ items: ContractDocument[]; total: number }>(
+        `/documents?collection_id=${encodeURIComponent(collectionId)}&page=${page}&page_size=${DOCUMENT_PAGE_SIZE}`,
+      );
+    const [collection, first] = await Promise.all([
       apiRequest<ContractCollection>(`/collections/${encodeURIComponent(collectionId)}`),
-      apiRequest<{ items: ContractDocument[]; total: number; page: number; page_size: number }>(`/documents?collection_id=${encodeURIComponent(collectionId)}&page=${page}&page_size=100`),
+      documentsPage(1),
     ]);
-    return { collection: toCollection(collection), child_collections: [], documents: documents.items.map(toDocument), total: documents.total, page: documents.page, page_size: documents.page_size };
+    const remaining = Math.max(0, Math.ceil(first.total / DOCUMENT_PAGE_SIZE) - 1);
+    const rest = await Promise.all(Array.from({ length: remaining }, (_, index) => documentsPage(index + 2)));
+    const documents = [first, ...rest].flatMap((page) => page.items);
+    return { collection: toCollection(collection), documents: documents.map(toDocument), total: first.total };
   },
+  /**
+   * Index a document again from its stored content: a new run of its
+   * Ingestion. Refused (409) while one is queued or running, and for a
+   * document a connector wrote — its source's sync re-indexes it.
+   */
+  reindex: (documentId: string) =>
+    apiRequest<Ingestion>(`/documents/${encodeURIComponent(documentId)}/ingestions`, { method: "POST" }),
   createCollection: (title: string, description?: string) =>
     apiRequest<{ id: string; title: string }>("/collections", {
       method: "POST",

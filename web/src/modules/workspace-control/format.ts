@@ -85,3 +85,25 @@ export function describeAuditAction(action?: string | null) {
   const resource = parts.join(" ").replaceAll("_", " ");
   return `${verb.charAt(0).toUpperCase()}${verb.slice(1)} ${resource}`;
 }
+
+const SIGN_IN_METHODS: Record<string, string> = {
+  password: "Password",
+  oidc: "Single sign-on",
+  saml: "SAML single sign-on",
+  internal: "Development sign-in",
+};
+
+/** How someone signed in, as the person who chose it would name it. */
+export function describeSignInMethod(method: string) {
+  return SIGN_IN_METHODS[method] ?? titleCase(method);
+}
+
+/** A span of time at the precision a person reads it: "2h 14m", "3d 4h", "Under a minute". */
+export function formatSpan(milliseconds: number) {
+  const minutes = Math.floor(Math.max(0, milliseconds) / 60_000);
+  if (minutes < 1) return "Under a minute";
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ${minutes % 60}m`;
+  return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+}

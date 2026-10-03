@@ -58,7 +58,8 @@
 
 .document-row:hover .document-row__select,
 .document-row__select:checked,
-.document-row__select:focus-visible {
+.document-row__select:focus-visible,
+[data-selecting] .document-row__select {
   opacity: 1;
 }
 

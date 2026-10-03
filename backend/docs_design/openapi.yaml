@@ -418,6 +418,30 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '409': {$ref: '#/components/responses/Conflict'}
         '422': {$ref: '#/components/responses/ValidationError'}
+  /api/v1/documents/{document_id}/ingestions:
+    post:
+      tags: [ingestions]
+      operationId: createDocumentIngestion
+      x-required-collection-permission: collection.update
+      x-required-collection-role: editor
+      description: >-
+        Re-index an uploaded Document: start a new `manual` run of its Ingestion
+        (same `ingestion_id`), processing the stored content from scratch.
+        `409` while a run is queued or running, for content that is not
+        processed as knowledge, or when the original file is unavailable
+        (a connector-written Document is re-indexed by its Source's sync).
+      parameters:
+        - {$ref: '#/components/parameters/DocumentId'}
+      responses:
+        '202':
+          description: Accepted Ingestion
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Ingestion'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
   /api/v1/artifacts/{artifact_id}:
     get:
       tags: [artifacts]
@@ -883,15 +907,44 @@ paths:
       tags: [workspaces]
       operationId: getWorkspaceOverview
       x-required-permissions: [tenant.read]
-      x-authorization-rule: recent_activity is empty without audit.read.
+      x-authorization-rule: recent_activity is empty without audit.read; knowledge and usage are aggregate counts only.
       parameters:
         - {$ref: '#/components/parameters/WorkspaceId'}
+        - {$ref: '#/components/parameters/Timezone'}
       responses:
         '200':
           description: Workspace dashboard projection
           content:
             application/json:
               schema: {$ref: '#/components/schemas/WorkspaceOverview'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/ValidationError'}
+  /api/v1/workspaces/{workspace_id}/activity:
+    get:
+      tags: [workspaces]
+      operationId: getWorkspaceActivity
+      x-required-permissions: [audit.read]
+      description: >-
+        Sign-ins, questions, conversations, and administrative changes in the
+        caller's active workspace, bucketed on the `tz` wall clock. Another
+        workspace's id is 404.
+      parameters:
+        - {$ref: '#/components/parameters/WorkspaceId'}
+        - name: window
+          in: query
+          description: '24h: 24 hourly buckets; 7d: 7 daily buckets; 30d: 30 daily buckets'
+          schema: {type: string, enum: ['24h', '7d', '30d'], default: '7d'}
+        - {$ref: '#/components/parameters/Timezone'}
+      responses:
+        '200':
+          description: Workspace activity dashboard
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WorkspaceActivity'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/ValidationError'}
   /api/v1/users:
     get:
       tags: [iam]
@@ -1101,6 +1154,32 @@ paths:
       x-required-permissions: [audit.read]
       responses:
         '200': {description: Audit Logs, content: {application/json: {schema: {$ref: '#/components/schemas/AuditLogPage'}}}}
+  /api/v1/access-sessions:
+    get:
+      tags: [governance]
+      operationId: listAccessSessions
+      x-required-permissions: [audit.read]
+      description: >-
+        Sign-in sessions of the caller's active workspace (kind user only),
+        newest first (`created_at` desc, then `id`).
+      parameters:
+        - {$ref: '#/components/parameters/Page'}
+        - {$ref: '#/components/parameters/PageSize'}
+        - name: status
+          in: query
+          description: '`active`: effectively active now; `ended`: every other session.'
+          schema: {type: string, enum: [active, ended]}
+        - name: user_id
+          in: query
+          schema: {type: string, format: uuid}
+        - name: search
+          in: query
+          description: Case-insensitive match on the user's email or display name.
+          schema: {type: string}
+      responses:
+        '200': {description: Access sessions, content: {application/json: {schema: {$ref: '#/components/schemas/AccessSessionPage'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '422': {$ref: '#/components/responses/ValidationError'}
   /api/v1/platform/overview:
     get:
       tags: [platform]
@@ -1148,6 +1227,11 @@ components:
     Search: {name: search, in: query, schema: {type: string, maxLength: 255}}
     IdempotencyKey: {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 128}}
     WorkspaceId: {name: workspace_id, in: path, required: true, schema: {type: string, format: uuid}}
+    Timezone:
+      name: tz
+      in: query
+      description: IANA timezone name whose wall clock cuts the buckets; an unknown name is 422.
+      schema: {type: string, default: UTC, examples: [Asia/Ho_Chi_Minh]}
     UserId: {name: user_id, in: path, required: true, schema: {type: string, format: uuid}}
     RoleId: {name: role_id, in: path, required: true, schema: {type: string, format: uuid}}
     GroupId: {name: group_id, in: path, required: true, schema: {type: string, format: uuid}}
@@ -1806,13 +1890,123 @@ components:
           properties: {items: {type: array, items: {$ref: '#/components/schemas/Workspace'}}}
     WorkspaceOverview:
       type: object
-      required: [workspace, metrics, attention, recent_activity, generated_at]
+      required: [workspace, metrics, attention, recent_activity, knowledge, usage, generated_at]
       properties:
         workspace: {$ref: '#/components/schemas/Workspace'}
         metrics: {type: object, additionalProperties: {type: integer}}
         attention: {type: object, additionalProperties: {type: integer}}
         recent_activity: {type: array, items: {$ref: '#/components/schemas/AuditLog'}}
+        knowledge: {$ref: '#/components/schemas/KnowledgeHealth'}
+        usage: {$ref: '#/components/schemas/WorkspaceUsage'}
         generated_at: {type: string, format: date-time}
+    KnowledgeHealth:
+      type: object
+      description: Non-deleted Items. Index counts cover Documents only (`unsupported` is in none of them).
+      required: [collections, documents, indexed, indexing, failed]
+      properties:
+        collections: {type: integer, minimum: 0}
+        documents: {type: integer, minimum: 0}
+        indexed: {type: integer, minimum: 0, description: index_status ready}
+        indexing: {type: integer, minimum: 0, description: index_status pending or processing}
+        failed: {type: integer, minimum: 0, description: index_status failed}
+    UsageCounts:
+      type: object
+      required: [active_users, questions, sign_ins]
+      properties:
+        active_users: {type: integer, minimum: 0}
+        questions: {type: integer, minimum: 0}
+        sign_ins: {type: integer, minimum: 0}
+    WorkspaceUsage:
+      type: object
+      required: [timezone, buckets, totals, previous]
+      properties:
+        timezone: {type: string}
+        buckets:
+          type: array
+          description: 30 daily buckets on the `tz` wall clock, oldest first, zero-filled
+          items:
+            allOf:
+              - {$ref: '#/components/schemas/UsageCounts'}
+              - type: object
+                required: [start]
+                properties:
+                  start: {type: string, format: date-time}
+        totals:
+          allOf: [{$ref: '#/components/schemas/UsageCounts'}]
+          description: The last 7 local days (the same span as the 7d activity window)
+        previous:
+          allOf: [{$ref: '#/components/schemas/UsageCounts'}]
+          description: The equally long span immediately before
+    ActivityTotals:
+      type: object
+      required: [active_users, sign_ins, questions, conversations, changes, failed_changes]
+      properties:
+        active_users: {type: integer, minimum: 0}
+        sign_ins: {type: integer, minimum: 0}
+        questions: {type: integer, minimum: 0}
+        conversations: {type: integer, minimum: 0}
+        changes: {type: integer, minimum: 0}
+        failed_changes: {type: integer, minimum: 0}
+    WorkspaceActivity:
+      type: object
+      required: [window, timezone, bucket, start, generated_at, totals, previous, live_sessions, buckets, sign_in_methods, top_changes, people]
+      properties:
+        window: {type: string, enum: ['24h', '7d', '30d']}
+        timezone: {type: string}
+        bucket: {type: string, enum: [hour, day]}
+        start: {type: string, format: date-time, description: Start of the oldest bucket; the window ends at generated_at}
+        generated_at: {type: string, format: date-time}
+        totals: {$ref: '#/components/schemas/ActivityTotals'}
+        previous:
+          allOf: [{$ref: '#/components/schemas/ActivityTotals'}]
+          description: The equally long span immediately before start
+        live_sessions: {type: integer, minimum: 0}
+        buckets:
+          type: array
+          description: Every bucket in the window, oldest first, zero-filled
+          items:
+            type: object
+            required: [start, active_users, sign_ins, questions, changes, failed_changes]
+            properties:
+              start: {type: string, format: date-time}
+              active_users: {type: integer, minimum: 0}
+              sign_ins: {type: integer, minimum: 0}
+              questions: {type: integer, minimum: 0}
+              changes: {type: integer, minimum: 0}
+              failed_changes: {type: integer, minimum: 0}
+        sign_in_methods:
+          type: array
+          items:
+            type: object
+            required: [method, count]
+            properties:
+              method: {type: string}
+              count: {type: integer, minimum: 0}
+        top_changes:
+          type: array
+          maxItems: 8
+          items:
+            type: object
+            required: [action, count, failed]
+            properties:
+              action: {type: string}
+              count: {type: integer, minimum: 0}
+              failed: {type: integer, minimum: 0}
+        people:
+          type: array
+          maxItems: 10
+          items:
+            type: object
+            required: [user_id, email, display_name, questions, conversations, sign_ins, changes, last_active_at]
+            properties:
+              user_id: {type: string, format: uuid}
+              email: {type: [string, 'null']}
+              display_name: {type: [string, 'null']}
+              questions: {type: integer, minimum: 0}
+              conversations: {type: integer, minimum: 0}
+              sign_ins: {type: integer, minimum: 0}
+              changes: {type: integer, minimum: 0}
+              last_active_at: {type: [string, 'null'], format: date-time}
     User:
       type: object
       required: [id, email, display_name, status, roles, groups]
@@ -2036,6 +2230,40 @@ components:
         - type: object
           required: [items]
           properties: {items: {type: array, items: {$ref: '#/components/schemas/AuditLog'}}}
+    AccessSessionRecord:
+      type: object
+      description: Session metadata only; never tokens, token_version, metadata, or provider subjects.
+      required: [id, user, authentication_method, entry, status, started_at, last_seen_at, ended_at, end_reason, expires_at, current]
+      properties:
+        id: {type: string, format: uuid}
+        user:
+          type: object
+          required: [id, email, display_name]
+          properties:
+            id: {type: string, format: uuid}
+            email: {type: [string, 'null']}
+            display_name: {type: [string, 'null']}
+        authentication_method: {type: string}
+        entry: {type: string, enum: [sign_in, workspace_switch]}
+        status:
+          type: string
+          enum: [active, expired, revoked, superseded]
+          description: Effective status; a stored-active row past its absolute or idle expiry is expired.
+        started_at: {type: string, format: date-time}
+        last_seen_at: {type: [string, 'null'], format: date-time}
+        ended_at:
+          type: [string, 'null']
+          format: date-time
+          description: For an effectively expired row still stored active, the expiry that lapsed.
+        end_reason: {type: [string, 'null']}
+        expires_at: {type: string, format: date-time}
+        current: {type: boolean, description: The caller's own session}
+    AccessSessionPage:
+      allOf:
+        - {$ref: '#/components/schemas/PageFields'}
+        - type: object
+          required: [items]
+          properties: {items: {type: array, items: {$ref: '#/components/schemas/AccessSessionRecord'}}}
     PlatformOverview:
       type: object
       required: [metrics, workspace_health]

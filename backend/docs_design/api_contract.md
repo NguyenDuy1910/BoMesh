@@ -196,6 +196,7 @@ insufficient mutation permission returns `403`.
 | GET | `/documents/{document_id}` | bearer | Document metadata and lifecycle |
 | PUT | `/documents/{document_id}/content` | bearer | Validate reserved content and make it available |
 | DELETE | `/documents/{document_id}` | bearer | Delete document from normal use |
+| POST | `/documents/{document_id}/ingestions` | bearer | Re-index: start a new run of the Document's Ingestion |
 | POST | `/documents/search` | bearer | Permission-filtered semantic search |
 
 `POST /collections/{collection_id}/documents` is the only Document creation
@@ -211,6 +212,18 @@ separate Ingestion lifecycle; there is no Document-level retry route.
 
 Those are public API states. Internal Item and upload-ledger statuses may use
 different storage-oriented values and must be mapped at the API boundary.
+
+`POST /documents/{document_id}/ingestions` re-indexes an uploaded Document on
+request, whatever its last run's outcome — the way `POST
+/sources/{source_id}/ingestions` re-syncs a Source. It needs Collection update,
+starts a `manual` run under the Document's one `ingestion_id` (mode unchanged),
+and processes the stored bytes from scratch, so a changed embedding,
+contextualization or parser setting takes effect. A queued or running run is a
+`409`, as are an unavailable original, content not processed as knowledge,
+and a connector-written Document (no upload to re-run; its Source's sync
+re-indexes it). Each `409` carries a user-facing reason, which the Web UI
+shows as-is when a bulk re-index refuses some of a selection. Retrying a
+failed run stays `POST /ingestions/{ingestion_id}/retry`.
 
 ### Artifacts
 
@@ -297,9 +310,10 @@ synchronizes one Source. Every kind runs the same ingestion core
   by the API process on arrival. It is read from the Document's Ingestion
   record; it is not listed by `GET /ingestions`, and it cannot be cancelled.
 
-`IngestionService` owns the resource for both runners and routes retry to the
-owning lifecycle (`DocumentService` for documents, in their original mode;
-`IntegrationLifecycleService.ingest_source` for Sources).
+`IngestionService` owns the resource for both runners and routes retry, and a
+Document re-index, to the owning lifecycle (`DocumentService` for documents,
+in their original mode; `IntegrationLifecycleService.ingest_source` for
+Sources).
 
 Visibility follows the data a run touches. A document Ingestion is visible to
 readers of its Collection, and retry/cancel need Collection update. A source
@@ -332,7 +346,8 @@ otherwise); there is no push channel.
 | GET | `/workspaces` | bearer | workspace membership or platform scope |
 | GET | `/workspaces/{workspace_id}` | bearer | active workspace context |
 | PATCH | `/workspaces/{workspace_id}` | bearer | `tenant.manage` |
-| GET | `/workspaces/{workspace_id}/overview` | bearer | `tenant.read` |
+| GET | `/workspaces/{workspace_id}/overview?tz=` | bearer | `tenant.read` |
+| GET | `/workspaces/{workspace_id}/activity?window=&tz=` | bearer | `audit.read` |
 | GET | `/users` | bearer | `user.manage` |
 | POST | `/users` | bearer | `user.manage` |
 | GET | `/accounts?email=` | bearer | `user.manage` |
@@ -354,6 +369,7 @@ otherwise); there is no push channel.
 | GET | `/approval-requests/{approval_request_id}` | bearer | own/reviewable request |
 | PATCH | `/approval-requests/{approval_request_id}` | bearer | requester/reviewer capability |
 | GET | `/audit-logs` | bearer | `audit.read` |
+| GET | `/access-sessions` | bearer | `audit.read` |
 
 Approval requester identity always comes from `AuthContext`; request body has
 no `requester_user_id`.
@@ -395,7 +411,21 @@ workspace assignment sets, while omitted fields preserve them.
 
 Workspace overview requires `tenant.read`, not `audit.read`. Its
 `recent_activity` is empty when the caller lacks `audit.read`; overview does
-not expose audit records through a weaker permission.
+not expose audit records through a weaker permission. Its `knowledge` and
+`usage` blocks are aggregate counts only (no identities, no audit rows), so
+`tenant.read` suffices for them:
+
+- `knowledge` = `{collections, documents, indexed, indexing, failed}` over
+  non-deleted Items (`status <> 'deleted'`, `deleted_at` null). `indexed` is
+  `index_status = ready`, `indexing` is `pending|processing`, `failed` is
+  `failed`; `unsupported` Documents count only in `documents`.
+- `usage` = `{timezone, buckets, totals, previous}`: 30 daily buckets of
+  `{start, active_users, questions, sign_ins}` (oldest first, zero-filled);
+  `totals` covers the last 7 local days — the same span as the `7d` activity
+  window — and `previous` the equally long span immediately before it.
+
+Overview's optional `tz` (IANA name, default `UTC`; unknown is `422`) is the
+wall clock that cuts the usage days.
 
 A workspace never creates identities. `POST /users` adds an existing account
 (found by exact email) as a member: an unknown email is `404` and the person
@@ -408,6 +438,56 @@ workspace administrator cannot browse other workspaces' people.
 Suspension (`PATCH /users/{user_id}` `status: suspended|active`) is a
 membership state of this workspace only. It never disables the account, its
 sign-in, or its other workspaces; account-wide disabling is a platform concern.
+
+#### Workspace activity
+
+`GET /workspaces/{workspace_id}/activity` (`audit.read`) reports the caller's
+active workspace; another workspace's id is `404`, as for overview.
+`window` is `24h` (24 hourly buckets), `7d` (7 daily), or `30d` (30 daily),
+default `7d`; `tz` is an IANA name, default `UTC`, unknown is `422`. Buckets
+are cut on the `tz` wall clock (`date_trunc` over `ts AT TIME ZONE tz`), every
+bucket in the window is emitted oldest first and zero-filled, and each `start`
+carries the zone's offset. The window runs from `start` (the oldest bucket's
+start) to `generated_at`; `previous` covers the equally long span immediately
+before `start`.
+
+All counts are scoped to the workspace and to timestamps inside the span:
+
+| Count | Source |
+| --- | --- |
+| `sign_ins` | `access_sessions` of kind `user` created in the span; a `tenant_switch` child counts (it enters this workspace) |
+| `questions` | `messages` with role `user` in the workspace's conversations, attributed to the conversation owner |
+| `conversations` | `conversations` created in the span |
+| `changes` / `failed_changes` | `audit_logs` in the span / those with `outcome <> 'success'` |
+| `active_users` | distinct users over: session users whose `created_at` or `last_seen_at` is in the span, question authors, audit actors |
+
+`live_sessions` counts sessions stored `active` whose `expires_at` and
+`idle_expires_at` (when set) are still in the future. `sign_in_methods` groups
+the window's sign-ins by `authentication_method`, count descending.
+`top_changes` is the 8 most frequent audit actions with their failed count.
+`people` is the 10 most active users — ordered by `questions + sign_ins +
+changes` descending, then `last_active_at` descending — where
+`last_active_at` is the latest of that user's presence timestamps above.
+
+#### Access sessions
+
+`GET /access-sessions` (`audit.read`) pages the active workspace's `user`
+sessions newest first (`created_at` desc, then `id`), filtered by optional
+`status` (`active` | `ended`), `user_id`, and `search` (case-insensitive on the
+user's email or display name). Each `AccessSessionRecord` is `{id, user {id,
+email, display_name}, authentication_method, entry, status, started_at,
+last_seen_at, ended_at, end_reason, expires_at, current}`:
+
+- `entry` is `sign_in` for a fresh session and `workspace_switch` for a
+  `tenant_switch` child.
+- `status` is effective: a row still stored `active` whose absolute or idle
+  expiry has passed is `expired`, with `ended_at` the expiry that lapsed and
+  `end_reason` `session_expired`. `status=active` returns effectively active
+  rows; `status=ended` returns all others.
+- `current` marks the caller's own session.
+
+Token versions, session metadata, and identity-provider subjects are never
+returned.
 
 ### Platform scope
 

@@ -43,6 +43,7 @@ class S3DocumentStorage:
         provider: str = _AWS_S3_PROVIDER,
         region: str | None = None,
         endpoint_url: str | None = None,
+        public_endpoint_url: str | None = None,
         addressing_style: str | None = None,
         access_key_id: str | None = None,
         secret_access_key: str | None = None,
@@ -75,7 +76,7 @@ class S3DocumentStorage:
         if max_pool_connections < 1:
             raise ValueError("max_pool_connections must be greater than zero")
 
-        if client is None:
+        def build_client(endpoint: str | None) -> Any:
             try:
                 session_arguments: dict[str, str | None] = {
                     "region_name": normalized_region,
@@ -85,10 +86,9 @@ class S3DocumentStorage:
                     session_arguments["aws_secret_access_key"] = (
                         normalized_secret_access_key
                     )
-                session = boto3.Session(**session_arguments)
-                client = session.client(
+                return boto3.Session(**session_arguments).client(
                     "s3",
-                    endpoint_url=normalized_endpoint,
+                    endpoint_url=endpoint,
                     config=Config(
                         signature_version="s3v4",
                         connect_timeout=timeout_seconds,
@@ -101,6 +101,19 @@ class S3DocumentStorage:
             except (BotoCoreError, ValueError) as exc:
                 raise ObjectStorageError("S3-compatible client configuration failed") from exc
 
+        if client is None:
+            client = build_client(normalized_endpoint)
+        # A signed URL is for whoever holds it — a browser, a phone — and SigV4
+        # signs the host, so it must name the storage host as they reach it.
+        # The backend may reach the same storage at another address (MinIO on
+        # 127.0.0.1 here, while a phone needs the machine's network address).
+        # Signing makes no request, so the second client never connects.
+        public_endpoint = _optional_string(public_endpoint_url)
+        self._signer = (
+            build_client(public_endpoint)
+            if public_endpoint is not None and public_endpoint != normalized_endpoint
+            else client
+        )
         self._bucket = normalized_bucket
         self._provider = normalized_provider
         self._client = client
@@ -231,7 +244,7 @@ class S3DocumentStorage:
             "ContentType": content_type,
         }
         try:
-            url = self._client.generate_presigned_url(
+            url = self._signer.generate_presigned_url(
                 "put_object",
                 Params=params,
                 ExpiresIn=expires_seconds,
@@ -255,7 +268,7 @@ class S3DocumentStorage:
         normalized_key = _object_key(key)
         expires_seconds = _expiry(expires_seconds)
         try:
-            url = self._client.generate_presigned_url(
+            url = self._signer.generate_presigned_url(
                 "get_object",
                 Params={"Bucket": self._bucket, "Key": normalized_key},
                 ExpiresIn=expires_seconds,
@@ -383,9 +396,11 @@ class S3DocumentStorage:
         )
 
     async def aclose(self) -> None:
-        close = getattr(self._client, "close", None)
-        if close is not None:
-            await asyncio.to_thread(close)
+        clients = [self._client] if self._signer is self._client else [self._client, self._signer]
+        for client in clients:
+            close = getattr(client, "close", None)
+            if close is not None:
+                await asyncio.to_thread(close)
 
 
 def _stored_object(value: dict[str, Any]) -> StoredObject:

@@ -4,11 +4,12 @@ import asyncio
 import base64
 import os
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo
 
 import pytest
 import pytest_asyncio
@@ -48,6 +49,7 @@ from bomesh.services import (
     PLATFORM_ADMIN_ROLE,
     ROLE_MANAGE_PERMISSION,
     TENANT_ADMIN_ROLE,
+    TENANT_MEMBER_ROLE,
     USER_MANAGE_PERMISSION,
     ArtifactValidationError,
     AuthenticationError,
@@ -67,6 +69,7 @@ from bomesh.services import (
     SandboxProviderFile,
 )
 from bomesh.services.approval_request import ApprovalRequestService
+from bomesh.services.dashboard.activity import ActivityService
 from bomesh.services.dashboard.dashboard import DashboardService
 from bomesh.services.artifact import ArtifactService
 from bomesh.services.identity_access.auth import AuthenticationService
@@ -86,6 +89,8 @@ from bomesh.services.item_catalog import ItemCatalogService
 from bomesh.services.sandbox_session import SandboxSessionService
 from bomesh.services.documents import DocumentService
 from bomesh.services.document_presentation import DocumentPresenter
+from bomesh.services.ingestion import IngestionService
+from bomesh.services.workflow import WorkflowExecutionNotFoundError
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -580,6 +585,419 @@ async def test_platform_reporting_is_gated_and_reads_roles_not_memberships(
         workspaces = await dashboard.list_platform_workspaces(operator_context)
         assert workspaces["items"][0]["owner"]["email"] == admin.email
 
+
+def _local_midnight(zone_name: str) -> datetime:
+    """Today's 00:00 on the given wall clock, as an aware datetime."""
+
+    return datetime.now(ZoneInfo(zone_name)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+
+
+def _session_row(
+    user: User,
+    tenant_id: UUID,
+    *,
+    at: datetime,
+    method: str = "password",
+    status: str = "active",
+    expires_at: datetime | None = None,
+    idle_expires_at: datetime | None = None,
+    parent: AccessSession | None = None,
+) -> AccessSession:
+    ended = status != "active"
+    return AccessSession(
+        tenant_id=tenant_id,
+        user_id=user.id,
+        kind="user",
+        authentication_method=method,
+        assurance_level="aal1",
+        status=status,
+        parent_session_id=parent.id if parent is not None else None,
+        transition_reason="tenant_switch" if parent is not None else None,
+        created_at=at,
+        last_seen_at=at,
+        expires_at=expires_at or datetime.now(UTC) + timedelta(hours=1),
+        idle_expires_at=idle_expires_at,
+        ended_at=at if ended else None,
+        end_reason="logout" if ended else None,
+    )
+
+
+async def _ask(
+    session: AsyncSession,
+    owner: User,
+    tenant_id: UUID,
+    access: AccessSession,
+    *,
+    at: datetime,
+    questions: int = 1,
+) -> None:
+    """One conversation opened at ``at`` with ``questions`` user turns and a reply."""
+
+    conversation = Conversation(
+        tenant_id=tenant_id,
+        owner_user_id=owner.id,
+        created_by_session_id=access.id,
+        created_at=at,
+    )
+    session.add(conversation)
+    await session.flush()
+    roles = ["user"] * questions + ["assistant"]
+    session.add_all(
+        Message(
+            conversation_id=conversation.id,
+            role=role,
+            content=f"turn {index}",
+            sequence_number=index + 1,
+            created_at=at,
+        )
+        for index, role in enumerate(roles)
+    )
+    await session.flush()
+
+
+@pytest.mark.asyncio
+async def test_workspace_activity_counts_on_the_callers_wall_clock(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Buckets are local days; totals, previous span, and leaders come from real rows."""
+
+    zone = "Asia/Ho_Chi_Minh"
+    midnight = _local_midnight(zone)
+    # Both instants fall on one UTC day (16:30Z and 17:30Z) but on two local days.
+    before_boundary = midnight - timedelta(days=1, minutes=30)
+    after_boundary = midnight - timedelta(days=1) + timedelta(minutes=30)
+    now = datetime.now(UTC)
+
+    async with session_factory.begin() as session:
+        identity = IdentityStoreService(session)
+        tenant = await identity.create_tenant("activity", "Activity")
+        elsewhere = await identity.create_tenant("activity-other", "Elsewhere")
+        admin = await identity.create_user("admin@activity.test", display_name="Admin")
+        member = await identity.create_user("member@activity.test")
+        outsider = await identity.create_user("outsider@activity.test")
+        await join_tenant(session, admin, tenant.id, system_role=TENANT_ADMIN_ROLE)
+        await join_tenant(session, member, tenant.id, system_role=TENANT_MEMBER_ROLE)
+        await join_tenant(session, outsider, elsewhere.id, system_role=TENANT_MEMBER_ROLE)
+
+        member_session = _session_row(member, tenant.id, at=before_boundary)
+        admin_session = _session_row(
+            admin,
+            tenant.id,
+            at=after_boundary,
+            method="oidc",
+            expires_at=now - timedelta(minutes=1),  # stored active, lapsed: not live
+        )
+        outsider_session = _session_row(outsider, elsewhere.id, at=after_boundary)
+        session.add_all([member_session, admin_session, outsider_session])
+        await session.flush()
+        await _ask(session, member, tenant.id, member_session, at=after_boundary, questions=2)
+        # Eight local days ago sits in the previous span; forty in neither.
+        await _ask(session, member, tenant.id, member_session, at=midnight - timedelta(days=8))
+        await _ask(session, member, tenant.id, member_session, at=midnight - timedelta(days=40))
+        await _ask(session, outsider, elsewhere.id, outsider_session, at=after_boundary)
+        session.add_all(
+            [
+                AuditLog(
+                    tenant_id=tenant.id,
+                    actor_user_id=admin.id,
+                    action="user.updated",
+                    resource_type="user",
+                    outcome="failure",
+                    created_at=before_boundary,
+                ),
+                AuditLog(
+                    tenant_id=tenant.id,
+                    actor_user_id=admin.id,
+                    action="user.updated",
+                    resource_type="user",
+                    created_at=after_boundary,
+                ),
+                AuditLog(
+                    tenant_id=tenant.id,
+                    actor_user_id=admin.id,
+                    action="role.created",
+                    resource_type="role",
+                    created_at=after_boundary,
+                ),
+                AuditLog(
+                    tenant_id=elsewhere.id,
+                    actor_user_id=outsider.id,
+                    action="user.updated",
+                    resource_type="user",
+                    created_at=after_boundary,
+                ),
+            ]
+        )
+        await session.flush()
+
+        activity = ActivityService(session)
+        admin_context = await identity.get_context(admin.id, tenant_id=tenant.id)
+        member_context = await identity.get_context(member.id, tenant_id=tenant.id)
+
+        report = await activity.workspace_activity(
+            admin_context, tenant.id, window="7d", tz=zone
+        )
+
+        assert report["bucket"] == "day"
+        assert report["timezone"] == zone
+        assert datetime.fromisoformat(report["start"]) == midnight - timedelta(days=6)
+        starts = [datetime.fromisoformat(bucket["start"]) for bucket in report["buckets"]]
+        assert starts == [midnight - timedelta(days=6 - index) for index in range(7)]
+        by_day = {
+            datetime.fromisoformat(bucket["start"]): bucket for bucket in report["buckets"]
+        }
+        two_days_ago = by_day[midnight - timedelta(days=2)]
+        yesterday = by_day[midnight - timedelta(days=1)]
+        assert {key: two_days_ago[key] for key in two_days_ago if key != "start"} == {
+            "active_users": 2,
+            "sign_ins": 1,
+            "questions": 0,
+            "changes": 1,
+            "failed_changes": 1,
+        }
+        assert {key: yesterday[key] for key in yesterday if key != "start"} == {
+            "active_users": 2,
+            "sign_ins": 1,
+            "questions": 2,
+            "changes": 2,
+            "failed_changes": 0,
+        }
+        assert sum(bucket["questions"] for bucket in report["buckets"]) == 2
+        assert report["totals"] == {
+            "active_users": 2,
+            "sign_ins": 2,
+            "questions": 2,
+            "conversations": 1,
+            "changes": 3,
+            "failed_changes": 1,
+        }
+        assert report["previous"] == {
+            "active_users": 1,
+            "sign_ins": 0,
+            "questions": 1,
+            "conversations": 1,
+            "changes": 0,
+            "failed_changes": 0,
+        }
+        assert report["live_sessions"] == 1
+        assert report["sign_in_methods"] == [
+            {"method": "oidc", "count": 1},
+            {"method": "password", "count": 1},
+        ]
+        assert report["top_changes"] == [
+            {"action": "user.updated", "count": 2, "failed": 1},
+            {"action": "role.created", "count": 1, "failed": 0},
+        ]
+        people = report["people"]
+        # Admin: 1 sign-in + 3 changes outranks member: 2 questions + 1 sign-in.
+        assert [person["email"] for person in people] == [admin.email, member.email]
+        assert people[1] | {"last_active_at": None} == {
+            "user_id": str(member.id),
+            "email": member.email,
+            "display_name": None,
+            "questions": 2,
+            "conversations": 1,
+            "sign_ins": 1,
+            "changes": 0,
+            "last_active_at": None,
+        }
+        assert datetime.fromisoformat(people[1]["last_active_at"]) == after_boundary
+
+        hourly = await activity.workspace_activity(admin_context, tenant.id, window="24h", tz=zone)
+        assert hourly["bucket"] == "hour" and len(hourly["buckets"]) == 24
+        assert (await activity.workspace_activity(admin_context, tenant.id, window="30d"))[
+            "timezone"
+        ] == "UTC"
+
+        # Members hold tenant.read but not audit.read; and only the active workspace answers.
+        with pytest.raises(AuthorizationError):
+            await activity.workspace_activity(member_context, tenant.id)
+        with pytest.raises(ControlPlaneNotFoundError):
+            await activity.workspace_activity(admin_context, elsewhere.id)
+        with pytest.raises(ControlPlaneValidationError, match="timezone"):
+            await activity.workspace_activity(admin_context, tenant.id, tz="Mars/Olympus")
+
+
+@pytest.mark.asyncio
+async def test_access_sessions_report_effective_status_and_stay_in_the_workspace(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    now = datetime.now(UTC)
+    async with session_factory.begin() as session:
+        identity = IdentityStoreService(session)
+        tenant = await identity.create_tenant("sessions", "Sessions")
+        elsewhere = await identity.create_tenant("sessions-other", "Elsewhere")
+        admin = await identity.create_user("admin@sessions.test")
+        member = await identity.create_user("member@sessions.test", display_name="Mai")
+        await join_tenant(session, admin, tenant.id, system_role=TENANT_ADMIN_ROLE)
+        await join_tenant(session, member, tenant.id, system_role=TENANT_MEMBER_ROLE)
+        await join_tenant(session, member, elsewhere.id, system_role=TENANT_MEMBER_ROLE)
+        sessions = AccessSessionService(session)
+        _, admin_context = await sessions.create_user(
+            user=admin,
+            tenant_id=tenant.id,
+            auth_identity=None,
+            authentication_method="password",
+            expires_in_seconds=3_600,
+        )
+
+        signed_in = _session_row(
+            member, tenant.id, at=now - timedelta(hours=5), status="superseded"
+        )
+        session.add(signed_in)
+        await session.flush()
+        switched = _session_row(
+            member, tenant.id, at=now - timedelta(hours=4), method="oidc", parent=signed_in
+        )
+        lapsed = _session_row(
+            member,
+            tenant.id,
+            at=now - timedelta(hours=3),
+            expires_at=now - timedelta(hours=1),
+        )
+        idle = _session_row(
+            member,
+            tenant.id,
+            at=now - timedelta(hours=2),
+            idle_expires_at=now - timedelta(minutes=10),
+        )
+        revoked = _session_row(
+            member, tenant.id, at=now - timedelta(hours=6), status="revoked"
+        )
+        foreign = _session_row(member, elsewhere.id, at=now - timedelta(minutes=5))
+        session.add_all([switched, lapsed, idle, revoked, foreign])
+        await session.flush()
+
+        page = await sessions.list_sessions(admin_context)
+        assert page["total"] == 6
+        records = {record["id"]: record for record in page["items"]}
+        assert str(foreign.id) not in records
+        # Newest first: the admin's own session was created by this transaction.
+        assert page["items"][0]["id"] == str(admin_context.session_id)
+        assert [record["id"] for record in page["items"][1:]] == [
+            str(row.id) for row in (idle, lapsed, switched, signed_in, revoked)
+        ]
+        assert [record["id"] for record in page["items"] if record["current"]] == [
+            str(admin_context.session_id)
+        ]
+        assert records[str(lapsed.id)]["status"] == "expired"
+        assert records[str(lapsed.id)]["end_reason"] == "session_expired"
+        assert datetime.fromisoformat(records[str(lapsed.id)]["ended_at"]) == lapsed.expires_at
+        assert records[str(idle.id)]["status"] == "expired"
+        assert records[str(switched.id)] | {"last_seen_at": None, "started_at": None,
+                                            "expires_at": None} == {
+            "id": str(switched.id),
+            "user": {"id": str(member.id), "email": member.email, "display_name": "Mai"},
+            "authentication_method": "oidc",
+            "entry": "workspace_switch",
+            "status": "active",
+            "started_at": None,
+            "last_seen_at": None,
+            "ended_at": None,
+            "end_reason": None,
+            "expires_at": None,
+            "current": False,
+        }
+        assert records[str(signed_in.id)]["entry"] == "sign_in"
+        assert records[str(signed_in.id)]["status"] == "superseded"
+        assert records[str(revoked.id)]["status"] == "revoked"
+
+        active = await sessions.list_sessions(admin_context, status="active")
+        assert {record["id"] for record in active["items"]} == {
+            str(admin_context.session_id),
+            str(switched.id),
+        }
+        ended = await sessions.list_sessions(admin_context, status="ended")
+        assert ended["total"] == 4
+        assert {record["status"] for record in ended["items"]} == {
+            "expired",
+            "superseded",
+            "revoked",
+        }
+        mine = await sessions.list_sessions(admin_context, user_id=admin.id)
+        assert [record["id"] for record in mine["items"]] == [str(admin_context.session_id)]
+        found = await sessions.list_sessions(admin_context, search="MAI", page_size=2, page=2)
+        assert found["total"] == 5
+        assert [record["id"] for record in found["items"]] == [str(switched.id), str(signed_in.id)]
+
+        member_context = await identity.get_context(member.id, tenant_id=tenant.id)
+        with pytest.raises(AuthorizationError):
+            await sessions.list_sessions(member_context)
+
+
+@pytest.mark.asyncio
+async def test_workspace_overview_reports_knowledge_health_and_usage(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    zone = "Asia/Ho_Chi_Minh"
+    midnight = _local_midnight(zone)
+    async with session_factory.begin() as session:
+        identity = IdentityStoreService(session)
+        tenant = await identity.create_tenant("overview", "Overview")
+        member = await identity.create_user("member@overview.test")
+        await join_tenant(session, member, tenant.id, system_role=TENANT_MEMBER_ROLE)
+
+        collection = Item(tenant_id=tenant.id, item_type="collection", title="Policies")
+        session.add(collection)
+        await session.flush()
+        deleted_at = datetime.now(UTC)
+        session.add_all(
+            Item(
+                tenant_id=tenant.id,
+                item_type="document",
+                parent_item_id=collection.id,
+                parent_relation="contains",
+                document_type="pdf",
+                title=f"Document {index}",
+                status="deleted" if index_status == "deleted" else "ready",
+                index_status="ready" if index_status == "deleted" else index_status,
+                deleted_at=deleted_at if index_status == "deleted" else None,
+            )
+            for index, index_status in enumerate(
+                ["ready", "ready", "pending", "processing", "failed", "unsupported", "deleted"]
+            )
+        )
+        # Nine local days ago lies in the 7 days before the last 7; forty in no bucket.
+        old_session = _session_row(member, tenant.id, at=midnight - timedelta(days=9))
+        session.add(old_session)
+        await session.flush()
+        await _ask(session, member, tenant.id, old_session, at=midnight - timedelta(days=9))
+        await _ask(
+            session, member, tenant.id, old_session, at=midnight - timedelta(hours=23)
+        )
+        await _ask(session, member, tenant.id, old_session, at=midnight - timedelta(days=40))
+
+        member_context = await identity.get_context(member.id, tenant_id=tenant.id)
+        overview = await DashboardService(session).overview(member_context, tz=zone)
+
+        assert overview["knowledge"] == {
+            "collections": 1,
+            "documents": 6,
+            "indexed": 2,
+            "indexing": 2,
+            "failed": 1,
+        }
+        # tenant.read alone sees aggregate usage but no audit records.
+        assert overview["recent_activity"] == []
+        usage = overview["usage"]
+        assert usage["timezone"] == zone
+        starts = [datetime.fromisoformat(bucket["start"]) for bucket in usage["buckets"]]
+        assert starts == [midnight - timedelta(days=29 - index) for index in range(30)]
+        questions = {
+            datetime.fromisoformat(bucket["start"]): bucket["questions"]
+            for bucket in usage["buckets"]
+            if bucket["questions"]
+        }
+        assert questions == {
+            midnight - timedelta(days=9): 1,
+            midnight - timedelta(days=1): 1,
+        }
+        assert usage["totals"] == {"active_users": 1, "questions": 1, "sign_ins": 0}
+        assert usage["previous"] == {"active_users": 1, "questions": 1, "sign_ins": 1}
+        with pytest.raises(ControlPlaneValidationError, match="timezone"):
+            await DashboardService(session).overview(member_context, tz="Nowhere/Land")
 
 @pytest.mark.asyncio
 async def test_personal_upload_and_message_relation_store_metadata_only(
@@ -1521,7 +1939,87 @@ async def test_an_image_is_a_conversation_attachment_never_knowledge(
     assert "ingestion" not in attached.item.metadata_
     assert ingestion.indexed == [] and workflows.requests == []
     with pytest.raises(UploadConflictError, match="not processed as knowledge"):
-        await documents.retry_ingestion(editor, attached.item.id)
+        await documents.restart_ingestion(editor, attached.item.id, trigger_type="retry")
+
+
+class _TemporalIngestions(_RecordingIndexWorkflow):
+    """Managed runs as Temporal reports them: the latest run of each document."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.status: dict[str, str] = {}
+
+    async def start_ingestion(self, input: Any, **kwargs: object) -> dict[str, bool]:
+        self.status[input.document_id] = "running"
+        return await super().start_ingestion(input, **kwargs)
+
+    async def describe_ingestion(self, workflow_id: str) -> dict[str, Any]:
+        document_id = workflow_id.rsplit(":", 1)[-1]
+        if document_id not in self.status:
+            raise WorkflowExecutionNotFoundError(workflow_id)
+        latest = next(r for r in reversed(self.requests) if r.document_id == document_id)
+        return {
+            "workflow_id": workflow_id,
+            "kind": "document",
+            "document_id": document_id,
+            "status": self.status[document_id],
+            "trigger_type": latest.trigger_type,
+        }
+
+
+@pytest.mark.asyncio
+async def test_an_indexed_document_is_reindexed_on_request_but_never_doubled(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    workspace_id, editor, viewer, _ = await _collection_upload_contexts(session_factory)
+    workflows = _TemporalIngestions()
+    documents = _uploads(session_factory, _UploadStorage(), workflows)
+    ingestions = IngestionService(
+        session_factory,
+        workflows=workflows,  # type: ignore[arg-type]
+        documents=documents,
+        sources=None,  # type: ignore[arg-type]
+    )
+    uploaded = await documents.upload_to_collection(
+        editor, workspace_id, idempotency_key="kb-reindex", file_name="policy.txt",
+        content_type="text/plain", content=_AsyncUpload(b"workspace policy"),
+    )
+    document_id = uploaded.item.id
+
+    # The first run is still going: a re-index would double it.
+    with pytest.raises(ControlPlaneConflictError, match="already being indexed"):
+        await ingestions.start_document_ingestion(editor, document_id)
+
+    # It finished and the document is indexed.
+    workflows.status[str(document_id)] = "completed"
+    async with session_factory.begin() as session:
+        (await session.get(Item, document_id)).index_status = "ready"
+
+    with pytest.raises(AuthorizationError, match="collection.update"):
+        await ingestions.start_document_ingestion(viewer, document_id)
+    started = await ingestions.start_document_ingestion(editor, document_id)
+
+    assert started["status"] == "running"
+    assert started["trigger_type"] == "manual"
+    assert str(started["id"]) == uploaded.item.metadata_["ingestion"]["id"]
+    assert [request.trigger_type for request in workflows.requests] == ["upload", "manual"]
+    async with session_factory() as session:
+        document = await session.get(Item, document_id)
+        # Pending, not ready: the core's "index is current" shortcut cannot skip it.
+        assert document.index_status == "pending"
+        assert document.metadata_["ingestion"]["trigger_type"] == "manual"
+
+    # A connector wrote this one: there is no upload to run again.
+    async with session_factory.begin() as session:
+        synced = Item(
+            id=uuid4(), tenant_id=editor.tenant_id, item_type="document",
+            parent_item_id=workspace_id, parent_relation="child",
+            document_type="confluence_page", title="Synced page",
+            status="ready", index_status="ready",
+        )
+        session.add(synced)
+    with pytest.raises(ControlPlaneConflictError, match="re-indexed by its source's sync"):
+        await ingestions.start_document_ingestion(editor, synced.id)
 
 
 

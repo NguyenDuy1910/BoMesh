@@ -183,6 +183,9 @@ class ObjectStorageConfig:
     bucket: str | None = None
     region: str | None = None
     endpoint_url: str | None = None
+    #: The storage host as browsers and devices reach it, used only for the
+    #: signed URLs they receive. Defaults to ``endpoint_url``.
+    public_endpoint_url: str | None = None
     addressing_style: str = "auto"
     account_id: str | None = None
     access_key_id: str | None = None
@@ -271,6 +274,7 @@ class ObjectStorageConfig:
             endpoint_url=optional_text(
                 "BOMESH_S3_ENDPOINT_URL", "BOMESH_OBJECT_STORAGE_ENDPOINT"
             ),
+            public_endpoint_url=optional_text("BOMESH_S3_PUBLIC_ENDPOINT_URL"),
             addressing_style=text("BOMESH_S3_ADDRESSING_STYLE", "auto"),
             timeout_seconds=number("BOMESH_S3_TIMEOUT_SECONDS", default=20.0),
             max_pool_connections=integer(

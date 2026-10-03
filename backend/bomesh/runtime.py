@@ -513,6 +513,7 @@ class AppRuntime:
             bucket=bucket,
             region=storage.region,
             endpoint_url=storage.endpoint_url,
+            public_endpoint_url=storage.public_endpoint_url,
             addressing_style=storage.addressing_style,
             timeout_seconds=storage.timeout_seconds,
             max_pool_connections=storage.max_pool_connections,

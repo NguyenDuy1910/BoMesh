@@ -67,12 +67,12 @@ export const legacySectionAliases: Record<string, string> = {
 /* One line each, stating what the page is for in product words. A line
    promises only what the page actually shows. */
 const DESCRIPTIONS: Record<string, string> = {
-  overview: "Workspace health and what needs your attention.",
+  overview: "How the workspace is used, what it knows, and what needs your attention.",
   knowledge: "The collections, documents and sources the assistant answers from.",
   agent: "How the assistant behaves in this workspace.",
   access: "Members, groups and roles for this workspace.",
   experience: "What members see when they open this workspace.",
-  activity: "Administrative changes and sync events in this workspace.",
+  activity: "Who uses this workspace, how they sign in, and what changed.",
   settings: "This workspace's name and status.",
   "platform-tenants": "Every tenant on this deployment. Members see each one as a workspace.",
   "platform-users": "Everyone with an account, their workspaces and platform roles.",

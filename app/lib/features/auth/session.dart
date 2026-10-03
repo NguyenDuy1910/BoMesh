@@ -59,7 +59,13 @@ class AuthSession {
 /// Restoring and resuming always revalidates the bearer against /auth/session.
 class SessionController extends ChangeNotifier {
   SessionController(this.api, {FlutterSecureStorage? storage})
-    : _storage = storage ?? const FlutterSecureStorage() {
+    : _storage =
+          storage ??
+          // The data-protection keychain needs a Keychain Sharing
+          // provisioning profile on macOS; the login keychain does not.
+          const FlutterSecureStorage(
+            mOptions: MacOsOptions(usesDataProtectionKeychain: false),
+          ) {
     api.onUnauthorized = expire;
   }
   final ApiClient api;

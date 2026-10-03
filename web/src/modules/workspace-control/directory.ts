@@ -123,8 +123,93 @@ export interface WorkspaceOverview {
   metrics: Record<string, number>;
   attention: Record<string, number>;
   recent_activity: AuditEvent[];
+  /** Non-deleted collections and documents, by where indexing left them. */
+  knowledge: { collections: number; documents: number; indexed: number; indexing: number; failed: number };
+  /** Thirty daily buckets in `timezone`, with the last seven days against the seven before. */
+  usage: {
+    timezone: string;
+    buckets: UsageBucket[];
+    totals: UsageTotals;
+    previous: UsageTotals;
+  };
   generated_at: string | null;
 }
+
+export interface UsageTotals {
+  active_users: number;
+  questions: number;
+  sign_ins: number;
+}
+
+export interface UsageBucket extends UsageTotals {
+  start: string;
+}
+
+export type ActivityWindow = "24h" | "7d" | "30d";
+
+/** One span's counts (OpenAPI `ActivityTotals`). */
+export interface ActivityTotals {
+  active_users: number;
+  sign_ins: number;
+  questions: number;
+  conversations: number;
+  changes: number;
+  failed_changes: number;
+}
+
+export interface ActivityBucket {
+  start: string;
+  active_users: number;
+  sign_ins: number;
+  questions: number;
+  changes: number;
+  failed_changes: number;
+}
+
+export interface ActivityPerson {
+  user_id: string;
+  email: string | null;
+  display_name: string | null;
+  questions: number;
+  conversations: number;
+  sign_ins: number;
+  changes: number;
+  last_active_at: string | null;
+}
+
+/** How the workspace was used over one window (OpenAPI `WorkspaceActivity`). */
+export interface WorkspaceActivity {
+  window: ActivityWindow;
+  timezone: string;
+  bucket: "hour" | "day";
+  start: string;
+  generated_at: string;
+  totals: ActivityTotals;
+  previous: ActivityTotals;
+  live_sessions: number;
+  buckets: ActivityBucket[];
+  sign_in_methods: { method: string; count: number }[];
+  top_changes: { action: string; count: number; failed: number }[];
+  people: ActivityPerson[];
+}
+
+/** One time someone entered the workspace (OpenAPI `AccessSessionRecord`). */
+export interface AccessSessionRecord {
+  id: string;
+  user: { id: string; email: string | null; display_name: string | null };
+  authentication_method: string;
+  entry: "sign_in" | "workspace_switch";
+  status: "active" | "expired" | "revoked" | "superseded";
+  started_at: string;
+  last_seen_at: string | null;
+  ended_at: string | null;
+  end_reason: string | null;
+  expires_at: string;
+  current: boolean;
+}
+
+/** The browser's own zone, so a "day" on a chart is the reader's day. */
+const browserTimezone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
 export interface PlatformOverview {
   metrics: Record<string, number>;
@@ -146,7 +231,16 @@ export const workspaceDirectoryApi = {
     return saved;
   },
 
-  overview: (workspaceId = getAuthSession()?.active_workspace_id ?? "") => controlPlaneRequest<WorkspaceOverview>(`/workspaces/${workspaceId}/overview`),
+  overview: (workspaceId = getAuthSession()?.active_workspace_id ?? "") =>
+    controlPlaneRequest<WorkspaceOverview>(`/workspaces/${workspaceId}/overview${queryString({ tz: browserTimezone() })}`),
+  activity: (window: ActivityWindow, workspaceId = getAuthSession()?.active_workspace_id ?? "") =>
+    controlPlaneRequest<WorkspaceActivity>(
+      `/workspaces/${workspaceId}/activity${queryString({ window, tz: browserTimezone() })}`,
+    ),
+  accessSessions: (params: { search?: string; status?: "active" | "ended" | "" } = {}) =>
+    controlPlaneRequest<Paginated<AccessSessionRecord>>(
+      `/access-sessions${queryString({ page_size: ALL, search: params.search, status: params.status || undefined })}`,
+    ),
 
   members: (search = "") =>
     controlPlaneRequest<Paginated<Member>>(`/users${queryString({ page_size: ALL, search })}`),

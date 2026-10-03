@@ -19,7 +19,9 @@ from bomesh.services import (
 )
 from bomesh.services.approval_request import ApprovalRequestService
 from bomesh.services.audit import AuditService
+from bomesh.services.dashboard.activity import ActivityService
 from bomesh.services.dashboard.dashboard import DashboardService
+from bomesh.services.identity_access.access_session import AccessSessionService
 from bomesh.services.identity_access.authorization import AuthorizationService
 from bomesh.services.identity_access.role_assignments import RoleAssignmentService
 from bomesh.services.identity_access.groups import GroupService
@@ -45,9 +47,19 @@ class WorkspaceControlPlaneService:
 
     # -- Tenants ------------------------------------------------------------
 
-    async def workspace_overview(self, actor: AuthContext) -> dict[str, Any]:
+    async def workspace_overview(
+        self, actor: AuthContext, *, tz: str = "UTC"
+    ) -> dict[str, Any]:
         async with self._unit_of_work() as session:
-            return await DashboardService(session).overview(actor)
+            return await DashboardService(session).overview(actor, tz=tz)
+
+    async def workspace_activity(
+        self, actor: AuthContext, workspace_id: UUID, **filters: Any
+    ) -> dict[str, Any]:
+        async with self._unit_of_work() as session:
+            return await ActivityService(session).workspace_activity(
+                actor, workspace_id, **filters
+            )
 
     async def platform_overview(self, actor: AuthContext) -> dict[str, Any]:
         async with self._unit_of_work() as session:
@@ -362,6 +374,12 @@ class WorkspaceControlPlaneService:
     ) -> dict[str, Any]:
         async with self._unit_of_work() as session:
             return await AuditService(session).list_platform_events(actor, **filters)
+
+    async def list_access_sessions(
+        self, actor: AuthContext, **filters: Any
+    ) -> dict[str, Any]:
+        async with self._unit_of_work() as session:
+            return await AccessSessionService(session).list_sessions(actor, **filters)
 
     # -- Internals ----------------------------------------------------------
 

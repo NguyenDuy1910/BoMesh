@@ -1,26 +1,20 @@
 import 'package:flutter/material.dart';
 
-import '../../../app/app_brand.dart';
 import '../../../app/app_theme.dart';
 import '../models/chat_models.dart';
 import '../state/chat_controller.dart';
-import 'product_mark.dart';
 
 class ChatSidebar extends StatefulWidget {
   const ChatSidebar({
     super.key,
     required this.controller,
     required this.collapsed,
-    required this.themeMode,
-    required this.onCycleTheme,
     this.onToggleCollapsed,
     this.onClose,
   });
 
   final ChatController controller;
   final bool collapsed;
-  final ThemeMode themeMode;
-  final VoidCallback onCycleTheme;
   final VoidCallback? onToggleCollapsed;
   final VoidCallback? onClose;
 
@@ -85,33 +79,14 @@ class _ChatSidebarState extends State<ChatSidebar> {
                 padding: EdgeInsets.symmetric(horizontal: collapsed ? 8 : 14),
                 child: Row(
                   children: [
-                    if (!collapsed) const ProductMark(),
-                    if (!collapsed) ...[
-                      const SizedBox(width: 9),
+                    if (!collapsed)
                       Expanded(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              AppBrand.productName,
-                              style: Theme.of(context).textTheme.labelLarge,
-                            ),
-                            Text(
-                              widget.controller.session.workspaceName,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.labelSmall
-                                  ?.copyWith(
-                                    color: colors.textMuted,
-                                    fontFamily: 'monospace',
-                                    fontSize: 10,
-                                  ),
-                            ),
-                          ],
+                        child: Text(
+                          'Conversations',
+                          style: Theme.of(context).textTheme.titleMedium,
                         ),
-                      ),
-                    ] else
+                      )
+                    else
                       const Spacer(),
                     IconButton(
                       tooltip: widget.onClose != null
@@ -214,27 +189,6 @@ class _ChatSidebarState extends State<ChatSidebar> {
                       onPin: widget.controller.pinConversation,
                     ),
             ),
-            Divider(height: 1, color: colors.border),
-            Padding(
-              padding: EdgeInsets.all(collapsed ? 8 : 10),
-              child: Column(
-                children: [
-                  if (!collapsed)
-                    _SidebarAction(
-                      collapsed: false,
-                      icon: Icons.settings_outlined,
-                      label: widget.controller.session.workspaceName,
-                      onTap: _showConnection,
-                    ),
-                  _SidebarAction(
-                    collapsed: collapsed,
-                    icon: _themeIcon(widget.themeMode),
-                    label: 'Theme: ${widget.themeMode.name}',
-                    onTap: widget.onCycleTheme,
-                  ),
-                ],
-              ),
-            ),
           ],
         ),
       ),
@@ -298,33 +252,6 @@ class _ChatSidebarState extends State<ChatSidebar> {
     }
   }
 
-  void _showConnection() {
-    showModalBottomSheet<void>(
-      context: context,
-      builder: (context) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Workspace connection',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 12),
-              Text(widget.controller.session.workspaceName),
-              const SizedBox(height: 8),
-              Text(
-                'Conversations are stored on this device, separately for your account and workspace.',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 }
 
 class _ConversationList extends StatelessWidget {
@@ -617,9 +544,3 @@ List<_ConversationGroup> _groupConversations(List<ChatConversation> values) {
     ),
   ];
 }
-
-IconData _themeIcon(ThemeMode mode) => switch (mode) {
-  ThemeMode.system => Icons.laptop_rounded,
-  ThemeMode.light => Icons.light_mode_outlined,
-  ThemeMode.dark => Icons.dark_mode_outlined,
-};

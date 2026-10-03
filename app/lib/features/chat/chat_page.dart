@@ -13,7 +13,6 @@ import 'state/chat_controller.dart';
 import 'widgets/app_sidebar.dart';
 import 'widgets/chat_composer.dart';
 import 'widgets/message_view.dart';
-import 'widgets/product_mark.dart';
 import 'widgets/welcome_view.dart';
 
 class ChatPage extends StatefulWidget {
@@ -21,18 +20,18 @@ class ChatPage extends StatefulWidget {
     super.key,
     required this.api,
     required this.session,
+    required this.account,
     this.initialDocumentId,
     this.initialDocumentTitle,
-    required this.themeMode,
-    required this.onCycleTheme,
   });
 
   final ApiClient api;
   final AuthSession session;
+
+  /// The account button, which every screen's header carries.
+  final Widget account;
   final String? initialDocumentId;
   final String? initialDocumentTitle;
-  final ThemeMode themeMode;
-  final VoidCallback onCycleTheme;
 
   @override
   State<ChatPage> createState() => _ChatPageState();
@@ -147,8 +146,6 @@ class _ChatPageState extends State<ChatPage> {
                     child: ChatSidebar(
                       controller: _controller,
                       collapsed: false,
-                      themeMode: widget.themeMode,
-                      onCycleTheme: widget.onCycleTheme,
                       onClose: () => Navigator.of(context).pop(),
                     ),
                   ),
@@ -169,8 +166,6 @@ class _ChatPageState extends State<ChatPage> {
                     child: ChatSidebar(
                       controller: _controller,
                       collapsed: _sidebarCollapsed,
-                      themeMode: widget.themeMode,
-                      onCycleTheme: widget.onCycleTheme,
                       onToggleCollapsed: () => setState(
                         () => _sidebarCollapsed = !_sidebarCollapsed,
                       ),
@@ -197,7 +192,7 @@ class _ChatPageState extends State<ChatPage> {
           children: [
             Container(
               height: 56,
-              padding: EdgeInsets.symmetric(horizontal: desktop ? 20 : 8),
+              padding: EdgeInsets.symmetric(horizontal: desktop ? 20 : 4),
               decoration: BoxDecoration(
                 color: colors.appBackground.withValues(alpha: 0.94),
                 border: Border(bottom: BorderSide(color: colors.border)),
@@ -206,48 +201,38 @@ class _ChatPageState extends State<ChatPage> {
                 children: [
                   if (!desktop)
                     IconButton(
-                      tooltip: 'Open conversation sidebar',
+                      tooltip: 'Conversations',
                       onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-                      icon: const Icon(Icons.menu_rounded, size: 21),
+                      icon: const Icon(Icons.menu_rounded, size: 22),
                     ),
-                  if (!desktop) ...[
-                    const ProductMark(size: 30),
-                    const SizedBox(width: 9),
-                  ],
                   Expanded(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (desktop)
-                          Text(
-                            'KNOWLEDGE ASSISTANT',
-                            style: Theme.of(context).textTheme.labelSmall
-                                ?.copyWith(
-                                  color: colors.textMuted,
-                                  letterSpacing: 0.65,
-                                  fontSize: 10,
-                                ),
-                          ),
-                        Text(
-                          _controller.conversationTitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                      ],
+                    child: Text(
+                      _controller.conversationTitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleMedium,
                     ),
                   ),
                   if (_controller.isGenerating)
                     Semantics(
                       liveRegion: true,
                       label: 'Assistant is working',
-                      child: const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                      child: const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 8),
+                        child: SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
                       ),
+                    )
+                  else if (_controller.messages.isNotEmpty)
+                    IconButton(
+                      tooltip: 'New chat',
+                      onPressed: () => unawaited(_controller.newChat()),
+                      icon: const Icon(Icons.edit_square, size: 21),
                     ),
+                  widget.account,
                 ],
               ),
             ),

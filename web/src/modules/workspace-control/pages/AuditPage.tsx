@@ -11,16 +11,208 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { PageLoadingSkeleton } from "@/components/ui/Skeleton";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { Tabs } from "@/components/ui/Tabs";
+import {
+  BarList,
+  changeLabel,
+  Metric,
+  MetricLedger,
+  Panel,
+  PanelRow,
+  TrendChart,
+} from "@/modules/workspace-control/components/dashboard";
 import { SectionHeader } from "@/modules/workspace-control/components/SectionHeader";
-import { describeAuditAction, formatDateTime, formatRelative, pluralize } from "@/modules/workspace-control/format";
-import { workspaceDirectoryApi, type AuditEvent } from "@/modules/workspace-control/directory";
+import { SessionLog } from "@/modules/workspace-control/components/SessionLog";
+import {
+  describeAuditAction,
+  describeSignInMethod,
+  formatDateTime,
+  formatRelative,
+  pluralize,
+} from "@/modules/workspace-control/format";
+import {
+  workspaceDirectoryApi,
+  type ActivityPerson,
+  type ActivityWindow,
+  type AuditEvent,
+  type WorkspaceActivity,
+} from "@/modules/workspace-control/directory";
 import { useControlPlaneData } from "@/modules/workspace-control/queries";
 
+const WINDOWS: { id: ActivityWindow; label: string }[] = [
+  { id: "24h", label: "24 hours" },
+  { id: "7d", label: "7 days" },
+  { id: "30d", label: "30 days" },
+];
+
+const LOGS = [
+  { id: "sign-ins", label: "Sign-ins" },
+  { id: "changes", label: "Audit log" },
+];
+
+/**
+ * Activity: is the workspace being used, who is in it, and what changed.
+ *
+ * The figures and charts answer the first two at a glance for the chosen
+ * period; the two logs underneath are the records they are counted from, for
+ * when a figure needs explaining.
+ */
 export function AuditPage() {
+  const [period, setPeriod] = useState<ActivityWindow>("7d");
+  const [log, setLog] = useState("sign-ins");
+  const activity = useControlPlaneData(() => workspaceDirectoryApi.activity(period), period);
+
   return <>
-    <SectionHeader section="activity" />
-    <ActivityTable platform={false} />
+    <SectionHeader
+      actions={
+        <Tabs
+          activeTab={period}
+          ariaLabel="Period"
+          density="compact"
+          onChange={(next) => setPeriod(next as ActivityWindow)}
+          tabs={WINDOWS}
+        />
+      }
+      section="activity"
+    />
+    {activity.error ? (
+      <ErrorState description={activity.error} onAction={activity.reload} />
+    ) : activity.data ? (
+      <ActivityDashboard activity={activity.data} />
+    ) : (
+      <PageLoadingSkeleton label="Loading activity" />
+    )}
+    <section aria-label="Activity records" className="mt-[var(--section-gap)]">
+      <Tabs activeTab={log} ariaLabel="Records" className="mb-[var(--space-3)]" onChange={setLog} tabs={LOGS} variant="underline" />
+      {log === "sign-ins" ? <SessionLog /> : <ActivityTable platform={false} />}
+    </section>
   </>;
+}
+
+function ActivityDashboard({ activity }: { activity: WorkspaceActivity }) {
+  const { totals, previous, buckets } = activity;
+  const span = WINDOWS.find((item) => item.id === activity.window)?.label ?? activity.window;
+  const series = (key: keyof WorkspaceActivity["buckets"][number]) => buckets.map((bucket) => Number(bucket[key]));
+
+  return (
+    <div className="ctl-dashboard">
+      <MetricLedger label={`Activity over the last ${span}`}>
+        <Metric
+          change={changeLabel(totals.active_users, previous.active_users, span)}
+          label="Active people"
+          trend={series("active_users")}
+          value={totals.active_users}
+        />
+        <Metric
+          change={changeLabel(totals.sign_ins, previous.sign_ins, span)}
+          label="Sign-ins"
+          trend={series("sign_ins")}
+          value={totals.sign_ins}
+        />
+        <Metric
+          change={changeLabel(totals.questions, previous.questions, span)}
+          label="Questions asked"
+          note={`in ${pluralize(totals.conversations, "new conversation")}`}
+          trend={series("questions")}
+          value={totals.questions}
+        />
+        <Metric
+          change={changeLabel(totals.changes, previous.changes, span)}
+          label="Admin changes"
+          note={totals.failed_changes ? `${pluralize(totals.failed_changes, "change")} failed` : "None failed"}
+          trend={series("changes")}
+          value={totals.changes}
+        />
+      </MetricLedger>
+
+      <PanelRow>
+        <Panel aside={`Times in ${activity.timezone}`} title="Usage">
+          <TrendChart
+            bucket={activity.bucket}
+            buckets={buckets}
+            label={`Usage over the last ${span}`}
+            series={[
+              { key: "questions", label: "Questions", kind: "bar", tone: "muted" },
+              { key: "sign_ins", label: "Sign-ins", kind: "line", tone: "ink" },
+              { key: "active_users", label: "Active people", kind: "detail", tone: "ink" },
+              { key: "changes", label: "Admin changes", kind: "detail", tone: "muted" },
+            ]}
+            timezone={activity.timezone}
+          />
+        </Panel>
+        <Panel title="Signed in now">
+          <div className="ctl-live">
+            <span className="ctl-live__dot" data-idle={activity.live_sessions ? undefined : ""} />
+            <span className="ctl-live__value">{activity.live_sessions.toLocaleString()}</span>
+            <span className="ctl-muted">{activity.live_sessions === 1 ? "open session" : "open sessions"}</span>
+          </div>
+          <div>
+            <h3 className="configuration-heading">How people signed in · {span}</h3>
+            <BarList
+              empty={`No sign-ins in the last ${span}.`}
+              rows={activity.sign_in_methods.map((item) => ({
+                key: item.method,
+                label: describeSignInMethod(item.method),
+                value: item.count,
+              }))}
+            />
+          </div>
+        </Panel>
+      </PanelRow>
+
+      <PanelRow layout="halves">
+        <Panel aside={span} className="ctl-panel--flush" title="Most active people">
+          <PeopleTable people={activity.people} span={span} />
+        </Panel>
+        <Panel aside={span} title="What changed">
+          <BarList
+            empty={`No administrative changes in the last ${span}.`}
+            rows={activity.top_changes.map((item) => ({
+              key: item.action,
+              label: describeAuditAction(item.action),
+              value: item.count,
+              detail: item.failed ? `${pluralize(item.failed, "attempt")} failed` : undefined,
+              tone: item.failed === item.count ? "danger" : "ink",
+            }))}
+          />
+        </Panel>
+      </PanelRow>
+    </div>
+  );
+}
+
+function PeopleTable({ people, span }: { people: ActivityPerson[]; span: string }) {
+  const count = (value: number) => <span className="ctl-num" data-zero={value ? undefined : ""}>{value.toLocaleString()}</span>;
+  const columns: Column<ActivityPerson>[] = [
+    {
+      key: "person",
+      label: "Person",
+      primary: true,
+      render: (row) => {
+        const name = row.display_name ?? row.email ?? "Unknown person";
+        return <CellTitle icon={<Avatar name={name} size="sm" />} subtitle={row.display_name ? row.email : undefined} title={name} />;
+      },
+    },
+    { key: "questions", label: "Questions", width: 96, align: "right", render: (row) => count(row.questions) },
+    { key: "sign_ins", label: "Sign-ins", width: 88, align: "right", priority: "medium", render: (row) => count(row.sign_ins) },
+    { key: "changes", label: "Changes", width: 88, align: "right", priority: "medium", render: (row) => count(row.changes) },
+    {
+      key: "last_active_at",
+      label: "Last active",
+      width: 110,
+      priority: "low",
+      render: (row) => <span title={formatDateTime(row.last_active_at)}>{formatRelative(row.last_active_at)}</span>,
+    },
+  ];
+  return (
+    <DataTable
+      ariaLabel="Most active people"
+      columns={columns}
+      data={people}
+      emptyState={<p className="ctl-muted py-[var(--space-4)]">Nobody signed in, asked or changed anything in the last {span}.</p>}
+      getRowId={(row) => row.user_id}
+    />
+  );
 }
 
 /** Who did what, where, and how it went — from the durable audit trail. */

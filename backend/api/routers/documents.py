@@ -7,7 +7,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Header, Query, Request, Response, status
 
-from api.deps import Caller, Documents, KnowledgeQuery
+from api.deps import Caller, Documents, Ingestions, KnowledgeQuery
 from api.routers import (
     Document,
     DocumentContentResult,
@@ -17,6 +17,7 @@ from api.routers import (
     DocumentSearchRequest,
     DocumentSearchResponse,
     DocumentStatus,
+    Ingestion,
 )
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -109,6 +110,20 @@ async def finalize_document_content(
 ) -> DocumentContentResult:
     return DocumentContentResult.model_validate(
         await documents.finalize_document_content(caller, document_id)
+    )
+
+
+@router.post(
+    "/{document_id}/ingestions",
+    tags=["ingestions"],
+    response_model=Ingestion,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def create_document_ingestion(
+    document_id: UUID, caller: Caller, ingestions: Ingestions
+) -> Ingestion:
+    return Ingestion.model_validate(
+        await ingestions.start_document_ingestion(caller, document_id)
     )
 
 
