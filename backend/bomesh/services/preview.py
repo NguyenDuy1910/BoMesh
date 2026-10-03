@@ -1,0 +1,550 @@
+"""Generation and authorized resolution of derived Item previews."""
+
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import logging
+import tempfile
+from collections.abc import Mapping
+from io import BytesIO
+from pathlib import Path
+
+import pypdfium2 as pdfium
+from PIL import Image
+
+from bomesh.connector.processing.pdfium_lock import PDFIUM_LOCK
+from bomesh.connector.protocol import DocumentItem
+from bomesh.db.models import Item
+from bomesh.services import (
+    DEFAULT_PREVIEW_MAX_DIMENSION,
+    DEFAULT_PREVIEW_MAX_PAGES,
+    DEFAULT_PREVIEW_MAX_SOURCE_BYTES,
+    DEFAULT_PREVIEW_WEBP_QUALITY,
+    DOCUMENT_RENDITION_CONTENT_TYPE,
+    DOCUMENT_RENDITION_VERSION,
+    PREVIEW_RENDERER_VERSION,
+    PREVIEW_SCHEMA_VERSION,
+    KnowledgePreviewView,
+    PreviewAsset,
+    PreviewGenerationError,
+    PreviewManifest,
+    PreviewOriginal,
+    PreviewRendition,
+    RenderedPreview,
+    RenderedPreviewAsset,
+    ResolvedPreviewAsset,
+    ResolvedRendition,
+)
+from bomesh.services.document_rendition import build_document_rendition
+from bomesh.storage import DocumentStorage, StoredObject
+
+log = logging.getLogger(__name__)
+
+_PDF_CONTENT_TYPES = frozenset({"application/pdf"})
+_PDF_EXTENSIONS = frozenset({".pdf"})
+
+_RENDITION_CACHE_CONTROL = "private, max-age=31536000, immutable"
+
+
+class KnowledgePreview:
+    """Render, store, and resolve bounded previews for one knowledge Item."""
+
+    def __init__(
+        self,
+        object_storage: DocumentStorage,
+        *,
+        max_source_bytes: int = DEFAULT_PREVIEW_MAX_SOURCE_BYTES,
+        max_pages: int = DEFAULT_PREVIEW_MAX_PAGES,
+        max_dimension: int = DEFAULT_PREVIEW_MAX_DIMENSION,
+        webp_quality: int = DEFAULT_PREVIEW_WEBP_QUALITY,
+        max_image_pixels: int = 40_000_000,
+    ) -> None:
+        if min(max_source_bytes, max_pages, max_dimension, max_image_pixels) < 1:
+            raise ValueError("preview limits must be greater than zero")
+        if not 1 <= webp_quality <= 100:
+            raise ValueError("webp_quality must be between 1 and 100")
+        self._object_storage = object_storage
+        self._max_source_bytes = max_source_bytes
+        self.max_pages = max_pages
+        self.max_dimension = max_dimension
+        self.webp_quality = webp_quality
+        self.max_image_pixels = max_image_pixels
+
+    def render(self, source_path: Path, *, file_name: str, content_type: str | None) -> RenderedPreview:
+        source = Path(source_path)
+        if not source.is_file():
+            raise PreviewGenerationError(f"preview source is not a file: {source}")
+        normalized_type = (content_type or "").split(";", 1)[0].strip().casefold()
+        extension = Path(file_name).suffix.casefold() or source.suffix.casefold()
+        if normalized_type in _PDF_CONTENT_TYPES or extension in _PDF_EXTENSIONS:
+            return self._render_pdf(source)
+        return RenderedPreview(representation="original")
+
+    @staticmethod
+    def supports(*, file_name: str, content_type: str | None) -> bool:
+        """Whether a page preview is rendered: PDFs only (images are not knowledge)."""
+
+        normalized_type = (content_type or "").split(";", 1)[0].strip().casefold()
+        extension = Path(file_name).suffix.casefold()
+        return normalized_type in _PDF_CONTENT_TYPES or extension in _PDF_EXTENSIONS
+
+    def _render_pdf(self, source: Path) -> RenderedPreview:
+        with PDFIUM_LOCK:
+            return self._render_pdf_pages(source)
+
+    def _render_pdf_pages(self, source: Path) -> RenderedPreview:
+        try:
+            document = pdfium.PdfDocument(str(source))
+        except Exception as exc:
+            raise PreviewGenerationError("PDF preview rendering failed") from exc
+        try:
+            page_count = len(document)
+            if page_count < 1:
+                raise PreviewGenerationError("PDF preview source has no pages")
+            assets: list[RenderedPreviewAsset] = []
+            for page_index in range(min(page_count, self.max_pages)):
+                page = document[page_index]
+                try:
+                    width, height = page.get_size()
+                    if width <= 0 or height <= 0:
+                        raise PreviewGenerationError("PDF page has invalid dimensions")
+                    bitmap = page.render(scale=max(min(2.0, self.max_dimension / width, self.max_dimension / height), 0.0001))
+                    try:
+                        image = bitmap.to_pil()
+                        try:
+                            assets.append(self._webp_asset(image, page=page_index + 1))
+                        finally:
+                            image.close()
+                    finally:
+                        bitmap.close()
+                finally:
+                    page.close()
+            return RenderedPreview(representation="pages", assets=tuple(assets), page_count=page_count, truncated=page_count > self.max_pages)
+        except PreviewGenerationError:
+            raise
+        except Exception as exc:
+            raise PreviewGenerationError("PDF preview rendering failed") from exc
+        finally:
+            document.close()
+
+    def _webp_asset(self, image: Image.Image, *, page: int) -> RenderedPreviewAsset:
+        self._validate_dimensions(*image.size)
+        image.thumbnail((self.max_dimension, self.max_dimension), Image.Resampling.LANCZOS)
+        converted = image.convert("RGBA" if "A" in image.getbands() else "RGB") if image.mode not in {"RGB", "RGBA"} else None
+        rendered = converted or image
+        try:
+            output = BytesIO()
+            rendered.save(output, format="WEBP", quality=self.webp_quality, method=4)
+            data = output.getvalue()
+            if not data:
+                raise PreviewGenerationError("WebP encoder returned an empty preview")
+            return RenderedPreviewAsset(data=data, content_type="image/webp", width=rendered.width, height=rendered.height, page=page)
+        finally:
+            if converted is not None:
+                converted.close()
+
+    def _validate_dimensions(self, width: int, height: int) -> None:
+        if width < 1 or height < 1:
+            raise PreviewGenerationError("preview source has invalid dimensions")
+        if width * height > self.max_image_pixels:
+            raise PreviewGenerationError("preview source exceeds the image pixel limit")
+
+    async def generate(
+        self,
+        document: Item,
+        *,
+        source_path: Path | None = None,
+        content: DocumentItem | None = None,
+    ) -> PreviewManifest | None:
+        """Build an idempotent manifest while leaving the original untouched.
+
+        ``content`` is the canonical parse of the original; when given, the
+        whole-document rendition is written unless a current one exists.
+        Page images and the rendition are independent: either is kept while
+        the source is unchanged.
+        """
+
+        storage_key = _text(getattr(document, "storage_key", None))
+        if storage_key is None:
+            return None
+        stored = await self._object_storage.head(storage_key)
+        expected_size = getattr(document, "size_bytes", None)
+        if expected_size is not None and stored.size_bytes != expected_size:
+            raise PreviewGenerationError(
+                "stored preview source size does not match Item metadata"
+            )
+        source_version = _source_version(document, stored, storage_key=storage_key)
+        current = _manifest(document)
+        manifest = await self._page_manifest(
+            document,
+            current,
+            source_path=source_path,
+            stored=stored,
+            storage_key=storage_key,
+            source_version=source_version,
+        )
+        rendition_version = _rendition_version(source_version)
+        rendition = (
+            current.rendition
+            if current is not None
+            and current.rendition is not None
+            and current.rendition.version == rendition_version
+            else None
+        )
+        if rendition is None and content is not None:
+            rendition = await self._store_rendition(
+                document,
+                content,
+                source_version=source_version,
+                version=rendition_version,
+            )
+        return manifest.model_copy(update={"rendition": rendition})
+
+    async def _page_manifest(
+        self,
+        document: Item,
+        current: PreviewManifest | None,
+        *,
+        source_path: Path | None,
+        stored: StoredObject,
+        storage_key: str,
+        source_version: str,
+    ) -> PreviewManifest:
+        if (
+            current is not None
+            and current.schema_version == PREVIEW_SCHEMA_VERSION
+            and current.renderer_version == PREVIEW_RENDERER_VERSION
+            and current.source_version == source_version
+        ):
+            return current
+        if stored.size_bytes > self._max_source_bytes:
+            return PreviewManifest(
+                source_version=source_version,
+                representation="original",
+            )
+        content_type = _text(getattr(document, "mime_type", None)) or stored.content_type
+        if not self.supports(
+            file_name=_file_name(document),
+            content_type=content_type,
+        ):
+            return PreviewManifest(
+                source_version=source_version,
+                representation="original",
+            )
+
+        if source_path is not None:
+            source = Path(source_path)
+            if not source.is_file() or source.stat().st_size != stored.size_bytes:
+                raise PreviewGenerationError(
+                    "local preview source does not match the stored original"
+                )
+            return await self._render_and_store(
+                document,
+                source,
+                stored=stored,
+                source_version=source_version,
+            )
+
+        suffix = Path(_file_name(document)).suffix
+        with tempfile.TemporaryDirectory(prefix="bomesh-preview-") as directory:
+            source = Path(directory) / f"source{suffix}"
+            downloaded = await self._object_storage.download_to_path(
+                storage_key,
+                source,
+                max_bytes=self._max_source_bytes,
+            )
+            if downloaded.size_bytes != stored.size_bytes:
+                raise PreviewGenerationError(
+                    "downloaded preview source no longer matches object metadata"
+                )
+            return await self._render_and_store(
+                document,
+                source,
+                stored=stored,
+                source_version=source_version,
+            )
+
+    async def has_current_rendition(self, document: Item) -> bool:
+        """Whether the stored manifest already has a rendition of the current source."""
+
+        storage_key = _text(getattr(document, "storage_key", None))
+        current = _manifest(document)
+        if storage_key is None or current is None or current.rendition is None:
+            return False
+        stored = await self._object_storage.head(storage_key)
+        source_version = _source_version(document, stored, storage_key=storage_key)
+        return current.rendition.version == _rendition_version(source_version)
+
+    def resolve(
+        self,
+        document: Item,
+        *,
+        expires_seconds: int,
+    ) -> KnowledgePreviewView | None:
+        """Resolve short-lived URLs after the caller has authorized the Item."""
+
+        if expires_seconds < 1:
+            raise ValueError("preview URL lifetime must be greater than zero")
+        storage_key = _text(getattr(document, "storage_key", None))
+        if storage_key is None:
+            return None
+        original_request = self._object_storage.presign_download(
+            storage_key,
+            expires_seconds=expires_seconds,
+        )
+        manifest = _manifest(document)
+        representation = manifest.representation if manifest is not None else "original"
+        assets: list[ResolvedPreviewAsset] = []
+        if manifest is not None:
+            expected_prefix = _preview_prefix(document)
+            for asset in manifest.assets:
+                if not asset.key.startswith(expected_prefix):
+                    log.warning("ignored preview object outside its Item prefix")
+                    continue
+                try:
+                    request = self._object_storage.presign_download(
+                        asset.key,
+                        expires_seconds=expires_seconds,
+                    )
+                except Exception:
+                    log.exception("could not resolve derived preview object")
+                    continue
+                assets.append(
+                    ResolvedPreviewAsset(
+                        url=request.url,
+                        content_type=asset.content_type,
+                        size_bytes=asset.size_bytes,
+                        width=asset.width,
+                        height=asset.height,
+                        page=asset.page,
+                    )
+                )
+        if representation != "original" and not assets:
+            representation = "original"
+        rendition = (
+            self._resolve_rendition(
+                document,
+                manifest.rendition,
+                expires_seconds=expires_seconds,
+            )
+            if manifest is not None and manifest.rendition is not None
+            else None
+        )
+        return KnowledgePreviewView(
+            representation=representation,
+            original=PreviewOriginal(
+                url=original_request.url,
+                file_name=_file_name(document),
+                content_type=(
+                    _text(getattr(document, "mime_type", None))
+                    or "application/octet-stream"
+                ),
+                size_bytes=max(0, int(getattr(document, "size_bytes", None) or 0)),
+            ),
+            assets=tuple(assets),
+            page_count=manifest.page_count if manifest is not None else None,
+            truncated=manifest.truncated if manifest is not None else False,
+            rendition=rendition,
+        )
+
+    def _resolve_rendition(
+        self,
+        document: Item,
+        rendition: PreviewRendition,
+        *,
+        expires_seconds: int,
+    ) -> ResolvedRendition | None:
+        if not rendition.key.startswith(_preview_prefix(document)):
+            log.warning("ignored document rendition outside its Item prefix")
+            return None
+        try:
+            request = self._object_storage.presign_download(
+                rendition.key,
+                expires_seconds=expires_seconds,
+            )
+        except Exception:
+            log.exception("could not resolve document rendition object")
+            return None
+        return ResolvedRendition(
+            url=request.url,
+            version=rendition.version,
+            size_bytes=rendition.size_bytes,
+            block_count=rendition.block_count,
+            truncated=rendition.truncated,
+        )
+
+    async def _store_rendition(
+        self,
+        document: Item,
+        content: DocumentItem,
+        *,
+        source_version: str,
+        version: str,
+    ) -> PreviewRendition | None:
+        """Write the whole-document rendition; failures only lose the rendition."""
+
+        try:
+            built = await asyncio.to_thread(build_document_rendition, content)
+            if built.block_count == 0:
+                return None
+            key = (
+                f"{_preview_prefix(document)}{DOCUMENT_RENDITION_VERSION}/"
+                f"{source_version}/document.json.gz"
+            )
+            persisted = await asyncio.to_thread(
+                self._object_storage.put_bytes,
+                built.data,
+                key,
+                content_type=DOCUMENT_RENDITION_CONTENT_TYPE,
+                content_encoding="gzip",
+                cache_control=_RENDITION_CACHE_CONTROL,
+            )
+        except Exception as exc:  # noqa: BLE001 - the rendition is best effort
+            log.warning(
+                "document rendition generation failed item_id=%s error_type=%s",
+                getattr(document, "id", None),
+                type(exc).__name__,
+            )
+            return None
+        return PreviewRendition(
+            key=key,
+            size_bytes=persisted.size_bytes,
+            version=version,
+            block_count=built.block_count,
+            truncated=built.truncated,
+        )
+
+    async def _render_and_store(
+        self,
+        document: Item,
+        source: Path,
+        *,
+        stored: StoredObject,
+        source_version: str,
+    ) -> PreviewManifest:
+        rendered = await asyncio.to_thread(
+            self.render,
+            source,
+            file_name=_file_name(document),
+            content_type=(
+                _text(getattr(document, "mime_type", None)) or stored.content_type
+            ),
+        )
+        assets: list[PreviewAsset] = []
+        for position, rendered_asset in enumerate(rendered.assets, start=1):
+            key = _preview_key(
+                document,
+                source_version=source_version,
+                page=rendered_asset.page,
+                position=position,
+            )
+            persisted = await asyncio.to_thread(
+                self._object_storage.put_bytes,
+                rendered_asset.data,
+                key,
+                content_type=rendered_asset.content_type,
+            )
+            assets.append(
+                PreviewAsset(
+                    key=key,
+                    content_type=rendered_asset.content_type,
+                    size_bytes=persisted.size_bytes,
+                    width=rendered_asset.width,
+                    height=rendered_asset.height,
+                    page=rendered_asset.page,
+                )
+            )
+        return PreviewManifest(
+            source_version=source_version,
+            representation=rendered.representation,
+            assets=tuple(assets),
+            page_count=rendered.page_count,
+            truncated=rendered.truncated,
+        )
+
+
+def _manifest(document: Item) -> PreviewManifest | None:
+    metadata = getattr(document, "metadata_", None)
+    if not isinstance(metadata, Mapping):
+        return None
+    value = metadata.get("preview")
+    if value is None:
+        return None
+    try:
+        manifest = PreviewManifest.model_validate(value)
+    except ValueError:
+        return None
+    return manifest if manifest.schema_version == PREVIEW_SCHEMA_VERSION else None
+
+
+def _source_version(
+    document: Item,
+    stored: StoredObject,
+    *,
+    storage_key: str,
+) -> str:
+    metadata = getattr(document, "metadata_", None)
+    storage_metadata = metadata.get("storage") if isinstance(metadata, Mapping) else None
+    candidates: list[object] = [stored.version_id, stored.etag]
+    if isinstance(storage_metadata, Mapping):
+        candidates.extend(
+            [storage_metadata.get("version_id"), storage_metadata.get("etag")]
+        )
+    if isinstance(metadata, Mapping):
+        source = metadata.get("source")
+        if isinstance(source, Mapping):
+            candidates.extend(
+                [source.get("external_version"), source.get("etag")]
+            )
+    version = next(
+        (normalized for value in candidates if (normalized := _text(value))),
+        None,
+    )
+    identity = f"{storage_key}\0{version or 'unversioned'}\0{stored.size_bytes}"
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()
+
+
+def _rendition_version(source_version: str) -> str:
+    identity = f"{source_version}:{DOCUMENT_RENDITION_VERSION}"
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()
+
+
+def _preview_key(
+    document: Item,
+    *,
+    source_version: str,
+    page: int | None,
+    position: int,
+) -> str:
+    name = (
+        f"page-{page:04d}.webp"
+        if page is not None
+        else f"asset-{position:04d}.webp"
+    )
+    return (
+        f"{_preview_prefix(document)}{PREVIEW_RENDERER_VERSION}/"
+        f"{source_version}/{name}"
+    )
+
+
+def _preview_prefix(document: Item) -> str:
+    tenant_id = _text(getattr(document, "tenant_id", None)) or "unscoped"
+    item_id = _text(getattr(document, "id", None))
+    if item_id is None:
+        raise PreviewGenerationError("preview Item has no durable ID")
+    return f"tenants/{tenant_id}/items/{item_id}/previews/"
+
+
+def _file_name(document: Item) -> str:
+    metadata = getattr(document, "metadata_", None)
+    value = metadata.get("file_name") if isinstance(metadata, Mapping) else None
+    return _text(value) or _text(getattr(document, "title", None)) or "document"
+
+
+def _text(value: object) -> str | None:
+    normalized = str(value).strip() if value is not None else ""
+    return normalized or None
+
+
+__all__ = ["KnowledgePreview"]

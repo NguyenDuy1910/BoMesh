@@ -379,12 +379,12 @@ class _MemberPageState extends State<_MemberPage> {
     }
     if (!_lookedUp) {
       return const WorkspaceNotice(
-        'Enter the full email they use to sign in. Members must already have a BoThesis account.',
+        'Enter the full email they use to sign in. Members must already have a BoMesh account.',
       );
     }
     if (_account == null) {
       return const WorkspaceNotice(
-        'No account uses this email. Ask them to create a BoThesis account, then look them up again.',
+        'No account uses this email. Ask them to create a BoMesh account, then look them up again.',
       );
     }
     final standing = textOf(_account!['workspace_membership']);

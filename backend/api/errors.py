@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
-from bothesis.services import (
+from bomesh.services import (
     ControlPlaneConflictError,
     ControlPlaneExternalUnavailableError,
     ControlPlaneNotFoundError,
@@ -23,7 +23,7 @@ from bothesis.services import (
     UploadTooLargeError,
     UploadValidationError,
 )
-from bothesis.storage import ObjectStorageError
+from bomesh.storage import ObjectStorageError
 
 # An authorization failure is a missing credential, not a denied one, when the
 # request never carried a trusted identity in the first place.

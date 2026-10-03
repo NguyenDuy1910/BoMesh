@@ -20,8 +20,8 @@ from api.routers import (
     SourceUpdate,
 )
 from api.routers._mapping import source_payload
-from bothesis.services.ingestion import ingestion_resource
-from bothesis.services import ControlPlaneNotFoundError
+from bomesh.services.ingestion import ingestion_resource
+from bomesh.services import ControlPlaneNotFoundError
 
 router = APIRouter(prefix="/sources", tags=["sources"])
 

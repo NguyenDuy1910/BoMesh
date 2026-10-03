@@ -14,8 +14,8 @@ from api.routers import (
     GoogleSessionCreate,
     WorkspaceMembership,
 )
-from bothesis.db.engine import transaction_scope
-from bothesis.services import AuthenticationSession
+from bomesh.db.engine import transaction_scope
+from bomesh.services import AuthenticationSession
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 

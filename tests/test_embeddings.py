@@ -9,9 +9,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
-from bothesis.agent.transports.openrouter import OpenRouterTransport
-from bothesis.document_index import EmbeddingRejectedError, EmbeddingService
-from bothesis.services.item_ingestion import failure_message
+from bomesh.agent.transports.openrouter import OpenRouterTransport
+from bomesh.document_index import EmbeddingRejectedError, EmbeddingService
+from bomesh.services.item_ingestion import failure_message
 
 
 @pytest.mark.asyncio

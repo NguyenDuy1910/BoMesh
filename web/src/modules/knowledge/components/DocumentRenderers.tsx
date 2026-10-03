@@ -98,7 +98,7 @@ export function OriginalRenderer({
     return (
       <EmptyState
         action={<Button onClick={retry} size="sm" variant="secondary">Retry</Button>}
-        description="The document could not be loaded. BoThesis will not reconstruct missing content."
+        description="The document could not be loaded. BoMesh will not reconstruct missing content."
         icon={<TriangleAlert size={20} />}
         title="Document temporarily unavailable"
       />
@@ -182,7 +182,7 @@ export function UnsupportedRenderer({ document }: Pick<RendererProps, "document"
           : document.state === "indexed"
             ? "No readable preview has been produced for this document yet."
             : document.failureReason
-              ?? `BoThesis cannot render ${document.fileTypeLabel ?? "this format"} files, so the document is stored but never used in answers.`}
+              ?? `BoMesh cannot render ${document.fileTypeLabel ?? "this format"} files, so the document is stored but never used in answers.`}
       </p>
       {document.externalUrl && (
         <div className="knowledge-unsupported__actions">

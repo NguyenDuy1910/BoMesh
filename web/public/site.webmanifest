@@ -1,6 +1,6 @@
 {
-  "name": "Enterprise Agent",
-  "short_name": "Enterprise Agent",
+  "name": "BoMesh",
+  "short_name": "BoMesh",
   "description": "Enterprise knowledge and BI assistant.",
   "display": "standalone",
   "start_url": "/app",

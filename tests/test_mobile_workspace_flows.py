@@ -9,17 +9,17 @@ from sqlalchemy import select
 
 from api.routers import ApprovalRequest as ApprovalResponse
 from api.routers import Group as GroupResponse, GroupCreate, GroupUpdate, Role as RoleResponse, RoleCreate
-from bothesis.db.models import Item, Role, User
-from bothesis.document_index import ItemIndex
-from bothesis.services import AuthorizationError, DocumentNotFoundError
-from bothesis.services.approval_request import ApprovalRequestService
-from bothesis.services.identity_access.authorization import AuthorizationService
-from bothesis.services.identity_access.identity_store import IdentityStoreService
-from bothesis.services.identity_access.roles import RoleService
-from bothesis.services.item import ItemService
-from bothesis.services.item_catalog import ItemCatalogService
-from bothesis.services.item_ingestion import ItemIngestionService
-from bothesis.services.workspace_control_plane import WorkspaceControlPlaneService
+from bomesh.db.models import Item, Role, User
+from bomesh.document_index import ItemIndex
+from bomesh.services import AuthorizationError, DocumentNotFoundError
+from bomesh.services.approval_request import ApprovalRequestService
+from bomesh.services.identity_access.authorization import AuthorizationService
+from bomesh.services.identity_access.identity_store import IdentityStoreService
+from bomesh.services.identity_access.roles import RoleService
+from bomesh.services.item import ItemService
+from bomesh.services.item_catalog import ItemCatalogService
+from bomesh.services.item_ingestion import ItemIngestionService
+from bomesh.services.workspace_control_plane import WorkspaceControlPlaneService
 from config import VectorIndexConfig
 from test_db_services import (
     TEST_DATABASE_URL,

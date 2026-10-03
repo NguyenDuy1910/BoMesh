@@ -46,8 +46,8 @@ const knowledgeHome = {
 const browser = await chromium.launch();
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 await context.addInitScript((s) => {
-  sessionStorage.setItem("bothesis.auth.session", s);
-  localStorage.setItem("bothesis-theme", "light");
+  sessionStorage.setItem("bomesh.auth.session", s);
+  localStorage.setItem("bomesh-theme", "light");
 }, JSON.stringify(session));
 await context.route("**/api/v1/knowledge/**", (route) =>
   route.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify(knowledgeHome) }),

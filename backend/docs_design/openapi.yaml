@@ -1,7 +1,7 @@
 # Target contract. Replace with generated runtime OpenAPI only after implementation matches it.
 openapi: 3.1.0
 info:
-  title: BoThesis Enterprise Agent API
+  title: BoMesh API
   version: 1.0.0
   description: Contract-first target for workspace knowledge, IAM, integrations, and governed ingestion.
 security:

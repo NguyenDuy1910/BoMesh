@@ -67,7 +67,7 @@ function PreferencesPanel() {
         </div>
       </section>
       <section aria-label="Chat"><h3 className="text-sm font-medium">Chat</h3>
-        <SettingRow title="Show agent activity" description="Show action steps while BoThesis is working." control={<Toggle checked={preferences.showAgentActivity} label="Show agent activity" onChange={(showAgentActivity) => updatePreferences({ showAgentActivity })} />} />
+        <SettingRow title="Show agent activity" description="Show action steps while BoMesh is working." control={<Toggle checked={preferences.showAgentActivity} label="Show agent activity" onChange={(showAgentActivity) => updatePreferences({ showAgentActivity })} />} />
         <SettingRow title="Enter to send" description="Use Shift + Enter for a new line." control={<Toggle checked={preferences.enterToSend} label="Enter to send" onChange={(enterToSend) => updatePreferences({ enterToSend })} />} />
       </section>
       <section aria-label="Accessibility"><h3 className="text-sm font-medium">Accessibility</h3><SettingRow title="Reduce motion" description="Minimize cross-fades and movement." control={<Toggle checked={preferences.reduceMotion} label="Reduce motion" onChange={(reduceMotion) => updatePreferences({ reduceMotion })} />} /></section>

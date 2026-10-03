@@ -188,7 +188,7 @@ export function DocumentFinder({
           <p>No document matches “{trimmed}” by name or content.</p>
           <button className="document-finder__inline-action" onClick={() => onAskQuestion(trimmed)} type="button">
             <MessageSquarePlus aria-hidden="true" size={14} />
-            Ask BoThesis instead
+            Ask BoMesh instead
           </button>
         </div>
       ) : (

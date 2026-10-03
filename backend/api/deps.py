@@ -7,18 +7,18 @@ from typing import Annotated
 
 from fastapi import Depends, Request
 
-from bothesis.db.engine import transaction_scope
-from bothesis.health import HealthService
-from bothesis.runtime import AppRuntime
-from bothesis.services import AuthenticationError, AuthContext, AuthorizationError, JwtClaims
-from bothesis.services.workspace_control_plane import WorkspaceControlPlaneService
-from bothesis.services.integration_lifecycle import IntegrationLifecycleService
-from bothesis.services.ingestion import IngestionService
-from bothesis.services.artifact import ArtifactService
-from bothesis.services.chat import ChatService
-from bothesis.services.knowledge_query import KnowledgeQueryService
-from bothesis.services.knowledge_view import KnowledgeViewService
-from bothesis.services.documents import DocumentService
+from bomesh.db.engine import transaction_scope
+from bomesh.health import HealthService
+from bomesh.runtime import AppRuntime
+from bomesh.services import AuthenticationError, AuthContext, AuthorizationError, JwtClaims
+from bomesh.services.workspace_control_plane import WorkspaceControlPlaneService
+from bomesh.services.integration_lifecycle import IntegrationLifecycleService
+from bomesh.services.ingestion import IngestionService
+from bomesh.services.artifact import ArtifactService
+from bomesh.services.chat import ChatService
+from bomesh.services.knowledge_query import KnowledgeQueryService
+from bomesh.services.knowledge_view import KnowledgeViewService
+from bomesh.services.documents import DocumentService
 
 from api.identity import RequestIdentity, resolve_auth_context
 from api.routers import ChatRequest
@@ -37,8 +37,8 @@ def get_request_identity(request: Request) -> RequestIdentity:
     return RequestIdentity(
         auth_context=getattr(request.state, "auth_context", None),
         token_claims=getattr(request.state, "jwt_claims", None),
-        user_id=request.headers.get("X-Bothesis-User-Id"),
-        tenant_id=request.headers.get("X-Bothesis-Tenant-Id"),
+        user_id=request.headers.get("X-Bomesh-User-Id"),
+        tenant_id=request.headers.get("X-Bomesh-Tenant-Id"),
     )
 
 

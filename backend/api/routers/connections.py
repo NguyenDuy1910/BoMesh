@@ -241,7 +241,7 @@ def _provider_error(error: str | None, description: str | None) -> str:
 def _completion_page(
     origin: str, payload: dict[str, Any], *, status_code: int = 200
 ) -> HTMLResponse:
-    message = _script_literal({"source": "bothesis.connection", **payload})
+    message = _script_literal({"source": "bomesh.connection", **payload})
     target = _script_literal(origin)
     return HTMLResponse(
         status_code=status_code,

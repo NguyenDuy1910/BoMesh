@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Response, status
 
 from api.deps import Health
-from bothesis.health import HealthReport
+from bomesh.health import HealthReport
 
 router = APIRouter(tags=["platform"])
 

@@ -7,7 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
-from bothesis import (
+from bomesh import (
     PromptRenderError,
     load_prompt,
     render_agent_base,
@@ -19,7 +19,7 @@ def test_prompt_set_contains_only_the_runtime_roles() -> None:
     prompt_directory = (
         Path(__file__).resolve().parents[1]
         / "backend"
-        / "bothesis"
+        / "bomesh"
         / "agent"
         / "prompts"
     )

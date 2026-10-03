@@ -52,9 +52,9 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 load_dotenv(BACKEND_ROOT.parent / ".env", override=False)
 
-from bothesis.connector.file import FinxFileExtensions
-from bothesis.connector.file.archive import is_archive_name
-from bothesis.services import DEFAULT_MAX_UPLOAD_BYTES
+from bomesh.connector.file import FinxFileExtensions
+from bomesh.connector.file.archive import is_archive_name
+from bomesh.services import DEFAULT_MAX_UPLOAD_BYTES
 
 _MIB = 1024 * 1024
 #: The API's Document name limit.
@@ -86,7 +86,7 @@ class Skipped:
 
 def _parse_args() -> argparse.Namespace:
     upload_limit = int(
-        os.getenv("BOTHESIS_DOCUMENT_MAX_UPLOAD_BYTES") or DEFAULT_MAX_UPLOAD_BYTES
+        os.getenv("BOMESH_DOCUMENT_MAX_UPLOAD_BYTES") or DEFAULT_MAX_UPLOAD_BYTES
     )
     parser = argparse.ArgumentParser(
         description="Create one knowledge Document per R2 object in a workspace Collection."
@@ -94,14 +94,14 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--prefix", default=os.getenv("R2_PREFIX", "raw"))
     parser.add_argument(
         "--api",
-        default=os.getenv("BOTHESIS_API_URL")
-        or f"http://127.0.0.1:{os.getenv('BOTHESIS_PORT', '8000')}",
+        default=os.getenv("BOMESH_API_URL")
+        or f"http://127.0.0.1:{os.getenv('BOMESH_PORT', '8000')}",
         help="API base URL (default: the local API)",
     )
-    parser.add_argument("--email", default=os.getenv("BOTHESIS_EMAIL"))
-    parser.add_argument("--password", default=os.getenv("BOTHESIS_PASSWORD"))
+    parser.add_argument("--email", default=os.getenv("BOMESH_EMAIL"))
+    parser.add_argument("--password", default=os.getenv("BOMESH_PASSWORD"))
     parser.add_argument(
-        "--token", default=os.getenv("BOTHESIS_TOKEN"), help="Bearer token instead of a password"
+        "--token", default=os.getenv("BOMESH_TOKEN"), help="Bearer token instead of a password"
     )
     parser.add_argument("--workspace-id", help="Switch the session to this workspace first")
     target = parser.add_mutually_exclusive_group()
@@ -244,7 +244,7 @@ class ApiError(RuntimeError):
         self.status_code = response.status_code
 
 
-class BoThesisApi:
+class BoMeshApi:
     """The few public endpoints this script needs, as one authenticated caller."""
 
     def __init__(self, base_url: str, *, email: str | None, password: str | None, token: str | None):
@@ -352,7 +352,7 @@ class BoThesisApi:
 
 
 def _ingest_one(
-    r2: Any, bucket: str, api: BoThesisApi, collection_id: str, source: SourceObject
+    r2: Any, bucket: str, api: BoMeshApi, collection_id: str, source: SourceObject
 ) -> dict[str, Any]:
     row: dict[str, Any] = {
         "r2_key": source.key, "path": source.path, "name": source.name,
@@ -409,7 +409,7 @@ def main() -> int:
     _write_skipped(args.out / "skipped.csv", skipped)
     results: Counter[str] = Counter()
 
-    api = BoThesisApi(args.api, email=args.email, password=args.password, token=args.token)
+    api = BoMeshApi(args.api, email=args.email, password=args.password, token=args.token)
     try:
         if args.workspace_id:
             api.use_workspace(args.workspace_id)

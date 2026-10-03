@@ -44,7 +44,7 @@ import {
   titleFromMessage,
   uiToCachedMessage,
 } from "@/modules/chat/conversations";
-import { useChat } from "@/modules/chat/hooks/useBothesisChat";
+import { useChat } from "@/modules/chat/hooks/useBomeshChat";
 import { useJumpToLatest } from "@/modules/chat/hooks/useJumpToLatest";
 import type {
   ChatConversation,
@@ -1002,7 +1002,7 @@ function Welcome({
   onFind: () => void;
   onSelect: (text: string) => Promise<void>;
 }) {
-  const name = "BoThesis";
+  const name = "BoMesh";
   return (
     <div className="welcome">
       <div className="welcome__content">

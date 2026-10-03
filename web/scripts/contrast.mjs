@@ -60,8 +60,8 @@ const browser = await chromium.launch();
 const context = await browser.newContext({ viewport: { width: 1560, height: 960 } });
 await context.addInitScript(
   ([s, t]) => {
-    sessionStorage.setItem("bothesis.auth.session", s);
-    localStorage.setItem("bothesis-theme", t);
+    sessionStorage.setItem("bomesh.auth.session", s);
+    localStorage.setItem("bomesh-theme", t);
   },
   [JSON.stringify(session), theme],
 );

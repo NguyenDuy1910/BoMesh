@@ -1,11 +1,11 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   BoThesis — semantic design tokens
+   BoMesh — semantic design tokens
    ---------------------------------------------------------------------------
    The single source of colour, shape, density, motion and layout for every
    surface in the product: chat, knowledge, apps, workspace settings, platform
    admin. Nothing else in the codebase may declare a token or a raw hex.
 
-   Mirrors the "Enterprise Agent / Semantic" collection in Figma
+   Mirrors the "BoMesh / Semantic" collection in Figma
    (file xJDiDHNP0QK0uwvX0xGysL), which aliases the pearl / ink / lilac /
    aurora / night primitives. Where this file departs from Figma the reason is
    written next to the value — every departure is an accessibility or

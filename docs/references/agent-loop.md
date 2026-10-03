@@ -1,17 +1,17 @@
 ---
 sidebar_position: 3
-title: "Enterprise Agent Architecture"
+title: "BoMesh Architecture"
 description: "OpenResponses as the canonical language of the agent: items, events, reducer, provider adapters, conversation loop, tools, grounding"
 ---
 
-# Enterprise Agent Architecture
+# BoMesh Architecture
 
-This document is implementation context for the Enterprise Agent conversational agent.
+This document is implementation context for the BoMesh conversational agent.
 Keep it aligned with the code when changing agent behavior.
 
 ## Purpose and boundaries
 
-Enterprise Agent is an enterprise knowledge and analytics assistant. The agent answers
+BoMesh is an enterprise knowledge and analytics assistant. The agent answers
 from the current conversation when sufficient, retrieves enterprise knowledge
 only when needed, preserves source lineage for citations, and enforces the
 authenticated tenant and reader scope before evidence reaches the model.
@@ -26,7 +26,7 @@ The agent speaks [Open Responses](https://www.openresponses.org) (version
 `2026-04-24`), an open, vendor-neutral specification for LLM APIs. It is the
 canonical language of the agent, not one of several dialects:
 
-- there is no Enterprise Agent event model, and no translation step into or out of one;
+- there is no BoMesh event model, and no translation step into or out of one;
 - a provider's native protocol exists only inside its transport adapter;
 - anything above the transport layer works with the same canonical models.
 
@@ -228,15 +228,15 @@ inferred or deferred: the adapter forwards each `output_item.added`,
 ## Custom extensions
 
 The specification requires implementer-specific types to be slug-prefixed and
-permits optional fields on standard types when documented. Enterprise Agent adds exactly
+permits optional fields on standard types when documented. BoMesh adds exactly
 two things, both annotations, both because OpenResponses does not cover the
 requirement:
 
 | Extension | Why |
 | --- | --- |
-| `bothesis:document_citation` annotation | The specification defines only `url_citation`, which cannot carry enterprise document lineage (document id, page, section, access source). |
+| `bomesh:document_citation` annotation | The specification defines only `url_citation`, which cannot carry enterprise document lineage (document id, page, section, access source). |
 That is the entire extension surface. A reasoning item, in particular, needs no
-Enterprise Agent-specific field: `summary` plus `encrypted_content` are what every
+BoMesh-specific field: `summary` plus `encrypted_content` are what every
 provider uses to continue a reasoning session.
 
 Before adding anything else, check whether an existing item, annotation, content
@@ -252,7 +252,7 @@ evidence IDs. The model cites with `[[cite:EVIDENCE_ID]]`.
 - strips markers from `response.output_text.delta`, forwarding cleaned text
   immediately;
 - emits `response.output_text.annotation.added` with a
-  `bothesis:document_citation` annotation at the character offset the marker
+  `bomesh:document_citation` annotation at the character offset the marker
   occupied;
 - rewrites `response.output_text.done`, `response.content_part.done` and the
   message in `response.output_item.done` to the cleaned text plus annotations,
@@ -293,7 +293,7 @@ citation projection can resolve.
 | --- | --- |
 | `agent_base.md` | Primary conversational-agent instruction used by `ContextManager.start_turn()`. |
 
-Prompt rendering is centralized in `bothesis.render_prompt()`.
+Prompt rendering is centralized in `bomesh.render_prompt()`.
 
 ## Change rules
 

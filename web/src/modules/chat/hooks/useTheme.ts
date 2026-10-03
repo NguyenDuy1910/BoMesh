@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 export type ThemeMode = "light" | "dark" | "system";
 
-const STORAGE_KEY = "bothesis-theme";
+const STORAGE_KEY = "bomesh-theme";
 
 function getSystemTheme(): "light" | "dark" {
   if (typeof window === "undefined") return "light";

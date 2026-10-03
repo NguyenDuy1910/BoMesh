@@ -18,7 +18,7 @@ class ProductApp extends StatefulWidget {
 }
 
 class _ProductAppState extends State<ProductApp> with WidgetsBindingObserver {
-  static const _themeKey = 'bothesis-theme';
+  static const _themeKey = 'bomesh-theme';
   final _preferences = SharedPreferencesAsync();
   ThemeMode _themeMode = ThemeMode.system;
   late final ApiClient _api;

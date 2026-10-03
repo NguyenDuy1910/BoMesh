@@ -1,4 +1,4 @@
-"""Executable bootstrap for the Enterprise Agent HTTP application."""
+"""Executable bootstrap for the BoMesh HTTP application."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ async def main() -> None:
     worker = await asyncio.create_subprocess_exec(
         sys.executable,
         "-m",
-        "bothesis.services.workflow.worker",
+        "bomesh.services.workflow.worker",
         cwd=Path(__file__).parent,
         start_new_session=True,  # Ctrl-C reaches the API; the supervisor stops the worker.
     )

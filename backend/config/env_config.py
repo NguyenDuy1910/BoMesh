@@ -1,4 +1,4 @@
-"""Single source of truth for Enterprise Agent process configuration.
+"""Single source of truth for BoMesh process configuration.
 
 Every environment variable the application depends on is read here, once, and
 handed to the rest of the system as validated values. No module outside this
@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Literal
 
-from bothesis.services import (
+from bomesh.services import (
     DEFAULT_MAX_UPLOAD_BYTES,
     DEFAULT_PREVIEW_MAX_DIMENSION,
     DEFAULT_PREVIEW_MAX_PAGES,
@@ -135,9 +135,9 @@ class ServerConfig:
     @classmethod
     def from_environment(cls) -> ServerConfig:
         return cls(
-            host=text("BOTHESIS_HOST", "127.0.0.1"),
-            port=integer("BOTHESIS_PORT", default=8000),
-            log_level=text("BOTHESIS_LOG_LEVEL", "INFO").upper(),
+            host=text("BOMESH_HOST", "127.0.0.1"),
+            port=integer("BOMESH_PORT", default=8000),
+            log_level=text("BOMESH_LOG_LEVEL", "INFO").upper(),
         )
 
 
@@ -147,8 +147,8 @@ class IdentityConfig:
 
     allow_insecure_development_identity: bool = False
     jwt_secret: str | None = None
-    jwt_issuer: str = "bothesis"
-    jwt_audience: str = "bothesis-api"
+    jwt_issuer: str = "bomesh"
+    jwt_audience: str = "bomesh-api"
     jwt_expires_in_seconds: int = 900
     google_client_id: str | None = None
     google_jwks_url: str = "https://www.googleapis.com/oauth2/v3/certs"
@@ -158,20 +158,20 @@ class IdentityConfig:
     def from_environment(cls) -> IdentityConfig:
         return cls(
             allow_insecure_development_identity=boolean(
-                "BOTHESIS_ALLOW_INSECURE_DEV_IDENTITY"
+                "BOMESH_ALLOW_INSECURE_DEV_IDENTITY"
             ),
-            jwt_secret=optional_text("BOTHESIS_AUTH_JWT_SECRET"),
-            jwt_issuer=text("BOTHESIS_AUTH_JWT_ISSUER", "bothesis"),
-            jwt_audience=text("BOTHESIS_AUTH_JWT_AUDIENCE", "bothesis-api"),
+            jwt_secret=optional_text("BOMESH_AUTH_JWT_SECRET"),
+            jwt_issuer=text("BOMESH_AUTH_JWT_ISSUER", "bomesh"),
+            jwt_audience=text("BOMESH_AUTH_JWT_AUDIENCE", "bomesh-api"),
             jwt_expires_in_seconds=_positive_integer(
-                "BOTHESIS_AUTH_JWT_EXPIRES_IN_SECONDS", default=900
+                "BOMESH_AUTH_JWT_EXPIRES_IN_SECONDS", default=900
             ),
-            google_client_id=optional_text("BOTHESIS_GOOGLE_CLIENT_ID"),
+            google_client_id=optional_text("BOMESH_GOOGLE_CLIENT_ID"),
             google_jwks_url=text(
-                "BOTHESIS_GOOGLE_JWKS_URL",
+                "BOMESH_GOOGLE_JWKS_URL",
                 "https://www.googleapis.com/oauth2/v3/certs",
             ),
-            platform_admin_emails=email_set("BOTHESIS_PLATFORM_ADMIN_EMAILS"),
+            platform_admin_emails=email_set("BOMESH_PLATFORM_ADMIN_EMAILS"),
         )
 
 
@@ -193,7 +193,7 @@ class ObjectStorageConfig:
     def __post_init__(self) -> None:
         if self.provider not in {AWS_S3_PROVIDER, CLOUDFLARE_R2_PROVIDER}:
             raise RuntimeError(
-                "BOTHESIS_OBJECT_STORAGE_PROVIDER must be aws_s3 or cloudflare_r2"
+                "BOMESH_OBJECT_STORAGE_PROVIDER must be aws_s3 or cloudflare_r2"
             )
 
     @property
@@ -218,63 +218,63 @@ class ObjectStorageConfig:
             )
             if configured and not self.bucket:
                 raise RuntimeError(
-                    "BOTHESIS_R2_BUCKET is required when Cloudflare R2 is configured"
+                    "BOMESH_R2_BUCKET is required when Cloudflare R2 is configured"
                 )
             if not self.bucket:
-                raise RuntimeError("BOTHESIS_OBJECT_STORAGE_BUCKET is required")
+                raise RuntimeError("BOMESH_OBJECT_STORAGE_BUCKET is required")
             if not (self.account_id or self.endpoint_url):
                 raise RuntimeError(
-                    "BOTHESIS_R2_ACCOUNT_ID or BOTHESIS_R2_ENDPOINT_URL is required"
+                    "BOMESH_R2_ACCOUNT_ID or BOMESH_R2_ENDPOINT_URL is required"
                 )
             if not (self.access_key_id and self.secret_access_key):
                 raise RuntimeError(
-                    "BOTHESIS_R2_ACCESS_KEY_ID and "
-                    "BOTHESIS_R2_SECRET_ACCESS_KEY are required"
+                    "BOMESH_R2_ACCESS_KEY_ID and "
+                    "BOMESH_R2_SECRET_ACCESS_KEY are required"
                 )
             return self.bucket
         if self.endpoint_url and not self.bucket:
             raise RuntimeError(
-                "BOTHESIS_S3_BUCKET is required when AWS S3 is configured"
+                "BOMESH_S3_BUCKET is required when AWS S3 is configured"
             )
         if not self.bucket:
-            raise RuntimeError("BOTHESIS_OBJECT_STORAGE_BUCKET is required")
+            raise RuntimeError("BOMESH_OBJECT_STORAGE_BUCKET is required")
         return self.bucket
 
     @classmethod
     def from_environment(cls) -> ObjectStorageConfig:
         provider = text(
-            "BOTHESIS_OBJECT_STORAGE_PROVIDER", AWS_S3_PROVIDER
+            "BOMESH_OBJECT_STORAGE_PROVIDER", AWS_S3_PROVIDER
         ).lower()
         if provider == CLOUDFLARE_R2_PROVIDER:
             return cls(
                 provider=provider,
                 bucket=optional_text(
-                    "BOTHESIS_R2_BUCKET", "BOTHESIS_OBJECT_STORAGE_BUCKET"
+                    "BOMESH_R2_BUCKET", "BOMESH_OBJECT_STORAGE_BUCKET"
                 ),
-                account_id=optional_text("BOTHESIS_R2_ACCOUNT_ID"),
-                endpoint_url=optional_text("BOTHESIS_R2_ENDPOINT_URL"),
-                access_key_id=optional_text("BOTHESIS_R2_ACCESS_KEY_ID"),
-                secret_access_key=optional_text("BOTHESIS_R2_SECRET_ACCESS_KEY"),
-                timeout_seconds=number("BOTHESIS_R2_TIMEOUT_SECONDS", default=20.0),
+                account_id=optional_text("BOMESH_R2_ACCOUNT_ID"),
+                endpoint_url=optional_text("BOMESH_R2_ENDPOINT_URL"),
+                access_key_id=optional_text("BOMESH_R2_ACCESS_KEY_ID"),
+                secret_access_key=optional_text("BOMESH_R2_SECRET_ACCESS_KEY"),
+                timeout_seconds=number("BOMESH_R2_TIMEOUT_SECONDS", default=20.0),
                 max_pool_connections=integer(
-                    "BOTHESIS_R2_MAX_POOL_CONNECTIONS", default=20
+                    "BOMESH_R2_MAX_POOL_CONNECTIONS", default=20
                 ),
             )
         return cls(
             provider=provider,
             bucket=optional_text(
-                "BOTHESIS_S3_BUCKET", "BOTHESIS_OBJECT_STORAGE_BUCKET"
+                "BOMESH_S3_BUCKET", "BOMESH_OBJECT_STORAGE_BUCKET"
             ),
             region=optional_text(
-                "BOTHESIS_S3_REGION", "AWS_REGION", "AWS_DEFAULT_REGION"
+                "BOMESH_S3_REGION", "AWS_REGION", "AWS_DEFAULT_REGION"
             ),
             endpoint_url=optional_text(
-                "BOTHESIS_S3_ENDPOINT_URL", "BOTHESIS_OBJECT_STORAGE_ENDPOINT"
+                "BOMESH_S3_ENDPOINT_URL", "BOMESH_OBJECT_STORAGE_ENDPOINT"
             ),
-            addressing_style=text("BOTHESIS_S3_ADDRESSING_STYLE", "auto"),
-            timeout_seconds=number("BOTHESIS_S3_TIMEOUT_SECONDS", default=20.0),
+            addressing_style=text("BOMESH_S3_ADDRESSING_STYLE", "auto"),
+            timeout_seconds=number("BOMESH_S3_TIMEOUT_SECONDS", default=20.0),
             max_pool_connections=integer(
-                "BOTHESIS_S3_MAX_POOL_CONNECTIONS", default=20
+                "BOMESH_S3_MAX_POOL_CONNECTIONS", default=20
             ),
         )
 
@@ -300,7 +300,7 @@ class VectorIndexConfig:
             collection=optional_text("QDRANT_COLLECTION"),
             prefer_grpc=boolean("QDRANT_PREFER_GRPC"),
             embedding_batch_size=integer(
-                "BOTHESIS_DOCUMENT_EMBEDDING_BATCH_SIZE", default=32
+                "BOMESH_DOCUMENT_EMBEDDING_BATCH_SIZE", default=32
             ),
         )
 
@@ -326,7 +326,7 @@ class ModelConfig:
 
     @classmethod
     def from_environment(cls) -> ModelConfig:
-        configured_provider = optional_text("BOTHESIS_AGENT_MODEL_PROVIDER")
+        configured_provider = optional_text("BOMESH_AGENT_MODEL_PROVIDER")
         openrouter_api_key = optional_text("OPENROUTER_API_KEY")
         openrouter_model = optional_text("OPENROUTER_MODEL")
         # A fully configured OpenRouter agent is the only provider that offers
@@ -337,7 +337,7 @@ class ModelConfig:
         )
         if agent_provider not in {"openai", "openrouter"}:
             raise RuntimeError(
-                "BOTHESIS_AGENT_MODEL_PROVIDER must be 'openai' or 'openrouter'"
+                "BOMESH_AGENT_MODEL_PROVIDER must be 'openai' or 'openrouter'"
             )
         return cls(
             openrouter_base_url=text(
@@ -354,10 +354,10 @@ class ModelConfig:
             agent_provider=agent_provider,
             embedding_model=optional_text("EMBEDDING_MODEL"),
             contextualization_enabled=boolean(
-                "BOTHESIS_CONTEXTUALIZATION_ENABLED", default=True
+                "BOMESH_CONTEXTUALIZATION_ENABLED", default=True
             ),
-            contextualization_model=optional_text("BOTHESIS_CONTEXTUALIZATION_MODEL"),
-            reranker_model=optional_text("BOTHESIS_RERANKER_MODEL"),
+            contextualization_model=optional_text("BOMESH_CONTEXTUALIZATION_MODEL"),
+            reranker_model=optional_text("BOMESH_RERANKER_MODEL"),
         )
 
 
@@ -385,15 +385,15 @@ class RetrievalConfig:
     def from_environment(cls) -> RetrievalConfig:
         return cls(
             hybrid_candidate_limit=integer(
-                "BOTHESIS_RETRIEVAL_CANDIDATE_COUNT",
-                "BOTHESIS_HYBRID_CANDIDATE_LIMIT",
+                "BOMESH_RETRIEVAL_CANDIDATE_COUNT",
+                "BOMESH_HYBRID_CANDIDATE_LIMIT",
                 default=20,
             ),
-            final_top_k=integer("BOTHESIS_FINAL_RETRIEVAL_TOP_K", default=6),
+            final_top_k=integer("BOMESH_FINAL_RETRIEVAL_TOP_K", default=6),
             context_characters=integer(
-                "BOTHESIS_RETRIEVAL_CONTEXT_CHARACTERS", default=8_000
+                "BOMESH_RETRIEVAL_CONTEXT_CHARACTERS", default=8_000
             ),
-            reranking_enabled=boolean("BOTHESIS_RERANKING_ENABLED", default=True),
+            reranking_enabled=boolean("BOMESH_RERANKING_ENABLED", default=True),
         )
 
 
@@ -418,21 +418,21 @@ class AgentRuntimeConfig:
     @classmethod
     def from_environment(cls) -> AgentRuntimeConfig:
         return cls(
-            max_model_turns=integer("BOTHESIS_MAX_MODEL_TURNS", default=8),
-            max_tool_rounds=integer("BOTHESIS_MAX_TOOL_ROUNDS", default=4),
-            max_tool_calls=integer("BOTHESIS_MAX_TOOL_CALLS", default=6),
-            max_history_messages=integer("BOTHESIS_MAX_HISTORY_MESSAGES", default=24),
+            max_model_turns=integer("BOMESH_MAX_MODEL_TURNS", default=8),
+            max_tool_rounds=integer("BOMESH_MAX_TOOL_ROUNDS", default=4),
+            max_tool_calls=integer("BOMESH_MAX_TOOL_CALLS", default=6),
+            max_history_messages=integer("BOMESH_MAX_HISTORY_MESSAGES", default=24),
             max_history_characters=integer(
-                "BOTHESIS_MAX_HISTORY_CHARACTERS", default=24_000
+                "BOMESH_MAX_HISTORY_CHARACTERS", default=24_000
             ),
             recent_history_messages=integer(
-                "BOTHESIS_RECENT_HISTORY_MESSAGES", default=6
+                "BOMESH_RECENT_HISTORY_MESSAGES", default=6
             ),
             tool_timeout_seconds=number(
-                "BOTHESIS_TOOL_TIMEOUT_SECONDS", default=30.0
+                "BOMESH_TOOL_TIMEOUT_SECONDS", default=30.0
             ),
             max_resource_read_characters=integer(
-                "BOTHESIS_MAX_RESOURCE_READ_CHARACTERS", default=12_000
+                "BOMESH_MAX_RESOURCE_READ_CHARACTERS", default=12_000
             ),
         )
 
@@ -462,16 +462,16 @@ class ArtifactConfig:
     def from_environment(cls) -> ArtifactConfig:
         return cls(
             max_content_bytes=integer(
-                "BOTHESIS_ARTIFACT_MAX_CONTENT_BYTES", default=2 * 1024 * 1024
+                "BOMESH_ARTIFACT_MAX_CONTENT_BYTES", default=2 * 1024 * 1024
             ),
             context_characters=integer(
-                "BOTHESIS_ARTIFACT_CONTEXT_CHARACTERS", default=20_000
+                "BOMESH_ARTIFACT_CONTEXT_CHARACTERS", default=20_000
             ),
             result_characters=integer(
-                "BOTHESIS_ARTIFACT_RESULT_CHARACTERS", default=8_000
+                "BOMESH_ARTIFACT_RESULT_CHARACTERS", default=8_000
             ),
             download_url_seconds=integer(
-                "BOTHESIS_ARTIFACT_DOWNLOAD_URL_SECONDS", default=300
+                "BOMESH_ARTIFACT_DOWNLOAD_URL_SECONDS", default=300
             ),
         )
 
@@ -489,19 +489,19 @@ class UploadConfig:
     def from_environment(cls) -> UploadConfig:
         return cls(
             max_upload_bytes=integer(
-                "BOTHESIS_DOCUMENT_MAX_UPLOAD_BYTES",
+                "BOMESH_DOCUMENT_MAX_UPLOAD_BYTES",
                 default=DEFAULT_MAX_UPLOAD_BYTES,
             ),
             processing_max_bytes=integer(
-                "BOTHESIS_DOCUMENT_MAX_PROCESSING_BYTES",
+                "BOMESH_DOCUMENT_MAX_PROCESSING_BYTES",
                 default=DEFAULT_PROCESSING_MAX_BYTES,
             ),
             upload_url_seconds=integer(
-                "BOTHESIS_DOCUMENT_UPLOAD_URL_SECONDS",
+                "BOMESH_DOCUMENT_UPLOAD_URL_SECONDS",
                 default=DEFAULT_UPLOAD_URL_SECONDS,
             ),
             citation_url_seconds=integer(
-                "BOTHESIS_DOCUMENT_CITATION_URL_SECONDS", default=300
+                "BOMESH_DOCUMENT_CITATION_URL_SECONDS", default=300
             ),
         )
 
@@ -520,21 +520,21 @@ class PreviewConfig:
     def from_environment(cls) -> PreviewConfig:
         return cls(
             max_source_bytes=integer(
-                "BOTHESIS_PREVIEW_MAX_SOURCE_BYTES",
+                "BOMESH_PREVIEW_MAX_SOURCE_BYTES",
                 default=DEFAULT_PREVIEW_MAX_SOURCE_BYTES,
             ),
             max_pages=integer(
-                "BOTHESIS_PREVIEW_MAX_PAGES", default=DEFAULT_PREVIEW_MAX_PAGES
+                "BOMESH_PREVIEW_MAX_PAGES", default=DEFAULT_PREVIEW_MAX_PAGES
             ),
             max_dimension=integer(
-                "BOTHESIS_PREVIEW_MAX_DIMENSION",
+                "BOMESH_PREVIEW_MAX_DIMENSION",
                 default=DEFAULT_PREVIEW_MAX_DIMENSION,
             ),
             webp_quality=integer(
-                "BOTHESIS_PREVIEW_WEBP_QUALITY",
+                "BOMESH_PREVIEW_WEBP_QUALITY",
                 default=DEFAULT_PREVIEW_WEBP_QUALITY,
             ),
-            url_seconds=integer("BOTHESIS_PREVIEW_URL_SECONDS", default=300),
+            url_seconds=integer("BOMESH_PREVIEW_URL_SECONDS", default=300),
         )
 
 
@@ -549,7 +549,7 @@ class WorkerConfig:
     def __post_init__(self) -> None:
         if self.max_concurrent_activities < 1:
             raise RuntimeError(
-                "BOTHESIS_TEMPORAL_MAX_CONCURRENT_ACTIVITIES must be at least one"
+                "BOMESH_TEMPORAL_MAX_CONCURRENT_ACTIVITIES must be at least one"
             )
         if self.activity_rate_limit is not None and self.activity_rate_limit <= 0:
             raise ValueError("Temporal Activity rate limit must be positive")
@@ -558,10 +558,10 @@ class WorkerConfig:
     def from_environment(cls) -> WorkerConfig:
         return cls(
             max_concurrent_activities=integer(
-                "BOTHESIS_TEMPORAL_MAX_CONCURRENT_ACTIVITIES", default=4
+                "BOMESH_TEMPORAL_MAX_CONCURRENT_ACTIVITIES", default=4
             ),
             activity_rate_limit=optional_number(
-                "BOTHESIS_TEMPORAL_ACTIVITY_RATE_LIMIT"
+                "BOMESH_TEMPORAL_ACTIVITY_RATE_LIMIT"
             ),
         )
 
@@ -610,14 +610,14 @@ class IntegrationOAuthConfig:
     @classmethod
     def from_environment(cls) -> IntegrationOAuthConfig:
         return cls(
-            redirect_uri=optional_text("BOTHESIS_INTEGRATION_OAUTH_REDIRECT_URI"),
-            client_origin=optional_text("BOTHESIS_INTEGRATION_OAUTH_CLIENT_ORIGIN"),
-            state_secret=optional_text("BOTHESIS_INTEGRATION_OAUTH_STATE_SECRET"),
+            redirect_uri=optional_text("BOMESH_INTEGRATION_OAUTH_REDIRECT_URI"),
+            client_origin=optional_text("BOMESH_INTEGRATION_OAUTH_CLIENT_ORIGIN"),
+            state_secret=optional_text("BOMESH_INTEGRATION_OAUTH_STATE_SECRET"),
             timeout_seconds=number(
-                "BOTHESIS_INTEGRATION_OAUTH_TIMEOUT_SECONDS", default=20.0
+                "BOMESH_INTEGRATION_OAUTH_TIMEOUT_SECONDS", default=20.0
             ),
-            google=OAuthClientConfig.from_environment("BOTHESIS_GOOGLE_OAUTH"),
-            atlassian=OAuthClientConfig.from_environment("BOTHESIS_ATLASSIAN_OAUTH"),
+            google=OAuthClientConfig.from_environment("BOMESH_GOOGLE_OAUTH"),
+            atlassian=OAuthClientConfig.from_environment("BOMESH_ATLASSIAN_OAUTH"),
         )
 
 
@@ -632,7 +632,7 @@ class IntegrationConfig:
     def from_environment(cls) -> IntegrationConfig:
         return cls(
             credential_encryption_key=optional_text(
-                "BOTHESIS_INTEGRATION_ENCRYPTION_KEY"
+                "BOMESH_INTEGRATION_ENCRYPTION_KEY"
             ),
             oauth=IntegrationOAuthConfig.from_environment(),
         )

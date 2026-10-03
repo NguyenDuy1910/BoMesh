@@ -76,7 +76,7 @@ export interface AuthorizationRequest {
  * browsers block it, so the person would press Connect and see nothing happen.
  */
 export function beginAuthorization(request: AuthorizationRequest): PendingAuthorization {
-  const popup = window.open("", "bothesis-authorize", POPUP_FEATURES);
+  const popup = window.open("", "bomesh-authorize", POPUP_FEATURES);
   if (!popup) throw new PopupBlocked();
 
   let settle: ((outcome: () => void) => void) | null = null;
@@ -146,7 +146,7 @@ function watch(
     // one the reader abandoned.
     if (event.origin !== origin) return;
     const payload = event.data as CompletionMessage | null;
-    if (!payload || payload.source !== "bothesis.connection") return;
+    if (!payload || payload.source !== "bomesh.connection") return;
     if (payload.nonce !== nonce) return;
 
     if (payload.status === "connected" && typeof payload.connection_id === "string") {

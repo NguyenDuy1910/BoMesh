@@ -21,9 +21,9 @@ class ConversationStore {
   set _writes(Future<void> value) => _pendingWrites[_namespace] = value;
 
   // Unscoped legacy caches are deliberately not imported into authenticated sessions.
-  String get _conversationKey => 'bothesis-chat-v2:$_namespace:conversations';
-  String _messageKey(String id) => 'bothesis-chat-v2:$_namespace:messages:$id';
-  String get _selectionKey => 'bothesis-chat-v2:$_namespace:selected';
+  String get _conversationKey => 'bomesh-chat-v2:$_namespace:conversations';
+  String _messageKey(String id) => 'bomesh-chat-v2:$_namespace:messages:$id';
+  String get _selectionKey => 'bomesh-chat-v2:$_namespace:selected';
 
   Future<String?> selectedConversation() async {
     await _writes;

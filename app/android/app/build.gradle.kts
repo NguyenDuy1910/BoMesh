@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.bothesis.bothesis"
+    namespace = "com.bomesh.bomesh"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -15,7 +15,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.bothesis.bothesis"
+        applicationId = "com.bomesh.bomesh"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 24

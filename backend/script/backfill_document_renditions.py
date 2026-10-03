@@ -30,12 +30,12 @@ if str(BACKEND_ROOT) not in sys.path:
 load_dotenv(BACKEND_ROOT.parent / ".env", override=False)
 
 from config import get_config
-from bothesis.db.engine import transaction_scope
-from bothesis.db.models import Item
-from bothesis.runtime import AppRuntime
-from bothesis.services.item import ItemService
-from bothesis.services.preview import KnowledgePreview
-from bothesis.services.stored_file_content import StoredFileContentService
+from bomesh.db.engine import transaction_scope
+from bomesh.db.models import Item
+from bomesh.runtime import AppRuntime
+from bomesh.services.item import ItemService
+from bomesh.services.preview import KnowledgePreview
+from bomesh.services.stored_file_content import StoredFileContentService
 
 
 def _parse_args() -> argparse.Namespace:
@@ -125,7 +125,7 @@ async def _backfill_one(
         _without_rendition(item)
     assert item.storage_key is not None
     suffix = Path(str(item.metadata_.get("file_name") or item.title or "")).suffix
-    with tempfile.TemporaryDirectory(prefix="bothesis-rendition-") as directory:
+    with tempfile.TemporaryDirectory(prefix="bomesh-rendition-") as directory:
         path = Path(directory) / f"source{suffix}"
         await runtime.object_storage().download_to_path(
             item.storage_key, path, max_bytes=max_bytes

@@ -12,9 +12,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
 import api.app as api_app
 import api.deps as api_deps
-from bothesis.services import AuthContext
-from bothesis.services.document_presentation import public_document_status
-from bothesis.services.knowledge_view import _document_payload
+from bomesh.services import AuthContext
+from bomesh.services.document_presentation import public_document_status
+from bomesh.services.knowledge_view import _document_payload
 
 
 def _caller() -> AuthContext:

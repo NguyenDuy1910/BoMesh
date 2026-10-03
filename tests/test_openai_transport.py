@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
-from bothesis.agent.transports.openai import OpenAITransport
+from bomesh.agent.transports.openai import OpenAITransport
 
 
 def _response(output: list[dict[str, Any]]) -> dict[str, Any]:

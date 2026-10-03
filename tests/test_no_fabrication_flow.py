@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
-from bothesis import render_agent_base
+from bomesh import render_agent_base
 
 
 def test_agent_base_requires_observed_grounded_evidence() -> None:

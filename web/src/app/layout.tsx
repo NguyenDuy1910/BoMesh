@@ -39,8 +39,8 @@ export default function RootLayout({
         />
       </head>
       <body>
-        <Script id="bothesis-theme" strategy="beforeInteractive">
-          {`(function(){try{var t=localStorage.getItem("bothesis-theme")||"system";var d=t==="dark"||(t==="system"&&matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.dataset.theme=d?"dark":"light";document.documentElement.classList.toggle("dark",d)}catch(e){}})();`}
+        <Script id="bomesh-theme" strategy="beforeInteractive">
+          {`(function(){try{var t=localStorage.getItem("bomesh-theme")||"system";var d=t==="dark"||(t==="system"&&matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.dataset.theme=d?"dark":"light";document.documentElement.classList.toggle("dark",d)}catch(e){}})();`}
         </Script>
         <a className="skip-link" href="#main-content">Skip to main content</a>
         <AuthGate>{children}</AuthGate>

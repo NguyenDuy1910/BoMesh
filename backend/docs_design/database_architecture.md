@@ -1,6 +1,6 @@
-# BoThesis database architecture
+# BoMesh database architecture
 
-**Status:** reviewed against `backend/bothesis/db/models.py` and migrations  
+**Status:** reviewed against `backend/bomesh/db/models.py` and migrations  
 **Canonical schema design:** [design.dbml](design.dbml)  
 **Scope:** durable PostgreSQL state only
 
@@ -13,7 +13,7 @@ storage nor Qdrant is a source of truth for domain state.
 
 ### Database operation lifecycle
 
-Every application database operation uses `bothesis.db.engine.transaction_scope`:
+Every application database operation uses `bomesh.db.engine.transaction_scope`:
 
 ```text
 transaction_scope(session_factory)
@@ -221,6 +221,18 @@ new one for a speculative query.
   platform `guest` role with its role permissions and assignments, and drops
   tenant `visibility`, `public_access_role_id`, and their public-access
   check/trigger.
+- Product rename BoThesis → BoMesh. Migration
+  `backend/migrations/20261003_rename_bomesh.sql` renames the
+  `bothesis_validate_*` trigger functions to `bomesh_validate_*` (triggers bind
+  by function identity, so they keep firing). The deployment owns the rest:
+  the database and its owning role are `bomesh` (an existing cluster renames
+  them in place with `ALTER DATABASE … RENAME` / `ALTER ROLE … RENAME`, the
+  bootstrap superuser through a temporary superuser), the object-storage
+  bucket and the Qdrant collection are `bomesh` (MinIO copies with
+  `mc mirror --preserve`; Qdrant has no rename, so it recovers a snapshot of the
+  old collection under the new name), and stored document renditions carry
+  `application/vnd.bomesh.document+json`. Earlier migrations keep their
+  original `bothesis_*` names because they describe history.
 - `role_permissions` and citations retain tombstones and reactivate stable
   identities instead of creating duplicate rows.
 - Design documentation stays under `backend/docs_design`; this document and

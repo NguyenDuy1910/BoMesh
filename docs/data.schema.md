@@ -1,4 +1,4 @@
-# Enterprise Agent Storage Ownership
+# BoMesh Storage Ownership
 
 PostgreSQL stores durable business and application state: identities, tenant
 memberships, Integration Connections, encrypted Integration Credentials,

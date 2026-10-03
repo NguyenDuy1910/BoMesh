@@ -28,7 +28,7 @@ export function getApiConfiguration(): ApiConfiguration | null {
  * configuration remains an explicit override for non-local environments.
  */
 export function getApiUrl(): string | null {
-  return configuredValue(process.env.NEXT_PUBLIC_BOTHESIS_API_URL)
+  return configuredValue(process.env.NEXT_PUBLIC_BOMESH_API_URL)
     ?? (process.env.NODE_ENV === "development" ? localDevelopmentApiUrl : null);
 }
 
@@ -44,9 +44,9 @@ function resolveApiConfiguration(session: ReturnType<typeof getStoredAuthSession
     };
   }
   const localIdentity = process.env.NODE_ENV === "development";
-  const tenantId = configuredValue(process.env.NEXT_PUBLIC_BOTHESIS_TENANT_ID)
+  const tenantId = configuredValue(process.env.NEXT_PUBLIC_BOMESH_TENANT_ID)
     ?? (localIdentity ? localDevelopmentTenantId : undefined);
-  const userId = configuredValue(process.env.NEXT_PUBLIC_BOTHESIS_USER_ID)
+  const userId = configuredValue(process.env.NEXT_PUBLIC_BOMESH_USER_ID)
     ?? (localIdentity ? localDevelopmentUserId : undefined);
   if (!tenantId || !userId) return null;
   return { apiUrl, tenantId, userId };
@@ -63,7 +63,7 @@ export function requestIdentityHeaders(configuration: ApiConfiguration): Record<
     return { Authorization: `Bearer ${configuration.accessToken}` };
   }
   return {
-    "X-Bothesis-User-Id": configuration.userId,
-    "X-Bothesis-Tenant-Id": configuration.tenantId,
+    "X-Bomesh-User-Id": configuration.userId,
+    "X-Bomesh-Tenant-Id": configuration.tenantId,
   };
 }

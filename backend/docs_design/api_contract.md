@@ -1,4 +1,4 @@
-# BoThesis API Contract
+# BoMesh API Contract
 
 Status: canonical implemented API contract. Authentication details are locked
 in `auth_contract.md`; Document/content details are locked in

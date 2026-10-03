@@ -2,7 +2,7 @@
 
 Every handler validates, delegates to a service, and returns. The models live
 here so one import gives a router its whole transport contract; application
-logic lives in ``bothesis.services``.
+logic lives in ``bomesh.services``.
 """
 
 from __future__ import annotations

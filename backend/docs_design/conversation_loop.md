@@ -26,7 +26,7 @@ queries (1–3, normalized, deduplicated)
 Qdrant: one query_points request
     dense + BM25 prefetch per query, all fused by native RRF,
     tenant / Collection / tombstone / schema filter on every prefetch
-    ↓ fused candidates (BOTHESIS_RETRIEVAL_CANDIDATE_COUNT)
+    ↓ fused candidates (BOMESH_RETRIEVAL_CANDIDATE_COUNT)
 Collection visibility re-check
     ↓
 one LLM rerank over every query  →  relevance gate
