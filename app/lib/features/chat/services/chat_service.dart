@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
 import '../../../core/api_client.dart';
+import '../../../core/uploads.dart';
 import '../models/chat_models.dart';
 import '../models/chat_stream.dart';
 
@@ -185,9 +185,7 @@ class ChatService {
     onProgress(UploadProgress.uploading);
     final result = await api.upload(
       '/api/v1/collections/${Uri.encodeComponent(id)}/documents',
-      fileName: file.fileName,
-      bytes: file.bytes,
-      contentType: file.contentType,
+      file: file.source,
       fields: const {'purpose': 'conversation_attachment'},
       idempotencyKey: file.idempotencyKey,
     );
@@ -201,9 +199,9 @@ class ChatService {
     }
     return ConversationDocument(
       id: textOf(document['id']),
-      fileName: textOf(document['name'], file.fileName),
-      contentType: textOf(document['content_type'], file.contentType),
-      sizeBytes: (document['size_bytes'] as num?)?.toInt() ?? file.bytes.length,
+      fileName: textOf(document['name'], file.source.fileName),
+      contentType: textOf(document['content_type'], file.source.contentType),
+      sizeBytes: (document['size_bytes'] as num?)?.toInt() ?? file.source.length,
       mode: 'indexed',
       status: 'available',
       origin: 'upload',
@@ -255,16 +253,10 @@ class ChatStreamHandle {
 
 enum UploadProgress { starting, uploading, validating, ready, failed }
 
+/// One attachment and the key that makes its upload safe to repeat.
 class UploadFile {
-  const UploadFile({
-    required this.fileName,
-    required this.contentType,
-    required this.bytes,
-    required this.idempotencyKey,
-  });
-  final String fileName;
-  final String contentType;
-  final Uint8List bytes;
+  const UploadFile({required this.source, required this.idempotencyKey});
+  final UploadSource source;
   final String idempotencyKey;
 }
 

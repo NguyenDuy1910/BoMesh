@@ -1,9 +1,9 @@
 import 'dart:async';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../../../app/app_theme.dart';
+import '../../../core/uploads.dart';
 import '../services/chat_service.dart';
 import '../state/chat_controller.dart';
 import 'document_picker.dart';
@@ -16,36 +16,6 @@ class ChatComposer extends StatefulWidget {
 }
 
 class _ChatComposerState extends State<ChatComposer> {
-  static const _extensions = [
-    'avif',
-    'bmp',
-    'csv',
-    'docx',
-    'gif',
-    'htm',
-    'html',
-    'jpeg',
-    'jpg',
-    'json',
-    'jsonl',
-    'log',
-    'markdown',
-    'md',
-    'pdf',
-    'png',
-    'pptx',
-    'rst',
-    'sql',
-    'tif',
-    'tiff',
-    'tsv',
-    'txt',
-    'webp',
-    'xlsx',
-    'xml',
-    'yaml',
-    'yml',
-  ];
   final _textController = TextEditingController();
   final _focusNode = FocusNode();
   int _draftRevision = 0;
@@ -93,30 +63,86 @@ class _ChatComposerState extends State<ChatComposer> {
     unawaited(widget.controller.sendMessage(value));
   }
 
+  /// Everything that adds context to a question, in one labelled menu rather
+  /// than three unlabelled icons.
+  Future<void> _openAddMenu() async {
+    final controller = widget.controller;
+    final full = controller.attachments.length >= 10;
+    final scope = controller.selectedCollectionIds.length;
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              enabled: !full,
+              leading: const Icon(Icons.upload_file_outlined),
+              title: const Text('Upload a file'),
+              subtitle: Text(full ? 'Up to 10 files per question' : 'PDF, Office, text or an image'),
+              onTap: () => Navigator.pop(sheetContext, 'upload'),
+            ),
+            ListTile(
+              enabled: !full,
+              leading: const Icon(Icons.description_outlined),
+              title: const Text('Use a document from your library'),
+              onTap: () => Navigator.pop(sheetContext, 'document'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.folder_outlined),
+              title: const Text('Search only some collections'),
+              subtitle: Text(scope == 0 ? 'Now: everything you can access' : 'Now: $scope selected'),
+              onTap: () => Navigator.pop(sheetContext, 'scope'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || choice == null) return;
+    switch (choice) {
+      case 'upload':
+        await _pickFiles();
+      case 'document':
+        await showModalBottomSheet<void>(
+          context: context,
+          isScrollControlled: true,
+          useSafeArea: true,
+          builder: (_) => DocumentPicker(controller: controller),
+        );
+      case 'scope':
+        await showModalBottomSheet<void>(
+          context: context,
+          isScrollControlled: true,
+          useSafeArea: true,
+          builder: (_) => _CollectionPicker(controller: controller),
+        );
+    }
+  }
+
   Future<void> _pickFiles() async {
     final conversationId = widget.controller.conversationId;
     try {
-      final result = await FilePicker.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: _extensions,
+      final picked = await pickUploads(
+        extensions: {...knowledgeExtensions, ...imageExtensions},
+        limit: 10 - widget.controller.attachments.length,
       );
       if (!mounted || conversationId != widget.controller.conversationId) {
         return;
       }
-      for (final file in result) {
-        if (widget.controller.attachments.length >= 10) break;
-        final bytes = await file.readAsBytes();
-        if (!mounted || conversationId != widget.controller.conversationId) {
-          return;
-        }
-        unawaited(
-          widget.controller.addAttachment(fileName: file.name, bytes: bytes),
+      for (final file in picked.accepted) {
+        unawaited(widget.controller.addAttachment(file));
+      }
+      if (picked.rejected.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(picked.rejected.join('\n'))),
         );
       }
     } catch (cause) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not read the file: $cause')),
+          SnackBar(content: Text('The file could not be opened: $cause')),
         );
       }
     }
@@ -143,7 +169,7 @@ class _ChatComposerState extends State<ChatComposer> {
               ),
             ),
             child: Padding(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.fromLTRB(4, 4, 6, 4),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -206,87 +232,44 @@ class _ChatComposerState extends State<ChatComposer> {
                         ),
                       ),
                     ),
-                  TextField(
-                    controller: _textController,
-                    focusNode: _focusNode,
-                    enabled: controller.isConfigured && !controller.isLoading,
-                    minLines: 1,
-                    maxLines: compact ? 4 : 6,
-                    maxLength: 4000,
-                    textCapitalization: TextCapitalization.sentences,
-                    keyboardType: TextInputType.multiline,
-                    onChanged: (_) => setState(() {}),
-                    decoration: InputDecoration(
-                      labelText: 'Ask your knowledge assistant',
-                      floatingLabelBehavior: FloatingLabelBehavior.never,
-                      hintText: 'Ask a question or describe a document…',
-                      filled: false,
-                      border: InputBorder.none,
-                      enabledBorder: InputBorder.none,
-                      focusedBorder: InputBorder.none,
-                      contentPadding: const EdgeInsets.symmetric(vertical: 8),
-                      counterText: _textController.text.length > 3500
-                          ? '${_textController.text.length}/4000'
-                          : '',
-                    ),
-                    style: Theme.of(context).textTheme.bodyLarge,
-                  ),
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       IconButton(
-                        tooltip: 'Upload attachment',
-                        onPressed:
-                            controller.isConfigured &&
-                                !controller.isGenerating &&
-                                controller.attachments.length < 10
-                            ? _pickFiles
-                            : null,
-                        icon: const Icon(Icons.attach_file_rounded),
-                      ),
-                      IconButton(
-                        tooltip: 'Find an existing document',
-                        onPressed:
-                            controller.isConfigured &&
-                                !controller.isGenerating &&
-                                controller.attachments.length < 10
-                            ? () => showModalBottomSheet<void>(
-                                context: context,
-                                isScrollControlled: true,
-                                useSafeArea: true,
-                                builder: (_) =>
-                                    DocumentPicker(controller: controller),
-                              )
-                            : null,
-                        icon: const Icon(Icons.find_in_page_outlined),
-                      ),
-                      IconButton(
-                        tooltip: controller.selectedCollectionIds.isEmpty
-                            ? 'Search all permitted collections'
-                            : '${controller.selectedCollectionIds.length} collections selected',
-                        onPressed:
-                            controller.isConfigured && !controller.isGenerating
-                            ? () => showModalBottomSheet<void>(
-                                context: context,
-                                isScrollControlled: true,
-                                useSafeArea: true,
-                                builder: (_) =>
-                                    _CollectionPicker(controller: controller),
-                              )
+                        tooltip: 'Add a file or choose what to search',
+                        onPressed: controller.isConfigured && !controller.isGenerating
+                            ? _openAddMenu
                             : null,
                         color: controller.selectedCollectionIds.isEmpty
                             ? colors.textSecondary
                             : colors.brand,
-                        icon: const Icon(Icons.folder_outlined),
+                        icon: const Icon(Icons.add_circle_outline_rounded),
                       ),
-                      const Spacer(),
-                      if (!compact)
-                        Padding(
-                          padding: const EdgeInsets.only(right: 12),
-                          child: Text(
-                            'Permission-aware',
-                            style: Theme.of(context).textTheme.labelSmall,
+                      Expanded(
+                        child: TextField(
+                          controller: _textController,
+                          focusNode: _focusNode,
+                          enabled: controller.isConfigured && !controller.isLoading,
+                          minLines: 1,
+                          maxLines: compact ? 4 : 6,
+                          maxLength: 4000,
+                          textCapitalization: TextCapitalization.sentences,
+                          keyboardType: TextInputType.multiline,
+                          onChanged: (_) => setState(() {}),
+                          decoration: InputDecoration(
+                            hintText: 'Ask anything',
+                            filled: false,
+                            border: InputBorder.none,
+                            enabledBorder: InputBorder.none,
+                            focusedBorder: InputBorder.none,
+                            contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                            counterText: _textController.text.length > 3500
+                                ? '${_textController.text.length}/4000'
+                                : '',
                           ),
+                          style: Theme.of(context).textTheme.bodyLarge,
                         ),
+                      ),
                       IconButton.filled(
                         tooltip: controller.isGenerating
                             ? 'Stop response'
@@ -333,7 +316,7 @@ class _AttachmentRow extends StatelessWidget {
           UploadProgress.ready =>
             attachment.document?.isUpload == true
                 ? 'Attached to your next question'
-                : 'Existing document · never deleted by Chat',
+                : 'From your library',
         };
     return ListTile(
       contentPadding: EdgeInsets.zero,

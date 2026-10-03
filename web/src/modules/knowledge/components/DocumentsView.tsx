@@ -17,6 +17,7 @@ import type {
 import { pluralize } from "@/modules/workspace-control/format";
 
 import { DocumentBulkBar } from "./DocumentBulkBar";
+import { DocumentSelectMenu } from "./DocumentSelectMenu";
 import { FileTypeIcon } from "./FileTypeIcon";
 
 const COLLECTION_ICON = {
@@ -43,11 +44,11 @@ interface DocumentsViewProps {
   onOpenCollection: (name: string) => void;
   onOpenDocument: (document: WorkspaceKnowledgeDocument) => void;
   onToggleDocument: (id: string, checked: boolean) => void;
+  /** Replaces the selection, e.g. with every shown document, or one status. */
+  onSelectDocuments: (ids: string[]) => void;
   onClearSelection: () => void;
-  /** Retries the failed documents in the selection; the rest are left alone. */
-  onRetryIndexingSelection: () => void;
-  /** How many selected documents a retry would actually touch. */
-  retryableSelectionCount: number;
+  /** Re-indexes the selected documents; the backend refuses the ones it cannot. */
+  onReindexSelection: () => void;
   onRemoveSelection: () => void;
   onClearFilters: () => void;
   onWidenScope: () => void;
@@ -71,9 +72,9 @@ export function DocumentsView({
   onOpenCollection,
   onOpenDocument,
   onToggleDocument,
+  onSelectDocuments,
   onClearSelection,
-  onRetryIndexingSelection,
-  retryableSelectionCount,
+  onReindexSelection,
   onRemoveSelection,
   onClearFilters,
   onWidenScope,
@@ -173,9 +174,12 @@ export function DocumentsView({
         >
           {!compact && (
             <div className="knowledge-list-heading">
-              <h2 className="knowledge-eyebrow" id="knowledge-documents-heading">
-                {browsing ? "Recently updated" : scope || "Results"}
-              </h2>
+              <div className="knowledge-list-heading__title">
+                <DocumentSelectMenu documents={documents} onSelect={onSelectDocuments} selection={selection} />
+                <h2 className="knowledge-eyebrow" id="knowledge-documents-heading">
+                  {browsing ? "Recently updated" : scope || "Results"}
+                </h2>
+              </div>
               <span>
                 {browsing
                   ? `${totalDocumentCount.toLocaleString()} in this workspace`
@@ -188,13 +192,12 @@ export function DocumentsView({
             <DocumentBulkBar
               count={selection.length}
               onClear={onClearSelection}
+              onReindex={onReindexSelection}
               onRemove={onRemoveSelection}
-              onRetryIndexing={onRetryIndexingSelection}
-              retryableCount={retryableSelectionCount}
             />
           )}
 
-          <div className="knowledge-rows">
+          <div className="knowledge-rows" data-selecting={selection.length > 0 || undefined}>
             {documents.map((document) => {
               const status = documentStatus(document);
               return (

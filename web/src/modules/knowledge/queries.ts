@@ -124,6 +124,24 @@ export const knowledgeActions = {
     if (retryable.length) invalidateApiData();
     return retryable.length;
   },
+  /**
+   * Index documents again from their stored content, whatever their last
+   * indexing did. Every document is sent and the backend decides: it refuses
+   * one already indexing, or one a connector wrote, with its own reason. One
+   * refusal does not stop the rest; the reasons are returned, counted.
+   */
+  async reindex(documents: WorkspaceKnowledgeDocument[]) {
+    const results = await Promise.allSettled(documents.map((document) => knowledgeApi.reindex(document.id)));
+    const refused = new Map<string, number>();
+    for (const result of results) {
+      if (result.status === "fulfilled") continue;
+      const reason = result.reason instanceof Error ? result.reason.message : "The request failed";
+      refused.set(reason, (refused.get(reason) ?? 0) + 1);
+    }
+    const started = documents.length - [...refused.values()].reduce((total, count) => total + count, 0);
+    if (started) invalidateApiData();
+    return { started, refused };
+  },
   async retryIngestion(id: string) {
     const next = await ingestionsApi.retry(id);
     invalidateApiData();

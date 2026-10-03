@@ -7,27 +7,21 @@ import { ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { PageLoadingSkeleton } from "@/components/ui/Skeleton";
-import { StatGrid, StatTile } from "@/components/ui/StatTile";
+import {
+  changeLabel,
+  Metric,
+  MetricLedger,
+  Panel,
+  PanelRow,
+  TrendChart,
+} from "@/modules/workspace-control/components/dashboard";
 import { SectionHeader } from "@/modules/workspace-control/components/SectionHeader";
 import { workspaceDirectoryApi, type WorkspaceOverview } from "@/modules/workspace-control/directory";
 import { useControlPlaneData } from "@/modules/workspace-control/queries";
-import { describeAuditAction, formatRelative } from "@/modules/workspace-control/format";
+import { describeAuditAction, formatDateTime, formatRelative, pluralize } from "@/modules/workspace-control/format";
 
-/* `items` counts every collection and document in the workspace — the backend
-   keeps both in one table and does not split the count — so it is labelled as
-   both rather than as documents. */
-const METRICS: { key: string; label: string }[] = [
-  { key: "active_users", label: "Members" },
-  { key: "active_groups", label: "Groups" },
-  { key: "active_roles", label: "Roles" },
-  { key: "items", label: "Collections and documents" },
-  { key: "active_integration_connections", label: "Connected accounts" },
-];
-
-const ATTENTION: { key: string; label: string; href: string }[] = [
-  { key: "pending_approval_requests", label: "Pending access requests", href: "/workspace-control/access" },
-  { key: "failed_items", label: "Failed documents", href: "/workspace-control/knowledge" },
-];
+/** The week the headline figures compare, against the week before it. */
+const WEEK = "7 days";
 
 export function WorkspaceOverviewPage() {
   const router = useRouter();
@@ -50,7 +44,7 @@ export function WorkspaceOverviewPage() {
       {query.error ? (
         <ErrorState description={query.error} onAction={query.reload} />
       ) : query.data ? (
-        <OverviewContent overview={query.data} />
+        <OverviewDashboard overview={query.data} />
       ) : (
         <PageLoadingSkeleton label="Loading workspace overview" />
       )}
@@ -58,57 +52,155 @@ export function WorkspaceOverviewPage() {
   );
 }
 
-function OverviewContent({ overview }: { overview: WorkspaceOverview }) {
-  const { metrics, attention, recent_activity } = overview;
+/**
+ * The workspace on one screen: whether people use it, whether its knowledge
+ * is ready to answer from, and the few things only an administrator can fix.
+ */
+function OverviewDashboard({ overview }: { overview: WorkspaceOverview }) {
+  const { metrics, attention, knowledge, usage, recent_activity } = overview;
+  const lastTwoWeeks = usage.buckets.slice(-14);
+  const trend = (key: "active_users" | "questions") => lastTwoWeeks.map((bucket) => bucket[key]);
+  // What only an administrator can fix. Indexing failures come from the same
+  // counts as the Knowledge panel, so the two never disagree; `failed_items`
+  // is content that never arrived, a different failure.
+  const waiting = [
+    { key: "requests", label: "Access requests waiting for review", href: "/workspace-control/access", value: attention.pending_approval_requests ?? 0 },
+    { key: "indexing", label: "Documents that failed to index", href: "/workspace-control/knowledge", value: knowledge.failed },
+    { key: "uploads", label: "Uploads whose file never arrived", href: "/workspace-control/knowledge", value: attention.failed_items ?? 0 },
+  ].filter((item) => item.value > 0);
+
   return (
-    <>
-      <StatGrid>
-        {METRICS.map((metric) => (
-          <StatTile key={metric.key} label={metric.label} value={metrics[metric.key] ?? 0} />
-        ))}
-      </StatGrid>
+    <div className="ctl-dashboard">
+      <MetricLedger label="Workspace at a glance">
+        <Metric
+          href="/workspace-control/access"
+          label="Members"
+          note={`${pluralize(metrics.active_groups ?? 0, "group")} · ${pluralize(metrics.active_roles ?? 0, "role")}`}
+          value={metrics.active_users ?? 0}
+        />
+        <Metric
+          change={changeLabel(usage.totals.active_users, usage.previous.active_users, WEEK)}
+          href="/workspace-control/activity"
+          label={`Active people · ${WEEK}`}
+          trend={trend("active_users")}
+          value={usage.totals.active_users}
+        />
+        <Metric
+          change={changeLabel(usage.totals.questions, usage.previous.questions, WEEK)}
+          href="/workspace-control/activity"
+          label={`Questions asked · ${WEEK}`}
+          trend={trend("questions")}
+          value={usage.totals.questions}
+        />
+        <Metric
+          href="/workspace-control/knowledge"
+          label="Indexed documents"
+          note={knowledge.documents
+            ? `${Math.round((knowledge.indexed / knowledge.documents) * 100)}% of ${pluralize(knowledge.documents, "document")}`
+            : "No documents yet"}
+          value={knowledge.indexed}
+        />
+      </MetricLedger>
 
-      <div className="mt-[var(--section-gap)] grid gap-x-10 gap-y-[var(--section-gap)] md:grid-cols-2">
-        <section aria-labelledby="overview-attention">
-          <h2 className="configuration-heading" id="overview-attention">Needs attention</h2>
-          <ul>
-            {ATTENTION.map((item) => (
-              <li key={item.key}>
-                <Link
-                  className="flex items-center justify-between gap-2 py-3 text-[length:var(--text-size-ui)] text-[var(--text-primary)] hover:text-[var(--text-accent)]"
-                  href={item.href}
-                >
-                  <span>{item.label}</span>
-                  <span className={attention[item.key] ? "text-[var(--status-danger-text)]" : "text-[var(--text-tertiary)]"}>
-                    {attention[item.key] ?? 0}
-                  </span>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </section>
+      <PanelRow>
+        <Panel aside={`Last 30 days · times in ${usage.timezone}`} title="Usage">
+          <TrendChart
+            bucket="day"
+            buckets={usage.buckets}
+            label="Usage over the last 30 days"
+            series={[
+              { key: "questions", label: "Questions", kind: "bar", tone: "muted" },
+              { key: "sign_ins", label: "Sign-ins", kind: "line", tone: "ink" },
+              { key: "active_users", label: "Active people", kind: "detail", tone: "ink" },
+            ]}
+            timezone={usage.timezone}
+          />
+        </Panel>
+        <KnowledgePanel knowledge={knowledge} connections={metrics.active_integration_connections ?? 0} />
+      </PanelRow>
 
-        <section aria-labelledby="overview-activity">
-          <div className="configuration-heading-row">
-            <h2 className="configuration-heading" id="overview-activity">Recent activity</h2>
-            <Link href="/workspace-control/activity">View all</Link>
-          </div>
+      <PanelRow layout="halves">
+        <Panel title="Needs attention">
+          {waiting.length ? (
+            <dl className="ctl-keyfigures">
+              {waiting.map((item) => (
+                <div className="contents" key={item.key}>
+                  <dt><Link href={item.href}>{item.label}</Link></dt>
+                  <dd className="text-[var(--status-danger-text)]">{item.value.toLocaleString()}</dd>
+                </div>
+              ))}
+            </dl>
+          ) : (
+            <p className="ctl-muted">Nothing needs your attention. Access requests and indexing failures appear here.</p>
+          )}
+        </Panel>
+        <Panel aside={<Link href="/workspace-control/activity">View activity</Link>} title="Recent changes">
           {recent_activity.length ? (
-            <ul>
-              {recent_activity.slice(0, 5).map((event) => (
-                <li className="py-3 text-[length:var(--text-size-ui)]" key={event.id}>
-                  <p className="text-[var(--text-primary)]">{describeAuditAction(event.action)}</p>
-                  <p className="mt-1 text-[length:var(--text-size-meta)] text-[var(--text-tertiary)]">
-                    {event.actor.display_name ?? event.actor.email ?? "System"} · {formatRelative(event.created_at)}
-                  </p>
+            <ul className="ctl-feed">
+              {recent_activity.slice(0, 6).map((event) => (
+                <li key={event.id}>
+                  <span className="ctl-feed__mark" data-failed={event.outcome === "success" ? undefined : ""} />
+                  <span className="min-w-0">
+                    <span className="ctl-feed__what">{describeAuditAction(event.action)}</span>
+                    <span className="ctl-feed__who">{event.actor.display_name ?? event.actor.email ?? "System"}</span>
+                  </span>
+                  <span className="ctl-feed__when" title={formatDateTime(event.created_at)}>{formatRelative(event.created_at)}</span>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="py-3 text-[length:var(--text-size-ui)] text-[var(--text-tertiary)]">No activity yet.</p>
+            <p className="ctl-muted">No changes recorded yet, or you cannot read the audit log.</p>
           )}
-        </section>
+        </Panel>
+      </PanelRow>
+    </div>
+  );
+}
+
+function KnowledgePanel({
+  knowledge,
+  connections,
+}: {
+  knowledge: WorkspaceOverview["knowledge"];
+  connections: number;
+}) {
+  const parts = [
+    { key: "indexed", label: "Indexed", value: knowledge.indexed, tone: "ink" },
+    { key: "indexing", label: "Indexing", value: knowledge.indexing, tone: "muted" },
+    { key: "failed", label: "Failed", value: knowledge.failed, tone: "danger" },
+  ] as const;
+  const counted = parts.reduce((sum, part) => sum + part.value, 0);
+  return (
+    <Panel aside={<Link href="/workspace-control/knowledge">Open knowledge</Link>} title="Knowledge">
+      <div>
+        <div
+          aria-label={parts.map((part) => `${part.value} ${part.label.toLowerCase()}`).join(", ")}
+          className="ctl-split"
+          role="img"
+        >
+          {counted > 0 && parts.map((part) => part.value > 0 && (
+            <i data-tone={part.tone} key={part.key} style={{ width: `${(part.value / counted) * 100}%` }} />
+          ))}
+        </div>
       </div>
-    </>
+      <dl className="ctl-keyfigures">
+        {parts.map((part) => (
+          <div className="contents" key={part.key}>
+            <dt><i className="ctl-swatch" data-tone={part.tone} />{part.label}</dt>
+            <dd className={part.key === "failed" && part.value ? "text-[var(--status-danger-text)]" : undefined}>
+              {part.value.toLocaleString()}
+            </dd>
+          </div>
+        ))}
+        <div className="contents">
+          <dt>Collections</dt>
+          <dd>{knowledge.collections.toLocaleString()}</dd>
+        </div>
+        <div className="contents">
+          <dt>Connected accounts</dt>
+          <dd>{connections.toLocaleString()}</dd>
+        </div>
+      </dl>
+    </Panel>
   );
 }

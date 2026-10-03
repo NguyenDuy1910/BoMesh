@@ -11,7 +11,8 @@ Two runners execute them, both over the same ingestion core:
   state is the Document's Ingestion record, which the core keeps current.
 
 This service decides who may see which run, shapes both into the public
-contract, and routes retry/cancel to the lifecycle that owns each kind.
+contract, and routes retry/cancel (and a Document re-index) to the lifecycle
+that owns each kind.
 Visibility follows the data a run touches: a document run is visible to
 readers of its Collection, a source run to holders of ``source.manage``.
 """
@@ -39,6 +40,7 @@ from bomesh.services import (
     ControlPlaneConflictError,
     ControlPlaneExternalUnavailableError,
     ControlPlaneNotFoundError,
+    DocumentNotFoundError,
     require_tenant_permission,
 )
 from bomesh.services.document_presentation import document_ingestion
@@ -213,16 +215,54 @@ class IngestionService:
             assert target.document is not None
             if _direct_resource(target.document)["status"] not in _FINISHED_UNSUCCESSFULLY:
                 raise ControlPlaneConflictError("only a failed or cancelled ingestion can be retried")
-            document = await self._documents.retry_ingestion(access, target.document.id)
+            document = await self._documents.restart_ingestion(
+                access, target.document.id, trigger_type="retry"
+            )
             return _direct_resource(document)
         current = ingestion_resource(await self._describe(target.workflow_id))
         if current["status"] not in _FINISHED_UNSUCCESSFULLY:
             raise ControlPlaneConflictError("only a failed or cancelled ingestion can be retried")
         if current["kind"] == "document":
-            await self._documents.retry_ingestion(access, UUID(str(current["document_id"])))
+            await self._documents.restart_ingestion(
+                access, UUID(str(current["document_id"])), trigger_type="retry"
+            )
         else:
             await self._sources.ingest_source(access, UUID(str(current["source_id"])))
         return ingestion_resource(await self._describe(target.workflow_id))
+
+    async def start_document_ingestion(
+        self, access: AuthContext, document_id: UUID
+    ) -> dict[str, Any]:
+        """Re-index an uploaded Document: a new manual run of its Ingestion.
+
+        Any finished run may be followed by another: re-indexing picks up a
+        changed model, parser or chunker. A queued or running one is never
+        doubled; asking again while it runs is a conflict.
+        """
+
+        try:
+            document = await self._documents.get_document(
+                access, document_id, permission=COLLECTION_UPDATE_PERMISSION
+            )
+        except DocumentNotFoundError:
+            # No upload behind it. A connector wrote it, or it is not a document.
+            async with transaction_scope(self._sessions) as session:
+                item = await AuthorizationService(session).require_item(
+                    document_id, access=access, permission=COLLECTION_UPDATE_PERMISSION
+                )
+            if item.item_type != "document":
+                raise
+            raise ControlPlaneConflictError(
+                "a document from a connected source is re-indexed by its source's sync"
+            ) from None
+        current = await self._document_run(document)
+        if current is not None and current["status"] in {"pending", "running"}:
+            raise ControlPlaneConflictError("the document is already being indexed")
+        document = await self._documents.restart_ingestion(
+            access, document_id, trigger_type="manual"
+        )
+        # A failed dispatch leaves only the pending record; asking again restarts it.
+        return await self._document_run(document) or _direct_resource(document)
 
     async def cancel_ingestion(self, access: AuthContext, ingestion_id: UUID) -> dict[str, Any]:
         target = await self._resolve(access, ingestion_id, write=True)
@@ -238,6 +278,25 @@ class IngestionService:
         )
 
     # -- Internals ------------------------------------------------------------
+
+    async def _document_run(self, document: Item) -> dict[str, Any] | None:
+        """A Document's latest run, read from whoever runs it; ``None`` if none exists.
+
+        A managed run Temporal does not know (never dispatched, or its history
+        expired) does not exist, whatever the record last said.
+        """
+
+        recorded = document_ingestion(document)
+        if recorded is None or recorded["mode"] == "direct":
+            return recorded
+        try:
+            return ingestion_resource(
+                await self._temporal(
+                    self._workflows.describe_ingestion(ingestion_workflow_id(str(document.id)))
+                )
+            )
+        except WorkflowExecutionNotFoundError:
+            return None
 
     async def _scope(self, access: AuthContext) -> tuple[UUID, bool, tuple[UUID, ...]]:
         """The caller's tenant, whether source runs are visible, and readable Collections."""

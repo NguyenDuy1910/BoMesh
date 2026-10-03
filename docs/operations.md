@@ -70,6 +70,19 @@ the bucket with `make services`; use `http://127.0.0.1:9001` for the MinIO
 console. Keep `BOMESH_OBJECT_STORAGE_PROVIDER=aws_s3` — MinIO is handled by
 the existing S3 adapter, not by a separate provider.
 
+Signed URLs (previews, "open original", presigned uploads) are used by the
+browser or phone, not the backend, and SigV4 signs the host, so they must name
+storage as the client reaches it. When that differs from
+`BOMESH_S3_ENDPOINT_URL` — a phone on the network cannot reach the Mac's
+`127.0.0.1` — set:
+
+```dotenv
+BOMESH_S3_PUBLIC_ENDPOINT_URL=http://<machine-network-address>:9000
+```
+
+The backend still reads and writes through `BOMESH_S3_ENDPOINT_URL`. Without it,
+device previews fail although the API itself is reachable.
+
 AWS S3 uses boto3's standard credential chain. Cloudflare R2 uses its
 S3-compatible endpoint and API-token access key pair:
 

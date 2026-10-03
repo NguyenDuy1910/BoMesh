@@ -1,0 +1,323 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+
+import '../../app/app_theme.dart';
+import '../../core/api_client.dart';
+import 'document_page.dart';
+import 'knowledge_models.dart';
+import 'knowledge_widgets.dart';
+
+typedef CollectionPermission = bool Function(String permission, String collectionId);
+
+/// The documents of one collection, or every readable one when
+/// [collectionId] is null, filtered by name.
+///
+/// One line of supporting text per row: the file type and date when the
+/// document is ready, otherwise what it is waiting for. Rows still being
+/// indexed are re-read every few seconds until they settle.
+class DocumentList extends StatefulWidget {
+  const DocumentList({
+    super.key,
+    required this.api,
+    required this.can,
+    required this.onAskDocument,
+    required this.empty,
+    this.collectionId,
+    this.search = '',
+    this.personalCollectionId,
+    this.bottomPadding = 96,
+  });
+  final ApiClient api;
+  final CollectionPermission can;
+  final void Function(String documentId, String title) onAskDocument;
+  final Widget empty;
+  final String? collectionId, personalCollectionId;
+  final String search;
+
+  /// Room under the last row for a floating action button.
+  final double bottomPadding;
+  @override
+  State<DocumentList> createState() => _DocumentListState();
+}
+
+class _DocumentListState extends State<DocumentList> {
+  static const _pageSize = 30;
+  List<KnowledgeDocument> _documents = [];
+  int _total = 0, _request = 0;
+  bool _loading = true, _more = false;
+  String? _error;
+  Timer? _poll;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _request++;
+    _poll?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _load({bool more = false, bool quiet = false}) async {
+    _poll?.cancel();
+    final request = ++_request;
+    if (!quiet) {
+      setState(() {
+        _loading = !more;
+        _more = more;
+        _error = null;
+      });
+    }
+    // More continues from what is on screen; a quiet refresh re-reads all of
+    // it in one request (up to the page limit) so rows update in place.
+    final query = more
+        ? {'page': _documents.length ~/ _pageSize + 1, 'page_size': _pageSize}
+        : {
+            'page': 1,
+            'page_size': quiet && _documents.length > _pageSize
+                ? (_documents.length > 100 ? 100 : _documents.length)
+                : _pageSize,
+          };
+    try {
+      final value = await widget.api.get(
+        '/documents',
+        query: {
+          ...query,
+          'collection_id': widget.collectionId,
+          'search': widget.search,
+        },
+      );
+      if (!mounted || request != _request) return;
+      final documents = objectList(value['items']).map(KnowledgeDocument.fromJson).toList();
+      setState(() {
+        if (more) {
+          final seen = {for (final document in _documents) document.id};
+          _documents = [
+            ..._documents,
+            ...documents.where((document) => !seen.contains(document.id)),
+          ];
+        } else {
+          _documents = documents;
+        }
+        _total = numberOf(value['total']);
+        _loading = false;
+        _more = false;
+      });
+      if (_documents.any((document) => document.isActive)) {
+        _poll = Timer(const Duration(seconds: 5), () => _load(quiet: true));
+      }
+    } catch (error) {
+      if (!mounted || request != _request) return;
+      setState(() {
+        _error = error.toString();
+        _loading = false;
+        _more = false;
+      });
+    }
+  }
+
+  bool _canEdit(KnowledgeDocument document) =>
+      widget.can('collection.update', document.collectionId);
+
+  bool _canDelete(KnowledgeDocument document) =>
+      _canEdit(document) &&
+      (document.purpose != 'conversation_attachment' ||
+          document.collectionId == widget.personalCollectionId);
+
+  bool _canAsk(KnowledgeDocument document) =>
+      document.status == 'available' && !document.isArchive && !document.isImage;
+
+  Future<void> _open(KnowledgeDocument document) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (routeContext) => DocumentPage(
+          api: widget.api,
+          documentId: document.id,
+          onAskDocument: (id, title) {
+            Navigator.of(routeContext).pop();
+            widget.onAskDocument(id, title);
+          },
+        ),
+      ),
+    );
+    if (mounted) await _load(quiet: true);
+  }
+
+  Future<void> _actions(KnowledgeDocument document) async {
+    final retry = _canEdit(document) && document.ingestion?.canRetry == true;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+              child: Text(
+                document.name,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+            ),
+            if (_canAsk(document))
+              ListTile(
+                leading: const Icon(Icons.chat_bubble_outline_rounded),
+                title: const Text('Ask about this document'),
+                onTap: () => Navigator.pop(sheetContext, 'ask'),
+              ),
+            if (retry)
+              ListTile(
+                leading: const Icon(Icons.refresh_rounded),
+                title: const Text('Try indexing again'),
+                onTap: () => Navigator.pop(sheetContext, 'retry'),
+              ),
+            if (_canDelete(document))
+              ListTile(
+                leading: Icon(Icons.delete_outline_rounded, color: context.colors.danger),
+                title: Text('Delete', style: TextStyle(color: context.colors.danger)),
+                onTap: () => Navigator.pop(sheetContext, 'delete'),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted) return;
+    switch (action) {
+      case 'ask':
+        widget.onAskDocument(document.id, document.name);
+      case 'retry':
+        await _mutate(
+          () => widget.api.post(
+            '/ingestions/${Uri.encodeComponent(document.ingestion!.id)}/retry',
+          ),
+          'Indexing started again',
+        );
+      case 'delete':
+        if (await confirmKnowledgeAction(
+          context,
+          title: 'Delete this document?',
+          message: '“${document.name}” will no longer be used in answers. Past conversations are kept.',
+          confirmLabel: 'Delete',
+        )) {
+          await _mutate(
+            () => widget.api.delete('/documents/${Uri.encodeComponent(document.id)}'),
+            'Document deleted',
+          );
+        }
+    }
+  }
+
+  Future<void> _mutate(Future<Object?> Function() work, String done) async {
+    try {
+      await work();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(done)));
+      await _load(quiet: true);
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString())));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    return RefreshIndicator(
+      onRefresh: () => _load(),
+      child: NotificationListener<ScrollNotification>(
+        onNotification: (notification) {
+          if (!_more &&
+              _documents.length < _total &&
+              notification.metrics.extentAfter < 400) {
+            _load(more: true);
+          }
+          return false;
+        },
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: EdgeInsets.only(bottom: widget.bottomPadding),
+          children: [
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: KnowledgeNotice(
+                  title: 'Documents could not be loaded',
+                  message: _error,
+                  actionLabel: 'Try again',
+                  onAction: _load,
+                  danger: true,
+                ),
+              )
+            else if (_documents.isEmpty)
+              widget.empty,
+            for (final document in _documents)
+              DocumentRow(
+                document: document,
+                onTap: () => _open(document),
+                onMore: () => _actions(document),
+              ),
+            if (_more)
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Center(child: CircularProgressIndicator()),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// One document: its name, and the one fact a person acts on.
+class DocumentRow extends StatelessWidget {
+  const DocumentRow({
+    super.key,
+    required this.document,
+    required this.onTap,
+    required this.onMore,
+  });
+  final KnowledgeDocument document;
+  final VoidCallback onTap, onMore;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final failed = document.status == 'failed' || document.ingestion?.canRetry == true;
+    final kind = document.name.contains('.')
+        ? document.name.split('.').last.toUpperCase()
+        : 'File';
+    final (String detail, Color tone) = failed
+        ? ('Couldn’t be indexed', colors.danger)
+        : document.isActive
+        ? ('Processing…', colors.brand)
+        : ('$kind · ${readableDate(document.updatedAt)}', colors.textSecondary);
+    return ListTile(
+      contentPadding: const EdgeInsets.fromLTRB(16, 2, 4, 2),
+      onTap: onTap,
+      leading: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: colors.subtle,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Icon(document.icon, color: colors.textSecondary, size: 20),
+      ),
+      title: Text(document.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Text(detail, style: TextStyle(color: tone)),
+      trailing: IconButton(
+        tooltip: 'More',
+        onPressed: onMore,
+        icon: const Icon(Icons.more_vert_rounded),
+      ),
+    );
+  }
+}

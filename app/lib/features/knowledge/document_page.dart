@@ -405,10 +405,10 @@ class _DocumentPageState extends State<DocumentPage> {
                         child: SingleChildScrollView(
                           padding: const EdgeInsets.all(16),
                           child: KnowledgeNotice(
-                            title: 'Preview link may have expired',
-                            message: 'Refresh to recheck access and obtain a new signed preview.',
+                            title: 'This page could not be loaded',
+                            message: 'Check your connection, then try again. The Text tab still shows the document’s content.',
                             onAction: _load,
-                            actionLabel: 'Refresh preview',
+                            actionLabel: 'Try again',
                           ),
                         ),
                       ),

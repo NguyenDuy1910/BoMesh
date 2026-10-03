@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh.db.models import IntegrationCredential
+from bomesh.identity import PERSISTED_IDENTITY_NAMESPACE
 from bomesh.services import ControlPlaneValidationError
 
 #: Written in place of a secret that was revoked. An empty envelope decrypts to
@@ -143,9 +144,12 @@ class IntegrationCredentialService:
 
     @staticmethod
     def _associated_data(integration_connection_id: UUID) -> bytes:
-        # This persisted AAD namespace is a cryptographic format identifier.
-        # Changing it would make credentials encrypted before this rename unreadable.
-        return f"bomesh:plugin-credential:{integration_connection_id}".encode("ascii")
+        # Associated data is part of every stored ciphertext: it keeps the
+        # persisted namespace (see ``bomesh.identity``), whatever the product
+        # is called, or credentials encrypted before a rename become unreadable.
+        return (
+            f"{PERSISTED_IDENTITY_NAMESPACE}:plugin-credential:{integration_connection_id}"
+        ).encode("ascii")
 
 
 __all__ = ["CLEARED_PAYLOAD", "IntegrationCredentialService"]

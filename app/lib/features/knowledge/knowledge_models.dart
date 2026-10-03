@@ -132,48 +132,6 @@ class KnowledgeDocument {
       : Icons.description_outlined;
 }
 
-class KnowledgeSearchHit {
-  KnowledgeSearchHit.fromJson(JsonMap value)
-    : documentId = textOf(value['document_id']),
-      collectionId = textOf(value['collection_id']),
-      name = textOf(value['name']),
-      excerpt = textOf(value['excerpt']),
-      chunkId = textOf(objectOf(value['metadata'])['chunk_id']);
-  final String documentId, collectionId, name, excerpt, chunkId;
-}
-
-class CollectionGrant {
-  CollectionGrant.fromJson(JsonMap value)
-    : principalType = textOf(value['principal_type']),
-      principalId = textOf(value['principal_id']),
-      role = textOf(value['role']);
-  final String principalType, principalId, role;
-  String get key => '$principalType/$principalId';
-}
-
-class SharingPrincipal {
-  SharingPrincipal.fromJson(JsonMap value, this.type)
-    : id = textOf(value['id']),
-      name = textOf(value['display_name']).isNotEmpty
-          ? textOf(value['display_name'])
-          : textOf(value['email']).isNotEmpty
-          ? textOf(value['email'])
-          : textOf(value['code'], 'Unnamed member'),
-      detail = type == 'user'
-          ? textOf(value['email'])
-          : textOf(value['description']),
-      active =
-          value['status'] != false &&
-          ![
-            'disabled',
-            'inactive',
-            'suspended',
-          ].contains(textOf(value['status']));
-  final String id, type, name, detail;
-  final bool active;
-  String get key => '$type/$id';
-}
-
 class ViewerAsset {
   ViewerAsset.fromJson(JsonMap value)
     : url = textOf(value['url']),

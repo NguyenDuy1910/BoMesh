@@ -394,8 +394,15 @@ class DocumentService:
 
     # -- Ingestion -------------------------------------------------------------
 
-    async def retry_ingestion(self, access: AuthContext, document_id: UUID) -> Item:
-        """Open a new Ingestion for an available upload, in its original mode."""
+    async def restart_ingestion(
+        self, access: AuthContext, document_id: UUID, *, trigger_type: str
+    ) -> Item:
+        """Run an available upload's Ingestion again, in its original mode.
+
+        ``retry`` follows a run that did not succeed; ``manual`` re-indexes on
+        request. ``IngestionService`` decides which one may start; either way
+        the stored bytes are processed from scratch.
+        """
 
         require_user_identity(access)
         document = await self.get_document(
@@ -409,11 +416,13 @@ class DocumentService:
             items = ItemService(session)
             collection = await session.get(Item, document.parent_item_id)
             mode = ingestion_mode(collection) if collection is not None else "managed"
-            await items.restart_ingestion(document.id, ingestion_mode=mode)
+            await items.restart_ingestion(
+                document.id, ingestion_mode=mode, trigger_type=trigger_type
+            )
             document = await items.get_upload_for_access(
                 document.id, access, permission=COLLECTION_UPDATE_PERMISSION
             )
-        await self._start_ingestion(document, trigger_type="retry")
+        await self._start_ingestion(document, trigger_type=trigger_type)
         return document
 
     async def resume_direct_ingestions(self) -> int:
@@ -455,8 +464,10 @@ class DocumentService:
     async def _start_ingestion(self, document: Item, *, trigger_type: str = "upload") -> None:
         """Hand an available upload to its runner, as its Ingestion record says."""
 
+        # A repeated upload of indexed content is a no-op; a retry or a
+        # re-index was asked for, so it always runs.
         if document.index_status == "unsupported" or (
-            document.index_status == "ready" and trigger_type != "retry"
+            document.index_status == "ready" and trigger_type == "upload"
         ):
             return
         record = document.metadata_.get("ingestion") or {}

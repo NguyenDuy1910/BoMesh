@@ -669,12 +669,120 @@ class WorkspaceUpdate(StrictRequest):
     settings: dict[str, Any] | None = None
 
 
+class KnowledgeHealth(BaseModel):
+    """Non-deleted Items; index counts describe Documents only."""
+
+    collections: int = Field(ge=0)
+    documents: int = Field(ge=0)
+    indexed: int = Field(ge=0)
+    indexing: int = Field(ge=0)
+    failed: int = Field(ge=0)
+
+
+class UsageCounts(BaseModel):
+    active_users: int = Field(ge=0)
+    questions: int = Field(ge=0)
+    sign_ins: int = Field(ge=0)
+
+
+class UsageBucket(UsageCounts):
+    start: datetime
+
+
+class WorkspaceUsage(BaseModel):
+    timezone: str
+    buckets: list[UsageBucket]
+    totals: UsageCounts
+    previous: UsageCounts
+
+
 class WorkspaceOverview(BaseModel):
     workspace: Workspace
     metrics: dict[str, int] = Field(default_factory=dict)
     attention: dict[str, int] = Field(default_factory=dict)
     recent_activity: list[dict[str, Any]] = Field(default_factory=list)
+    knowledge: KnowledgeHealth
+    usage: WorkspaceUsage
     generated_at: datetime
+
+
+class ActivityTotals(BaseModel):
+    active_users: int = Field(ge=0)
+    sign_ins: int = Field(ge=0)
+    questions: int = Field(ge=0)
+    conversations: int = Field(ge=0)
+    changes: int = Field(ge=0)
+    failed_changes: int = Field(ge=0)
+
+
+class ActivityBucket(BaseModel):
+    start: datetime
+    active_users: int = Field(ge=0)
+    sign_ins: int = Field(ge=0)
+    questions: int = Field(ge=0)
+    changes: int = Field(ge=0)
+    failed_changes: int = Field(ge=0)
+
+
+class SignInMethodCount(BaseModel):
+    method: str
+    count: int = Field(ge=0)
+
+
+class ActivityChangeCount(BaseModel):
+    action: str
+    count: int = Field(ge=0)
+    failed: int = Field(ge=0)
+
+
+class ActivityPerson(BaseModel):
+    user_id: UUID
+    email: str | None = None
+    display_name: str | None = None
+    questions: int = Field(ge=0)
+    conversations: int = Field(ge=0)
+    sign_ins: int = Field(ge=0)
+    changes: int = Field(ge=0)
+    last_active_at: datetime | None = None
+
+
+class WorkspaceActivity(BaseModel):
+    window: Literal["24h", "7d", "30d"]
+    timezone: str
+    bucket: Literal["hour", "day"]
+    start: datetime
+    generated_at: datetime
+    totals: ActivityTotals
+    previous: ActivityTotals
+    live_sessions: int = Field(ge=0)
+    buckets: list[ActivityBucket]
+    sign_in_methods: list[SignInMethodCount]
+    top_changes: list[ActivityChangeCount]
+    people: list[ActivityPerson]
+
+
+class AccessSessionUser(BaseModel):
+    id: UUID
+    email: str | None = None
+    display_name: str | None = None
+
+
+class AccessSessionRecord(BaseModel):
+    id: UUID
+    user: AccessSessionUser
+    authentication_method: str
+    entry: Literal["sign_in", "workspace_switch"]
+    status: Literal["active", "expired", "revoked", "superseded"]
+    started_at: datetime
+    last_seen_at: datetime | None = None
+    ended_at: datetime | None = None
+    end_reason: str | None = None
+    expires_at: datetime
+    current: bool
+
+
+class AccessSessionPage(PageFields):
+    items: list[AccessSessionRecord]
 
 
 class User(BaseModel):
@@ -834,6 +942,19 @@ __all__ = [
     "WorkspacePage",
     "WorkspaceUpdate",
     "WorkspaceOverview",
+    "KnowledgeHealth",
+    "UsageCounts",
+    "UsageBucket",
+    "WorkspaceUsage",
+    "WorkspaceActivity",
+    "ActivityTotals",
+    "ActivityBucket",
+    "SignInMethodCount",
+    "ActivityChangeCount",
+    "ActivityPerson",
+    "AccessSessionUser",
+    "AccessSessionRecord",
+    "AccessSessionPage",
     "User",
     "UserPage",
     "RolePage",

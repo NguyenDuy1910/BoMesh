@@ -483,6 +483,39 @@ def test_s3_constructor_uses_the_standard_boto_session(
     assert "aws_secret_access_key" not in captured["client_kwargs"]
 
 
+def test_signed_urls_name_storage_as_the_client_reaches_it() -> None:
+    # Real boto3: signing makes no request. A phone cannot reach the backend's
+    # loopback storage address, so URLs it receives must name the public host.
+    storage = S3DocumentStorage(
+        bucket="documents",
+        region="us-east-1",
+        endpoint_url="http://127.0.0.1:9000",
+        public_endpoint_url="http://10.0.0.5:9000",
+        addressing_style="path",
+        access_key_id="key",
+        secret_access_key="secret",
+    )
+
+    download = storage.presign_download("documents/id/page-0001.webp", expires_seconds=60)
+    upload = storage.presign_upload(
+        "documents/id/raw", content_type="application/pdf", expires_seconds=60
+    )
+
+    assert download.url.startswith("http://10.0.0.5:9000/documents/documents/id/page-0001.webp?")
+    assert upload.url.startswith("http://10.0.0.5:9000/documents/documents/id/raw?")
+    unconfigured = S3DocumentStorage(
+        bucket="documents",
+        region="us-east-1",
+        endpoint_url="http://127.0.0.1:9000",
+        addressing_style="path",
+        access_key_id="key",
+        secret_access_key="secret",
+    )
+    assert unconfigured.presign_download("k", expires_seconds=60).url.startswith(
+        "http://127.0.0.1:9000/"
+    )
+
+
 def test_cloudflare_r2_uses_the_same_boto3_s3_adapter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

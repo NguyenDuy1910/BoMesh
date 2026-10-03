@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from fastapi import APIRouter
 from uuid import UUID
 
 from api.deps import Caller, WorkspaceControlPlane
-from api.routers import Workspace, WorkspaceOverview, WorkspacePage, WorkspaceUpdate
+from api.routers import (
+    Workspace,
+    WorkspaceActivity,
+    WorkspaceOverview,
+    WorkspacePage,
+    WorkspaceUpdate,
+)
 from api.routers._mapping import workspace_payload
 
 router = APIRouter(prefix="/workspaces", tags=["workspaces"])
@@ -55,9 +62,12 @@ async def update_workspace(
 
 @router.get("/{workspace_id}/overview", response_model=WorkspaceOverview)
 async def get_workspace_overview(
-    workspace_id: UUID, caller: Caller, control_plane: WorkspaceControlPlane
+    workspace_id: UUID,
+    caller: Caller,
+    control_plane: WorkspaceControlPlane,
+    tz: str = "UTC",
 ) -> WorkspaceOverview:
-    value = await control_plane.workspace_overview(caller)
+    value = await control_plane.workspace_overview(caller, tz=tz)
     workspace = value.get("workspace") or await control_plane.get_workspace(
         caller, workspace_id
     )
@@ -66,7 +76,24 @@ async def get_workspace_overview(
         metrics=value.get("metrics", {}),
         attention=value.get("attention", {}),
         recent_activity=value.get("recent_activity", []),
+        knowledge=value["knowledge"],
+        usage=value["usage"],
         generated_at=value.get("generated_at") or datetime.now(),
+    )
+
+
+@router.get("/{workspace_id}/activity", response_model=WorkspaceActivity)
+async def get_workspace_activity(
+    workspace_id: UUID,
+    caller: Caller,
+    control_plane: WorkspaceControlPlane,
+    window: Literal["24h", "7d", "30d"] = "7d",
+    tz: str = "UTC",
+) -> WorkspaceActivity:
+    return WorkspaceActivity.model_validate(
+        await control_plane.workspace_activity(
+            caller, workspace_id, window=window, tz=tz
+        )
     )
 
 

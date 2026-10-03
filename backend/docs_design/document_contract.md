@@ -30,6 +30,7 @@ Collection
 | POST | `/api/v1/documents/search` | Search permission-filtered indexed Documents | `knowledge.read` + effective `collection.read` | n/a |
 | GET | `/api/v1/documents/{document_id}` | Read canonical Document metadata | Collection read access | n/a |
 | PUT | `/api/v1/documents/{document_id}/content` | Validate reserved object, bind it as Document content, and start Ingestion when required | Document/Collection write access | method is idempotent |
+| POST | `/api/v1/documents/{document_id}/ingestions` | Re-index: start a new `manual` run of the Document's Ingestion from its stored content | Document/Collection write access | `409` while a run is queued or running |
 | DELETE | `/api/v1/documents/{document_id}` | Remove Document from normal use | signed-in user + effective `collection.update`; private attachment owner only | method is idempotent |
 
 No `PATCH /documents/{document_id}` is added: current product has no distinct
@@ -191,14 +192,18 @@ pending | running | completed | failed | cancelled | timed_out
 Document responses embed `latest_ingestion` (an `Ingestion`, or `null`) rather
 than duplicating its state as `index_status`, `processing`, or `ready`. It is
 the Document's own Ingestion: an upload records one when its bytes become
-available and a new one on retry, on the Item (`metadata.ingestion`, with its
+available and a new run on retry or re-index, on the Item (`metadata.ingestion`, with its
 `mode`), and the core keeps it current as it runs, whichever runner runs it:
 phases, counts, timestamps and a user-safe failure reason. It outlives the
 ingestion runtime's retention. For a managed run its `id` is also the
 execution `/ingestions` reports live. It is `null` for a Document a connector
 wrote (its Source's Ingestion indexed it) and for content that never arrived.
 Retrying goes through `POST /ingestions/{ingestion_id}/retry`, in the run's
-original mode; a direct run cannot be cancelled (`409`).
+original mode; a direct run cannot be cancelled (`409`). Re-indexing an upload
+whose last run finished (completed or not) goes through
+`POST /documents/{document_id}/ingestions`: the same Ingestion id and mode, a
+`manual` trigger, and the whole pipeline again — the per-document "index is
+current" shortcut is skipped because the run starts from `pending`.
 
 Managed runs retry only what time can fix (storage, index, provider timeouts,
 rate limits, 5xx). An embedding provider that refuses the request itself

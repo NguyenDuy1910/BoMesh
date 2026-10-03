@@ -66,28 +66,6 @@ class AppColors extends ThemeExtension<AppColors> {
     codeText: Color(0xFFE4E4E7),
   );
 
-  static const dark = AppColors(
-    appBackground: Color(0xFF111113),
-    surface: Color(0xFF1A1A1E),
-    sidebar: Color(0xFF151518),
-    subtle: Color(0xFF222226),
-    hover: Color(0xFF25252A),
-    selected: Color(0xFF292943),
-    border: Color(0xFF303039),
-    borderStrong: Color(0xFF626270),
-    textPrimary: Color(0xFFF4F4F5),
-    textSecondary: Color(0xFFD4D4D8),
-    textMuted: Color(0xFFA1A1AA),
-    brand: Color(0xFF8B8BEA),
-    brandHover: Color(0xFFA2A2F0),
-    brandSoft: Color(0x26292943),
-    onBrand: Color(0xFF111113),
-    danger: Color(0xFFFF8A8A),
-    dangerSoft: Color(0x1CFF8A8A),
-    codeSurface: Color(0xFF09090B),
-    codeText: Color(0xFFE4E4E7),
-  );
-
   @override
   AppColors copyWith() => this;
 
@@ -97,20 +75,17 @@ class AppColors extends ThemeExtension<AppColors> {
 }
 
 abstract final class AppTheme {
-  static ThemeData get light => _build(Brightness.light, AppColors.light);
-  static ThemeData get dark => _build(Brightness.dark, AppColors.dark);
+  static ThemeData get light => _build(AppColors.light);
 
-  static ThemeData _build(Brightness brightness, AppColors colors) {
+  static ThemeData _build(AppColors colors) {
     final colorScheme = ColorScheme(
-      brightness: brightness,
+      brightness: Brightness.light,
       primary: colors.brand,
       onPrimary: colors.onBrand,
       secondary: colors.brand,
       onSecondary: colors.onBrand,
       error: colors.danger,
-      onError: brightness == Brightness.dark
-          ? colors.textPrimary
-          : Colors.white,
+      onError: Colors.white,
       surface: colors.surface,
       onSurface: colors.textPrimary,
       outline: colors.borderStrong,
@@ -119,7 +94,7 @@ abstract final class AppTheme {
     );
     final base = ThemeData(
       useMaterial3: true,
-      brightness: brightness,
+      brightness: Brightness.light,
       colorScheme: colorScheme,
       scaffoldBackgroundColor: colors.appBackground,
       canvasColor: colors.surface,

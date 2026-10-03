@@ -233,6 +233,17 @@ new one for a speculative query.
   old collection under the new name), and stored document renditions carry
   `application/vnd.bomesh.document+json`. Earlier migrations keep their
   original `bothesis_*` names because they describe history.
+- Persisted identities keep the original namespace through any rename.
+  Upload, personal/artifact collection, external-resource and public
+  ingestion IDs are uuid5 values of `bothesis:{kind}:…`, and connection
+  credentials are AES-GCM sealed with `bothesis:plugin-credential:{id}` as
+  associated data; all are derived from `bomesh.identity.PERSISTED_IDENTITY_NAMESPACE`
+  and pinned by `tests/bomesh/test_persisted_identity.py`. The rename first
+  changed them, which gave every user a new, empty personal collection and left
+  stored credentials undecryptable; restoring the namespace re-attached the
+  original rows, and the one duplicate personal collection created meanwhile
+  was tombstoned. Temporal queue, workflow and activity names did change: no
+  schedule or running workflow referenced the old names.
 - `role_permissions` and citations retain tombstones and reactivate stable
   identities instead of creating duplicate rows.
 - Design documentation stays under `backend/docs_design`; this document and

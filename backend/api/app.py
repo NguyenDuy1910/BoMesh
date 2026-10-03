@@ -77,6 +77,11 @@ _CONTRACT_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "x-required-collection-permission": "collection.update",
         "x-required-collection-role": "editor",
     },
+    ("post", "/api/v1/documents/{document_id}/ingestions"): {
+        "tags": ["ingestions"],
+        "x-required-collection-permission": "collection.update",
+        "x-required-collection-role": "editor",
+    },
     ("post", "/api/v1/connections"): {
         "x-authorization-rule": "Personal connections belong to the caller; workspace-owned connections require source.manage.",
     },
@@ -87,8 +92,9 @@ _CONTRACT_METADATA: dict[tuple[str, str], dict[str, Any]] = {
     ("patch", "/api/v1/workspaces/{workspace_id}"): {"x-required-permissions": ["tenant.manage"]},
     ("get", "/api/v1/workspaces/{workspace_id}/overview"): {
         "x-required-permissions": ["tenant.read"],
-        "x-authorization-rule": "recent_activity is empty without audit.read.",
+        "x-authorization-rule": "recent_activity is empty without audit.read; knowledge and usage are aggregate counts only.",
     },
+    ("get", "/api/v1/workspaces/{workspace_id}/activity"): {"x-required-permissions": ["audit.read"]},
     ("get", "/api/v1/users"): {"x-required-permissions": ["user.manage"]},
     ("post", "/api/v1/users"): {"x-required-permissions": ["user.manage"]},
     ("get", "/api/v1/accounts"): {"x-required-permissions": ["user.manage"]},
@@ -118,6 +124,7 @@ _CONTRACT_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "x-authorization-rule": "Pending only. Requester may cancel; approve/deny requires access.manage for resource_access or source.manage for plugin_installation. Reviewers may also cancel.",
     },
     ("get", "/api/v1/audit-logs"): {"x-required-permissions": ["audit.read"]},
+    ("get", "/api/v1/access-sessions"): {"x-required-permissions": ["audit.read"]},
     ("get", "/api/v1/platform/overview"): {"x-required-permissions": ["platform.tenant.read"]},
     ("get", "/api/v1/platform/workspaces"): {"x-required-permissions": ["platform.tenant.read"]},
     ("get", "/api/v1/platform/users"): {"x-required-permissions": ["platform.user.read"]},

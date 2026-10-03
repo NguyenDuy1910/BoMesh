@@ -1,10 +1,11 @@
 # BoMesh Flutter application
 
-Flutter client for the existing `/api/v1` API: authentication, streamed chat,
-knowledge library, connections/sources, ingestion activity, and workspace
-administration. The same UI adapts to phones, tablets and the web preview.
-Workspace permissions and collection ACLs are enforced by the backend; the app
-uses returned permissions to show the available actions.
+Flutter client for the existing `/api/v1` API, focused on the two things people
+do on a phone: ask questions (Chat) and manage their documents (Library).
+Workspace administration — members, roles, groups, sharing, connectors, sync
+activity, audit — lives in the web console; the app keeps only access-request
+review, badged on the account button. Permissions and collection ACLs are
+enforced by the backend; the app uses returned permissions to show actions.
 
 ## Run
 
@@ -17,6 +18,21 @@ flutter pub get
 flutter run -d <device-id> \
   --dart-define=BOMESH_API_URL=https://<api-host>
 ```
+
+From the repository root, the Makefile wraps the same commands:
+
+```bash
+make app-web                       # web-server on http://127.0.0.1:5174
+make app-run                       # DEVICE defaults to chrome
+make app-run DEVICE=<device-id>    # see `make app-devices`
+make app-run APP_ENV=prod          # uses app/env/prod.json
+```
+
+Dart defines come from `app/env/<APP_ENV>.json` (default `local`) via
+`--dart-define-from-file`. Keeping them in one stable file preserves the
+incremental build cache between runs. `flutter pub get` runs only when
+`pubspec.yaml`/`pubspec.lock` change; `flutter run` itself uses `--no-pub`.
+Extra flags pass through `FLUTTER_RUN_FLAGS`.
 
 `flutter devices` lists available devices. The default API origin is
 `http://localhost:8000`; the client appends `/api/v1`. iOS simulators can reach
@@ -60,26 +76,20 @@ Google login is enabled when `BOMESH_GOOGLE_CLIENT_ID` is supplied:
 - Native server client IDs and the backend's allowed Google audience must agree.
   Do not embed an OAuth client secret in Flutter.
 
-Connector OAuth opens the backend-provided authorization URL in the system
-browser. Return to the app and refresh the connection after completing consent.
-The existing web callback does not define a mobile deep-link callback. Credential
-connections use the same provider-specific fields as the web application.
-Provider credentials, live external consent and production signing belong to the
-deployment; the application does not simulate successful connections.
-
 ## Workflows
 
-- Chat: streaming text/reasoning/tool activity, stop/retry/edit, conversation
-  search/rename/pin/delete, uploads and existing-document references, collection
-  scope, citations, generated artifact downloads/revisions/publishing.
-- Library: home/personal/collection browsing, name/content search, document
-  uploads and indexing status, source preview/text/metadata, ask-document,
-  collection management/sharing and access requests.
-- Workspace: overview, members, roles/permissions, groups, approvals, audit and
-  settings. Personal connections and requests remain reachable without admin
-  permissions; privileged controls use the session's capabilities.
-- Connections: provider accounts, credentials/OAuth, resource selection, source
-  scope and lifecycle, schedules, sync activity/progress/retry/cancel.
+- Chat: one header (conversations, title, new chat, account); streaming
+  text/reasoning/tool activity, stop/retry/edit, conversation
+  search/rename/pin/delete. One "+" adds context: upload a file, use a library
+  document, or limit the search to some collections. Citations and generated
+  artifacts open in place.
+- Library: search, then "My files" or "Workspace" collections. Each row shows
+  the file type and date, or what it is waiting for. Upload opens the system
+  picker at once and uploads straight away; formats are checked in the app, not
+  by the picker, because Android and iOS cannot filter Markdown, YAML or logs.
+  Files are streamed from disk, never held in memory.
+- Account: workspace switch, access requests (approve/deny, or cancel your
+  own), sign out.
 
 Unavailable indexed text, expired signed previews, failed streams, empty lists,
 permission errors and pending external operations are shown explicitly rather

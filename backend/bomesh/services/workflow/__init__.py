@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
+from bomesh.identity import PERSISTED_IDENTITY_NAMESPACE
+
 INGESTION_TASK_QUEUE = "bomesh-ingestion"
 INGESTION_WORKFLOW_NAME = "bomesh.ingestion"
 SOURCE_INGESTION_ACTIVITY_NAME = "bomesh.ingest_source"
@@ -164,7 +166,7 @@ def public_ingestion_id(workflow_id: str) -> UUID:
     normalized = workflow_id.strip()
     if not normalized:
         raise ValueError("workflow_id must not be blank")
-    return uuid5(NAMESPACE_URL, f"bomesh:ingestion:{normalized}")
+    return uuid5(NAMESPACE_URL, f"{PERSISTED_IDENTITY_NAMESPACE}:ingestion:{normalized}")
 
 
 def _environment_boolean(name: str, *, default: bool = False) -> bool:

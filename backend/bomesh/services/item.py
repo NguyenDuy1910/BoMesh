@@ -12,6 +12,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
+from bomesh.identity import PERSISTED_IDENTITY_NAMESPACE as _NS
 from bomesh.db.models import (
     Conversation,
     Item,
@@ -55,15 +56,15 @@ class ItemService:
     @staticmethod
     def external_item_id(source_id: UUID, identity_key: str) -> UUID:
         normalized = _required_text(identity_key, "external identity")
-        return uuid5(NAMESPACE_URL, f"bomesh:external-resource:{source_id}:{normalized}")
+        return uuid5(NAMESPACE_URL, f"{_NS}:external-resource:{source_id}:{normalized}")
 
     @staticmethod
     def upload_collection_id(tenant_id: UUID, user_id: UUID) -> UUID:
-        return uuid5(NAMESPACE_URL, f"bomesh:upload-collection:{tenant_id}:{user_id}")
+        return uuid5(NAMESPACE_URL, f"{_NS}:upload-collection:{tenant_id}:{user_id}")
 
     @staticmethod
     def artifact_collection_id(tenant_id: UUID, user_id: UUID) -> UUID:
-        return uuid5(NAMESPACE_URL, f"bomesh:artifact-collection:{tenant_id}:{user_id}")
+        return uuid5(NAMESPACE_URL, f"{_NS}:artifact-collection:{tenant_id}:{user_id}")
 
     async def create_collection(
         self,
@@ -173,7 +174,7 @@ class ItemService:
 
         item_id = uuid5(
             NAMESPACE_URL,
-            f"bomesh:upload:{tenant_id}:{owner_user_id}:{normalized_key}",
+            f"{_NS}:upload:{tenant_id}:{owner_user_id}:{normalized_key}",
         )
         return await self._create_or_get_upload(
             item_id=item_id,
@@ -291,7 +292,7 @@ class ItemService:
             raise ValueError("upload size must be greater than zero")
         item_id = uuid5(
             NAMESPACE_URL,
-            "bomesh:collection-upload:"
+            f"{_NS}:collection-upload:"
             f"{tenant_id}:{owner_user_id}:{collection_id}:{normalized_key}",
         )
         return await self._create_or_get_upload(
@@ -683,14 +684,16 @@ class ItemService:
         await self._session.flush()
         return item
 
-    async def restart_ingestion(self, item_id: UUID, *, ingestion_mode: str) -> Item:
-        """Open a retry Ingestion for an available upload."""
+    async def restart_ingestion(
+        self, item_id: UUID, *, ingestion_mode: str, trigger_type: str
+    ) -> Item:
+        """Open a new run of an available upload's Ingestion (a retry or a re-index)."""
 
         item = await self._get_internal(item_id)
         if item.status == "deleted":
-            raise InvalidDocumentStateError("cannot retry a deleted item")
+            raise InvalidDocumentStateError("cannot ingest a deleted item")
         item.index_status = "pending"
-        _begin_ingestion(item, trigger_type="retry", mode=ingestion_mode)
+        _begin_ingestion(item, trigger_type=trigger_type, mode=ingestion_mode)
         await self._session.flush()
         return item
 

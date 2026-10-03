@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 
 import '../app/app_config.dart';
+import 'uploads.dart';
 
 typedef JsonMap = Map<String, dynamic>;
 
@@ -119,29 +120,25 @@ class ApiClient {
     }
   }
 
+  /// Send one file as a multipart Document creation. The same
+  /// [idempotencyKey] on a retry returns the Document the server already made.
   Future<JsonMap> upload(
     String path, {
-    required String fileName,
-    required Uint8List bytes,
-    String? contentType,
+    required UploadSource file,
     Map<String, String> fields = const {},
-    String? idempotencyKey,
+    required String idempotencyKey,
   }) async {
     try {
       final request = http.MultipartRequest('POST', uri(path))
-        ..headers.addAll({
-          ...headers,
-          'Idempotency-Key': idempotencyKey ?? newRequestId(),
-        })
+        ..headers.addAll({...headers, 'Idempotency-Key': idempotencyKey})
         ..fields.addAll(fields)
         ..files.add(
-          http.MultipartFile.fromBytes(
+          http.MultipartFile(
             'file',
-            bytes,
-            filename: fileName,
-            contentType: contentType == null
-                ? null
-                : MediaType.parse(contentType),
+            file.open(),
+            file.length,
+            filename: file.fileName,
+            contentType: MediaType.parse(file.contentType),
           ),
         );
       final response = await _client

@@ -4,19 +4,28 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh.db.models import AccessSession, AuthIdentity, User
 from bomesh.services import (
     ACTIVE_STATUS,
+    AUDIT_READ_PERMISSION,
     AuthContext,
     AuthenticationError,
+    ControlPlaneValidationError,
     JwtClaims,
+    normalize_page,
+    require_tenant_permission,
+    timestamp,
 )
 from bomesh.services.identity_access.identity_store import IdentityStoreService
+
+#: Why a session began: a fresh sign-in, or a switch from another workspace.
+_ENTRY_BY_TRANSITION = {None: "sign_in", "tenant_switch": "workspace_switch"}
 
 
 class AccessSessionService:
@@ -147,11 +156,107 @@ class AccessSessionService:
             await self._session.flush()
         return context
 
+    async def list_sessions(
+        self,
+        actor: AuthContext,
+        *,
+        page: int = 1,
+        page_size: int = 20,
+        status: str | None = None,
+        user_id: UUID | None = None,
+        search: str | None = None,
+    ) -> dict[str, Any]:
+        """Page the workspace's sign-in sessions, newest first, by effective status.
+
+        A row still stored ``active`` whose absolute or idle expiry has passed
+        is reported ``expired``: it is only rewritten when next presented.
+        """
+
+        tenant_id = require_tenant_permission(actor, AUDIT_READ_PERMISSION)
+        page, page_size, offset = normalize_page(page, page_size)
+        now = datetime.now(UTC)
+        live = and_(
+            AccessSession.status == ACTIVE_STATUS,
+            AccessSession.expires_at > now,
+            or_(
+                AccessSession.idle_expires_at.is_(None),
+                AccessSession.idle_expires_at > now,
+            ),
+        )
+        filters = [AccessSession.tenant_id == tenant_id, AccessSession.kind == "user"]
+        if status == "active":
+            filters.append(live)
+        elif status == "ended":
+            filters.append(not_(live))
+        elif status is not None:
+            raise ControlPlaneValidationError("status must be one of active, ended")
+        if user_id is not None:
+            filters.append(AccessSession.user_id == user_id)
+        if search and search.strip():
+            term = f"%{search.strip()}%"
+            filters.append(or_(User.email.ilike(term), User.display_name.ilike(term)))
+        base = (
+            select(AccessSession, User.email, User.display_name)
+            .join(User, User.id == AccessSession.user_id)
+            .where(*filters)
+        )
+        total = await self._session.scalar(
+            select(func.count()).select_from(base.subquery())
+        )
+        rows = (
+            await self._session.execute(
+                base.order_by(AccessSession.created_at.desc(), AccessSession.id)
+                .limit(page_size)
+                .offset(offset)
+            )
+        ).all()
+        return {
+            "items": [
+                _session_record(row, email, display_name, now, actor.session_id)
+                for row, email, display_name in rows
+            ],
+            "total": int(total or 0),
+            "page": page,
+            "page_size": page_size,
+        }
+
     @staticmethod
     def _end(row: AccessSession, *, status: str, reason: str) -> None:
         row.status = status
         row.ended_at = datetime.now(UTC)
         row.end_reason = reason
+
+
+def _session_record(
+    row: AccessSession,
+    email: str | None,
+    display_name: str | None,
+    now: datetime,
+    current_session_id: UUID | None,
+) -> dict[str, Any]:
+    """Safe session metadata: never tokens, metadata, or provider subjects."""
+
+    status, ended_at, end_reason = row.status, row.ended_at, row.end_reason
+    lapsed = [
+        moment
+        for moment in (row.expires_at, row.idle_expires_at)
+        if moment is not None and moment <= now
+    ]
+    if status == ACTIVE_STATUS and lapsed:
+        status, ended_at, end_reason = "expired", min(lapsed), "session_expired"
+    return {
+        "id": str(row.id),
+        "user": {"id": str(row.user_id), "email": email, "display_name": display_name},
+        "authentication_method": row.authentication_method,
+        "entry": _ENTRY_BY_TRANSITION.get(row.transition_reason, "sign_in"),
+        "status": status,
+        "started_at": timestamp(row.created_at),
+        "last_seen_at": timestamp(row.last_seen_at),
+        "ended_at": timestamp(ended_at),
+        "end_reason": end_reason,
+        "expires_at": timestamp(row.expires_at),
+        "current": current_session_id is not None and row.id == current_session_id,
+    }
 
 
 __all__ = ["AccessSessionService"]

@@ -1,6 +1,6 @@
 "use client";
 
-import { X } from "lucide-react";
+import { RefreshCw, X } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 
@@ -10,35 +10,31 @@ import { Button } from "@/components/ui/Button";
  * The bar replaces nothing and pushes nothing around: it takes the strip above
  * the rows only while a selection exists. Remove is separated from the
  * reversible action and confirmed elsewhere, so the destructive one is never
- * the neighbour of the routine one. Retrying only ever touches the failed
- * documents in a selection, so it says how many that is.
+ * the neighbour of the routine one. Re-index sends the whole selection; the
+ * backend refuses what it cannot re-index and says why.
  */
 export function DocumentBulkBar({
   count,
-  retryableCount,
-  onRetryIndexing,
+  onReindex,
   onRemove,
   onClear,
 }: {
   count: number;
-  retryableCount: number;
-  onRetryIndexing: () => void;
+  onReindex: () => void;
   onRemove: () => void;
   onClear: () => void;
 }) {
   return (
     <div className="knowledge-bulk-bar" role="status">
-      <span>{count} {count === 1 ? "document" : "documents"} selected</span>
+      <span>{count.toLocaleString()} {count === 1 ? "document" : "documents"} selected</span>
       <Button
-        disabled={!retryableCount}
-        onClick={onRetryIndexing}
+        icon={<RefreshCw size={14} />}
+        onClick={onReindex}
         size="sm"
-        title={retryableCount ? undefined : "Only documents that failed to index can be retried"}
+        title="Index again from the stored file, with the current models"
         variant="ghost"
       >
-        {retryableCount && retryableCount < count
-          ? `Retry indexing (${retryableCount})`
-          : "Retry indexing"}
+        Re-index
       </Button>
       <Button className="text-[var(--status-danger-text)] hover:bg-[var(--status-danger-bg)]" onClick={onRemove} size="sm" variant="ghost">
         Remove
