@@ -47,6 +47,10 @@ class TemporalWorker:
         worker = Worker(
             client,
             task_queue=self._settings.task_queue,
+            # Without an explicit id the SDK hashes the code of every loaded
+            # module; that scan trips transformers' lazy alias modules (one
+            # warning each) and slows startup. Worker versioning is not used.
+            build_id="bothesis-ingestion",
             workflows=[IngestionWorkflow],
             activities=[activities.ingest_source, activities.ingest_document],
             # Importing a submodule of ``bothesis.services`` executes that

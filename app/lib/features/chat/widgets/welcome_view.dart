@@ -144,10 +144,12 @@ class _TrustLabel extends StatelessWidget {
       children: [
         Icon(icon, size: 15, color: context.colors.brand),
         const SizedBox(width: 6),
-        Text(
-          label,
-          style: Theme.of(context).textTheme.bodySmall
-              ?.copyWith(color: context.colors.textMuted),
+        Flexible(
+          child: Text(
+            label,
+            style: Theme.of(context).textTheme.bodySmall
+                ?.copyWith(color: context.colors.textMuted),
+          ),
         ),
       ],
     );

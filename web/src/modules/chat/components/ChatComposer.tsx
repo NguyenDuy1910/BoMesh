@@ -5,10 +5,13 @@ import {
   Bot,
   ChevronDown,
   ChevronRight,
+  FileSearch,
   FileUp,
   LibraryBig,
   LoaderCircle,
+  MessageSquare,
   Plus,
+  Search,
   Send,
   Square,
   X,
@@ -22,9 +25,6 @@ import {
 } from "react";
 
 import { appBrand } from "@/lib/brand";
-import { useAuthPrompt } from "@/components/auth/AuthPrompt";
-import { isGuestSession } from "@/lib/auth/session";
-import { useAuthSession } from "@/lib/hooks/useAuthSession";
 import { type Collection, listCollections } from "../api";
 import type { ConversationDocument } from "../types";
 import { FileTypeIcon } from "./ResourceIcon";
@@ -40,6 +40,8 @@ export interface ComposerAttachment {
   error?: string;
 }
 
+export type ComposerMode = "ask" | "find";
+
 interface ChatComposerProps {
   attachments: ComposerAttachment[];
   contextCollections: Collection[];
@@ -48,6 +50,10 @@ interface ChatComposerProps {
   isConfigured: boolean;
   isStreaming: boolean;
   isUploading: boolean;
+  /** `find` turns the input into a document search; submitting searches content. */
+  mode?: ComposerMode;
+  /** Offered only where switching makes sense; omitted, no switch is shown. */
+  onModeChange?: (mode: ComposerMode) => void;
   onChange: (value: string) => void;
   onContextCollectionsChange: (collections: Collection[]) => void;
   onFiles: (files: FileList) => void;
@@ -66,6 +72,8 @@ export function ChatComposer({
   isConfigured,
   isStreaming,
   isUploading,
+  mode = "ask",
+  onModeChange,
   onChange,
   onContextCollectionsChange,
   onFiles,
@@ -74,8 +82,7 @@ export function ChatComposer({
   onSubmit,
   textareaRef,
 }: ChatComposerProps) {
-  const { requestSignIn } = useAuthPrompt();
-  const session = useAuthSession();
+  const finding = mode === "find";
   const [addOpen, setAddOpen] = useState(false);
   const [collections, setCollections] = useState<Collection[]>([]);
   const [collectionsError, setCollectionsError] = useState<string>();
@@ -86,6 +93,11 @@ export function ChatComposer({
   const addButtonRef = useRef<HTMLButtonElement | null>(null);
   const addPopoverRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Context belongs to asking; leaving for search closes the picker.
+  useEffect(() => {
+    if (finding) setAddOpen(false);
+  }, [finding]);
 
   useEffect(() => {
     if (!addOpen || collections.length || collectionsLoading || collectionsRequested) return;
@@ -199,23 +211,46 @@ export function ChatComposer({
         />
         <textarea
           aria-describedby="composer-help"
-          aria-label="Message BoThesis"
+          aria-label={finding ? "Find documents" : "Message BoThesis"}
           autoComplete="off"
           disabled={!isConfigured}
           name="message"
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={(event) => {
-            if (enterToSend && event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+            // A search is one line: Enter always searches, whatever the
+            // send preference says about messages.
+            if ((enterToSend || finding) && event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
               event.preventDefault();
               void onSubmit(input);
             }
           }}
-          placeholder="Ask about your company knowledge…"
+          placeholder={finding ? "Find documents by name or content…" : "Ask about your company knowledge…"}
           ref={textareaRef}
           rows={1}
           value={input}
         />
         <div className="composer__footer">
+          {onModeChange && (
+            <span aria-label="Composer mode" className="composer-mode" role="group">
+              <button
+                aria-pressed={!finding}
+                className={clsx("composer-mode__option", !finding && "is-active")}
+                onClick={() => onModeChange("ask")}
+                type="button"
+              >
+                <MessageSquare aria-hidden="true" size={14} />Ask
+              </button>
+              <button
+                aria-pressed={finding}
+                className={clsx("composer-mode__option", finding && "is-active")}
+                onClick={() => onModeChange("find")}
+                type="button"
+              >
+                <FileSearch aria-hidden="true" size={14} />Find documents
+              </button>
+            </span>
+          )}
+          {!finding && (
           <span className="composer-add">
             <button
               aria-expanded={addOpen}
@@ -245,14 +280,7 @@ export function ChatComposer({
                   <button
                     className="composer-add-popover__row composer-add-popover__row--upload"
                     disabled={attachments.length >= 12}
-                    onClick={() => {
-                      if (isGuestSession(session)) {
-                        setAddOpen(false);
-                        requestSignIn("Sign in to upload a private file into this conversation.");
-                        return;
-                      }
-                      fileInputRef.current?.click();
-                    }}
+                    onClick={() => fileInputRef.current?.click()}
                     type="button"
                   >
                     <FileUp aria-hidden="true" size={16} />
@@ -336,12 +364,29 @@ export function ChatComposer({
               </div>
             )}
           </span>
-          <span className="composer-context-indicator composer-context-indicator--knowledge"><LibraryBig aria-hidden="true" size={14} />Knowledge: Company</span>
-          <span className="composer-context-indicator"><Bot aria-hidden="true" size={14} />BoThesis</span>
-          <span className="composer-context-indicator composer-context-indicator--model">Managed model <ChevronDown aria-hidden="true" size={14} /></span>
-          <span className="composer__shortcut">
-            {enterToSend ? "Enter to send · Shift + Enter for new line" : "Use the send button · Enter for new line"}
+          )}
+          {!finding && (
+            <>
+              <span className="composer-context-indicator composer-context-indicator--knowledge"><LibraryBig aria-hidden="true" size={14} />Knowledge: Company</span>
+              <span className="composer-context-indicator"><Bot aria-hidden="true" size={14} />BoThesis</span>
+              <span className="composer-context-indicator composer-context-indicator--model">Managed model <ChevronDown aria-hidden="true" size={14} /></span>
+            </>
+          )}
+          <span className={clsx("composer__shortcut", finding && "composer__shortcut--end")}>
+            {finding
+              ? "Results by name appear as you type · Enter searches inside documents"
+              : enterToSend ? "Enter to send · Shift + Enter for new line" : "Use the send button · Enter for new line"}
           </span>
+          {finding ? (
+            <button
+              aria-label="Search inside documents"
+              className="composer-send"
+              disabled={!input.trim() || !isConfigured}
+              type="submit"
+            >
+              <Search aria-hidden="true" className="composer-send__send-icon" size={16} />
+            </button>
+          ) : (
           <button
             aria-label={isStreaming ? "Stop generating" : "Send message"}
             className={clsx("composer-send", isStreaming && "composer-send--stop")}
@@ -355,6 +400,7 @@ export function ChatComposer({
           >
             {isStreaming ? <Square aria-hidden="true" className="composer-send__stop-icon" size={12} strokeWidth={0} /> : <Send aria-hidden="true" className="composer-send__send-icon" size={16} />}
           </button>
+          )}
         </div>
       </form>
       <p className="composer-disclaimer" id="composer-help">{appBrand.productName} can make mistakes. Verify important decisions with the cited sources.</p>
@@ -363,6 +409,7 @@ export function ChatComposer({
 }
 
 function attachmentProgressLabel(item: ComposerAttachment) {
+  if (item.document?.origin === "reference") return "Workspace";
   if (item.progress === "starting") return "Starting…";
   if (item.progress === "uploading") return "Uploading…";
   if (item.progress === "validating") return "Validating…";

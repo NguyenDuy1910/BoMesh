@@ -28,6 +28,7 @@ from docling_core.types.doc import (
 )
 
 from . import DoclingProcessingError
+from .pdfium_lock import PDFIUM_LOCK
 
 #: Top and bottom bands of a page where running headers and footers sit.
 _MARGIN_BAND = 0.1
@@ -100,18 +101,19 @@ def pdf_text_document(
     than ``max_pages`` pages, or has no text layer (a scan or images only).
     """
 
-    try:
-        pdf = pdfium.PdfDocument(source if isinstance(source, bytes) else str(source))
-    except pdfium.PdfiumError as exc:
-        raise DoclingProcessingError(f"Docling could not read {name}") from exc
-    try:
-        if len(pdf) > max_pages:
-            raise DoclingProcessingError(f"{name} has more than {max_pages} pages")
-        sizes, lines = _read_lines(pdf, page_range)
-    except pdfium.PdfiumError as exc:
-        raise DoclingProcessingError(f"Docling could not read {name}") from exc
-    finally:
-        pdf.close()
+    with PDFIUM_LOCK:
+        try:
+            pdf = pdfium.PdfDocument(source if isinstance(source, bytes) else str(source))
+        except pdfium.PdfiumError as exc:
+            raise DoclingProcessingError(f"Docling could not read {name}") from exc
+        try:
+            if len(pdf) > max_pages:
+                raise DoclingProcessingError(f"{name} has more than {max_pages} pages")
+            sizes, lines = _read_lines(pdf, page_range)
+        except pdfium.PdfiumError as exc:
+            raise DoclingProcessingError(f"Docling could not read {name}") from exc
+        finally:
+            pdf.close()
 
     lines = _without_furniture(lines, sizes)
     if not lines:
@@ -227,7 +229,7 @@ def _without_furniture(lines: list[_Line], sizes: dict[int, Size]) -> list[_Line
     A heading is never furniture, even one repeated at the top of every page.
     """
 
-    if len(sizes) < 3:
+    if len(sizes) < 3 or not lines:
         return lines
     body_height = median(line.height for line in lines) or 1.0
     pages_by_key: dict[str, set[int]] = {}

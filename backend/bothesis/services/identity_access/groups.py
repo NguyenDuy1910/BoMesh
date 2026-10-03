@@ -19,6 +19,7 @@ from bothesis.services import (
     ControlPlaneNotFoundError,
     ControlPlaneValidationError,
     AuthContext,
+    code_from_name,
     normalize_code,
     normalize_page,
     normalize_required_text,
@@ -102,20 +103,28 @@ class GroupService:
         self,
         actor: AuthContext,
         *,
-        code: str,
         display_name: str,
+        code: str | None = None,
         description: str | None = None,
     ) -> dict[str, Any]:
+        """Create a group; without a ``code`` one is derived from its name."""
+
         tenant_id = require_tenant_permission(actor, GROUP_MANAGE_PERMISSION)
-        normalized_code = normalize_code(code, "group code")
-        if await self._session.scalar(
-            select(Group.id).where(
-                Group.tenant_id == tenant_id, Group.code == normalized_code
+        tenant_codes = select(Group.code).where(Group.tenant_id == tenant_id)
+        if code is None:
+            normalized_code = code_from_name(
+                normalize_required_text(display_name, "group display name", 255),
+                fallback="group",
+                taken=await self._session.scalars(tenant_codes),
             )
-        ) is not None:
-            raise ControlPlaneConflictError(
-                f"group code already exists in tenant: {normalized_code}"
-            )
+        else:
+            normalized_code = normalize_code(code, "group code")
+            if await self._session.scalar(
+                tenant_codes.where(Group.code == normalized_code)
+            ) is not None:
+                raise ControlPlaneConflictError(
+                    f"group code already exists in tenant: {normalized_code}"
+                )
         group = Group(
             tenant_id=tenant_id,
             code=normalized_code,
@@ -146,6 +155,7 @@ class GroupService:
         *,
         display_name: str | None = None,
         description: str | None = None,
+        description_provided: bool = False,
         status: str | None = None,
     ) -> dict[str, Any]:
         tenant_id = require_tenant_permission(actor, GROUP_MANAGE_PERMISSION)
@@ -156,9 +166,11 @@ class GroupService:
                 display_name, "group display name", 255
             )
             changed.append("display_name")
-        if description is not None:
-            group.description = normalize_required_text(
-                description, "group description", 2_000
+        if description_provided or description is not None:
+            group.description = (
+                normalize_required_text(description, "group description", 2_000)
+                if description is not None
+                else None
             )
             changed.append("description")
         if status is not None:
@@ -168,6 +180,7 @@ class GroupService:
             group.status = normalized_status
             changed.append("status")
         await self._session.flush()
+        await self._session.refresh(group, attribute_names=["updated_at"])
         await self._audit.record(
             actor,
             action="group.updated",

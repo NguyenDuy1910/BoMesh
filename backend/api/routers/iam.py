@@ -6,14 +6,17 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Query, Response, status
+from pydantic import EmailStr
 
 from api.deps import Caller, WorkspaceControlPlane
 from api.routers import (
+    AccountPage,
     Group,
     GroupCreate,
     GroupMembersUpdate,
     GroupPage,
     GroupUpdate,
+    MemberAdd,
     Permission,
     PermissionPage,
     Role,
@@ -21,7 +24,6 @@ from api.routers import (
     RolePage,
     RoleUpdate,
     User,
-    UserCreate,
     UserPage,
     UserUpdate,
 )
@@ -50,12 +52,23 @@ async def list_users(
 
 
 @router.post("/users", response_model=User, status_code=status.HTTP_201_CREATED)
-async def create_user(
-    body: UserCreate, caller: Caller, control_plane: WorkspaceControlPlane
+async def add_member(
+    body: MemberAdd, caller: Caller, control_plane: WorkspaceControlPlane
 ) -> User:
     return User.model_validate(
-        user_payload(await control_plane.create_user(caller, body.model_dump()))
+        user_payload(await control_plane.add_member(caller, body.model_dump()))
     )
+
+
+@router.get("/accounts", response_model=AccountPage)
+async def lookup_accounts(
+    caller: Caller,
+    control_plane: WorkspaceControlPlane,
+    email: Annotated[EmailStr, Query()],
+) -> AccountPage:
+    """Resolve one exact email; fragments never match, so no directory is browsable."""
+
+    return AccountPage.model_validate(await control_plane.lookup_account(caller, str(email)))
 
 
 @router.get("/users/{user_id}", response_model=User)
@@ -74,12 +87,11 @@ async def update_user(
     caller: Caller,
     control_plane: WorkspaceControlPlane,
 ) -> User:
+    changes = body.model_dump(exclude_unset=True)
+    if changes.get("status") is not None:
+        changes["status"] = changes["status"] == "active"
     return User.model_validate(
-        user_payload(
-            await control_plane.update_user(
-                caller, user_id, body.model_dump(exclude_unset=True)
-            )
-        )
+        user_payload(await control_plane.update_user(caller, user_id, changes))
     )
 
 

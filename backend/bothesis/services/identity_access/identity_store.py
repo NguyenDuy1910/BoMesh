@@ -45,6 +45,7 @@ from bothesis.services import (
     IdentityNotFoundError,
     INACTIVE_STATUS,
     TenantMembershipSummary,
+    code_from_name,
 )
 
 
@@ -193,7 +194,6 @@ class IdentityStoreService:
         name: str,
         *,
         settings: Mapping[str, Any] | None = None,
-        visibility: str = "private",
     ) -> Tenant:
         normalized_code = _normalize_code(code, "tenant code")
         existing = await self._session.scalar(
@@ -207,11 +207,8 @@ class IdentityStoreService:
         tenant = Tenant(
             code=normalized_code,
             name=_required_text(name, "tenant name", 255),
-            visibility=visibility,
             settings=dict(settings or {}),
         )
-        if visibility == "public":
-            tenant.public_access_role_id = await self._public_role_id()
         self._session.add(tenant)
         await self._session.flush()
         return tenant
@@ -295,39 +292,41 @@ class IdentityStoreService:
                 .returning(Role.id)
             )
             await self._replace_role_permissions(role_id, definition.permission_codes)
-            if definition.code == "guest":
-                await self._session.execute(
-                    Tenant.__table__.update()
-                    .where(
-                        Tenant.visibility == "public",
-                        Tenant.public_access_role_id.is_(None),
-                    )
-                    .values(public_access_role_id=role_id)
-                )
         await self._session.flush()
 
     async def create_role(
         self,
         tenant_id: UUID,
-        code: str,
+        code: str | None,
         display_name: str,
         *,
         permission_codes: Iterable[str] = (),
     ) -> Role:
-        """Define a tenant-owned role. Platform and Collection roles are system roles."""
+        """Define a tenant-owned role. Platform and Collection roles are system roles.
+
+        Without a ``code`` one is derived from the name: people pick roles by
+        name, the code only has to be unique among this tenant's and the
+        platform's roles.
+        """
 
         await self.get_tenant(tenant_id)
-        normalized_code = _normalize_code(code, "role code")
-        conflict = await self._session.scalar(
-            select(Role.id).where(
-                or_(Role.tenant_id == tenant_id, Role.tenant_id.is_(None)),
-                Role.code == normalized_code,
-            )
+        visible_codes = select(Role.code).where(
+            or_(Role.tenant_id == tenant_id, Role.tenant_id.is_(None))
         )
-        if conflict is not None:
-            raise IdentityConflictError(
-                f"role code is already in use: {normalized_code}"
+        if code is None:
+            normalized_code = code_from_name(
+                display_name,
+                fallback="role",
+                taken=await self._session.scalars(visible_codes),
             )
+        else:
+            normalized_code = _normalize_code(code, "role code")
+            if await self._session.scalar(
+                visible_codes.where(Role.code == normalized_code)
+            ) is not None:
+                raise IdentityConflictError(
+                    f"role code is already in use: {normalized_code}"
+                )
 
         role = Role(
             tenant_id=tenant_id,
@@ -387,40 +386,6 @@ class IdentityStoreService:
             .order_by(RolePermission.permission_code)
         )
         return tuple(codes)
-
-    async def _public_role_id(self) -> UUID:
-        role_id = await self._session.scalar(
-            select(Role.id).where(
-                Role.code == "guest",
-                Role.scope_type == TENANT_SCOPE,
-                Role.status == ACTIVE_STATUS,
-                Role.tenant_id.is_(None),
-            )
-        )
-        if role_id is None:
-            raise IdentityNotFoundError(
-                "public access role is missing; run the system role sync"
-            )
-        return role_id
-
-    async def public_access(
-        self, tenant: Tenant
-    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-        """Resolve baseline permissions without manufacturing a principal grant."""
-
-        if tenant.visibility != "public" or tenant.public_access_role_id is None:
-            raise AuthorizationError("tenant does not allow public access")
-        role = await self._session.scalar(
-            select(Role).where(
-                Role.id == tenant.public_access_role_id,
-                Role.scope_type == TENANT_SCOPE,
-                Role.status == ACTIVE_STATUS,
-                or_(Role.tenant_id.is_(None), Role.tenant_id == tenant.id),
-            )
-        )
-        if role is None:
-            raise AuthorizationError("tenant public access role is unavailable")
-        return (role.code,), await self.role_permissions(role.id)
 
     async def permissions_for_roles(
         self, role_ids: Iterable[UUID]
@@ -584,25 +549,7 @@ class IdentityStoreService:
         membership = memberships[0] if memberships else None
         if membership is None:
             if tenant_id is not None:
-                tenant = await self.get_tenant(tenant_id, include_inactive=True)
-                if tenant.status != ACTIVE_STATUS:
-                    raise IdentityInactiveError(f"tenant is not active: {tenant_id}")
-                if tenant.visibility != "public":
-                    raise AuthorizationError(
-                        f"user is not a member of tenant: {tenant_id}"
-                    )
-                role_codes, permission_codes = await self.public_access(tenant)
-                _, platform_permissions = await self._grants(user_id, None, ())
-                return AuthContext(
-                    user_id=user.id,
-                    email=user.email,
-                    display_name=user.display_name,
-                    tenant_id=tenant.id,
-                    permission_codes=permission_codes,
-                    group_ids=(),
-                    role_codes=role_codes,
-                    platform_permissions=platform_permissions,
-                )
+                raise AuthorizationError(f"user is not a member of tenant: {tenant_id}")
             _, platform_permissions = await self._grants(user_id, None, ())
             return AuthContext(
                 user_id=user.id,
@@ -639,12 +586,6 @@ class IdentityStoreService:
             user_id, membership.tenant_id, group_ids
         )
         role_codes, permission_codes = tenant_grants
-        if tenant.visibility == "public":
-            public_roles, public_permissions = await self.public_access(tenant)
-            role_codes = tuple(sorted(set(role_codes) | set(public_roles)))
-            permission_codes = tuple(
-                sorted(set(permission_codes) | set(public_permissions))
-            )
         return AuthContext(
             user_id=user.id,
             email=user.email,

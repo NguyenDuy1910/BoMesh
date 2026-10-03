@@ -62,12 +62,27 @@ export function splitCitationMarkers(text: string): CitationSegment[] {
  * Build the number-to-source lookup a rendered answer resolves chips against.
  *
  * Only numbers this answer actually cited are present, so a `[n]` the model
- * merely wrote in prose cannot become a clickable citation.
+ * merely wrote in prose cannot become a clickable citation. A document cited
+ * under several numbers (answers saved before numbering was per document)
+ * resolves each number to that document, opened at the passage it marked.
  */
-export function citationRenderingSources<T extends { index: number }>(
-  sources: readonly T[],
-): ReadonlyMap<number, T> {
-  return new Map(sources.map((source) => [source.index, source]));
+export function citationRenderingSources<
+  T extends { index: number; chunkId?: string; passages?: readonly { number: number; chunkId: string; page?: number; locator?: string }[] },
+>(sources: readonly T[]): ReadonlyMap<number, T> {
+  const resolved = new Map<number, T>();
+  for (const source of sources) {
+    resolved.set(source.index, source);
+    for (const passage of source.passages ?? []) {
+      if (resolved.has(passage.number)) continue;
+      resolved.set(passage.number, {
+        ...source,
+        chunkId: passage.chunkId,
+        page: passage.page,
+        locator: passage.locator,
+      });
+    }
+  }
+  return resolved;
 }
 
 interface HastNode {

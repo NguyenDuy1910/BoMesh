@@ -62,6 +62,7 @@ config: ## Create the root environment file and enforce local dependency endpoin
 	update_env .env DATABASE_URL "$(LOCAL_DATABASE_URL)"; \
 	update_env .env QDRANT_URL "$(LOCAL_QDRANT_URL)"; \
 	update_env .env QDRANT_COLLECTION "$(QDRANT_COLLECTION)"; \
+	update_env .env QDRANT_API_KEY ""; \
 	update_env .env BOTHESIS_TEMPORAL_TARGET "$(LOCAL_TEMPORAL_TARGET)"; \
 	update_env .env BOTHESIS_TEMPORAL_NAMESPACE default; \
 	update_env .env BOTHESIS_TEMPORAL_TLS false; \
@@ -69,6 +70,7 @@ config: ## Create the root environment file and enforce local dependency endpoin
 	update_env .env BOTHESIS_OBJECT_STORAGE_BUCKET "$(LOCAL_S3_BUCKET)"; \
 	update_env .env BOTHESIS_S3_ENDPOINT_URL "$(LOCAL_S3_ENDPOINT)"; \
 	update_env .env BOTHESIS_S3_ADDRESSING_STYLE path; \
+	update_env .env BOTHESIS_S3_REGION us-east-1; \
 	update_env .env AWS_ACCESS_KEY_ID bothesis; \
 	update_env .env AWS_SECRET_ACCESS_KEY bothesis; \
 	integration_key="$$(sed -n 's/^BOTHESIS_INTEGRATION_ENCRYPTION_KEY=//p' .env | tail -n 1)"; \
@@ -87,7 +89,8 @@ config: ## Create the root environment file and enforce local dependency endpoin
 	remove_env .env BOTHESIS_PLUGIN_ENCRYPTION_KEY; \
 	remove_env .env BOTHESIS_CONNECTOR_ENCRYPTION_KEY; \
 	update_env .env BOTHESIS_ALLOW_INSECURE_DEV_IDENTITY true; \
-	update_env .env BOTHESIS_PUBLIC_TENANT_CODE "$(DEV_TENANT_CODE)"
+	remove_env .env BOTHESIS_PUBLIC_TENANT_CODE; \
+	remove_env .env BOTHESIS_GUEST_SESSION_EXPIRES_IN_SECONDS
 	@echo "Configured the root environment file."
 
 services: config ## Start PostgreSQL, Qdrant, object storage, and Temporal.
@@ -128,7 +131,7 @@ db-init: services ## Apply the current database design and the permission/system
 
 db-seed: services ## Create or refresh the deterministic local admin identity.
 	@set -euo pipefail
-	@tenant_id="$$( $(COMPOSE) exec -T postgres sh -c 'psql -Atq -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "$$1"' _ "INSERT INTO tenants (id, code, name, status, visibility, public_access_role_id, settings) SELECT '$(DEV_TENANT_ID)', '$(DEV_TENANT_CODE)', 'Enterprise Agent Local', 'active', 'public', role.id, '{}'::jsonb FROM roles role WHERE role.tenant_id IS NULL AND role.code = 'guest' AND role.status = 'active' ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, status = 'active', visibility = 'public', public_access_role_id = EXCLUDED.public_access_role_id, updated_at = now() RETURNING id" )"; \
+	@tenant_id="$$( $(COMPOSE) exec -T postgres sh -c 'psql -Atq -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "$$1"' _ "INSERT INTO tenants (id, code, name, status, settings) VALUES ('$(DEV_TENANT_ID)', '$(DEV_TENANT_CODE)', 'Enterprise Agent Local', 'active', '{}'::jsonb) ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, status = 'active', updated_at = now() RETURNING id" )"; \
 	user_id="$$( $(COMPOSE) exec -T postgres sh -c 'psql -Atq -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "$$1"' _ "INSERT INTO users (id, email, display_name, status, preferences) VALUES ('$(DEV_USER_ID)', '$(DEV_USER_EMAIL)', 'Local Administrator', true, '{}'::jsonb) ON CONFLICT (email) DO UPDATE SET display_name = EXCLUDED.display_name, status = true, updated_at = now() RETURNING id" )"; \
 	$(COMPOSE) exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "$$1"' _ "INSERT INTO tenant_memberships (user_id, tenant_id, status, joined_at, deleted_at) VALUES ('$$user_id', '$$tenant_id', 'active', now(), NULL) ON CONFLICT (user_id, tenant_id) DO UPDATE SET status = 'active', deleted_at = NULL" >/dev/null; \
 	$(COMPOSE) exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "$$1"' _ "INSERT INTO role_assignments (id, user_id, role_id, tenant_id) SELECT '$(DEV_TENANT_ADMIN_ASSIGNMENT_ID)', '$$user_id', role.id, '$$tenant_id' FROM roles role WHERE role.is_system AND role.code = 'tenant_admin' ON CONFLICT DO NOTHING" >/dev/null; \

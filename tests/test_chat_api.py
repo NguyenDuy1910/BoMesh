@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -47,8 +47,7 @@ from bothesis.connector.protocol import (
 from bothesis.document_index import ContextualChunk
 from bothesis.knowledge import Evidence, ItemKnowledgeRetriever
 from api.routers import ChatRequest
-from bothesis.services import AuthContext, AuthorizationError
-from bothesis.services.documents import DocumentService
+from bothesis.services import AuthContext
 from bothesis.services.document_presentation import (
     DocumentPresenter,
     payload_citation,
@@ -110,20 +109,6 @@ class ExposedChatTool(ToolExecutor):
         )
 
 
-def guest_access() -> AuthContext:
-    return AuthContext(
-        session_id=uuid4(),
-        session_kind="guest",
-        user_id=None,
-        email=None,
-        display_name="Guest",
-        tenant_id=uuid4(),
-        permission_codes=("collection.read", "knowledge.read"),
-        group_ids=(),
-        role_codes=("guest",),
-    )
-
-
 def test_chat_exposes_all_registered_tools() -> None:
     registry = ToolRegistry()
     registry.register(ExposedChatTool())
@@ -138,86 +123,6 @@ def test_chat_exposes_all_registered_tools() -> None:
         "exposed_chat_tool",
         "knowledge_search",
     )
-
-
-def test_guest_chat_exposes_public_safe_tools_only() -> None:
-    registry = ToolRegistry()
-    registry.register(ExposedChatTool())
-    registry.register(ExposedChatTool("knowledge_search"))
-    registry.register(ExposedChatTool("request_identity"))
-    service = ChatService(
-        session_factory=object(),  # type: ignore[arg-type]
-        agent=Agent(model=object(), tools=registry),
-        conversations=object(),  # type: ignore[arg-type]
-    )
-    access = guest_access()
-
-    assert service._available_tool_names(access=access) == (
-        "knowledge_search",
-        "request_identity",
-    )
-
-
-def test_authenticated_chat_hides_guest_identity_tool() -> None:
-    registry = ToolRegistry()
-    registry.register(ExposedChatTool("knowledge_search"))
-    registry.register(ExposedChatTool("request_identity"))
-    service = ChatService(
-        session_factory=object(),  # type: ignore[arg-type]
-        agent=Agent(model=object(), tools=registry),
-        conversations=object(),  # type: ignore[arg-type]
-    )
-
-    assert service._available_tool_names() == ("knowledge_search",)
-
-
-def _documents() -> DocumentService:
-    return DocumentService(
-        object(),  # type: ignore[arg-type]
-        object_storage=object(),  # type: ignore[arg-type]
-        ingestion=object(),  # type: ignore[arg-type]
-        content=object(),  # type: ignore[arg-type]
-        workflows=object(),  # type: ignore[arg-type]
-        presenter=object(),  # type: ignore[arg-type]
-    )
-
-
-@pytest.mark.asyncio
-async def test_guest_cannot_create_private_upload_collection() -> None:
-    with pytest.raises(AuthorizationError, match="sign in is required"):
-        await _documents().ensure_personal_collection(guest_access())
-
-
-@pytest.mark.asyncio
-async def test_guest_cannot_use_upload_lifecycle() -> None:
-    service = _documents()
-    access = guest_access()
-
-    with pytest.raises(AuthorizationError, match="sign in is required"):
-        await service.reserve_upload(
-            access,
-            uuid4(),
-            idempotency_key="guest-start",
-            file_name="private.txt",
-            content_type="text/plain",
-            size_bytes=10,
-        )
-    with pytest.raises(AuthorizationError, match="sign in is required"):
-        await service.upload_to_collection(
-            access,
-            uuid4(),
-            idempotency_key="guest-collection",
-            file_name="private.txt",
-            content_type="text/plain",
-            content=object(),  # type: ignore[arg-type]
-        )
-    with pytest.raises(AuthorizationError, match="sign in is required"):
-        await service.finalize_content(access, uuid4())
-    with pytest.raises(AuthorizationError, match="sign in is required"):
-        await service.retry_ingestion(access, uuid4())
-    with pytest.raises(AuthorizationError, match="sign in is required"):
-        await service.delete_document(access, uuid4())
-
 
 
 @pytest.mark.asyncio
@@ -345,7 +250,6 @@ def test_default_agent_composes_the_openai_transport(
     assert agent.tools.has("knowledge_search")
     assert [spec.name for spec in agent.tools.specs()] == [
         "knowledge_search",
-        "request_identity",
         "inspect_resource",
         "read_resource",
         "materialize_resource",
@@ -848,7 +752,7 @@ class IndexedChunkIndex:
 
     async def search_item_content(
         self,
-        query: str,
+        queries: Sequence[str],
         *,
         limit: int,
         tenant_id: str,
@@ -993,7 +897,7 @@ class TwoChunkIndex:
 
     async def search_item_content(
         self,
-        query: str,
+        queries: Sequence[str],
         *,
         limit: int,
         tenant_id: str,

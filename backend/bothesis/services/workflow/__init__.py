@@ -21,6 +21,7 @@ DOCUMENT_INGESTION_ACTIVITY_NAME = "bothesis.ingest_document"
 #: Failure types whose message is written for people and may be shown.
 DOCUMENT_FAILURE_TYPE = "DocumentIngestionError"
 INTERRUPTED_FAILURE_TYPE = "IngestionInterrupted"
+PROVIDER_FAILURE_TYPE = "ModelProviderRejected"
 TRIGGER_TYPES = frozenset({"manual", "scheduled", "webhook", "initial", "upload", "retry"})
 TEMPORAL_DEFAULT_NAMESPACE = "default"
 TEMPORAL_DEFAULT_TARGET = "127.0.0.1:7233"
@@ -185,6 +186,7 @@ __all__ = [
     "INGESTION_TASK_QUEUE",
     "INGESTION_WORKFLOW_NAME",
     "INTERRUPTED_FAILURE_TYPE",
+    "PROVIDER_FAILURE_TYPE",
     "SOURCE_INGESTION_ACTIVITY_NAME",
     "TRIGGER_TYPES",
     "IngestionProgress",

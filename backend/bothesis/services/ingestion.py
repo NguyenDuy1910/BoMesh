@@ -49,6 +49,7 @@ from bothesis.services.item_ingestion import progress_from_phases
 from bothesis.services.workflow import (
     DOCUMENT_FAILURE_TYPE,
     INTERRUPTED_FAILURE_TYPE,
+    PROVIDER_FAILURE_TYPE,
     WorkflowExecutionNotFoundError,
     ingestion_workflow_id,
     public_ingestion_id,
@@ -75,7 +76,7 @@ _WINDOWS = {
 _SUMMARY_LIMIT = 2000
 #: Failed rows on one list page whose reason is read from history.
 _MAX_FAILURE_LOOKUPS = 10
-_SAFE_FAILURE_TYPES = {DOCUMENT_FAILURE_TYPE, INTERRUPTED_FAILURE_TYPE}
+_SAFE_FAILURE_TYPES = {DOCUMENT_FAILURE_TYPE, INTERRUPTED_FAILURE_TYPE, PROVIDER_FAILURE_TYPE}
 
 
 @dataclass(frozen=True, slots=True)

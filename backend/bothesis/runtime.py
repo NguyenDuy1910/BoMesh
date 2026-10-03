@@ -22,7 +22,6 @@ from bothesis.agent.tools.materialize_resource import MaterializeResource
 from bothesis.agent.tools.materialize_sandbox_resource import MaterializeSandboxResource
 from bothesis.agent.tools.read_resource import ReadResource
 from bothesis.agent.tools.export_sandbox_file import ExportSandboxFile
-from bothesis.agent.tools.request_identity import RequestIdentity
 from bothesis.agent.transports.openai import OpenAITransport
 from bothesis.agent.transports.openrouter import OpenRouterTransport
 from bothesis.agent.transports.openrouter_execution_capability import (
@@ -228,10 +227,6 @@ class AppRuntime:
             session,
             tokens=self.jwt_token_service(),
             platform_admin_emails=self._config.identity.platform_admin_emails,
-            public_tenant_code=self._config.identity.public_tenant_code,
-            guest_session_expires_in_seconds=(
-                self._config.identity.guest_session_expires_in_seconds
-            ),
         )
 
     # -- Shared collaborators ----------------------------------------------
@@ -437,7 +432,6 @@ class AppRuntime:
                     tracer=tracer,
                 )
             )
-            registry.register(RequestIdentity())
             registry.register(InspectResource())
             registry.register(
                 ReadResource(max_characters=agent.max_resource_read_characters)

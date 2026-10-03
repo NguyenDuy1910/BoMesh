@@ -174,7 +174,11 @@ class AuthIdentity(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 
 class AccessSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """One revocable guest or user security session in one tenant context."""
+    """One revocable User security session in one tenant context.
+
+    ``kind`` and the anonymous authentication method survive only so retired
+    guest rows stay valid history; every new or active session is a User's.
+    """
 
     __tablename__ = "access_sessions"
     __table_args__ = (
@@ -184,7 +188,12 @@ class AccessSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index(None, "parent_session_id"),
         Index(None, "status", "expires_at"),
         Index(None, "status", "idle_expires_at"),
+        # 'guest' is a retired historical kind: those rows are never active.
         CheckConstraint("kind IN ('guest', 'user')", name="access_session_kind_is_valid"),
+        CheckConstraint(
+            "kind = 'user' OR status <> 'active'",
+            name="access_session_guest_is_retired",
+        ),
         CheckConstraint(
             "authentication_method IN ('anonymous', 'oidc', 'saml', 'password', 'internal')",
             name="access_session_auth_method_is_valid",
@@ -269,37 +278,16 @@ class AccessSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 class Tenant(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "tenants"
-    __table_args__ = (
-        CheckConstraint(
-            "visibility IN ('private', 'public')",
-            name="tenant_visibility_is_valid",
-        ),
-        CheckConstraint(
-            "(visibility = 'private' AND public_access_role_id IS NULL) OR "
-            "(visibility = 'public' AND public_access_role_id IS NOT NULL)",
-            name="tenant_public_access_is_complete",
-        ),
-    )
 
     code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, default="active", server_default="active"
     )
-    visibility: Mapped[str] = mapped_column(
-        String(16), nullable=False, default="private", server_default="private"
-    )
-    public_access_role_id: Mapped[UUID | None] = mapped_column(
-        PG_UUID(as_uuid=True),
-        ForeignKey("roles.id", use_alter=True, name="fk_tenants_public_access_role_id_roles"),
-    )
     settings: Mapped[JsonObject] = _json_object_column()
 
     roles: Mapped[list[Role]] = relationship(
         back_populates="tenant", foreign_keys="Role.tenant_id"
-    )
-    public_access_role: Mapped[Role | None] = relationship(
-        foreign_keys=[public_access_role_id], post_update=True
     )
     memberships: Mapped[list[TenantMembership]] = relationship(back_populates="tenant")
     groups: Mapped[list[Group]] = relationship(back_populates="tenant")
@@ -498,6 +486,11 @@ class Conversation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index(None, "tenant_id", "owner_user_id", "updated_at"),
         Index(None, "tenant_id", "created_by_session_id", "updated_at"),
         Index(None, "tenant_id", "status"),
+        # Ownerless rows are tombstoned retired guest history; live ones have a User.
+        CheckConstraint(
+            "owner_user_id IS NOT NULL OR status <> 'active'",
+            name="conversation_owner_required",
+        ),
     )
 
     tenant_id: Mapped[UUID] = mapped_column(
@@ -1532,30 +1525,6 @@ _APPROVAL_REQUEST_TRIGGER_CREATE = DDL(
     FOR EACH ROW EXECUTE FUNCTION bothesis_validate_approval_request()"""
 ).execute_if(dialect="postgresql")
 
-_TENANT_PUBLIC_ACCESS_TRIGGER = DDL(
-    """
-    CREATE OR REPLACE FUNCTION bothesis_validate_tenant_public_access() RETURNS trigger AS $$
-    BEGIN
-      IF NEW.public_access_role_id IS NOT NULL AND NOT EXISTS (
-        SELECT 1 FROM roles role
-        WHERE role.id = NEW.public_access_role_id
-          AND role.scope_type = 'tenant'
-          AND role.status = 'active'
-          AND (role.tenant_id IS NULL OR role.tenant_id = NEW.id)
-      ) THEN
-        RAISE EXCEPTION 'public access Role must be an active tenant-scope Role available to the tenant';
-      END IF;
-      RETURN NEW;
-    END;
-    $$ LANGUAGE plpgsql;
-    """
-).execute_if(dialect="postgresql")
-_TENANT_PUBLIC_ACCESS_TRIGGER_CREATE = DDL(
-    """CREATE TRIGGER trg_tenants_validate_public_access
-    BEFORE INSERT OR UPDATE OF visibility, public_access_role_id ON tenants
-    FOR EACH ROW EXECUTE FUNCTION bothesis_validate_tenant_public_access()"""
-).execute_if(dialect="postgresql")
-
 _ACCESS_SESSION_TRIGGER = DDL(
     """
     CREATE OR REPLACE FUNCTION bothesis_validate_access_session() RETURNS trigger AS $$
@@ -1565,14 +1534,8 @@ _ACCESS_SESSION_TRIGGER = DDL(
       parent_user uuid;
       parent_kind varchar(24);
     BEGIN
-      IF NEW.kind = 'guest' AND NOT EXISTS (
-        SELECT 1 FROM tenants tenant
-        WHERE tenant.id = NEW.tenant_id
-          AND tenant.status = 'active'
-          AND tenant.visibility = 'public'
-          AND tenant.public_access_role_id IS NOT NULL
-      ) THEN
-        RAISE EXCEPTION 'Guest Access Session must target an active public tenant';
+      IF NEW.kind <> 'user' THEN
+        RAISE EXCEPTION 'Access Session must belong to a User';
       END IF;
       IF NEW.auth_identity_id IS NOT NULL THEN
         SELECT user_id INTO identity_user FROM auth_identities
@@ -1593,19 +1556,13 @@ _ACCESS_SESSION_TRIGGER = DDL(
       IF NOT FOUND THEN
         RAISE EXCEPTION 'Access Session parent must exist';
       END IF;
-      IF NEW.transition_reason = 'identity_upgrade' THEN
-        IF parent_kind <> 'guest' OR NEW.kind <> 'user'
-           OR parent_tenant <> NEW.tenant_id THEN
-          RAISE EXCEPTION 'identity upgrade must replace a guest in the same tenant';
-        END IF;
-      ELSIF NEW.transition_reason = 'token_rotation' THEN
-        IF parent_kind <> NEW.kind OR parent_tenant <> NEW.tenant_id
+      IF NEW.transition_reason = 'token_rotation' THEN
+        IF parent_kind <> 'user' OR parent_tenant <> NEW.tenant_id
            OR parent_user IS DISTINCT FROM NEW.user_id THEN
           RAISE EXCEPTION 'token rotation must preserve session subject and tenant';
         END IF;
       ELSIF NEW.transition_reason = 'tenant_switch' THEN
-        IF parent_kind <> 'user' OR NEW.kind <> 'user'
-           OR parent_user IS DISTINCT FROM NEW.user_id THEN
+        IF parent_kind <> 'user' OR parent_user IS DISTINCT FROM NEW.user_id THEN
           RAISE EXCEPTION 'tenant switch must preserve the User subject';
         END IF;
       ELSE
@@ -1628,19 +1585,16 @@ _CONVERSATION_SESSION_TRIGGER = DDL(
     DECLARE
       session_tenant uuid;
       creator_user_id uuid;
-      session_kind varchar(24);
+      creator_kind varchar(24);
     BEGIN
       SELECT tenant_id, user_id, kind
-      INTO session_tenant, creator_user_id, session_kind
+      INTO session_tenant, creator_user_id, creator_kind
       FROM access_sessions WHERE id = NEW.created_by_session_id;
       IF NOT FOUND OR session_tenant IS DISTINCT FROM NEW.tenant_id THEN
         RAISE EXCEPTION 'Conversation creator session must belong to its tenant';
       END IF;
-      IF NEW.owner_user_id IS NULL AND session_kind <> 'guest' THEN
-        RAISE EXCEPTION 'Guest-owned Conversation must be created by a guest session';
-      END IF;
-      IF NEW.owner_user_id IS NOT NULL AND session_kind = 'user'
-         AND creator_user_id IS DISTINCT FROM NEW.owner_user_id THEN
+      IF creator_kind <> 'user' OR NEW.owner_user_id IS NULL
+         OR creator_user_id IS DISTINCT FROM NEW.owner_user_id THEN
         RAISE EXCEPTION 'Conversation owner must match its creator User session';
       END IF;
       RETURN NEW;
@@ -1674,8 +1628,6 @@ event.listen(ApprovalRequest.__table__, "after_create", _APPROVAL_REQUEST_TRIGGE
 event.listen(
     ApprovalRequest.__table__, "after_create", _APPROVAL_REQUEST_TRIGGER_CREATE
 )
-event.listen(Base.metadata, "after_create", _TENANT_PUBLIC_ACCESS_TRIGGER)
-event.listen(Base.metadata, "after_create", _TENANT_PUBLIC_ACCESS_TRIGGER_CREATE)
 event.listen(Base.metadata, "after_create", _ACCESS_SESSION_TRIGGER)
 event.listen(Base.metadata, "after_create", _ACCESS_SESSION_TRIGGER_CREATE)
 event.listen(Base.metadata, "after_create", _CONVERSATION_SESSION_TRIGGER)

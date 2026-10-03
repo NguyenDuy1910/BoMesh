@@ -3,8 +3,6 @@
 import { usePathname } from "next/navigation";
 
 import { ContextHeader, NavItem } from "@/components/patterns";
-import { useAuthPrompt } from "@/components/auth/AuthPrompt";
-import { isGuestSession } from "@/lib/auth/session";
 import { useAuthSession } from "@/lib/hooks/useAuthSession";
 import { isRailItemActive, workspaceRailItems } from "@/lib/navigation";
 
@@ -33,7 +31,6 @@ export function WorkspaceRail({
   children?: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const { requestSignIn } = useAuthPrompt();
   const session = useAuthSession();
   const activeWorkspace = session?.workspaces.find((item) => item.id === session.active_workspace_id);
 
@@ -52,16 +49,11 @@ export function WorkspaceRail({
           <NavItem
             active={isRailItemActive(item, pathname)}
             collapsed={collapsed}
-            href={isGuestSession(session) && item.id === "library" ? undefined : item.href}
+            href={item.href}
             icon={item.icon}
             key={item.id}
             label={item.label}
-            onClick={() => {
-              onMobileClose();
-              if (isGuestSession(session) && item.id === "library") {
-                requestSignIn("Sign in to upload and keep private files.");
-              }
-            }}
+            onClick={onMobileClose}
           />
         ))}
       </RailGroup>

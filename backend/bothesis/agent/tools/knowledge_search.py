@@ -47,11 +47,15 @@ class KnowledgeSearch(Tool):
         return ToolSpec(
             name="knowledge_search",
             description=(
-                "Search access-permitted enterprise sources for grounded evidence. "
-                "Use it when the answer needs organization-specific facts or the user "
-                "asks to search knowledge. Supply one to three focused, standalone "
-                "queries. It returns citable evidence with a source reference to cite "
-                "or reports that no permitted source was found."
+                "Search the workspace's access-permitted knowledge for grounded "
+                "evidence. This is the default first step: use it for any message "
+                "that could be about the organization or its documents, including a "
+                "bare title, name, code, date, or topic, before answering and before "
+                "asking the user for files or data. Skip it only for greetings, "
+                "small talk, questions about this conversation, or tasks fully "
+                "contained in the message. Supply one to three focused, standalone "
+                "queries. It returns citable evidence with a source reference to "
+                "cite, or reports that no permitted source was found."
             ),
             input_schema={
                 "type": "object",
@@ -59,9 +63,10 @@ class KnowledgeSearch(Tool):
                     "queries": {
                         "type": "array",
                         "description": (
-                            "Focused, independently useful queries. Do not use generic "
-                            "terms without available scope; include names, identifiers, "
-                            "dates, or other useful detail."
+                            "Focused, independently useful queries. Keep the user's "
+                            "exact names, codes, and dates; add a variant with "
+                            "abbreviations expanded when it could match differently "
+                            "worded documents."
                         ),
                         "items": {
                             "type": "string",

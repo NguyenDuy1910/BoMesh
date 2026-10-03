@@ -76,7 +76,6 @@ const DESCRIPTIONS: Record<string, string> = {
   settings: "This workspace's name and status.",
   "platform-tenants": "Every tenant on this deployment. Members see each one as a workspace.",
   "platform-users": "Everyone with an account, their workspaces and platform roles.",
-  "platform-public-workspaces": "Which tenant guests land in.",
   "platform-models": "Which models and capabilities tenants may use.",
   "platform-integrations": "The connectors this deployment supports.",
   "platform-usage": "Volume and cost across tenants.",

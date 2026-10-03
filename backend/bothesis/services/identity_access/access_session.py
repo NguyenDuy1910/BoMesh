@@ -9,12 +9,11 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bothesis.db.models import AccessSession, AuthIdentity, Tenant, User
+from bothesis.db.models import AccessSession, AuthIdentity, User
 from bothesis.services import (
     ACTIVE_STATUS,
     AuthContext,
     AuthenticationError,
-    AuthorizationError,
     JwtClaims,
 )
 from bothesis.services.identity_access.identity_store import IdentityStoreService
@@ -26,42 +25,6 @@ class AccessSessionService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._identities = IdentityStoreService(session)
-
-    async def create_guest(
-        self,
-        tenant: Tenant,
-        *,
-        expires_in_seconds: int,
-        metadata: dict[str, object] | None = None,
-    ) -> tuple[AccessSession, AuthContext]:
-        if tenant.status != ACTIVE_STATUS or tenant.visibility != "public":
-            raise AuthorizationError("public workspace is unavailable")
-        role_codes, permissions = await self._identities.public_access(tenant)
-        now = datetime.now(UTC)
-        row = AccessSession(
-            tenant_id=tenant.id,
-            kind="guest",
-            authentication_method="anonymous",
-            assurance_level="aal0",
-            expires_at=now + timedelta(seconds=expires_in_seconds),
-            idle_expires_at=now + timedelta(seconds=expires_in_seconds),
-            last_seen_at=now,
-            metadata_=dict(metadata or {}),
-        )
-        self._session.add(row)
-        await self._session.flush()
-        return row, AuthContext(
-            session_id=row.id,
-            session_kind="guest",
-            token_version=row.token_version,
-            user_id=None,
-            email=None,
-            display_name="Guest",
-            tenant_id=tenant.id,
-            permission_codes=permissions,
-            group_ids=(),
-            role_codes=role_codes,
-        )
 
     async def create_user(
         self,
@@ -92,12 +55,7 @@ class AccessSessionService:
         if parent is not None:
             self._end(parent, status="superseded", reason=transition_reason or "replaced")
         await self._session.flush()
-        return row, replace(
-            context,
-            session_id=row.id,
-            session_kind="user",
-            token_version=row.token_version,
-        )
+        return row, replace(context, session_id=row.id, token_version=row.token_version)
 
     async def internal_user(
         self, *, user: User, tenant_id: UUID
@@ -125,12 +83,7 @@ class AccessSessionService:
                 expires_in_seconds=86_400,
             )
             return context
-        return replace(
-            context,
-            session_id=row.id,
-            session_kind="user",
-            token_version=row.token_version,
-        )
+        return replace(context, session_id=row.id, token_version=row.token_version)
 
     async def active(
         self, session_id: UUID, *, lock: bool = False
@@ -150,6 +103,8 @@ class AccessSessionService:
             await self._session.flush()
         if row.status != "active" or expired:
             raise AuthenticationError("access session is unavailable or expired")
+        if row.kind != "user" or row.user_id is None:
+            raise AuthenticationError("access session has no user subject")
         return row
 
     def revoke(self, row: AccessSession, *, reason: str = "logout") -> None:
@@ -162,42 +117,22 @@ class AccessSessionService:
         if (
             row.tenant_id != claims.active_tenant_id
             or row.user_id != claims.user_id
-            or row.kind != claims.session_kind
             or row.token_version != claims.token_version
         ):
             raise AuthenticationError("access token no longer matches its session")
-        if row.kind == "guest":
-            tenant = await self._identities.get_tenant(row.tenant_id)
-            role_codes, permissions = await self._identities.public_access(tenant)
-            context = AuthContext(
-                session_id=row.id,
-                session_kind="guest",
-                token_version=row.token_version,
-                user_id=None,
-                email=None,
-                display_name="Guest",
-                tenant_id=row.tenant_id,
-                permission_codes=permissions,
-                group_ids=(),
-                role_codes=role_codes,
-            )
-        else:
-            if row.user_id is None:
-                raise AuthenticationError("user session has no subject")
-            if row.auth_identity_id is not None:
-                identity = await self._session.get(AuthIdentity, row.auth_identity_id)
-                if (
-                    identity is None
-                    or identity.status != ACTIVE_STATUS
-                    or identity.user_id != row.user_id
-                ):
-                    raise AuthenticationError("session identity is unavailable")
-            context = replace(
-                await self._identities.get_context(row.user_id, tenant_id=row.tenant_id),
-                session_id=row.id,
-                session_kind="user",
-                token_version=row.token_version,
-            )
+        if row.auth_identity_id is not None:
+            identity = await self._session.get(AuthIdentity, row.auth_identity_id)
+            if (
+                identity is None
+                or identity.status != ACTIVE_STATUS
+                or identity.user_id != row.user_id
+            ):
+                raise AuthenticationError("session identity is unavailable")
+        context = replace(
+            await self._identities.get_context(row.user_id, tenant_id=row.tenant_id),
+            session_id=row.id,
+            token_version=row.token_version,
+        )
         if (
             context.email != claims.email
             or context.permission_codes != claims.permissions

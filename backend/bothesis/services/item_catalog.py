@@ -12,10 +12,14 @@ from sqlalchemy.orm import selectinload
 from bothesis.db.models import ExternalResource, IngestionSource, Item, RoleAssignment
 from bothesis.services.audit import AuditService
 from bothesis.services.identity_access.role_assignments import RoleAssignmentService
+from bothesis.services.identity_access.authorization import AuthorizationService
 from bothesis.services.item import ItemService
 from bothesis.services.item_ingestion import ItemIngestionService
 from bothesis.services import (
     COLLECTION_OWNER_ROLE,
+    COLLECTION_DELETE_PERMISSION,
+    COLLECTION_UPDATE_PERMISSION,
+    DocumentNotFoundError,
     ITEM_MANAGE_PERMISSION,
     ControlPlaneConflictError,
     ControlPlaneNotFoundError,
@@ -54,6 +58,12 @@ class ItemCatalogService:
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         tenant_id = require_tenant_permission(actor, ITEM_MANAGE_PERMISSION)
+        if parent_item_id is not None:
+            parent = await AuthorizationService(self._session).require_item(
+                parent_item_id, access=actor, permission=COLLECTION_UPDATE_PERMISSION,
+            )
+            if parent.item_type != "collection":
+                raise DocumentNotFoundError("parent collection not found")
         item = await ItemService(self._session).create_collection(
             tenant_id=tenant_id,
             title=normalize_required_text(title, "collection title", 255),
@@ -81,7 +91,64 @@ class ItemCatalogService:
                 "creator_role": owner_role.code,
             },
         )
-        return await self.get_item(actor, item.id)
+        return await self.get_collection(actor, item.id)
+
+    async def list_collections(
+        self, actor: AuthContext, *, page: int = 1, page_size: int = 20,
+        search: str | None = None,
+    ) -> dict[str, Any]:
+        page, page_size, offset = normalize_page(page, page_size)
+        allowed = await AuthorizationService(self._session).allowed_collection_ids(actor)
+        statement = select(Item.id).where(Item.id.in_(allowed))
+        if search and search.strip():
+            statement = statement.where(Item.title.ilike(f"%{search.strip()}%"))
+        total = await self._session.scalar(select(func.count()).select_from(statement.subquery()))
+        ids = await self._session.scalars(
+            statement.order_by(Item.updated_at.desc(), Item.id).limit(page_size).offset(offset)
+        )
+        return {
+            "items": [await self.get_collection(actor, item_id) for item_id in ids],
+            "total": int(total or 0), "page": page, "page_size": page_size,
+        }
+
+    async def get_collection(self, actor: AuthContext, item_id: UUID) -> dict[str, Any]:
+        authorization = AuthorizationService(self._session)
+        item = await authorization.require_item(item_id, access=actor)
+        if item.item_type != "collection":
+            raise DocumentNotFoundError("collection not found")
+        document_count = await self._session.scalar(
+            select(func.count(Item.id)).where(
+                Item.parent_item_id == item.id, Item.item_type == "document",
+                Item.status != "deleted", Item.deleted_at.is_(None),
+            )
+        )
+        source_count = await self._session.scalar(
+            select(func.count(IngestionSource.id)).where(
+                IngestionSource.target_item_id == item.id, IngestionSource.deleted_at.is_(None),
+            )
+        )
+        return {
+            "id": str(item.id), "item_type": "collection", "title": item.title,
+            "metadata": dict(item.metadata_),
+            "parent_item_id": str(item.parent_item_id) if item.parent_item_id else None,
+            "status": item.status, "item_count": int(document_count or 0),
+            "source_count": int(source_count or 0),
+            "permissions": sorted(await authorization.permissions_for_item(item.id, access=actor)),
+            "created_at": timestamp(item.created_at), "updated_at": timestamp(item.updated_at),
+        }
+
+    async def delete_collection(self, actor: AuthContext, item_id: UUID) -> None:
+        item = await AuthorizationService(self._session).require_item(
+            item_id, access=actor, permission=COLLECTION_DELETE_PERMISSION,
+        )
+        if item.item_type != "collection":
+            raise DocumentNotFoundError("collection not found")
+        if self._ingestion is None:
+            raise RuntimeError("Collection deletion requires ItemIngestionService")
+        await self._ingestion.remove_item(item_id, actor=actor)
+        await self._audit.record(
+            actor, action="collection.deleted", resource_type="collection", resource_id=str(item_id),
+        )
 
     async def list_items(
         self,
@@ -288,14 +355,14 @@ class ItemCatalogService:
         description: str | None = None,
         description_provided: bool = False,
     ) -> dict[str, Any]:
-        previous = await self.get_item(actor, item_id)
-        if previous["item_type"] != "collection":
-            raise ControlPlaneValidationError("only collections can use this update")
+        item = await AuthorizationService(self._session).require_item(
+            item_id, access=actor, permission=COLLECTION_UPDATE_PERMISSION,
+        )
+        if item.item_type != "collection":
+            raise DocumentNotFoundError("collection not found")
         if title is None and not description_provided:
             raise ControlPlaneValidationError("collection update has no changes")
 
-        item = await self._session.get(Item, item_id)
-        assert item is not None
         changed_fields: list[str] = []
         if title is not None:
             item.title = normalize_required_text(title, "collection title", 255)
@@ -324,7 +391,7 @@ class ItemCatalogService:
             resource_id=str(item.id),
             details={"changed_fields": changed_fields},
         )
-        return await self.get_item(actor, item.id)
+        return await self.get_collection(actor, item.id)
 
     async def retry_item(self, actor: AuthContext, item_id: UUID) -> dict[str, Any]:
         payload = await self.get_item(actor, item_id)

@@ -1,7 +1,7 @@
 "use client";
 
-import { Plus, ShieldCheck, UserPlus, Users, UsersRound } from "lucide-react";
-import { useMemo, useState } from "react";
+import { Check, Copy, LoaderCircle, UserPlus, Users } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { FilterTrigger, CommandBar } from "@/components/layout/CommandBar";
 import { Avatar } from "@/components/ui/Avatar";
@@ -13,20 +13,24 @@ import { Dialog } from "@/components/ui/Dialog";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { Input } from "@/components/ui/Input";
-import { Select } from "@/components/ui/Select";
 import { PageLoadingSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Tabs } from "@/components/ui/Tabs";
+import { useToast } from "@/components/ui/Toast";
+import { useClipboard } from "@/lib/hooks/useClipboard";
 import { useRouteState } from "@/lib/hooks/useRouteState";
 import { useAuthSession } from "@/lib/hooks/useAuthSession";
+import { GroupsPanel } from "@/modules/workspace-control/access/GroupsPanel";
+import { GroupPicker, RolePicker } from "@/modules/workspace-control/access/pickers";
+import { RolesPanel } from "@/modules/workspace-control/access/RolesPanel";
 import {
   workspaceDirectoryApi,
   memberName,
   memberStatus,
   roleNames,
+  type Account,
   type Group,
   type Member,
-  type Permission,
   type Role,
 } from "@/modules/workspace-control/directory";
 import { SectionHeader } from "@/modules/workspace-control/components/SectionHeader";
@@ -64,13 +68,25 @@ export function AccessPage() {
 function MembersSection({ actorUserId }: { actorUserId: string | null }) {
   const members = useControlPlaneData(() => workspaceDirectoryApi.members());
   const roles = useControlPlaneData(() => workspaceDirectoryApi.roles());
+  // Groups are optional here: someone who manages members but not groups
+  // still gets the members tab, just without group choices.
+  const groups = useControlPlaneData(() => workspaceDirectoryApi.groups());
   const error = members.error || roles.error;
 
   if (error) {
     return <AccessDataError description={error} onRetry={() => { members.reload(); roles.reload(); }} />;
   }
-  if (!members.data || !roles.data) return <AccessDataLoading label="Loading members" />;
-  return <MembersPanel actorUserId={actorUserId} roles={roles.data.items} rows={members.data.items} />;
+  if (!members.data || !roles.data || (!groups.data && !groups.error)) {
+    return <AccessDataLoading label="Loading members" />;
+  }
+  return (
+    <MembersPanel
+      actorUserId={actorUserId}
+      groups={groups.data?.items ?? null}
+      roles={roles.data.items}
+      rows={members.data.items}
+    />
+  );
 }
 
 function GroupsSection() {
@@ -104,10 +120,13 @@ function MembersPanel({
   actorUserId,
   rows,
   roles,
+  groups,
 }: {
   actorUserId: string | null;
   rows: Member[];
   roles: Role[];
+  /** Null when the viewer cannot manage groups. */
+  groups: Group[] | null;
 }) {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
@@ -129,12 +148,12 @@ function MembersPanel({
         <CellTitle icon={<Avatar name={memberName(row)} size="md" />} subtitle={row.email} title={memberName(row)} />
       ),
     },
-    { key: "membership", label: "Workspace roles", priority: "medium", render: (row) => roleNames(row) || "No role" },
+    { key: "membership", label: "Role", priority: "medium", render: (row) => roleNames(row) || "No role yet" },
     {
       key: "groups",
       label: "Groups",
       priority: "low",
-      render: (row) => row.groups.map((group) => group.display_name).join(", ") || "Direct access only",
+      render: (row) => row.groups.map((group) => group.display_name).join(", ") || "—",
     },
     { key: "status", label: "Status", width: 110, render: (row) => <StatusBadge status={memberStatus(row)} /> },
   ];
@@ -173,53 +192,68 @@ function MembersPanel({
       }
       onRowClick={setSelected}
     />
-    <MemberDialog
-      actorUserId={actorUserId}
-      member={selected}
-      onClose={() => setSelected(null)}
+    {selected && (
+      <MemberDialog
+        actorUserId={actorUserId}
+        groups={groups}
+        key={selected.id}
+        member={selected}
+        onClose={() => setSelected(null)}
+        roles={roles}
+      />
+    )}
+    <AddMemberDialog
+      groups={groups}
+      onClose={() => setOpen(false)}
+      onOpenMember={(memberId) => {
+        setOpen(false);
+        setSelected(rows.find((row) => row.id === memberId) ?? null);
+      }}
+      open={open}
       roles={roles}
     />
-    <AddMemberDialog onClose={() => setOpen(false)} open={open} roles={roles} />
   </>;
 }
 
+/** Change what one person can do here: their role and their groups, saved together. */
 function MemberDialog({
   actorUserId,
   member,
   roles,
+  groups,
   onClose,
 }: {
   actorUserId: string | null;
-  member: Member | null;
+  member: Member;
   roles: Role[];
+  groups: Group[] | null;
   onClose: () => void;
 }) {
+  const { toast } = useToast();
+  const initialRoleId = member.roles[0]?.id ?? "";
+  const initialGroupIds = member.groups.map((group) => group.id);
+  const [roleId, setRoleId] = useState(initialRoleId);
+  const [groupIds, setGroupIds] = useState(initialGroupIds);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [pendingRoleId, setPendingRoleId] = useState<string | null>(null);
   const [confirmStatusChange, setConfirmStatusChange] = useState(false);
-  if (!member) return null;
   const active = memberStatus(member) === "active";
   const isCurrentUser = member.id === actorUserId;
-  const currentRoleId = member.roles[0]?.id ?? "";
-  const pendingRole = roles.find((role) => role.id === pendingRoleId);
-  const roleOptions = [
-    ...(currentRoleId && !roles.some((role) => role.id === currentRoleId)
-      ? [{ value: currentRoleId, label: `${roleNames(member)} (current role)` }]
-      : []),
-    ...roles.map((role) => ({ value: role.id, label: role.display_name })),
-  ];
+  const roleChanged = roleId !== initialRoleId;
+  const groupsChanged = [...groupIds].sort().join() !== [...initialGroupIds].sort().join();
 
-  const save = async (patch: Parameters<typeof workspaceDirectoryApi.saveMember>[1]) => {
+  const save = async () => {
     setBusy(true);
     setError(null);
     try {
-      await workspaceDirectoryApi.saveMember(member.id, patch);
+      await workspaceDirectoryApi.saveMember(member.id, {
+        ...(roleChanged ? { role_ids: roleId ? [roleId] : [] } : {}),
+        ...(groupsChanged ? { group_ids: groupIds } : {}),
+      });
+      toast({ title: `${memberName(member)} updated`, variant: "success" });
       onClose();
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : "Could not save this member.";
-      setError(message);
-      throw new Error(message);
+      setError(cause instanceof Error ? cause.message : "Could not save this member.");
     } finally {
       setBusy(false);
     }
@@ -227,62 +261,52 @@ function MemberDialog({
 
   return (
     <Dialog
+      className="max-w-xl"
       footer={<>
-        <Button onClick={onClose} variant="secondary">Close</Button>
         {!isCurrentUser && (
-          <Button loading={busy} onClick={() => setConfirmStatusChange(true)} variant={active ? "danger" : "secondary"}>
+          <Button className="mr-auto" onClick={() => setConfirmStatusChange(true)} variant={active ? "danger" : "secondary"}>
             {active ? "Suspend access" : "Restore access"}
           </Button>
         )}
+        <Button onClick={onClose} variant="secondary">Cancel</Button>
+        <Button disabled={!roleChanged && !groupsChanged} loading={busy} onClick={save}>Save changes</Button>
       </>}
       onClose={onClose}
       open
       title={memberName(member)}
     >
-      <div className="grid gap-4">
+      <div className="grid gap-5">
         <div className="flex items-center gap-3">
           <Avatar name={memberName(member)} size="lg" />
-          <div>
-            <p className="font-medium text-[var(--text-primary)]">{memberName(member)}</p>
-            <p className="text-sm text-[var(--text-secondary)]">{member.email}</p>
+          <div className="min-w-0">
+            <p className="truncate font-medium text-[var(--text-primary)]">{memberName(member)}</p>
+            <p className="truncate text-sm text-[var(--text-secondary)]">{member.email}</p>
           </div>
+          {!active && <Badge className="ml-auto" dot tone="warning">Suspended</Badge>}
         </div>
-        <label className="configuration-field">Workspace role
-          <Select
-            aria-describedby={isCurrentUser ? "own-access-help" : undefined}
+        <fieldset className="grid gap-2">
+          <legend className="mb-2 text-[length:var(--text-size-ui)] font-medium text-[var(--text-primary)]">Role</legend>
+          {isCurrentUser && (
+            <p className="mb-1 text-[length:var(--text-size-meta)] text-[var(--text-secondary)]">
+              You can't change your own role. Ask another workspace administrator.
+            </p>
+          )}
+          <RolePicker
             disabled={isCurrentUser}
-            onChange={(event) => {
-              if (event.target.value !== currentRoleId) setPendingRoleId(event.target.value);
-            }}
-            options={roleOptions}
-            value={currentRoleId}
+            name={`member-role-${member.id}`}
+            onChange={setRoleId}
+            roles={roles}
+            value={roleId}
           />
-        </label>
-        {isCurrentUser && (
-          <p className="text-sm text-[var(--text-secondary)]" id="own-access-help">
-            Your workspace role and access can only be changed by another workspace administrator.
-          </p>
-        )}
-        <div>
-          <p className="mb-2 text-sm font-medium">Groups</p>
-          <div className="flex flex-wrap gap-1">
-            {member.groups.length
-              ? member.groups.map((group) => <Badge key={group.id} tone="neutral">{group.display_name}</Badge>)
-              : <span className="text-sm text-[var(--text-tertiary)]">No group memberships</span>}
+        </fieldset>
+        {groups && (
+          <div className="grid gap-2">
+            <span className="text-[length:var(--text-size-ui)] font-medium text-[var(--text-primary)]">Groups</span>
+            <GroupPicker groups={groups} onChange={setGroupIds} value={groupIds} />
           </div>
-        </div>
+        )}
         {error && <ErrorState description={error} layout="inline" />}
       </div>
-      <ConfirmDialog
-        confirmLabel="Change role"
-        description={
-          <>This changes {memberName(member)}’s workspace role to <strong>{pendingRole?.display_name}</strong>.</>
-        }
-        onClose={() => setPendingRoleId(null)}
-        onConfirm={() => save({ role_ids: pendingRoleId ? [pendingRoleId] : [] })}
-        open={pendingRoleId !== null}
-        title="Change workspace role?"
-      />
       <ConfirmDialog
         confirmLabel={active ? "Suspend access" : "Restore access"}
         description={
@@ -292,7 +316,10 @@ function MemberDialog({
         }
         destructive={active}
         onClose={() => setConfirmStatusChange(false)}
-        onConfirm={() => save({ status: active ? "suspended" : "active" })}
+        onConfirm={async () => {
+          await workspaceDirectoryApi.saveMember(member.id, { status: active ? "suspended" : "active" });
+          onClose();
+        }}
         open={confirmStatusChange}
         title={active ? "Suspend workspace access?" : "Restore workspace access?"}
       />
@@ -300,26 +327,92 @@ function MemberDialog({
   );
 }
 
-function AddMemberDialog({ open, roles, onClose }: { open: boolean; roles: Role[]; onClose: () => void }) {
-  const [name, setName] = useState("");
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const LOOKUP_DELAY_MS = 350;
+
+type AccountLookup =
+  | { state: "idle" }
+  | { state: "checking" }
+  | { state: "found"; account: Account }
+  | { state: "missing"; email: string }
+  | { state: "error"; message: string };
+
+/**
+ * Add someone who already has an account. Identities are never created
+ * here: the email resolves to an existing account, shown back for
+ * confirmation, and only then are a role and groups offered.
+ */
+function AddMemberDialog({
+  open,
+  roles,
+  groups,
+  onClose,
+  onOpenMember,
+}: {
+  open: boolean;
+  roles: Role[];
+  groups: Group[] | null;
+  onClose: () => void;
+  onOpenMember: (memberId: string) => void;
+}) {
+  const { toast } = useToast();
+  const emailRef = useRef<HTMLInputElement | null>(null);
   const [email, setEmail] = useState("");
+  const [lookup, setLookup] = useState<AccountLookup>({ state: "idle" });
   const [roleId, setRoleId] = useState("");
+  const [groupIds, setGroupIds] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const chosen = roleId || roles[0]?.id || "";
+  // `/roles` lists only roles this workspace can assign; the server re-checks.
+  const chosen = roleId || defaultRoleId(roles);
+  const address = email.trim().toLowerCase();
+  const account = lookup.state === "found" ? lookup.account : null;
+  const canAdd = Boolean(account && account.status === "active" && account.workspace_membership === "none" && chosen);
+
+  // The account is looked up only for a whole address, after typing pauses.
+  useEffect(() => {
+    setError(null);
+    if (!EMAIL_PATTERN.test(address)) {
+      setLookup({ state: "idle" });
+      return;
+    }
+    const controller = new AbortController();
+    setLookup({ state: "checking" });
+    const timer = window.setTimeout(() => {
+      workspaceDirectoryApi.lookupAccount(address, controller.signal)
+        .then((found) => setLookup(found ? { state: "found", account: found } : { state: "missing", email: address }))
+        .catch((cause: unknown) => {
+          if (controller.signal.aborted) return;
+          setLookup({ state: "error", message: cause instanceof Error ? cause.message : "Could not look up this email." });
+        });
+    }, LOOKUP_DELAY_MS);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [address]);
+
+  const close = () => {
+    setEmail("");
+    setRoleId("");
+    setGroupIds([]);
+    setError(null);
+    onClose();
+  };
 
   const submit = async () => {
+    if (!account || !canAdd) return;
+    const role = roles.find((item) => item.id === chosen);
     setBusy(true);
     setError(null);
     try {
-      await workspaceDirectoryApi.createMember({
-        email: email.trim(),
-        display_name: name.trim() || null,
-        role_ids: chosen ? [chosen] : [],
+      const member = await workspaceDirectoryApi.addMember({ email: account.email, role_ids: [chosen], group_ids: groupIds });
+      toast({
+        title: `${memberName(member)} added`,
+        description: role ? `They can now use this workspace as ${role.display_name}.` : undefined,
+        variant: "success",
       });
-      setName("");
-      setEmail("");
-      onClose();
+      close();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not add this member.");
     } finally {
@@ -329,268 +422,163 @@ function AddMemberDialog({ open, roles, onClose }: { open: boolean; roles: Role[
 
   return (
     <Dialog
+      className="max-w-xl"
       footer={<>
-        <Button onClick={onClose} variant="secondary">Cancel</Button>
-        <Button disabled={!email.includes("@") || !chosen} loading={busy} onClick={submit}>Add member</Button>
+        <Button onClick={close} variant="secondary">Cancel</Button>
+        <Button disabled={!canAdd} form="add-member-form" loading={busy} type="submit">Add to workspace</Button>
       </>}
-      onClose={onClose}
+      initialFocusRef={emailRef}
+      onClose={close}
       open={open}
       title="Add member"
     >
-      <div className="grid gap-4">
-        <label className="configuration-field">Name
-          <Input onChange={(event) => setName(event.target.value)} value={name} />
-        </label>
-        <label className="configuration-field">Email
-          <Input onChange={(event) => setEmail(event.target.value)} required type="email" value={email} />
-        </label>
-        <label className="configuration-field">Role
-          <Select
-            onChange={(event) => setRoleId(event.target.value)}
-            options={roles.map((role) => ({ value: role.id, label: role.display_name }))}
-            value={chosen}
-          />
-        </label>
+      <form
+        className="grid gap-5"
+        id="add-member-form"
+        noValidate
+        onSubmit={(event) => {
+          event.preventDefault();
+          void submit();
+        }}
+      >
+        <div className="grid gap-2">
+          <label className="configuration-field">Email
+            <span className="relative block">
+              <Input
+                aria-describedby="add-member-lookup"
+                autoComplete="off"
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="name@company.com"
+                ref={emailRef}
+                spellCheck={false}
+                type="email"
+                value={email}
+              />
+              {lookup.state === "checking" && (
+                <LoaderCircle
+                  aria-label="Looking up account"
+                  className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-[var(--text-tertiary)]"
+                />
+              )}
+            </span>
+          </label>
+          <div aria-live="polite" id="add-member-lookup">
+            <AccountLookupResult lookup={lookup} onOpenMember={onOpenMember} />
+          </div>
+        </div>
+
+        {canAdd && (
+          <>
+            <fieldset className="grid gap-2">
+              <legend className="mb-2 text-[length:var(--text-size-ui)] font-medium text-[var(--text-primary)]">Role</legend>
+              <RolePicker name="new-member-role" onChange={setRoleId} roles={roles} value={chosen} />
+            </fieldset>
+            {groups && groups.length > 0 && (
+              <div className="grid gap-2">
+                <span className="text-[length:var(--text-size-ui)] font-medium text-[var(--text-primary)]">
+                  Groups <span className="font-normal text-[var(--text-tertiary)]">(optional)</span>
+                </span>
+                <GroupPicker groups={groups} onChange={setGroupIds} value={groupIds} />
+              </div>
+            )}
+          </>
+        )}
         {error && <ErrorState description={error} layout="inline" />}
-      </div>
+      </form>
     </Dialog>
   );
 }
 
-function GroupsPanel({ rows }: { rows: Group[] }) {
-  const [search, setSearch] = useState("");
-  const [open, setOpen] = useState(false);
-  const matching = rows.filter((row) =>
-    `${row.display_name} ${row.description ?? ""}`.toLowerCase().includes(search.toLowerCase()),
-  );
-  const columns: Column<Group>[] = [
-    {
-      key: "display_name",
-      label: "Group",
-      primary: true,
-      sortable: true,
-      render: (row) => <CellTitle subtitle={row.description ?? row.code} title={row.display_name} />,
-    },
-    { key: "member_count", label: "Members", width: 100, align: "right" },
-    { key: "status", label: "Status", width: 110, render: (row) => <StatusBadge status={row.status} /> },
-  ];
+function AccountLookupResult({
+  lookup,
+  onOpenMember,
+}: {
+  lookup: AccountLookup;
+  onOpenMember: (memberId: string) => void;
+}) {
+  const { copy, copied } = useClipboard();
 
-  return <>
-    <CommandBar
-      action={<Button icon={<Plus size={16} />} onClick={() => setOpen(true)}>Create group</Button>}
-      count={pluralize(matching.length, "group")}
-      search={{ value: search, onChange: setSearch, placeholder: "Search groups…", label: "Search groups" }}
-    />
-    <DataTable
-      ariaLabel="Access groups"
-      columns={columns}
-      data={matching}
-      emptyState={
-        <EmptyState
-          description={search ? "Try a different search." : "Create a group to give several members the same access."}
-          icon={<UsersRound size={20} />}
-          size="sm"
-          title={search ? "No matching groups" : "No groups yet"}
-        />
-      }
-    />
-    <GroupDialog onClose={() => setOpen(false)} open={open} />
-  </>;
-}
+  if (lookup.state === "idle") {
+    return <p className="text-[length:var(--text-size-meta)] text-[var(--text-tertiary)]">Enter the email they sign in with. They need a BoThesis account.</p>;
+  }
+  if (lookup.state === "checking") {
+    return <Skeleton className="h-[3.75rem] w-full rounded-[var(--radius-md)]" />;
+  }
+  if (lookup.state === "error") {
+    return <ErrorState description={lookup.message} layout="inline" />;
+  }
+  if (lookup.state === "missing") {
+    return (
+      <div className="grid gap-2 rounded-[var(--radius-md)] border border-dashed border-[var(--border-default)] px-3 py-3">
+        <p className="text-[length:var(--text-size-ui)] text-[var(--text-primary)]">
+          No BoThesis account uses <strong>{lookup.email}</strong>.
+        </p>
+        <p className="text-[length:var(--text-size-meta)] text-[var(--text-secondary)]">
+          Send them the sign-up link, then add them here once they have an account.
+        </p>
+        <div>
+          <Button
+            icon={copied ? <Check size={14} /> : <Copy size={14} />}
+            onClick={() => void copy(`${window.location.origin}/auth/signup`)}
+            size="sm"
+            variant="secondary"
+          >
+            {copied ? "Link copied" : "Copy sign-up link"}
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
-function GroupDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [code, setCode] = useState("");
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const submit = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await workspaceDirectoryApi.createGroup({
-        code: code.trim(),
-        display_name: name.trim(),
-        description: description.trim() || undefined,
-      });
-      setCode("");
-      setName("");
-      setDescription("");
-      onClose();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not create this group.");
-    } finally {
-      setBusy(false);
-    }
-  };
+  const { account } = lookup;
+  const name = account.display_name || account.email;
+  const standing = account.status === "disabled"
+    ? { tone: "danger" as const, label: "Account disabled", note: "This account is disabled and cannot be added." }
+    : account.workspace_membership === "active"
+      ? { tone: "neutral" as const, label: "Already a member", note: null }
+      : account.workspace_membership === "suspended"
+        ? { tone: "warning" as const, label: "Suspended here", note: "Their access to this workspace is suspended. Restore it from their member details." }
+        : { tone: "success" as const, label: "Can be added", note: null };
 
   return (
-    <Dialog
-      footer={<>
-        <Button onClick={onClose} variant="secondary">Cancel</Button>
-        <Button disabled={!code.trim() || !name.trim()} loading={busy} onClick={submit}>Create group</Button>
-      </>}
-      onClose={onClose}
-      open={open}
-      title="Create group"
-    >
-      <div className="grid gap-4">
-        <label className="configuration-field">Group name
-          <Input onChange={(event) => setName(event.target.value)} value={name} />
-        </label>
-        <label className="configuration-field">Code
-          <Input onChange={(event) => setCode(event.target.value)} value={code} />
-          <span className="text-xs text-[var(--text-tertiary)]">Short identifier, unique in this workspace.</span>
-        </label>
-        <label className="configuration-field">Description
-          <Input onChange={(event) => setDescription(event.target.value)} value={description} />
-        </label>
-        {error && <ErrorState description={error} layout="inline" />}
-      </div>
-    </Dialog>
-  );
-}
-
-function RolesPanel({ rows }: { rows: Role[] }) {
-  const [open, setOpen] = useState(false);
-  const columns: Column<Role>[] = [
-    {
-      key: "display_name",
-      label: "Role",
-      primary: true,
-      sortable: true,
-      // The role code is an internal identifier; what a reader needs beside
-      // the name is how much the role grants.
-      render: (row) => <CellTitle subtitle={pluralize(row.permission_codes.length, "permission")} title={row.display_name} />,
-    },
-    {
-      key: "permission_codes",
-      label: "Permissions",
-      priority: "medium",
-      render: (row) => (
-        <span className="flex flex-wrap gap-1">
-          {row.permission_codes.slice(0, 3).map((permission) => (
-            <Badge key={permission} tone="neutral">{permission}</Badge>
-          ))}
-          {row.permission_codes.length > 3 && (
-            <span className="text-xs text-[var(--text-tertiary)]">
-              +{row.permission_codes.length - 3} more
-            </span>
+    <div className="grid gap-2">
+      <div className="flex items-center gap-3 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-2.5">
+        <Avatar name={name} size="md" />
+        <span className="grid min-w-0 flex-1">
+          <span className="truncate text-[length:var(--text-size-ui)] font-medium text-[var(--text-primary)]">{name}</span>
+          {account.display_name && (
+            <span className="truncate text-[length:var(--text-size-meta)] text-[var(--text-secondary)]">{account.email}</span>
           )}
         </span>
-      ),
-    },
-    { key: "member_count", label: "Members", width: 100, align: "right" },
-    { key: "is_system", label: "Type", width: 110, render: (row) => (row.is_system ? "Platform" : "Custom") },
-  ];
-
-  return <>
-    <CommandBar
-      action={<Button icon={<Plus size={16} />} onClick={() => setOpen(true)}>Create role</Button>}
-      count={pluralize(rows.length, "role")}
-    />
-    <DataTable
-      ariaLabel="Workspace roles"
-      columns={columns}
-      data={rows}
-      emptyState={
-        <EmptyState
-          description="Create a role to choose which permissions it grants."
-          icon={<ShieldCheck size={20} />}
-          size="sm"
-          title="No roles yet"
-        />
-      }
-    />
-    {open && <RoleDialog onClose={() => setOpen(false)} open />}
-  </>;
+        <Badge dot tone={standing.tone}>{standing.label}</Badge>
+      </div>
+      {standing.note && (
+        <p className="text-[length:var(--text-size-meta)] text-[var(--text-secondary)]">
+          {standing.note}
+          {account.workspace_membership === "suspended" && (
+            <>
+              {" "}
+              <button
+                className="font-medium text-[var(--text-primary)] underline underline-offset-2 hover:text-[var(--text-accent)]"
+                onClick={() => onOpenMember(account.id)}
+                type="button"
+              >
+                Open member details
+              </button>
+            </>
+          )}
+        </p>
+      )}
+    </div>
+  );
 }
 
-function RoleDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const catalogue = useControlPlaneData(workspaceDirectoryApi.permissions);
-  const [code, setCode] = useState("");
-  const [name, setName] = useState("");
-  const [permissions, setPermissions] = useState<string[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const choices: Permission[] = catalogue.data?.items ?? [];
-
-  const submit = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await workspaceDirectoryApi.createRole({
-        code: code.trim(),
-        display_name: name.trim(),
-        permission_codes: permissions,
-      });
-      setCode("");
-      setName("");
-      setPermissions([]);
-      onClose();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not create this role.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
+/** Prefer the ordinary member role; never default anyone to administrator. */
+function defaultRoleId(roles: Role[]) {
+  const assignable = roles.filter((role) => role.status === "active");
   return (
-    <Dialog
-      footer={<>
-        <Button onClick={onClose} variant="secondary">Cancel</Button>
-        <Button disabled={!code.trim() || !name.trim() || !permissions.length} loading={busy} onClick={submit}>
-          Create role
-        </Button>
-      </>}
-      onClose={onClose}
-      open={open}
-      title="Create role"
-    >
-      <div className="grid gap-4">
-        <label className="configuration-field">Role name
-          <Input onChange={(event) => setName(event.target.value)} value={name} />
-        </label>
-        <label className="configuration-field">Code
-          <Input onChange={(event) => setCode(event.target.value)} value={code} />
-        </label>
-        <fieldset>
-          <legend className="mb-2 text-sm font-medium">Permissions</legend>
-          {catalogue.error ? (
-            <ErrorState description={catalogue.error} layout="inline" onAction={catalogue.reload} />
-          ) : !catalogue.data ? (
-            <div aria-busy="true" className="grid gap-2" role="status">
-              <span className="sr-only">Loading permissions</span>
-              <Skeleton className="h-9" />
-              <Skeleton className="h-9" />
-              <Skeleton className="h-9 w-2/3" />
-            </div>
-          ) : (
-            <div className="grid gap-2">
-              {choices.map((permission) => (
-                <label className="flex items-start gap-2 text-sm" key={permission.code}>
-                  <input
-                    checked={permissions.includes(permission.code)}
-                    className="mt-1"
-                    onChange={() => setPermissions((current) =>
-                      current.includes(permission.code)
-                        ? current.filter((item) => item !== permission.code)
-                        : [...current, permission.code],
-                    )}
-                    type="checkbox"
-                  />
-                  <span>
-                    <span className="font-medium">{permission.code}</span>
-                    <span className="block text-xs text-[var(--text-tertiary)]">{permission.description}</span>
-                  </span>
-                </label>
-              ))}
-            </div>
-          )}
-        </fieldset>
-        {error && <ErrorState description={error} layout="inline" />}
-      </div>
-    </Dialog>
-  );
+    assignable.find((role) => role.code === "tenant_member")
+    ?? assignable.find((role) => !role.permission_codes.includes("user.manage"))
+    ?? assignable[0]
+  )?.id ?? "";
 }

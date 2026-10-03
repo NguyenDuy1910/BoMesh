@@ -7,12 +7,11 @@ ACLs, chat state, and audit records.
 
 Identity and session state stay separate. `users` stores durable human
 identities; `auth_identities` maps `(issuer, subject)` from an external
-provider to one User; `access_sessions` stores tenant context, guest/user
-kind, expiry, revocation, token version, and transition lineage. Guest
-sessions have no User row or role assignment. Public access resolves through
-the tenant's `public_access_role_id`. Login creates a child User session,
-supersedes the Guest session, and assigns its guest-created conversations to
-the durable User while preserving `created_by_session_id`.
+provider to one User; `access_sessions` stores tenant context, User subject,
+expiry, revocation, token version, and transition lineage. Every active
+session belongs to a User with an active membership in its tenant; workspace
+permissions come only from `role_assignments`. Tenants have no public access
+role or visibility, and every active conversation has an `owner_user_id`.
 
 The canonical knowledge model is one `items` table. `item_type` distinguishes
 Collections and Documents. `parent_item_id` represents canonical containment;

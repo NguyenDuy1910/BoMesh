@@ -7,8 +7,10 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../../app/app_brand.dart';
 import '../../../app/app_theme.dart';
+import '../../knowledge/document_page.dart';
 import '../models/chat_models.dart';
 import '../state/chat_controller.dart';
+import 'artifact_page.dart';
 
 class ChatMessageView extends StatefulWidget {
   const ChatMessageView({
@@ -61,35 +63,71 @@ class _ChatMessageViewState extends State<ChatMessageView> {
                   runSpacing: 6,
                   children: widget.message.documents
                       .map(
-                        (document) => Container(
-                          decoration: BoxDecoration(
-                            color: colors.border,
-                            borderRadius: BorderRadius.circular(9),
-                          ),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 5,
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.find_in_page_outlined, size: 15),
-                              const SizedBox(width: 5),
-                              Flexible(
-                                child: Text(
-                                  document.fileName,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context).textTheme.labelSmall,
-                                ),
+                        (document) => InkWell(
+                          borderRadius: BorderRadius.circular(9),
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => DocumentPage(
+                                api: widget.controller.api,
+                                documentId: document.id,
                               ),
-                            ],
+                            ),
+                          ),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: colors.border,
+                              borderRadius: BorderRadius.circular(9),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 5,
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.find_in_page_outlined,
+                                  size: 15,
+                                ),
+                                const SizedBox(width: 5),
+                                Flexible(
+                                  child: Text(
+                                    document.fileName,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelSmall,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       )
                       .toList(),
                 ),
                 const SizedBox(height: 7),
+              ],
+              if (widget.message.collections.isNotEmpty) ...[
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final collection in widget.message.collections)
+                      Chip(
+                        avatar: const Icon(Icons.folder_outlined, size: 16),
+                        label: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 220),
+                          child: Text(
+                            collection.title,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
               ],
               if (widget.message.text.isNotEmpty)
                 SelectableText(
@@ -115,7 +153,8 @@ class _ChatMessageViewState extends State<ChatMessageView> {
           AssistantTurnView(
             turn: turn,
             isStreaming: widget.isStreaming,
-            connectorLabel: widget.controller.activityConnectorLabel,
+            collectionLabel: widget.controller.activityCollectionLabel,
+            onOpenSource: _openSource,
           ),
           if (turn?.error case final error?) ...[
             const SizedBox(height: 8),
@@ -128,9 +167,46 @@ class _ChatMessageViewState extends State<ChatMessageView> {
               onOpen: (source) => _openSource(source),
             ),
           ],
+          if (turn != null && turn.artifacts.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            for (final artifact in turn.artifacts)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Card(
+                  margin: EdgeInsets.zero,
+                  child: ListTile(
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    leading: const Icon(Icons.description_outlined),
+                    title: Text(
+                      artifact.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    subtitle: Text(
+                      'Revision ${artifact.revision} · ${artifact.fileName}',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => ArtifactPage(
+                          artifact: artifact,
+                          controller: widget.controller,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
           if (settled && (text.isNotEmpty || turn?.error != null)) ...[
             const SizedBox(height: 4),
-            Row(
+            Wrap(
+              spacing: 4,
               children: [
                 if (text.isNotEmpty)
                   IconButton(
@@ -142,13 +218,20 @@ class _ChatMessageViewState extends State<ChatMessageView> {
                     ),
                   ),
                 TextButton.icon(
-                  onPressed: () => unawaited(
-                    widget.controller.regenerate(widget.message.id),
-                  ),
+                  onPressed: widget.controller.isGenerating
+                      ? null
+                      : () => unawaited(
+                          widget.controller.regenerate(widget.message.id),
+                        ),
                   icon: const Icon(Icons.refresh_rounded, size: 18),
-                  label: turn?.error == null
-                      ? const SizedBox.shrink()
-                      : const Text('Retry'),
+                  label: Text(turn?.error == null ? 'Regenerate' : 'Retry'),
+                ),
+                TextButton.icon(
+                  onPressed: widget.controller.isGenerating
+                      ? null
+                      : () => widget.controller.editRequest(widget.message.id),
+                  icon: const Icon(Icons.edit_outlined, size: 18),
+                  label: const Text('Edit request'),
                 ),
               ],
             ),
@@ -167,13 +250,15 @@ class _ChatMessageViewState extends State<ChatMessageView> {
   }
 
   Future<void> _openSource(AnswerSource source) async {
-    final uri = widget.controller.sourceUri(source);
-    if (!await launchUrl(uri, mode: LaunchMode.externalApplication) &&
-        mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not open this source.')),
-      );
-    }
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => DocumentPage(
+          api: widget.controller.api,
+          documentId: source.itemId,
+          chunkId: source.chunkId,
+        ),
+      ),
+    );
   }
 }
 
@@ -182,12 +267,14 @@ class AssistantTurnView extends StatelessWidget {
     super.key,
     required this.turn,
     required this.isStreaming,
-    this.connectorLabel,
+    this.collectionLabel,
+    required this.onOpenSource,
   });
 
   final ChatTurnState? turn;
   final bool isStreaming;
-  final String? connectorLabel;
+  final String? collectionLabel;
+  final ValueChanged<AnswerSource> onOpenSource;
 
   @override
   Widget build(BuildContext context) {
@@ -204,12 +291,30 @@ class AssistantTurnView extends StatelessWidget {
               AssistantTurnItemKind.message => _MarkdownAnswer(
                 text: item.text,
                 muted: item.phase == 'commentary',
+                sources: turn?.sources ?? const [],
+                onOpenSource: onOpenSource,
               ),
               AssistantTurnItemKind.tool => _ToolActivity(
                 item: item,
-                connectorLabel: connectorLabel,
+                collectionLabel: collectionLabel,
               ),
-              AssistantTurnItemKind.reasoning => const SizedBox.shrink(),
+              AssistantTurnItemKind.reasoning => ExpansionTile(
+                tilePadding: EdgeInsets.zero,
+                leading: const Icon(Icons.psychology_outlined, size: 18),
+                title: Text(
+                  'Reasoning',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: SelectableText(
+                      item.text,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                ],
+              ),
             },
           ),
         if (pending) const _PendingIndicator(),
@@ -219,10 +324,17 @@ class AssistantTurnView extends StatelessWidget {
 }
 
 class _MarkdownAnswer extends StatelessWidget {
-  const _MarkdownAnswer({required this.text, this.muted = false});
+  const _MarkdownAnswer({
+    required this.text,
+    this.muted = false,
+    this.sources = const [],
+    required this.onOpenSource,
+  });
 
   final String text;
   final bool muted;
+  final List<AnswerSource> sources;
+  final ValueChanged<AnswerSource> onOpenSource;
 
   @override
   Widget build(BuildContext context) {
@@ -230,12 +342,21 @@ class _MarkdownAnswer extends StatelessWidget {
     final bodyStyle = Theme.of(context).textTheme.bodyLarge
         ?.copyWith(height: 1.65, color: muted ? colors.textSecondary : null);
     return MarkdownBody(
-      data: text,
+      data: _linkCitations(text, sources),
       selectable: true,
       softLineBreak: true,
       onTapLink: (text, href, title) {
         final uri = href == null ? null : Uri.tryParse(href);
-        if (uri != null && uri.hasScheme) {
+        if (uri?.scheme == 'citation') {
+          final number = int.tryParse(uri!.path);
+          final source = sources
+              .where((source) => source.number == number)
+              .firstOrNull;
+          if (source != null) onOpenSource(source);
+          return;
+        }
+        if (uri != null &&
+            const ['https', 'http', 'mailto'].contains(uri.scheme)) {
           launchUrl(uri, mode: LaunchMode.externalApplication);
         }
       },
@@ -295,10 +416,10 @@ class _MarkdownAnswer extends StatelessWidget {
 }
 
 class _ToolActivity extends StatelessWidget {
-  const _ToolActivity({required this.item, this.connectorLabel});
+  const _ToolActivity({required this.item, this.collectionLabel});
 
   final AssistantTurnItem item;
-  final String? connectorLabel;
+  final String? collectionLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -325,25 +446,34 @@ class _ToolActivity extends StatelessWidget {
             color: error ? context.colors.danger : context.colors.textMuted,
           ),
           const SizedBox(width: 7),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                presentation.label,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: error
-                      ? context.colors.danger
-                      : context.colors.textSecondary,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              if (presentation.detail != null)
+          Flexible(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
                 Text(
-                  presentation.detail!,
-                  style: Theme.of(context).textTheme.labelSmall
-                      ?.copyWith(color: context.colors.textMuted),
+                  presentation.label,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: error
+                        ? context.colors.danger
+                        : context.colors.textSecondary,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
-            ],
+                if (presentation.detail != null)
+                  Text(
+                    presentation.detail!,
+                    style: Theme.of(context).textTheme.labelSmall
+                        ?.copyWith(color: context.colors.textMuted),
+                  ),
+                if (active &&
+                    item.name == 'knowledge_search' &&
+                    collectionLabel != null)
+                  Text(
+                    collectionLabel!,
+                    style: Theme.of(context).textTheme.labelSmall,
+                  ),
+              ],
+            ),
           ),
         ],
       ),
@@ -364,7 +494,7 @@ class _PendingIndicatorState extends State<_PendingIndicator>
   late final AnimationController _controller = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 2000),
-  )..repeat(reverse: true);
+  );
 
   @override
   void initState() {
@@ -372,6 +502,17 @@ class _PendingIndicatorState extends State<_PendingIndicator>
     Future<void>.delayed(const Duration(milliseconds: 700), () {
       if (mounted) setState(() => _visible = true);
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _controller.stop();
+      _controller.value = 1;
+    } else if (!_controller.isAnimating) {
+      _controller.repeat(reverse: true);
+    }
   }
 
   @override
@@ -431,7 +572,12 @@ class _AnswerSources extends StatelessWidget {
                 dense: true,
                 contentPadding: const EdgeInsets.only(left: 6, right: 4),
                 minLeadingWidth: 24,
-                leading: const Icon(Icons.article_outlined, size: 17),
+                leading: source.number == null
+                    ? const Icon(Icons.article_outlined, size: 17)
+                    : Text(
+                        '[${source.number}]',
+                        style: TextStyle(color: context.colors.brand),
+                      ),
                 title: Text(
                   source.title,
                   maxLines: 2,
@@ -445,7 +591,7 @@ class _AnswerSources extends StatelessWidget {
                           source.locator,
                         ].whereType<String>().join(' · '),
                       ),
-                trailing: const Icon(Icons.open_in_new_rounded, size: 16),
+                trailing: const Icon(Icons.chevron_right_rounded, size: 20),
                 onTap: () => onOpen(source),
               ),
             )
@@ -497,63 +643,51 @@ class _ErrorBox extends StatelessWidget {
   String state,
   int? resultCount,
 ) {
+  if (state == 'failed') return (label: 'The operation failed', detail: null);
+  if (state == 'timeout') {
+    return (label: 'The operation timed out', detail: null);
+  }
+  if (state == 'skipped') return (label: 'Operation skipped', detail: null);
   final completed = state == 'completed';
   if (name == 'knowledge_search') {
     return (
-      label: state == 'failed' || state == 'timeout'
-          ? 'Không thể hoàn tất thao tác'
-          : completed
-          ? 'Đã tìm tài liệu liên quan'
-          : 'Đang tìm tài liệu liên quan…',
+      label: completed
+          ? 'Searched your knowledge'
+          : 'Searching your knowledge…',
       detail: completed && resultCount != null
-          ? '$resultCount tài liệu phù hợp'
-          : 'Đang kiểm tra các tài liệu phù hợp',
+          ? '$resultCount relevant results'
+          : null,
     );
   }
-  const vocabulary =
-      <String, ({String active, String completed, String detail})>{
-        'read_resource': (
-          active: 'Đang đọc tài liệu…',
-          completed: 'Đã đọc tài liệu',
-          detail: 'Đang đọc nội dung tài liệu',
-        ),
-        'inspect_resource': (
-          active: 'Đang kiểm tra tài liệu…',
-          completed: 'Đã kiểm tra tài liệu',
-          detail: 'Đang xem thông tin tài liệu',
-        ),
-        'materialize_resource': (
-          active: 'Đang chuẩn bị tài liệu…',
-          completed: 'Đã chuẩn bị tài liệu',
-          detail: 'Đang chuẩn bị nội dung để phân tích',
-        ),
-        'document_edit': (
-          active: 'Đang chỉnh sửa tài liệu…',
-          completed: 'Đã chỉnh sửa tài liệu',
-          detail: 'Đang cập nhật nội dung tài liệu',
-        ),
-        'artifact_create': (
-          active: 'Đang hoàn thiện tài liệu…',
-          completed: 'Đã tạo tài liệu',
-          detail: 'Đang tạo phiên bản tài liệu',
-        ),
-      };
-  final text =
-      vocabulary[name] ??
-      (
-        active: 'Đang xử lý yêu cầu…',
-        completed: 'Đã hoàn tất thao tác',
-        detail: 'Đang thực hiện thao tác cần thiết',
-      );
-  if (state == 'failed') {
-    return (label: 'Không thể hoàn tất thao tác', detail: null);
-  }
-  if (state == 'timeout') {
-    return (label: 'Thao tác mất quá nhiều thời gian', detail: null);
-  }
-  if (state == 'skipped') return (label: 'Đã bỏ qua thao tác', detail: null);
-  return (
-    label: completed ? text.completed : text.active,
-    detail: completed ? null : text.detail,
+  final labels = switch (name) {
+    'read_resource' => ('Reading document…', 'Read document'),
+    'inspect_resource' => ('Inspecting document…', 'Inspected document'),
+    'materialize_resource' || 'materialize_sandbox_resource' => (
+      'Preparing document…',
+      'Prepared document',
+    ),
+    'document_edit' => ('Updating document…', 'Updated document'),
+    'artifact_create' => ('Creating document…', 'Created document'),
+    'hosted_execution' => ('Running document task…', 'Completed document task'),
+    _ => ('Working on your request…', 'Completed operation'),
+  };
+  return (label: completed ? labels.$2 : labels.$1, detail: null);
+}
+
+String _linkCitations(String text, List<AnswerSource> sources) {
+  final numbers = sources
+      .map((source) => source.number)
+      .whereType<int>()
+      .toSet();
+  if (numbers.isEmpty) return text;
+  // Leave literal code and existing Markdown links untouched.
+  final pattern = RegExp(
+    r'(`{3}[\s\S]*?`{3}|`[^`]*`|\[[^\]]*\]\([^)]*\)|\[[^\]]*\]\[[^\]]*\])|\[(\d{1,3})\](?![\[(])',
   );
+  return text.replaceAllMapped(pattern, (match) {
+    final number = int.tryParse(match.group(2) ?? '');
+    return number != null && numbers.contains(number)
+        ? '[${match.group(0)}](citation:$number)'
+        : match.group(0)!;
+  });
 }

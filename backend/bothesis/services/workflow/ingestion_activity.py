@@ -29,7 +29,7 @@ from bothesis.connector.pipeline import ConnectorPipelineError, PipelineResult
 from bothesis.connector.registry import ConnectorRegistry
 from bothesis.db.engine import transaction_scope
 from bothesis.db.models import IngestionSource, Item
-from bothesis.document_index import ItemIndex
+from bothesis.document_index import EmbeddingRejectedError, ItemIndex
 from bothesis.integrations.registry import ConnectionProviderRegistry
 from bothesis.services import (
     ControlPlaneNotFoundError,
@@ -48,6 +48,7 @@ from bothesis.services.workflow import (
     DOCUMENT_FAILURE_TYPE,
     DOCUMENT_INGESTION_ACTIVITY_NAME,
     INTERRUPTED_FAILURE_TYPE,
+    PROVIDER_FAILURE_TYPE,
     SOURCE_INGESTION_ACTIVITY_NAME,
     IngestionResult,
     IngestionWorkflowInput,
@@ -58,7 +59,13 @@ from bothesis.storage import DocumentStorage
 log = logging.getLogger(__name__)
 
 _NON_RETRYABLE_FAILURE_TYPES = frozenset(
-    {"ControlPlaneNotFoundError", "InvalidDocumentStateError", "PermissionError", "ValueError"}
+    {
+        "ControlPlaneNotFoundError",
+        "EmbeddingRejectedError",
+        "InvalidDocumentStateError",
+        "PermissionError",
+        "ValueError",
+    }
 )
 #: How often a running Activity repeats its last heartbeat (the SDK throttles
 #: the rest); a phase can run long without reporting.
@@ -253,6 +260,20 @@ class IngestionActivities:
                 failure_message(exc),
                 {"phases": recorder.phases},
                 type=DOCUMENT_FAILURE_TYPE,
+                non_retryable=True,
+            ) from None
+        except EmbeddingRejectedError as exc:
+            # The provider refused the key, credit or model: every retry would
+            # parse and contextualize again only to be refused again.
+            log.warning(
+                "document ingestion rejected by the model provider document_id=%s: %s",
+                document_id,
+                exc,
+            )
+            raise ApplicationError(
+                failure_message(exc),
+                {"phases": recorder.phases},
+                type=PROVIDER_FAILURE_TYPE,
                 non_retryable=True,
             ) from None
         except Exception as exc:

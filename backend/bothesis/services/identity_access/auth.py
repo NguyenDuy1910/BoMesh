@@ -5,14 +5,13 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bothesis.db.models import AccessSession, AuthIdentity, Conversation, Role, Tenant, User
+from bothesis.db.models import AuthIdentity, Role, User
 from bothesis.services import (
     ACTIVE_STATUS,
-    AuthContext,
     PLATFORM_ADMIN_ROLE,
     TENANT_ADMIN_ROLE,
     AuthenticationError,
@@ -41,8 +40,6 @@ class AuthenticationService:
         *,
         tokens: JwtTokenService,
         platform_admin_emails: frozenset[str] = frozenset(),
-        public_tenant_code: str | None = None,
-        guest_session_expires_in_seconds: int = 86_400,
     ) -> None:
         self._session = session
         self._identities = IdentityStoreService(session)
@@ -50,8 +47,6 @@ class AuthenticationService:
         self._assignments = RoleAssignmentService(session)
         self._tokens = tokens
         self._platform_admin_emails = platform_admin_emails
-        self._public_tenant_code = public_tenant_code
-        self._guest_session_expires_in_seconds = guest_session_expires_in_seconds
 
     async def create_account(
         self,
@@ -60,7 +55,6 @@ class AuthenticationService:
         password: str,
         username: str | None = None,
         display_name: str | None = None,
-        guest_session_id: UUID | None = None,
     ) -> AuthenticationSession:
         """Create one local Account and issue its first canonical Session."""
 
@@ -71,11 +65,7 @@ class AuthenticationService:
             display_name=display_name,
         )
         await self._create_personal_workspace(user)
-        return await self._issue_user_session(
-            user,
-            authentication_method="password",
-            guest_session_id=guest_session_id,
-        )
+        return await self._issue_user_session(user, authentication_method="password")
 
     async def create_session(
         self,
@@ -85,12 +75,9 @@ class AuthenticationService:
         username: str | None = None,
         password: str | None = None,
         credential: str | None = None,
-        guest_session_id: UUID | None = None,
     ) -> AuthenticationSession:
         """Dispatch typed auth methods into one Session creation operation."""
 
-        if method == "guest":
-            return await self._create_guest_access_session()
         if method == "password":
             if password is None or (email is None) == (username is None):
                 raise AuthenticationError("email or username and password are incorrect")
@@ -106,11 +93,7 @@ class AuthenticationService:
                 password, user.password_hash
             ):
                 raise AuthenticationError("email or username and password are incorrect")
-            return await self._issue_user_session(
-                user,
-                authentication_method="password",
-                guest_session_id=guest_session_id,
-            )
+            return await self._issue_user_session(user, authentication_method="password")
         if method == "google":
             if credential is None:
                 raise AuthenticationError("google credential is required")
@@ -133,78 +116,24 @@ class AuthenticationService:
 
     async def current_session(self, session_id: UUID):
         row = await self._access_sessions.active(session_id)
-        if row.kind == "guest":
-            tenant = await self._identities.get_tenant(row.tenant_id)
-            role_codes, permissions = await self._identities.public_access(tenant)
-            context = AuthContext(
-                session_id=row.id,
-                session_kind="guest",
-                token_version=row.token_version,
-                user_id=None,
-                email=None,
-                display_name="Guest",
-                tenant_id=row.tenant_id,
-                permission_codes=permissions,
-                group_ids=(),
-                role_codes=role_codes,
-            )
-            return row, context, (self._public_summary(tenant, role_codes, permissions),)
-        if row.user_id is None:
-            raise AuthenticationError("user session has no subject")
         context = await self._identities.get_context(row.user_id, tenant_id=row.tenant_id)
         memberships = await self._identities.list_active_tenant_memberships(row.user_id)
         return row, context, memberships
 
-    async def _create_guest_access_session(self) -> AuthenticationSession:
-        """Create one anonymous security session in configured public workspace."""
-
-        tenant = await self._public_tenant()
-        row, context = await self._access_sessions.create_guest(
-            tenant, expires_in_seconds=self._guest_session_expires_in_seconds
-        )
-        access_token, token_expires_at = self._tokens.issue(
-            context, expires_in_seconds=self._guest_session_expires_in_seconds
-        )
-        return AuthenticationSession(
-            access_token=access_token,
-            expires_at=min(row.expires_at, token_expires_at),
-            session_id=row.id,
-            user_id=None,
-            email=None,
-            display_name="Guest",
-            active_tenant_id=tenant.id,
-            permissions=context.permission_codes,
-            tenants=(self._public_summary(tenant, context.role_codes, context.permission_codes),),
-            platform_permissions=(),
-            session_kind="guest",
-        )
-
     async def complete_verified_external_session(
-        self,
-        identity: VerifiedGoogleIdentity,
-        *,
-        guest_session_id: UUID | None = None,
+        self, identity: VerifiedGoogleIdentity
     ) -> AuthenticationSession:
-        """Link verified Google subject, upgrade guest state, and issue user session."""
+        """Link a verified Google subject and issue its user session."""
 
         user, auth_identity, personal_tenant_id = await self._find_or_provision_user(
             identity
         )
         await self._grant_configured_platform_admin(user)
-        parent: AccessSession | None = None
-        if guest_session_id is not None:
-            parent = await self._access_sessions.active(guest_session_id, lock=True)
-            if parent.kind != "guest":
-                raise AuthorizationError("only a guest session can be upgraded")
-
         memberships = await self._identities.list_active_tenant_memberships(user.id)
-        if not memberships and parent is None:
+        if not memberships:
             raise AuthorizationError("user has no active tenant membership")
-        active_tenant_id = (
-            parent.tenant_id
-            if parent is not None
-            else personal_tenant_id
-            or _default_tenant_id(memberships, user_id=str(user.id))
+        active_tenant_id = personal_tenant_id or _default_tenant_id(
+            memberships, user_id=str(user.id)
         )
         row, context = await self._access_sessions.create_user(
             user=user,
@@ -212,19 +141,7 @@ class AuthenticationService:
             auth_identity=auth_identity,
             authentication_method="oidc",
             expires_in_seconds=self._tokens.expires_in_seconds,
-            parent=parent,
-            transition_reason="identity_upgrade" if parent is not None else None,
         )
-        if parent is not None:
-            await self._session.execute(
-                update(Conversation)
-                .where(
-                    Conversation.created_by_session_id == parent.id,
-                    Conversation.tenant_id == parent.tenant_id,
-                    Conversation.owner_user_id.is_(None),
-                )
-                .values(owner_user_id=user.id)
-            )
         access_token, expires_at = self._tokens.issue(context)
         return AuthenticationSession(
             access_token=access_token,
@@ -235,51 +152,25 @@ class AuthenticationService:
             display_name=user.display_name,
             active_tenant_id=active_tenant_id,
             permissions=context.permission_codes,
-            tenants=await self._session_tenants(memberships, active_tenant_id, context),
+            tenants=memberships,
             platform_permissions=context.platform_permissions,
-            session_kind="user",
         )
 
     async def _issue_user_session(
-        self,
-        user: User,
-        *,
-        authentication_method: str,
-        guest_session_id: UUID | None,
+        self, user: User, *, authentication_method: str
     ) -> AuthenticationSession:
         await self._grant_configured_platform_admin(user)
-        parent: AccessSession | None = None
-        if guest_session_id is not None:
-            parent = await self._access_sessions.active(guest_session_id, lock=True)
-            if parent.kind != "guest":
-                raise AuthorizationError("only a guest session can be upgraded")
         memberships = await self._identities.list_active_tenant_memberships(user.id)
-        if not memberships and parent is None:
+        if not memberships:
             raise AuthorizationError("user has no active tenant membership")
-        active_tenant_id = (
-            parent.tenant_id
-            if parent is not None
-            else _default_tenant_id(memberships, user_id=str(user.id))
-        )
+        active_tenant_id = _default_tenant_id(memberships, user_id=str(user.id))
         row, context = await self._access_sessions.create_user(
             user=user,
             tenant_id=active_tenant_id,
             auth_identity=None,
             authentication_method=authentication_method,
             expires_in_seconds=self._tokens.expires_in_seconds,
-            parent=parent,
-            transition_reason="identity_upgrade" if parent is not None else None,
         )
-        if parent is not None:
-            await self._session.execute(
-                update(Conversation)
-                .where(
-                    Conversation.created_by_session_id == parent.id,
-                    Conversation.tenant_id == parent.tenant_id,
-                    Conversation.owner_user_id.is_(None),
-                )
-                .values(owner_user_id=user.id)
-            )
         access_token, expires_at = self._tokens.issue(context)
         return AuthenticationSession(
             access_token=access_token,
@@ -290,9 +181,8 @@ class AuthenticationService:
             display_name=user.display_name,
             active_tenant_id=active_tenant_id,
             permissions=context.permission_codes,
-            tenants=await self._session_tenants(memberships, active_tenant_id, context),
+            tenants=memberships,
             platform_permissions=context.platform_permissions,
-            session_kind="user",
         )
 
     async def _switch_session(
@@ -301,18 +191,10 @@ class AuthenticationService:
         """Replace current user session with one selecting another membership."""
 
         parent = await self._access_sessions.active(current_session_id, lock=True)
-        if parent.kind != "user" or parent.user_id is None:
-            raise AuthorizationError("sign in is required for workspace selection")
         user = await self._identities.get_user(parent.user_id)
         memberships = await self._identities.list_active_tenant_memberships(user.id)
         if tenant_id not in {membership.tenant_id for membership in memberships}:
-            tenant = await self._identities.get_tenant(tenant_id)
-            try:
-                await self._identities.public_access(tenant)
-            except AuthorizationError as exc:
-                raise AuthorizationError(
-                    f"user is not a member of tenant: {tenant_id}"
-                ) from exc
+            raise AuthorizationError(f"user is not a member of tenant: {tenant_id}")
         auth_identity = (
             await self._session.get(AuthIdentity, parent.auth_identity_id)
             if parent.auth_identity_id is not None
@@ -339,9 +221,8 @@ class AuthenticationService:
             display_name=user.display_name,
             active_tenant_id=tenant_id,
             permissions=context.permission_codes,
-            tenants=await self._session_tenants(memberships, tenant_id, context),
+            tenants=memberships,
             platform_permissions=context.platform_permissions,
-            session_kind="user",
         )
 
     async def _find_or_provision_user(
@@ -442,46 +323,6 @@ class AuthenticationService:
             created_by_user_id=user.id,
         )
         return tenant.id
-
-    async def _session_tenants(
-        self,
-        memberships: tuple[TenantMembershipSummary, ...],
-        active_tenant_id: UUID,
-        context,
-    ) -> tuple[TenantMembershipSummary, ...]:
-        if active_tenant_id in {membership.tenant_id for membership in memberships}:
-            return memberships
-        tenant = await self._identities.get_tenant(active_tenant_id)
-        return (
-            self._public_summary(tenant, context.role_codes, context.permission_codes),
-            *memberships,
-        )
-
-    @staticmethod
-    def _public_summary(
-        tenant: Tenant, role_codes: tuple[str, ...], permissions: tuple[str, ...]
-    ) -> TenantMembershipSummary:
-        return TenantMembershipSummary(
-            tenant_id=tenant.id,
-            tenant_code=tenant.code,
-            tenant_name=tenant.name,
-            role_codes=role_codes,
-            permissions=permissions,
-        )
-
-    async def _public_tenant(self) -> Tenant:
-        if not self._public_tenant_code:
-            raise AuthorizationError("public workspace is not configured")
-        tenant = await self._session.scalar(
-            select(Tenant).where(
-                Tenant.code == self._public_tenant_code,
-                Tenant.status == ACTIVE_STATUS,
-                Tenant.visibility == "public",
-            )
-        )
-        if tenant is None:
-            raise AuthorizationError("configured public workspace is unavailable")
-        return tenant
 
     async def _tenant_admin_role_id(self) -> UUID:
         role = await self._session.scalar(

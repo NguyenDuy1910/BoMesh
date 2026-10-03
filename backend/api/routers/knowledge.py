@@ -20,7 +20,11 @@ class KnowledgeDocumentViewer(BaseModel):
     status: DocumentStatus
     document_url: str | None = None
     external_url: str | None = None
+    #: Rendered pages or the original behind short-lived signed URLs.
+    preview: dict[str, Any] | None = None
     elements: list[dict[str, Any]]
+    #: The requested passage (`?chunk=`) and its citation, to open the viewer at.
+    focus: dict[str, Any] | None = None
 
 
 class KnowledgeDocumentCitation(BaseModel):

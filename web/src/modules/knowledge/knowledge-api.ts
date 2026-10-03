@@ -43,7 +43,7 @@ export const knowledgeApi = {
 };
 
 interface ContractCollection { id: string; title: string; description: string | null; parent_collection_id: string | null; document_count: number; source_count: number; updated_at: string; }
-interface ContractDocument {
+export interface ContractDocument {
   id: string;
   name: string;
   content_type: string;
@@ -60,7 +60,7 @@ const toCollection = (v: ContractCollection): ApiKnowledgeCollection => ({ ...v,
  * took it in. Available content with no ingestion behind it was written by a
  * connector, inside its source's sync, so it is already indexed.
  */
-function documentStatus(v: ContractDocument): ApiKnowledgeDocument["status"] {
+export function documentStatus(v: ContractDocument): ApiKnowledgeDocument["status"] {
   if (v.status === "pending_content") return "pending";
   if (v.status === "failed") return "failed";
   switch (v.latest_ingestion?.status) {

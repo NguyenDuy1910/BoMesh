@@ -123,9 +123,27 @@ from .contextualization import (
 )
 from .semantic_contextualizer import SemanticContextualizer
 
+class EmbeddingRejectedError(RuntimeError):
+    """The embedding provider refused the request itself, not the moment.
+
+    A rejected key, exhausted credit, a forbidden or unknown model, or an
+    invalid request fails the same way on every retry; only a configuration
+    change by an operator can fix it. Transient failures (timeouts, 408, 429,
+    5xx) are not this error.
+    """
+
+    def __init__(self, status_code: int, detail: str) -> None:
+        super().__init__(f"embedding provider rejected the request (HTTP {status_code}): {detail}")
+        self.status_code = status_code
+
+
 @runtime_checkable
 class EmbeddingService(Protocol):
-    """Provider-neutral embedding operations used by document indexing."""
+    """Provider-neutral embedding operations used by document indexing.
+
+    Implementations raise :class:`EmbeddingRejectedError` when the provider
+    refuses a request in a way retrying cannot change.
+    """
 
     embedding_model: str
 
@@ -139,13 +157,13 @@ class ItemContentIndex(Protocol):
 
     async def search_item_content(
         self,
-        query: str,
+        queries: Sequence[str],
         *,
         limit: int,
         tenant_id: str,
         collection_item_ids: tuple[str, ...],
     ) -> list[ContextualChunk]:
-        """Return indexed chunks after applying the supplied access scope."""
+        """Return every query's fused candidates within the supplied access scope."""
 
 
 from .index import ItemIndex
@@ -161,6 +179,7 @@ __all__ = [
     "ChunkContextGenerator",
     "ContextualChunk",
     "ContextualChunkBuilder",
+    "EmbeddingRejectedError",
     "EmbeddingService",
     "IndexProgress",
     "IndexingContext",

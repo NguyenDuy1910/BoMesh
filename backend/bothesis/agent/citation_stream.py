@@ -140,13 +140,19 @@ class CitationProjection:
 
         The marker is one whole delta, so a client never sees a half-written
         citation even though the model's own marker arrived split across
-        several deltas.
+        several deltas. Passages of one document share its number, so a second
+        passage cited right after the first adds no visible ``[1][1]``: its
+        annotation points at the marker already shown.
         """
 
         number = self._references.number(evidence_id)
         marker = f"[{number}]"
-        start = len(self._value(key))
-        self._text.setdefault(key, []).append(marker)
+        text = self._value(key)
+        settled = text.rstrip()
+        repeated = settled.endswith(marker)
+        start = len(settled) - len(marker) if repeated else len(text)
+        if not repeated:
+            self._text.setdefault(key, []).append(marker)
         annotations = self._annotations.setdefault(key, [])
         annotation = _document_citation(
             self._evidence[evidence_id],
@@ -155,16 +161,16 @@ class CitationProjection:
             end=start + len(marker),
         )
         annotations.append(annotation)
-        return (
-            event.model_copy(update={"delta": marker}),
-            ResponseOutputTextAnnotationAddedEvent(
-                item_id=event.item_id,
-                output_index=event.output_index,
-                content_index=event.content_index,
-                annotation_index=len(annotations) - 1,
-                annotation=annotation,
-            ),
+        added = ResponseOutputTextAnnotationAddedEvent(
+            item_id=event.item_id,
+            output_index=event.output_index,
+            content_index=event.content_index,
+            annotation_index=len(annotations) - 1,
+            annotation=annotation,
         )
+        if repeated:
+            return (added,)
+        return (event.model_copy(update={"delta": marker}), added)
 
     def _message(self, output_index: int, item: MessageItem) -> MessageItem:
         content = tuple(

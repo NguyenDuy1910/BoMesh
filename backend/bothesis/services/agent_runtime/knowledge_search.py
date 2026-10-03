@@ -81,8 +81,11 @@ class AgentKnowledgeSearchService:
             )
 
         started_at = perf_counter()
-        results = await self._search_all(queries, context, call_id)
-        evidence, failures = self._merged_evidence(results, references)
+        evidence, failure = await self._retrieve(queries, context, call_id)
+        evidence = [
+            replace(item, id=references.reference(item.item_id, item.chunk_id))
+            for item in evidence
+        ]
         duration_ms = self._duration_ms(started_at)
 
         built = self._context_builder.build(evidence) if evidence else None
@@ -90,12 +93,12 @@ class AgentKnowledgeSearchService:
             return AgentKnowledgeSearchResult(
                 content=built.text,
                 evidence=built.evidence,
-                outcome="partial_success" if failures else "success",
+                outcome="success",
                 success_criteria_met=True,
                 duration_ms=duration_ms,
             )
-        if failures:
-            timed_out = all(failure == "timeout" for failure in failures)
+        if failure is not None:
+            timed_out = failure == "timeout"
             return AgentKnowledgeSearchResult(
                 content="",
                 error=_TIMEOUT_ERROR if timed_out else _FAILURE_ERROR,
@@ -109,69 +112,28 @@ class AgentKnowledgeSearchService:
             duration_ms=duration_ms,
         )
 
-    async def _search_all(
+    async def _retrieve(
         self,
         queries: list[str],
         context: RetrievalContext,
         call_id: str,
-    ) -> list[tuple[list[Evidence], str | None]]:
-        """Run every query concurrently under one shared wall-clock budget."""
-
-        deadline = asyncio.get_running_loop().time() + self._timeout_seconds
-        if len(queries) == 1:
-            return [await self._search_query(queries[0], context, call_id, deadline)]
-        return list(
-            await asyncio.gather(
-                *(
-                    self._search_query(query, context, call_id, deadline)
-                    for query in queries
-                )
-            )
-        )
-
-    @staticmethod
-    def _merged_evidence(
-        results: list[tuple[list[Evidence], str | None]],
-        references: CitationReferences,
-    ) -> tuple[list[Evidence], list[str]]:
-        """Collapse per-query results into one deduplicated, citable ranking."""
-
-        evidence: list[Evidence] = []
-        failures: list[str] = []
-        seen: set[tuple[str, str]] = set()
-        for query_evidence, failure in results:
-            if failure is not None:
-                failures.append(failure)
-                continue
-            for item in query_evidence:
-                identity = (item.item_id, item.chunk_id)
-                if identity in seen:
-                    continue
-                seen.add(identity)
-                evidence.append(replace(item, id=references.reference(*identity)))
-        return evidence, failures
-
-    async def _search_query(
-        self,
-        query: str,
-        context: RetrievalContext,
-        call_id: str,
-        deadline: float,
     ) -> tuple[list[Evidence], str | None]:
+        """One retrieval for every query: fused candidates, one ranking."""
+
         started_at = perf_counter()
         with self._tracer.span(
             "knowledge.retrieve",
             attributes={"result_limit": self._result_limit, "tool_call_id": call_id},
             input=TraceSerializer.full(
                 TraceSerializer.retrieval_input(
-                    query=query, result_limit=self._result_limit
+                    queries=queries, result_limit=self._result_limit
                 )
             ),
         ) as trace:
             try:
-                async with asyncio.timeout_at(deadline):
+                async with asyncio.timeout(self._timeout_seconds):
                     evidence = await self._retriever.search(
-                        query,
+                        queries,
                         limit=self._result_limit,
                         ctx=context,
                     )

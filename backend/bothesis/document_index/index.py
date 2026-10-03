@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Sequence
 from typing import Any
 
@@ -100,17 +101,17 @@ class ItemIndex:
 
     async def search_item_content(
         self,
-        query: str,
+        queries: Sequence[str],
         *,
         limit: int,
         tenant_id: str,
         collection_item_ids: tuple[str, ...],
     ) -> list[ContextualChunk]:
-        """Return indexed chunks after applying lifecycle and access scope filters."""
+        """Return the fused candidates of every query, within the access scope."""
 
-        normalized_query = query.strip()
-        if not normalized_query:
-            raise ValueError("query must not be empty")
+        normalized_queries = [query.strip() for query in queries]
+        if not normalized_queries or not all(normalized_queries):
+            raise ValueError("queries must be non-empty")
         if limit < 1:
             raise ValueError("limit must be at least one")
         normalized_tenant_id = tenant_id.strip() if isinstance(tenant_id, str) else ""
@@ -119,10 +120,12 @@ class ItemIndex:
         if not collection_item_ids:
             return []
 
-        query_vector = await self._require_embedder().embed_query(normalized_query)
+        embedder = self._require_embedder()
+        vectors = await asyncio.gather(
+            *(embedder.embed_query(query) for query in normalized_queries)
+        )
         points = await self._backend.search_item_points(
-            query_vector=query_vector,
-            query_text=normalized_query,
+            queries=list(zip(normalized_queries, vectors, strict=True)),
             tenant_id=normalized_tenant_id,
             collection_item_ids=collection_item_ids,
             limit=limit,

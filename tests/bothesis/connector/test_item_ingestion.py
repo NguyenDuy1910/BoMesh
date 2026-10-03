@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import ast
+import gzip
+import json
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
@@ -15,12 +17,18 @@ from bothesis.connector.protocol import (
     Chunk,
     CitationInfo,
     CitationSpan,
+    CodePart,
     DocumentItem,
     DocumentKind,
     Hierarchy,
+    ImagePart,
+    LinkPart,
     ProviderCacheEntry,
     SourceIdentity,
     SourceProvider,
+    StructuredPart,
+    TablePart,
+    TextPart,
 )
 from bothesis.db.models import Item, ItemUpload
 from bothesis.document_index import IndexingContext, ItemIndex
@@ -39,6 +47,8 @@ from bothesis.services import (
 from bothesis.services.item_ingestion import ItemIngestionService
 from bothesis.services.documents import DocumentService
 from bothesis.services.stored_file_content import StoredFileContentService
+from bothesis.services import document_rendition
+from bothesis.services.document_rendition import build_document_rendition
 from bothesis.services.preview import KnowledgePreview
 from PIL import Image
 
@@ -712,6 +722,7 @@ class _PreviewStorage:
         self.content_type = content_type
         self.downloads = 0
         self.puts: dict[str, tuple[bytes, str | None]] = {}
+        self.put_headers: dict[str, tuple[str | None, str | None]] = {}
 
     async def head(self, key: str) -> StoredObject:
         assert key == "tenants/t/items/i/raw"
@@ -740,8 +751,11 @@ class _PreviewStorage:
         key: str,
         *,
         content_type: str | None = None,
+        content_encoding: str | None = None,
+        cache_control: str | None = None,
     ) -> StoredObject:
         self.puts[key] = (data, content_type)
+        self.put_headers[key] = (content_encoding, cache_control)
         return StoredObject(size_bytes=len(data), content_type=content_type)
 
     def presign_download(self, key: str, *, expires_seconds: int) -> PresignedRequest:
@@ -821,6 +835,171 @@ async def test_office_preview_uses_the_consistent_original_representation() -> N
     assert manifest.assets == ()
     assert storage.downloads == 0
     assert storage.puts == {}
+
+
+def _rendition_content(document: Item) -> DocumentItem:
+    return DocumentItem(
+        id=str(document.id),
+        title="report",
+        document_kind=DocumentKind.DOCUMENT,
+        source=SourceIdentity(
+            connector_id="upload",
+            provider=SourceProvider.FILE,
+            external_id=str(document.id),
+        ),
+        access=AccessPolicy(),
+        content=[
+            TextPart(
+                element_id="doc_heading_001",
+                text="Report",
+                section_path=("Report",),
+            ),
+            TextPart(
+                element_id="p002_heading_007",
+                text="Deep",
+                page=2,
+                section_path=("Report", "A", "B", "C", "Deep"),
+            ),
+            TextPart(element_id="p001_para_002", text="Body text.", page=1),
+            TablePart(
+                element_id="p002_table_001",
+                columns=["name", "qty"],
+                rows=[["a", "1"], ["b", "2"], ["c", "3"]],
+                page=2,
+            ),
+            CodePart(element_id="p001_code_003", code="select 1", language="sql"),
+            ImagePart(element_id="p003_image_001", page=3),
+            ImagePart(element_id="p003_image_002", alt_text="Chart", ocr_text="42"),
+            LinkPart(url="https://example.test/x", title="Example"),
+            StructuredPart(element_id="doc_structured_004", data={"k": "v"}),
+        ],
+    )
+
+
+def _rendition_json(data: bytes) -> dict[str, Any]:
+    return json.loads(gzip.decompress(data))
+
+
+def test_document_rendition_blocks_follow_the_parsed_parts() -> None:
+    content = _rendition_content(_document("text/plain"))
+
+    rendition = build_document_rendition(content)
+
+    assert rendition == build_document_rendition(content)
+    payload = _rendition_json(rendition.data)
+    assert payload["schema"] == 1
+    assert payload["truncated"] is False
+    blocks = payload["blocks"]
+    assert rendition.block_count == len(blocks)
+    assert [(block["id"], block["kind"]) for block in blocks] == [
+        ("doc_heading_001", "heading"),
+        ("p002_heading_007", "heading"),
+        ("p001_para_002", "paragraph"),
+        ("p002_table_001", "table"),
+        ("p001_code_003", "code"),
+        ("p003_image_002", "image"),
+        ("block_7", "link"),
+        ("doc_structured_004", "paragraph"),
+    ]
+    assert [blocks[0]["level"], blocks[1]["level"]] == [1, 4]
+    assert blocks[2] == {
+        "id": "p001_para_002",
+        "kind": "paragraph",
+        "text": "Body text.",
+        "page": 1,
+    }
+    assert blocks[3]["rows"] == [["a", "1"], ["b", "2"], ["c", "3"]]
+    assert blocks[3]["total_rows"] == 3
+    assert blocks[3]["columns"] == ["name", "qty"]
+    assert blocks[4]["language"] == "sql"
+    assert blocks[5]["text"] == "Chart\n42"
+    assert blocks[6]["url"] == "https://example.test/x"
+    assert blocks[6]["text"] == "Example"
+
+
+def test_document_rendition_drops_content_past_its_bounds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content = _rendition_content(_document("text/plain"))
+    monkeypatch.setattr(document_rendition, "MAX_TABLE_ROWS", 2)
+
+    table_cut = _rendition_json(build_document_rendition(content).data)
+
+    table = next(b for b in table_cut["blocks"] if b["kind"] == "table")
+    assert table["rows"] == [["a", "1"], ["b", "2"]]
+    assert table["total_rows"] == 3
+    assert table_cut["truncated"] is True
+
+    monkeypatch.setattr(document_rendition, "MAX_BLOCKS", 3)
+    blocks_cut = build_document_rendition(content)
+
+    assert blocks_cut.truncated is True
+    assert blocks_cut.block_count == 3
+    assert len(_rendition_json(blocks_cut.data)["blocks"]) == 3
+
+
+@pytest.mark.asyncio
+async def test_preview_stores_a_document_rendition_and_keeps_it_across_regeneration() -> None:
+    source = b"office source remains authoritative"
+    content_type = (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    storage = _PreviewStorage(source, content_type=content_type)
+    service = KnowledgePreview(cast(Any, storage))
+    document = _preview_document(content_type, source, file_name="report.docx")
+    content = _rendition_content(document)
+
+    manifest = await service.generate(document, content=content)
+
+    assert manifest is not None and manifest.rendition is not None
+    assert manifest.representation == "original"
+    rendition = manifest.rendition
+    assert rendition.key.startswith(f"tenants/{document.tenant_id}/items/{document.id}/")
+    assert rendition.key.endswith("/document.json.gz")
+    data, stored_type = storage.puts[rendition.key]
+    assert stored_type == "application/vnd.bothesis.document+json"
+    assert storage.put_headers[rendition.key] == (
+        "gzip",
+        "private, max-age=31536000, immutable",
+    )
+    assert rendition.size_bytes == len(data)
+    assert rendition.block_count == len(_rendition_json(data)["blocks"])
+    assert storage.downloads == 0
+
+    document.metadata_["preview"] = manifest.model_dump(mode="json")
+    assert await service.generate(document) == manifest
+    assert await service.generate(document, content=content) == manifest
+    assert len(storage.puts) == 1
+    assert await service.has_current_rendition(document)
+
+    resolved = service.resolve(document, expires_seconds=300)
+    assert resolved is not None and resolved.rendition is not None
+    assert resolved.representation == "original"
+    assert resolved.rendition.url.startswith(
+        f"https://objects.example.test/{rendition.key}"
+    )
+    assert resolved.rendition.version == rendition.version
+
+
+@pytest.mark.asyncio
+async def test_preview_rendition_failure_still_returns_the_page_manifest() -> None:
+    source = b"office source remains authoritative"
+    content_type = "text/markdown"
+
+    class FailingStorage(_PreviewStorage):
+        def put_bytes(self, *_: Any, **__: Any) -> StoredObject:
+            raise ObjectStorageError("write failed")
+
+    service = KnowledgePreview(
+        cast(Any, FailingStorage(source, content_type=content_type))
+    )
+    document = _preview_document(content_type, source, file_name="notes.md")
+
+    manifest = await service.generate(document, content=_rendition_content(document))
+
+    assert manifest is not None
+    assert manifest.representation == "original"
+    assert manifest.rendition is None
 
 
 def test_pdf_preview_pages_are_bounded_and_keep_one_based_page_mapping(

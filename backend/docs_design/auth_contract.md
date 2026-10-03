@@ -1,7 +1,14 @@
 # Authentication API Contract
 
-Status: target contract. This document is part of the contract-first gate;
-implementation changes wait until this model is accepted.
+Status: implemented resource contract shared by web and Flutter clients.
+
+## Multi-tenant access
+
+Every request is made by an authenticated User. A User reaches a workspace
+(tenant) only through an active `tenant_memberships` row plus
+`role_assignments` in that workspace; platform permissions are a separate scope
+and never grant workspace data access by themselves. There is no anonymous
+session and no public-workspace access.
 
 ## Resource model
 
@@ -17,8 +24,9 @@ become URL namespaces.
 | DELETE | `/api/v1/auth/session` | bearer | Invalidate current Session |
 
 No `/auth/password`, `/auth/google`, or `/auth/guest-sessions` routes remain in
-the final contract. No password reset routes are added because current product
-has no recovery lifecycle.
+the final contract; the guest route was removed with anonymous access. No
+password reset routes are added because current product has no recovery
+lifecycle.
 
 ## Account creation
 
@@ -55,22 +63,22 @@ Username sign-in is also supported for accounts that have one:
 ```
 
 ```json
-{ "method": "guest" }
-```
-
-```json
 { "method": "google", "credential": "provider-issued-token" }
 ```
 
-Each variant has a closed, concrete schema. No arbitrary `credentials` map is
-accepted. Future OIDC providers add a typed variant and provider strategy
-behind this route; they do not add a provider-specific route.
+The only variants are `password` and `google`; any other `method` (including
+the removed `guest`) returns `422 VALIDATION_ERROR`. Each variant has a closed,
+concrete schema. No arbitrary `credentials` map is accepted. Future OIDC
+providers add a typed variant and provider strategy behind this route; they do
+not add a provider-specific route.
 
 All variants return `AuthSession`. Password and provider failures return generic
 `401 INVALID_CREDENTIALS` without revealing whether account or credential was
-wrong. Guest creation uses the same durable access-session abstraction and may
-have a shorter expiration and restricted permissions, represented by
-`session_kind: "guest"`.
+wrong. Session creation and account creation are fully public (`security: []`)
+and ignore any bearer token; there is no session-upgrade path.
+
+`AuthSession` and `CurrentSession` always carry a non-null `user_id`; there is
+no `session_kind` field. Tokens that do not resolve to a User are rejected.
 
 ## Current session lifecycle
 
@@ -84,9 +92,11 @@ permissions from the caller.
 { "active_workspace_id": "uuid" }
 ```
 
-Server validates workspace membership/public access, creates the replacement
-session context, and returns `AuthSession`. Internal `tenant_id` and JWT claim
-`active_tenant_id` stay behind the API boundary.
+Server validates that the User has an active membership in the target
+workspace, creates the replacement session context, and returns `AuthSession`.
+A workspace without membership returns `403`; there is no public fallback.
+Internal `tenant_id` and JWT claim `active_tenant_id` stay behind the API
+boundary.
 
 `DELETE /auth/session` resolves the bearer session and tombstones/revokes it;
 response is `204`. No physical business data is deleted.
@@ -100,27 +110,44 @@ response is `204`. No physical business data is deleted.
 - Stable auth codes: `INVALID_CREDENTIALS`, `SESSION_EXPIRED`,
   `ACCOUNT_ALREADY_EXISTS`, `ACCOUNT_DISABLED`, `TOO_MANY_ATTEMPTS`.
 
-## Migration/deletion gate
+## Flutter session boundary
 
-Implementation may begin after `openapi.yaml` matches this model. Completion
-requires removing public routes, DTOs, operation IDs, frontend methods, and
-tests for provider-shaped login endpoints. Internal authenticator strategy
-methods may remain only behind `SessionService`; they must not be exported as
-HTTP aliases.
+The Flutter client sends only `Authorization: Bearer ...`; development identity
+headers and compiled-in user/workspace identifiers are not supported. The access
+token is persisted with platform secure storage, namespaced by API origin.
+Startup and foreground resume revalidate it with `GET /auth/session`.
+
+There is no refresh-token endpoint. Token expiry or a `401` for the current
+token clears the authenticated UI; a late response for a replaced token cannot
+invalidate the new session. Workspace changes use the replacement token returned
+by `PATCH`, discard open resource routes, and recreate the workspace-scoped HTTP
+client. Pending work cannot send a newly selected workspace's credentials.
+
+Conversation caches are separate by account and workspace. No unscoped legacy
+cache is imported. Unauthenticated clients show the sign-in/register screen;
+they never create a session automatically. Sign-out revokes the session and
+clears local credentials even when the server cannot be reached; offline
+revocation failure is reported, not represented as confirmed server revocation.
+
+Google login passes the provider-issued ID credential through the same session
+endpoint. Native client IDs, callback schemes and backend audience configuration
+must match the deployed application; Flutter does not embed a provider secret.
 
 ## Local full-access test accounts
 
 `backend/script/seed_account.py` is an idempotent local-development utility,
-not an HTTP API. It synchronizes platform-defined roles, creates the three
-`admin{1,2,3}@bothesis.local` accounts when absent, grants each
-`platform_admin`, and grants each active workspace membership plus
-`tenant_admin`. This combines platform administration with workspace data
+not an HTTP API. It synchronizes platform-defined roles, creates the sample
+administrator accounts `admin1@gamil.com`, `admin2@gamil.com`, and
+`admin3@gamil.com` (usernames `sample-admin-1..3`) when absent, grants each
+`platform_admin`, and grants each a membership plus `tenant_admin` in every
+active workspace. This combines platform administration with workspace data
 access without weakening the normal separation of those scopes.
 
-New accounts use `ChangeMe!123` unless `--password` is provided. Re-running
-the script preserves existing passwords; `--reset-password` is required to
-change them. If no active workspace exists, it creates `sample-workspace` so
-the accounts can establish an active authenticated workspace.
+New accounts use the script's default password (`DEFAULT_PASSWORD`) unless
+`--password` is supplied. Re-running the script preserves existing passwords;
+`--reset-password` is required to change them. If no active workspace exists,
+it creates one with code `FinxWorkspace` (`DEFAULT_WORKSPACE_CODE`) so the
+accounts can establish an active authenticated workspace through membership.
 
 The complete local reset command, `make reset-all`, runs this seeder after
 database initialization.

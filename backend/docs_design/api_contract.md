@@ -1,12 +1,11 @@
 # BoThesis API Contract
 
-Status: target contract for the contract-first refactor. Authentication details
-are locked in `auth_contract.md`; Document/content details are locked in
-`document_contract.md`. Both are mirrored in the OpenAPI target.
+Status: canonical implemented API contract. Authentication details are locked
+in `auth_contract.md`; Document/content details are locked in
+`document_contract.md`. Both are mirrored in the checked-in OpenAPI contract.
 
-This document is the source of truth for the next implementation phase. Code,
-frontend callers, tests, and the checked-in OpenAPI snapshot must conform to
-this contract. No compatibility aliases are part of this contract.
+Code, frontend callers, and the checked-in OpenAPI snapshot use this contract.
+No compatibility aliases are part of this contract.
 
 Base URL: `/api/v1` for product APIs. `/health` remains unversioned liveness.
 
@@ -33,8 +32,12 @@ Base URL: `/api/v1` for product APIs. `/health` remains unversioned liveness.
    never supply caller `user_id`, `workspace_id`, roles, or permissions.
 9. Workspace permission, platform permission, and Collection ACL remain
    separate authorization scopes.
-10. DELETE means lifecycle removal/tombstone. State changes use PATCH.
-11. `Idempotency-Key` is required for upload creation and other retry-sensitive
+10. Strict multi-tenancy: every caller is an authenticated User. A User
+   reaches a workspace only through an active membership plus role
+   assignments in that workspace; platform permissions never grant workspace
+   data access. There is no anonymous or public-workspace access.
+11. DELETE means lifecycle removal/tombstone. State changes use PATCH.
+12. `Idempotency-Key` is required for upload creation and other retry-sensitive
    non-idempotent writes.
 
 ## Authentication and security
@@ -54,18 +57,22 @@ security:
 
 Account creation and session creation override the default with `security: []`.
 Current-session read/logout require bearer authentication. Health also overrides
-the default with `security: []`. Protected operations document capability
-metadata using `x-required-permissions`.
-Document operations additionally use `x-required-collection-role` to state the
-Collection ACL ceiling: `viewer` for reads/search and `editor` for creation,
-content finalization, and deletion. The API must enforce both workspace
-capability and Collection ACL.
+the default with `security: []`. Protected operations document workspace
+capabilities using `x-required-permissions` and effective resource permissions
+using `x-required-collection-permission`. Conditional ownership/reviewer rules
+are documented separately; they are not unconditional workspace requirements.
 
-Document capability names are explicit: `knowledge.documents.read`,
-`knowledge.documents.search`, `knowledge.documents.create`,
-`knowledge.documents.write`, and `knowledge.documents.delete`. Collection ACL
-still applies as a second boundary; a workspace capability never grants access
-to Collections the caller cannot see.
+Runtime workspace permissions are `tenant.read`, `tenant.manage`,
+`user.manage`, `role.manage`, `group.manage`, `source.manage`, `item.manage`,
+`knowledge.read`, `collection.read`, `collection.update`, `collection.share`,
+`collection.delete`, `access.manage`, and `audit.read`. There are no
+`iam.*`, `knowledge.documents.*`, or `knowledge.collections.*` capabilities.
+Effective Collection permissions combine the caller's workspace grants with
+direct and inherited user/group ACL grants. `item.manage` alone does not grant
+Collection visibility. Document reads use `collection.read`; creation, content
+finalization, and deletion use `collection.update` (ACL editor or equivalent).
+Search also requires `knowledge.read`. Private conversation attachments remain
+owner-only, including deletion; Collection editor access does not override this.
 
 Error body is stable across API failures:
 
@@ -96,30 +103,32 @@ All paths below are relative to `/api/v1`.
 
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
-| POST | `/auth/accounts` | public/optional guest | Create local account and first session |
-| POST | `/auth/sessions` | public/optional bearer | Authenticate and create one Session |
+| POST | `/auth/accounts` | public | Create local account and first session |
+| POST | `/auth/sessions` | public | Authenticate and create one Session |
 | GET | `/auth/session` | bearer | Read current authenticated Session/context |
 | PATCH | `/auth/session` | bearer | Change active workspace on current Session |
 | DELETE | `/auth/session` | bearer | Invalidate current Session |
 
 `POST /auth/sessions` is a single resource operation. Its typed request
-discriminator is `method` and currently supports `password`, `guest`, and
-`google`. Adding an authentication provider adds a request variant, not another
-top-level route.
+discriminator is `method` and supports only `password` and `google`; any other
+method returns `422 VALIDATION_ERROR`. Adding an authentication provider adds a
+request variant, not another top-level route. Account and session creation are
+fully public and accept no optional bearer.
 
-`AuthSession` exposes `active_workspace_id` and `workspaces`. Internal
-`active_tenant_id` and `tenants` are not public fields. Current identity is
-always resolved from the bearer session; no caller identity fields are accepted
-by `GET`, `PATCH`, or `DELETE /auth/session`.
+`AuthSession` and `CurrentSession` expose a required `user_id`,
+`active_workspace_id`, and `workspaces` (real memberships only); there is no
+`session_kind` field. Internal `active_tenant_id` and `tenants` are not public
+fields. Current identity is always resolved from the bearer session; no caller
+identity fields are accepted by `GET`, `PATCH`, or `DELETE /auth/session`.
 
 Password login uses `method: "password"` with exactly one of `email` or
 `username`, plus `password`. Account `email` remains the canonical credential
 identifier; optional account `username` is also accepted for local sign-in.
 Google login uses `method: "google"` with the verified provider credential.
-Guest access uses `method: "guest"` and no credential fields. Workspace
-switching uses `PATCH /auth/session` with `active_workspace_id` and requires
-bearer authentication. All Session-creation variants return the same
-`AuthSession` response.
+Workspace switching uses `PATCH /auth/session` with `active_workspace_id`,
+requires bearer authentication, and returns `403` when the User has no active
+membership in the target workspace. All Session-creation variants return the
+same `AuthSession` response.
 
 No password-reset or password-change route is part of this contract yet: the
 current product has no implemented password recovery/change use case. Add
@@ -137,6 +146,18 @@ current product has no implemented password recovery/change use case. Add
 `ChatRequest` contains only `message`, `conversation_id`, `history`,
 `collection_ids`, and `attachment_ids`.
 
+`attachment_ids` names Documents for this turn by id: a file uploaded into the
+conversation, or any existing Document the caller can read (for example one
+picked from document search, "Ask about this"). Each id is authorized like any
+Document read; referencing never copies the Document or changes its owner.
+Clients delete only Documents they uploaded as `conversation_attachment`; a
+referenced Document is never removed with the conversation.
+
+`GET /knowledge/documents/{document_id}` returns the document's `elements`, its
+renderable `preview` (signed URLs, resolved per read), and, when `?chunk=` names
+a passage, `focus` (`chunk_id`, `chunk_text`, `citation`) plus a signed
+`document_url`. Citations and document search open the viewer at that passage.
+
 `GET /knowledge/home` is intentionally not a Collection list. It is a read
 projection and has no Collection mutation behavior.
 
@@ -144,21 +165,28 @@ projection and has no Collection mutation behavior.
 
 | Method | Path | Auth | Permission |
 | --- | --- | --- | --- |
-| GET | `/collections` | bearer | `knowledge.collections.read` |
-| POST | `/collections` | bearer | `knowledge.collections.create` |
-| GET | `/collections/{collection_id}` | bearer | Collection ACL/read |
-| PATCH | `/collections/{collection_id}` | bearer | `knowledge.collections.update` or ACL editor |
-| DELETE | `/collections/{collection_id}` | bearer | `knowledge.collections.delete` or ACL owner |
-| GET | `/collections/{collection_id}/access` | bearer | `knowledge.access.read`/share |
-| PUT | `/collections/{collection_id}/access/{principal_type}/{principal_id}` | bearer | `knowledge.access.manage` |
-| DELETE | `/collections/{collection_id}/access/{principal_type}/{principal_id}` | bearer | `knowledge.access.manage` |
-| POST | `/collections/{collection_id}/documents` | bearer | Collection write ACL |
-| PUT | `/collections/personal` | bearer | authenticated user |
+| GET | `/collections` | bearer | filter by effective `collection.read` |
+| POST | `/collections` | bearer | `item.manage`; child also requires parent `collection.update` |
+| GET | `/collections/{collection_id}` | bearer | effective `collection.read` |
+| PATCH | `/collections/{collection_id}` | bearer | effective `collection.update` |
+| DELETE | `/collections/{collection_id}` | bearer | effective `collection.delete` |
+| GET | `/collections/{collection_id}/access` | bearer | effective `collection.share` |
+| PUT | `/collections/{collection_id}/access/{principal_type}/{principal_id}` | bearer | effective `collection.share` |
+| DELETE | `/collections/{collection_id}/access/{principal_type}/{principal_id}` | bearer | effective `collection.share` |
+| POST | `/collections/{collection_id}/documents` | bearer | effective `collection.update`; signed-in user |
+| PUT | `/collections/personal` | bearer | signed-in user with `knowledge.read` |
 
 `principal_type` is `user` or `group`. PUT body is `{ "role": "owner" |
 "editor" | "viewer" }`; principal identity is in URL. Existing internal role
 codes may remain `collection_owner`, `collection_editor`, and
 `collection_viewer` behind transport mapping.
+
+`Collection.permissions` is the effective caller-specific permission list,
+not the ACL role name or a global permission catalogue. Clients use it to
+enable resource actions. Listing, reading, updating, and deleting Collections
+do not additionally require `item.manage`; creation does, including children.
+An inaccessible Collection is hidden as `404`; a readable Collection with an
+insufficient mutation permission returns `403`.
 
 ### Documents and content
 
@@ -235,6 +263,15 @@ then a space's top-level pages, then a page's children; pages are identified as
 `page:<id>`, and a selected page becomes a source covering that page and its
 subtree.
 
+Personal Connections are owned and managed by their caller; workspace-owned
+Connections require `source.manage`. Source visibility follows its Connection.
+A Source's `connection_id`, destination `collection_id`, `resource_type`, and
+`external_resource_id` are selected at creation and cannot be patched. To
+change that binding, create a new Source. `PATCH /sources/{source_id}` accepts
+`display_name`, `status`, and `config`; supplying `config` replaces the entire
+connector scope/configuration, not a merge, and resets the checkpoint so the
+next ingestion rediscovers the scope. Schedules have their own resource.
+
 ### Ingestions
 
 | Method | Path | Auth | Purpose |
@@ -292,25 +329,26 @@ otherwise); there is no push channel.
 
 | Method | Path | Auth | Permission |
 | --- | --- | --- | --- |
-| GET | `/workspaces` | bearer | workspace membership/read or platform scope |
-| GET | `/workspaces/{workspace_id}` | bearer | workspace read |
-| PATCH | `/workspaces/{workspace_id}` | bearer | `iam.workspaces.manage` |
-| GET | `/workspaces/{workspace_id}/overview` | bearer | workspace read |
-| GET | `/users` | bearer | `iam.users.read` |
-| POST | `/users` | bearer | `iam.users.manage` |
-| GET | `/users/{user_id}` | bearer | `iam.users.read` |
-| PATCH | `/users/{user_id}` | bearer | `iam.users.manage` |
-| GET | `/roles` | bearer | `iam.roles.read` |
-| POST | `/roles` | bearer | `iam.roles.manage` |
-| GET | `/roles/{role_id}` | bearer | `iam.roles.read` |
-| PATCH | `/roles/{role_id}` | bearer | `iam.roles.manage` |
-| GET | `/groups` | bearer | `iam.groups.read` |
-| POST | `/groups` | bearer | `iam.groups.manage` |
-| GET | `/groups/{group_id}` | bearer | `iam.groups.read` |
-| PATCH | `/groups/{group_id}` | bearer | `iam.groups.manage` |
-| PUT | `/groups/{group_id}/members` | bearer | `iam.groups.manage` |
-| DELETE | `/groups/{group_id}` | bearer | lifecycle removal |
-| GET | `/permissions` | bearer | `iam.roles.read` |
+| GET | `/workspaces` | bearer | workspace membership or platform scope |
+| GET | `/workspaces/{workspace_id}` | bearer | active workspace context |
+| PATCH | `/workspaces/{workspace_id}` | bearer | `tenant.manage` |
+| GET | `/workspaces/{workspace_id}/overview` | bearer | `tenant.read` |
+| GET | `/users` | bearer | `user.manage` |
+| POST | `/users` | bearer | `user.manage` |
+| GET | `/accounts?email=` | bearer | `user.manage` |
+| GET | `/users/{user_id}` | bearer | `user.manage` |
+| PATCH | `/users/{user_id}` | bearer | `user.manage` |
+| GET | `/roles` | bearer | `role.manage` |
+| POST | `/roles` | bearer | `role.manage` |
+| GET | `/roles/{role_id}` | bearer | `role.manage` |
+| PATCH | `/roles/{role_id}` | bearer | `role.manage` |
+| GET | `/groups` | bearer | `group.manage` |
+| POST | `/groups` | bearer | `group.manage` |
+| GET | `/groups/{group_id}` | bearer | `group.manage` |
+| PATCH | `/groups/{group_id}` | bearer | `group.manage` |
+| PUT | `/groups/{group_id}/members` | bearer | `group.manage` |
+| DELETE | `/groups/{group_id}` | bearer | `group.manage` |
+| GET | `/permissions` | bearer | `role.manage` |
 | POST | `/approval-requests` | bearer | requester context |
 | GET | `/approval-requests` | bearer | own/reviewable requests |
 | GET | `/approval-requests/{approval_request_id}` | bearer | own/reviewable request |
@@ -319,6 +357,57 @@ otherwise); there is no push channel.
 
 Approval requester identity always comes from `AuthContext`; request body has
 no `requester_user_id`.
+
+Requesters may list/read their own requests and cancel a pending request
+without reviewer permissions. Reviewers may read and decide `resource_access`
+requests with `access.manage`, or `plugin_installation` requests with
+`source.manage`; approval/denial always requires the matching reviewer
+permission, even for one's own request. Plugin request creation also requires
+`source.manage`. Only pending requests can transition; a completed decision
+cannot be changed. `ApprovalRequest.requester` is `{id, email, display_name}`,
+not a workspace `User` and has no `status`. `requested_role` is nullable
+`{id, code, display_name}`; decision metadata is `decision_note`,
+`decided_by_user_id`, `decided_at`, and `updated_at`.
+
+`Role` includes `tenant_id` (nullable for global definitions), `scope_type`,
+`is_system`, and `member_count`. Workspace role routes expose tenant-scoped
+roles; system roles cannot be edited. Permission replacement cannot exceed
+the caller's own grants; `/permissions` lists assignable tenant permissions.
+Supplying `RoleUpdate.permission_codes` replaces that role's permission set;
+omitting it preserves the set.
+
+Roles and groups are created by name: `code` is optional on `RoleCreate` and
+`GroupCreate` and, when omitted, the server derives a unique internal code from
+the name (accents folded, `-2`, `-3`… on collision). Codes stay internal
+identifiers; clients for people never show or ask for them, and describe a
+role by what its permissions allow rather than by permission codes.
+`GET /roles` never lists a retired (inactive) built-in role; a disabled custom
+role stays listed so it can be enabled again, but is not offered for
+assignment.
+
+`Group.members` contains `{id, email, display_name, joined_at}` on detail reads;
+list/mutation responses may use the default empty list, so load group detail
+before editing membership. `member_count` remains the actual active count.
+`PUT /groups/{group_id}/members` replaces the complete set (`[]` removes all).
+For `GroupUpdate`, an omitted `description` preserves it; explicit `null`
+clears it. Supplied `UserUpdate.role_ids` and `group_ids` likewise replace the
+workspace assignment sets, while omitted fields preserve them.
+
+Workspace overview requires `tenant.read`, not `audit.read`. Its
+`recent_activity` is empty when the caller lacks `audit.read`; overview does
+not expose audit records through a weaker permission.
+
+A workspace never creates identities. `POST /users` adds an existing account
+(found by exact email) as a member: an unknown email is `404` and the person
+signs up first; an active or suspended member is `409`; a removed member is
+readmitted with exactly the roles given. `GET /accounts?email=` resolves one
+whole address to `{id, email, display_name, status, workspace_membership}` so
+the console can confirm who is being added; fragments never match, so a
+workspace administrator cannot browse other workspaces' people.
+
+Suspension (`PATCH /users/{user_id}` `status: suspended|active`) is a
+membership state of this workspace only. It never disables the account, its
+sign-in, or its other workspaces; account-wide disabling is a platform concern.
 
 ### Platform scope
 

@@ -12,26 +12,28 @@ current router surface:
 - `POST /auth/accounts` remains Account creation and may issue the first
   Session.
 - `POST /auth/sessions` becomes the only public Session-creation route. Its
-  discriminated request variants are `password`, `guest`, and `google`.
+  discriminated request variants are `password` and `google`.
 - `GET /auth/session` returns current server-resolved Session context.
 - `PATCH /auth/session` changes active workspace on the current Session.
 - `DELETE /auth/session` invalidates the current durable access Session.
 
-Current `/auth/password`, `/auth/google`, and `/auth/guest-sessions` handlers
-must become internal authentication strategies behind `SessionService`; they
-must not remain public aliases. The existing POST `/auth/session` workspace
-switch becomes `PATCH /auth/session` with an `active_workspace_id` state
-update.
+Current `/auth/password` and `/auth/google` handlers must become internal
+authentication strategies behind `SessionService`; they must not remain public
+aliases. The `/auth/guest-sessions` route is removed outright: there is no
+anonymous access and no guest strategy. The existing POST `/auth/session`
+workspace switch becomes `PATCH /auth/session` with an `active_workspace_id`
+state update and requires an active membership in the target workspace (`403`
+otherwise).
 
 The current access-session table already provides durable lifecycle state,
-guest-to-user parent/child lineage, expiry, and revocation status. The
+parent/child lineage, expiry, and revocation status. The
 implementation phase must expose that lifecycle through one service, add an
 explicit invalidation operation for logout, and map internal `tenant_id` and
 `active_tenant_id` to public `workspace_id` and `active_workspace_id` only at
 the API boundary.
 
 Authentication errors must map to the stable error envelope without account
-enumeration. Password, Google, and guest requests may be unauthenticated;
+enumeration. Password and Google requests may be unauthenticated;
 workspace switching requires an existing bearer Session through
 `PATCH /auth/session`. No password-reset or password-change resource is added
 until a real product use case and persistence flow exist.

@@ -120,10 +120,33 @@ test("only the answer's own citation numbers resolve to a chip", () => {
     internalUrl: "/knowledge/documents/item-1?chunk=item-1%3A12",
     used: true,
     spans: [],
+    passages: [],
   };
   const resolved = citationRenderingSources([source]);
 
   assert.equal(resolved.get(1)?.itemId, "item-1");
   // A number the answer never cited must not become clickable.
   assert.equal(resolved.get(9), undefined);
+});
+
+test("an answer saved with one number per passage opens each passage of the one source", () => {
+  const source: AnswerSource = {
+    id: "document:sheet",
+    index: 2,
+    title: "DSBTH.xlsx",
+    itemId: "sheet",
+    chunkId: "sheet:1",
+    internalUrl: "/knowledge/documents/sheet?chunk=sheet%3A1",
+    used: true,
+    spans: [],
+    passages: [
+      { number: 2, chunkId: "sheet:1", internalUrl: "", spans: [] },
+      { number: 4, chunkId: "sheet:7", internalUrl: "", spans: [] },
+    ],
+  };
+  const resolved = citationRenderingSources([source]);
+
+  assert.equal(resolved.get(2)?.chunkId, "sheet:1");
+  assert.equal(resolved.get(4)?.chunkId, "sheet:7");
+  assert.equal(resolved.get(4)?.itemId, "sheet");
 });

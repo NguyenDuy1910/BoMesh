@@ -84,13 +84,6 @@ def get_token_claims(request: Request) -> JwtClaims:
     return claims
 
 
-def get_optional_token_claims(request: Request) -> JwtClaims | None:
-    """Return verified claims when supplied; guest creation itself is anonymous."""
-
-    claims = getattr(request.state, "jwt_claims", None)
-    return claims if isinstance(claims, JwtClaims) else None
-
-
 def require_permission(permission_code: str):
     """Create a dependency that checks a signed active-tenant permission claim."""
 
@@ -163,7 +156,6 @@ def get_health_service(
 
 Runtime = Annotated[AppRuntime, Depends(get_runtime)]
 TokenClaims = Annotated[JwtClaims, Depends(get_token_claims)]
-OptionalTokenClaims = Annotated[JwtClaims | None, Depends(get_optional_token_claims)]
 Caller = Annotated[AuthContext, Depends(get_auth_context)]
 ChatCaller = Annotated[AuthContext, Depends(get_chat_auth_context)]
 Chat = Annotated[ChatService, Depends(get_chat_service)]
@@ -190,7 +182,6 @@ __all__ = [
     "Ingestions",
     "KnowledgeQuery",
     "KnowledgeView",
-    "OptionalTokenClaims",
     "Runtime",
     "TokenClaims",
     "get_artifact_service",
@@ -200,6 +191,5 @@ __all__ = [
     "get_request_identity",
     "get_runtime",
     "get_token_claims",
-    "get_optional_token_claims",
     "require_permission",
 ]

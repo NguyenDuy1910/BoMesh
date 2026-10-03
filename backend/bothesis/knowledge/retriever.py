@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+from collections.abc import Sequence
 from hashlib import sha256
 
 from bothesis.document_index import ContextualChunk, ItemContentIndex
@@ -32,17 +33,17 @@ class ItemKnowledgeRetriever:
 
     async def search(
         self,
-        query: str,
+        queries: Sequence[str],
         *,
         limit: int,
         ctx: RetrievalContext,
     ) -> list[Evidence]:
-        normalized_query = _validate_search(query, limit=limit)
+        normalized_queries = _validate_search(queries, limit=limit)
         tenant_id = _validate_tenant_id(ctx.tenant_id)
         if not ctx.collection_item_ids:
             return []
         chunks = await self._index.search_item_content(
-            normalized_query,
+            normalized_queries,
             limit=max(limit, self._candidate_count),
             tenant_id=tenant_id,
             collection_item_ids=ctx.collection_item_ids,
@@ -51,20 +52,22 @@ class ItemKnowledgeRetriever:
         visible = [
             chunk for chunk in chunks if chunk.collection_item_id in allowed_collections
         ]
-        ranked = await self._rank(visible, query=normalized_query, limit=limit)
+        if not visible:
+            return []
+        ranked = await self._rank(visible, queries=normalized_queries, limit=limit)
         return [_evidence_from_chunk(chunk) for chunk in ranked]
 
     async def _rank(
         self,
         chunks: list[ContextualChunk],
         *,
-        query: str,
+        queries: list[str],
         limit: int,
     ) -> list[ContextualChunk]:
         if not self._reranking_enabled or self._reranker is None:
             return _score_order(chunks, limit=limit)
         try:
-            result = self._reranker.rerank(chunks, query=query, limit=limit)
+            result = self._reranker.rerank(chunks, queries=queries, limit=limit)
             if inspect.isawaitable(result):
                 result = await result
             ranked = list(result)
@@ -76,6 +79,8 @@ class ItemKnowledgeRetriever:
                 set(ranked_ids)
             ):
                 raise ValueError("reranker returned invalid candidates")
+            # The reranker is the relevance gate: what it leaves out, and an
+            # empty answer, are judgments, not failures.
             return ranked[:limit]
         except Exception as exc:  # noqa: BLE001 - optional reranking must fail open
             # Validation failures carry only positions and identifiers, so the
@@ -131,13 +136,18 @@ def _evidence_from_chunk(chunk: ContextualChunk) -> Evidence:
     )
 
 
-def _validate_search(query: str, *, limit: int) -> str:
-    normalized_query = query.strip()
-    if not normalized_query:
-        raise ValueError("query must not be empty")
+def _validate_search(queries: Sequence[str], *, limit: int) -> list[str]:
+    # A bare string is a sequence too; searching its characters is never meant.
+    if isinstance(queries, str):
+        raise TypeError("queries must be a sequence of strings, not one string")
+    normalized_queries = list(
+        dict.fromkeys(" ".join(query.split()) for query in queries)
+    )
+    if not normalized_queries or not all(normalized_queries):
+        raise ValueError("queries must not be empty")
     if limit < 1:
         raise ValueError("limit must be at least one")
-    return normalized_query
+    return normalized_queries
 
 
 def _validate_tenant_id(tenant_id: str) -> str:

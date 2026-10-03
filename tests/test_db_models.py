@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import json
 from uuid import uuid4
 
 import pytest
@@ -9,7 +13,7 @@ from sqlalchemy.schema import CreateTable
 
 from bothesis.db.engine import get_engine, get_session_factory
 from bothesis.db.models import Base
-from bothesis.services import AuthContext
+from bothesis.services import AuthContext, AuthenticationError
 from bothesis.services.identity_access.jwt_tokens import JwtTokenService
 from bothesis.services.identity_access.passwords import PasswordCredentialService
 
@@ -89,46 +93,57 @@ def test_users_carry_no_administration_flag() -> None:
     assert "permission_codes" not in Base.metadata.tables["roles"].c.keys()
 
 
-def test_guest_identity_and_public_workspace_are_explicit() -> None:
-    users = Base.metadata.tables["users"].c
-    sessions = Base.metadata.tables["access_sessions"].c
+def test_workspaces_are_reached_only_through_membership() -> None:
     tenants = Base.metadata.tables["tenants"].c
 
-    assert "identity_kind" not in users
-    assert "guest_session_id" not in users
-    assert "guest_expires_at" not in users
-    assert sessions.user_id.nullable is True
-    assert sessions.expires_at.nullable is False
-    assert tenants.visibility.nullable is False
-    assert tenants.public_access_role_id.nullable is True
+    assert {"visibility", "public_access_role_id"}.isdisjoint(tenants.keys())
 
 
-def test_guest_access_token_preserves_session_type() -> None:
-    guest_session_id = uuid4()
-    context = AuthContext(
-        session_id=guest_session_id,
-        session_kind="guest",
-        user_id=None,
-        email=None,
-        display_name="Guest",
-        tenant_id=uuid4(),
-        permission_codes=("knowledge.read",),
-        group_ids=(),
-        role_codes=("guest",),
-    )
+def test_access_tokens_are_always_bound_to_a_user() -> None:
+    secret = "t" * 32
     tokens = JwtTokenService(
-        secret="t" * 32,
+        secret=secret,
         issuer="bothesis",
         audience="bothesis-api",
         expires_in_seconds=900,
     )
+    context = AuthContext(
+        session_id=uuid4(),
+        user_id=None,
+        email=None,
+        display_name=None,
+        tenant_id=uuid4(),
+        permission_codes=("knowledge.read",),
+        group_ids=(),
+    )
 
-    token, _ = tokens.issue(context)
-    claims = tokens.verify(token)
+    with pytest.raises(AuthenticationError, match="signed-in user"):
+        tokens.issue(context)
 
-    assert claims.session_kind == "guest"
-    assert claims.session_id == guest_session_id
-    assert claims.user_id is None
+    user_token, _ = tokens.issue(
+        AuthContext(
+            session_id=context.session_id,
+            user_id=uuid4(),
+            email="person@example.com",
+            display_name="Person",
+            tenant_id=context.tenant_id,
+            permission_codes=context.permission_codes,
+            group_ids=(),
+        )
+    )
+    header, payload, _ = user_token.split(".")
+    claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+    claims["user_id"] = None
+    anonymous = base64.urlsafe_b64encode(
+        json.dumps(claims, separators=(",", ":")).encode()
+    ).rstrip(b"=").decode()
+    signature = hmac.new(
+        secret.encode(), f"{header}.{anonymous}".encode(), hashlib.sha256
+    ).digest()
+    forged = f"{header}.{anonymous}.{base64.urlsafe_b64encode(signature).rstrip(b'=').decode()}"
+
+    with pytest.raises(AuthenticationError, match="user"):
+        tokens.verify(forged)
 
 
 def test_engine_normalizes_standard_postgres_url_and_is_cached() -> None:

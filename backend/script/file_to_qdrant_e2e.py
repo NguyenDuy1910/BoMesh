@@ -206,7 +206,7 @@ async def _run(args: argparse.Namespace) -> None:
             if not query:
                 raise ValueError("--query must not be blank")
             results = await index.search_item_content(
-                query,
+                (query,),
                 limit=min(5, chunk_count),
                 tenant_id=tenant_id,
                 collection_item_ids=(collection_item_id,),

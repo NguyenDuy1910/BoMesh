@@ -83,10 +83,12 @@ abstract final class ChatStreamReducer {
           final part = _contentPart(turn, payload, type: 'output_text');
           final index =
               payload['annotation_index'] as int? ?? part.annotations.length;
-          part.annotations.insert(
-            index.clamp(0, part.annotations.length),
-            Map<String, dynamic>.from(annotation),
-          );
+          final value = Map<String, dynamic>.from(annotation);
+          if (index >= 0 && index < part.annotations.length) {
+            part.annotations[index] = value;
+          } else {
+            part.annotations.add(value);
+          }
         }
       case 'response.refusal.delta':
         final part = _contentPart(turn, payload, type: 'refusal');
@@ -129,6 +131,7 @@ abstract final class ChatStreamReducer {
         final response = _reconcileResponse(turn, responsePayload);
         turn.status = response.hasFunctionCalls ? 'streaming' : 'completed';
         turn.error = null;
+        turn.modelPending = response.hasFunctionCalls;
       case 'response.incomplete':
       case 'response.failed':
         final responsePayload = _responsePayload(payload);
@@ -350,6 +353,10 @@ abstract final class ChatStreamReducer {
     final index = payload['content_index'] as int? ?? 0;
     while (item.content.length <= index) {
       item.content.add(ChatOutputPart(type: 'output_text'));
+    }
+    final previous = item.content[index];
+    if (part.annotations.isEmpty && previous.annotations.isNotEmpty) {
+      part.annotations.addAll(previous.annotations);
     }
     item.content[index] = part;
   }

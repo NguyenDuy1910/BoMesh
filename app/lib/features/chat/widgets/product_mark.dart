@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../../app/app_brand.dart';
-import '../../../app/app_theme.dart';
 
 class ProductMark extends StatelessWidget {
   const ProductMark({super.key, this.size = 32});
@@ -17,15 +16,17 @@ class ProductMark extends StatelessWidget {
         width: size,
         height: size,
         decoration: BoxDecoration(
-          color: context.colors.brand,
+          color: Colors.white,
           borderRadius: BorderRadius.circular(size * 0.26),
           border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
         ),
         alignment: Alignment.center,
-        child: Icon(
-          Icons.menu_book_rounded,
-          color: context.colors.onBrand,
-          size: size * 0.52,
+        child: Padding(
+          padding: EdgeInsets.all(size * .08),
+          child: Image.asset(
+            'assets/bothesis-logo.png',
+            excludeFromSemantics: true,
+          ),
         ),
       ),
     );

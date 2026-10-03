@@ -63,8 +63,7 @@ class ItemResourceResolver:
         mime_type = item.mime_type or ""
         if not mime_type.startswith("image/"):
             raise DocumentProcessingError("resource cannot be materialized as an image")
-        image_url = await self._content.direct_file_data(item, expires_seconds=300)
-        return (InputImage(image_url=image_url),)
+        return (InputImage(image_url=await self._content.image_data_url(item)),)
 
     async def _item(self, resource: ResourceRef):
         try:

@@ -89,11 +89,15 @@ class WorkspaceControlPlaneService:
         async with self._unit_of_work() as session:
             return await UserService(session).list_platform_users(actor, **filters)
 
-    async def create_user(
+    async def lookup_account(self, actor: AuthContext, email: str) -> dict[str, Any]:
+        async with self._unit_of_work() as session:
+            return await UserService(session).lookup_account(actor, email=email)
+
+    async def add_member(
         self, actor: AuthContext, values: dict[str, Any]
     ) -> dict[str, Any]:
         async with self._unit_of_work() as session:
-            return await UserService(session).create_user(actor, **values)
+            return await UserService(session).add_member(actor, **values)
 
     async def get_user(self, actor: AuthContext, user_id: UUID) -> dict[str, Any]:
         async with self._unit_of_work() as session:
@@ -151,7 +155,12 @@ class WorkspaceControlPlaneService:
         self, actor: AuthContext, group_id: UUID, changes: dict[str, Any]
     ) -> dict[str, Any]:
         async with self._unit_of_work() as session:
-            return await GroupService(session).update_group(actor, group_id, **changes)
+            return await GroupService(session).update_group(
+                actor,
+                group_id,
+                description_provided="description" in changes,
+                **changes,
+            )
 
     async def replace_group_members(
         self, actor: AuthContext, group_id: UUID, user_ids: list[UUID]
@@ -173,7 +182,9 @@ class WorkspaceControlPlaneService:
             return await service.list_items(actor, **filters)
 
     async def list_collections(self, actor: AuthContext, **filters: Any) -> dict[str, Any]:
-        result = await self.list_items(actor, item_type="collection", **filters)
+        async with self._catalog() as (session, service):
+            del session
+            result = await service.list_collections(actor, **filters)
         return {
             **result,
             "items": [self._collection_payload(item) for item in result.get("items", [])],
@@ -195,7 +206,9 @@ class WorkspaceControlPlaneService:
             return await service.get_item(actor, item_id)
 
     async def get_collection(self, actor: AuthContext, collection_id: UUID) -> dict[str, Any]:
-        return self._collection_payload(await self.get_item(actor, collection_id))
+        async with self._catalog() as (session, service):
+            del session
+            return self._collection_payload(await service.get_collection(actor, collection_id))
 
     async def update_collection(
         self, actor: AuthContext, item_id: UUID, changes: dict[str, Any]
@@ -214,7 +227,9 @@ class WorkspaceControlPlaneService:
         return self._collection_payload(await self.update_collection(actor, collection_id, changes))
 
     async def delete_collection(self, actor: AuthContext, collection_id: UUID) -> None:
-        await self.delete_item(actor, collection_id)
+        async with self._catalog() as (session, service):
+            del session
+            await service.delete_collection(actor, collection_id)
 
     async def update_item(
         self, actor: AuthContext, item_id: UUID, status: str
@@ -398,6 +413,7 @@ class WorkspaceControlPlaneService:
             "source_count": item.get("source_count", 0),
             "created_at": item.get("created_at"),
             "updated_at": item.get("updated_at"),
+            "permissions": item.get("permissions", []),
         }
 
 

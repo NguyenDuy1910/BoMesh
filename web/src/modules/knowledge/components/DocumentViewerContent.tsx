@@ -4,11 +4,9 @@ import { LockKeyhole, TriangleAlert } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { documentFacts } from "@/modules/knowledge/document-facts";
 import type { WorkspaceKnowledgeDocument } from "@/modules/knowledge/workspace-repository";
 
 import { AgentDocumentView } from "./AgentDocumentView";
-import { DocumentPager } from "./DocumentPager";
 import { documentRenderers } from "./DocumentRenderers";
 
 interface DocumentViewerContentProps {
@@ -29,7 +27,8 @@ interface DocumentViewerContentProps {
  *
  * It decides three things and nothing else: whether there is anything to show
  * at all, which representation was asked for, and which renderer draws the
- * format. Everything a reader operates lives in the shell around it.
+ * format. The renderer offers only the page, zoom and find controls its
+ * content supports; everything else a reader operates lives in the shell.
  */
 export function DocumentViewerContent({
   document,
@@ -42,8 +41,6 @@ export function DocumentViewerContent({
   onSearchChange,
   onRetryIndexing,
 }: DocumentViewerContentProps) {
-  const facts = documentFacts(document);
-
   if (document.state === "restricted") {
     return (
       <div className="knowledge-viewer__stage">
@@ -57,8 +54,6 @@ export function DocumentViewerContent({
   }
 
   const Renderer = documentRenderers[document.kind];
-  const paged = document.kind === "pdf" && facts.pageCount > 1;
-  const zoomable = document.kind === "pdf";
 
   return (
     <div className="knowledge-viewer__stage">
@@ -82,16 +77,12 @@ export function DocumentViewerContent({
       {view === "agent" ? (
         <AgentDocumentView document={document} search={search} />
       ) : (
-        <Renderer document={document} page={page} search={search} zoom={zoom} />
-      )}
-
-      {view === "original" && (paged || zoomable) && (
-        <DocumentPager
+        <Renderer
+          document={document}
           onPageChange={onPageChange}
           onSearchChange={onSearchChange}
           onZoomChange={onZoomChange}
           page={page}
-          pageCount={facts.pageCount}
           search={search}
           zoom={zoom}
         />

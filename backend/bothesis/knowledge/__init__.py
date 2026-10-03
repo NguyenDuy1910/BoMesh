@@ -47,11 +47,15 @@ class EvidenceContext:
 
 @runtime_checkable
 class KnowledgeRetriever(Protocol):
-    """Tenant-scoped evidence retrieval boundary consumed by agents."""
+    """Tenant-scoped evidence retrieval boundary consumed by agents.
+
+    One search answers every query together: their candidates are fused and
+    ranked as one list, so the result is a single relevance ranking.
+    """
 
     async def search(
         self,
-        query: str,
+        queries: Sequence[str],
         *,
         limit: int,
         ctx: RetrievalContext,
@@ -59,14 +63,18 @@ class KnowledgeRetriever(Protocol):
 
 
 class Reranker(Protocol):
-    """Optional second-stage ordering over permission-filtered chunks."""
+    """Optional second stage over permission-filtered chunks.
+
+    It returns only the chunks that help answer the queries, strongest first;
+    an empty result means none do.
+    """
 
     def rerank(
         self,
         chunks: Sequence[ContextualChunk],
         *,
+        queries: Sequence[str],
         limit: int,
-        query: str = "",
     ) -> list[ContextualChunk] | Awaitable[list[ContextualChunk]]: ...
 
 

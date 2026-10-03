@@ -10,7 +10,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
 from bothesis.agent.transports.openrouter import OpenRouterTransport
-from bothesis.document_index import EmbeddingService
+from bothesis.document_index import EmbeddingRejectedError, EmbeddingService
+from bothesis.services.item_ingestion import failure_message
 
 
 @pytest.mark.asyncio
@@ -121,4 +122,42 @@ async def test_openrouter_query_embedding_validates_input_and_vector() -> None:
     with pytest.raises(ValueError, match="embedding response vector is invalid"):
         await transport.embed_query("policy")
 
+    await client.aclose()
+
+
+def _status_transport(status: int, body: dict[str, object]) -> tuple[OpenRouterTransport, httpx.AsyncClient]:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status, json=body, request=request)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    return (
+        OpenRouterTransport(api_key="test-key", embedding_model="test-model", client=client),
+        client,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_refused_key_is_a_rejection_people_can_act_on() -> None:
+    transport, client = _status_transport(
+        403,
+        {"error": {"message": "Key limit exceeded (total limit). Manage it using https://openrouter.ai/keys/secret-hash", "code": 403}},
+    )
+
+    with pytest.raises(EmbeddingRejectedError) as rejected:
+        await transport.embed_documents(["policy"])
+
+    assert rejected.value.status_code == 403
+    assert "Key limit exceeded" in str(rejected.value)
+    shown = failure_message(rejected.value)
+    assert "HTTP 403" in shown and "administrator" in shown
+    assert "secret-hash" not in shown
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_rate_limiting_stays_a_transient_failure() -> None:
+    transport, client = _status_transport(429, {"error": {"message": "slow down"}})
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await transport.embed_documents(["policy"])
     await client.aclose()

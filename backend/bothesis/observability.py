@@ -207,8 +207,10 @@ class TraceSerializer:
         }
 
     @classmethod
-    def retrieval_input(cls, *, query: str, result_limit: int) -> dict[str, object]:
-        return {"query": query, "result_limit": result_limit}
+    def retrieval_input(
+        cls, *, queries: Sequence[str], result_limit: int
+    ) -> dict[str, object]:
+        return {"queries": list(queries), "result_limit": result_limit}
 
     @staticmethod
     def retrieval_output(

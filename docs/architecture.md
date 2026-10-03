@@ -18,12 +18,12 @@ repository / infrastructure adapter
 PostgreSQL, S3-compatible storage, Qdrant, model provider, or connector API
 ```
 
-Authentication resolves every request to an `access_sessions` row. Guest
-sessions carry only public tenant access and a session subject; User sessions
-carry durable User identity and membership permissions. Identity upgrade is a
-session transition, not a mutation of `users`: the child User session
-supersedes the Guest session and claims its conversation owner while retaining
-the original session lineage for audit and access checks.
+Authentication resolves every request to an `access_sessions` row owned by an
+authenticated User; there is no anonymous caller. A User reaches a
+workspace (tenant) only through an active `tenant_memberships` row plus
+`role_assignments` in that workspace, and platform permissions remain a
+separate scope. Workspaces have no public visibility. Token rotation and
+workspace switches are session transitions, not mutations of `users`.
 
 `backend/main.py` is the FastAPI boundary. It defines routes, validates HTTP
 input, resolves simple request identity, calls a service, and returns an HTTP
@@ -76,7 +76,7 @@ Item metadata + raw bytes in object storage
     ↓
 ContextualChunk → embedding + BM25 payload → Qdrant
     ↓
-tenant / tombstone / ACL filter → rerank → Evidence
+tenant / tombstone / ACL filter → fused multi-query candidates → relevance rerank → Evidence
     ↓
 agent response with citations
 ```
