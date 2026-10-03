@@ -12,8 +12,8 @@ from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
-from bothesis.connector.protocol import BoundingBox, Chunk, CitationInfo, CitationSpan
-from bothesis.db.models import (
+from bomesh.connector.protocol import BoundingBox, Chunk, CitationInfo, CitationSpan
+from bomesh.db.models import (
     ArtifactRevision,
     AccessSession,
     AuditLog,
@@ -33,14 +33,14 @@ from bothesis.db.models import (
     SandboxSession,
     User,
 )
-from bothesis.agent.models import AgentContext
-from bothesis.storage import (
+from bomesh.agent.models import AgentContext
+from bomesh.storage import (
     ObjectNotFoundError,
     ObjectStorageError,
     PresignedRequest,
     StoredObject,
 )
-from bothesis.services import (
+from bomesh.services import (
     COLLECTION_EDITOR_ROLE,
     COLLECTION_OWNER_ROLE,
     COLLECTION_UPDATE_PERMISSION,
@@ -66,26 +66,26 @@ from bothesis.services import (
     SandboxManifestResource,
     SandboxProviderFile,
 )
-from bothesis.services.approval_request import ApprovalRequestService
-from bothesis.services.dashboard.dashboard import DashboardService
-from bothesis.services.artifact import ArtifactService
-from bothesis.services.identity_access.auth import AuthenticationService
-from bothesis.services.identity_access.access_session import AccessSessionService
-from bothesis.services.identity_access.identity_store import IdentityStoreService
-from bothesis.services.identity_access.jwt_tokens import JwtTokenService
-from bothesis.services.identity_access.passwords import PasswordCredentialService
-from bothesis.services.citation import CitationService
-from bothesis.services.identity_access.role_assignments import RoleAssignmentService
-from bothesis.services.identity_access.roles import RoleService
-from bothesis.services.identity_access.users import UserService
-from bothesis.services.conversation import ConversationService
-from bothesis.services.integration_connections import IntegrationConnectionService
-from bothesis.services.integration_credential import IntegrationCredentialService
-from bothesis.services.item import ItemService
-from bothesis.services.item_catalog import ItemCatalogService
-from bothesis.services.sandbox_session import SandboxSessionService
-from bothesis.services.documents import DocumentService
-from bothesis.services.document_presentation import DocumentPresenter
+from bomesh.services.approval_request import ApprovalRequestService
+from bomesh.services.dashboard.dashboard import DashboardService
+from bomesh.services.artifact import ArtifactService
+from bomesh.services.identity_access.auth import AuthenticationService
+from bomesh.services.identity_access.access_session import AccessSessionService
+from bomesh.services.identity_access.identity_store import IdentityStoreService
+from bomesh.services.identity_access.jwt_tokens import JwtTokenService
+from bomesh.services.identity_access.passwords import PasswordCredentialService
+from bomesh.services.citation import CitationService
+from bomesh.services.identity_access.role_assignments import RoleAssignmentService
+from bomesh.services.identity_access.roles import RoleService
+from bomesh.services.identity_access.users import UserService
+from bomesh.services.conversation import ConversationService
+from bomesh.services.integration_connections import IntegrationConnectionService
+from bomesh.services.integration_credential import IntegrationCredentialService
+from bomesh.services.item import ItemService
+from bomesh.services.item_catalog import ItemCatalogService
+from bomesh.services.sandbox_session import SandboxSessionService
+from bomesh.services.documents import DocumentService
+from bomesh.services.document_presentation import DocumentPresenter
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -346,8 +346,8 @@ async def test_switch_session_replaces_session_and_resolves_new_workspace(
             session,
             tokens=JwtTokenService(
                 secret="s" * 32,
-                issuer="bothesis",
-                audience="bothesis-api",
+                issuer="bomesh",
+                audience="bomesh-api",
                 expires_in_seconds=900,
             ),
         )
@@ -422,8 +422,8 @@ async def test_platform_role_grant_is_idempotent_and_audited(
             session,
             tokens=JwtTokenService(
                 secret="a" * 32,
-                issuer="bothesis",
-                audience="bothesis-api",
+                issuer="bomesh",
+                audience="bomesh-api",
                 expires_in_seconds=900,
             ),
             platform_admin_emails=frozenset({"root@example.com"}),
@@ -498,8 +498,8 @@ async def test_password_session_accepts_username_login(
             session,
             tokens=JwtTokenService(
                 secret="u" * 32,
-                issuer="bothesis",
-                audience="bothesis-api",
+                issuer="bomesh",
+                audience="bomesh-api",
                 expires_in_seconds=900,
             ),
         )
@@ -531,8 +531,8 @@ async def test_workspace_switch_requires_an_active_membership(
             session,
             tokens=JwtTokenService(
                 secret="m" * 32,
-                issuer="bothesis",
-                audience="bothesis-api",
+                issuer="bomesh",
+                audience="bomesh-api",
                 expires_in_seconds=900,
             ),
         )

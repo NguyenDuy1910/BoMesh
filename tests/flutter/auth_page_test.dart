@@ -1,9 +1,9 @@
 import 'dart:convert';
 
-import 'package:bothesis/app/app_theme.dart';
-import 'package:bothesis/core/api_client.dart';
-import 'package:bothesis/features/auth/auth_page.dart';
-import 'package:bothesis/features/auth/session.dart';
+import 'package:bomesh/app/app_theme.dart';
+import 'package:bomesh/core/api_client.dart';
+import 'package:bomesh/features/auth/auth_page.dart';
+import 'package:bomesh/features/auth/session.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -118,7 +118,7 @@ void main() {
         await tester.ensureVisible(
           find.widgetWithText(
             TextButton,
-            'New to BoThesis? Create an account',
+            'New to BoMesh? Create an account',
           ),
         );
         await tester.pumpAndSettle();

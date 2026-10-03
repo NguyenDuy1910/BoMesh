@@ -1,13 +1,13 @@
 /* ═══════════════════════════════════════════════════════════════════════════
    Pattern motion
    ---------------------------------------------------------------------------
-   The only animations the BoThesis patterns own. Everything else is a colour
+   The only animations the BoMesh patterns own. Everything else is a colour
    or opacity transition declared inline with its component.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* The pending treatment stays text-only so the product mark remains the sole
    identity icon. A small opacity breath keeps the state alive without clutter. */
-.bothesis-agent-thinking {
+.bomesh-agent-thinking {
   display: inline-flex;
   min-height: 1.75rem;
   width: fit-content;
@@ -19,24 +19,24 @@
   line-height: var(--text-lh-ui);
 }
 
-.bothesis-agent-thinking__label {
+.bomesh-agent-thinking__label {
   animation:
-    bothesis-thinking-label-in 220ms var(--ease-out) both,
-    bothesis-thinking-breathe 2.8s ease-in-out 220ms infinite;
+    bomesh-thinking-label-in 220ms var(--ease-out) both,
+    bomesh-thinking-breathe 2.8s ease-in-out 220ms infinite;
 }
 
-@keyframes bothesis-thinking-breathe {
+@keyframes bomesh-thinking-breathe {
   0%, 100% { opacity: 0.8; }
   50% { opacity: 1; }
 }
 
-@keyframes bothesis-thinking-label-in {
+@keyframes bomesh-thinking-label-in {
   from { opacity: 0; transform: translateY(0.2rem); }
   to { opacity: 1; transform: translateY(0); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .bothesis-agent-thinking__label {
+  .bomesh-agent-thinking__label {
     animation: none;
   }
 }

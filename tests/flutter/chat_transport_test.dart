@@ -1,10 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:bothesis/core/api_client.dart';
-import 'package:bothesis/features/chat/models/chat_models.dart';
-import 'package:bothesis/features/chat/models/chat_stream.dart';
-import 'package:bothesis/features/chat/services/chat_service.dart';
+import 'package:bomesh/core/api_client.dart';
+import 'package:bomesh/features/chat/models/chat_models.dart';
+import 'package:bomesh/features/chat/models/chat_stream.dart';
+import 'package:bomesh/features/chat/services/chat_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

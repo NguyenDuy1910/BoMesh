@@ -11,8 +11,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
-from bothesis.agent.protocol import InputText, MessageItem, Prompt
-from bothesis.observability import LangfuseTracer, NoopTracer, TraceSerializer
+from bomesh.agent.protocol import InputText, MessageItem, Prompt
+from bomesh.observability import LangfuseTracer, NoopTracer, TraceSerializer
 
 
 class RecordingObservation:

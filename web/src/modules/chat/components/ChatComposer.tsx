@@ -211,7 +211,7 @@ export function ChatComposer({
         />
         <textarea
           aria-describedby="composer-help"
-          aria-label={finding ? "Find documents" : "Message BoThesis"}
+          aria-label={finding ? "Find documents" : "Message BoMesh"}
           autoComplete="off"
           disabled={!isConfigured}
           name="message"
@@ -368,7 +368,7 @@ export function ChatComposer({
           {!finding && (
             <>
               <span className="composer-context-indicator composer-context-indicator--knowledge"><LibraryBig aria-hidden="true" size={14} />Knowledge: Company</span>
-              <span className="composer-context-indicator"><Bot aria-hidden="true" size={14} />BoThesis</span>
+              <span className="composer-context-indicator"><Bot aria-hidden="true" size={14} />BoMesh</span>
               <span className="composer-context-indicator composer-context-indicator--model">Managed model <ChevronDown aria-hidden="true" size={14} /></span>
             </>
           )}

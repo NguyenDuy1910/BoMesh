@@ -1,6 +1,6 @@
 {
   "schema_version": 5,
-  "title": "Enterprise Agent canonical Item and storage ownership",
+  "title": "BoMesh canonical Item and storage ownership",
   "status": "implemented",
   "ownership": {
     "postgresql": "durable business and application state",

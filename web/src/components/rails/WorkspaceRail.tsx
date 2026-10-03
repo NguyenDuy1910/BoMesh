@@ -40,7 +40,7 @@ export function WorkspaceRail({
         <ContextHeader
           collapsed={collapsed}
           context="Workspace"
-          name={activeWorkspace?.name ?? "BoThesis"}
+          name={activeWorkspace?.name ?? "BoMesh"}
         />
       </RailGroup>
 

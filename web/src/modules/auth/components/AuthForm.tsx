@@ -17,7 +17,7 @@ const capabilities = [
 ] as const;
 
 const accessCommitments = [
-  ["Permission-aware", "BoThesis respects the permissions of connected sources."],
+  ["Permission-aware", "BoMesh respects the permissions of connected sources."],
   ["Source-grounded", "Answers can be traced back to the original evidence."],
   ["Workspace-scoped", "Your available collections and apps come from your workspace."],
 ] as const;
@@ -96,7 +96,7 @@ export default function AuthForm({ mode }: { mode: "login" | "signup" }) {
           <h1 id="welcome-title">Company knowledge,<br />connected to action.</h1>
           <p className="auth-welcome__lead">Search trusted company knowledge, inspect original sources, work with files, and take governed actions — all from one conversation.</p>
 
-          <ul aria-label="BoThesis capabilities" className="auth-welcome__capabilities">
+          <ul aria-label="BoMesh capabilities" className="auth-welcome__capabilities">
             {capabilities.map(([title, description, Icon, tone]) => (
               <li key={title}>
                 <span className={`auth-welcome__capability-icon auth-welcome__capability-icon--${tone}`}><Icon aria-hidden="true" size={20} strokeWidth={1.8} /></span>
@@ -113,9 +113,9 @@ export default function AuthForm({ mode }: { mode: "login" | "signup" }) {
 
         <section aria-labelledby="auth-title" className="auth-welcome__panel">
           <div className="auth-welcome__panel-mark"><ShieldCheck aria-hidden="true" size={24} strokeWidth={1.8} /></div>
-          <h2 id="auth-title">Welcome to BoThesis</h2>
+          <h2 id="auth-title">Welcome to BoMesh</h2>
           <p className="auth-welcome__panel-intro">{isSignup ? "Create an account to access your workspace knowledge and capabilities." : "Sign in to access the knowledge and capabilities available to your workspace."}</p>
-          <div aria-busy={isSigningIn || undefined} aria-label="Continue to BoThesis with Google Workspace" className="auth-welcome__google-button" ref={googleButtonHost} />
+          <div aria-busy={isSigningIn || undefined} aria-label="Continue to BoMesh with Google Workspace" className="auth-welcome__google-button" ref={googleButtonHost} />
           {isSigningIn ? <p className="auth-welcome__google-progress" role="status">Signing in…</p> : null}
           {signInError ? <p className="auth-welcome__sign-in-error" role="alert">{signInError}</p> : null}
           <div className="auth-welcome__workspace-hint"><Info aria-hidden="true" size={18} strokeWidth={1.8} /><span><strong>Use your work Google account</strong><small>Workspace access and permissions are applied after sign-in.</small></span></div>
@@ -127,14 +127,14 @@ export default function AuthForm({ mode }: { mode: "login" | "signup" }) {
             <label><span>Password</span><input autoComplete={isSignup ? "new-password" : "current-password"} minLength={8} onChange={(event) => setPassword(event.target.value)} required type="password" value={password} /></label>
             <button className="auth-welcome__password-submit" disabled={isSigningIn} type="submit"><KeyRound aria-hidden="true" size={17} strokeWidth={1.9} /><span>{isSignup ? "Create account" : "Sign in"}</span></button>
           </form>
-          <p className="auth-welcome__switch">{isSignup ? "Already have an account?" : "New to BoThesis?"} <Link href={isSignup ? "/auth/login" : "/auth/signup"}>{isSignup ? "Sign in" : "Create an account"}</Link></p>
+          <p className="auth-welcome__switch">{isSignup ? "Already have an account?" : "New to BoMesh?"} <Link href={isSignup ? "/auth/login" : "/auth/signup"}>{isSignup ? "Sign in" : "Create an account"}</Link></p>
           <section aria-labelledby="access-title" className="auth-welcome__access"><h3 id="access-title">Your access stays governed</h3><ul>{accessCommitments.map(([title, detail]) => <li key={title}><Check aria-hidden="true" size={16} strokeWidth={2.2} /><strong>{title}</strong><small>{detail}</small></li>)}</ul></section>
-          <p className="auth-welcome__terms">By continuing, you agree to your organization’s access policies and BoThesis terms.</p>
+          <p className="auth-welcome__terms">By continuing, you agree to your organization’s access policies and BoMesh terms.</p>
         </section>
       </div>
 
       <span className="auth-welcome__workspace-status"><i />Google Workspace ready</span>
-      <Link aria-label="Open BoThesis" className="auth-welcome__launcher" href="/app"><Bot aria-hidden="true" size={22} strokeWidth={1.8} /><i /></Link>
+      <Link aria-label="Open BoMesh" className="auth-welcome__launcher" href="/app"><Bot aria-hidden="true" size={22} strokeWidth={1.8} /><i /></Link>
     </main>
   );
 }

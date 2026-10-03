@@ -183,7 +183,7 @@ export function ResourcePicker({
           description={
             search
               ? "Nothing here matches that search."
-              : "This account has nothing BoThesis can read at this level."
+              : "This account has nothing BoMesh can read at this level."
           }
           size="sm"
           title="Nothing to choose"

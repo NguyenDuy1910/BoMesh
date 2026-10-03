@@ -10,9 +10,9 @@ const nextConfig: NextConfig = {
   // repository root. Explicitly define public values so production builds
   // inline the same values that `next dev` receives from `@next/env`.
   env: {
-    NEXT_PUBLIC_BOTHESIS_API_URL: process.env.NEXT_PUBLIC_BOTHESIS_API_URL ?? "",
-    NEXT_PUBLIC_BOTHESIS_TENANT_ID: process.env.NEXT_PUBLIC_BOTHESIS_TENANT_ID ?? "",
-    NEXT_PUBLIC_BOTHESIS_USER_ID: process.env.NEXT_PUBLIC_BOTHESIS_USER_ID ?? "",
+    NEXT_PUBLIC_BOMESH_API_URL: process.env.NEXT_PUBLIC_BOMESH_API_URL ?? "",
+    NEXT_PUBLIC_BOMESH_TENANT_ID: process.env.NEXT_PUBLIC_BOMESH_TENANT_ID ?? "",
+    NEXT_PUBLIC_BOMESH_USER_ID: process.env.NEXT_PUBLIC_BOMESH_USER_ID ?? "",
     NEXT_PUBLIC_GOOGLE_CLIENT_ID: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? "",
   },
   devIndicators: false,

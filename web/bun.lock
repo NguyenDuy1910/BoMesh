@@ -3,7 +3,7 @@
   "configVersion": 0,
   "workspaces": {
     "": {
-      "name": "bothesis-web",
+      "name": "bomesh-web",
       "dependencies": {
         "clsx": "^2.1.1",
         "katex": "^0.17.0",

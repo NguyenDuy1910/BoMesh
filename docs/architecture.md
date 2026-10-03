@@ -1,6 +1,6 @@
 # Architecture
 
-Enterprise Agent is organized around explicit ownership boundaries. The goal is to
+BoMesh is organized around explicit ownership boundaries. The goal is to
 keep HTTP handling thin, make business flow testable in services, and prevent
 connector or storage concerns from leaking into chat and retrieval behavior.
 

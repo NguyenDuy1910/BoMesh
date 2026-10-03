@@ -4,7 +4,7 @@ Status: accepted design. Implementation follows this document.
 
 ## Problem
 
-People must be able to read a whole knowledge document in BoThesis — from a
+People must be able to read a whole knowledge document in BoMesh — from a
 citation in chat and from the Library — not only the cited passage. Today only
 PDFs have page images; Word, Excel, text and Markdown files show at most one
 passage, and the Library's "Original" view has no real content at all.
@@ -14,7 +14,7 @@ passage, and the Library's "Original" view has no real content at all.
 Ingestion already parses every document once into a canonical `DocumentItem`
 whose `content` is a list of typed parts (`text`, `table`, `code`, `image`,
 `link`, `structured`), each with the same `element_id` that citation spans
-point at. That parse is the rendition. At ingestion time, BoThesis serializes
+point at. That parse is the rendition. At ingestion time, BoMesh serializes
 it into one **document rendition** — compact JSON, gzip-compressed — and stores
 it beside the existing page previews. The browser downloads it directly from
 object storage through a short-lived signed URL and renders it with React.
@@ -49,7 +49,7 @@ Rejected alternatives:
 ### Stored rendition (object storage, internal)
 
 Key: `tenants/{tenant}/items/{item}/previews/{DOCUMENT_RENDITION_VERSION}/{source_version}/document.json.gz`,
-stored with `Content-Type: application/vnd.bothesis.document+json`,
+stored with `Content-Type: application/vnd.bomesh.document+json`,
 `Content-Encoding: gzip`, `Cache-Control: private, max-age=31536000, immutable`.
 The key changes whenever the original or the renderer changes, so objects are
 never rewritten in place.

@@ -7,8 +7,8 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import Response
 
-from bothesis.services import AuthenticationError
-from bothesis.services.identity_access.jwt_tokens import JwtTokenService
+from bomesh.services import AuthenticationError
+from bomesh.services.identity_access.jwt_tokens import JwtTokenService
 
 
 class JwtAuthenticationMiddleware(BaseHTTPMiddleware):

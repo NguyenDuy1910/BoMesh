@@ -8,9 +8,9 @@ import type {
 } from "./types";
 import { finalTurnText } from "./message-stream.ts";
 
-const CONVERSATIONS_KEY_BASE = "bothesis-conversations";
-const MESSAGE_PREFIX_BASE = "bothesis-messages:";
-const SELECTED_CONVERSATION_KEY_BASE = "bothesis-selected-conversation";
+const CONVERSATIONS_KEY_BASE = "bomesh-conversations";
+const MESSAGE_PREFIX_BASE = "bomesh-messages:";
+const SELECTED_CONVERSATION_KEY_BASE = "bomesh-selected-conversation";
 const ANONYMOUS_USER_NAMESPACE = "anonymous";
 const DEFAULT_CONVERSATION_TITLE = "New conversation";
 let memoryConversations: ChatConversation[] = [];
@@ -197,7 +197,7 @@ export function titleFromMessage(message: string) {
 
 export function cachedToUIMessage(message: CachedChatMessage): ChatMessage {
   // An assistant reply's content lives entirely in ``turn`` — its own ``parts``
-  // is always empty (see useBothesisChat.ts). Gating this branch on parts alone
+  // is always empty (see useBomeshChat.ts). Gating this branch on parts alone
   // dropped ``turn`` for every restored assistant message and rendered it as an
   // empty bubble, since AssistantTurn reads only ``turn``.
   if (message.parts.length || message.turn) {

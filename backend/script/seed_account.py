@@ -19,17 +19,17 @@ if str(BACKEND_ROOT) not in sys.path:
 
 load_dotenv(BACKEND_ROOT.parent / ".env", override=False)
 
-from bothesis.db.engine import get_session_factory, transaction_scope
-from bothesis.db.models import Tenant
-from bothesis.services import (
+from bomesh.db.engine import get_session_factory, transaction_scope
+from bomesh.db.models import Tenant
+from bomesh.services import (
     ACTIVE_STATUS,
     PLATFORM_ADMIN_ROLE,
     TENANT_ADMIN_ROLE,
     IdentityNotFoundError,
 )
-from bothesis.services.identity_access.identity_store import IdentityStoreService
-from bothesis.services.identity_access.passwords import PasswordCredentialService
-from bothesis.services.identity_access.role_assignments import RoleAssignmentService
+from bomesh.services.identity_access.identity_store import IdentityStoreService
+from bomesh.services.identity_access.passwords import PasswordCredentialService
+from bomesh.services.identity_access.role_assignments import RoleAssignmentService
 
 
 DEFAULT_PASSWORD = "19102003"

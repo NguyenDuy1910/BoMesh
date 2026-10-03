@@ -16,11 +16,11 @@ const defaults: AccountPreferences = {
   showAgentActivity: true,
 };
 
-const changeEvent = "bothesis-account-preferences";
+const changeEvent = "bomesh-account-preferences";
 
 function storageKey() {
   const userId = getAuthSession()?.user_id;
-  return `bothesis.account.preferences.${userId ?? "anonymous"}`;
+  return `bomesh.account.preferences.${userId ?? "anonymous"}`;
 }
 
 function readPreferences(): AccountPreferences {

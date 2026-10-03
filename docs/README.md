@@ -1,4 +1,4 @@
-# Enterprise Agent documentation
+# BoMesh documentation
 
 This directory contains operational and architecture documentation. API design
 ownership lives in [`backend/docs_design`](../backend/docs_design), so do not

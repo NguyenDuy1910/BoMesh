@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:bothesis/core/api_client.dart';
-import 'package:bothesis/features/auth/session.dart';
+import 'package:bomesh/core/api_client.dart';
+import 'package:bomesh/features/auth/session.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;

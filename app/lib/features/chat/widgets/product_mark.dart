@@ -24,7 +24,7 @@ class ProductMark extends StatelessWidget {
         child: Padding(
           padding: EdgeInsets.all(size * .08),
           child: Image.asset(
-            'assets/bothesis-logo.png',
+            'assets/bomesh-logo.png',
             excludeFromSemantics: true,
           ),
         ),

@@ -7,9 +7,9 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bothesis.services.identity_access.access_session import AccessSessionService
-from bothesis.services.identity_access.identity_store import IdentityStoreService
-from bothesis.services import (
+from bomesh.services.identity_access.access_session import AccessSessionService
+from bomesh.services.identity_access.identity_store import IdentityStoreService
+from bomesh.services import (
     AuthContext,
     AuthorizationError,
     JwtClaims,

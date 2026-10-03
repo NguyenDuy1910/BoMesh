@@ -23,20 +23,20 @@ import native_responses as native
 
 import api.app as api_app
 import api.deps as api_deps
-import bothesis.runtime as runtime_module
-from bothesis.agent import Agent, SessionConfiguration
-from bothesis.agent.models import AgentContext
-from bothesis.agent.protocol import (
+import bomesh.runtime as runtime_module
+from bomesh.agent import Agent, SessionConfiguration
+from bomesh.agent.models import AgentContext
+from bomesh.agent.protocol import (
     ExecutionEnvironmentRef,
     ExecutionOutput,
     HostedExecutionResultItem,
     ProviderResourceRef,
     ResponseOutputItemDoneEvent,
 )
-from bothesis.agent.tools import ToolExecutor, ToolRegistry, ToolSpec
-from bothesis.agent.tools.knowledge_search import KnowledgeSearch
-from bothesis.services.chat import ChatService, _public_event
-from bothesis.connector.protocol import (
+from bomesh.agent.tools import ToolExecutor, ToolRegistry, ToolSpec
+from bomesh.agent.tools.knowledge_search import KnowledgeSearch
+from bomesh.services.chat import ChatService, _public_event
+from bomesh.connector.protocol import (
     CitationInfo,
     CitationSpan,
     EffectiveAccess,
@@ -44,16 +44,16 @@ from bothesis.connector.protocol import (
     SourceIdentity,
     SourceProvider,
 )
-from bothesis.document_index import ContextualChunk
-from bothesis.knowledge import Evidence, ItemKnowledgeRetriever
+from bomesh.document_index import ContextualChunk
+from bomesh.knowledge import Evidence, ItemKnowledgeRetriever
 from api.routers import ChatRequest
-from bothesis.services import AuthContext
-from bothesis.services.document_presentation import (
+from bomesh.services import AuthContext
+from bomesh.services.document_presentation import (
     DocumentPresenter,
     payload_citation,
     viewer_elements,
 )
-from bothesis.services.item import ItemService
+from bomesh.services.item import ItemService
 from config import AppConfig, ModelConfig
 
 
@@ -213,7 +213,7 @@ def test_default_agent_composes_the_openai_transport(
 ) -> None:
     """The agent speaks OpenAI: its execution tools are native OpenAI ones."""
 
-    from bothesis.agent.transports import openai as openai_transport
+    from bomesh.agent.transports import openai as openai_transport
 
     class TestOpenAITransport:
         provider = "openai"
@@ -290,7 +290,7 @@ def test_model_configuration_auto_selects_a_configured_openrouter_agent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     for key in (
-        "BOTHESIS_AGENT_MODEL_PROVIDER",
+        "BOMESH_AGENT_MODEL_PROVIDER",
         "OPENROUTER_API_KEY",
         "OPENROUTER_MODEL",
         "OPENAI_MODEL",
@@ -522,7 +522,7 @@ def _install_access(monkeypatch: Any) -> tuple[UUID, UUID]:
         return (UUID(int=12), UUID(int=14))
 
     monkeypatch.setattr(
-        "bothesis.services.identity_access.authorization.AuthorizationService"
+        "bomesh.services.identity_access.authorization.AuthorizationService"
         ".allowed_collection_ids",
         allowed_collections,
     )
@@ -589,8 +589,8 @@ def test_collection_upload_route_accepts_multipart_without_a_connector(
             f"/api/v1/collections/{collection_id}/documents",
             headers={
                 "Idempotency-Key": "upload-contract-1",
-                "X-Bothesis-Tenant-Id": str(tenant_id),
-                "X-Bothesis-User-Id": str(user_id),
+                "X-Bomesh-Tenant-Id": str(tenant_id),
+                "X-Bomesh-User-Id": str(user_id),
             },
             files={"file": ("policy.txt", b"governed policy", "text/plain")},
         )
@@ -713,7 +713,7 @@ def test_chat_api_streams_agent_retrieval_and_sources(monkeypatch) -> None:
         for event in events
         if event["type"] == "response.output_text.annotation.added"
     )
-    assert annotation["type"] == "bothesis:document_citation"
+    assert annotation["type"] == "bomesh:document_citation"
     assert annotation["citation"]["item_id"] == "doc-1"
     assert annotation["citation"]["chunk_id"] == "chunk-1"
     assert annotation["citation"]["reference"] == "ref_1"
@@ -872,7 +872,7 @@ def test_chat_api_resolves_a_cited_source_reference_to_canonical_metadata(
         if event["type"] == "response.output_text.annotation.added"
     )
     citation = annotation["citation"]
-    assert annotation["type"] == "bothesis:document_citation"
+    assert annotation["type"] == "bomesh:document_citation"
     # The index range brackets the marker, so position survives serialization.
     assert answer[annotation["start_index"] : annotation["end_index"]] == "[1]"
     assert citation["number"] == 1
@@ -1063,8 +1063,8 @@ def test_document_search_api_uses_authorized_retrieval_scope(monkeypatch) -> Non
         response = client.post(
             "/api/v1/documents/search",
             headers={
-                "X-Bothesis-Tenant-Id": str(tenant_id),
-                "X-Bothesis-User-Id": str(user_id),
+                "X-Bomesh-Tenant-Id": str(tenant_id),
+                "X-Bomesh-User-Id": str(user_id),
             },
             json={
                 "query": "annual leave",
@@ -1160,7 +1160,7 @@ async def test_a_reasoning_item_replays_as_a_canonical_input_item() -> None:
 
 
 # Incremental delta forwarding, citation-boundary buffering, and literal-bracket
-# handling are covered by tests/bothesis/agent/test_turn_runtime.py.
+# handling are covered by tests/bomesh/agent/test_turn_runtime.py.
 
 
 def test_chat_api_rejects_unbounded_history(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1217,7 +1217,7 @@ def test_chat_request_accepts_an_optional_bounded_collection_selection() -> None
 def test_artifact_routes_delegate_to_the_service_and_map_missing_documents(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from bothesis.services import DocumentNotFoundError
+    from bomesh.services import DocumentNotFoundError
 
     artifact_id = uuid4()
     access = AuthContext(
@@ -1263,7 +1263,7 @@ def test_artifact_routes_delegate_to_the_service_and_map_missing_documents(
 
     _override_caller(monkeypatch, resolve_access)
     monkeypatch.setitem(api_app.app.dependency_overrides, api_deps.get_artifact_service, Artifacts)
-    headers = {"X-Bothesis-Tenant-Id": str(access.tenant_id), "X-Bothesis-User-Id": str(access.user_id)}
+    headers = {"X-Bomesh-Tenant-Id": str(access.tenant_id), "X-Bomesh-User-Id": str(access.user_id)}
     with TestClient(api_app.app) as client:
         found = client.get(f"/api/v1/artifacts/{artifact_id}", headers=headers)
         missing = client.get(f"/api/v1/artifacts/{uuid4()}", headers=headers)

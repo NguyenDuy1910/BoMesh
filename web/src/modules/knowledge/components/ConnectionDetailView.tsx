@@ -148,7 +148,7 @@ export function ConnectionDetailView({
           <div>
             <strong>{connection.display_name} needs to be connected again</strong>
             <p>
-              {connection.status_detail ?? "The account no longer authorizes BoThesis."}{" "}
+              {connection.status_detail ?? "The account no longer authorizes BoMesh."}{" "}
               {documentsAtRisk
                 ? `${pluralize(documentsAtRisk, "source has", "sources have")} stopped updating. Indexed documents still answer questions, but anything changed since then is missing.`
                 : "Nothing is indexed from it yet."}

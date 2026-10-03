@@ -11,11 +11,11 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import configure_mappers
 from sqlalchemy.schema import CreateTable
 
-from bothesis.db.engine import get_engine, get_session_factory
-from bothesis.db.models import Base
-from bothesis.services import AuthContext, AuthenticationError
-from bothesis.services.identity_access.jwt_tokens import JwtTokenService
-from bothesis.services.identity_access.passwords import PasswordCredentialService
+from bomesh.db.engine import get_engine, get_session_factory
+from bomesh.db.models import Base
+from bomesh.services import AuthContext, AuthenticationError
+from bomesh.services.identity_access.jwt_tokens import JwtTokenService
+from bomesh.services.identity_access.passwords import PasswordCredentialService
 
 
 EXPECTED_TABLES = {
@@ -103,8 +103,8 @@ def test_access_tokens_are_always_bound_to_a_user() -> None:
     secret = "t" * 32
     tokens = JwtTokenService(
         secret=secret,
-        issuer="bothesis",
-        audience="bothesis-api",
+        issuer="bomesh",
+        audience="bomesh-api",
         expires_in_seconds=900,
     )
     context = AuthContext(
@@ -147,7 +147,7 @@ def test_access_tokens_are_always_bound_to_a_user() -> None:
 
 
 def test_engine_normalizes_standard_postgres_url_and_is_cached() -> None:
-    database_url = "postgresql://user:password@localhost/bothesis"
+    database_url = "postgresql://user:password@localhost/bomesh"
 
     first = get_engine(database_url, echo=False)
     second = get_engine(database_url, echo=False)
@@ -159,4 +159,4 @@ def test_engine_normalizes_standard_postgres_url_and_is_cached() -> None:
 
 def test_engine_rejects_non_postgres_urls() -> None:
     with pytest.raises(ValueError, match="must use PostgreSQL"):
-        get_engine("sqlite:///bothesis.db")
+        get_engine("sqlite:///bomesh.db")

@@ -314,7 +314,7 @@ storage strategy remains internal.
 ## Implementation gate
 
 Implementation must converge direct and presigned transports on one Document
-creation pipeline, keep object storage inside `bothesis.storage`, keep
+creation pipeline, keep object storage inside `bomesh.storage`, keep
 Document/content lifecycle in Item services, and keep indexing lifecycle in
 `ItemIngestionService`. No compatibility upload routes or public `upload_id`
 remain after callers migrate.

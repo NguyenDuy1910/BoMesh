@@ -56,7 +56,7 @@ export function Composer({
   generating = false,
   disabled = false,
   dragOver = false,
-  placeholder = "Ask BoThesis…",
+  placeholder = "Ask BoMesh…",
   attachments,
   capabilities,
   error,

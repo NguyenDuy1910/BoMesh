@@ -5,13 +5,13 @@ SHELL := /bin/bash
 COMPOSE_FILE := deployment/compose.yml
 COMPOSE := docker compose -f $(COMPOSE_FILE)
 
-LOCAL_DATABASE_URL ?= postgresql+asyncpg://bothesis:bothesis@127.0.0.1:5432/bothesis
+LOCAL_DATABASE_URL ?= postgresql+asyncpg://bomesh:bomesh@127.0.0.1:5432/bomesh
 LOCAL_QDRANT_URL ?= http://127.0.0.1:6333
 LOCAL_S3_ENDPOINT ?= http://127.0.0.1:9000
-LOCAL_S3_BUCKET ?= bothesis
+LOCAL_S3_BUCKET ?= bomesh
 LOCAL_TEMPORAL_TARGET ?= 127.0.0.1:7233
 LOCAL_TEMPORAL_UI ?= http://127.0.0.1:8080
-QDRANT_COLLECTION ?= bothesis
+QDRANT_COLLECTION ?= bomesh
 QDRANT_VECTOR_SIZE ?= 1536
 
 DEV_TENANT_ID ?= 00000000-0000-0000-0000-000000000001
@@ -19,19 +19,19 @@ DEV_USER_ID ?= 00000000-0000-0000-0000-000000000002
 DEV_TENANT_ADMIN_ASSIGNMENT_ID ?= 00000000-0000-0000-0000-000000000003
 DEV_PLATFORM_ADMIN_ASSIGNMENT_ID ?= 00000000-0000-0000-0000-000000000004
 DEV_TENANT_CODE ?= local
-DEV_USER_EMAIL ?= local-admin@bothesis.dev
+DEV_USER_EMAIL ?= local-admin@bomesh.dev
 DEV_USER_IS_PLATFORM_ADMIN ?= true
 
 .PHONY: help init reset-all config services _temporal-reset db-init db-seed db-seed-accounts db-reset qdrant-init status
 
 help: ## Show available local-development commands.
-	@echo "Enterprise Agent local development"
+	@echo "BoMesh local development"
 	@echo
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-init: reset-all ## Initialize the complete local Enterprise Agent environment.
+init: reset-all ## Initialize the complete local BoMesh environment.
 	@echo
-	@echo "Enterprise Agent local environment is ready."
+	@echo "BoMesh local environment is ready."
 	@echo "  API:       http://127.0.0.1:8000"
 	@echo "  Qdrant:    $(LOCAL_QDRANT_URL)/dashboard"
 	@echo "  MinIO:     http://127.0.0.1:9001"
@@ -59,23 +59,31 @@ config: ## Create the root environment file and enforce local dependency endpoin
 		awk -v key="$$key" '$$0 !~ "^" key "=" { print }' "$$file" > "$$temp_file"; \
 		mv "$$temp_file" "$$file"; \
 	}; \
+	rename_prefix() { \
+		local file="$$1" old="$$2" new="$$3" temp_file; \
+		temp_file="$$(mktemp)"; \
+		awk -v old="$$old" -v new="$$new" 'index($$0, old) == 1 { $$0 = new substr($$0, length(old) + 1) } { print }' "$$file" > "$$temp_file"; \
+		mv "$$temp_file" "$$file"; \
+	}; \
+	rename_prefix .env BOTHESIS_ BOMESH_; \
+	rename_prefix .env NEXT_PUBLIC_BOTHESIS_ NEXT_PUBLIC_BOMESH_; \
 	update_env .env DATABASE_URL "$(LOCAL_DATABASE_URL)"; \
 	update_env .env QDRANT_URL "$(LOCAL_QDRANT_URL)"; \
 	update_env .env QDRANT_COLLECTION "$(QDRANT_COLLECTION)"; \
 	update_env .env QDRANT_API_KEY ""; \
-	update_env .env BOTHESIS_TEMPORAL_TARGET "$(LOCAL_TEMPORAL_TARGET)"; \
-	update_env .env BOTHESIS_TEMPORAL_NAMESPACE default; \
-	update_env .env BOTHESIS_TEMPORAL_TLS false; \
-	update_env .env BOTHESIS_OBJECT_STORAGE_PROVIDER aws_s3; \
-	update_env .env BOTHESIS_OBJECT_STORAGE_BUCKET "$(LOCAL_S3_BUCKET)"; \
-	update_env .env BOTHESIS_S3_ENDPOINT_URL "$(LOCAL_S3_ENDPOINT)"; \
-	update_env .env BOTHESIS_S3_ADDRESSING_STYLE path; \
-	update_env .env BOTHESIS_S3_REGION us-east-1; \
-	update_env .env AWS_ACCESS_KEY_ID bothesis; \
-	update_env .env AWS_SECRET_ACCESS_KEY bothesis; \
-	integration_key="$$(sed -n 's/^BOTHESIS_INTEGRATION_ENCRYPTION_KEY=//p' .env | tail -n 1)"; \
-	legacy_plugin_key="$$(sed -n 's/^BOTHESIS_PLUGIN_ENCRYPTION_KEY=//p' .env | tail -n 1)"; \
-	legacy_connector_key="$$(sed -n 's/^BOTHESIS_CONNECTOR_ENCRYPTION_KEY=//p' .env | tail -n 1)"; \
+	update_env .env BOMESH_TEMPORAL_TARGET "$(LOCAL_TEMPORAL_TARGET)"; \
+	update_env .env BOMESH_TEMPORAL_NAMESPACE default; \
+	update_env .env BOMESH_TEMPORAL_TLS false; \
+	update_env .env BOMESH_OBJECT_STORAGE_PROVIDER aws_s3; \
+	update_env .env BOMESH_OBJECT_STORAGE_BUCKET "$(LOCAL_S3_BUCKET)"; \
+	update_env .env BOMESH_S3_ENDPOINT_URL "$(LOCAL_S3_ENDPOINT)"; \
+	update_env .env BOMESH_S3_ADDRESSING_STYLE path; \
+	update_env .env BOMESH_S3_REGION us-east-1; \
+	update_env .env AWS_ACCESS_KEY_ID bomesh; \
+	update_env .env AWS_SECRET_ACCESS_KEY bomesh-local; \
+	integration_key="$$(sed -n 's/^BOMESH_INTEGRATION_ENCRYPTION_KEY=//p' .env | tail -n 1)"; \
+	legacy_plugin_key="$$(sed -n 's/^BOMESH_PLUGIN_ENCRYPTION_KEY=//p' .env | tail -n 1)"; \
+	legacy_connector_key="$$(sed -n 's/^BOMESH_CONNECTOR_ENCRYPTION_KEY=//p' .env | tail -n 1)"; \
 	if [[ ! "$$integration_key" =~ ^[A-Za-z0-9_-]{43}=?$$ ]]; then \
 		if [[ "$$legacy_plugin_key" =~ ^[A-Za-z0-9_-]{43}=?$$ ]]; then \
 			integration_key="$$legacy_plugin_key"; \
@@ -84,13 +92,13 @@ config: ## Create the root environment file and enforce local dependency endpoin
 		else \
 			integration_key="$$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '\n')"; \
 		fi; \
-		update_env .env BOTHESIS_INTEGRATION_ENCRYPTION_KEY "$$integration_key"; \
+		update_env .env BOMESH_INTEGRATION_ENCRYPTION_KEY "$$integration_key"; \
 	fi; \
-	remove_env .env BOTHESIS_PLUGIN_ENCRYPTION_KEY; \
-	remove_env .env BOTHESIS_CONNECTOR_ENCRYPTION_KEY; \
-	update_env .env BOTHESIS_ALLOW_INSECURE_DEV_IDENTITY true; \
-	remove_env .env BOTHESIS_PUBLIC_TENANT_CODE; \
-	remove_env .env BOTHESIS_GUEST_SESSION_EXPIRES_IN_SECONDS
+	remove_env .env BOMESH_PLUGIN_ENCRYPTION_KEY; \
+	remove_env .env BOMESH_CONNECTOR_ENCRYPTION_KEY; \
+	update_env .env BOMESH_ALLOW_INSECURE_DEV_IDENTITY true; \
+	remove_env .env BOMESH_PUBLIC_TENANT_CODE; \
+	remove_env .env BOMESH_GUEST_SESSION_EXPIRES_IN_SECONDS
 	@echo "Configured the root environment file."
 
 services: config ## Start PostgreSQL, Qdrant, object storage, and Temporal.
@@ -126,12 +134,12 @@ _temporal-reset: services
 db-init: services ## Apply the current database design and the permission/system-role catalogs.
 	@set -euo pipefail
 	@$(COMPOSE) exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"' >/dev/null
-	@cd backend && DATABASE_URL="$(LOCAL_DATABASE_URL)" uv run python -c 'import asyncio; from bothesis.db.engine import get_engine, get_session_factory; from bothesis.db.models import Base; from bothesis.services.identity_access.identity_store import IdentityStoreService; exec("async def initialize():\n    engine = get_engine()\n    async with engine.begin() as connection:\n        await connection.run_sync(Base.metadata.create_all)\n    async with get_session_factory()() as session:\n        async with session.begin():\n            await IdentityStoreService(session).sync_system_roles()\n    await engine.dispose()") ; asyncio.run(initialize())'
+	@cd backend && DATABASE_URL="$(LOCAL_DATABASE_URL)" uv run python -c 'import asyncio; from bomesh.db.engine import get_engine, get_session_factory; from bomesh.db.models import Base; from bomesh.services.identity_access.identity_store import IdentityStoreService; exec("async def initialize():\n    engine = get_engine()\n    async with engine.begin() as connection:\n        await connection.run_sync(Base.metadata.create_all)\n    async with get_session_factory()() as session:\n        async with session.begin():\n            await IdentityStoreService(session).sync_system_roles()\n    await engine.dispose()") ; asyncio.run(initialize())'
 	@echo "PostgreSQL schema, permissions, and system roles are initialized."
 
 db-seed: services ## Create or refresh the deterministic local admin identity.
 	@set -euo pipefail
-	@tenant_id="$$( $(COMPOSE) exec -T postgres sh -c 'psql -Atq -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "$$1"' _ "INSERT INTO tenants (id, code, name, status, settings) VALUES ('$(DEV_TENANT_ID)', '$(DEV_TENANT_CODE)', 'Enterprise Agent Local', 'active', '{}'::jsonb) ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, status = 'active', updated_at = now() RETURNING id" )"; \
+	@tenant_id="$$( $(COMPOSE) exec -T postgres sh -c 'psql -Atq -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "$$1"' _ "INSERT INTO tenants (id, code, name, status, settings) VALUES ('$(DEV_TENANT_ID)', '$(DEV_TENANT_CODE)', 'BoMesh Local', 'active', '{}'::jsonb) ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, status = 'active', updated_at = now() RETURNING id" )"; \
 	user_id="$$( $(COMPOSE) exec -T postgres sh -c 'psql -Atq -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "$$1"' _ "INSERT INTO users (id, email, display_name, status, preferences) VALUES ('$(DEV_USER_ID)', '$(DEV_USER_EMAIL)', 'Local Administrator', true, '{}'::jsonb) ON CONFLICT (email) DO UPDATE SET display_name = EXCLUDED.display_name, status = true, updated_at = now() RETURNING id" )"; \
 	$(COMPOSE) exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "$$1"' _ "INSERT INTO tenant_memberships (user_id, tenant_id, status, joined_at, deleted_at) VALUES ('$$user_id', '$$tenant_id', 'active', now(), NULL) ON CONFLICT (user_id, tenant_id) DO UPDATE SET status = 'active', deleted_at = NULL" >/dev/null; \
 	$(COMPOSE) exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "$$1"' _ "INSERT INTO role_assignments (id, user_id, role_id, tenant_id) SELECT '$(DEV_TENANT_ADMIN_ASSIGNMENT_ID)', '$$user_id', role.id, '$$tenant_id' FROM roles role WHERE role.is_system AND role.code = 'tenant_admin' ON CONFLICT DO NOTHING" >/dev/null; \

@@ -66,7 +66,7 @@ export function DocumentViewerContent({
                 ? `Indexing failed after ${document.latestIngestion.attempt} attempts`
                 : "This document could not be indexed"}
             </strong>
-            <p>{document.failureReason ?? "BoThesis could not read the file, so it never appears in an answer."}</p>
+            <p>{document.failureReason ?? "BoMesh could not read the file, so it never appears in an answer."}</p>
           </div>
           {onRetryIndexing && (
             <Button onClick={onRetryIndexing} size="sm" variant="secondary">Retry indexing</Button>

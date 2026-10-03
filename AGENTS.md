@@ -1,8 +1,8 @@
-# BoThesis Agent Rules
+# BoMesh Agent Rules
 
 ## Project intent
 
-BoThesis is an enterprise knowledge.
+BoMesh (Business-only Knowledge Mesh) is an enterprise knowledge platform.
 
 It connects to trusted enterprise sources, ingests and indexes knowledge, retrieves permission-filtered evidence, answers with grounded citations, and supports governed business analytics.
 
@@ -15,7 +15,7 @@ Keep implementations simple, explicit, typed, and aligned with the existing arch
 Before making any meaningful code change, inspect:
 
 ```text
-/Users/nguyenduy/Documents/utex/BoThesis/backend/docs_design
+/Users/nguyenduy/Documents/utex/BoMesh/backend/docs_design
 ```
 
 This directory is the architectural source of truth for the project.
@@ -329,7 +329,7 @@ Use environment variables or the configured secret-management mechanism.
 Tests belong under:
 
 ```text
-/Users/duynguyen/Documents/vikki-bank-code/ai-team/BoThesis/tests
+/Users/nguyenduy/Documents/utex/BoMesh/tests
 ```
 
 Reuse existing tests where possible.

@@ -81,7 +81,7 @@ class _AuthPageState extends State<AuthPage> {
                                 const SizedBox(width: 12),
                                 Flexible(
                                   child: Text(
-                                    'BoThesis',
+                                    'BoMesh',
                                     style: Theme.of(context)
                                         .textTheme
                                         .titleLarge
@@ -281,7 +281,7 @@ class _AuthPageState extends State<AuthPage> {
                               child: Text(
                                 _register
                                     ? 'Already have an account? Sign in'
-                                    : 'New to BoThesis? Create an account',
+                                    : 'New to BoMesh? Create an account',
                               ),
                             ),
                             const SizedBox(height: 24),

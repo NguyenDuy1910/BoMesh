@@ -19,9 +19,9 @@ from openai import AsyncOpenAI
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
-from bothesis.agent.transports.openrouter import OpenRouterTransport
-from bothesis.agent.execution import ExecutionCapability
-from bothesis.agent.protocol import (
+from bomesh.agent.transports.openrouter import OpenRouterTransport
+from bomesh.agent.execution import ExecutionCapability
+from bomesh.agent.protocol import (
     ExecutionEnvironmentRef,
     ExecutionOutput,
     HostedExecutionCallItem,
@@ -29,7 +29,7 @@ from bothesis.agent.protocol import (
     Prompt,
     ProviderResourceRef,
 )
-from bothesis.agent.transports.responses_adapter import ResponsesStream
+from bomesh.agent.transports.responses_adapter import ResponsesStream
 
 _RESPONSE_BODY = {
     "id": "resp_1",
@@ -102,7 +102,7 @@ async def test_stream_response_posts_to_the_openresponses_endpoint() -> None:
         )
 
     transport = transport_with(
-        handler, site_url="https://bothesis.test", app_name="Enterprise Agent"
+        handler, site_url="https://bomesh.test", app_name="BoMesh"
     )
     stream = await transport.stream_response(
         input=[{"type": "message", "role": "user", "content": "hi"}],
@@ -112,8 +112,8 @@ async def test_stream_response_posts_to_the_openresponses_endpoint() -> None:
     events = [event async for event in stream]
 
     assert seen["url"] == "https://openrouter.ai/api/v1/responses"
-    assert seen["headers"]["http-referer"] == "https://bothesis.test"
-    assert seen["headers"]["x-title"] == "Enterprise Agent"
+    assert seen["headers"]["http-referer"] == "https://bomesh.test"
+    assert seen["headers"]["x-title"] == "BoMesh"
     # Specified fields are top-level; non-specified options merge in from
     # ``extra_body`` without the agent ever naming them.
     assert seen["body"]["model"] == "openai/gpt-test"

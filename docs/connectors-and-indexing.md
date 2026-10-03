@@ -1,6 +1,6 @@
 # Connectors and indexing
 
-The connector boundary turns external source data into canonical Enterprise Agent
+The connector boundary turns external source data into canonical BoMesh
 Items. It owns provider-specific behavior so retrieval and the agent operate on
 one consistent source and evidence model.
 
@@ -63,7 +63,7 @@ See `backend/docs_design/conversation_loop.md`.
 Connector credentials and reader permissions serve different purposes:
 
 ```text
-encrypted ConnectorCredential → lets Enterprise Agent read a provider
+encrypted ConnectorCredential → lets BoMesh read a provider
 Item allowed/denied principals → lets a user retrieve source evidence
 ```
 
@@ -105,4 +105,4 @@ unavailable. The background workflow calls the same `ItemIngestionService` and
   tombstoned; normal reads exclude tombstones.
 
 The connector package's implementation notes are kept alongside the code in
-[`backend/bothesis/connector/README.md`](../backend/bothesis/connector/README.md).
+[`backend/bomesh/connector/README.md`](../backend/bomesh/connector/README.md).

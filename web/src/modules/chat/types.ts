@@ -85,16 +85,16 @@ export interface CitationSource {
   url?: string | null;
 }
 
-/** The Enterprise Agent citation annotation type; the specification only defines url_citation. */
-export const DOCUMENT_CITATION_TYPE = "bothesis:document_citation";
+/** The BoMesh citation annotation type; the specification only defines url_citation. */
+export const DOCUMENT_CITATION_TYPE = "bomesh:document_citation";
 
 /**
- * The Enterprise Agent artifact annotation type: a file the turn produced, attached to
+ * The BoMesh artifact annotation type: a file the turn produced, attached to
  * the answer that presents it. Zero-width at the end of the text, and the
  * replacement for the provider's own `container_file_citation`, which the
  * backend consumes so no container or provider file id reaches a client.
  */
-export const ARTIFACT_ANNOTATION_TYPE = "bothesis:artifact";
+export const ARTIFACT_ANNOTATION_TYPE = "bomesh:artifact";
 
 /** The description of one produced file revision; never its content. */
 export interface ArtifactReference {

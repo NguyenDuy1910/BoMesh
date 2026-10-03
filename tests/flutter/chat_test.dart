@@ -1,12 +1,12 @@
 import 'dart:convert';
 
-import 'package:bothesis/core/api_client.dart';
-import 'package:bothesis/features/auth/session.dart';
-import 'package:bothesis/features/chat/models/chat_models.dart';
-import 'package:bothesis/features/chat/models/chat_stream.dart';
-import 'package:bothesis/features/chat/services/chat_service.dart';
-import 'package:bothesis/features/chat/services/conversation_store.dart';
-import 'package:bothesis/features/chat/state/chat_controller.dart';
+import 'package:bomesh/core/api_client.dart';
+import 'package:bomesh/features/auth/session.dart';
+import 'package:bomesh/features/chat/models/chat_models.dart';
+import 'package:bomesh/features/chat/models/chat_stream.dart';
+import 'package:bomesh/features/chat/services/chat_service.dart';
+import 'package:bomesh/features/chat/services/conversation_store.dart';
+import 'package:bomesh/features/chat/state/chat_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';

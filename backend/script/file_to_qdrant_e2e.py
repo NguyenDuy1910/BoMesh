@@ -18,22 +18,22 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 load_dotenv(BACKEND_ROOT.parent / ".env", override=False)
 
-from bothesis.agent.transports.openrouter import OpenRouterTransport
-from bothesis.connector.file import FileProcessor
-from bothesis.connector.protocol import (
+from bomesh.agent.transports.openrouter import OpenRouterTransport
+from bomesh.connector.file import FileProcessor
+from bomesh.connector.protocol import (
     AccessPolicy,
     Hierarchy,
     SourceIdentity,
     SourceProvider,
 )
-from bothesis.document_index import (
+from bomesh.document_index import (
     IndexingContext,
     ItemIndex,
 )
 
 
 def _parse_args() -> argparse.Namespace:
-    configured_collection = os.getenv("QDRANT_COLLECTION", "").strip() or "bothesis"
+    configured_collection = os.getenv("QDRANT_COLLECTION", "").strip() or "bomesh"
     parser = argparse.ArgumentParser(
         description=(
             "Process one file with the production Docling/chunking pipeline, "

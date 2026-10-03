@@ -23,13 +23,13 @@ OPENAI_MODEL=gpt-5-mini
 
 OPENROUTER_API_KEY=...
 OPEN_ROUTER_BASE_URL=https://openrouter.ai/api/v1
-BOTHESIS_DOCLING_MODEL=qwen/qwen3-vl-30b-a3b-instruct
+BOMESH_DOCLING_MODEL=qwen/qwen3-vl-30b-a3b-instruct
 EMBEDDING_MODEL=openai/text-embedding-3-small
 ```
 
 OpenAI serves the chat path. OpenRouter serves embedding requests and Docling's
 remote vision pipeline for PDF and image ingestion. PDF/image pages are sent to
-`BOTHESIS_DOCLING_MODEL`, which returns grounded text and table blocks with page
+`BOMESH_DOCLING_MODEL`, which returns grounded text and table blocks with page
 coordinates for citation provenance. No Docling layout, OCR, table, or tokenizer
 model is loaded locally. Health reports each dependency separately so a missing
 key is visible as an unhealthy required service instead of a silent fallback.
@@ -38,13 +38,13 @@ key is visible as an unhealthy required service instead of a silent fallback.
 
 ```dotenv
 QDRANT_URL=http://127.0.0.1:6333
-QDRANT_COLLECTION=bothesis
+QDRANT_COLLECTION=bomesh
 QDRANT_API_KEY=
 QDRANT_PREFER_GRPC=false
 
-BOTHESIS_CONTEXTUALIZATION_ENABLED=false
-BOTHESIS_CONTEXTUALIZATION_MODEL=
-BOTHESIS_HYBRID_CANDIDATE_LIMIT=20
+BOMESH_CONTEXTUALIZATION_ENABLED=false
+BOMESH_CONTEXTUALIZATION_MODEL=
+BOMESH_HYBRID_CANDIDATE_LIMIT=20
 ```
 
 The local Qdrant collection has one dense vector named `content` and one sparse
@@ -56,29 +56,29 @@ BM25 vector named `content_bm25`. It is derived state and can be recreated with
 Raw document storage is mandatory. Configure one S3-compatible provider:
 
 ```dotenv
-BOTHESIS_OBJECT_STORAGE_PROVIDER=aws_s3
-BOTHESIS_OBJECT_STORAGE_BUCKET=bothesis
-BOTHESIS_S3_REGION=us-east-1
-BOTHESIS_S3_ENDPOINT_URL=http://127.0.0.1:9000
-BOTHESIS_S3_ADDRESSING_STYLE=path
-AWS_ACCESS_KEY_ID=bothesis
-AWS_SECRET_ACCESS_KEY=bothesis
+BOMESH_OBJECT_STORAGE_PROVIDER=aws_s3
+BOMESH_OBJECT_STORAGE_BUCKET=bomesh
+BOMESH_S3_REGION=us-east-1
+BOMESH_S3_ENDPOINT_URL=http://127.0.0.1:9000
+BOMESH_S3_ADDRESSING_STYLE=path
+AWS_ACCESS_KEY_ID=bomesh
+AWS_SECRET_ACCESS_KEY=bomesh-local
 ```
 
 Those are the repository's local MinIO defaults. Start the service and create
 the bucket with `make services`; use `http://127.0.0.1:9001` for the MinIO
-console. Keep `BOTHESIS_OBJECT_STORAGE_PROVIDER=aws_s3` — MinIO is handled by
+console. Keep `BOMESH_OBJECT_STORAGE_PROVIDER=aws_s3` — MinIO is handled by
 the existing S3 adapter, not by a separate provider.
 
 AWS S3 uses boto3's standard credential chain. Cloudflare R2 uses its
 S3-compatible endpoint and API-token access key pair:
 
 ```dotenv
-BOTHESIS_OBJECT_STORAGE_PROVIDER=cloudflare_r2
-BOTHESIS_R2_BUCKET=...
-BOTHESIS_R2_ACCOUNT_ID=...
-BOTHESIS_R2_ACCESS_KEY_ID=...
-BOTHESIS_R2_SECRET_ACCESS_KEY=...
+BOMESH_OBJECT_STORAGE_PROVIDER=cloudflare_r2
+BOMESH_R2_BUCKET=...
+BOMESH_R2_ACCOUNT_ID=...
+BOMESH_R2_ACCESS_KEY_ID=...
+BOMESH_R2_SECRET_ACCESS_KEY=...
 ```
 
 Never persist a presigned URL. Store the Item's `storage_key` and generate a
@@ -88,19 +88,19 @@ used by Compose; a `SignatureDoesNotMatch` response means they do not match.
 
 Image and PDF ingestion may also write versioned WebP objects below the owning
 Item's `previews/` prefix. These are derived presentation assets; the raw object
-remains authoritative. Bound rendering with `BOTHESIS_PREVIEW_MAX_SOURCE_BYTES`,
-`BOTHESIS_PREVIEW_MAX_PAGES`, `BOTHESIS_PREVIEW_MAX_DIMENSION`, and
-`BOTHESIS_PREVIEW_WEBP_QUALITY`. Preview URLs are signed at read time and use
-`BOTHESIS_PREVIEW_URL_SECONDS`.
+remains authoritative. Bound rendering with `BOMESH_PREVIEW_MAX_SOURCE_BYTES`,
+`BOMESH_PREVIEW_MAX_PAGES`, `BOMESH_PREVIEW_MAX_DIMENSION`, and
+`BOMESH_PREVIEW_WEBP_QUALITY`. Preview URLs are signed at read time and use
+`BOMESH_PREVIEW_URL_SECONDS`.
 
 ## Identity and credentials
 
 ```dotenv
 # Exactly 32 URL-safe base64-decoded bytes; generate once and retain securely.
-BOTHESIS_INTEGRATION_ENCRYPTION_KEY=...
+BOMESH_INTEGRATION_ENCRYPTION_KEY=...
 
 # Local development only. Never enable this in deployment.
-BOTHESIS_ALLOW_INSECURE_DEV_IDENTITY=true
+BOMESH_ALLOW_INSECURE_DEV_IDENTITY=true
 ```
 
 Integration credentials are encrypted before they are written to
@@ -120,7 +120,7 @@ LANGFUSE_SECRET_KEY=...
 LANGFUSE_PUBLIC_KEY=...
 LANGFUSE_BASE_URL=https://cloud.langfuse.com
 LANGFUSE_TRACING_ENVIRONMENT=development
-OTEL_SERVICE_NAME=bothesis-api
+OTEL_SERVICE_NAME=bomesh-api
 ```
 
 Both Langfuse keys are required. Keep trace retention and access policies

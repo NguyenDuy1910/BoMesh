@@ -30,7 +30,7 @@ export function AuthorizationWaiting({
       />
       <strong>Finish signing in to {providerName}</strong>
       <p>
-        A separate window is open for that. {providerName} decides what BoThesis
+        A separate window is open for that. {providerName} decides what BoMesh
         may read — nothing is connected here until it says so.
       </p>
       <div className="knowledge-waiting__actions">

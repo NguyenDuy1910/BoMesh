@@ -1,3 +1,3 @@
 abstract final class AppBrand {
-  static const productName = 'BoThesis';
+  static const productName = 'BoMesh';
 }

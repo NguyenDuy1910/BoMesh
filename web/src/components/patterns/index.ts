@@ -1,5 +1,5 @@
 /**
- * WA 00 — the BoThesis patterns.
+ * WA 00 — the BoMesh patterns.
  *
  * Everything the Workspace Architecture introduced, in one place. These bind
  * to the semantic tokens in tokens.css and never to a raw value, so a change

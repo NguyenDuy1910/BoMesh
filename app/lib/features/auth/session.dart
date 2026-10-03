@@ -65,7 +65,7 @@ class SessionController extends ChangeNotifier {
   final ApiClient api;
   final FlutterSecureStorage _storage;
   String get _storageKey =>
-      'bothesis.session.${Uri.encodeComponent(api.baseUrl)}';
+      'bomesh.session.${Uri.encodeComponent(api.baseUrl)}';
   AuthSession? session;
   bool restoring = true;
   bool busy = false;

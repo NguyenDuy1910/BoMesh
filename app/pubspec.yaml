@@ -1,5 +1,5 @@
-name: bothesis
-description: Enterprise Agent mobile knowledge and BI assistant.
+name: bomesh
+description: BoMesh mobile knowledge and BI assistant.
 publish_to: none
 version: 1.0.0+1
 
@@ -28,4 +28,4 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/bothesis-logo.png
+    - assets/bomesh-logo.png

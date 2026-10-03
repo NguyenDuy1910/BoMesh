@@ -499,7 +499,7 @@ function AccountLookupResult({
   const { copy, copied } = useClipboard();
 
   if (lookup.state === "idle") {
-    return <p className="text-[length:var(--text-size-meta)] text-[var(--text-tertiary)]">Enter the email they sign in with. They need a BoThesis account.</p>;
+    return <p className="text-[length:var(--text-size-meta)] text-[var(--text-tertiary)]">Enter the email they sign in with. They need a BoMesh account.</p>;
   }
   if (lookup.state === "checking") {
     return <Skeleton className="h-[3.75rem] w-full rounded-[var(--radius-md)]" />;
@@ -511,7 +511,7 @@ function AccountLookupResult({
     return (
       <div className="grid gap-2 rounded-[var(--radius-md)] border border-dashed border-[var(--border-default)] px-3 py-3">
         <p className="text-[length:var(--text-size-ui)] text-[var(--text-primary)]">
-          No BoThesis account uses <strong>{lookup.email}</strong>.
+          No BoMesh account uses <strong>{lookup.email}</strong>.
         </p>
         <p className="text-[length:var(--text-size-meta)] text-[var(--text-secondary)]">
           Send them the sign-up link, then add them here once they have an account.

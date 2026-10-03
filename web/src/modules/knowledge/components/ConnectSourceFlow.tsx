@@ -72,7 +72,7 @@ function submitted(
 /**
  * Connecting a source, in the two decisions it actually is.
  *
- * **Connect the account** proves who BoThesis may read as. **Choose knowledge**
+ * **Connect the account** proves who BoMesh may read as. **Choose knowledge**
  * decides what it reads. They are separate because they have different
  * lifetimes: an account is authorized once and then feeds any number of spaces
  * or drives, and adding the fifth one must not send anyone back through a
@@ -494,7 +494,7 @@ export function ConnectSourceFlow({
             {usesAuthorization ? (
               <p className="knowledge-setup__confirmed">
                 You will sign in to {capability?.provider_display_name ?? connector.name} in a
-                new window. {connector.name} decides what BoThesis may read, and the sign-in
+                new window. {connector.name} decides what BoMesh may read, and the sign-in
                 never reaches this page.
               </p>
             ) : (

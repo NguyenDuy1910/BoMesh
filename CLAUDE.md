@@ -1,6 +1,6 @@
-# Enterprise Agent Claude Instructions
+# BoMesh Claude Instructions
 
-Enterprise Agent is an enterprise knowledge and BI assistant.
+BoMesh is an enterprise knowledge and BI assistant.
 
 ## Default behavior
 - Keep changes simple and local.

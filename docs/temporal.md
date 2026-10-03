@@ -1,6 +1,6 @@
 # Temporal runtime
 
-Enterprise Agent uses Temporal as the durable runtime for the single end-to-end
+BoMesh uses Temporal as the durable runtime for the single end-to-end
 `IngestionWorkflow`. PostgreSQL stores connector and Item domain state; it does
 not mirror Workflow executions or schedules.
 
@@ -19,12 +19,12 @@ Run the API and worker as separate processes:
 ```bash
 cd backend
 uv run python main.py
-uv run python -m bothesis.services.workflow.worker
+uv run python -m bomesh.services.workflow.worker
 ```
 
-For Temporal Cloud, set `BOTHESIS_TEMPORAL_TARGET`,
-`BOTHESIS_TEMPORAL_NAMESPACE`, `BOTHESIS_TEMPORAL_API_KEY`, and
-`BOTHESIS_TEMPORAL_TLS=true`, and create the same Search Attributes in the
+For Temporal Cloud, set `BOMESH_TEMPORAL_TARGET`,
+`BOMESH_TEMPORAL_NAMESPACE`, `BOMESH_TEMPORAL_API_KEY`, and
+`BOMESH_TEMPORAL_TLS=true`, and create the same Search Attributes in the
 target namespace.
 
 ## Concurrency and retry behavior

@@ -47,10 +47,10 @@ async function open({ permissions = ["tenant.read", "knowledge.read"], theme = "
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   await context.addInitScript(
     ([s, t, chats]) => {
-      sessionStorage.setItem("bothesis.auth.session", s);
-      localStorage.setItem("bothesis-theme", t);
+      sessionStorage.setItem("bomesh.auth.session", s);
+      localStorage.setItem("bomesh-theme", t);
       if (chats) {
-        for (const key of ["bothesis-conversations:u:t1", "bothesis-conversations:duy.nguyen@enterprise.ai:t1"]) {
+        for (const key of ["bomesh-conversations:u:t1", "bomesh-conversations:duy.nguyen@enterprise.ai:t1"]) {
           localStorage.setItem(key, chats);
         }
       }

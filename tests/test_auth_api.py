@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 import api.app as api_app
 from api.routers import PasswordSessionCreate
 from api.routers.auth import _session_response
-from bothesis.services import AuthenticationSession
+from bomesh.services import AuthenticationSession
 
 
 def test_session_response_includes_bearer_token_type() -> None:

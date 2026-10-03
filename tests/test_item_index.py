@@ -10,9 +10,9 @@ from qdrant_client import models as qmodels
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
-import bothesis.document_index._qdrant as qdrant_module
-from bothesis.document_index import INDEX_SCHEMA_VERSION, ItemIndex
-from bothesis.document_index._qdrant import _QdrantBackend
+import bomesh.document_index._qdrant as qdrant_module
+from bomesh.document_index import INDEX_SCHEMA_VERSION, ItemIndex
+from bomesh.document_index._qdrant import _QdrantBackend
 
 
 class RecordingClient:

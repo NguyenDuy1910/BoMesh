@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from api.deps import Caller, KnowledgeView
 from api.routers import Collection, Document, DocumentStatus, KnowledgeHomeResponse
-from bothesis.services.document_presentation import public_document_status
+from bomesh.services.document_presentation import public_document_status
 
 
 class KnowledgeDocumentViewer(BaseModel):

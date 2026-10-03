@@ -18,7 +18,7 @@ const NAV_BREAKPOINT = "(max-width: 1023.98px)";
  * workspace settings, which is what a person expects from one product.
  */
 export function useShellNav() {
-  const [collapsed, setCollapsed] = useLocalStorage("bothesis-nav-collapsed", false);
+  const [collapsed, setCollapsed] = useLocalStorage("bomesh-nav-collapsed", false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isNarrow, setIsNarrow] = useState(false);
 

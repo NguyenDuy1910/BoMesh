@@ -22,7 +22,7 @@ export interface AuthSession {
   platform_permissions: string[];
 }
 
-const storageKey = "bothesis.auth.session";
+const storageKey = "bomesh.auth.session";
 
 /**
  * Keep the browser's navigation decisions aligned with the authorization

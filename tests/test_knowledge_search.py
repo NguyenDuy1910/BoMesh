@@ -12,17 +12,17 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
-from bothesis.agent.citation_stream import CitationProjection
-from bothesis.agent.models import AgentContext, CitationReferences
-from bothesis.agent.protocol import (
+from bomesh.agent.citation_stream import CitationProjection
+from bomesh.agent.models import AgentContext, CitationReferences
+from bomesh.agent.protocol import (
     ResponseOutputTextAnnotationAddedEvent,
     ResponseOutputTextDeltaEvent,
     ResponseOutputTextDoneEvent,
 )
-from bothesis.agent.protocol import FunctionTool
-from bothesis.agent.tools import ToolInvocation, ToolPayload, ToolRegistry
-from bothesis.agent.tools.knowledge_search import KnowledgeSearch
-from bothesis.connector.protocol import (
+from bomesh.agent.protocol import FunctionTool
+from bomesh.agent.tools import ToolInvocation, ToolPayload, ToolRegistry
+from bomesh.agent.tools.knowledge_search import KnowledgeSearch
+from bomesh.connector.protocol import (
     CitationInfo,
     CitationSpan,
     EffectiveAccess,
@@ -30,8 +30,8 @@ from bothesis.connector.protocol import (
     SourceIdentity,
     SourceProvider,
 )
-from bothesis.document_index import ChunkContext, ContextualChunk, ItemIndex
-from bothesis.knowledge import (
+from bomesh.document_index import ChunkContext, ContextualChunk, ItemIndex
+from bomesh.knowledge import (
     CitationResolver,
     Evidence,
     EvidenceContextBuilder,

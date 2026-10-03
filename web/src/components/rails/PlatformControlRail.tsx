@@ -12,7 +12,7 @@ import { PlatformContextMenu } from "./PlatformContextMenu";
 /**
  * Mode 3 — the Platform control rail.
  *
- * A separate control plane for platform operators. It names BoThesis rather than a
+ * A separate control plane for platform operators. It names BoMesh rather than a
  * workspace and sits on a different surface, so it can never be mistaken for
  * Workspace control. This is the only rail that speaks in tenants.
  */

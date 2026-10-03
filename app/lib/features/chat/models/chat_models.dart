@@ -522,7 +522,7 @@ class ChatTurnState {
   }
 
   List<AnswerSource> get sources {
-    const citationType = 'bothesis:document_citation';
+    const citationType = 'bomesh:document_citation';
     final result = <String, AnswerSource>{};
     final order = <String>[];
     for (final ordered in orderedItems) {
@@ -561,7 +561,7 @@ class ChatTurnState {
       if (entry.item.type != 'message') continue;
       for (final part in entry.item.content) {
         for (final annotation in part.annotations) {
-          if (annotation['type'] == 'bothesis:artifact') {
+          if (annotation['type'] == 'bomesh:artifact') {
             add(annotation['artifact']);
           }
         }

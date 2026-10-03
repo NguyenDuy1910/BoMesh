@@ -5,10 +5,10 @@ import Link from "next/link";
 export function GlobalAssistantLauncher() {
   return (
     <Link
-      aria-label="Ask BoThesis"
+      aria-label="Ask BoMesh"
       className="global-assistant-launcher"
       href="/app"
-      title="Ask BoThesis"
+      title="Ask BoMesh"
     >
       <Bot aria-hidden="true" className="h-5 w-5" />
       <span aria-hidden="true" />

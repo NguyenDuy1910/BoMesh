@@ -1,6 +1,6 @@
 # Getting started
 
-This guide prepares a local Enterprise Agent environment for backend, WebUI, and
+This guide prepares a local BoMesh environment for backend, WebUI, and
 connector development.
 
 ## Prerequisites
@@ -12,7 +12,7 @@ connector development.
 - [Bun](https://bun.sh/) to run the WebUI
 - An OpenAI API key for chat and an OpenRouter API key for document vision and embeddings
 
-The Flutter app under `app/bothesis/` is optional. It needs a current Flutter
+The Flutter app under `app/bomesh/` is optional. It needs a current Flutter
 SDK only when you are working on the mobile client.
 
 ## Initialize the local stack
@@ -78,7 +78,7 @@ bun run web
 
 The WebUI loads its public configuration from the same root `.env`. The API
 accepts the development identity only while
-`BOTHESIS_ALLOW_INSECURE_DEV_IDENTITY=true`; it is not an authentication
+`BOMESH_ALLOW_INSECURE_DEV_IDENTITY=true`; it is not an authentication
 mechanism for deployment.
 
 ## Local service endpoints
