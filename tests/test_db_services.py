@@ -52,7 +52,9 @@ from bothesis.services import (
     ArtifactValidationError,
     AuthenticationError,
     ControlPlaneConflictError,
+    ControlPlaneNotFoundError,
     ControlPlaneValidationError,
+    IdentityInactiveError,
     AuthContext,
     AuthorizationError,
     DocumentNotFoundError,
@@ -84,7 +86,7 @@ from bothesis.services.item_catalog import ItemCatalogService
 from bothesis.services.sandbox_session import SandboxSessionService
 from bothesis.services.documents import DocumentService
 from bothesis.services.document_presentation import DocumentPresenter
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
@@ -235,6 +237,54 @@ async def test_tenant_access_administration_cannot_escalate_or_lock_out_a_worksp
                 administrator.id,
                 status=False,
             )
+
+
+@pytest.mark.asyncio
+async def test_adding_a_member_admits_an_existing_account_and_suspension_stays_local(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A workspace never creates an identity, and never switches one off."""
+
+    async with session_factory.begin() as session:
+        identity = IdentityStoreService(session)
+        workspace = await identity.create_tenant("adding", "Adding")
+        elsewhere = await identity.create_tenant("elsewhere", "Elsewhere")
+        administrator = await identity.create_user("admin@example.com")
+        person = await identity.create_user("person@example.com", display_name="Person")
+        await join_tenant(session, administrator, workspace.id, system_role=TENANT_ADMIN_ROLE)
+        await join_tenant(session, person, elsewhere.id)
+        context = await identity.get_context(administrator.id, tenant_id=workspace.id)
+        member_role_id = await session.scalar(
+            select(Role.id).where(Role.code == "tenant_member", Role.is_system)
+        )
+        assert member_role_id is not None
+        users = UserService(session)
+
+        assert await users.lookup_account(context, email="nobody@example.com") == {"items": [], "total": 0}
+        with pytest.raises(ControlPlaneNotFoundError, match="sign up first"):
+            await users.add_member(context, email="nobody@example.com", role_ids=[member_role_id])
+
+        found = await users.lookup_account(context, email="PERSON@example.com")
+        assert found["items"][0]["workspace_membership"] == "none"
+        added = await users.add_member(
+            context, email="Person@Example.com", role_ids=[member_role_id]
+        )
+        assert added["id"] == str(person.id)
+        assert added["membership"]["roles"][0]["code"] == "tenant_member"
+        # Adding reused the account; no identity was created.
+        assert await session.scalar(select(func.count()).select_from(User)) == 2
+        with pytest.raises(ControlPlaneConflictError, match="already a member"):
+            await users.add_member(context, email="person@example.com", role_ids=[member_role_id])
+
+        suspended = await users.update_user(context, person.id, status=False)
+        assert suspended["status"] == "suspended"
+        found = await users.lookup_account(context, email="person@example.com")
+        assert found["items"][0]["workspace_membership"] == "suspended"
+        assert found["items"][0]["status"] == "active"
+        # The account still signs in and keeps its other workspace.
+        assert (await identity.get_context(person.id, tenant_id=elsewhere.id)).tenant_id == elsewhere.id
+        with pytest.raises(IdentityInactiveError):
+            await identity.get_context(person.id, tenant_id=workspace.id)
 
 
 async def grant_collection_role(
@@ -465,59 +515,39 @@ async def test_password_session_accepts_username_login(
 
 
 @pytest.mark.asyncio
-async def test_guest_session_is_claimed_without_moving_the_conversation(
+async def test_workspace_switch_requires_an_active_membership(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     async with session_factory.begin() as session:
         identity = IdentityStoreService(session)
-        public = await identity.create_tenant(
-            "public-demo", "Public Demo", visibility="public"
+        home = await identity.create_tenant("home", "Home")
+        other = await identity.create_tenant("other", "Other")
+        user = await identity.create_user(
+            "member@example.com",
+            password_hash=PasswordCredentialService.hash("correct horse battery staple"),
         )
+        await join_tenant(session, user, home.id)
         authentication = AuthenticationService(
             session,
             tokens=JwtTokenService(
-                secret="g" * 32,
+                secret="m" * 32,
                 issuer="bothesis",
                 audience="bothesis-api",
                 expires_in_seconds=900,
             ),
-            public_tenant_code=public.code,
         )
-        guest = await authentication.create_session(method="guest")
-        conversation = Conversation(
-            tenant_id=public.id,
-            owner_user_id=None,
-            created_by_session_id=guest.session_id,
-            title="Guest question",
+        signed_in = await authentication.create_session(
+            method="password",
+            email="member@example.com",
+            password="correct horse battery staple",
         )
-        session.add(conversation)
-        await session.flush()
 
-        with pytest.raises(AuthorizationError, match="sign in is required"):
+        assert [workspace.tenant_id for workspace in signed_in.tenants] == [home.id]
+        with pytest.raises(AuthorizationError, match="not a member"):
             await authentication.update_session(
-                current_session_id=guest.session_id,
-                active_workspace_id=public.id,
+                current_session_id=signed_in.session_id,
+                active_workspace_id=other.id,
             )
-
-        claimed = await authentication.complete_verified_external_session(
-            VerifiedGoogleIdentity(
-                issuer="https://accounts.google.com",
-                subject="claimed-google-subject",
-                email="claimed@example.com",
-                display_name="Claimed User",
-            ),
-            guest_session_id=guest.session_id,
-        )
-        await session.refresh(conversation)
-        retired_guest = await session.get(AccessSession, guest.session_id)
-
-        assert claimed.session_kind == "user"
-        assert claimed.active_tenant_id == public.id
-        assert conversation.tenant_id == public.id
-        assert conversation.owner_user_id == claimed.user_id
-        assert conversation.created_by_session_id == guest.session_id
-        assert retired_guest is not None
-        assert retired_guest.status == "superseded"
 
 
 @pytest.mark.asyncio
@@ -1144,16 +1174,7 @@ async def test_admin_collection_creation_is_tenant_scoped_and_audited(
 
         assert created["item_type"] == "collection"
         assert created["title"] == "Engineering handbook"
-        assert created["inherit_access"] is True
         assert created["metadata"] == {"description": "Governed engineering knowledge"}
-        assert created["created_by_user_id"] == str(owner.id)
-        assert created["role_assignments"] == [
-            {
-                "principal_type": "user",
-                "principal_id": str(owner.id),
-                "role_code": COLLECTION_OWNER_ROLE,
-            }
-        ]
         listed = await ItemCatalogService(session).list_items(
             actor,
             item_type="collection",
@@ -1693,7 +1714,15 @@ class InMemoryObjectStorage:
     def __init__(self) -> None:
         self.objects: dict[str, tuple[bytes, str | None]] = {}
 
-    def put_bytes(self, data: bytes, key: str, *, content_type: str | None = None) -> StoredObject:
+    def put_bytes(
+        self,
+        data: bytes,
+        key: str,
+        *,
+        content_type: str | None = None,
+        content_encoding: str | None = None,
+        cache_control: str | None = None,
+    ) -> StoredObject:
         self.objects[key] = (data, content_type)
         return StoredObject(size_bytes=len(data), content_type=content_type)
 

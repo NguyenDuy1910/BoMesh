@@ -39,9 +39,7 @@ class ConversationService:
         normalized_content = content.strip()
         if not normalized_content:
             raise ValueError("message content must not be blank")
-        if access.tenant_id is None:
-            raise DocumentNotFoundError(f"conversation not found: {conversation_id}")
-        if access.session_id is None:
+        if access.tenant_id is None or access.user_id is None or access.session_id is None:
             raise DocumentNotFoundError(f"conversation not found: {conversation_id}")
         async with transaction_scope(self._session_factory) as session:
             now = datetime.now(UTC)
@@ -249,12 +247,6 @@ def _title(content: str) -> str:
 def _can_access(conversation: Conversation, access: AuthContext) -> bool:
     if conversation.tenant_id != access.tenant_id or conversation.status != "active":
         return False
-    if access.is_guest:
-        return (
-            access.session_id is not None
-            and conversation.created_by_session_id == access.session_id
-            and conversation.owner_user_id is None
-        )
     return access.user_id is not None and conversation.owner_user_id == access.user_id
 
 

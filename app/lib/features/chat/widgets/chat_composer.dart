@@ -3,23 +3,20 @@ import 'dart:async';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
-import '../../../app/app_brand.dart';
 import '../../../app/app_theme.dart';
-import '../models/chat_models.dart';
 import '../services/chat_service.dart';
 import '../state/chat_controller.dart';
+import 'document_picker.dart';
 
 class ChatComposer extends StatefulWidget {
   const ChatComposer({super.key, required this.controller});
-
   final ChatController controller;
-
   @override
   State<ChatComposer> createState() => _ChatComposerState();
 }
 
 class _ChatComposerState extends State<ChatComposer> {
-  static const _extensions = <String>[
+  static const _extensions = [
     'avif',
     'bmp',
     'csv',
@@ -49,44 +46,78 @@ class _ChatComposerState extends State<ChatComposer> {
     'yaml',
     'yml',
   ];
-
   final _textController = TextEditingController();
   final _focusNode = FocusNode();
+  int _draftRevision = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _draftRevision = widget.controller.draftRevision;
+    _textController.text = widget.controller.draftText;
+    widget.controller.addListener(_syncDraft);
+    _focusNode.addListener(_focusChanged);
+  }
+
+  void _focusChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _syncDraft() {
+    if (!mounted || _draftRevision == widget.controller.draftRevision) return;
+    _draftRevision = widget.controller.draftRevision;
+    final value = widget.controller.draftText;
+    _textController.value = TextEditingValue(
+      text: value,
+      selection: TextSelection.collapsed(offset: value.length),
+    );
+    if (value.isNotEmpty) _focusNode.requestFocus();
+    setState(() {});
+  }
 
   @override
   void dispose() {
+    widget.controller.removeListener(_syncDraft);
+    _focusNode.removeListener(_focusChanged);
     _textController.dispose();
     _focusNode.dispose();
     super.dispose();
   }
 
-  Future<void> _send() async {
+  void _send() {
     final value = _textController.text;
     if (!widget.controller.canSend(value)) return;
     _textController.clear();
+    FocusManager.instance.primaryFocus?.unfocus();
     setState(() {});
     unawaited(widget.controller.sendMessage(value));
   }
 
   Future<void> _pickFiles() async {
-    final remaining = 12 - widget.controller.attachments.length;
-    if (remaining <= 0) return;
-    final result = await FilePicker.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: _extensions,
-    );
-    if (result.isEmpty) return;
-    for (final file in result.take(remaining)) {
-      try {
+    final conversationId = widget.controller.conversationId;
+    try {
+      final result = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: _extensions,
+      );
+      if (!mounted || conversationId != widget.controller.conversationId) {
+        return;
+      }
+      for (final file in result) {
+        if (widget.controller.attachments.length >= 10) break;
         final bytes = await file.readAsBytes();
+        if (!mounted || conversationId != widget.controller.conversationId) {
+          return;
+        }
         unawaited(
           widget.controller.addAttachment(fileName: file.name, bytes: bytes),
         );
-      } catch (_) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Could not read ${file.name}.')));
+      }
+    } catch (cause) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not read the file: $cause')),
+        );
       }
     }
   }
@@ -95,180 +126,180 @@ class _ChatComposerState extends State<ChatComposer> {
   Widget build(BuildContext context) {
     final controller = widget.controller;
     final colors = context.colors;
-    final horizontal = MediaQuery.sizeOf(context).width < 600 ? 12.0 : 24.0;
+    final compact = MediaQuery.sizeOf(context).width < 600;
     return SafeArea(
       top: false,
-      minimum: EdgeInsets.fromLTRB(horizontal, 8, horizontal, 8),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 864),
-            child: AnimatedContainer(
-              duration: MediaQuery.disableAnimationsOf(context)
-                  ? Duration.zero
-                  : const Duration(milliseconds: 160),
-              decoration: BoxDecoration(
-                color: colors.surface,
-                borderRadius: BorderRadius.circular(22),
-                border: Border.all(
-                  color: _focusNode.hasFocus ? colors.brand : colors.border,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(
-                      alpha: Theme.of(context).brightness == Brightness.dark
-                          ? 0.34
-                          : 0.07,
-                    ),
-                    blurRadius: 28,
-                    offset: const Offset(0, 8),
-                  ),
-                ],
+      minimum: EdgeInsets.fromLTRB(compact ? 12 : 24, 8, compact ? 12 : 24, 8),
+      child: Center(
+        heightFactor: 1,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 864),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: colors.surface,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: _focusNode.hasFocus ? colors.brand : colors.border,
               ),
-              padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (controller.selectedConnectorIds.isNotEmpty &&
-                      controller.connectorMode == ChatConnectorMode.selected)
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Padding(
-                        padding: const EdgeInsets.only(bottom: 7),
-                        child: Wrap(
-                          spacing: 6,
-                          runSpacing: 6,
-                          children: controller.selectedConnectors
-                              .map(
-                                (connector) => InputChip(
-                                  avatar: const Icon(
-                                    Icons.extension_outlined,
-                                    size: 15,
+                  if (controller.hasUnavailableScope)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'A selected collection is unavailable. Choose a new scope before sending.',
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(color: colors.danger),
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: controller.clearCollections,
+                            child: const Text('Clear'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  if (controller.selectedCollections.isNotEmpty)
+                    SizedBox(
+                      height: 48,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: controller.selectedCollections.length,
+                        separatorBuilder: (_, _) => const SizedBox(width: 8),
+                        itemBuilder: (_, index) {
+                          final collection =
+                              controller.selectedCollections[index];
+                          return InputChip(
+                            avatar: const Icon(Icons.folder_outlined, size: 18),
+                            label: ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 190),
+                              child: Text(
+                                collection.title,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            onDeleted: controller.isGenerating
+                                ? null
+                                : () => controller.toggleCollection(
+                                    collection.id,
                                   ),
-                                  label: Text(connector.displayName),
-                                  onDeleted: () =>
-                                      controller.toggleConnector(connector.id),
-                                  visualDensity: VisualDensity.compact,
-                                ),
-                              )
-                              .toList(),
-                        ),
+                          );
+                        },
                       ),
                     ),
                   if (controller.attachments.isNotEmpty)
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Padding(
-                        padding: const EdgeInsets.only(bottom: 7),
-                        child: Wrap(
-                          spacing: 6,
-                          runSpacing: 6,
-                          children: controller.attachments
-                              .map(
-                                (attachment) => _AttachmentChip(
-                                  attachment: attachment,
-                                  onRemove: () => controller.removeAttachment(
-                                    attachment.key,
-                                  ),
-                                ),
-                              )
-                              .toList(),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 148),
+                      child: ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: controller.attachments.length,
+                        itemBuilder: (_, index) => _AttachmentRow(
+                          controller: controller,
+                          attachment: controller.attachments[index],
                         ),
                       ),
                     ),
-                  Semantics(
-                    label: 'Message assistant',
-                    textField: true,
-                    child: TextField(
-                      controller: _textController,
-                      focusNode: _focusNode,
-                      enabled: controller.isConfigured,
-                      minLines: 1,
-                      maxLines: 6,
-                      textCapitalization: TextCapitalization.sentences,
-                      keyboardType: TextInputType.multiline,
-                      onChanged: (_) => setState(() {}),
-                      onTap: () => setState(() {}),
-                      decoration: const InputDecoration(
-                        hintText: 'Ask about your company knowledge…',
-                        filled: false,
-                        border: InputBorder.none,
-                        enabledBorder: InputBorder.none,
-                        focusedBorder: InputBorder.none,
-                        contentPadding: EdgeInsets.fromLTRB(3, 2, 3, 8),
-                      ),
-                      style: Theme.of(context).textTheme.bodyLarge,
+                  TextField(
+                    controller: _textController,
+                    focusNode: _focusNode,
+                    enabled: controller.isConfigured && !controller.isLoading,
+                    minLines: 1,
+                    maxLines: compact ? 4 : 6,
+                    maxLength: 4000,
+                    textCapitalization: TextCapitalization.sentences,
+                    keyboardType: TextInputType.multiline,
+                    onChanged: (_) => setState(() {}),
+                    decoration: InputDecoration(
+                      labelText: 'Ask your knowledge assistant',
+                      floatingLabelBehavior: FloatingLabelBehavior.never,
+                      hintText: 'Ask a question or describe a document…',
+                      filled: false,
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                      counterText: _textController.text.length > 3500
+                          ? '${_textController.text.length}/4000'
+                          : '',
                     ),
+                    style: Theme.of(context).textTheme.bodyLarge,
                   ),
                   Row(
                     children: [
-                      _ComposerTool(
-                        tooltip: 'Attach files',
-                        icon: Icons.attach_file_rounded,
-                        label: 'Attach',
-                        enabled:
+                      IconButton(
+                        tooltip: 'Upload attachment',
+                        onPressed:
                             controller.isConfigured &&
-                            controller.attachments.length < 12,
-                        onTap: _pickFiles,
+                                !controller.isGenerating &&
+                                controller.attachments.length < 10
+                            ? _pickFiles
+                            : null,
+                        icon: const Icon(Icons.attach_file_rounded),
                       ),
-                      const SizedBox(width: 4),
-                      _ComposerTool(
-                        tooltip: 'Choose knowledge sources',
-                        icon: Icons.extension_outlined,
-                        label: _sourceLabel(controller),
-                        enabled:
-                            controller.isConfigured && !controller.isGenerating,
-                        onTap: () => _showSourcePicker(context),
+                      IconButton(
+                        tooltip: 'Find an existing document',
+                        onPressed:
+                            controller.isConfigured &&
+                                !controller.isGenerating &&
+                                controller.attachments.length < 10
+                            ? () => showModalBottomSheet<void>(
+                                context: context,
+                                isScrollControlled: true,
+                                useSafeArea: true,
+                                builder: (_) =>
+                                    DocumentPicker(controller: controller),
+                              )
+                            : null,
+                        icon: const Icon(Icons.find_in_page_outlined),
+                      ),
+                      IconButton(
+                        tooltip: controller.selectedCollectionIds.isEmpty
+                            ? 'Search all permitted collections'
+                            : '${controller.selectedCollectionIds.length} collections selected',
+                        onPressed:
+                            controller.isConfigured && !controller.isGenerating
+                            ? () => showModalBottomSheet<void>(
+                                context: context,
+                                isScrollControlled: true,
+                                useSafeArea: true,
+                                builder: (_) =>
+                                    _CollectionPicker(controller: controller),
+                              )
+                            : null,
+                        color: controller.selectedCollectionIds.isEmpty
+                            ? colors.textSecondary
+                            : colors.brand,
+                        icon: const Icon(Icons.folder_outlined),
                       ),
                       const Spacer(),
-                      if (MediaQuery.sizeOf(context).width >= 700)
+                      if (!compact)
                         Padding(
-                          padding: const EdgeInsets.only(right: 10),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.shield_outlined,
-                                size: 14,
-                                color: colors.brand,
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                'Permission-aware',
-                                style: Theme.of(context).textTheme.labelSmall
-                                    ?.copyWith(color: colors.brand),
-                              ),
-                            ],
+                          padding: const EdgeInsets.only(right: 12),
+                          child: Text(
+                            'Permission-aware',
+                            style: Theme.of(context).textTheme.labelSmall,
                           ),
                         ),
-                      SizedBox(
-                        width: 44,
-                        height: 44,
-                        child: IconButton.filled(
-                          tooltip: controller.isGenerating
-                              ? 'Stop generating'
-                              : 'Send message',
-                          onPressed: controller.isGenerating
-                              ? controller.stop
-                              : controller.canSend(_textController.text)
-                              ? _send
-                              : null,
-                          style: IconButton.styleFrom(
-                            backgroundColor: controller.isGenerating
-                                ? colors.textPrimary
-                                : colors.brand,
-                            foregroundColor: controller.isGenerating
-                                ? colors.surface
-                                : colors.onBrand,
-                            disabledBackgroundColor: colors.subtle,
-                            disabledForegroundColor: colors.textMuted,
-                          ),
-                          icon: Icon(
-                            controller.isGenerating
-                                ? Icons.stop_rounded
-                                : Icons.arrow_upward_rounded,
-                            size: controller.isGenerating ? 18 : 20,
-                          ),
+                      IconButton.filled(
+                        tooltip: controller.isGenerating
+                            ? 'Stop response'
+                            : 'Send message',
+                        onPressed: controller.isGenerating
+                            ? controller.stop
+                            : controller.canSend(_textController.text)
+                            ? _send
+                            : null,
+                        icon: Icon(
+                          controller.isGenerating
+                              ? Icons.stop_rounded
+                              : Icons.arrow_upward_rounded,
                         ),
                       ),
                     ],
@@ -277,119 +308,75 @@ class _ChatComposerState extends State<ChatComposer> {
               ),
             ),
           ),
-          if (MediaQuery.sizeOf(context).width >= 600)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Text(
-                '${AppBrand.productName} can make mistakes. Verify important decisions with the cited sources.',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodySmall
-                    ?.copyWith(fontSize: 11),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _showSourcePicker(BuildContext context) async {
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      builder: (context) => _SourcePicker(controller: widget.controller),
-    );
-  }
-}
-
-class _ComposerTool extends StatelessWidget {
-  const _ComposerTool({
-    required this.tooltip,
-    required this.icon,
-    required this.label,
-    required this.enabled,
-    required this.onTap,
-  });
-
-  final String tooltip;
-  final IconData icon;
-  final String label;
-  final bool enabled;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final compact = MediaQuery.sizeOf(context).width < 480;
-    return Tooltip(
-      message: tooltip,
-      child: TextButton.icon(
-        onPressed: enabled ? onTap : null,
-        style: TextButton.styleFrom(
-          minimumSize: const Size(44, 44),
-          padding: EdgeInsets.symmetric(horizontal: compact ? 12 : 10),
-          foregroundColor: context.colors.textSecondary,
-          backgroundColor: context.colors.subtle,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-          ),
         ),
-        icon: Icon(icon, size: 17),
-        label: compact ? const SizedBox.shrink() : Text(label),
       ),
     );
   }
 }
 
-class _AttachmentChip extends StatelessWidget {
-  const _AttachmentChip({required this.attachment, required this.onRemove});
-
+class _AttachmentRow extends StatelessWidget {
+  const _AttachmentRow({required this.controller, required this.attachment});
+  final ChatController controller;
   final ComposerAttachment attachment;
-  final VoidCallback onRemove;
-
   @override
   Widget build(BuildContext context) {
     final active =
         attachment.progress != UploadProgress.ready &&
         attachment.progress != UploadProgress.failed;
-    final failed = attachment.progress == UploadProgress.failed;
-    return Container(
-      constraints: const BoxConstraints(maxWidth: 260),
-      decoration: BoxDecoration(
-        color: failed ? context.colors.dangerSoft : context.colors.subtle,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: failed ? context.colors.danger : context.colors.border,
+    final label =
+        attachment.error ??
+        switch (attachment.progress) {
+          UploadProgress.starting => 'Preparing upload…',
+          UploadProgress.uploading => 'Uploading…',
+          UploadProgress.validating => 'Checking content…',
+          UploadProgress.failed => 'Upload failed',
+          UploadProgress.ready =>
+            attachment.document?.isUpload == true
+                ? 'Attached to your next question'
+                : 'Existing document · never deleted by Chat',
+        };
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: active
+          ? const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : Icon(
+              attachment.progress == UploadProgress.failed
+                  ? Icons.error_outline
+                  : Icons.description_outlined,
+              color: attachment.error == null
+                  ? context.colors.brand
+                  : context.colors.danger,
+            ),
+      title: Text(
+        attachment.fileName,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      subtitle: Text(
+        label,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: attachment.error == null ? null : context.colors.danger,
         ),
       ),
-      padding: const EdgeInsets.only(left: 9),
-      child: Row(
+      trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (active)
-            const SizedBox(
-              width: 14,
-              height: 14,
-              child: CircularProgressIndicator(strokeWidth: 1.8),
-            )
-          else
-            Icon(
-              Icons.find_in_page_outlined,
-              size: 16,
-              color: failed ? context.colors.danger : context.colors.textMuted,
+          if (attachment.progress == UploadProgress.failed)
+            IconButton(
+              tooltip: 'Retry upload',
+              onPressed: () => controller.retryAttachment(attachment.key),
+              icon: const Icon(Icons.refresh),
             ),
-          const SizedBox(width: 6),
-          Flexible(
-            child: Text(
-              attachment.fileName,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.labelSmall,
-            ),
-          ),
           IconButton(
-            tooltip: 'Remove ${attachment.fileName}',
-            onPressed: onRemove,
-            visualDensity: VisualDensity.compact,
-            icon: const Icon(Icons.close_rounded, size: 15),
+            tooltip: 'Remove attachment',
+            onPressed: () => controller.removeAttachment(attachment.key),
+            icon: const Icon(Icons.close, size: 20),
           ),
         ],
       ),
@@ -397,135 +384,121 @@ class _AttachmentChip extends StatelessWidget {
   }
 }
 
-class _SourcePicker extends StatelessWidget {
-  const _SourcePicker({required this.controller});
-
+class _CollectionPicker extends StatefulWidget {
+  const _CollectionPicker({required this.controller});
   final ChatController controller;
-
   @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: controller,
-      builder: (context, _) => SafeArea(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.sizeOf(context).height * 0.72,
-          ),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 2, 20, 18),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Knowledge sources',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Choose what ${AppBrand.productName} may search for this conversation.',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-                const SizedBox(height: 14),
-                SizedBox(
-                  width: double.infinity,
-                  child: SegmentedButton<ChatConnectorMode>(
-                    showSelectedIcon: false,
-                    segments: const [
-                      ButtonSegment(
-                        value: ChatConnectorMode.auto,
-                        label: Text('Auto'),
-                      ),
-                      ButtonSegment(
-                        value: ChatConnectorMode.selected,
-                        label: Text('Selected'),
-                      ),
-                      ButtonSegment(
-                        value: ChatConnectorMode.off,
-                        label: Text('Off'),
-                      ),
-                    ],
-                    selected: <ChatConnectorMode>{controller.connectorMode},
-                    onSelectionChanged: (selection) =>
-                        controller.setConnectorMode(selection.first),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Text(switch (controller.connectorMode) {
-                  ChatConnectorMode.auto => 'Search every permitted source when it helps answer the question.',
-                  ChatConnectorMode.selected =>
-                    'Search only the sources selected below.',
-                  ChatConnectorMode.off =>
-                    'Answer without searching workspace knowledge.',
-                }, style: Theme.of(context).textTheme.bodySmall),
-                if (controller.connectorMode == ChatConnectorMode.selected) ...[
-                  const SizedBox(height: 10),
-                  Flexible(child: _ConnectorList(controller: controller)),
-                ],
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  State<_CollectionPicker> createState() => _CollectionPickerState();
 }
 
-class _ConnectorList extends StatelessWidget {
-  const _ConnectorList({required this.controller});
-
-  final ChatController controller;
-
+class _CollectionPickerState extends State<_CollectionPicker> {
+  String _query = '';
   @override
-  Widget build(BuildContext context) {
-    if (controller.connectorsLoading) {
-      return const Center(child: CircularProgressIndicator(strokeWidth: 2));
-    }
-    if (controller.connectorsError case final error?) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(error, textAlign: TextAlign.center),
-            const SizedBox(height: 8),
-            TextButton.icon(
-              onPressed: controller.loadConnectors,
-              icon: const Icon(Icons.refresh_rounded),
-              label: const Text('Reload'),
-            ),
-          ],
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: widget.controller,
+    builder: (context, _) {
+      final controller = widget.controller;
+      final values = controller.collections
+          .where(
+            (value) => value.title.toLowerCase().contains(_query.toLowerCase()),
+          )
+          .toList();
+      return Padding(
+        padding: EdgeInsets.fromLTRB(
+          20,
+          16,
+          20,
+          MediaQuery.viewInsetsOf(context).bottom + 16,
+        ),
+        child: SizedBox(
+          height: MediaQuery.sizeOf(context).height * 0.62,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Knowledge scope',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Close scope picker',
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+              const Text(
+                'Leave selections empty to search all knowledge you can access. Select up to 20 collections.',
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                decoration: const InputDecoration(
+                  labelText: 'Find a collection',
+                  prefixIcon: Icon(Icons.search),
+                ),
+                onChanged: (value) => setState(() => _query = value),
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: controller.collectionsLoading
+                    ? const Center(child: CircularProgressIndicator())
+                    : controller.collectionsError != null
+                    ? Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(controller.collectionsError!),
+                            TextButton.icon(
+                              onPressed: controller.loadCollections,
+                              icon: const Icon(Icons.refresh),
+                              label: const Text('Retry'),
+                            ),
+                          ],
+                        ),
+                      )
+                    : values.isEmpty
+                    ? const Center(child: Text('No collections found.'))
+                    : ListView.builder(
+                        itemCount: values.length,
+                        itemBuilder: (_, index) {
+                          final value = values[index];
+                          return CheckboxListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(value.title),
+                            value: controller.selectedCollectionIds.contains(
+                              value.id,
+                            ),
+                            onChanged:
+                                controller.selectedCollectionIds.length < 20 ||
+                                    controller.selectedCollectionIds.contains(
+                                      value.id,
+                                    )
+                                ? (_) => controller.toggleCollection(value.id)
+                                : null,
+                          );
+                        },
+                      ),
+              ),
+              Row(
+                children: [
+                  TextButton(
+                    onPressed: controller.clearCollections,
+                    child: const Text('Use all permitted'),
+                  ),
+                  const Spacer(),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Done'),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       );
-    }
-    if (controller.connectors.isEmpty) {
-      return const Center(child: Text('No permitted sources are available.'));
-    }
-    return ListView.builder(
-      shrinkWrap: true,
-      itemCount: controller.connectors.length,
-      itemBuilder: (context, index) {
-        final connector = controller.connectors[index];
-        return CheckboxListTile(
-          value: controller.selectedConnectorIds.contains(connector.id),
-          onChanged: (_) => controller.toggleConnector(connector.id),
-          controlAffinity: ListTileControlAffinity.trailing,
-          secondary: const Icon(Icons.extension_outlined),
-          title: Text(connector.displayName),
-          subtitle: connector.capabilities.isEmpty
-              ? null
-              : Text(connector.capabilities.join(' · ')),
-        );
-      },
-    );
-  }
+    },
+  );
 }
-
-String _sourceLabel(ChatController controller) =>
-    switch (controller.connectorMode) {
-      ChatConnectorMode.auto => 'Auto',
-      ChatConnectorMode.off => 'Off',
-      ChatConnectorMode.selected =>
-        controller.selectedConnectorIds.isEmpty
-            ? 'Select'
-            : '${controller.selectedConnectorIds.length}',
-    };

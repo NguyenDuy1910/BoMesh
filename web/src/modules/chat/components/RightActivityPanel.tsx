@@ -62,6 +62,7 @@ export function RightActivityPanel({
         ) : (
           <KnowledgeDocumentPreview
             chunkId={activity.chunkId}
+            passageIds={activity.passageIds}
             // Keyed by document: two citations in one source reuse the loaded
             // viewer and just navigate, while another source starts clean.
             key={activity.itemId}

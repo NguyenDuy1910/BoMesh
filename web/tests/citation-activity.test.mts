@@ -32,6 +32,7 @@ function source(overrides: Partial<AnswerSource> = {}): AnswerSource {
     internalUrl: "/knowledge/documents/item-1?chunk=item-1%3A12",
     used: true,
     spans: [],
+    passages: [],
     ...overrides,
   };
 }
@@ -75,6 +76,7 @@ test("a citation becomes a knowledge document activity without copying the sourc
     citationId: "source-a1b2c3d4",
     itemId: "item-1",
     chunkId: "item-1:12",
+    passageIds: [],
     title: "Lesson 3.pdf",
     page: 7,
   });

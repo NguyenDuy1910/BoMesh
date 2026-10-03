@@ -53,6 +53,21 @@ export interface Member {
 
 export type MemberStatus = "active" | "inactive" | "suspended";
 
+/** An existing account found by its exact email (OpenAPI `Account`). */
+export interface Account {
+  id: string;
+  email: string;
+  display_name: string | null;
+  status: "active" | "disabled";
+  workspace_membership: "none" | "active" | "suspended";
+}
+
+export interface GroupMember {
+  id: string;
+  email: string;
+  display_name: string | null;
+}
+
 export interface Group {
   [key: string]: unknown;
   id: string;
@@ -62,6 +77,8 @@ export interface Group {
   description: string | null;
   status: string;
   member_count: number;
+  /** Present on a single-group read; lists leave it empty. */
+  members?: GroupMember[];
   created_at: string;
   updated_at: string;
 }
@@ -144,40 +161,88 @@ export const workspaceDirectoryApi = {
     invalidateApiData();
     return saved;
   },
-  async createMember(input: {
-    email: string;
-    display_name?: string | null;
-    role_ids: string[];
-    group_ids?: string[];
-  }) {
-    const created = await controlPlaneRequest<Member>("/users", {
+  /** The account one exact email names, and its standing in this workspace. */
+  async lookupAccount(email: string, signal?: AbortSignal) {
+    const page = await controlPlaneRequest<{ items: Account[]; total: number }>(
+      `/accounts${queryString({ email })}`,
+      { signal },
+    );
+    return page.items[0] ?? null;
+  },
+  /** Give an existing account membership; identities are never created here. */
+  async addMember(input: { email: string; role_ids: string[]; group_ids?: string[] }) {
+    const added = await controlPlaneRequest<Member>("/users", {
       method: "POST",
       body: JSON.stringify({ group_ids: [], ...input }),
     });
     invalidateApiData();
-    return created;
+    return added;
   },
 
   groups: (search = "") =>
     controlPlaneRequest<Paginated<Group>>(`/groups${queryString({ page_size: ALL, search })}`),
-  async createGroup(input: { code: string; display_name: string; description?: string }) {
+  /** One group with its current members, for editing membership. */
+  group: (groupId: string) => controlPlaneRequest<Group>(`/groups/${groupId}`),
+  /** Groups are named by people; the server derives their internal code. */
+  async createGroup(input: { display_name: string; description?: string }, memberIds: string[] = []) {
     const created = await controlPlaneRequest<Group>("/groups", {
       method: "POST",
       body: JSON.stringify(input),
     });
+    if (memberIds.length) {
+      await controlPlaneRequest<Group>(`/groups/${created.id}/members`, {
+        method: "PUT",
+        body: JSON.stringify({ user_ids: memberIds }),
+      });
+    }
     invalidateApiData();
     return created;
+  },
+  /** Save what changed: the group's details, its members, or both. */
+  async saveGroup(
+    groupId: string,
+    changes: { details?: { display_name?: string; description?: string | null }; memberIds?: string[] },
+  ) {
+    if (changes.details && Object.keys(changes.details).length) {
+      await controlPlaneRequest<Group>(`/groups/${groupId}`, {
+        method: "PATCH",
+        body: JSON.stringify(changes.details),
+      });
+    }
+    if (changes.memberIds) {
+      await controlPlaneRequest<Group>(`/groups/${groupId}/members`, {
+        method: "PUT",
+        body: JSON.stringify({ user_ids: changes.memberIds }),
+      });
+    }
+    invalidateApiData();
+  },
+  async deleteGroup(groupId: string) {
+    await controlPlaneRequest<void>(`/groups/${groupId}`, { method: "DELETE" });
+    invalidateApiData();
   },
 
   roles: () => controlPlaneRequest<Paginated<Role>>(`/roles${queryString({ page_size: ALL })}`),
   permissions: () => controlPlaneRequest<{ items: Permission[]; total: number }>("/permissions"),
-  async createRole(input: { code: string; display_name: string; permission_codes: string[] }) {
+  /** Roles are named by people; the server derives their internal code. */
+  async createRole(input: { display_name: string; permission_codes: string[] }) {
     const created = await controlPlaneRequest<Role>("/roles", {
       method: "POST",
       body: JSON.stringify(input),
     });
     invalidateApiData();
     return created;
+  },
+  async updateRole(
+    roleId: string,
+    patch: { display_name?: string; permission_codes?: string[]; status?: "active" | "inactive" },
+  ) {
+    const saved = await controlPlaneRequest<Role>(`/roles/${roleId}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+    invalidateApiData();
+    return saved;
   },
 
   auditLogs: (search = "") =>

@@ -31,6 +31,7 @@ from bothesis.services import (
     KNOWLEDGE_READ_PERMISSION,
     AuthContext,
     require_tenant_permission,
+    require_user_identity,
 )
 from bothesis.services.identity_access.authorization import AuthorizationService
 from bothesis.services.conversation import ConversationService
@@ -95,7 +96,7 @@ class ChatService:
             attachments, access=access
         )
         context = AgentContext(
-            user_id=str(access.subject_id),
+            user_id=str(require_user_identity(access)),
             tenant_id=str(access.tenant_id),
             roles=list(access.role_codes),
             collection_item_ids=tuple(str(value) for value in selected_ids),
@@ -106,7 +107,6 @@ class ChatService:
                 for role, content in history
             ),
             allowed_tool_names=self._available_tool_names(
-                access=access,
                 resources_available=bool(attachment_resources or referenced_resources)
             ),
             resources=referenced_resources,
@@ -142,7 +142,7 @@ class ChatService:
             ),
             sandbox_runtime=(
                 self._sandbox_runtime(access, resolved_conversation_id, context.request_id or "")
-                if self._sandbox_runtime is not None and not access.is_guest
+                if self._sandbox_runtime is not None
                 else None
             ),
             is_disconnected=is_disconnected,
@@ -206,22 +206,13 @@ class ChatService:
             raise PermissionError("one or more selected Collections are unavailable")
         return tuple(dict.fromkeys(collection_item_ids))
 
-    def _available_tool_names(
-        self, *, access: AuthContext | None = None, resources_available: bool = True
-    ) -> tuple[str, ...]:
+    def _available_tool_names(self, *, resources_available: bool = True) -> tuple[str, ...]:
         """Expose the runtime's registered chat tools for this turn."""
 
-        if access is not None and access.is_guest:
-            return tuple(
-                name
-                for name, _ in self._agent.tools.executors()
-                if name in {"knowledge_search", "request_identity"}
-            )
         return tuple(
             name
             for name, _ in self._agent.tools.executors()
-            if name != "request_identity"
-            and (resources_available or name not in _RESOURCE_TOOL_NAMES)
+            if resources_available or name not in _RESOURCE_TOOL_NAMES
         )
 
 

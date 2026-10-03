@@ -52,9 +52,11 @@ available. Optional semantic contextualization adds a short chunk-specific
 description through the configured model and falls back safely to structural
 context when unavailable. The original `chunk_text` remains the evidence text.
 
-Qdrant executes dense and BM25 searches and combines candidates with native
-reciprocal-rank fusion. The `knowledge` package applies tenant, source,
-tombstone, and principal filters before reranking and evidence projection.
+Qdrant executes dense and BM25 searches for every query of a search in one
+request and combines all candidates with native reciprocal-rank fusion. The
+`knowledge` package applies tenant, source, tombstone, and principal filters
+before one LLM rerank, which acts as a relevance gate, and evidence projection.
+See `backend/docs_design/conversation_loop.md`.
 
 ## Access control
 

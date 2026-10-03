@@ -430,67 +430,23 @@
   padding: var(--space-5) var(--space-4) calc(var(--space-12) + var(--space-5));
 }
 
-/* ── Paper ─────────────────────────────────────────────────────────────────
-   A PDF page and a Word flow are the same reading column; only the PDF keeps
-   its sheet and its folio, because only the PDF's pagination is real. */
-.knowledge-paper {
-  max-width: 44rem;
+/* ── Original ──────────────────────────────────────────────────────────────
+   The real document: its page images, or its rendition as one reading column
+   (the shared `.doc-rendition` in globals.css). */
+.knowledge-stage-switch {
+  display: flex;
+  justify-content: center;
+  margin-bottom: var(--space-4);
+}
+
+.knowledge-viewer__stage .doc-rendition {
+  max-width: 48rem;
   margin-inline: auto;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-xs);
   background: var(--surface-base);
   padding: var(--space-8) var(--space-10);
   box-shadow: var(--elevation-1);
-  transform-origin: top center;
-}
-
-.knowledge-paper--flow {
-  border: 0;
-  padding: var(--space-6) var(--space-8);
-  box-shadow: none;
-}
-
-.knowledge-paper h3 {
-  margin: var(--space-5) 0 var(--space-2);
-  color: var(--text-primary);
-  font-size: var(--text-size-h3);
-  font-weight: 600;
-  line-height: var(--text-lh-h3);
-}
-
-.knowledge-paper h3:first-child {
-  margin-top: 0;
-}
-
-.knowledge-paper p {
-  margin-block: var(--space-3);
-  color: var(--text-secondary);
-  font-size: var(--text-size-ui);
-  line-height: 1.7;
-}
-
-.knowledge-paper__running-head {
-  margin: 0 0 var(--space-5);
-  border-bottom: 1px solid var(--border-subtle);
-  padding-bottom: var(--space-3);
-  color: var(--text-tertiary);
-  font-size: var(--text-size-caption);
-  letter-spacing: var(--text-tracking-caption);
-  text-align: center;
-}
-
-.knowledge-paper__label {
-  margin: var(--space-5) 0 0;
-  color: var(--text-tertiary);
-  font-size: var(--text-size-caption);
-  letter-spacing: var(--text-tracking-caption);
-}
-
-.knowledge-paper__folio {
-  margin-top: var(--space-8);
-  color: var(--text-tertiary);
-  font-size: var(--text-size-meta);
-  text-align: center;
 }
 
 .knowledge-paper__empty {
@@ -505,71 +461,6 @@
   background: var(--highlight-surface);
   box-shadow: 0 0 0 1px var(--highlight-border);
   color: inherit;
-}
-
-/* ── Sheet ─────────────────────────────────────────────────────────────────
-   A workbook shows cells as cells: what is readable here is exactly what the
-   agent indexed, so flattening it into prose would misrepresent it. */
-.knowledge-sheet {
-  display: flex;
-  max-width: 56rem;
-  flex-direction: column;
-  margin-inline: auto;
-  overflow: hidden;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--surface-base);
-}
-
-.knowledge-sheet__grid {
-  overflow-x: auto;
-}
-
-.knowledge-sheet table {
-  width: 100%;
-  min-width: 34rem;
-  border-collapse: collapse;
-  font-size: var(--text-size-ui);
-}
-
-.knowledge-sheet th,
-.knowledge-sheet td {
-  border-right: 1px solid var(--border-subtle);
-  border-bottom: 1px solid var(--border-subtle);
-  padding: var(--space-2) var(--space-3);
-  text-align: left;
-  white-space: nowrap;
-}
-
-.knowledge-sheet thead th {
-  background: var(--surface-inset);
-  color: var(--text-secondary);
-  font-weight: 500;
-}
-
-.knowledge-sheet thead th span {
-  margin-right: var(--space-2);
-  color: var(--text-tertiary);
-  font-weight: 400;
-}
-
-.knowledge-sheet tbody th {
-  width: 2.25rem;
-  background: var(--surface-inset);
-  color: var(--text-tertiary);
-  font-size: var(--text-size-meta);
-  font-weight: 400;
-  text-align: center;
-}
-
-.knowledge-sheet td {
-  color: var(--text-secondary);
-}
-
-.knowledge-sheet__tabs {
-  border-top: 1px solid var(--border-subtle);
-  background: var(--surface-inset);
-  padding: var(--space-1) var(--space-2);
 }
 
 /* ── Unsupported ───────────────────────────────────────────────────────────
@@ -2616,7 +2507,7 @@ html.dark .knowledge-app-icon {
 @media (max-width: 68.75rem) {
   .experience-layout { gap: 1.5rem; grid-template-columns: 1fr 1fr; }
   .document-split[data-mode="split"] { grid-template-columns: minmax(16rem, 21rem) minmax(0, 1fr); }
-  .knowledge-paper { padding: var(--space-6); }
+  .knowledge-viewer__stage .doc-rendition { padding: var(--space-6); }
 }
 
 @media (max-width: 34rem) {
@@ -2642,8 +2533,7 @@ html.dark .knowledge-app-icon {
   .knowledge-bar .tab-bar__end { justify-content: flex-start; }
   .knowledge-bar__search { order: -1; flex: 1 1 100%; }
   .knowledge-viewer__stage { margin-inline: 0; border-radius: 0; padding: var(--space-4) var(--space-3) var(--space-10); }
-  .knowledge-paper { min-height: 0; padding: var(--space-5); }
-  .knowledge-sheet table { min-width: 28rem; }
+  .knowledge-viewer__stage .doc-rendition { padding: var(--space-5); }
   .knowledge-details { top: 0; width: 100%; border-left: 0; border-radius: 0; }
   .chat-mobile-menu { display: grid; }
   .global-assistant-launcher { right: 1rem; bottom: max(5rem, calc(env(safe-area-inset-bottom) + 4rem)); }

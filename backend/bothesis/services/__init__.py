@@ -6,6 +6,8 @@ errors, and shared constants live here so callers use one stable boundary.
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
@@ -17,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from bothesis.integrations import PendingAuthorization
 
 from bothesis.connector.protocol import Chunk, DocumentItem
-from sqlalchemy import and_, false
+from sqlalchemy import false
 
 from bothesis.db.models import Conversation, Item, ItemUpload
 from bothesis.storage import PresignedRequest
@@ -224,7 +226,6 @@ PERMISSIONS_BY_CODE: dict[str, PermissionDefinition] = {
 PLATFORM_ADMIN_ROLE = "platform_admin"
 TENANT_ADMIN_ROLE = "tenant_admin"
 TENANT_MEMBER_ROLE = "tenant_member"
-GUEST_ROLE = "guest"
 COLLECTION_OWNER_ROLE = "collection_owner"
 COLLECTION_EDITOR_ROLE = "collection_editor"
 COLLECTION_VIEWER_ROLE = "collection_viewer"
@@ -269,16 +270,6 @@ SYSTEM_ROLES: tuple[RoleDefinition, ...] = (
         "Workspace Member",
         TENANT_SCOPE,
         (KNOWLEDGE_READ_PERMISSION, TENANT_READ_PERMISSION),
-    ),
-    RoleDefinition(
-        GUEST_ROLE,
-        "Guest",
-        TENANT_SCOPE,
-        (
-            COLLECTION_READ_PERMISSION,
-            KNOWLEDGE_READ_PERMISSION,
-            TENANT_READ_PERMISSION,
-        ),
     ),
     RoleDefinition(
         COLLECTION_OWNER_ROLE,
@@ -327,6 +318,8 @@ DEFAULT_PREVIEW_MAX_SOURCE_BYTES = 100 * 1024 * 1024
 DEFAULT_PREVIEW_MAX_PAGES = 50
 DEFAULT_PREVIEW_MAX_DIMENSION = 1_600
 DEFAULT_PREVIEW_WEBP_QUALITY = 80
+DOCUMENT_RENDITION_VERSION = "document-v1"
+DOCUMENT_RENDITION_CONTENT_TYPE = "application/vnd.bothesis.document+json"
 
 ARTIFACT_COLLECTION_KIND = "conversation_artifacts"
 ARTIFACT_COLLECTION_TITLE = "My documents"
@@ -428,29 +421,11 @@ class AuthContext:
     role_codes: tuple[str, ...] = ()
     platform_permissions: tuple[str, ...] = ()
     session_id: UUID | None = None
-    session_kind: Literal["guest", "user"] = "user"
     token_version: int = 1
 
     @property
     def is_enterprise_user(self) -> bool:
         return self.tenant_id is not None
-
-    @property
-    def is_guest(self) -> bool:
-        return self.session_kind == "guest"
-
-    @property
-    def is_user(self) -> bool:
-        return self.session_kind == "user" and self.user_id is not None
-
-    @property
-    def subject_id(self) -> UUID:
-        """Stable request actor key: durable User for members, session for guests."""
-
-        value = self.user_id or self.session_id
-        if value is None:
-            raise AuthorizationError("request identity has no subject")
-        return value
 
     def has_permissions(self, *permission_codes: str) -> bool:
         required = {_permission_code(code) for code in permission_codes}
@@ -466,14 +441,13 @@ class JwtClaims:
     """Signed access-token claims trusted at the HTTP authentication boundary."""
 
     session_id: UUID
-    user_id: UUID | None
+    user_id: UUID
     email: str | None
     active_tenant_id: UUID
     permissions: tuple[str, ...]
     issued_at: datetime
     expires_at: datetime
     platform_permissions: tuple[str, ...] = ()
-    session_kind: Literal["guest", "user"] = "user"
     token_version: int = 1
 
     def has_permission(self, permission_code: str) -> bool:
@@ -527,14 +501,13 @@ class AuthenticationSession:
     access_token: str
     expires_at: datetime
     session_id: UUID
-    user_id: UUID | None
+    user_id: UUID
     email: str | None
     display_name: str | None
     active_tenant_id: UUID
     permissions: tuple[str, ...]
     tenants: tuple[TenantMembershipSummary, ...]
     platform_permissions: tuple[str, ...] = ()
-    session_kind: Literal["guest", "user"] = "user"
 
 
 SandboxSessionStatus = Literal["active", "expired", "closed"]
@@ -609,12 +582,7 @@ class StoredFileContent(Protocol):
         access: AuthContext,
     ) -> CanonicalDocumentContent: ...
 
-    async def direct_file_data(
-        self,
-        document: Item,
-        *,
-        expires_seconds: int,
-    ) -> str: ...
+    async def image_data_url(self, document: Item) -> str: ...
 
 
 class DocumentServiceError(Exception):
@@ -725,6 +693,18 @@ class PreviewAsset(BaseModel):
     page: int | None = Field(default=None, ge=1)
 
 
+class PreviewRendition(BaseModel):
+    """Durable metadata for the whole-document rendition of one original."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    key: str = Field(min_length=1)
+    size_bytes: int = Field(ge=0)
+    version: str = Field(min_length=1)
+    block_count: int = Field(ge=0)
+    truncated: bool = False
+
+
 class PreviewManifest(BaseModel):
     """Versioned internal record of renditions derived from one original."""
 
@@ -737,6 +717,7 @@ class PreviewManifest(BaseModel):
     assets: tuple[PreviewAsset, ...] = ()
     page_count: int | None = Field(default=None, ge=1)
     truncated: bool = False
+    rendition: PreviewRendition | None = None
 
     @model_validator(mode="after")
     def _validate_assets(self) -> PreviewManifest:
@@ -778,6 +759,18 @@ class ResolvedPreviewAsset(BaseModel):
     page: int | None = Field(default=None, ge=1)
 
 
+class ResolvedRendition(BaseModel):
+    """Short-lived, client-facing access to the whole-document rendition."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    url: str
+    version: str
+    size_bytes: int = Field(ge=0)
+    block_count: int = Field(ge=0)
+    truncated: bool = False
+
+
 class KnowledgePreviewView(BaseModel):
     """Consistent UX representation for an authorized knowledge asset.
 
@@ -793,6 +786,7 @@ class KnowledgePreviewView(BaseModel):
     assets: tuple[ResolvedPreviewAsset, ...] = ()
     page_count: int | None = Field(default=None, ge=1)
     truncated: bool = False
+    rendition: ResolvedRendition | None = None
     coordinate_space: Literal["normalized_top_left"] = "normalized_top_left"
 
 
@@ -820,24 +814,19 @@ def require_tenant_permission(
 
 
 def require_user_identity(context: AuthContext) -> UUID:
-    """Return durable User identity or reject guest-only session context."""
+    """Return the durable User behind the request or reject an unbound context."""
 
-    if context.user_id is None or context.is_guest:
+    if context.user_id is None:
         raise AuthorizationError("sign in is required")
     return context.user_id
 
 
 def conversation_access_filter(context: AuthContext):
-    """Build ownership predicate for guest-created and user-owned conversations."""
+    """Build the ownership predicate: a Conversation is readable by its owner only."""
 
-    if context.is_guest and context.session_id is not None:
-        return and_(
-            Conversation.created_by_session_id == context.session_id,
-            Conversation.owner_user_id.is_(None),
-        )
-    if context.user_id is not None:
-        return Conversation.owner_user_id == context.user_id
-    return false()
+    if context.user_id is None:
+        return false()
+    return Conversation.owner_user_id == context.user_id
 
 
 def require_platform_permission(
@@ -868,6 +857,24 @@ def normalize_required_text(value: str, field_name: str, max_length: int) -> str
 
 def normalize_code(value: str, field_name: str, max_length: int = 64) -> str:
     return normalize_required_text(value, field_name, max_length).casefold()
+
+
+def code_from_name(name: str, *, fallback: str, taken: Iterable[str] = ()) -> str:
+    """A stable internal code for something people only ever see by name.
+
+    Accents are folded (``đ`` included) and anything else becomes a hyphen, so
+    "Quản lý tài liệu" becomes ``quan-ly-tai-lieu``; a code already ``taken``
+    gains the first free numeric suffix.
+    """
+
+    folded = unicodedata.normalize("NFKD", name.replace("đ", "d").replace("Đ", "D"))
+    ascii_name = folded.encode("ascii", "ignore").decode().casefold()
+    base = re.sub(r"[^a-z0-9]+", "-", ascii_name).strip("-")[:56].strip("-") or fallback
+    used = set(taken)
+    code, suffix = base, 2
+    while code in used:
+        code, suffix = f"{base}-{suffix}", suffix + 1
+    return code
 
 
 def normalize_codes(
@@ -940,6 +947,8 @@ __all__ = [
     "DEFAULT_PREVIEW_WEBP_QUALITY",
     "DEFAULT_PROCESSING_MAX_BYTES",
     "DEFAULT_UPLOAD_URL_SECONDS",
+    "DOCUMENT_RENDITION_CONTENT_TYPE",
+    "DOCUMENT_RENDITION_VERSION",
     "DocumentNotFoundError",
     "DocumentProcessingError",
     "DocumentServiceError",
@@ -976,6 +985,7 @@ __all__ = [
     "PreviewAsset",
     "PreviewGenerationError",
     "PreviewManifest",
+    "PreviewRendition",
     "PreviewOriginal",
     "PreviewRepresentation",
     "ROLE_MANAGE_PERMISSION",
@@ -984,6 +994,7 @@ __all__ = [
     "RenderedPreview",
     "RenderedPreviewAsset",
     "ResolvedPreviewAsset",
+    "ResolvedRendition",
     "RoleDefinition",
     "SOURCE_CONNECTION_REQUIRED",
     "SOURCE_DISABLED",
@@ -1008,6 +1019,7 @@ __all__ = [
     "UploadTooLargeError",
     "UploadValidationError",
     "VerifiedGoogleIdentity",
+    "code_from_name",
     "normalize_code",
     "normalize_codes",
     "normalize_page",

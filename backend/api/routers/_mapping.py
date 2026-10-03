@@ -53,7 +53,6 @@ def workspace_payload(value: dict[str, Any]) -> dict[str, Any]:
         "code": value.get("code", ""),
         "name": value.get("name", ""),
         "status": value.get("status", "active"),
-        "visibility": value.get("visibility"),
         "settings": value.get("settings", {}),
     }
 
@@ -80,6 +79,10 @@ def role_payload(value: dict[str, Any]) -> dict[str, Any]:
         "display_name": value.get("display_name", ""),
         "status": value.get("status", "active"),
         "permission_codes": value.get("permission_codes", []),
+        "tenant_id": value.get("tenant_id"),
+        "scope_type": value["scope_type"],
+        "is_system": value["is_system"],
+        "member_count": value["member_count"],
     }
 
 

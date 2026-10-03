@@ -4,6 +4,7 @@ import asyncio
 import sys
 import time
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,7 +12,13 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
+from bothesis.agent.citation_stream import CitationProjection
 from bothesis.agent.models import AgentContext, CitationReferences
+from bothesis.agent.protocol import (
+    ResponseOutputTextAnnotationAddedEvent,
+    ResponseOutputTextDeltaEvent,
+    ResponseOutputTextDoneEvent,
+)
 from bothesis.agent.protocol import FunctionTool
 from bothesis.agent.tools import ToolInvocation, ToolPayload, ToolRegistry
 from bothesis.agent.tools.knowledge_search import KnowledgeSearch
@@ -153,17 +160,17 @@ def test_evidence_contract_preserves_original_chunk_text_and_citation() -> None:
 class StubRetriever(KnowledgeRetriever):
     def __init__(self, evidence: list[Evidence]) -> None:
         self.evidence = evidence
-        self.calls: list[tuple[str, int]] = []
+        self.calls: list[tuple[list[str], int]] = []
         self.contexts: list[AgentContext] = []
 
     async def search(
         self,
-        query: str,
+        queries: Sequence[str],
         *,
         limit: int,
         ctx: AgentContext,
     ) -> list[Evidence]:
-        self.calls.append((query, limit))
+        self.calls.append((list(queries), limit))
         self.contexts.append(ctx)
         return self.evidence
 
@@ -171,7 +178,7 @@ class StubRetriever(KnowledgeRetriever):
 class FailingRetriever(KnowledgeRetriever):
     async def search(
         self,
-        query: str,
+        queries: Sequence[str],
         *,
         limit: int,
         ctx: AgentContext,
@@ -182,57 +189,13 @@ class FailingRetriever(KnowledgeRetriever):
 class BlockingRetriever(KnowledgeRetriever):
     async def search(
         self,
-        query: str,
+        queries: Sequence[str],
         *,
         limit: int,
         ctx: AgentContext,
     ) -> list[Evidence]:
         await asyncio.Event().wait()
         return []
-
-
-class SelectiveRetriever(KnowledgeRetriever):
-    """Answer known queries and stall on the rest, to force a partial failure."""
-
-    def __init__(self, evidence_by_query: dict[str, list[Evidence]]) -> None:
-        self.evidence_by_query = evidence_by_query
-
-    async def search(
-        self,
-        query: str,
-        *,
-        limit: int,
-        ctx: AgentContext,
-    ) -> list[Evidence]:
-        evidence = self.evidence_by_query.get(query)
-        if evidence is None:
-            await asyncio.Event().wait()
-        return evidence or []
-
-
-class SlowRetriever(KnowledgeRetriever):
-    """Record how many searches overlap, so concurrency is observable."""
-
-    def __init__(self, *, delay_seconds: float, evidence: list[Evidence]) -> None:
-        self.delay_seconds = delay_seconds
-        self.evidence = evidence
-        self.in_flight = 0
-        self.concurrent_peak = 0
-
-    async def search(
-        self,
-        query: str,
-        *,
-        limit: int,
-        ctx: AgentContext,
-    ) -> list[Evidence]:
-        self.in_flight += 1
-        self.concurrent_peak = max(self.concurrent_peak, self.in_flight)
-        try:
-            await asyncio.sleep(self.delay_seconds)
-            return self.evidence
-        finally:
-            self.in_flight -= 1
 
 
 class StubDocumentIndex:
@@ -248,7 +211,7 @@ class StubDocumentIndex:
 
     async def search_item_content(
         self,
-        query: str,
+        queries: Sequence[str],
         *,
         limit: int,
         tenant_id: str,
@@ -258,7 +221,7 @@ class StubDocumentIndex:
             self.events.append("index")
         self.calls.append(
             {
-                "query": query,
+                "queries": list(queries),
                 "limit": limit,
                 "tenant_id": tenant_id,
                 "collection_item_ids": collection_item_ids,
@@ -271,22 +234,34 @@ class RecordingReranker:
     def __init__(self, events: list[str]) -> None:
         self.events = events
         self.calls: list[list[ContextualChunk]] = []
+        self.queries: list[list[str]] = []
 
     def rerank(
         self,
         chunks: Sequence[ContextualChunk],
         *,
+        queries: Sequence[str],
         limit: int,
-        query: str = "",
     ) -> list[ContextualChunk]:
-        del query
         self.events.append("rerank")
         self.calls.append(list(chunks))
+        self.queries.append(list(queries))
         return sorted(
             chunks,
             key=lambda chunk: chunk.relevance_score or float("-inf"),
             reverse=True,
         )[:limit]
+
+
+class NothingRelevantReranker:
+    async def rerank(
+        self,
+        chunks: Sequence[ContextualChunk],
+        *,
+        queries: Sequence[str],
+        limit: int,
+    ) -> list[ContextualChunk]:
+        return []
 
 
 class StubEmbedder:
@@ -300,13 +275,12 @@ class StubEmbedder:
 
 class StubIndexBackend:
     def __init__(self) -> None:
-        self.calls: list[tuple[list[float], str, object, int, int]] = []
+        self.calls: list[tuple[list[tuple[str, list[float]]], object, int, int]] = []
 
     async def search_item_points(
         self,
         *,
-        query_vector: list[float],
-        query_text: str,
+        queries: Sequence[tuple[str, list[float]]],
         tenant_id: str,
         collection_item_ids: tuple[str, ...],
         limit: int,
@@ -314,8 +288,7 @@ class StubIndexBackend:
     ) -> list[object]:
         self.calls.append(
             (
-                query_vector,
-                query_text,
+                list(queries),
                 (tenant_id, collection_item_ids),
                 limit,
                 candidate_limit,
@@ -356,15 +329,21 @@ async def test_item_index_search_embeds_and_rebuilds_contextual_chunks() -> None
     index = ItemIndex(backend=backend, embedder=embedder)  # type: ignore[arg-type]
 
     results = await index.search_item_content(
-        " annual leave ",
+        [" annual leave ", "carry over"],
         limit=3,
         tenant_id="tenant-1",
         collection_item_ids=("collection-1",),
     )
 
-    assert embedder.queries == ["annual leave"]
+    assert embedder.queries == ["annual leave", "carry over"]
+    # Every query reaches the index in one search, each with its own vector.
     assert backend.calls == [
-        ([0.1, 0.2], "annual leave", ("tenant-1", ("collection-1",)), 3, 20)
+        (
+            [("annual leave", [0.1, 0.2]), ("carry over", [0.1, 0.2])],
+            ("tenant-1", ("collection-1",)),
+            3,
+            20,
+        )
     ]
     assert len(results) == 1
     document = results[0]
@@ -408,11 +387,11 @@ async def test_collection_scoped_retrieval_filters_before_reranking() -> None:
         collection_item_ids=("collection-7",),
     )
 
-    results = await retriever.search(" annual leave ", limit=3, ctx=context)
+    results = await retriever.search([" annual leave "], limit=3, ctx=context)
 
     assert index.calls == [
         {
-            "query": "annual leave",
+            "queries": ["annual leave"],
             "limit": 20,
             "tenant_id": "tenant-1",
             "collection_item_ids": ("collection-7",),
@@ -425,9 +404,42 @@ async def test_collection_scoped_retrieval_filters_before_reranking() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("query", "limit"), [("   ", 3), ("annual leave", 0)])
+async def test_retrieval_ranks_every_query_together_in_one_rerank() -> None:
+    """One tool call is one information need: one search, one ranking."""
+
+    events: list[str] = []
+    index = StubDocumentIndex([DOCUMENT], events=events)
+    reranker = RecordingReranker(events)
+    retriever = ItemKnowledgeRetriever(index, reranker=reranker)
+
+    await retriever.search(
+        ["annual leave", "carry over", "Annual  leave"], limit=3, ctx=CONTEXT
+    )
+
+    assert events == ["index", "rerank"]
+    assert index.calls[0]["queries"] == ["annual leave", "carry over", "Annual leave"]
+    assert reranker.queries == [["annual leave", "carry over", "Annual leave"]]
+
+
+@pytest.mark.asyncio
+async def test_retrieval_returns_nothing_when_the_reranker_finds_nothing_relevant() -> None:
+    """The reranker's empty judgment must not fall back to irrelevant chunks."""
+
+    retriever = ItemKnowledgeRetriever(
+        StubDocumentIndex([DOCUMENT]),
+        reranker=NothingRelevantReranker(),  # type: ignore[arg-type]
+    )
+
+    assert await retriever.search(["xin chào"], limit=3, ctx=CONTEXT) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("queries", "limit"),
+    [(["   "], 3), ([], 3), (["annual leave"], 0), ("annual leave", 3)],
+)
 async def test_document_index_retriever_validates_before_search_or_reranking(
-    query: str,
+    queries: object,
     limit: int,
 ) -> None:
     events: list[str] = []
@@ -440,8 +452,8 @@ async def test_document_index_retriever_validates_before_search_or_reranking(
         collection_item_ids=(),
     )
 
-    with pytest.raises(ValueError):
-        await retriever.search(query, limit=limit, ctx=context)
+    with pytest.raises((ValueError, TypeError)):
+        await retriever.search(queries, limit=limit, ctx=context)  # type: ignore[arg-type]
 
     assert index.calls == []
     assert events == []
@@ -461,7 +473,7 @@ async def test_document_index_retriever_requires_a_tenant_even_for_empty_scope()
     )
 
     with pytest.raises(ValueError, match="tenant_id must not be empty"):
-        await retriever.search("annual leave", limit=3, ctx=context)
+        await retriever.search(["annual leave"], limit=3, ctx=context)
 
     assert index.calls == []
 
@@ -477,7 +489,7 @@ async def test_collection_retrieval_remains_tenant_scoped() -> None:
         collection_item_ids=("collection-1",),
     )
 
-    results = await retriever.search("annual leave", limit=3, ctx=context)
+    results = await retriever.search(["annual leave"], limit=3, ctx=context)
 
     assert index.calls[0]["tenant_id"] == "tenant-1"
     assert index.calls[0]["collection_item_ids"] == ("collection-1",)
@@ -492,7 +504,7 @@ async def test_item_index_rejects_a_missing_tenant_scope() -> None:
 
     with pytest.raises(ValueError, match="tenant_id must not be empty"):
         await index.search_item_content(
-            "annual leave",
+            ["annual leave"],
             limit=3,
             tenant_id="",
             collection_item_ids=("collection-1",),
@@ -509,7 +521,7 @@ async def test_knowledge_search_returns_bounded_evidence_and_source_metadata() -
 
     result = await tool.handle(invocation({"queries": ["annual leave"]}))
 
-    assert retriever.calls == [("annual leave", 3)]
+    assert retriever.calls == [(["annual leave"], 3)]
     assert result.error is None
     assert result.metadata["result_count"] == 1
     # The tool assigns the compact reference before building the context.
@@ -577,40 +589,15 @@ async def test_knowledge_search_handles_timeouts() -> None:
 
 
 @pytest.mark.asyncio
-async def test_knowledge_search_keeps_evidence_when_only_one_query_fails() -> None:
-    """A partial retrieval failure must not discard the evidence that arrived."""
+async def test_knowledge_search_retrieves_every_query_in_one_search() -> None:
+    retriever = StubRetriever([EVIDENCE])
 
-    tool = KnowledgeSearch(
-        SelectiveRetriever({"annual leave": [EVIDENCE]}),
-        timeout_seconds=0.05,
-    )
-
-    result = await tool.handle(
-        invocation({"queries": ["annual leave", "carry over"]})
-    )
-
-    assert result.error is None
-    assert result.metadata["outcome"] == "partial_success"
-    assert [item.id for item in result.evidence] == ["ref_1"]
-
-
-@pytest.mark.asyncio
-async def test_knowledge_search_runs_queries_concurrently_under_one_deadline() -> None:
-    """Queries share the tool's budget instead of each restarting their own."""
-
-    retriever = SlowRetriever(delay_seconds=0.05, evidence=[EVIDENCE])
-    tool = KnowledgeSearch(retriever, timeout_seconds=0.4)
-
-    started_at = time.perf_counter()
-    result = await tool.handle(
+    result = await KnowledgeSearch(retriever, result_limit=4).handle(
         invocation({"queries": ["annual leave", "carry over", "unused days"]})
     )
-    elapsed = time.perf_counter() - started_at
 
     assert result.metadata["outcome"] == "success"
-    assert retriever.concurrent_peak == 3
-    # Three sequential 50ms searches would take 150ms; concurrent ones do not.
-    assert elapsed < 0.12
+    assert retriever.calls == [(["annual leave", "carry over", "unused days"], 4)]
 
 
 @pytest.mark.asyncio
@@ -650,10 +637,6 @@ def test_knowledge_search_declares_itself_as_a_protocol_function_tool() -> None:
     assert declaration.parameters["required"] == ["queries"]
     assert "access-permitted" in declaration.description
     assert "a source reference to cite" in declaration.description
-    assert (
-        "Do not use generic terms"
-        in declaration.parameters["properties"]["queries"]["description"]
-    )
     # A closed argument schema lets a provider enforce strict tool calling.
     assert declaration.strict is True
 
@@ -690,7 +673,7 @@ async def test_semantic_reranker_uses_structured_order_and_preserves_scores() ->
 
     ranked = await SemanticReranker(transport).rerank(  # type: ignore[arg-type]
         [lower, higher],
-        query="annual leave policy",
+        queries=["annual leave policy"],
         limit=2,
     )
 
@@ -713,7 +696,7 @@ async def test_semantic_reranker_reports_an_empty_reasoning_model_response() -> 
     with pytest.raises(ValueError, match="reranker returned no text"):
         await SemanticReranker(transport).rerank(  # type: ignore[arg-type]
             [_chunk()],
-            query="annual leave policy",
+            queries=["annual leave policy"],
             limit=1,
         )
 
@@ -739,7 +722,7 @@ async def test_semantic_reranker_reads_the_order_through_model_wrapping(
 
     ranked = await SemanticReranker(StubRerankTransport(output_text)).rerank(  # type: ignore[arg-type]
         [lower, higher],
-        query="annual leave policy",
+        queries=["annual leave policy"],
         limit=2,
     )
 
@@ -751,9 +734,37 @@ async def test_semantic_reranker_rejects_a_response_without_a_json_object() -> N
     with pytest.raises(ValueError, match="no JSON object"):
         await SemanticReranker(StubRerankTransport("I cannot rank these.")).rerank(  # type: ignore[arg-type]
             [_chunk()],
-            query="annual leave policy",
+            queries=["annual leave policy"],
             limit=1,
         )
+
+
+@pytest.mark.asyncio
+async def test_semantic_reranker_returns_nothing_when_nothing_is_relevant() -> None:
+    first = _chunk(chunk_id="first", score=0.8)
+    second = _chunk(chunk_id="second", score=0.7)
+
+    ranked = await SemanticReranker(StubRerankTransport('{"chunk_ids":[]}')).rerank(  # type: ignore[arg-type]
+        [first, second],
+        queries=["xin chào"],
+        limit=1,
+    )
+
+    assert ranked == []
+
+
+@pytest.mark.asyncio
+async def test_semantic_reranker_drops_candidates_the_model_leaves_out() -> None:
+    lower = _chunk(chunk_id="lower", score=0.8)
+    higher = _chunk(chunk_id="higher", score=0.7)
+
+    ranked = await SemanticReranker(StubRerankTransport('{"chunk_ids":["higher"]}')).rerank(  # type: ignore[arg-type]
+        [lower, higher],
+        queries=["annual leave policy"],
+        limit=2,
+    )
+
+    assert [chunk.id for chunk in ranked] == ["higher"]
 
 
 class FailingReranker:
@@ -761,10 +772,10 @@ class FailingReranker:
         self,
         chunks: Sequence[ContextualChunk],
         *,
+        queries: Sequence[str],
         limit: int,
-        query: str = "",
     ) -> list[ContextualChunk]:
-        del chunks, limit, query
+        del chunks, limit, queries
         raise RuntimeError("reranker unavailable")
 
 
@@ -779,7 +790,7 @@ async def test_reranking_failure_falls_back_to_candidate_order() -> None:
         candidate_count=7,
     )
 
-    results = await retriever.search("annual leave", limit=1, ctx=CONTEXT)
+    results = await retriever.search(["annual leave"], limit=1, ctx=CONTEXT)
 
     assert index.calls[0]["limit"] == 7
     assert [item.chunk_id for item in results] == ["second"]
@@ -812,8 +823,8 @@ async def test_retrieval_assigns_stable_source_references_to_evidence() -> None:
     other = _chunk(chunk_id="chunk-2", score=0.4)
     retriever = ItemKnowledgeRetriever(StubDocumentIndex([DOCUMENT, other]))
 
-    first = await retriever.search("annual leave", limit=2, ctx=CONTEXT)
-    second = await retriever.search("annual leave", limit=2, ctx=CONTEXT)
+    first = await retriever.search(["annual leave"], limit=2, ctx=CONTEXT)
+    second = await retriever.search(["annual leave"], limit=2, ctx=CONTEXT)
 
     references = [item.id for item in first]
     assert references == [item.id for item in second]
@@ -884,13 +895,42 @@ async def test_references_are_compact_stable_and_shared_across_tool_calls() -> N
     ]
 
 
-def test_reader_facing_numbers_follow_first_use_not_retrieval_order() -> None:
+def test_reader_facing_numbers_follow_first_use_and_are_shared_per_document() -> None:
     references = CitationReferences()
     references.reference("doc-1", "chunk-1")  # ref_1
     references.reference("doc-1", "chunk-2")  # ref_2
+    references.reference("doc-2", "chunk-9")  # ref_3
 
-    # The answer happens to cite the second source first.
-    assert references.number("ref_2") == 1
+    # The answer happens to cite the second document first.
+    assert references.number("ref_3") == 1
+    # Two passages of one document are one source to the reader.
+    assert references.number("ref_2") == 2
     assert references.number("ref_1") == 2
-    # Repeated use reuses the number rather than allocating another.
-    assert references.number("ref_2") == 1
+    assert references.number("ref_3") == 1
+
+
+def test_adjacent_passages_of_one_document_show_one_marker() -> None:
+    references = CitationReferences()
+    evidence = {
+        references.reference(item_id, chunk_id): replace(EVIDENCE, item_id=item_id, chunk_id=chunk_id)
+        for item_id, chunk_id in (("doc-1", "chunk-1"), ("doc-1", "chunk-2"), ("doc-2", "chunk-9"))
+    }
+    for reference in evidence:
+        evidence[reference] = replace(evidence[reference], id=reference)
+    projection = CitationProjection(evidence, references=references)
+    delta = ResponseOutputTextDeltaEvent(
+        item_id="msg", output_index=0, content_index=0,
+        delta="Codes [[cite:ref_1]] [[cite:ref_2]][[cite:ref_3]] end.",
+    )
+    projected = projection.project(delta)
+    done = projection.project(
+        ResponseOutputTextDoneEvent(item_id="msg", output_index=0, content_index=0, text="")
+    )
+
+    text = done[-1].text
+    assert text == "Codes [1] [2] end."
+    annotations = [event.annotation for event in projected if isinstance(event, ResponseOutputTextAnnotationAddedEvent)]
+    # Both passages of doc-1 stay cited, and both point at the one visible [1].
+    assert [(a["citation"]["chunk_id"], text[a["start_index"]:a["end_index"]]) for a in annotations] == [
+        ("chunk-1", "[1]"), ("chunk-2", "[1]"), ("chunk-9", "[2]"),
+    ]

@@ -46,7 +46,7 @@ const users = {
   total: 24,
   items: [
     { id: "u1", display_name: "Duy Nguyen", email: "duy@enterprise.ai", status: true, created_at: "2025-01-10T09:00:00Z", membership: { role: { code: "owner", display_name: "Owner" } } },
-    { id: "u5", display_name: "Vendor Support", email: "vendor@partner.io", status: false, created_at: "2025-05-30T09:00:00Z", membership: { role: { code: "guest", display_name: "Guest" } } },
+    { id: "u5", display_name: "Vendor Support", email: "vendor@partner.io", status: false, created_at: "2025-05-30T09:00:00Z", membership: { role: { code: "member", display_name: "Member" } } },
   ],
 };
 const overview = {

@@ -60,6 +60,19 @@ export interface PreviewOriginal {
 }
 
 /**
+ * The whole document as typed blocks, stored beside the page previews and
+ * read directly from storage through a short-lived signed URL.
+ */
+export interface PreviewRendition {
+  url: string;
+  /** Changes whenever the source or the renderer changes; a cache key. */
+  version: string;
+  size_bytes: number;
+  block_count: number;
+  truncated: boolean;
+}
+
+/**
  * The presentation view of an authorized source. Asset pages and citation span
  * pages share one-based numbering, and the backend states the coordinate space
  * its bounding boxes are expressed in.
@@ -71,10 +84,12 @@ export interface KnowledgePreview {
   page_count?: number | null;
   truncated: boolean;
   coordinate_space: "normalized_top_left";
+  /** Null until a rendition has been produced for this document. */
+  rendition?: PreviewRendition | null;
 }
 
 export interface KnowledgeItemViewer {
-  item_id: string;
+  document_id: string;
   title: string;
   content_type: string;
   status: DocumentStatus;

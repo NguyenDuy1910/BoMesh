@@ -1,3 +1,4 @@
+import type { FoundDocument } from "@/modules/knowledge/document-search";
 import type { TurnArtifact } from "./artifacts";
 import type { AnswerSource } from "./sources";
 
@@ -12,7 +13,10 @@ export interface KnowledgeDocumentActivity {
   type: "knowledge_document";
   citationId: string;
   itemId: string;
+  /** The passage to open at; empty opens the document at its start. */
   chunkId: string;
+  /** Every passage the answer cited in this document, so the panel can step through them. */
+  passageIds?: string[];
   /** Shown in the panel header before the document resolves. */
   title: string;
   /** The cited page, when the answer's citation already names one. */
@@ -53,8 +57,21 @@ export function knowledgeDocumentActivity(
     citationId: source.id,
     itemId: source.itemId,
     chunkId: source.chunkId,
+    passageIds: source.passages.map((passage) => passage.chunkId),
     title: source.title,
     page: source.page,
+  };
+}
+
+/** Open a document found by search, at its matching passage when it has one. */
+export function foundDocumentActivity(document: FoundDocument): KnowledgeDocumentActivity {
+  return {
+    type: "knowledge_document",
+    citationId: `document:${document.id}`,
+    itemId: document.id,
+    chunkId: document.match?.chunkId ?? "",
+    title: document.name,
+    page: document.match?.page,
   };
 }
 

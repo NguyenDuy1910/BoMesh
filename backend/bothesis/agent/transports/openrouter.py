@@ -39,6 +39,10 @@ from bothesis.agent.transports.openrouter_execution_mapper import (
     OpenRouterExecutionMapper,
 )
 from bothesis.agent.transports.openrouter_tool_builder import OpenRouterToolBuilder
+from bothesis.document_index import EmbeddingRejectedError
+
+#: Embedding responses no retry can change: bad request, key, credit, model.
+_REJECTED_EMBEDDING_STATUSES = frozenset({400, 401, 402, 403, 404, 422})
 
 
 class OpenRouterTransport:
@@ -164,6 +168,8 @@ class OpenRouterTransport:
             headers=self._headers,
             json={"model": selected_model, "input": input, **params},
         )
+        if response.status_code in _REJECTED_EMBEDDING_STATUSES:
+            raise EmbeddingRejectedError(response.status_code, _error_detail(response))
         response.raise_for_status()
         payload = response.json()
         if not isinstance(payload, dict):
@@ -301,6 +307,19 @@ def _file_name(value: str) -> str:
     if len(name) > 255:
         raise ValueError("sandbox upload file name is invalid")
     return name
+
+
+def _error_detail(response: httpx.Response) -> str:
+    """OpenRouter's own error message, for operators' logs."""
+
+    try:
+        error = response.json().get("error")
+    except (ValueError, AttributeError):
+        error = None
+    message = error.get("message") if isinstance(error, dict) else None
+    if isinstance(message, str) and message.strip():
+        return message.strip()[:500]
+    return response.reason_phrase or "request rejected"
 
 
 def _provider_identifier(value: object, label: str) -> str:

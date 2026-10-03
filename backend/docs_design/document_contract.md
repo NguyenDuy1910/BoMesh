@@ -1,8 +1,7 @@
 # Document and Content API Contract
 
-Status: target contract. This document is part of the contract-first gate;
-router, service, storage, frontend, and test changes wait until this model is
-accepted.
+Status: canonical implemented Document/content contract. Router, service,
+storage, frontend, and OpenAPI representations share this lifecycle.
 
 ## Domain finding
 
@@ -27,14 +26,24 @@ Collection
 | Method | Path | Purpose | Authorization | Idempotency |
 | --- | --- | --- | --- | --- |
 | POST | `/api/v1/collections/{collection_id}/documents` | Create Document; accept direct multipart content or reserve presigned content upload | authenticated user + Collection write access | required `Idempotency-Key` |
-| GET | `/api/v1/documents` | List permission-filtered Documents | workspace permission + Collection ACL | n/a |
-| POST | `/api/v1/documents/search` | Search permission-filtered indexed Documents | workspace permission + Collection ACL | n/a |
+| GET | `/api/v1/documents` | List permission-filtered Documents | effective `collection.read` on destination Collections | n/a |
+| POST | `/api/v1/documents/search` | Search permission-filtered indexed Documents | `knowledge.read` + effective `collection.read` | n/a |
 | GET | `/api/v1/documents/{document_id}` | Read canonical Document metadata | Collection read access | n/a |
 | PUT | `/api/v1/documents/{document_id}/content` | Validate reserved object, bind it as Document content, and start Ingestion when required | Document/Collection write access | method is idempotent |
-| DELETE | `/api/v1/documents/{document_id}` | Remove Document from normal use | Document/Collection delete access | method is idempotent |
+| DELETE | `/api/v1/documents/{document_id}` | Remove Document from normal use | signed-in user + effective `collection.update`; private attachment owner only | method is idempotent |
 
 No `PATCH /documents/{document_id}` is added: current product has no distinct
 Document metadata-edit use case.
+
+Collection read/write checks use the caller's effective permissions (workspace
+grants plus direct/inherited user or group ACL grants), not a separate
+`knowledge.documents.*` namespace. Read uses `collection.read`; upload,
+finalization, and deletion use `collection.update` (editor or equivalent).
+Deleting an ordinary knowledge Document does not require `item.manage`,
+Collection ownership, or upload ownership. A `conversation_attachment` is
+different: its private upload remains owner-only even when another caller has
+Collection editor permissions. Referencing an existing knowledge Document
+from chat does not change its purpose or ownership.
 
 ## Document creation
 
@@ -68,13 +77,22 @@ Knowledge formats are text (`.txt .md .markdown .rst .csv .tsv .json .jsonl
 .xml .yaml .yml .html .htm .log .sql`), Office (`.docx .pptx .xlsx`) and PDF.
 Extraction uses no model: a PDF is read from its own text layer, so a scanned
 PDF (no text layer) fails its Ingestion with "the file has no text to index",
-and text inside pictures or screenshots is not indexed.
+and text inside pictures or screenshots is not indexed. PDFium is not
+thread-safe, so PDF text extraction and PDF preview rendering hold one
+process-wide lock; concurrent Activities in a worker parse other formats in
+parallel but PDFs one at a time.
+The same parse also yields the document's whole-document rendition, read by
+the document viewer; see `document_viewer.md`.
 **Images are not knowledge in this phase.** An image (`.png .jpg .jpeg .gif
 .webp .bmp .tif .tiff .avif`) is accepted only as a `conversation_attachment`,
 for the model to look at in that conversation: it is stored and `available`,
 but never ingested (internal `index_status` `unsupported`, `latest_ingestion`
 null, retry `409`). As `knowledge`, or in any workspace Collection, it is
 rejected with `422`. Sources and archives skip image files the same way.
+When the agent looks at an image, the backend reads it from object storage and
+sends it inline (`data:` URL, at most 20 MB). A storage URL is never handed to
+the model provider: a private endpoint such as local MinIO is unreachable from
+it, and a signed URL would give a third party a bearer link to the object.
 
 ## Who runs the ingestion
 
@@ -182,6 +200,14 @@ wrote (its Source's Ingestion indexed it) and for content that never arrived.
 Retrying goes through `POST /ingestions/{ingestion_id}/retry`, in the run's
 original mode; a direct run cannot be cancelled (`409`).
 
+Managed runs retry only what time can fix (storage, index, provider timeouts,
+rate limits, 5xx). An embedding provider that refuses the request itself
+(HTTP 400/401/402/403/404/422: a bad or exhausted key, a forbidden or unknown
+model) fails the run at once, without retries, with the reason "The embedding
+provider refused the request (HTTP n) …". The provider's own message, which can
+carry account details, stays in the worker log. After an operator fixes the
+provider configuration, retry the Ingestion.
+
 State transitions are intentionally narrow:
 
 ```text
@@ -234,6 +260,21 @@ and keeps the skip report, and its Ingestion (phase `expanding`) stays visible
 in `/ingestions`. A failed expansion keeps the archive Document with a failed
 `latest_ingestion`, so the reason stays visible and retryable. Removing a child
 is independent of the archive.
+
+## Bulk loading a crawled corpus
+
+A corpus that already sits in object storage (the UTE website mirror in R2,
+written by `backend/script/ute_lib.py`) is loaded with
+`backend/script/r2_to_collection.py`, a client of this contract rather than a
+second ingestion path. It signs in, resolves or creates one workspace
+Collection, and creates one multipart `knowledge` Document per supported
+object, so each file gets its own managed Ingestion; no archive is built. The
+`Idempotency-Key` is derived from the bucket and the decoded, NFC-normalized
+object path, so a re-run replays existing Documents (`200`) and resumes the
+rest, and a changed object surfaces as `409`. Unsupported formats (`.doc`,
+`.xls`, `.rar`, images) and files above the upload limit are skipped locally
+with a reason; the crawler's source URL is kept only in the script's manifest,
+not on the Document.
 
 ## Idempotency
 

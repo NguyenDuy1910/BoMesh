@@ -13,8 +13,8 @@
   "identity_entities": {
     "users": "durable human identities only",
     "auth_identities": "external issuer and subject mapping to Users",
-    "access_sessions": "tenant-scoped guest/user security sessions with expiry, revocation, and transition lineage",
-    "guest_upgrade": "child User session supersedes Guest session and claims guest conversations without changing creation lineage"
+    "access_sessions": "tenant-scoped User security sessions with expiry, revocation, and transition lineage",
+    "workspace_access": "active tenant membership plus role assignments only; no anonymous or public-workspace access"
   },
   "canonical_entities": {
     "items": ["collection", "document"],

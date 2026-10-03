@@ -39,12 +39,6 @@ class PasswordSessionCreate(BaseModel):
         return self
 
 
-class GuestSessionCreate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    method: Literal["guest"]
-
-
 class GoogleSessionCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -53,7 +47,7 @@ class GoogleSessionCreate(BaseModel):
 
 
 CreateSessionRequest = Annotated[
-    Union[PasswordSessionCreate, GuestSessionCreate, GoogleSessionCreate],
+    Union[PasswordSessionCreate, GoogleSessionCreate],
     Field(discriminator="method"),
 ]
 
@@ -77,35 +71,38 @@ class AuthSession(BaseModel):
     token_type: Literal["bearer"]
     expires_at: datetime
     session_id: UUID
-    user_id: UUID | None
+    user_id: UUID
     email: EmailStr | None = None
     display_name: str | None = None
     active_workspace_id: UUID
     permissions: list[str]
     platform_permissions: list[str]
-    session_kind: Literal["user", "guest"]
     workspaces: list[WorkspaceMembership]
 
 
 class CurrentSession(BaseModel):
     session_id: UUID
     expires_at: datetime
-    user_id: UUID | None
+    user_id: UUID
     email: EmailStr | None = None
     display_name: str | None = None
     active_workspace_id: UUID
     permissions: list[str]
     platform_permissions: list[str]
-    session_kind: Literal["user", "guest"]
     workspaces: list[WorkspaceMembership]
 
 
 class RoleCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    code: str
     display_name: str
     permission_codes: list[str] = Field(default_factory=list)
+    code: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        description="Internal identifier; derived from display_name when omitted.",
+    )
 
 
 class RoleUpdate(BaseModel):
@@ -122,6 +119,10 @@ class Role(BaseModel):
     display_name: str
     status: Literal["active", "inactive"]
     permission_codes: list[str]
+    tenant_id: UUID | None = None
+    scope_type: Literal["platform", "tenant", "collection"]
+    is_system: bool
+    member_count: int = Field(ge=0)
 
 
 # --- Agent and chat ---
@@ -331,6 +332,7 @@ class Collection(BaseModel):
     source_count: int = Field(ge=0)
     created_at: datetime
     updated_at: datetime
+    permissions: list[str] = Field(default_factory=list)
 
 
 class CollectionPage(BaseModel):
@@ -428,24 +430,46 @@ class StrictRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class UserCreate(StrictRequest):
+class MemberAdd(StrictRequest):
+    """Add an existing account to the workspace; identities are never created here."""
+
     email: EmailStr
-    display_name: str | None = Field(default=None, min_length=1, max_length=255)
     role_ids: list[UUID] = Field(default_factory=list)
     group_ids: list[UUID] = Field(default_factory=list)
+
+
+class Account(BaseModel):
+    id: UUID
+    email: str
+    display_name: str | None = None
+    status: Literal["active", "disabled"]
+    #: The account's standing in the caller's workspace.
+    workspace_membership: Literal["none", "active", "suspended"]
+
+
+class AccountPage(BaseModel):
+    items: list[Account]
+    total: int
 
 
 class UserUpdate(StrictRequest):
     display_name: str | None = Field(default=None, min_length=1, max_length=255)
     role_ids: list[UUID] | None = None
-    status: bool | None = None
+    #: Workspace standing. ``inactive`` is the account's own state and is not
+    #: a workspace's to set.
+    status: Literal["active", "suspended"] | None = None
     group_ids: list[UUID] | None = None
 
 
 class GroupCreate(StrictRequest):
-    code: str = Field(min_length=1, max_length=64)
     display_name: str = Field(min_length=1, max_length=255)
     description: str | None = Field(default=None, min_length=1, max_length=2_000)
+    code: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        description="Internal identifier; derived from display_name when omitted.",
+    )
 
 
 class GroupUpdate(StrictRequest):
@@ -633,7 +657,6 @@ class Workspace(BaseModel):
     code: str
     name: str
     status: Literal["active", "inactive", "suspended"]
-    visibility: str | None = None
     settings: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -671,6 +694,13 @@ class RolePage(PageFields):
     items: list[Role]
 
 
+class GroupMember(BaseModel):
+    id: UUID
+    email: EmailStr
+    display_name: str | None = None
+    joined_at: datetime | None = None
+
+
 class Group(BaseModel):
     id: UUID
     code: str
@@ -678,6 +708,7 @@ class Group(BaseModel):
     description: str | None = None
     status: Literal["active", "inactive"]
     member_count: int = Field(ge=0)
+    members: list[GroupMember] = Field(default_factory=list)
 
 
 class GroupPage(PageFields):
@@ -695,16 +726,32 @@ class PermissionPage(BaseModel):
     total: int = Field(ge=0)
 
 
+class ApprovalRequester(BaseModel):
+    id: UUID
+    email: EmailStr
+    display_name: str | None = None
+
+
+class ApprovalRequestedRole(BaseModel):
+    id: UUID
+    code: str
+    display_name: str
+
+
 class ApprovalRequest(BaseModel):
     id: UUID
     request_type: Literal["resource_access", "plugin_installation"]
     target_id: str
     status: Literal["pending", "approved", "denied", "cancelled"]
-    requester: User
+    requester: ApprovalRequester
+    requested_role: ApprovalRequestedRole | None = None
     details: dict[str, Any] = Field(default_factory=dict)
     reason: str | None = None
     decision_note: str | None = None
+    decided_by_user_id: UUID | None = None
+    decided_at: datetime | None = None
     created_at: datetime
+    updated_at: datetime | None = None
 
 
 class ApprovalRequestPage(PageFields):
@@ -756,7 +803,9 @@ __all__ = [
     "GroupMembersUpdate",
     "GroupUpdate",
     "KnowledgeHomeResponse",
-    "UserCreate",
+    "Account",
+    "AccountPage",
+    "MemberAdd",
     "UserUpdate",
     "Connection",
     "ConnectionPage",

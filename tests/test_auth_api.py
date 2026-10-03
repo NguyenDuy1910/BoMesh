@@ -4,7 +4,9 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
+from fastapi.testclient import TestClient
 
+import api.app as api_app
 from api.routers import PasswordSessionCreate
 from api.routers.auth import _session_response
 from bothesis.services import AuthenticationSession
@@ -45,3 +47,10 @@ def test_password_session_accepts_username_or_email_but_not_both() -> None:
             username="analyst",
             password="correct horse battery staple",
         )
+
+
+def test_session_creation_accepts_only_authenticating_methods() -> None:
+    with TestClient(api_app.app) as client:
+        response = client.post("/api/v1/auth/sessions", json={"method": "guest"})
+
+    assert response.status_code == 422

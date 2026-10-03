@@ -2,8 +2,8 @@
 // PostgreSQL owns durable domain state. Raw bytes live in S3/R2. Retrieval
 // chunks, embeddings, and BM25 representation live in Qdrant.
 
-// Durable human identity only. Session lifecycle, anonymous access, device
-// state, token revocation, and expiry never live on this row.
+// Durable human identity only. Session lifecycle, device state, token
+// revocation, and expiry never live on this row.
 Table users {
   id uuid [pk]
   username varchar(64) [note: 'Optional local-login identifier; normalized lowercase; unique by lower(username) when present']
@@ -43,21 +43,21 @@ Table auth_identities {
   }
 }
 
-// One logical access session for one tenant context. A guest has no User row.
-// Login, token rotation, or another identity transition creates a child session
-// instead of changing the session subject in place.
+// One logical access session for one User in one tenant context. Token rotation
+// or a tenant switch creates a child session instead of changing the session
+// subject in place.
 Table access_sessions {
   id uuid [pk]
-  tenant_id uuid [not null, note: 'Active tenant context; a guest must target a public tenant']
-  user_id uuid [note: 'Null for guest; required for a user session']
-  auth_identity_id uuid [note: 'External identity used to establish this user session; null for guest or legacy/internal authentication']
-  kind varchar(24) [not null, note: 'guest | user; add a typed subject FK before adding another kind']
-  authentication_method varchar(32) [not null, note: 'anonymous | oidc | saml | password | internal']
+  tenant_id uuid [not null, note: 'Active tenant context; the User must hold an active membership in it']
+  user_id uuid [note: 'Required for every active session; nullable only for retired historical rows']
+  auth_identity_id uuid [note: 'External identity used to establish this user session; null for legacy/internal authentication']
+  kind varchar(24) [not null, note: 'user. `guest` is a retired historical value kept only for lineage; add a typed subject FK before adding another kind']
+  authentication_method varchar(32) [not null, note: 'oidc | saml | password | internal; anonymous appears only on retired historical rows']
   assurance_level varchar(16) [not null, default: 'aal0', note: 'aal0 | aal1 | aal2']
   status varchar(16) [not null, default: 'active', note: 'active | superseded | revoked | expired']
   token_version int [not null, default: 1, note: 'Increment to invalidate every token issued for this session']
-  parent_session_id uuid [note: 'Previous session when this row results from an identity upgrade or token rotation; multiple child sessions are allowed for concurrent renewal attempts']
-  transition_reason varchar(32) [note: 'identity_upgrade | token_rotation | tenant_switch; null for an initial session']
+  parent_session_id uuid [note: 'Previous session when this row results from token rotation or a tenant switch; multiple child sessions are allowed for concurrent renewal attempts']
+  transition_reason varchar(32) [note: 'token_rotation | tenant_switch; null for an initial session']
   expires_at timestamptz [not null]
   idle_expires_at timestamptz
   last_seen_at timestamptz
@@ -74,7 +74,7 @@ Table access_sessions {
     (status, expires_at)
     (status, idle_expires_at)
   }
-  Note: 'Checks enforce: guest means user_id and auth_identity_id are null, anonymous method, and aal0; user means user_id is set and method is not anonymous; when set, auth_identity_id must belong to user_id; parent_session_id and transition_reason are both null or both set; identity upgrades stay in the same tenant while tenant_switch may change it; non-active status requires ended_at; only active, unexpired sessions may authorize requests.'
+  Note: 'Checks enforce: kind = user OR status <> active (access_session_guest_is_retired), and the validation trigger rejects any new row whose kind is not user; a user session has user_id set and a non-anonymous method; when set, auth_identity_id must belong to user_id; parent_session_id and transition_reason are both null or both set; token_rotation preserves subject and tenant while tenant_switch may change the tenant but not the User; non-active status requires ended_at; only active, unexpired sessions may authorize requests. The historical subject-shape check is retained so retired guest rows stay valid.'
 }
 
 Table tenants {
@@ -82,12 +82,10 @@ Table tenants {
   code varchar(64) [not null, unique]
   name varchar(255) [not null]
   status varchar(16) [not null, default: 'active']
-  visibility varchar(16) [not null, default: 'private', note: 'private | public']
-  public_access_role_id uuid [note: 'Tenant-scoped role resolved as baseline public access; required only when visibility is public']
   settings jsonb [not null, default: `{}`]
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
-  Note: 'A trigger enforces that public_access_role_id names an active tenant-scope Role available to this tenant. Private tenants cannot define public access.'
+  Note: 'Tenants are private. Access is granted only through tenant_memberships plus role_assignments; there is no public or anonymous tenant access.'
 }
 
 // A named permission bundle. tenant_id is null for platform-defined roles,
@@ -275,7 +273,7 @@ Table item_uploads {
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
   indexes { (tenant_id, owner_user_id, idempotency_key) [unique] }
-  Note: 'Uploads require an authenticated owner. Guest conversations can exist, but private upload ownership is never inferred from a guest session.'
+  Note: 'Uploads require an authenticated owner; private upload ownership always comes from the active User.'
 }
 
 Table message_items {
@@ -383,8 +381,8 @@ Table external_resources {
 Table conversations {
   id uuid [pk]
   tenant_id uuid [not null]
-  owner_user_id uuid [note: 'Durable owner after authentication; null while conversation is guest-owned']
-  created_by_session_id uuid [not null, note: 'Immutable creation lineage and guest access boundary']
+  owner_user_id uuid [note: 'Owning User; required while status is active']
+  created_by_session_id uuid [not null, note: 'Immutable creation lineage; must be a user session of owner_user_id']
   title varchar(512)
   summary text
   summary_updated_at timestamptz
@@ -398,7 +396,7 @@ Table conversations {
     (tenant_id, created_by_session_id, updated_at)
     (tenant_id, status)
   }
-  Note: 'Guest reads require created_by_session_id to equal the active guest session. User reads require owner_user_id to equal the active user. Identity upgrade sets owner_user_id once; created_by_session_id never changes. A trigger enforces creator-session tenant consistency.'
+  Note: 'Check conversation_owner_required enforces owner_user_id IS NOT NULL OR status <> active. Reads require owner_user_id to equal the active User. A trigger enforces creator-session tenant consistency, a user creator session, and owner_user_id = the creator session user. Legacy guest-owned conversations were tombstoned with status deleted.'
 }
 
 Table sandbox_sessions {
@@ -484,7 +482,7 @@ Table audit_logs {
   id uuid [pk]
   tenant_id uuid
   actor_user_id uuid
-  actor_session_id uuid [note: 'Execution session; set for guest and authenticated browser actions']
+  actor_session_id uuid [note: 'Execution session for authenticated actions']
   action varchar(96) [not null]
   resource_type varchar(32) [not null]
   resource_id varchar(512)
@@ -506,7 +504,6 @@ Ref: access_sessions.auth_identity_id > auth_identities.id
 Ref: access_sessions.parent_session_id > access_sessions.id
 Ref: auth_identities.user_id > users.id
 Ref: roles.tenant_id > tenants.id
-Ref: tenants.public_access_role_id > roles.id
 Ref: role_permissions.role_id > roles.id
 Ref: role_permissions.permission_code > permissions.code
 Ref: role_assignments.user_id > users.id

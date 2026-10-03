@@ -92,14 +92,18 @@ class AgentContext:
 class CitationReferences:
     """Run-scoped reference IDs and reader-facing numbers for one turn.
 
-    Retrieval order assigns the compact ``ref_N`` the model is allowed to cite.
-    First appearance in the answer assigns the ``[n]`` the reader sees. Both are
-    scoped to one run and keyed by the identity they stand for, so the same
-    chunk keeps one reference across retrieval rounds and concurrent tool calls
-    without any process-wide state.
+    Retrieval order assigns the compact ``ref_N`` the model is allowed to cite,
+    one per chunk, so the model can point at the exact passage. First
+    appearance in the answer assigns the ``[n]`` the reader sees, one per
+    *document*: several passages of one file are one source to a reader, so
+    they share its number instead of listing the file once per passage. Both
+    are scoped to one run and keyed by the identity they stand for, so they
+    hold across retrieval rounds and concurrent tool calls without any
+    process-wide state.
     """
 
     _references: dict[tuple[str, str], str] = field(default_factory=dict)
+    _documents: dict[str, str] = field(default_factory=dict)
     _numbers: dict[str, int] = field(default_factory=dict)
 
     def reference(self, item_id: str, chunk_id: str) -> str:
@@ -111,16 +115,18 @@ class CitationReferences:
             return existing
         assigned = f"ref_{len(self._references) + 1}"
         self._references[identity] = assigned
+        self._documents[assigned] = item_id
         return assigned
 
     def number(self, reference: str) -> int:
-        """Return the reader-facing number for a reference, by first use."""
+        """Return the reader-facing number of a reference's document, by first use."""
 
-        existing = self._numbers.get(reference)
+        document = self._documents.get(reference, reference)
+        existing = self._numbers.get(document)
         if existing is not None:
             return existing
         assigned = len(self._numbers) + 1
-        self._numbers[reference] = assigned
+        self._numbers[document] = assigned
         return assigned
 
 

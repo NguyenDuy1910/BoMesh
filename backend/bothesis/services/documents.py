@@ -43,7 +43,6 @@ from bothesis.services import (
     KNOWLEDGE_READ_PERMISSION,
     AsyncUploadStream,
     AuthContext,
-    AuthorizationError,
     CollectionUpload,
     DocumentNotFoundError,
     InvalidDocumentStateError,
@@ -112,8 +111,6 @@ class DocumentService:
     async def ensure_personal_collection(self, access: AuthContext) -> dict[str, Any]:
         """Return the caller's private upload Collection, creating it once."""
 
-        if access.is_guest:
-            raise AuthorizationError("sign in is required for private uploads")
         user_id = require_user_identity(access)
         tenant_id = require_tenant_permission(access, KNOWLEDGE_READ_PERMISSION)
         collection_id = ItemService.upload_collection_id(tenant_id, user_id)
@@ -225,10 +222,22 @@ class DocumentService:
             }
 
     async def delete_document(self, access: AuthContext, document_id: UUID) -> None:
-        if access.is_guest:
-            raise AuthorizationError("sign in is required to remove documents")
-        require_user_identity(access)
-        await self._ingestion.remove_upload(document_id, access=access)
+        user_id = require_user_identity(access)
+        async with transaction_scope(self._sessions) as session:
+            document = await AuthorizationService(session).require_item(
+                document_id, access=access, permission=COLLECTION_UPDATE_PERMISSION
+            )
+            if document.item_type != "document":
+                raise DocumentNotFoundError("document not found")
+            is_attachment = document.metadata_.get("purpose") == "conversation_attachment"
+            if is_attachment:
+                await ItemService(session).get_owned_upload(
+                    document_id, user_id, access.tenant_id
+                )
+        if is_attachment:
+            await self._ingestion.remove_upload(document_id, access=access)
+        else:
+            await self._ingestion.remove_item(document_id, actor=access)
 
     # -- Upload transports ---------------------------------------------------
 
@@ -346,8 +355,7 @@ class DocumentService:
     async def finalize_content(self, access: AuthContext, document_id: UUID) -> Item:
         """Bind a presigned object as the Document's content and ingest it."""
 
-        if access.is_guest:
-            raise AuthorizationError("sign in is required for private uploads")
+        require_user_identity(access)
         if access.tenant_id is None:
             raise UploadValidationError("an active tenant is required")
         async with transaction_scope(self._sessions) as session:
@@ -389,8 +397,6 @@ class DocumentService:
     async def retry_ingestion(self, access: AuthContext, document_id: UUID) -> Item:
         """Open a new Ingestion for an available upload, in its original mode."""
 
-        if access.is_guest:
-            raise AuthorizationError("sign in is required for private uploads")
         require_user_identity(access)
         document = await self.get_document(
             access, document_id, permission=COLLECTION_UPDATE_PERMISSION
@@ -517,8 +523,6 @@ class DocumentService:
 
     @staticmethod
     def _uploader(access: AuthContext, purpose: str) -> tuple[UUID, UUID]:
-        if access.is_guest:
-            raise AuthorizationError("sign in is required for private uploads")
         if purpose not in _PURPOSES:
             raise UploadValidationError("unsupported document purpose")
         user_id = require_user_identity(access)

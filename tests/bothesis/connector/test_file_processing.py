@@ -244,8 +244,10 @@ def test_a_pdf_is_read_from_its_own_text_layer_without_a_model() -> None:
     assert 60 < box.l < 80 and 118 < box.t < 128 and 155 < box.b < 165
 
 
-def test_a_pdf_without_a_text_layer_has_nothing_to_index() -> None:
-    scan = _text_pdf([[]])
+@pytest.mark.parametrize("pages", [1, 3], ids=["one-page", "multi-page"])
+def test_a_pdf_without_a_text_layer_has_nothing_to_index(pages: int) -> None:
+    # From three pages on, running headers are looked for: a scan has none.
+    scan = _text_pdf([[] for _ in range(pages)])
 
     with pytest.raises(DoclingProcessingError, match="No extractable content"):
         DoclingProcessor().process_bytes(scan, file_name="scan.pdf")

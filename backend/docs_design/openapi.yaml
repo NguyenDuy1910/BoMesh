@@ -37,8 +37,7 @@ paths:
       tags: [auth]
       security: []
       operationId: createAccount
-      description: Create Account and issue its first Session. A guest bearer may be supplied to upgrade an existing guest Session.
-      x-optional-bearer: guest-upgrade
+      description: Create Account and issue its first Session. Fully public; no bearer is read.
       requestBody:
         required: true
         content:
@@ -53,12 +52,7 @@ paths:
       tags: [auth]
       security: []
       operationId: createSession
-      description: Create one Session using a typed authentication method. Password, guest, and Google methods are public and may optionally upgrade a guest bearer.
-      x-optional-bearer: guest-upgrade
-      x-method-security:
-        password: public
-        guest: public
-        google: public
+      description: Create one Session using a typed authentication method (password or Google). Fully public; no bearer is read.
       requestBody:
         required: true
         content:
@@ -173,7 +167,7 @@ paths:
     get:
       tags: [collections]
       operationId: listCollections
-      x-required-permissions: [knowledge.collections.read]
+      x-required-collection-permission: collection.read
       parameters:
         - {$ref: '#/components/parameters/Page'}
         - {$ref: '#/components/parameters/PageSize'}
@@ -187,7 +181,8 @@ paths:
     post:
       tags: [collections]
       operationId: createCollection
-      x-required-permissions: [knowledge.collections.create]
+      x-required-permissions: [item.manage]
+      x-authorization-rule: A child also requires collection.update on its parent Collection.
       requestBody:
         required: true
         content:
@@ -204,6 +199,8 @@ paths:
     put:
       tags: [collections]
       operationId: ensurePersonalCollection
+      x-required-permissions: [knowledge.read]
+      x-authorization-rule: Signed-in user; the Collection is owned by the caller.
       responses:
         '200':
           description: Personal Collection
@@ -216,6 +213,7 @@ paths:
     get:
       tags: [collections]
       operationId: getCollection
+      x-required-collection-permission: collection.read
       responses:
         '200':
           description: Collection detail
@@ -226,6 +224,7 @@ paths:
     patch:
       tags: [collections]
       operationId: updateCollection
+      x-required-collection-permission: collection.update
       requestBody:
         required: true
         content:
@@ -242,6 +241,7 @@ paths:
     delete:
       tags: [collections]
       operationId: deleteCollection
+      x-required-collection-permission: collection.delete
       responses:
         '204': {description: Collection tombstoned}
         '403': {$ref: '#/components/responses/Forbidden'}
@@ -250,7 +250,7 @@ paths:
     get:
       tags: [collections]
       operationId: listCollectionAccess
-      x-required-permissions: [knowledge.access.read]
+      x-required-collection-permission: collection.share
       parameters:
         - {$ref: '#/components/parameters/CollectionId'}
         - {$ref: '#/components/parameters/Page'}
@@ -269,7 +269,7 @@ paths:
     put:
       tags: [collections]
       operationId: putCollectionAccess
-      x-required-permissions: [knowledge.access.manage]
+      x-required-collection-permission: collection.share
       requestBody:
         required: true
         content:
@@ -284,14 +284,14 @@ paths:
     delete:
       tags: [collections]
       operationId: deleteCollectionAccess
-      x-required-permissions: [knowledge.access.manage]
+      x-required-collection-permission: collection.share
       responses:
         '204': {description: Access grant tombstoned}
   /api/v1/collections/{collection_id}/documents:
     post:
       tags: [documents]
       operationId: createDocument
-      x-required-permissions: [knowledge.documents.create]
+      x-required-collection-permission: collection.update
       x-required-collection-role: editor
       description: Create one Document. JSON reserves server-owned content storage; multipart stores content directly. Both transports share the same Document lifecycle.
       parameters:
@@ -328,7 +328,7 @@ paths:
     get:
       tags: [documents]
       operationId: listDocuments
-      x-required-permissions: [knowledge.documents.read]
+      x-required-collection-permission: collection.read
       x-required-collection-role: viewer
       parameters:
         - {$ref: '#/components/parameters/Page'}
@@ -353,7 +353,8 @@ paths:
     post:
       tags: [documents]
       operationId: searchDocuments
-      x-required-permissions: [knowledge.documents.search]
+      x-required-permissions: [knowledge.read]
+      x-required-collection-permission: collection.read
       x-required-collection-role: viewer
       requestBody:
         required: true
@@ -375,7 +376,7 @@ paths:
     get:
       tags: [documents]
       operationId: getDocument
-      x-required-permissions: [knowledge.documents.read]
+      x-required-collection-permission: collection.read
       x-required-collection-role: viewer
       responses:
         '200':
@@ -389,7 +390,8 @@ paths:
     delete:
       tags: [documents]
       operationId: deleteDocument
-      x-required-permissions: [knowledge.documents.delete]
+      x-required-collection-permission: collection.update
+      x-authorization-rule: Signed-in user; conversation_attachment deletion also requires upload ownership.
       x-required-collection-role: editor
       responses:
         '204': {description: Document deleted}
@@ -400,7 +402,7 @@ paths:
     put:
       tags: [documents]
       operationId: finalizeDocumentContent
-      x-required-permissions: [knowledge.documents.write]
+      x-required-collection-permission: collection.update
       x-required-collection-role: editor
       description: Validate server-owned object storage content for a reserved Document and make it available.
       parameters:
@@ -489,7 +491,7 @@ paths:
     post:
       tags: [connections]
       operationId: createConnection
-      x-required-permissions: [connections.manage]
+      x-authorization-rule: Personal connections belong to the caller; workspace-owned connections require source.manage.
       requestBody:
         required: true
         content:
@@ -864,7 +866,7 @@ paths:
     patch:
       tags: [workspaces]
       operationId: updateWorkspace
-      x-required-permissions: [iam.workspaces.manage]
+      x-required-permissions: [tenant.manage]
       requestBody:
         required: true
         content:
@@ -880,6 +882,8 @@ paths:
     get:
       tags: [workspaces]
       operationId: getWorkspaceOverview
+      x-required-permissions: [tenant.read]
+      x-authorization-rule: recent_activity is empty without audit.read.
       parameters:
         - {$ref: '#/components/parameters/WorkspaceId'}
       responses:
@@ -892,7 +896,7 @@ paths:
     get:
       tags: [iam]
       operationId: listUsers
-      x-required-permissions: [iam.users.read]
+      x-required-permissions: [user.manage]
       responses:
         '200':
           description: Workspace Users
@@ -901,30 +905,56 @@ paths:
               schema: {$ref: '#/components/schemas/UserPage'}
     post:
       tags: [iam]
-      operationId: createUser
-      x-required-permissions: [iam.users.manage]
+      operationId: addMember
+      x-required-permissions: [user.manage]
+      description: >-
+        Give an existing account membership of this workspace. Identities are
+        never created here; an unknown email is 404 (the person signs up first),
+        an active or suspended member is 409, a removed member is readmitted
+        with exactly the roles given.
       requestBody:
         required: true
         content:
           application/json:
-            schema: {$ref: '#/components/schemas/UserCreate'}
+            schema: {$ref: '#/components/schemas/MemberAdd'}
       responses:
         '201':
-          description: Created User membership
+          description: The new member
           content:
             application/json:
               schema: {$ref: '#/components/schemas/User'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/accounts:
+    get:
+      tags: [iam]
+      operationId: lookupAccounts
+      x-required-permissions: [user.manage]
+      description: >-
+        Resolve one exact email to the account it names and its standing in
+        this workspace. Fragments never match, so no cross-workspace directory
+        is browsable. Zero or one item.
+      parameters:
+        - {name: email, in: query, required: true, schema: {type: string, format: email}}
+      responses:
+        '200':
+          description: The matching account, if any
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AccountPage'}
   /api/v1/users/{user_id}:
     parameters:
       - {$ref: '#/components/parameters/UserId'}
     get:
       tags: [iam]
       operationId: getUser
+      x-required-permissions: [user.manage]
       responses:
         '200': {description: User, content: {application/json: {schema: {$ref: '#/components/schemas/User'}}}}
     patch:
       tags: [iam]
       operationId: updateUser
+      x-required-permissions: [user.manage]
       requestBody:
         required: true
         content:
@@ -936,11 +966,14 @@ paths:
     get:
       tags: [iam]
       operationId: listRoles
+      x-required-permissions: [role.manage]
+      description: Roles assignable in this workspace. Retired built-in roles are never listed; disabled custom roles are, so they can be enabled again.
       responses:
         '200': {description: Roles, content: {application/json: {schema: {$ref: '#/components/schemas/RolePage'}}}}
     post:
       tags: [iam]
       operationId: createRole
+      x-required-permissions: [role.manage]
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/RoleCreate'}}}
@@ -952,11 +985,13 @@ paths:
     get:
       tags: [iam]
       operationId: getRole
+      x-required-permissions: [role.manage]
       responses:
         '200': {description: Role, content: {application/json: {schema: {$ref: '#/components/schemas/Role'}}}}
     patch:
       tags: [iam]
       operationId: updateRole
+      x-required-permissions: [role.manage]
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/RoleUpdate'}}}
@@ -966,11 +1001,13 @@ paths:
     get:
       tags: [iam]
       operationId: listGroups
+      x-required-permissions: [group.manage]
       responses:
         '200': {description: Groups, content: {application/json: {schema: {$ref: '#/components/schemas/GroupPage'}}}}
     post:
       tags: [iam]
       operationId: createGroup
+      x-required-permissions: [group.manage]
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/GroupCreate'}}}
@@ -982,11 +1019,13 @@ paths:
     get:
       tags: [iam]
       operationId: getGroup
+      x-required-permissions: [group.manage]
       responses:
         '200': {description: Group, content: {application/json: {schema: {$ref: '#/components/schemas/Group'}}}}
     patch:
       tags: [iam]
       operationId: updateGroup
+      x-required-permissions: [group.manage]
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/GroupUpdate'}}}
@@ -995,12 +1034,14 @@ paths:
     delete:
       tags: [iam]
       operationId: deleteGroup
+      x-required-permissions: [group.manage]
       responses:
         '204': {description: Group tombstoned}
   /api/v1/groups/{group_id}/members:
     put:
       tags: [iam]
       operationId: replaceGroupMembers
+      x-required-permissions: [group.manage]
       parameters:
         - {$ref: '#/components/parameters/GroupId'}
       requestBody:
@@ -1012,6 +1053,7 @@ paths:
     get:
       tags: [iam]
       operationId: listPermissions
+      x-required-permissions: [role.manage]
       responses:
         '200':
           description: Assignable permissions
@@ -1022,11 +1064,13 @@ paths:
     get:
       tags: [governance]
       operationId: listApprovalRequests
+      x-authorization-rule: 'Own requests, or reviewable types: access.manage for resource_access, source.manage for plugin_installation.'
       responses:
         '200': {description: Approval Requests, content: {application/json: {schema: {$ref: '#/components/schemas/ApprovalRequestPage'}}}}
     post:
       tags: [governance]
       operationId: createApprovalRequest
+      x-authorization-rule: Own resource_access request; plugin_installation creation requires source.manage.
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/ApprovalRequestCreate'}}}
@@ -1038,11 +1082,13 @@ paths:
     get:
       tags: [governance]
       operationId: getApprovalRequest
+      x-authorization-rule: 'Own request, or reviewer permission: access.manage for resource_access, source.manage for plugin_installation.'
       responses:
         '200': {description: Approval Request, content: {application/json: {schema: {$ref: '#/components/schemas/ApprovalRequest'}}}}
     patch:
       tags: [governance]
       operationId: updateApprovalRequest
+      x-authorization-rule: Pending only. Requester may cancel; approve/deny requires access.manage for resource_access or source.manage for plugin_installation. Reviewers may also cancel.
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/ApprovalRequestUpdate'}}}
@@ -1178,13 +1224,11 @@ components:
     CreateSessionRequest:
       oneOf:
         - {$ref: '#/components/schemas/PasswordSessionCreate'}
-        - {$ref: '#/components/schemas/GuestSessionCreate'}
         - {$ref: '#/components/schemas/GoogleSessionCreate'}
       discriminator:
         propertyName: method
         mapping:
           password: '#/components/schemas/PasswordSessionCreate'
-          guest: '#/components/schemas/GuestSessionCreate'
           google: '#/components/schemas/GoogleSessionCreate'
     PasswordSessionCreate:
       type: object
@@ -1196,12 +1240,6 @@ components:
         username: {type: [string, 'null'], minLength: 3, maxLength: 64}
         password: {type: string, format: password, minLength: 8, maxLength: 128, writeOnly: true}
       description: Provide exactly one of email or username.
-    GuestSessionCreate:
-      type: object
-      additionalProperties: false
-      required: [method]
-      properties:
-        method: {type: string, const: guest}
     GoogleSessionCreate:
       type: object
       additionalProperties: false
@@ -1226,33 +1264,31 @@ components:
         permissions: {type: array, items: {type: string}}
     AuthSession:
       type: object
-      required: [access_token, token_type, expires_at, session_id, user_id, active_workspace_id, permissions, platform_permissions, session_kind, workspaces]
+      required: [access_token, token_type, expires_at, session_id, user_id, active_workspace_id, permissions, platform_permissions, workspaces]
       properties:
         access_token: {type: string}
         token_type: {type: string, const: bearer}
         expires_at: {type: string, format: date-time}
         session_id: {type: string, format: uuid}
-        user_id: {type: [string, 'null'], format: uuid}
+        user_id: {type: string, format: uuid}
         email: {type: [string, 'null'], format: email}
         display_name: {type: [string, 'null']}
         active_workspace_id: {type: string, format: uuid}
         permissions: {type: array, items: {type: string}}
         platform_permissions: {type: array, items: {type: string}}
-        session_kind: {type: string, enum: [user, guest]}
         workspaces: {type: array, items: {$ref: '#/components/schemas/WorkspaceMembership'}}
     CurrentSession:
       type: object
-      required: [session_id, expires_at, user_id, active_workspace_id, permissions, platform_permissions, session_kind, workspaces]
+      required: [session_id, expires_at, user_id, active_workspace_id, permissions, platform_permissions, workspaces]
       properties:
         session_id: {type: string, format: uuid}
         expires_at: {type: string, format: date-time}
-        user_id: {type: [string, 'null'], format: uuid}
+        user_id: {type: string, format: uuid}
         email: {type: [string, 'null'], format: email}
         display_name: {type: [string, 'null']}
         active_workspace_id: {type: string, format: uuid}
         permissions: {type: array, items: {type: string}}
         platform_permissions: {type: array, items: {type: string}}
-        session_kind: {type: string, enum: [user, guest]}
         workspaces: {type: array, items: {$ref: '#/components/schemas/WorkspaceMembership'}}
     ChatMessage:
       type: object
@@ -1283,6 +1319,11 @@ components:
         source_count: {type: integer, minimum: 0}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
+        permissions:
+          type: array
+          default: []
+          description: Effective caller permissions combining workspace and direct/inherited Collection ACL grants.
+          items: {type: string}
     CollectionCreate:
       type: object
       required: [title]
@@ -1433,9 +1474,28 @@ components:
         title: {type: string}
         content_type: {type: string}
         status: {$ref: '#/components/schemas/DocumentStatus'}
-        document_url: {type: [string, 'null'], format: uri}
+        document_url:
+          description: Short-lived signed URL of the stored original. Present when `chunk` is requested.
+          type: [string, 'null']
+          format: uri
         external_url: {type: [string, 'null'], format: uri}
+        preview:
+          description: Renderable presentation (`representation` original|image|pages, `original`, page `assets`, `page_count`, `truncated`, `coordinate_space`, and `rendition` — null or `{url, version, size_bytes, block_count, truncated}`, a signed GET of the gzip-encoded whole-document rendition JSON, see document_viewer.md) behind short-lived signed URLs; null when none can be resolved.
+          type: [object, 'null']
+          additionalProperties: true
         elements: {type: array, items: {type: object, additionalProperties: true}}
+        focus:
+          description: The passage named by `chunk`, for opening the viewer at it; null without `chunk`.
+          anyOf:
+            - {$ref: '#/components/schemas/KnowledgeViewerFocus'}
+            - {type: 'null'}
+    KnowledgeViewerFocus:
+      type: object
+      required: [chunk_id, chunk_text, citation]
+      properties:
+        chunk_id: {type: string}
+        chunk_text: {type: string}
+        citation: {type: object, additionalProperties: true}
     KnowledgeDocumentCitation:
       type: object
       required: [document_id, chunk_id, title, content_type, citation]
@@ -1576,6 +1636,8 @@ components:
         schedule: {anyOf: [{$ref: '#/components/schemas/SchedulePut'}, {type: 'null'}]}
     SourceUpdate:
       type: object
+      additionalProperties: false
+      description: Destination collection, connection and provider resource are immutable. Supplied config replaces the connector scope/configuration and resets its checkpoint; omission preserves it.
       minProperties: 1
       properties:
         display_name: {type: string}
@@ -1729,7 +1791,6 @@ components:
         code: {type: string}
         name: {type: string}
         status: {type: string, enum: [active, inactive, suspended]}
-        visibility: {type: string}
         settings: {type: object, additionalProperties: true}
     WorkspaceUpdate:
       type: object
@@ -1759,23 +1820,44 @@ components:
         id: {type: string, format: uuid}
         email: {type: string, format: email}
         display_name: {type: [string, 'null']}
-        status: {type: string, enum: [active, inactive, suspended]}
+        status:
+          description: "`active`/`suspended` is the member's standing in this workspace; `inactive` means the account itself is disabled."
+          type: string
+          enum: [active, inactive, suspended]
         roles: {type: array, items: {type: object, additionalProperties: true}}
         groups: {type: array, items: {type: object, additionalProperties: true}}
-    UserCreate:
+    MemberAdd:
       type: object
+      additionalProperties: false
       required: [email]
       properties:
         email: {type: string, format: email}
-        display_name: {type: [string, 'null']}
         role_ids: {type: array, uniqueItems: true, items: {type: string, format: uuid}}
         group_ids: {type: array, uniqueItems: true, items: {type: string, format: uuid}}
+    Account:
+      type: object
+      required: [id, email, display_name, status, workspace_membership]
+      properties:
+        id: {type: string, format: uuid}
+        email: {type: string, format: email}
+        display_name: {type: [string, 'null']}
+        status: {type: string, enum: [active, disabled]}
+        workspace_membership: {type: string, enum: [none, active, suspended]}
+    AccountPage:
+      type: object
+      required: [items, total]
+      properties:
+        items: {type: array, maxItems: 1, items: {$ref: '#/components/schemas/Account'}}
+        total: {type: integer, minimum: 0, maximum: 1}
     UserUpdate:
       type: object
       minProperties: 1
       properties:
         display_name: {type: [string, 'null']}
-        status: {type: string, enum: [active, inactive, suspended]}
+        status:
+          description: Workspace standing. Suspension removes access to this workspace only; the account keeps signing in and its other workspaces.
+          type: string
+          enum: [active, suspended]
         role_ids: {type: array, uniqueItems: true, items: {type: string, format: uuid}}
         group_ids: {type: array, uniqueItems: true, items: {type: string, format: uuid}}
     UserPage:
@@ -1786,22 +1868,27 @@ components:
           properties: {items: {type: array, items: {$ref: '#/components/schemas/User'}}}
     Role:
       type: object
-      required: [id, code, display_name, status, permission_codes]
+      required: [id, code, display_name, status, permission_codes, scope_type, is_system, member_count]
       properties:
         id: {type: string, format: uuid}
         code: {type: string}
         display_name: {type: string}
         status: {type: string, enum: [active, inactive]}
         permission_codes: {type: array, uniqueItems: true, items: {type: string}}
+        tenant_id: {type: [string, 'null'], format: uuid}
+        scope_type: {type: string, enum: [platform, tenant, collection]}
+        is_system: {type: boolean}
+        member_count: {type: integer, minimum: 0}
     RoleCreate:
       type: object
-      required: [code, display_name, permission_codes]
+      required: [display_name, permission_codes]
       properties:
-        code: {type: string}
         display_name: {type: string}
         permission_codes: {type: array, uniqueItems: true, items: {type: string}}
+        code: {type: string, minLength: 1, maxLength: 64, description: Internal identifier; derived from display_name when omitted. Clients for people should omit it.}
     RoleUpdate:
       type: object
+      description: System roles cannot be edited. Supplied permission_codes replaces the complete permission set within the caller's own permission ceiling; omission preserves it.
       minProperties: 1
       properties:
         display_name: {type: string}
@@ -1813,6 +1900,14 @@ components:
         - type: object
           required: [items]
           properties: {items: {type: array, items: {$ref: '#/components/schemas/Role'}}}
+    GroupMember:
+      type: object
+      required: [id, email]
+      properties:
+        id: {type: string, format: uuid}
+        email: {type: string, format: email}
+        display_name: {type: [string, 'null']}
+        joined_at: {type: [string, 'null'], format: date-time}
     Group:
       type: object
       required: [id, code, display_name, status, member_count]
@@ -1823,22 +1918,32 @@ components:
         description: {type: [string, 'null']}
         status: {type: string, enum: [active, inactive]}
         member_count: {type: integer, minimum: 0}
+        members:
+          type: array
+          default: []
+          description: Active members on detail reads; list and mutation responses may return the empty default. Load group detail before editing membership.
+          items: {$ref: '#/components/schemas/GroupMember'}
     GroupCreate:
       type: object
-      required: [code, display_name]
+      required: [display_name]
       properties:
-        code: {type: string}
         display_name: {type: string}
         description: {type: [string, 'null']}
+        code: {type: string, minLength: 1, maxLength: 64, description: Internal identifier; derived from display_name when omitted. Clients for people should omit it.}
     GroupUpdate:
       type: object
       minProperties: 1
       properties:
         display_name: {type: string}
-        description: {type: [string, 'null']}
+        description:
+          type: [string, 'null']
+          description: Omitted preserves the existing description; explicit null clears it.
+          minLength: 1
+          maxLength: 2000
         status: {type: string, enum: [active, inactive]}
     GroupMembersPut:
       type: object
+      description: Replaces the complete active membership set; an empty user_ids array removes all members.
       required: [user_ids]
       properties: {user_ids: {type: array, uniqueItems: true, items: {type: string, format: uuid}}}
     GroupPage:
@@ -1860,6 +1965,21 @@ components:
       properties:
         items: {type: array, items: {$ref: '#/components/schemas/Permission'}}
         total: {type: integer, minimum: 0}
+    ApprovalRequester:
+      type: object
+      required: [id, email]
+      description: Requester identity only; not a workspace User and has no status field.
+      properties:
+        id: {type: string, format: uuid}
+        email: {type: string, format: email}
+        display_name: {type: [string, 'null']}
+    ApprovalRequestedRole:
+      type: object
+      required: [id, code, display_name]
+      properties:
+        id: {type: string, format: uuid}
+        code: {type: string}
+        display_name: {type: string}
     ApprovalRequest:
       type: object
       required: [id, request_type, target_id, status, requester, created_at]
@@ -1868,11 +1988,15 @@ components:
         request_type: {type: string, enum: [resource_access, plugin_installation]}
         target_id: {type: string}
         status: {type: string, enum: [pending, approved, denied, cancelled]}
-        requester: {$ref: '#/components/schemas/User'}
+        requester: {$ref: '#/components/schemas/ApprovalRequester'}
+        requested_role: {anyOf: [{$ref: '#/components/schemas/ApprovalRequestedRole'}, {type: 'null'}]}
         details: {type: object, additionalProperties: true}
         reason: {type: [string, 'null']}
         decision_note: {type: [string, 'null']}
+        decided_by_user_id: {type: [string, 'null'], format: uuid}
+        decided_at: {type: [string, 'null'], format: date-time}
         created_at: {type: string, format: date-time}
+        updated_at: {type: [string, 'null'], format: date-time}
     ApprovalRequestCreate:
       type: object
       required: [request_type, target_id]

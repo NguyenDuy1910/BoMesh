@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import tempfile
 from collections.abc import Mapping
 from pathlib import Path
@@ -32,6 +33,9 @@ from bothesis.services import (
     DocumentUnavailableError,
     require_user_identity,
 )
+
+#: Model providers reject larger images; this also bounds what is held in memory.
+MAX_INLINE_IMAGE_BYTES = 20 * 1024 * 1024
 
 
 class StoredFileContentService:
@@ -71,39 +75,52 @@ class StoredFileContentService:
                 max_bytes=self._max_processing_bytes,
             )
             self._validate_stored_size(document, stored.size_bytes)
-            try:
-                processed = await asyncio.to_thread(
-                    self._processor.process_path,
-                    path,
-                    **self._processing_arguments(document, user_id=user_id),
-                )
-            except FileNoTextError as exc:
-                raise DocumentProcessingError(
-                    "the file has no text to index; scanned PDFs and text inside images"
-                    " are not supported yet"
-                ) from exc
-            except FileProcessingError as exc:
-                raise DocumentProcessingError(
-                    "the file could not be read; it may be damaged or in a format that cannot be parsed"
-                ) from exc
+            processed = await self.process_path(document, path, user_id=user_id)
             return self._canonical_content(document, processed, user_id=user_id)
 
-    async def direct_file_data(
+    async def process_path(
         self,
         document: Item,
+        path: Path,
         *,
-        expires_seconds: int,
-    ) -> str:
-        """Return a short-lived URL for the original object."""
+        user_id: UUID,
+    ) -> ProcessedFile:
+        """Parse a local copy of one Item's stored original through the file connector."""
 
-        if expires_seconds < 1:
-            raise ValueError("download URL lifetime must be greater than zero")
-        self._validate_size(document)
+        try:
+            return await asyncio.to_thread(
+                self._processor.process_path,
+                path,
+                **self._processing_arguments(document, user_id=user_id),
+            )
+        except FileNoTextError as exc:
+            raise DocumentProcessingError(
+                "the file has no text to index; scanned PDFs and text inside images"
+                " are not supported yet"
+            ) from exc
+        except FileProcessingError as exc:
+            raise DocumentProcessingError(
+                "the file could not be read; it may be damaged or in a format that cannot be parsed"
+            ) from exc
+
+    async def image_data_url(self, document: Item) -> str:
+        """Return one stored image inline, as a ``data:`` URL for the model.
+
+        The model provider never fetches from object storage: a private
+        endpoint (local MinIO) is unreachable from it, and a signed URL would
+        hand a third party a bearer link to the object.
+        """
+
+        if (document.size_bytes or 0) > MAX_INLINE_IMAGE_BYTES:
+            raise DocumentProcessingError("the image is too large to show the model")
         if not document.storage_key:
             raise DocumentUnavailableError("item has no raw object storage key")
-        return self._object_storage.presign_download(
-            document.storage_key, expires_seconds=expires_seconds
-        ).url
+        data = await self._object_storage.read(
+            document.storage_key, max_bytes=MAX_INLINE_IMAGE_BYTES
+        )
+        self._validate_stored_size(document, len(data))
+        mime_type = (document.mime_type or "").split(";", 1)[0].strip().lower()
+        return f"data:{mime_type};base64,{base64.b64encode(data).decode('ascii')}"
 
     def _canonical_content(
         self,

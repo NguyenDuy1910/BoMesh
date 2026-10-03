@@ -13,6 +13,7 @@ from bothesis.services import (
     KNOWLEDGE_READ_PERMISSION,
     AuthContext,
     require_tenant_permission,
+    require_user_identity,
 )
 from bothesis.services.identity_access.authorization import AuthorizationService
 
@@ -50,10 +51,10 @@ class KnowledgeQueryService:
         if access.tenant_id is None or not requested_ids:
             return {"results": [], "total": 0}
         evidence = await self._retriever.search(
-            query,
+            (query,),
             limit=top_k,
             ctx=AgentContext(
-                user_id=str(access.subject_id),
+                user_id=str(require_user_identity(access)),
                 tenant_id=str(access.tenant_id),
                 roles=list(access.role_codes),
                 collection_item_ids=tuple(str(value) for value in requested_ids),

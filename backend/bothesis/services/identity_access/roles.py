@@ -81,6 +81,9 @@ class RoleService:
         filters = [
             Role.scope_type == TENANT_SCOPE,
             or_(Role.tenant_id == tenant_id, Role.tenant_id.is_(None)),
+            # A built-in role is inactive only once the platform retired it;
+            # a disabled custom role stays listed so it can be enabled again.
+            or_(Role.is_system.is_(False), Role.status == ACTIVE_STATUS),
         ]
         if search and search.strip():
             term = f"%{search.strip()}%"
@@ -139,9 +142,9 @@ class RoleService:
         self,
         actor: AuthContext,
         *,
-        code: str,
         display_name: str,
         permission_codes: list[str],
+        code: str | None = None,
     ) -> dict[str, Any]:
         tenant_id = require_tenant_permission(actor, ROLE_MANAGE_PERMISSION)
         self._require_permission_ceiling(actor, permission_codes)
@@ -218,6 +221,7 @@ class RoleService:
             role.status = normalized_status
             changed.append("status")
         await self._session.flush()
+        await self._session.refresh(role, attribute_names=["updated_at"])
         current_permissions = await self._auth.role_permissions(role.id)
         details: dict[str, Any] = {"changed_fields": changed}
         if permission_codes is not None:

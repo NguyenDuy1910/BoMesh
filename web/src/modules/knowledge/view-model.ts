@@ -109,7 +109,6 @@ export function toWorkspaceDocument(
       : undefined,
     failureReason: document.latest_ingestion?.error ?? undefined,
     modifiedAt: document.updated_at,
-    original: [],
     agentView: [],
   };
 }

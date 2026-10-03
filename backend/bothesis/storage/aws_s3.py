@@ -151,6 +151,8 @@ class S3DocumentStorage:
         key: str,
         *,
         content_type: str | None = None,
+        content_encoding: str | None = None,
+        cache_control: str | None = None,
     ) -> StoredObject:
         """Write bytes to the configured S3-compatible object store."""
 
@@ -164,6 +166,10 @@ class S3DocumentStorage:
         }
         if content_type:
             parameters["ContentType"] = content_type
+        if content_encoding:
+            parameters["ContentEncoding"] = content_encoding
+        if cache_control:
+            parameters["CacheControl"] = cache_control
         try:
             result = self._client.put_object(**parameters)
         except ClientError as exc:

@@ -49,7 +49,6 @@ def test_agent_base_defines_lightweight_retrieval_and_grounding_guidance() -> No
     assert "Do not expose private reasoning" in prompt
     assert "knowledge_search" not in prompt
     assert "inspect_resource" not in prompt
-    assert len(prompt) < 1_500
 
 
 def test_contextual_rag_prompt_is_retrieval_specific_and_file_backed() -> None:

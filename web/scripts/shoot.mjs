@@ -92,7 +92,7 @@ const users = {
     { id: "u2", display_name: "Alicia Tran", email: "alicia@enterprise.ai", status: true, created_at: "2025-02-02T09:00:00Z", membership: { role: { code: "admin", display_name: "Admin" } } },
     { id: "u3", display_name: "Minh Pham", email: "minh@enterprise.ai", status: true, created_at: "2025-02-18T09:00:00Z", membership: { role: { code: "member", display_name: "Member" } } },
     { id: "u4", display_name: "Lan Nguyen", email: "lan@enterprise.ai", status: true, created_at: "2025-04-06T09:00:00Z", membership: { role: { code: "member", display_name: "Member" } } },
-    { id: "u5", display_name: "Vendor Support", email: "vendor@partner.io", status: false, created_at: "2025-05-30T09:00:00Z", membership: { role: { code: "guest", display_name: "Guest" } } },
+    { id: "u5", display_name: "Vendor Support", email: "vendor@partner.io", status: false, created_at: "2025-05-30T09:00:00Z", membership: { role: { code: "member", display_name: "Member" } } },
   ],
 };
 const overview = {

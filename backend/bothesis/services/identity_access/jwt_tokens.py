@@ -46,6 +46,8 @@ class JwtTokenService:
             raise AuthenticationError("an active tenant is required to issue a token")
         if context.session_id is None:
             raise AuthenticationError("an access session is required to issue a token")
+        if context.user_id is None:
+            raise AuthenticationError("a signed-in user is required to issue a token")
         secret = self._secret_or_error()
         issued_at = int(time.time())
         expires_at = issued_at + (expires_in_seconds or self._expires_in_seconds)
@@ -56,12 +58,11 @@ class JwtTokenService:
             # Token subject identifies revocable access session, never durable User.
             "sub": f"session:{context.session_id}",
             "session_id": str(context.session_id),
-            "user_id": str(context.user_id) if context.user_id is not None else None,
+            "user_id": str(context.user_id),
             "email": context.email,
             "active_tenant_id": str(context.tenant_id),
             "permissions": list(context.permission_codes),
             "platform_permissions": list(context.platform_permissions),
-            "session_kind": context.session_kind,
             "token_version": context.token_version,
             "iat": issued_at,
             "exp": expires_at,
@@ -136,9 +137,8 @@ def _claims_from_payload(
         tenant_id = UUID(_string_claim(payload, "active_tenant_id"))
     except ValueError as exc:
         raise AuthenticationError("access token has an invalid identifier") from exc
-    user_value = payload.get("user_id")
     try:
-        user_id = UUID(user_value) if isinstance(user_value, str) and user_value else None
+        user_id = UUID(_string_claim(payload, "user_id"))
     except ValueError as exc:
         raise AuthenticationError("access token user is invalid") from exc
     permissions_value = payload.get("permissions")
@@ -155,13 +155,7 @@ def _claims_from_payload(
     platform_permissions = tuple(
         sorted({value.strip().casefold() for value in platform_value})
     )
-    session_kind = payload.get("session_kind")
-    if session_kind not in {"user", "guest"}:
-        raise AuthenticationError("access token session kind is invalid")
-    expected_subject = f"session:{session_id}"
-    if payload.get("sub") != expected_subject or (session_kind == "guest") != (
-        user_id is None
-    ):
+    if payload.get("sub") != f"session:{session_id}":
         raise AuthenticationError("access token subject is invalid")
     token_version = payload.get("token_version")
     if isinstance(token_version, bool) or not isinstance(token_version, int) or token_version < 1:
@@ -185,7 +179,6 @@ def _claims_from_payload(
         active_tenant_id=tenant_id,
         permissions=permissions,
         platform_permissions=platform_permissions,
-        session_kind=session_kind,
         token_version=token_version,
         issued_at=datetime.fromtimestamp(issued_at, UTC),
         expires_at=datetime.fromtimestamp(expires_at, UTC),

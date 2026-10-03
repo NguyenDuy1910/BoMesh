@@ -15,6 +15,12 @@ export interface ConversationDocument {
   sizeBytes: number;
   mode: "direct" | "indexed";
   status: "available" | "failed";
+  /**
+   * `reference` is an existing Document the caller may read, cited by id.
+   * Only `upload` (the default) belongs to the conversation and is released
+   * with it; a reference is never deleted from the chat.
+   */
+  origin?: "upload" | "reference";
 }
 
 /** A Collection explicitly attached to one user turn as retrieval context. */

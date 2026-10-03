@@ -45,14 +45,14 @@ class AppColors extends ThemeExtension<AppColors> {
   final Color codeText;
 
   static const light = AppColors(
-    appBackground: Color(0xFFF7F7F6),
+    appBackground: Color(0xFFF6F7FB),
     surface: Color(0xFFFFFFFF),
-    sidebar: Color(0xFFF3F3F1),
-    subtle: Color(0xFFFAFAF9),
+    sidebar: Color(0xFFF0F2F8),
+    subtle: Color(0xFFF8F9FC),
     hover: Color(0xFFECECEA),
     selected: Color(0xFFEEEEFF),
-    border: Color(0x1A18181B),
-    borderStrong: Color(0x2918181B),
+    border: Color(0xFFE2E5EF),
+    borderStrong: Color(0xFFB8BECE),
     textPrimary: Color(0xFF18181B),
     textSecondary: Color(0xFF52525B),
     textMuted: Color(0xFF71717A),
@@ -60,7 +60,7 @@ class AppColors extends ThemeExtension<AppColors> {
     brandHover: Color(0xFF4F46C8),
     brandSoft: Color(0xFFEEEEFF),
     onBrand: Color(0xFFFFFFFF),
-    danger: Color(0xFFDC5252),
+    danger: Color(0xFFB42335),
     dangerSoft: Color(0xFFFFF1F1),
     codeSurface: Color(0xFF18181B),
     codeText: Color(0xFFE4E4E7),
@@ -73,8 +73,8 @@ class AppColors extends ThemeExtension<AppColors> {
     subtle: Color(0xFF222226),
     hover: Color(0xFF25252A),
     selected: Color(0xFF292943),
-    border: Color(0x1AFFFFFF),
-    borderStrong: Color(0x2BFFFFFF),
+    border: Color(0xFF303039),
+    borderStrong: Color(0xFF626270),
     textPrimary: Color(0xFFF4F4F5),
     textSecondary: Color(0xFFD4D4D8),
     textMuted: Color(0xFFA1A1AA),
@@ -150,7 +150,7 @@ abstract final class AppTheme {
         ),
         bodyLarge: TextStyle(
           color: colors.textPrimary,
-          fontSize: 15,
+          fontSize: 16,
           height: 1.58,
           letterSpacing: -0.05,
         ),
@@ -170,6 +170,72 @@ abstract final class AppTheme {
           fontWeight: FontWeight.w600,
         ),
       ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          minimumSize: const Size(48, 52),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+          textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size(48, 50),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          side: BorderSide(color: colors.borderStrong),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+      ),
+      cardTheme: CardThemeData(
+        elevation: 0,
+        color: colors.surface,
+        margin: EdgeInsets.zero,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: BorderSide(color: colors.border),
+        ),
+      ),
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: colors.surface,
+        indicatorColor: colors.brandSoft,
+        iconTheme: WidgetStateProperty.resolveWith(
+          (states) => IconThemeData(
+            color: states.contains(WidgetState.selected)
+                ? colors.brand
+                : colors.textSecondary,
+          ),
+        ),
+        labelTextStyle: WidgetStateProperty.resolveWith(
+          (states) => TextStyle(
+            color: states.contains(WidgetState.selected)
+                ? colors.brand
+                : colors.textSecondary,
+            fontWeight: states.contains(WidgetState.selected)
+                ? FontWeight.w600
+                : FontWeight.w500,
+          ),
+        ),
+        elevation: 0,
+        height: 72,
+      ),
+      navigationRailTheme: NavigationRailThemeData(
+        backgroundColor: colors.surface,
+        indicatorColor: colors.brandSoft,
+        selectedIconTheme: IconThemeData(color: colors.brand),
+        unselectedIconTheme: IconThemeData(color: colors.textSecondary),
+        selectedLabelTextStyle: TextStyle(
+          color: colors.brand,
+          fontWeight: FontWeight.w600,
+        ),
+        unselectedLabelTextStyle: TextStyle(color: colors.textSecondary),
+      ),
       appBarTheme: AppBarTheme(
         backgroundColor: colors.appBackground,
         foregroundColor: colors.textPrimary,
@@ -182,8 +248,8 @@ abstract final class AppTheme {
         fillColor: colors.subtle,
         hintStyle: TextStyle(color: colors.textMuted),
         contentPadding: const EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: 10,
+          horizontal: 16,
+          vertical: 16,
         ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
@@ -200,7 +266,7 @@ abstract final class AppTheme {
       ),
       iconButtonTheme: IconButtonThemeData(
         style: IconButton.styleFrom(
-          minimumSize: const Size(44, 44),
+          minimumSize: const Size(48, 48),
           foregroundColor: colors.textSecondary,
         ),
       ),

@@ -40,10 +40,10 @@ follows `api_contract.md` and names current owning services.
 | POST | `/sources/{source_id}/ingestions` | start source ingestion | integrations UI | `IntegrationLifecycleService.ingest_source` | source manage | keep | same |
 | POST | `/sources/{source_id}/schedule/pause` | schedule state command | integrations UI | Temporal schedule adapter | source manage | remove | PATCH schedule `enabled=false` |
 | POST | `/sources/{source_id}/schedule/resume` | schedule state command | integrations UI | Temporal schedule adapter | source manage | remove | PATCH schedule `enabled=true` |
-| POST | `/auth/guest-sessions` | provider-shaped guest Session creation | auth client | `AuthenticationService.create_guest_session` | public | merge into canonical Session operation | `/auth/sessions` (`method=guest`) |
-| POST | `/auth/password` | provider-shaped password Session creation | auth client | `AuthenticationService.complete_password_login` | public/guest | merge into canonical Session operation | `/auth/sessions` (`method=password`) |
-| POST | `/auth/google` | provider-shaped Google Session creation | auth client | `AuthenticationService.complete_google_login` | public/guest | merge into canonical Session operation | `/auth/sessions` (`method=google`) |
-| POST | `/auth/accounts` | local Account creation plus first Session | auth client | `AuthenticationService.create_password_account` | public/guest | keep resource operation; rename response fields | `/auth/accounts` |
+| POST | `/auth/guest-sessions` | provider-shaped guest Session creation | auth client | `AuthenticationService.create_guest_session` | public | remove (no anonymous access) | *(none)* |
+| POST | `/auth/password` | provider-shaped password Session creation | auth client | `AuthenticationService.complete_password_login` | public | merge into canonical Session operation | `/auth/sessions` (`method=password`) |
+| POST | `/auth/google` | provider-shaped Google Session creation | auth client | `AuthenticationService.complete_google_login` | public | merge into canonical Session operation | `/auth/sessions` (`method=google`) |
+| POST | `/auth/accounts` | local Account creation plus first Session | auth client | `AuthenticationService.create_password_account` | public | keep resource operation; rename response fields | `/auth/accounts` |
 | POST | `/auth/session` | workspace switch encoded as Session replacement | workspace switcher | `AuthenticationService.create_session` | bearer | model as Session state update | `PATCH /auth/session` |
 | GET | *(missing)* | current authenticated Session/context | auth client and app shell | access-session resolver | bearer | add explicit resource read | `/auth/session` |
 | PATCH | *(missing)* | active workspace state update | workspace switcher | `AuthenticationService.create_session` | bearer | add explicit state transition | `/auth/session` |
@@ -96,6 +96,9 @@ complete_password_login
 complete_google_login
 active_tenant_id (public DTO/client field)
 tenants (public auth response field)
+session_kind (public auth response field and JWT claim)
+Workspace.visibility (public workspace field)
+request_identity (agent tool)
 username as password-login identifier
 ```
 

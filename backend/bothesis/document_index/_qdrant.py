@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from typing import Any
 
 from qdrant_client import AsyncQdrantClient
@@ -142,18 +142,22 @@ class _QdrantBackend:
     async def search_item_points(
         self,
         *,
-        query_vector: list[float],
-        query_text: str,
+        queries: Sequence[tuple[str, list[float]]],
         tenant_id: str,
         collection_item_ids: Iterable[str],
         limit: int,
         candidate_limit: int,
     ) -> list[Any]:
-        """Search the private collection within an authorized Item scope."""
+        """Search the private collection within an authorized Item scope.
+
+        ``queries`` pairs each query's text with its dense embedding. Every
+        query contributes a dense and a BM25 candidate list, and one native
+        reciprocal-rank fusion ranks the union: a chunk several queries find
+        rises, and each point appears once.
+        """
 
         return await self._search(
-            query_vector,
-            query_text=query_text,
+            queries,
             query_filter=self._access_filter(
                 tenant_id=tenant_id,
                 collection_item_ids=collection_item_ids,
@@ -238,48 +242,54 @@ class _QdrantBackend:
 
     async def _search(
         self,
-        query_vector: list[float],
+        queries: Sequence[tuple[str, list[float]]],
         *,
-        query_text: str,
-        query_filter: Any | None,
+        query_filter: Any,
         limit: int,
         candidate_limit: int,
     ) -> list[Any]:
-        """Search dense and BM25 vectors through native reciprocal-rank fusion."""
+        """Fuse every query's dense and BM25 candidates with native RRF."""
 
+        if not queries:
+            raise ValueError("at least one query is required")
         if limit < 1 or candidate_limit < limit:
             raise ValueError("candidate_limit must be at least the result limit")
+        prefetches = [
+            prefetch
+            for text, vector in queries
+            for prefetch in (
+                qmodels.Prefetch(
+                    query=vector,
+                    using=DENSE_VECTOR_NAME,
+                    filter=query_filter,
+                    limit=candidate_limit,
+                ),
+                qmodels.Prefetch(
+                    query=qmodels.Document(
+                        text=text,
+                        model=BM25_MODEL,
+                        options=BM25_OPTIONS,
+                    ),
+                    using=SPARSE_VECTOR_NAME,
+                    filter=query_filter,
+                    limit=candidate_limit,
+                ),
+            )
+        ]
 
         last_error: Exception | None = None
         for attempt, retry_delay in enumerate((*_SEARCH_RETRY_DELAYS, None), start=1):
             try:
-                prefetches = self._build_prefetches(
-                    query_vector=query_vector,
-                    query_text=query_text,
-                    query_filter=query_filter,
-                    dense_vector_name=DENSE_VECTOR_NAME,
-                    candidate_limit=candidate_limit,
-                    sparse_vector_name=SPARSE_VECTOR_NAME,
-                )
-                if len(prefetches) > 1:
-                    result = await self._query_fused_points(
+                result = await self._maybe_await(
+                    self.client.query_points(
                         collection_name=self.collection_name,
-                        prefetches=prefetches,
-                        query_filter=query_filter,
+                        prefetch=prefetches,
+                        query=qmodels.FusionQuery(fusion=qmodels.Fusion.RRF),
                         limit=limit,
+                        query_filter=query_filter,
                         with_payload=True,
                         with_vectors=False,
                     )
-                    return list(getattr(result, "points", []) or [])
-
-                result = await self._query_dense_points(
-                    collection_name=self.collection_name,
-                    query_vector=query_vector,
-                    dense_vector_name=DENSE_VECTOR_NAME,
-                    query_filter=query_filter,
-                    limit=limit,
-                    with_payload=True,
-                    with_vectors=False,
                 )
                 return list(getattr(result, "points", []) or [])
             except Exception as error:  # noqa: BLE001 - SDK errors vary by transport
@@ -316,84 +326,6 @@ class _QdrantBackend:
         if offset is not None:
             kwargs["offset"] = offset
         return await self._maybe_await(self.client.scroll(**kwargs))
-
-    @staticmethod
-    def _build_prefetches(
-        *,
-        query_vector: list[float],
-        query_text: str | None,
-        query_filter: Any | None,
-        dense_vector_name: str,
-        candidate_limit: int,
-        sparse_vector_name: str,
-    ) -> list[Any]:
-        prefetches: list[Any] = [
-            qmodels.Prefetch(
-                query=query_vector,
-                using=dense_vector_name,
-                filter=query_filter,
-                limit=candidate_limit,
-            )
-        ]
-        if query_text:
-            prefetches.append(
-                qmodels.Prefetch(
-                    query=qmodels.Document(
-                        text=query_text,
-                        model=BM25_MODEL,
-                        options=BM25_OPTIONS,
-                    ),
-                    using=sparse_vector_name,
-                    filter=query_filter,
-                    limit=candidate_limit,
-                )
-            )
-        return prefetches
-
-    async def _query_fused_points(
-        self,
-        *,
-        collection_name: str,
-        prefetches: list[Any],
-        query_filter: Any | None,
-        limit: int,
-        with_payload: bool,
-        with_vectors: bool,
-    ) -> Any:
-        return await self._maybe_await(
-            self.client.query_points(
-                collection_name=collection_name,
-                prefetch=prefetches,
-                query=qmodels.FusionQuery(fusion=qmodels.Fusion.RRF),
-                limit=limit,
-                query_filter=query_filter,
-                with_payload=with_payload,
-                with_vectors=with_vectors,
-            )
-        )
-
-    async def _query_dense_points(
-        self,
-        *,
-        collection_name: str,
-        query_vector: list[float],
-        dense_vector_name: str,
-        query_filter: Any | None,
-        limit: int,
-        with_payload: bool,
-        with_vectors: bool,
-    ) -> Any:
-        return await self._maybe_await(
-            self.client.query_points(
-                collection_name=collection_name,
-                query=query_vector,
-                using=dense_vector_name,
-                limit=limit,
-                query_filter=query_filter,
-                with_payload=with_payload,
-                with_vectors=with_vectors,
-            )
-        )
 
     @staticmethod
     def _access_filter(

@@ -33,12 +33,6 @@ export interface KnowledgeAgentSection {
   citedCount?: number;
 }
 
-export interface KnowledgeSheet {
-  name: string;
-  columns: string[];
-  rows: string[][];
-}
-
 export interface WorkspaceKnowledgeDocument {
   id: string;
   title: string;
@@ -53,7 +47,6 @@ export interface WorkspaceKnowledgeDocument {
   answerIncluded?: boolean;
   /** A lifecycle tombstone. Normal workspace reads exclude this document. */
   removedAt?: string;
-  original: string[];
   agentView: string[];
 
   /* Everything below is optional so the personal Library, which builds these
@@ -62,8 +55,6 @@ export interface WorkspaceKnowledgeDocument {
 
   /** "PDF", "DOCX", "XLSX" — the word a person uses for the format. */
   fileTypeLabel?: string;
-  /** Pages for a document, sheets for a workbook. Drives the pager. */
-  pageCount?: number;
   /** Where the document lives inside its source. */
   path?: string;
   /** The file in its own source. Absent for anything with no home to open. */
@@ -82,7 +73,6 @@ export interface WorkspaceKnowledgeDocument {
   latestIngestion?: Pick<Ingestion, "id" | "status" | "error" | "attempt">;
   /** Retrieval-ready passages. Falls back to `agentView` lines. */
   sections?: KnowledgeAgentSection[];
-  sheets?: KnowledgeSheet[];
 }
 
 export interface WorkspaceKnowledgeCollection {

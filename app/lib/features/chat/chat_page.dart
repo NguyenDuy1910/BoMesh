@@ -3,7 +3,8 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 
-import '../../app/app_config.dart';
+import '../../core/api_client.dart';
+import '../auth/session.dart';
 import '../../app/app_theme.dart';
 import 'models/chat_models.dart';
 import 'services/chat_service.dart';
@@ -18,10 +19,18 @@ import 'widgets/welcome_view.dart';
 class ChatPage extends StatefulWidget {
   const ChatPage({
     super.key,
+    required this.api,
+    required this.session,
+    this.initialDocumentId,
+    this.initialDocumentTitle,
     required this.themeMode,
     required this.onCycleTheme,
   });
 
+  final ApiClient api;
+  final AuthSession session;
+  final String? initialDocumentId;
+  final String? initialDocumentTitle;
   final ThemeMode themeMode;
   final VoidCallback onCycleTheme;
 
@@ -42,11 +51,33 @@ class _ChatPageState extends State<ChatPage> {
   void initState() {
     super.initState();
     _controller = ChatController(
-      ChatService(),
-      ConversationStore(userNamespace: AppConfig.userId),
+      ChatService(widget.api),
+      ConversationStore(namespace: widget.session.namespace),
+      widget.session,
     )..addListener(_onControllerChanged);
     _scrollController.addListener(_onScroll);
-    unawaited(_controller.initialize());
+    unawaited(
+      _controller.initialize(
+        documentId: widget.initialDocumentId,
+        documentTitle: widget.initialDocumentTitle,
+      ),
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant ChatPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialDocumentId != null &&
+        widget.initialDocumentId != oldWidget.initialDocumentId) {
+      unawaited(_askInitialDocument());
+    }
+  }
+
+  Future<void> _askInitialDocument() async {
+    final id = widget.initialDocumentId;
+    final title = widget.initialDocumentTitle ?? 'Document';
+    await _controller.newChat();
+    if (mounted && id != null) _controller.referenceDocument(id, title);
   }
 
   @override
@@ -292,7 +323,7 @@ class _ChatPageState extends State<ChatPage> {
               const Padding(
                 padding: EdgeInsets.fromLTRB(14, 0, 14, 6),
                 child: _PageError(
-                  message: 'Chat is unavailable because workspace access has not been configured. Pass the API URL, tenant ID, and user ID when running the app.',
+                  message: 'Your current workspace does not grant knowledge access. Contact an administrator to use Chat.',
                 ),
               ),
             ChatComposer(controller: _controller),

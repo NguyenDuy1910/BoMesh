@@ -18,25 +18,28 @@ const ZOOM_STEP = 10;
  * — one floating object, never two.
  */
 export function DocumentPager({
-  page,
-  pageCount,
+  page = 1,
+  pageCount = 1,
   zoom,
-  search,
+  search = "",
   onPageChange,
   onZoomChange,
   onSearchChange,
 }: {
-  page: number;
-  pageCount: number;
-  zoom: number;
-  search: string;
-  onPageChange: (page: number) => void;
-  onZoomChange: (zoom: number) => void;
-  onSearchChange: (value: string) => void;
+  /** Paging shows only with more than one page and a handler. */
+  page?: number;
+  pageCount?: number;
+  onPageChange?: (page: number) => void;
+  /** Zoom shows only for a view that can be zoomed. */
+  zoom?: number;
+  onZoomChange?: (zoom: number) => void;
+  /** Find shows only for a view that can be searched. */
+  search?: string;
+  onSearchChange?: (value: string) => void;
 }) {
   const [finding, setFinding] = useState(false);
 
-  if (finding || search) {
+  if (onSearchChange && (finding || search)) {
     return (
       <div className="knowledge-pager knowledge-pager--finding" role="search">
         <Search aria-hidden="true" size={16} />
@@ -71,7 +74,7 @@ export function DocumentPager({
 
   return (
     <div className="knowledge-pager">
-      {pageCount > 1 && (
+      {onPageChange && pageCount > 1 && (
         <div className="knowledge-pager__group">
           <Button
             aria-label="Previous page"
@@ -94,37 +97,41 @@ export function DocumentPager({
           />
         </div>
       )}
-      <div className="knowledge-pager__group">
-        <Button
-          aria-label="Zoom out"
-          disabled={zoom <= ZOOM_MIN}
-          icon={<Minus size={16} />}
-          iconOnly
-          onClick={() => onZoomChange(zoom - ZOOM_STEP)}
-          size="sm"
-          variant="ghost"
-        />
-        <span>{zoom}%</span>
-        <Button
-          aria-label="Zoom in"
-          disabled={zoom >= ZOOM_MAX}
-          icon={<Plus size={16} />}
-          iconOnly
-          onClick={() => onZoomChange(zoom + ZOOM_STEP)}
-          size="sm"
-          variant="ghost"
-        />
-      </div>
-      <Tooltip label="Find in document" side="top">
-        <Button
-          aria-label="Find in document"
-          icon={<Search size={16} />}
-          iconOnly
-          onClick={() => setFinding(true)}
-          size="sm"
-          variant="ghost"
-        />
-      </Tooltip>
+      {onZoomChange && zoom !== undefined && (
+        <div className="knowledge-pager__group">
+          <Button
+            aria-label="Zoom out"
+            disabled={zoom <= ZOOM_MIN}
+            icon={<Minus size={16} />}
+            iconOnly
+            onClick={() => onZoomChange(zoom - ZOOM_STEP)}
+            size="sm"
+            variant="ghost"
+          />
+          <span>{zoom}%</span>
+          <Button
+            aria-label="Zoom in"
+            disabled={zoom >= ZOOM_MAX}
+            icon={<Plus size={16} />}
+            iconOnly
+            onClick={() => onZoomChange(zoom + ZOOM_STEP)}
+            size="sm"
+            variant="ghost"
+          />
+        </div>
+      )}
+      {onSearchChange && (
+        <Tooltip label="Find in document" side="top">
+          <Button
+            aria-label="Find in document"
+            icon={<Search size={16} />}
+            iconOnly
+            onClick={() => setFinding(true)}
+            size="sm"
+            variant="ghost"
+          />
+        </Tooltip>
+      )}
     </div>
   );
 }

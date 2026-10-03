@@ -16,8 +16,6 @@ import type {
  */
 export interface DocumentFacts {
   fileTypeLabel: string;
-  /** Pages for a document, sheets for a workbook. At least 1. */
-  pageCount: number;
   /** "6 sheets" / "48 pages" — the unit that matches the format. */
   extentLabel: string;
   path: string;
@@ -44,9 +42,6 @@ export function documentFacts(document: WorkspaceKnowledgeDocument): DocumentFac
       ? extension
       : KIND_LABEL[document.kind]);
 
-  const parsedExtent = Number.parseInt(document.pagesLabel, 10);
-  const pageCount = Math.max(1, document.pageCount ?? document.sheets?.length ?? (Number.isNaN(parsedExtent) ? 1 : parsedExtent));
-
   const sections = document.sections
     ?? document.agentView.map((line, index) => ({
       heading: index === 0 ? line : `Passage ${index}`,
@@ -55,7 +50,6 @@ export function documentFacts(document: WorkspaceKnowledgeDocument): DocumentFac
 
   return {
     fileTypeLabel,
-    pageCount,
     extentLabel: document.pagesLabel,
     path: document.path ?? document.collection ?? "Unfiled",
     modifiedLabel: document.modifiedAt ?? document.updatedLabel,

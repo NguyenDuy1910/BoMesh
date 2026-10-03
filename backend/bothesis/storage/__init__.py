@@ -47,6 +47,8 @@ class DocumentStorage(Protocol):
         key: str,
         *,
         content_type: str | None = None,
+        content_encoding: str | None = None,
+        cache_control: str | None = None,
     ) -> StoredObject: ...
 
     def put_path(

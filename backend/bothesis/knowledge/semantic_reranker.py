@@ -1,4 +1,4 @@
-"""LLM-backed second-stage ranking over permission-filtered candidates."""
+"""LLM-backed relevance gate and ranking over permission-filtered candidates."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from bothesis.document_index import ContextualChunk
 
 
 class SemanticReranker:
-    """Return a validated deterministic ordering selected by a model."""
+    """Keep the candidates a model judges useful, in the order it ranks them."""
 
     def __init__(
         self,
@@ -34,12 +34,12 @@ class SemanticReranker:
         self,
         chunks: Sequence[ContextualChunk],
         *,
+        queries: Sequence[str],
         limit: int,
-        query: str = "",
     ) -> list[ContextualChunk]:
-        normalized_query = query.strip()
-        if not normalized_query:
-            raise ValueError("reranking query must not be empty")
+        normalized_queries = [query.strip() for query in queries if query.strip()]
+        if not normalized_queries:
+            raise ValueError("reranking queries must not be empty")
         if limit < 1:
             raise ValueError("limit must be at least one")
         candidates = list(chunks)
@@ -47,7 +47,7 @@ class SemanticReranker:
             return []
         prompt = render_prompt(
             "retrieval_rerank",
-            query=normalized_query,
+            queries=normalized_queries,
             candidates=[self._candidate(chunk) for chunk in candidates],
             result_limit=min(limit, len(candidates)),
         )
@@ -63,11 +63,11 @@ class SemanticReranker:
                 "reranker returned no text "
                 f"(status={getattr(response, 'status', 'unknown')})"
             )
-        ordered_ids = self._ordered_ids(raw_text, candidates)
         by_id = {chunk.id: chunk for chunk in candidates}
-        ordered = [by_id[chunk_id] for chunk_id in ordered_ids]
-        ordered.extend(chunk for chunk in candidates if chunk.id not in ordered_ids)
-        selected = ordered[:limit]
+        # Candidates the model leaves out are judged not useful and dropped;
+        # an empty list means no candidate answers the queries.
+        selected = [by_id[chunk_id] for chunk_id in self._ordered_ids(raw_text, candidates)]
+        selected = selected[:limit]
         denominator = max(1, len(selected))
         return [
             chunk.model_copy(
@@ -97,8 +97,8 @@ class SemanticReranker:
         if not isinstance(value, dict) or set(value) != {"chunk_ids"}:
             raise ValueError("reranker response must contain only chunk_ids")
         chunk_ids = value["chunk_ids"]
-        if not isinstance(chunk_ids, list) or not chunk_ids:
-            raise ValueError("reranker chunk_ids must be a non-empty list")
+        if not isinstance(chunk_ids, list):
+            raise ValueError("reranker chunk_ids must be a list")
         if any(not isinstance(chunk_id, str) for chunk_id in chunk_ids):
             raise ValueError("reranker chunk_ids must contain strings")
         if len(chunk_ids) != len(set(chunk_ids)):

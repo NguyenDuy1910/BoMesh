@@ -28,7 +28,12 @@ from bothesis.connector.protocol import (
     DocumentKind,
 )
 from bothesis.db.models import ExternalResource, IngestionSource, Item
-from bothesis.document_index import IndexingContext, IndexProgress, ItemIndex
+from bothesis.document_index import (
+    EmbeddingRejectedError,
+    IndexingContext,
+    IndexProgress,
+    ItemIndex,
+)
 from bothesis.services.citation import CitationService
 from bothesis.services.item import ItemService
 from bothesis.services import (
@@ -103,6 +108,13 @@ class PhaseRecorder:
 def failure_message(exc: BaseException) -> str:
     """The reason a person is shown: a processing error's own words, else generic."""
 
+    if isinstance(exc, EmbeddingRejectedError):
+        # The provider's own text can carry account details; the status cannot.
+        return (
+            f"The embedding provider refused the request (HTTP {exc.status_code}). "
+            "An administrator must check the model provider key, credit and "
+            "embedding model, then retry."
+        )
     if not isinstance(exc, DocumentProcessingError):
         return INTERRUPTED_MESSAGE
     text = str(exc).strip() or "The document could not be processed"
@@ -310,7 +322,7 @@ class ItemIngestionService:
             item, tenant_id=tenant_id, integration_connection_id=connector_id
         )
         stored, source, _ = await self._persist_item(item)
-        await self._persist_preview(stored)
+        await self._persist_preview(stored, item)
         canonical_item, canonical_chunks = self._canonical_document(
             item,
             chunks,
@@ -482,7 +494,7 @@ class ItemIngestionService:
                 raise
             raise DocumentProcessingError("document canonicalization failed") from exc
 
-        await self._persist_preview(document)
+        await self._persist_preview(document, canonical.item)
         await self.process_item_content(
             document,
             canonical.item,
@@ -646,11 +658,13 @@ class ItemIngestionService:
             session.expunge(external_resource)
             return stored, source, external_resource
 
-    async def _persist_preview(self, stored: Item) -> None:
+    async def _persist_preview(
+        self, stored: Item, content: DocumentItem | None = None
+    ) -> None:
         if self._preview is None or not stored.storage_key:
             return
         try:
-            manifest = await self._preview.generate(stored)
+            manifest = await self._preview.generate(stored, content=content)
             if manifest is None:
                 return
             preview_metadata = manifest.model_dump(mode="json")

@@ -162,6 +162,10 @@ class KnowledgeViewService:
             document_counts, source_counts = await self._collection_counts(
                 session, collection_ids
             )
+            collection_permissions = {
+                item.id: sorted(await access_service.permissions_for_item(item.id, access=access))
+                for item in collections
+            }
             recent_documents = list(
                 await session.scalars(
                     self._document_statement(
@@ -184,11 +188,14 @@ class KnowledgeViewService:
         )
         return {
             "items": [
-                _collection_payload(
-                    item,
-                    document_count=document_counts.get(item.id, 0),
-                    source_count=source_counts.get(item.id, 0),
-                )
+                {
+                    **_collection_payload(
+                        item,
+                        document_count=document_counts.get(item.id, 0),
+                        source_count=source_counts.get(item.id, 0),
+                    ),
+                    "permissions": collection_permissions[item.id],
+                }
                 for item in collections
             ],
             "total": len(collections),

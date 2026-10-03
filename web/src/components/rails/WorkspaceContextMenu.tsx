@@ -3,7 +3,6 @@
 import {
   Check,
   ChevronRight,
-  LogIn,
   LogOut,
   SlidersHorizontal,
   Settings,
@@ -15,14 +14,12 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { Dropdown, DropdownItem, DropdownSeparator } from "@/components/ui/Dropdown";
-import { useAuthPrompt } from "@/components/auth/AuthPrompt";
 import { WorkspaceMark } from "@/components/patterns";
 import { Avatar } from "@/components/ui/Avatar";
 import {
   clearAuthSession,
   hasAnySessionPermission,
   canAccessPlatformControl,
-  isGuestSession,
 } from "@/lib/auth/session";
 import { useWorkspaceSwitch } from "@/modules/auth/queries";
 import { useAuthSession } from "@/lib/hooks/useAuthSession";
@@ -53,7 +50,6 @@ export function WorkspaceContextMenu({
   onNavigate?: () => void;
 }) {
   const router = useRouter();
-  const { requestSignIn } = useAuthPrompt();
   const [open, setOpen] = useState(false);
   const [accountTab, setAccountTab] = useState<"profile" | "preferences">("profile");
   const [accountOpen, setAccountOpen] = useState(false);
@@ -63,13 +59,10 @@ export function WorkspaceContextMenu({
 
   const current = session?.workspaces.find((tenant) => tenant.id === session.active_workspace_id);
   const workspaceName = current?.name ?? "Workspace";
-  const userName = isGuestSession(session)
-    ? "Guest session"
-    : session?.display_name || session?.email || "Signed in";
+  const userName = session?.display_name || session?.email || "Signed in";
   const otherWorkspaces = (session?.workspaces ?? []).filter((tenant) => tenant.id !== current?.id);
   const canManageWorkspace = hasAnySessionPermission(session, workspaceControlPermissions);
   const canUsePlatformControl = canAccessPlatformControl(session);
-  const isGuest = isGuestSession(session);
 
   const changeWorkspace = async (workspaceId: string) => {
     if (await selectWorkspace(workspaceId)) {
@@ -82,7 +75,7 @@ export function WorkspaceContextMenu({
 
   const signOut = () => {
     clearAuthSession();
-    router.replace("/app");
+    router.replace("/auth/login");
   };
 
   return (
@@ -110,7 +103,7 @@ export function WorkspaceContextMenu({
     >
       <div className="px-2.5 pb-2 pt-1" role="presentation">
         <p className="truncate text-[length:var(--text-size-meta)] text-[var(--text-secondary)]">
-          {session?.email ?? (isGuest ? "Guest session" : "Signed in")}
+          {session?.email ?? "Signed in"}
         </p>
         <div className="mt-2 flex items-center gap-3">
           <Avatar name={userName} size="lg" />
@@ -119,14 +112,14 @@ export function WorkspaceContextMenu({
               {userName}
             </p>
             <p className="text-[length:var(--text-size-meta)] text-[var(--text-tertiary)]">
-              {isGuest ? "Guest session" : "Member"}
+              Member
             </p>
           </div>
         </div>
       </div>
 
-      {session && !isGuest && <DropdownSeparator />}
-      {session && !isGuest && (
+      {session && <DropdownSeparator />}
+      {session && (
         <div className="px-2.5 pb-1 pt-2 text-[length:var(--text-size-meta)] font-medium text-[var(--text-tertiary)]" role="presentation">
           Switch workspace
         </div>
@@ -205,14 +198,7 @@ export function WorkspaceContextMenu({
         </>
       )}
 
-      {isGuest && (
-        <DropdownItem onClick={() => requestSignIn("Sign in to keep this conversation and unlock your workspace.")}>
-          <LogIn aria-hidden="true" className="h-[18px] w-[18px]" />
-          <span className="flex-1">Sign in</span>
-        </DropdownItem>
-      )}
-
-      {session && !isGuest && (
+      {session && (
         <>
           <DropdownSeparator />
           <div className="px-2.5 pb-1 pt-2 text-[length:var(--text-size-meta)] font-medium text-[var(--text-tertiary)]" role="presentation">
@@ -243,7 +229,7 @@ export function WorkspaceContextMenu({
         </>
       )}
 
-      {session && !isGuest && (
+      {session && (
         <>
           <DropdownSeparator />
           <DropdownItem destructive onClick={signOut}>

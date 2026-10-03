@@ -13,12 +13,16 @@ from pathlib import Path
 import pypdfium2 as pdfium
 from PIL import Image
 
+from bothesis.connector.processing.pdfium_lock import PDFIUM_LOCK
+from bothesis.connector.protocol import DocumentItem
 from bothesis.db.models import Item
 from bothesis.services import (
     DEFAULT_PREVIEW_MAX_DIMENSION,
     DEFAULT_PREVIEW_MAX_PAGES,
     DEFAULT_PREVIEW_MAX_SOURCE_BYTES,
     DEFAULT_PREVIEW_WEBP_QUALITY,
+    DOCUMENT_RENDITION_CONTENT_TYPE,
+    DOCUMENT_RENDITION_VERSION,
     PREVIEW_RENDERER_VERSION,
     PREVIEW_SCHEMA_VERSION,
     KnowledgePreviewView,
@@ -26,16 +30,21 @@ from bothesis.services import (
     PreviewGenerationError,
     PreviewManifest,
     PreviewOriginal,
+    PreviewRendition,
     RenderedPreview,
     RenderedPreviewAsset,
     ResolvedPreviewAsset,
+    ResolvedRendition,
 )
+from bothesis.services.document_rendition import build_document_rendition
 from bothesis.storage import DocumentStorage, StoredObject
 
 log = logging.getLogger(__name__)
 
 _PDF_CONTENT_TYPES = frozenset({"application/pdf"})
 _PDF_EXTENSIONS = frozenset({".pdf"})
+
+_RENDITION_CACHE_CONTROL = "private, max-age=31536000, immutable"
 
 
 class KnowledgePreview:
@@ -81,6 +90,10 @@ class KnowledgePreview:
         return normalized_type in _PDF_CONTENT_TYPES or extension in _PDF_EXTENSIONS
 
     def _render_pdf(self, source: Path) -> RenderedPreview:
+        with PDFIUM_LOCK:
+            return self._render_pdf_pages(source)
+
+    def _render_pdf_pages(self, source: Path) -> RenderedPreview:
         try:
             document = pdfium.PdfDocument(str(source))
         except Exception as exc:
@@ -136,13 +149,21 @@ class KnowledgePreview:
             raise PreviewGenerationError("preview source has invalid dimensions")
         if width * height > self.max_image_pixels:
             raise PreviewGenerationError("preview source exceeds the image pixel limit")
+
     async def generate(
         self,
         document: Item,
         *,
         source_path: Path | None = None,
+        content: DocumentItem | None = None,
     ) -> PreviewManifest | None:
-        """Build an idempotent manifest while leaving the original untouched."""
+        """Build an idempotent manifest while leaving the original untouched.
+
+        ``content`` is the canonical parse of the original; when given, the
+        whole-document rendition is written unless a current one exists.
+        Page images and the rendition are independent: either is kept while
+        the source is unchanged.
+        """
 
         storage_key = _text(getattr(document, "storage_key", None))
         if storage_key is None:
@@ -155,6 +176,41 @@ class KnowledgePreview:
             )
         source_version = _source_version(document, stored, storage_key=storage_key)
         current = _manifest(document)
+        manifest = await self._page_manifest(
+            document,
+            current,
+            source_path=source_path,
+            stored=stored,
+            storage_key=storage_key,
+            source_version=source_version,
+        )
+        rendition_version = _rendition_version(source_version)
+        rendition = (
+            current.rendition
+            if current is not None
+            and current.rendition is not None
+            and current.rendition.version == rendition_version
+            else None
+        )
+        if rendition is None and content is not None:
+            rendition = await self._store_rendition(
+                document,
+                content,
+                source_version=source_version,
+                version=rendition_version,
+            )
+        return manifest.model_copy(update={"rendition": rendition})
+
+    async def _page_manifest(
+        self,
+        document: Item,
+        current: PreviewManifest | None,
+        *,
+        source_path: Path | None,
+        stored: StoredObject,
+        storage_key: str,
+        source_version: str,
+    ) -> PreviewManifest:
         if (
             current is not None
             and current.schema_version == PREVIEW_SCHEMA_VERSION
@@ -209,6 +265,17 @@ class KnowledgePreview:
                 source_version=source_version,
             )
 
+    async def has_current_rendition(self, document: Item) -> bool:
+        """Whether the stored manifest already has a rendition of the current source."""
+
+        storage_key = _text(getattr(document, "storage_key", None))
+        current = _manifest(document)
+        if storage_key is None or current is None or current.rendition is None:
+            return False
+        stored = await self._object_storage.head(storage_key)
+        source_version = _source_version(document, stored, storage_key=storage_key)
+        return current.rendition.version == _rendition_version(source_version)
+
     def resolve(
         self,
         document: Item,
@@ -255,6 +322,15 @@ class KnowledgePreview:
                 )
         if representation != "original" and not assets:
             representation = "original"
+        rendition = (
+            self._resolve_rendition(
+                document,
+                manifest.rendition,
+                expires_seconds=expires_seconds,
+            )
+            if manifest is not None and manifest.rendition is not None
+            else None
+        )
         return KnowledgePreviewView(
             representation=representation,
             original=PreviewOriginal(
@@ -269,6 +345,74 @@ class KnowledgePreview:
             assets=tuple(assets),
             page_count=manifest.page_count if manifest is not None else None,
             truncated=manifest.truncated if manifest is not None else False,
+            rendition=rendition,
+        )
+
+    def _resolve_rendition(
+        self,
+        document: Item,
+        rendition: PreviewRendition,
+        *,
+        expires_seconds: int,
+    ) -> ResolvedRendition | None:
+        if not rendition.key.startswith(_preview_prefix(document)):
+            log.warning("ignored document rendition outside its Item prefix")
+            return None
+        try:
+            request = self._object_storage.presign_download(
+                rendition.key,
+                expires_seconds=expires_seconds,
+            )
+        except Exception:
+            log.exception("could not resolve document rendition object")
+            return None
+        return ResolvedRendition(
+            url=request.url,
+            version=rendition.version,
+            size_bytes=rendition.size_bytes,
+            block_count=rendition.block_count,
+            truncated=rendition.truncated,
+        )
+
+    async def _store_rendition(
+        self,
+        document: Item,
+        content: DocumentItem,
+        *,
+        source_version: str,
+        version: str,
+    ) -> PreviewRendition | None:
+        """Write the whole-document rendition; failures only lose the rendition."""
+
+        try:
+            built = await asyncio.to_thread(build_document_rendition, content)
+            if built.block_count == 0:
+                return None
+            key = (
+                f"{_preview_prefix(document)}{DOCUMENT_RENDITION_VERSION}/"
+                f"{source_version}/document.json.gz"
+            )
+            persisted = await asyncio.to_thread(
+                self._object_storage.put_bytes,
+                built.data,
+                key,
+                content_type=DOCUMENT_RENDITION_CONTENT_TYPE,
+                content_encoding="gzip",
+                cache_control=_RENDITION_CACHE_CONTROL,
+            )
+        except Exception as exc:  # noqa: BLE001 - the rendition is best effort
+            log.warning(
+                "document rendition generation failed item_id=%s error_type=%s",
+                getattr(document, "id", None),
+                type(exc).__name__,
+            )
+            return None
+        return PreviewRendition(
+            key=key,
+            size_bytes=persisted.size_bytes,
+            version=version,
+            block_count=built.block_count,
+            truncated=built.truncated,
         )
 
     async def _render_and_store(
@@ -358,6 +502,11 @@ def _source_version(
         None,
     )
     identity = f"{storage_key}\0{version or 'unversioned'}\0{stored.size_bytes}"
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()
+
+
+def _rendition_version(source_version: str) -> str:
+    identity = f"{source_version}:{DOCUMENT_RENDITION_VERSION}"
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()
 
 

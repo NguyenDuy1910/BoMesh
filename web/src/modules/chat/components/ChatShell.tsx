@@ -8,6 +8,7 @@ import {
   FileSearch,
   ArrowDown,
   FilePenLine,
+  FolderSearch,
   LibraryBig,
   Lock,
   Menu,
@@ -18,13 +19,11 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 import { useClipboard } from "@/lib/hooks/useClipboard";
 import { useAccountPreferences } from "@/lib/hooks/useAccountPreferences";
-import { useAuthPrompt } from "@/components/auth/AuthPrompt";
 import {
   useProductShellNavigation,
   useProductShellSidebar,
 } from "@/components/shell/ProductShell";
 import { getApiConfiguration } from "@/lib/api/config";
-import { getAuthSession } from "@/lib/auth/session";
 import { WorkspaceMark } from "@/components/patterns";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { PageLoadingSkeleton } from "@/components/ui/Skeleton";
@@ -54,10 +53,12 @@ import type {
 } from "@/modules/chat/types";
 import {
   artifactPreviewActivity,
+  foundDocumentActivity,
   isSameActivity,
   knowledgeDocumentActivity,
   type RightActivity,
 } from "@/modules/chat/activity";
+import type { FoundDocument } from "@/modules/knowledge/document-search";
 import { turnArtifacts, type TurnArtifact } from "@/modules/chat/artifacts";
 import { answerSources, type AnswerSource } from "@/modules/chat/sources";
 import { recoveryForTurn } from "@/modules/chat/recovery";
@@ -66,7 +67,8 @@ import { ChatSidebarContent } from "./AppSidebar";
 import { AnswerSources } from "./AnswerSources";
 import { ArtifactCards } from "./ArtifactCard";
 import { AssistantTurn } from "./AssistantTurn";
-import { ChatComposer, type ComposerAttachment } from "./ChatComposer";
+import { ChatComposer, type ComposerAttachment, type ComposerMode } from "./ChatComposer";
+import { type ContentSearch, DocumentFinder } from "./DocumentFinder";
 import { ConversationReuse } from "./ConversationReuse";
 import { ChatNotice, RecoveryNotice } from "./RecoveryNotice";
 import { RightActivityPanel } from "./RightActivityPanel";
@@ -143,12 +145,7 @@ export default function ChatShell() {
       router.replace("/auth/login");
       return;
     }
-    const session = getAuthSession();
-    setConversationUser(
-      configuration.userId,
-      configuration.tenantId,
-      session?.session_kind ?? "user",
-    );
+    setConversationUser(configuration.userId, configuration.tenantId);
     void refresh(readSelectedConversation());
   }, [refresh, router]);
 
@@ -205,9 +202,11 @@ export default function ChatShell() {
 
   const deleteConversation = useCallback(async (id: string) => {
     const storedMessages = await conversationAdapter.getConversationMessages(id);
+    // Only files uploaded into this conversation go with it. A referenced
+    // workspace Document belongs to its Collection and must never be deleted.
     const documentIds = new Set(
       storedMessages.flatMap((message) => message.parts.flatMap((part) => (
-        part.type === "data-document" ? [part.data.id] : []
+        part.type === "data-document" && part.data.origin !== "reference" ? [part.data.id] : []
       ))),
     );
     await Promise.allSettled(
@@ -346,9 +345,13 @@ function ChatConversation({
 }) {
   const [input, setInput] = useState("");
   const { preferences } = useAccountPreferences();
-  const { requestSignIn } = useAuthPrompt();
   const [composerAttachments, setComposerAttachments] = useState<ComposerAttachment[]>([]);
   const [contextCollections, setContextCollections] = useState<Collection[]>([]);
+  // Finding a document is offered on the empty conversation, where the
+  // composer is free to become a search box without hiding a transcript.
+  const [composerMode, setComposerMode] = useState<ComposerMode>("ask");
+  const [findQuery, setFindQuery] = useState("");
+  const [contentSearch, setContentSearch] = useState<ContentSearch | null>(null);
   // Source inspection lives beside this conversation, so opening a citation
   // never touches the streamed messages, the composer, or the scroll position.
   const [activity, setActivity] = useState<RightActivity | null>(null);
@@ -359,7 +362,6 @@ function ChatConversation({
   const positionedTurnRef = useRef<string | null>(null);
   const didInitialScrollRef = useRef(false);
   const appliedKnowledgeLaunchRef = useRef<string | null>(null);
-  const handledIdentityRequestsRef = useRef(new Set<string>());
   const {
     messages,
     sendMessage,
@@ -394,19 +396,6 @@ function ChatConversation({
     item.progress !== "ready" && item.progress !== "failed"
   ));
   const activeConnectorLabel = "permitted knowledge";
-
-  useEffect(() => {
-    for (const message of messages) {
-      for (const runtimeActivity of message.turn?.runtimeActivities ?? []) {
-        if (
-          runtimeActivity.toolName !== "request_identity"
-          || handledIdentityRequestsRef.current.has(runtimeActivity.callId)
-        ) continue;
-        handledIdentityRequestsRef.current.add(runtimeActivity.callId);
-        requestSignIn("Sign in to continue this governed action.");
-      }
-    }
-  }, [messages, requestSignIn]);
 
   useEffect(() => () => {
     for (const controller of uploadControllersRef.current.values()) controller.abort();
@@ -553,10 +542,87 @@ function ChatConversation({
     uploadControllersRef.current.get(key)?.abort();
     uploadControllersRef.current.delete(key);
     setComposerAttachments((current) => current.filter((candidate) => candidate.key !== key));
-    if (item?.document) {
+    // A referenced Document is only unpinned; only this chat's uploads are released.
+    if (item?.document && item.document.origin !== "reference") {
       void releaseConversationDocument(item.document.id);
     }
   }, [composerAttachments]);
+
+  const isEmptyConversation = messages.length === 0;
+  const finding = composerMode === "find" && isEmptyConversation;
+  const referencedIds = useMemo(() => new Set(composerAttachments.flatMap((item) => (
+    item.document?.origin === "reference" ? [item.document.id] : []
+  ))), [composerAttachments]);
+
+  /** Pin a readable workspace Document to the next question, by id only. */
+  const referenceDocument = useCallback((document: { id: string; name: string }) => {
+    setComposerAttachments((current) => {
+      if (current.length >= 12 || current.some((item) => item.document?.id === document.id)) {
+        return current;
+      }
+      return [...current, {
+        key: `reference:${document.id}`,
+        fileName: document.name,
+        sizeBytes: 0,
+        progress: "ready",
+        document: {
+          id: document.id,
+          fileName: document.name,
+          contentType: "",
+          sizeBytes: 0,
+          mode: "indexed",
+          status: "available",
+          origin: "reference",
+        },
+      }];
+    });
+  }, []);
+
+  // The composer is always on screen; focusing it must not scroll the shell.
+  const focusComposer = useCallback(() => {
+    window.requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }));
+  }, []);
+
+  const toggleFoundDocument = useCallback((document: FoundDocument) => {
+    if (referencedIds.has(document.id)) {
+      setComposerAttachments((current) => current.filter((item) => item.document?.id !== document.id));
+      return;
+    }
+    referenceDocument(document);
+  }, [referenceDocument, referencedIds]);
+
+  const askAboutDocument = useCallback((document: FoundDocument) => {
+    referenceDocument(document);
+    setComposerMode("ask");
+    focusComposer();
+  }, [focusComposer, referenceDocument]);
+
+  const askSelectedDocuments = useCallback(() => {
+    setComposerMode("ask");
+    focusComposer();
+  }, [focusComposer]);
+
+  const askQuestion = useCallback((question: string) => {
+    setComposerMode("ask");
+    setInput((current) => current.trim() ? current : question);
+    focusComposer();
+  }, [focusComposer]);
+
+  const searchContent = useCallback(async () => {
+    const query = findQuery.trim();
+    if (!query) return;
+    setContentSearch((current) => ({ query, request: (current?.request ?? 0) + 1 }));
+  }, [findQuery]);
+
+  const changeComposerMode = useCallback((mode: ComposerMode) => {
+    setComposerMode(mode);
+    focusComposer();
+  }, [focusComposer]);
+
+  const viewFoundDocument = useCallback((document: FoundDocument) => {
+    const next = foundDocumentActivity(document);
+    setActivity((current) => (isSameActivity(current, next) ? current : next));
+  }, []);
 
   const handleRegenerate = useCallback((messageId: string) => {
     void regenerate({ messageId });
@@ -608,11 +674,16 @@ function ChatConversation({
     textareaRef.current?.focus();
   }, []);
 
+  // "Ask this document" pins the open document to the next question, so the
+  // answer reads it directly instead of hoping retrieval finds it again.
   const askSource = useCallback((title: string) => {
+    if (activity?.type === "knowledge_document") {
+      referenceDocument({ id: activity.itemId, name: title });
+    }
     setActivity(null);
-    setInput((current) => current.trim() ? current : `Ask a follow-up about “${title}”: `);
-    window.requestAnimationFrame(() => textareaRef.current?.focus());
-  }, []);
+    setComposerMode("ask");
+    focusComposer();
+  }, [activity, focusComposer, referenceDocument]);
 
   const closeActivity = useCallback(() => setActivity(null), []);
 
@@ -634,8 +705,23 @@ function ChatConversation({
               ref={chatScrollRef}
             >
               <div className="chat-inner">
-                {messages.length === 0 ? (
-                  <Welcome onSelect={submit} />
+                {isEmptyConversation ? (
+                  finding ? (
+                    <DocumentFinder
+                      activeDocumentId={activity?.type === "knowledge_document" ? activity.itemId : undefined}
+                      contentSearch={contentSearch}
+                      onAsk={askAboutDocument}
+                      onAskQuestion={askQuestion}
+                      onAskSelected={askSelectedDocuments}
+                      onSearchContent={() => void searchContent()}
+                      onToggleSelect={toggleFoundDocument}
+                      onView={viewFoundDocument}
+                      query={findQuery}
+                      selectedIds={referencedIds}
+                    />
+                  ) : (
+                    <Welcome onFind={() => changeComposerMode("find")} onSelect={submit} />
+                  )
                 ) : (
                   <MessageList
                     activeArtifactId={activity?.type === "artifact" ? activity.artifactId : undefined}
@@ -691,16 +777,18 @@ function ChatConversation({
               attachments={composerAttachments}
               contextCollections={contextCollections}
               enterToSend={preferences.enterToSend}
-              input={input}
+              input={finding ? findQuery : input}
               isConfigured={isConfigured}
               isStreaming={isStreaming}
               isUploading={isUploading}
-              onChange={setInput}
+              mode={finding ? "find" : "ask"}
+              onChange={finding ? setFindQuery : setInput}
               onContextCollectionsChange={setContextCollections}
               onFiles={selectAttachments}
+              onModeChange={isEmptyConversation ? changeComposerMode : undefined}
               onRemoveAttachment={removeAttachment}
               onStop={stop}
-              onSubmit={submit}
+              onSubmit={finding ? searchContent : submit}
               textareaRef={textareaRef}
             />
         </div>
@@ -907,7 +995,13 @@ function reserveActiveTurnSpace(scroller: HTMLDivElement, stack: HTMLDivElement)
   stack.style.setProperty("--surface-selected", `${reservedHeight}px`);
 }
 
-function Welcome({ onSelect }: { onSelect: (text: string) => Promise<void> }) {
+function Welcome({
+  onFind,
+  onSelect,
+}: {
+  onFind: () => void;
+  onSelect: (text: string) => Promise<void>;
+}) {
   const name = "BoThesis";
   return (
     <div className="welcome">
@@ -933,6 +1027,13 @@ function Welcome({ onSelect }: { onSelect: (text: string) => Promise<void> }) {
               </span>
             </button>
           ))}
+          <button className="suggestion" onClick={onFind} type="button">
+            <span aria-hidden="true" className="suggestion__icon"><FolderSearch size={16} /></span>
+            <span className="suggestion__copy">
+              <span className="suggestion__title">Find a document</span>
+              <span className="suggestion__description">Search by name or content, open it, or ask about it.</span>
+            </span>
+          </button>
         </div>
       </div>
     </div>

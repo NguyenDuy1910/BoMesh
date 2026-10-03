@@ -21,6 +21,7 @@ from bothesis.db.models import (
 )
 from bothesis.services import (
     ACTIVE_STATUS,
+    AUDIT_READ_PERMISSION,
     CONNECTION_CONNECTED,
     PLATFORM_TENANT_READ_PERMISSION,
     TENANT_ADMIN_ROLE,
@@ -110,7 +111,11 @@ class DashboardService:
                 )
             ),
         }
-        recent = await self._audit.list_events(actor, page=1, page_size=8)
+        recent = (
+            await self._audit.list_events(actor, page=1, page_size=8)
+            if actor.has_permissions(AUDIT_READ_PERMISSION)
+            else {"items": []}
+        )
         return {
             "tenant": {
                 "id": str(tenant.id),

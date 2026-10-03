@@ -15,7 +15,6 @@ import { ExperiencePage } from "@/modules/workspace-control/pages/ExperiencePage
 import { PlatformAuditPage } from "@/modules/workspace-control/pages/PlatformAuditPage";
 import { PlatformIntegrationsPage } from "@/modules/workspace-control/pages/PlatformIntegrationsPage";
 import { PlatformModelsPage } from "@/modules/workspace-control/pages/PlatformModelsPage";
-import { PlatformPublicWorkspacesPage } from "@/modules/workspace-control/pages/PlatformPublicWorkspacesPage";
 import { PlatformTenantsPage } from "@/modules/workspace-control/pages/PlatformTenantsPage";
 import { PlatformUsagePage } from "@/modules/workspace-control/pages/PlatformUsagePage";
 import { PlatformUsersPage } from "@/modules/workspace-control/pages/PlatformUsersPage";
@@ -62,8 +61,6 @@ export function ControlPlanePage({ section: rawSection }: { section: string }) {
       return <PlatformTenantsPage />;
     case "platform-users":
       return <PlatformUsersPage />;
-    case "platform-public-workspaces":
-      return <PlatformPublicWorkspacesPage />;
     case "platform-models":
       return <PlatformModelsPage />;
     case "platform-integrations":

@@ -2,12 +2,29 @@ import { isMessageItem, isOutputTextPart, orderedTurnItems } from "./message-str
 import { DOCUMENT_CITATION_TYPE } from "./types.ts";
 import type { CitationReference, CitationSpan, TurnState } from "./types";
 
+/** One cited passage of a source document. */
+export interface AnswerPassage {
+  /** The reader-facing number this passage was cited under. */
+  number: number;
+  chunkId: string;
+  internalUrl: string;
+  locator?: string;
+  page?: number;
+  spans: CitationSpan[];
+}
+
+/**
+ * One document an answer cites. A file cited for several passages is still
+ * one source to the reader: it is listed once, and its passages travel with it.
+ */
 export interface AnswerSource {
+  /** Stable per document, so the list and the open panel agree on identity. */
   id: string;
   /** The stable one-based marker the reader clicks, in first-cited order. */
   index: number;
   title: string;
   itemId: string;
+  /** The first cited passage; the panel opens here. */
   chunkId: string;
   /** Primary internal viewer target. */
   internalUrl: string;
@@ -20,13 +37,14 @@ export interface AnswerSource {
   /** Citations are annotations on answer content, so every entry is used. */
   used: true;
   spans: CitationSpan[];
+  /** Every cited passage of this document, in first-cited order. */
+  passages: AnswerPassage[];
 }
 
 /** Collect citations from output-text annotations, never from stream events. */
 export function answerSources(turn: TurnState | undefined): AnswerSource[] {
   if (!turn) return [];
   const sources = new Map<string, AnswerSource>();
-  const order: string[] = [];
 
   for (const { item } of orderedTurnItems(turn)) {
     if (!isMessageItem(item)) continue;
@@ -34,24 +52,23 @@ export function answerSources(turn: TurnState | undefined): AnswerSource[] {
       if (!isOutputTextPart(part)) continue;
       for (const annotation of part.annotations) {
         if (annotation.type !== DOCUMENT_CITATION_TYPE || !annotation.citation) continue;
-        const source = toAnswerSource(annotation.citation);
-        if (!source) continue;
-        const existing = sources.get(source.id);
-        if (!existing) {
-          sources.set(source.id, source);
-          order.push(source.id);
-        } else {
-          sources.set(source.id, mergeSource(existing, source));
-        }
+        const cited = toAnswerSource(annotation.citation);
+        if (!cited) continue;
+        const existing = sources.get(cited.id);
+        sources.set(cited.id, existing ? mergeSource(existing, cited) : cited);
       }
     }
   }
   // The backend numbers citations by first use so the inline chip and this
   // list always agree. First-appearance order here is the fallback for
   // conversations saved before citations carried a number.
-  return order.map((id, position) => {
-    const source = sources.get(id)!;
-    return { ...source, index: source.index || position + 1 };
+  return [...sources.values()].map((source, position) => {
+    const index = source.index || position + 1;
+    return {
+      ...source,
+      index,
+      passages: source.passages.map((passage) => ({ ...passage, number: passage.number || index })),
+    };
   });
 }
 
@@ -59,44 +76,50 @@ function toAnswerSource(citation: CitationReference): AnswerSource | null {
   const itemId = citation.item_id?.trim();
   const chunkId = citation.chunk_id?.trim();
   if (!itemId || !chunkId) return null;
-  const id = citation.id?.trim() || chunkId;
   const spans = citation.spans ?? [];
   const internalUrl = citation.internal_url?.trim()
     || `/knowledge/documents/${encodeURIComponent(itemId)}?chunk=${encodeURIComponent(chunkId)}`;
   const originalUrl = citation.original_url?.trim() || citation.source?.url?.trim() || undefined;
+  // Zero means unnumbered; collection order fills it in as the fallback.
+  const number = typeof citation.number === "number" && citation.number > 0 ? citation.number : 0;
+  const locator = locatorLabel(citation, spans);
+  const page = citedPage(citation, spans);
   return {
-    id,
-    // Zero means unnumbered; collection order fills it in as the fallback.
-    index: typeof citation.number === "number" && citation.number > 0
-      ? citation.number
-      : 0,
+    id: `document:${itemId}`,
+    index: number,
     itemId,
     chunkId,
     title: citation.title?.trim() || citation.source?.provider?.trim() || "Untitled source",
     internalUrl,
     originalUrl,
-    locator: locatorLabel(citation, spans),
+    locator,
     origin: citation.source?.provider?.trim() || undefined,
-    page: citedPage(citation, spans),
+    page,
     used: true,
     spans,
+    passages: [{ number, chunkId, internalUrl, locator, page, spans }],
   };
 }
 
 function mergeSource(existing: AnswerSource, next: AnswerSource): AnswerSource {
+  const passages = [...existing.passages];
+  for (const passage of next.passages) {
+    const known = passages.findIndex((candidate) => candidate.chunkId === passage.chunkId);
+    if (known < 0) passages.push(passage);
+    else if (passage.spans.length && !passages[known].spans.length) passages[known] = passage;
+  }
   return {
-    id: existing.id,
+    ...existing,
+    // Conversations saved before per-document numbering cite one file under
+    // several numbers; the document keeps the first.
     index: existing.index || next.index,
-    itemId: existing.itemId,
-    chunkId: existing.chunkId,
-    title: next.title || existing.title,
-    internalUrl: next.internalUrl || existing.internalUrl,
-    originalUrl: next.originalUrl ?? existing.originalUrl,
-    locator: next.locator ?? existing.locator,
-    origin: next.origin ?? existing.origin,
-    page: next.page ?? existing.page,
-    used: true,
-    spans: next.spans.length ? next.spans : existing.spans,
+    title: existing.title || next.title,
+    originalUrl: existing.originalUrl ?? next.originalUrl,
+    locator: existing.locator ?? next.locator,
+    origin: existing.origin ?? next.origin,
+    page: existing.page ?? next.page,
+    spans: existing.spans.length ? existing.spans : next.spans,
+    passages,
   };
 }
 
@@ -129,7 +152,10 @@ function locatorLabel(
     ? (pages.length === 1 ? String(pages[0]) : `${pages[0]}–${pages[pages.length - 1]}`)
     : undefined;
   const values = [
-    page === undefined ? undefined : `p. ${page}`,
+    // A spreadsheet's "page" is its sheet.
+    page === undefined
+      ? undefined
+      : /\.(?:xlsx|xlsm|xls|csv|tsv)$/i.test(citation.title ?? "") ? `sheet ${page}` : `p. ${page}`,
     citation.section?.trim() || undefined,
   ].filter((value): value is string => Boolean(value));
   return values.length ? values.join(" · ") : undefined;

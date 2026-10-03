@@ -55,13 +55,20 @@ class ApprovalRequestService:
         request_type: str | None = None,
     ) -> dict[str, Any]:
         tenant_id = require_tenant_permission(actor)
-        allowed_types = self._visible_types(actor, request_type)
+        reviewable_types = self._reviewable_types(actor)
         page, page_size, offset = normalize_page(page, page_size)
         filters = [
             ApprovalRequest.tenant_id == tenant_id,
             ApprovalRequest.deleted_at.is_(None),
-            ApprovalRequest.request_type.in_(allowed_types),
+            or_(
+                ApprovalRequest.requester_user_id == actor.user_id,
+                ApprovalRequest.request_type.in_(reviewable_types),
+            ),
         ]
+        if request_type is not None:
+            filters.append(
+                ApprovalRequest.request_type == self._request_type(request_type)
+            )
         if status is not None:
             filters.append(ApprovalRequest.status == self._status(status))
         if search and search.strip():
@@ -177,7 +184,8 @@ class ApprovalRequestService:
         if row is None:
             raise ControlPlaneNotFoundError(f"approval request not found: {request_id}")
         request, user, role = row
-        self._require_reviewer(actor, request.request_type)
+        if request.requester_user_id != actor.user_id:
+            self._require_reviewer(actor, request.request_type)
         return self._payload(request, user, role)
 
     async def update_request(
@@ -327,12 +335,9 @@ class ApprovalRequestService:
             raise ControlPlaneNotFoundError(f"Collection not found: {item_id}")
         return item
 
-    def _visible_types(self, actor: AuthContext, request_type: str | None) -> tuple[str, ...]:
-        if request_type is not None:
-            normalized = self._request_type(request_type)
-            self._require_reviewer(actor, normalized)
-            return (normalized,)
-        visible = tuple(
+    @staticmethod
+    def _reviewable_types(actor: AuthContext) -> tuple[str, ...]:
+        return tuple(
             request_type
             for request_type, permission in (
                 ("resource_access", ACCESS_MANAGE_PERMISSION),
@@ -340,9 +345,6 @@ class ApprovalRequestService:
             )
             if actor.has_permissions(permission)
         )
-        if not visible:
-            raise ControlPlaneValidationError("no approval request types are available to this actor")
-        return visible
 
     @classmethod
     def _request_type(cls, value: str) -> str:

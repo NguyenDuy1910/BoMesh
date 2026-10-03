@@ -32,7 +32,7 @@ from bothesis.services import (
     ControlPlaneNotFoundError,
     ControlPlaneValidationError,
     AuthContext,
-    IdentityConflictError,
+    IdentityNotFoundError,
     normalize_page,
     require_platform_permission,
     require_tenant_permission,
@@ -79,7 +79,10 @@ class UserService:
                 or_(User.email.ilike(term), User.display_name.ilike(term))
             )
         if status is not None:
-            filters.append(User.status.is_(status))
+            # Standing in this workspace, not the account itself.
+            filters.append(
+                TenantMembership.status == (ACTIVE_STATUS if status else INACTIVE_STATUS)
+            )
         if role_id is not None:
             filters.append(
                 User.id.in_(
@@ -104,7 +107,7 @@ class UserService:
             "email": User.email,
             "last_login_at": User.last_login_at,
             "name": func.coalesce(User.display_name, User.email),
-            "status": User.status,
+            "status": TenantMembership.status,
         }
         sort_column = sort_columns.get(sort)
         if sort_column is None:
@@ -203,23 +206,54 @@ class UserService:
             "page_size": page_size,
         }
 
-    async def create_user(
+    async def lookup_account(self, actor: AuthContext, *, email: str) -> dict[str, Any]:
+        """Resolve one exact email to the account it names, for adding it.
+
+        Only a whole address resolves, never a fragment, so a workspace
+        administrator cannot browse the people of other workspaces. The answer
+        says whether the account can join this workspace.
+        """
+
+        tenant_id = require_tenant_permission(actor, USER_MANAGE_PERMISSION)
+        try:
+            user = await self._auth.get_user_by_email(email, include_inactive=True)
+        except IdentityNotFoundError:
+            return {"items": [], "total": 0}
+        membership = await self._session.get(
+            TenantMembership, {"user_id": user.id, "tenant_id": tenant_id}
+        )
+        return {"items": [_account_payload(user, membership)], "total": 1}
+
+    async def add_member(
         self,
         actor: AuthContext,
         *,
         email: str,
-        display_name: str | None,
         role_ids: list[UUID],
         group_ids: list[UUID] | None = None,
     ) -> dict[str, Any]:
+        """Give an existing account membership of this workspace.
+
+        A workspace never creates identities: a person signs up once and is
+        then added to any number of workspaces. A former member is readmitted
+        with exactly the roles given now, never yesterday's.
+        """
+
         tenant_id = require_tenant_permission(actor, USER_MANAGE_PERMISSION)
         await self._require_assignable_roles(actor, tenant_id, role_ids)
         try:
-            user = await self._auth.create_user(email, display_name=display_name)
-        except IdentityConflictError as exc:
-            raise ControlPlaneConflictError(str(exc)) from exc
-        except ValueError as exc:
-            raise ControlPlaneValidationError(str(exc)) from exc
+            user = await self._auth.get_user_by_email(email, include_inactive=True)
+        except IdentityNotFoundError as exc:
+            raise ControlPlaneNotFoundError(
+                "no account uses this email; they need to sign up first"
+            ) from exc
+        if not user.status:
+            raise ControlPlaneConflictError("this account is disabled")
+        existing = await self._session.get(
+            TenantMembership, {"user_id": user.id, "tenant_id": tenant_id}
+        )
+        if existing is not None and existing.deleted_at is None:
+            raise ControlPlaneConflictError("this person is already a member of the workspace")
         membership = await self._auth.assign_membership(user.id, tenant_id)
         roles = await self._assignments.replace_tenant_roles(
             user_id=user.id,
@@ -230,12 +264,13 @@ class UserService:
         groups = await self._replace_groups(tenant_id, user.id, group_ids or [])
         await self._audit.record(
             actor,
-            action="user.created",
+            action="member.added",
             resource_type="user",
             resource_id=str(user.id),
             details={
                 "email": user.email,
                 "role_ids": [str(role.id) for role in roles],
+                "readmitted": existing is not None,
             },
         )
         return _user_payload(user, membership, roles, groups)
@@ -279,7 +314,9 @@ class UserService:
                 raise ControlPlaneValidationError(str(exc)) from exc
             changed.append("display_name")
         if status is not None:
-            user.status = status
+            # Suspension is this workspace's decision about its own access; the
+            # account, its sign-in and its other workspaces are not this
+            # workspace's to switch off.
             membership.status = ACTIVE_STATUS if status else INACTIVE_STATUS
             if status:
                 membership.deleted_at = None
@@ -574,6 +611,30 @@ class UserService:
         return sorted(groups, key=lambda group: (group.display_name, group.id))
 
 
+def _account_payload(user: User, membership: TenantMembership | None) -> dict[str, Any]:
+    if membership is None or membership.deleted_at is not None:
+        workspace_membership = "none"
+    elif membership.status == ACTIVE_STATUS and user.status:
+        workspace_membership = "active"
+    else:
+        workspace_membership = "suspended"
+    return {
+        "id": str(user.id),
+        "email": user.email,
+        "display_name": user.display_name,
+        "status": "active" if user.status else "disabled",
+        "workspace_membership": workspace_membership,
+    }
+
+
+def _member_status(user: User, membership: TenantMembership) -> str:
+    """A member's standing here: suspended by this workspace, or account-wide."""
+
+    if not user.status:
+        return "inactive"
+    return "active" if membership.status == ACTIVE_STATUS else "suspended"
+
+
 def _user_payload(
     user: User,
     membership: TenantMembership,
@@ -584,7 +645,7 @@ def _user_payload(
         "id": str(user.id),
         "email": user.email,
         "display_name": user.display_name,
-        "status": user.status,
+        "status": _member_status(user, membership),
         "last_login_at": timestamp(user.last_login_at),
         "created_at": timestamp(user.created_at),
         "updated_at": timestamp(user.updated_at),

@@ -44,7 +44,7 @@ subject. It is not a universal join key.
 
 | Domain | Owning relationship | Intentional user reference |
 |---|---|---|
-| Conversation | `conversation_id -> messages` | `owner_user_id`; `created_by_session_id` preserves guest lineage |
+| Conversation | `conversation_id -> messages` | `owner_user_id`; `created_by_session_id` records the creating user session |
 | Knowledge | `item_id -> citations`, `item_id -> artifact_revisions` | `created_by_user_id` only |
 | Ingestion | `integration_connection_id -> ingestion_sources -> external_resources -> item_id` | creator/owner fields only |
 | Authorization | `principal -> role -> scope` | `user_id` or `group_id` exclusive arc |
@@ -78,10 +78,16 @@ The model keeps three separate concepts:
 2. `auth_identities`: external provider subject mapping (`issuer + subject`).
 3. `access_sessions`: revocable authentication context for one active tenant.
 
-Guest sessions have no `users` row. A conversation starts with
-`created_by_session_id`, then account creation or external login fills
-`owner_user_id` on that same conversation. Messages remain attached only to
-`conversation_id`; upgrade never rewrites message ownership.
+Every active session belongs to a User and to a tenant in which that User has
+an active membership; there is no anonymous or public-tenant session. A
+conversation's `owner_user_id` is required while it is active and equals the
+user of its `created_by_session_id`. Messages remain attached only to
+`conversation_id`.
+
+`access_sessions.kind` keeps `guest` only as a retired historical value: those
+rows are retained for lineage, check `access_session_guest_is_retired`
+(`kind = 'user' OR status <> 'active'`) keeps them inactive, and the
+validation trigger rejects any new non-user row.
 
 ### Item tree
 
@@ -136,9 +142,12 @@ reactivates the row and preserves its canonical Item ID.
 
 `tenant_memberships` answers only whether a user belongs to a tenant.
 `role_assignments` answers who has which role at platform, tenant, or
-collection scope. `groups` are principals, not a second authorization system.
-Role scope, tenant ownership, principal membership, and deleted-row behavior
-are validated by constraints/triggers and the authorization service.
+collection scope. Workspace access requires both an active membership and
+tenant-scope role assignments; platform roles are a separate scope. Tenants
+have no public visibility or baseline public role. `groups` are principals,
+not a second authorization system. Role scope, tenant ownership, principal
+membership, and deleted-row behavior are validated by constraints/triggers and
+the authorization service.
 
 ### Citations
 
@@ -203,8 +212,15 @@ new one for a speculative query.
 
 - `users.username` uniqueness is case-insensitive and optional. SQLAlchemy
   metadata now matches migration `uq_users_username` on `lower(username)`.
-- Local upload ownership is authenticated-user scoped. Guest sessions may own
-  conversations, but cannot silently become private upload owners.
+- Local upload ownership is authenticated-user scoped; ownership always comes
+  from the active User.
+- Migration `backend/migrations/20261003_remove_guest_access.sql` removes
+  anonymous and public-workspace access without hard deletes: it revokes every
+  active guest session, tombstones guest-owned conversations
+  (`status = 'deleted'`) and adds `conversation_owner_required`, tombstones the
+  platform `guest` role with its role permissions and assignments, and drops
+  tenant `visibility`, `public_access_role_id`, and their public-access
+  check/trigger.
 - `role_permissions` and citations retain tombstones and reactivate stable
   identities instead of creating duplicate rows.
 - Design documentation stays under `backend/docs_design`; this document and
@@ -218,6 +234,6 @@ new one for a speculative query.
 3. Replace remaining broad JSON/dict payloads only when a stable consumer
    contract exists; keep provider-specific state isolated.
 4. Add focused PostgreSQL tests for tombstone reactivation, tenant mismatch,
-   guest conversation upgrade, and authorization scope invariants.
+   conversation ownership, and authorization scope invariants.
 
 These are bounded follow-ups, not new tables or infrastructure layers.

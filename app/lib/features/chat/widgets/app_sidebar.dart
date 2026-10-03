@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../../app/app_brand.dart';
-import '../../../app/app_config.dart';
 import '../../../app/app_theme.dart';
 import '../models/chat_models.dart';
 import '../state/chat_controller.dart';
@@ -32,6 +31,28 @@ class ChatSidebar extends StatefulWidget {
 class _ChatSidebarState extends State<ChatSidebar> {
   final _searchController = TextEditingController();
   var _searchOpen = false;
+  Set<String>? _searchMatches;
+  int _searchRequest = 0;
+
+  Future<void> _search(String query) async {
+    final request = ++_searchRequest;
+    if (query.trim().isEmpty) {
+      setState(() => _searchMatches = null);
+      return;
+    }
+    try {
+      final matches = await widget.controller.searchConversations(query);
+      if (mounted && request == _searchRequest) {
+        setState(() => _searchMatches = matches);
+      }
+    } catch (cause) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not search conversations: $cause')),
+        );
+      }
+    }
+  }
 
   @override
   void dispose() {
@@ -47,7 +68,9 @@ class _ChatSidebarState extends State<ChatSidebar> {
     final conversations = widget.controller.conversations
         .where(
           (conversation) =>
-              query.isEmpty || conversation.title.toLowerCase().contains(query),
+              query.isEmpty ||
+              conversation.title.toLowerCase().contains(query) ||
+              (_searchMatches?.contains(conversation.id) ?? false),
         )
         .toList();
     return Material(
@@ -62,7 +85,7 @@ class _ChatSidebarState extends State<ChatSidebar> {
                 padding: EdgeInsets.symmetric(horizontal: collapsed ? 8 : 14),
                 child: Row(
                   children: [
-                    const ProductMark(),
+                    if (!collapsed) const ProductMark(),
                     if (!collapsed) ...[
                       const SizedBox(width: 9),
                       Expanded(
@@ -75,7 +98,7 @@ class _ChatSidebarState extends State<ChatSidebar> {
                               style: Theme.of(context).textTheme.labelLarge,
                             ),
                             Text(
-                              'Knowledge workspace',
+                              widget.controller.session.workspaceName,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: Theme.of(context).textTheme.labelSmall
@@ -149,7 +172,10 @@ class _ChatSidebarState extends State<ChatSidebar> {
                 child: TextField(
                   controller: _searchController,
                   autofocus: true,
-                  onChanged: (_) => setState(() {}),
+                  onChanged: (value) {
+                    setState(() {});
+                    _search(value);
+                  },
                   decoration: InputDecoration(
                     hintText: 'Search chats…',
                     prefixIcon: const Icon(Icons.search_rounded, size: 18),
@@ -158,6 +184,8 @@ class _ChatSidebarState extends State<ChatSidebar> {
                       onPressed: () {
                         _searchController.clear();
                         setState(() => _searchOpen = false);
+                        _searchRequest += 1;
+                        _searchMatches = null;
                       },
                       icon: const Icon(Icons.close_rounded, size: 17),
                     ),
@@ -183,6 +211,7 @@ class _ChatSidebarState extends State<ChatSidebar> {
                       },
                       onRename: _rename,
                       onHide: _hide,
+                      onPin: widget.controller.pinConversation,
                     ),
             ),
             Divider(height: 1, color: colors.border),
@@ -194,9 +223,7 @@ class _ChatSidebarState extends State<ChatSidebar> {
                     _SidebarAction(
                       collapsed: false,
                       icon: Icons.settings_outlined,
-                      label: AppConfig.isConfigured
-                          ? 'Workspace connected'
-                          : 'Workspace not configured',
+                      label: widget.controller.session.workspaceName,
                       onTap: _showConnection,
                     ),
                   _SidebarAction(
@@ -215,17 +242,19 @@ class _ChatSidebarState extends State<ChatSidebar> {
   }
 
   Future<void> _rename(ChatConversation conversation) async {
-    final input = TextEditingController(text: conversation.title);
+    var input = conversation.title;
     final result = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
+        scrollable: true,
         title: const Text('Rename conversation'),
-        content: TextField(
-          controller: input,
+        content: TextFormField(
+          initialValue: input,
+          onChanged: (value) => input = value,
           autofocus: true,
           maxLength: 120,
           decoration: const InputDecoration(labelText: 'Name'),
-          onSubmitted: (value) => Navigator.pop(context, value),
+          onFieldSubmitted: (value) => Navigator.pop(context, value),
         ),
         actions: [
           TextButton(
@@ -233,14 +262,13 @@ class _ChatSidebarState extends State<ChatSidebar> {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            onPressed: () => Navigator.pop(context, input.text),
+            onPressed: () => Navigator.pop(context, input),
             child: const Text('Save'),
           ),
         ],
       ),
     );
-    input.dispose();
-    if (result?.trim().isNotEmpty == true) {
+    if (mounted && result?.trim().isNotEmpty == true) {
       await widget.controller.renameConversation(conversation.id, result!);
     }
   }
@@ -249,9 +277,9 @@ class _ChatSidebarState extends State<ChatSidebar> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Hide conversation?'),
+        title: const Text('Delete conversation?'),
         content: Text(
-          'This will hide “${conversation.title}”. Its locally stored messages are retained.',
+          'Delete “${conversation.title}” and its history on this device? Files uploaded only for this chat will be removed. Existing knowledge documents are kept.',
         ),
         actions: [
           TextButton(
@@ -260,13 +288,13 @@ class _ChatSidebarState extends State<ChatSidebar> {
           ),
           FilledButton.tonal(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Hide'),
+            child: const Text('Delete'),
           ),
         ],
       ),
     );
-    if (confirmed == true) {
-      await widget.controller.hideConversation(conversation.id);
+    if (mounted && confirmed == true) {
+      await widget.controller.deleteConversation(conversation.id);
     }
   }
 
@@ -285,12 +313,10 @@ class _ChatSidebarState extends State<ChatSidebar> {
                 style: Theme.of(context).textTheme.titleLarge,
               ),
               const SizedBox(height: 12),
-              Text(AppConfig.apiBaseUrl),
+              Text(widget.controller.session.workspaceName),
               const SizedBox(height: 8),
               Text(
-                AppConfig.isConfigured
-                    ? 'Development identity headers are configured for this build.'
-                    : 'Pass BOTHESIS_API_URL, BOTHESIS_TENANT_ID, and BOTHESIS_USER_ID with --dart-define.',
+                'Conversations are stored on this device, separately for your account and workspace.',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
@@ -309,6 +335,7 @@ class _ConversationList extends StatelessWidget {
     required this.onSelect,
     required this.onRename,
     required this.onHide,
+    required this.onPin,
   });
 
   final bool collapsed;
@@ -317,6 +344,7 @@ class _ConversationList extends StatelessWidget {
   final ValueChanged<String> onSelect;
   final ValueChanged<ChatConversation> onRename;
   final ValueChanged<ChatConversation> onHide;
+  final ValueChanged<ChatConversation> onPin;
 
   @override
   Widget build(BuildContext context) {
@@ -374,6 +402,7 @@ class _ConversationList extends StatelessWidget {
                 onSelect: () => onSelect(conversation.id),
                 onRename: () => onRename(conversation),
                 onHide: () => onHide(conversation),
+                onPin: () => onPin(conversation),
               ),
           ],
       ],
@@ -389,6 +418,7 @@ class _ConversationRow extends StatelessWidget {
     required this.onSelect,
     required this.onRename,
     required this.onHide,
+    required this.onPin,
   });
 
   final bool collapsed;
@@ -397,6 +427,7 @@ class _ConversationRow extends StatelessWidget {
   final VoidCallback onSelect;
   final VoidCallback onRename;
   final VoidCallback onHide;
+  final VoidCallback onPin;
 
   @override
   Widget build(BuildContext context) {
@@ -418,7 +449,7 @@ class _ConversationRow extends StatelessWidget {
                 child: Tooltip(
                   message: conversation.title,
                   child: SizedBox(
-                    height: 44,
+                    height: 48,
                     child: Padding(
                       padding: EdgeInsets.symmetric(
                         horizontal: collapsed ? 12 : 10,
@@ -433,7 +464,7 @@ class _ConversationRow extends StatelessWidget {
                           else
                             Expanded(
                               child: Text(
-                                _displayTitle(conversation.title),
+                                conversation.title,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: Theme.of(context).textTheme.bodyMedium
@@ -455,11 +486,18 @@ class _ConversationRow extends StatelessWidget {
               PopupMenuButton<String>(
                 tooltip: 'Conversation actions',
                 iconSize: 18,
-                onSelected: (value) =>
-                    value == 'rename' ? onRename() : onHide(),
-                itemBuilder: (context) => const [
-                  PopupMenuItem(value: 'rename', child: Text('Rename')),
-                  PopupMenuItem(value: 'hide', child: Text('Hide')),
+                onSelected: (value) {
+                  if (value == 'rename') onRename();
+                  if (value == 'pin') onPin();
+                  if (value == 'delete') onHide();
+                },
+                itemBuilder: (context) => [
+                  const PopupMenuItem(value: 'rename', child: Text('Rename')),
+                  PopupMenuItem(
+                    value: 'pin',
+                    child: Text(conversation.pinned ? 'Unpin' : 'Pin'),
+                  ),
+                  const PopupMenuItem(value: 'delete', child: Text('Delete')),
                 ],
               ),
           ],
@@ -499,7 +537,7 @@ class _SidebarAction extends StatelessWidget {
         child: Tooltip(
           message: collapsed ? label : '',
           child: SizedBox(
-            height: 44,
+            height: 48,
             child: Padding(
               padding: EdgeInsets.symmetric(horizontal: collapsed ? 12 : 10),
               child: Row(
@@ -540,12 +578,15 @@ class _ConversationGroup {
 }
 
 List<_ConversationGroup> _groupConversations(List<ChatConversation> values) {
+  final pinned = values.where((value) => value.pinned).toList();
+  values = values.where((value) => !value.pinned).toList();
   final now = DateTime.now();
   final today = DateTime(now.year, now.month, now.day);
   final yesterday = today.subtract(const Duration(days: 1));
   final sevenDays = today.subtract(const Duration(days: 7));
   final thirtyDays = today.subtract(const Duration(days: 30));
   return [
+    _ConversationGroup('Pinned', pinned),
     _ConversationGroup(
       'Recent',
       values.where((value) => !value.updatedAt.isBefore(yesterday)).toList(),
@@ -576,16 +617,6 @@ List<_ConversationGroup> _groupConversations(List<ChatConversation> values) {
     ),
   ];
 }
-
-String _displayTitle(String title) => title
-    .replaceFirst(
-      RegExp(
-        r'^(please|can you|could you|help me|tell me|show me)\s+',
-        caseSensitive: false,
-      ),
-      '',
-    )
-    .replaceFirst(RegExp(r'[?.!]+$'), '');
 
 IconData _themeIcon(ThemeMode mode) => switch (mode) {
   ThemeMode.system => Icons.laptop_rounded,

@@ -1,24 +1,21 @@
 import { getApiUrl } from "@/lib/api/config";
 import { getAuthSession, storeAuthSession, type AuthSession } from "@/lib/auth/session";
-import { migrateConversationUser } from "@/modules/chat/conversations";
 
 export async function completeGoogleSignIn(credential: string): Promise<AuthSession> {
-  const current = getAuthSession();
   return requestSession(
     { method: "google", credential },
-    current?.session_kind === "guest" ? current.access_token : undefined,
+    undefined,
     "Google sign-in could not be completed.",
   );
 }
 
 export async function completePasswordSignIn(identifier: string, password: string): Promise<AuthSession> {
-  const current = getAuthSession();
   const normalizedIdentifier = identifier.trim();
   return requestSession(
     normalizedIdentifier.includes("@")
       ? { method: "password", email: normalizedIdentifier, password }
       : { method: "password", username: normalizedIdentifier, password },
-    current?.session_kind === "guest" ? current.access_token : undefined,
+    undefined,
     "Sign-in details are incorrect.",
   );
 }
@@ -29,7 +26,6 @@ export async function createPasswordAccount(input: {
   password: string;
   display_name?: string;
 }): Promise<AuthSession> {
-  const current = getAuthSession();
   const body: Record<string, string> = {
     ...input,
     ...(input.username?.trim() ? { username: input.username.trim() } : {}),
@@ -38,15 +34,11 @@ export async function createPasswordAccount(input: {
   if (input.username?.trim()) body.username = input.username.trim();
   return requestSession(
     body,
-    current?.session_kind === "guest" ? current.access_token : undefined,
+    undefined,
     "Account could not be created.",
     "POST",
     "/api/v1/auth/accounts",
   );
-}
-
-export async function createSession(): Promise<AuthSession> {
-  return requestSession({ method: "guest" });
 }
 
 export async function switchWorkspace(workspaceId: string): Promise<AuthSession> {
@@ -88,15 +80,6 @@ async function requestSession(
     throw new Error(detail);
   }
   const next = payload as AuthSession;
-  const previous = getAuthSession();
-  if (previous?.session_kind === "guest" && next.session_kind === "user" && next.user_id) {
-    migrateConversationUser(
-      previous.session_id,
-      previous.active_workspace_id,
-      next.user_id,
-      next.active_workspace_id,
-    );
-  }
   storeAuthSession(next);
   return next;
 }

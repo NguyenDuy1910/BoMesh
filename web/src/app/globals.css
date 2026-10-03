@@ -2124,8 +2124,59 @@ html[data-reduced-motion="true"] *::after {
 .source-preview__action--ghost { background: transparent; color: var(--text-secondary); }
 .source-preview__action--ghost:hover { background: var(--surface-selected); color: var(--text-primary); }
 .source-preview__no-excerpt { margin: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--surface-inset); padding: 0.625rem; color: var(--text-secondary); font-size: var(--text-size-meta); line-height: 1.45; }
+/* A file without page images is read through its cited passage, so the
+   passage takes the stage: highlighted like a quote, readable like a page. */
+.source-preview__passage { display: grid; gap: 0.5rem; align-self: start; width: 100%; border: 1px solid var(--highlight-border); border-radius: var(--radius-md); background: color-mix(in srgb, var(--highlight-surface) 60%, transparent); padding: 0.75rem 0.875rem; }
+.source-preview__passage-label { margin: 0; color: var(--text-tertiary); font-size: var(--text-size-caption); font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; }
+.source-preview__passage-text { margin: 0; color: var(--text-primary); font-size: var(--text-size-ui); line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+.source-preview__passage-heading { margin: 0 0 0.375rem; color: var(--text-primary); font-size: var(--text-size-meta); font-weight: 650; line-height: 1.45; }
+.source-preview__passage-table table { width: 100%; border-collapse: collapse; font-size: var(--text-size-meta); line-height: 1.5; }
+.source-preview__passage-table th, .source-preview__passage-table td { border-top: 1px solid var(--border-subtle); padding: 0.375rem 0.5rem 0.375rem 0; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.source-preview__passage-table th { width: 22%; color: var(--text-tertiary); font-weight: 600; }
+.source-preview__passage-table td { color: var(--text-primary); }
 .source-preview__notice-retry { margin-top: 0.25rem; background: var(--action-primary-bg); color: var(--text-on-action); }
 .source-preview__notice-retry:hover { background: var(--action-primary-hover); }
+
+/* ── Document rendition ─────────────────────────────────────────────────────
+   The whole document as one reading column, shared by the source panel and
+   the Library. Blocks and row groups skip layout off screen
+   (`content-visibility`), so a long file or a large sheet stays cheap. */
+.doc-rendition { display: grid; min-width: 0; gap: 0.625rem; color: var(--text-secondary); font-size: var(--text-size-ui); line-height: 1.65; }
+.doc-rendition__loading { padding-block: 0.5rem; }
+.doc-rendition__block { min-width: 0; margin: 0; border-radius: var(--radius-sm); content-visibility: auto; contain-intrinsic-size: auto 4rem; overflow-wrap: anywhere; }
+.doc-rendition__heading { margin-top: 0.5rem; color: var(--text-primary); font-weight: 650; line-height: 1.35; }
+.doc-rendition__heading:first-child { margin-top: 0; }
+h2.doc-rendition__heading { font-size: var(--text-size-h3); }
+h3.doc-rendition__heading { font-size: var(--text-size-ui); }
+h4.doc-rendition__heading { color: var(--text-secondary); font-size: var(--text-size-meta); letter-spacing: 0.02em; }
+.doc-rendition__paragraph { white-space: pre-wrap; }
+.doc-rendition__code { overflow-x: auto; border: 1px solid var(--border-subtle); background: var(--surface-inset); padding: 0.625rem 0.75rem; color: var(--text-primary); font-family: var(--font-mono); font-size: var(--text-size-meta); line-height: 1.55; white-space: pre; overflow-wrap: normal; }
+.doc-rendition__image { display: flex; align-items: flex-start; gap: 0.5rem; border: 1px dashed var(--border-subtle); padding: 0.5rem 0.625rem; color: var(--text-tertiary); font-size: var(--text-size-meta); }
+.doc-rendition__image > svg { flex: 0 0 auto; margin-top: 0.1875rem; }
+.doc-rendition__image-label { margin-inline-end: 0.375rem; color: var(--text-secondary); font-weight: 600; }
+.doc-rendition__link a { display: inline-flex; align-items: center; gap: 0.25rem; color: var(--text-accent); font-weight: 550; text-decoration: underline; text-underline-offset: 2px; }
+.doc-rendition__page { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; color: var(--text-tertiary); font-size: var(--text-size-caption); font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; }
+.doc-rendition__page::after { flex: 1; height: 1px; background: var(--border-subtle); content: ""; }
+.doc-rendition__note { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.5rem; margin: 0; color: var(--text-tertiary); font-size: var(--text-size-meta); }
+.doc-rendition__note a { display: inline-flex; align-items: center; gap: 0.25rem; color: var(--text-accent); font-weight: 600; }
+.doc-rendition__note--end { border-top: 1px solid var(--border-subtle); padding-top: 0.625rem; }
+/* The cited passage reads like the quote it replaces. */
+.doc-rendition__cited { background: color-mix(in srgb, var(--highlight-surface) 60%, transparent); box-shadow: 0 0 0 1px var(--highlight-border); }
+.doc-rendition__block.doc-rendition__cited { padding: 0.375rem 0.5rem; margin-inline: -0.5rem; }
+.doc-rendition__table { display: grid; gap: 0.375rem; }
+.doc-rendition__caption { color: var(--text-primary); font-size: var(--text-size-meta); font-weight: 650; }
+/* The table scrolls inside itself, so its header row can stay in view. */
+.doc-rendition__table-scroll { max-height: min(70vh, 40rem); overflow: auto; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--surface-base); overscroll-behavior: contain; }
+.doc-rendition__grid { min-width: 100%; font-size: var(--text-size-meta); line-height: 1.45; }
+.doc-rendition__head { position: sticky; z-index: 1; top: 0; background: var(--surface-inset); color: var(--text-primary); font-weight: 600; }
+.doc-rendition__rows { content-visibility: auto; }
+.doc-rendition__row { display: grid; grid-template-columns: var(--doc-columns); border-bottom: 1px solid var(--border-subtle); }
+.doc-rendition__row > span { min-width: 0; border-inline-end: 1px solid var(--border-subtle); padding: 0.3125rem 0.5rem; overflow-wrap: anywhere; white-space: pre-wrap; }
+.doc-rendition__row > span:last-child { border-inline-end: 0; }
+.doc-rendition__rownum { position: sticky; left: 0; background: var(--surface-inset); color: var(--text-tertiary); font-variant-numeric: tabular-nums; text-align: end; }
+.doc-rendition__rows .doc-rendition__row > span:not(.doc-rendition__rownum) { color: var(--text-primary); }
+.doc-rendition__row--cited { box-shadow: inset 0 0 0 1px var(--highlight-border); }
+.doc-rendition__row--cited .doc-rendition__rownum { background: var(--highlight-surface); color: var(--text-primary); }
 
 .conversation-reuse { width: min(57.5rem, calc(100% - 2.5rem)); margin: 0 auto 0.375rem; color: var(--text-secondary); }
 .conversation-reuse__heading { display: inline-flex; align-items: center; gap: 0.3125rem; color: var(--text-tertiary); font-size: var(--text-size-caption); font-weight: 600; }
@@ -2218,6 +2269,59 @@ html[data-reduced-motion="true"] *::after {
 .composer-send:hover:not(:disabled) { background: var(--action-primary-hover); }
 .composer-disclaimer { color: var(--text-tertiary); }
 
+/* Composer mode: asking and finding a document share one input, so the
+   switch sits where the reader's eye already is. */
+.composer-mode { display: inline-flex; flex: 0 0 auto; gap: 0.125rem; border: 1px solid var(--border-subtle); border-radius: 999px; background: var(--surface-inset); padding: 0.125rem; }
+.composer-mode__option { display: inline-flex; height: 1.75rem; align-items: center; gap: 0.3125rem; border: 0; border-radius: 999px; background: transparent; padding-inline: 0.625rem; color: var(--text-secondary); font-size: var(--text-size-meta); font-weight: 550; white-space: nowrap; transition: background-color var(--duration-base) var(--ease-out), color var(--duration-base) var(--ease-out); }
+.composer-mode__option:hover { color: var(--text-primary); }
+.composer-mode__option.is-active { background: var(--surface-base); color: var(--text-primary); box-shadow: var(--elevation-1); }
+.composer-mode__option.is-active svg { color: var(--text-accent); }
+.composer-mode__option:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.composer__shortcut--end { margin-left: auto; }
+
+/* Document finder. A result is shown with the passage that matched, set
+   off like a quotation, so the reader sees why it was found before opening it. */
+.document-finder { display: grid; width: 100%; max-width: 46rem; gap: 1.25rem; margin-inline: auto; padding: clamp(1.5rem, 6vh, 3.5rem) 0 1.5rem; }
+.document-finder__header h2 { margin: 0; color: var(--text-primary); font-size: clamp(1.375rem, 2.2vw, 1.75rem); font-weight: 620; letter-spacing: -0.01em; line-height: 1.25; }
+.document-finder__header p { max-width: 38rem; margin: 0.375rem 0 0; color: var(--text-secondary); font-size: var(--text-size-body); line-height: var(--text-lh-body); }
+.document-finder__group { display: grid; gap: 0.375rem; }
+.document-finder__label { margin: 0; color: var(--text-tertiary); font-size: var(--text-size-caption); font-weight: 650; letter-spacing: var(--text-tracking-caption); text-transform: uppercase; }
+.document-finder__list { display: grid; gap: 0.125rem; margin: 0 0 0 -0.625rem; padding: 0; list-style: none; }
+.document-finder__note { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin: 0; padding: 0.375rem 0; color: var(--text-secondary); font-size: var(--text-size-meta); line-height: var(--text-lh-meta); }
+.document-finder__note--error { color: var(--status-danger-text); }
+.document-finder__inline-action { display: inline-flex; width: fit-content; align-items: center; gap: 0.375rem; margin-left: -0.5rem; border: 0; border-radius: 0.5rem; background: transparent; padding: 0.375rem 0.5rem; color: var(--text-accent); font-size: var(--text-size-ui); font-weight: 600; text-align: left; }
+.document-finder__note .document-finder__inline-action { margin-left: 0; font-size: var(--text-size-meta); }
+.document-finder__inline-action:hover { background: var(--accent-soft); }
+.document-finder__inline-action:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.document-finder__empty { display: grid; gap: 0.375rem; border: 1px dashed var(--border-default); border-radius: 0.875rem; padding: 1rem 1.125rem; }
+.document-finder__empty p { margin: 0; color: var(--text-secondary); font-size: var(--text-size-body); }
+.document-finder__selection { position: sticky; bottom: 0.5rem; display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; border: 1px solid var(--border-subtle); border-radius: 0.875rem; background: var(--surface-raised); box-shadow: var(--elevation-2); padding: 0.4375rem 0.4375rem 0.4375rem 0.875rem; color: var(--text-primary); font-size: var(--text-size-ui); font-weight: 550; }
+.document-finder__ask-selected { display: inline-flex; align-items: center; gap: 0.375rem; border: 0; border-radius: 0.625rem; background: var(--action-primary-bg); padding: 0.4375rem 0.75rem; color: var(--text-on-action); font-size: var(--text-size-ui); font-weight: 600; }
+.document-finder__ask-selected:hover { background: var(--action-primary-hover); }
+.document-finder__ask-selected:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+.finder-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 0.625rem; border: 1px solid transparent; border-radius: 0.75rem; padding: 0.5rem 0.625rem; transition: background-color var(--duration-base) var(--ease-out), border-color var(--duration-base) var(--ease-out); }
+.finder-row:hover { background: var(--surface-hover); }
+.finder-row.is-selected { border-color: var(--border-subtle); background: var(--accent-soft); }
+.finder-row.is-active { border-color: var(--border-strong); }
+.finder-row__select { width: 1rem; height: 1rem; margin-top: 0.4375rem; accent-color: var(--accent-primary); }
+.finder-row__open { display: flex; min-width: 0; align-items: flex-start; gap: 0.625rem; border: 0; background: transparent; padding: 0.1875rem 0; color: inherit; text-align: left; }
+.finder-row__open .resource-icon { margin-top: 0.0625rem; }
+.finder-row__text { display: grid; min-width: 0; gap: 0.125rem; }
+.finder-row__name { overflow: hidden; color: var(--text-primary); font-size: var(--text-size-ui); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.finder-row__open:hover .finder-row__name { text-decoration: underline; text-underline-offset: 0.1875rem; }
+.finder-row__meta { color: var(--text-tertiary); font-size: var(--text-size-meta); line-height: var(--text-lh-meta); }
+.finder-row__excerpt { display: -webkit-box; overflow: hidden; margin-top: 0.3125rem; border-left: 2px solid var(--border-strong); padding-left: 0.625rem; color: var(--text-secondary); font-size: var(--text-size-meta); line-height: 1.125rem; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.finder-row.is-selected .finder-row__excerpt, .finder-row.is-active .finder-row__excerpt { border-left-color: var(--accent-primary); }
+.finder-row__ask { align-self: center; border: 1px solid var(--border-default); border-radius: 999px; background: var(--surface-base); padding: 0.3125rem 0.6875rem; color: var(--text-primary); font-size: var(--text-size-meta); font-weight: 550; white-space: nowrap; }
+.finder-row__ask:hover { border-color: var(--border-strong); background: var(--surface-selected); }
+.finder-row__open:focus-visible, .finder-row__ask:focus-visible, .finder-row__select:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: 0.375rem; }
+@media (max-width: 640px) {
+  .finder-row { grid-template-columns: auto minmax(0, 1fr); }
+  .finder-row__ask { grid-column: 2; justify-self: start; }
+  .composer-mode__option { padding-inline: 0.5rem; }
+}
+
 .welcome { min-height: min(38rem, calc(100dvh - 10rem)); padding-top: 0.5rem; }
 /* The welcome has a min-height; without `align-content`, the grid shares the
    spare height among its rows and opens a dead band under the one-line
@@ -2229,7 +2333,8 @@ html[data-reduced-motion="true"] *::after {
 .welcome-identity { color: var(--text-secondary); font-family: var(--font-sans); font-size: var(--text-size-ui); font-weight: 600; letter-spacing: 0; text-transform: none; }
 .welcome h2 { color: var(--text-primary); font-size: clamp(1.75rem, 3vw, 2.25rem); font-weight: 620; }
 .welcome-copy { color: var(--text-secondary); font-size: var(--text-size-body); line-height: var(--text-lh-body); }
-.suggestions { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.625rem; }
+/* Four tasks read as a 2×2 grid; three per row would truncate the fourth. */
+.suggestions { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.625rem; }
 .suggestion { min-height: 6.25rem; flex-direction: column; align-items: flex-start; gap: 0.625rem; border-color: var(--border-subtle); border-radius: 0.875rem; background: var(--surface-base); text-align: left; }
 .suggestion__icon { width: 1.875rem; height: 1.875rem; background: var(--accent-soft); color: var(--text-accent); }
 .suggestion__title { color: var(--text-primary); font-size: var(--text-size-ui); }
