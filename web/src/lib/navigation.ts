@@ -5,6 +5,7 @@ import {
   Building2,
   ChartColumn,
   Contrast,
+  Import,
   LayoutGrid,
   Plug,
   Plus,
@@ -55,13 +56,14 @@ export const workspaceRailItems: readonly RailItem[] = [
 export const workspaceControlRailItems: readonly RailItem[] = [
   { id: "overview", label: "Overview", href: "/workspace-control", icon: LayoutGrid, kind: "destination", permissionCodes: ["tenant.read"] },
   { id: "knowledge", label: "Knowledge", href: "/workspace-control/knowledge", icon: BookOpen, kind: "destination", permissionCodes: ["knowledge.read"] },
+  { id: "ingestion", label: "Ingestion", href: "/workspace-control/ingestion", icon: Import, kind: "destination", permissionCodes: ["ingestion.read", "ingestion.run", "source.manage"] },
   { id: "agent", label: "Agent", href: "/workspace-control/agent", icon: Bot, kind: "destination", permissionCodes: ["tenant.manage"] },
   { id: "access", label: "Access", href: "/workspace-control/access", icon: ShieldCheck, kind: "destination", permissionCodes: ["user.manage", "role.manage", "group.manage", "access.manage"] },
   { id: "experience", label: "Experience", href: "/workspace-control/experience", icon: Contrast, kind: "destination", permissionCodes: ["tenant.manage"] },
   { id: "activity", label: "Activity", href: "/workspace-control/activity", icon: Activity, kind: "destination", permissionCodes: ["audit.read"] },
 ];
 
-/** Settings sits below the spacer, separated from the six sections above it. */
+/** Settings sits below the spacer, separated from the sections above it. */
 export const workspaceControlRailTail: readonly RailItem[] = [
   { id: "settings", label: "Settings", href: "/workspace-control/settings", icon: Settings, kind: "destination", permissionCodes: ["tenant.manage"] },
 ];

@@ -43,6 +43,9 @@ class _LibraryPageState extends State<LibraryPage> {
   bool _loading = true, _uploading = false;
   int _revision = 0;
 
+  /// The run started by "Process now" after the last upload to My files.
+  String? _runId;
+
   @override
   void initState() {
     super.initState();
@@ -106,13 +109,17 @@ class _LibraryPageState extends State<LibraryPage> {
       );
       if (!mounted) return;
       _personalId = personal.id;
-      final added = await uploadDocuments(
+      final outcome = await uploadDocuments(
         context,
         api: widget.api,
         collection: personal,
         personal: true,
+        canProcess: personal.can('ingestion.run') || _can('ingestion.run', personal.id),
       );
-      if (added && mounted) await _loadHome();
+      if (outcome.added && mounted) {
+        _runId = outcome.runId;
+        await _loadHome();
+      }
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString())));
@@ -240,6 +247,7 @@ class _LibraryPageState extends State<LibraryPage> {
         api: widget.api,
         can: _can,
         collectionId: _personalId,
+        watchRunId: _runId,
         personalCollectionId: _personalId,
         search: _query,
         onAskDocument: widget.onAskDocument,
@@ -312,15 +320,22 @@ class _CollectionPage extends StatefulWidget {
 
 class _CollectionPageState extends State<_CollectionPage> {
   int _revision = 0;
+  String? _runId;
 
   Future<void> _upload() async {
-    final added = await uploadDocuments(
+    final outcome = await uploadDocuments(
       context,
       api: widget.api,
       collection: widget.collection,
       personal: false,
+      canProcess: widget.can('ingestion.run', widget.collection.id),
     );
-    if (added && mounted) setState(() => _revision++);
+    if (outcome.added && mounted) {
+      setState(() {
+        _runId = outcome.runId;
+        _revision++;
+      });
+    }
   }
 
   @override
@@ -340,6 +355,7 @@ class _CollectionPageState extends State<_CollectionPage> {
         api: widget.api,
         can: widget.can,
         collectionId: widget.collection.id,
+        watchRunId: _runId,
         onAskDocument: (id, title) {
           Navigator.of(context).pop();
           widget.onAskDocument(id, title);

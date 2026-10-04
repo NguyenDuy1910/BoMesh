@@ -22,11 +22,11 @@ const statuses: Record<string, StatusPresentation> = {
   archived: { label: "Archived", tone: "neutral" },
   error: { label: "Error", tone: "danger" },
 
-  // Content processing.
-  pending: { label: "Queued", tone: "info", moving: true },
+  // Content processing: a pending document waits for someone to run processing.
+  pending: { label: "Pending", tone: "neutral" },
   processing: { label: "Processing", tone: "info", moving: true },
-  indexing: { label: "Indexing", tone: "info", moving: true },
   ready: { label: "Ready", tone: "success" },
+  outdated: { label: "Outdated", tone: "warning" },
   unsupported: { label: "Unsupported file", tone: "warning" },
 
   // Runs.
@@ -55,8 +55,8 @@ const statuses: Record<string, StatusPresentation> = {
  * A domain's own reading of a status string.
  *
  * The dictionary above is the product-wide vocabulary, and one backend word
- * can mean different things in different places: `pending` is "Queued" for a
- * document waiting to be indexed, but "Review" for a workspace waiting on an
+ * can mean different things in different places: `pending` is "Pending" for a
+ * document waiting to be processed, but "Review" for a workspace waiting on an
  * administrator. A domain passes its own entries rather than forking the
  * component or inventing a second badge.
  */

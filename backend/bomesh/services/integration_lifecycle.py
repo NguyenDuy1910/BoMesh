@@ -1,10 +1,13 @@
-"""Transactional application service for Connections, Sources, and their runs.
+"""Transactional application service for Connections, Sources, and their syncs.
 
 Three layers meet here and nowhere else: Connection state in PostgreSQL, the
 provider authorization flow, and the Temporal schedules and executions that
-actually run a Source. Keeping them in one unit-of-work owner is what lets
+actually sync a Source. Keeping them in one unit-of-work owner is what lets
 deleting a connection also delete the schedules that would otherwise keep
 firing against a credential that no longer exists.
+
+A sync only changes the knowledge inventory. Processing what it registered is
+an Ingestion Run; a schedule's firing syncs and then starts one.
 """
 
 from __future__ import annotations
@@ -12,6 +15,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -32,7 +36,7 @@ from bomesh.services.integration_authorization import (
 from bomesh.services.integration_connections import IntegrationConnectionService
 from bomesh.services import (
     CONNECTION_ERROR,
-    SOURCE_MANAGE_PERMISSION,
+    RUNNABLE_SOURCE_STATUSES,
     ControlPlaneConflictError,
     ControlPlaneExternalUnavailableError,
     ControlPlaneNotFoundError,
@@ -41,13 +45,13 @@ from bomesh.services import (
     AuthorizationStart,
     CompletedAuthorization,
     ConnectionAuthorizationRequiredError,
-    require_tenant_permission,
 )
-from bomesh.services.workflow import (
-    IngestionWorkflowInput,
-    WorkflowExecutionNotFoundError,
-)
+from bomesh.services.workflow import WorkflowExecutionNotFoundError
 from bomesh.services.workflow.service import TemporalWorkflowService
+
+_SYNC_RUNNING = "A sync is already running for this source."
+_SYNC_UNAVAILABLE = "Syncing is unavailable right now. Try again in a moment."
+_FIRST_SYNC_UNAVAILABLE = "The first sync could not be started. Use Sync to try again."
 
 
 class IntegrationLifecycleService:
@@ -61,12 +65,16 @@ class IntegrationLifecycleService:
         integration: IntegrationConfig,
         providers: ConnectionProviderRegistry,
         authorization: IntegrationAuthorizationService,
+        processing_version: str | None,
     ) -> None:
         self._sessions = session_factory
         self._workflows = workflows
         self._integration = integration
         self._providers = providers
         self._authorization = authorization
+        #: What processing produces now: a Source's ready Documents built with
+        #: anything else count as waiting. ``None`` counts none as outdated.
+        self._processing_version = processing_version
 
     # -- Catalogue ----------------------------------------------------------
 
@@ -232,6 +240,13 @@ class IntegrationLifecycleService:
         integration_connection_id: UUID,
         values: dict[str, Any],
     ) -> dict[str, Any]:
+        """Create a Source and start its first sync.
+
+        The first sync only registers what the Source holds; nothing is
+        processed until someone runs processing (or the schedule does).
+        """
+
+        tenant_id = _tenant(actor)
         values = dict(values)
         schedule = values.pop("schedule", None)
         # Nothing syncs on its own unless a schedule was asked for.
@@ -240,12 +255,23 @@ class IntegrationLifecycleService:
             source = await self._sources(session).create_source(
                 actor, integration_connection_id, **values
             )
-            workflow_input = self._workflow_input(source, actor)
+        source_id = UUID(source["id"])
         if schedule is not None:
-            source["schedule"] = await self._upsert_schedule(
-                workflow_input, schedule, **self._labels(source)
-            )
-        return source
+            source["schedule"] = await self._upsert_schedule(source_id, tenant_id, schedule)
+        if source["status"] not in RUNNABLE_SOURCE_STATUSES:
+            return source
+        try:
+            await self._start_sync(source_id, tenant_id, finished_at=None)
+        except ControlPlaneExternalUnavailableError:
+            # The Source exists either way; say why it has not synced yet.
+            async with self._unit_of_work() as session:
+                await self._sources(session).finish_sync(
+                    source_id, succeeded=False, error=_FIRST_SYNC_UNAVAILABLE, counts={}
+                )
+        async with self._unit_of_work() as session:
+            synced = await self._sources(session).get_source(actor, source_id)
+        synced["schedule"] = source["schedule"]
+        return synced
 
     async def get_source(self, actor: AuthContext, source_id: UUID) -> dict[str, Any]:
         async with self._unit_of_work() as session:
@@ -256,6 +282,7 @@ class IntegrationLifecycleService:
     async def update_source(
         self, actor: AuthContext, source_id: UUID, changes: dict[str, Any]
     ) -> dict[str, Any]:
+        tenant_id = _tenant(actor)
         changes = dict(changes)
         schedule = changes.pop("schedule", None)
         clear_schedule = bool(changes.pop("clear_schedule", False))
@@ -267,14 +294,11 @@ class IntegrationLifecycleService:
             source = await self._sources(session).update_source(
                 actor, source_id, **changes
             )
-            workflow_input = self._workflow_input(source, actor)
         if clear_schedule:
             await self._workflows.delete_schedule(str(source_id))
             source["schedule"] = None
         elif schedule is not None:
-            source["schedule"] = await self._upsert_schedule(
-                workflow_input, schedule, **self._labels(source)
-            )
+            source["schedule"] = await self._upsert_schedule(source_id, tenant_id, schedule)
         else:
             source["schedule"] = await self._workflows.describe_schedule(str(source_id))
         return source
@@ -284,53 +308,27 @@ class IntegrationLifecycleService:
             await self._sources(session).delete_source(actor, source_id)
         await self._workflows.delete_schedule(str(source_id))
 
-    async def ingest_source(
-        self, actor: AuthContext, source_id: UUID
-    ) -> dict[str, Any]:
+    async def sync_source(self, actor: AuthContext, source_id: UUID) -> dict[str, Any]:
+        """Start one sync of a Source: inventory only, never processing."""
+
+        tenant_id = _tenant(actor)
         async with self._unit_of_work() as session:
-            source = await self._sources(session).get_source(actor, source_id)
-            workflow_input = self._workflow_input(source, actor)
-        result = await self._workflows.start_ingestion(
-            workflow_input, **self._labels(source)
-        )
+            finished_at = await self._sources(session).sync_requested(actor, source_id)
+        if not await self._start_sync(source_id, tenant_id, finished_at=finished_at):
+            raise ControlPlaneConflictError(_SYNC_RUNNING)
         async with self._unit_of_work() as session:
             await AuditService(session).record(
                 actor,
-                action="ingestion.source.requested",
+                action="ingestion.source.sync_requested",
                 resource_type="ingestion_source",
                 resource_id=str(source_id),
-                details={
-                    "workflow_id": result["workflow_id"],
-                    "run_id": result["run_id"],
-                    "started": result["started"],
-                },
             )
-        return result
-
-    # -- Ingestion status ----------------------------------------------------
-    # Reading, retrying and cancelling runs belongs to ``IngestionService``.
-
-    async def get_source_status(
-        self, actor: AuthContext, source_id: UUID
-    ) -> dict[str, Any]:
-        """The source's own state, and separately the state of its last run."""
-
-        async with self._unit_of_work() as session:
             source = await self._sources(session).get_source(actor, source_id)
-        tenant_id = require_tenant_permission(actor, SOURCE_MANAGE_PERMISSION)
-        return {
-            "source_id": str(source_id),
-            "source_status": source["status"],
-            "source_status_detail": source["status_detail"],
-            "connection_status": source["integration_connection"]["status"],
-            "last_ingested_at": source["last_ingested_at"],
-            "last_indexed_at": source["last_indexed_at"],
-            "workflow": await self._workflows.latest_ingestion(
-                tenant_id=str(tenant_id), source_id=str(source_id)
-            ),
-        }
+        source["schedule"] = await self._workflows.describe_schedule(str(source_id))
+        return source
 
-    # -- Ingestion schedules ------------------------------------------------
+    # -- Source schedules ---------------------------------------------------
+    # Each firing syncs the Source, then processes what is waiting.
 
     async def get_source_schedule(
         self, actor: AuthContext, source_id: UUID
@@ -344,12 +342,12 @@ class IntegrationLifecycleService:
     async def set_source_schedule(
         self, actor: AuthContext, source_id: UUID, values: dict[str, Any]
     ) -> dict[str, Any]:
+        tenant_id = _tenant(actor)
         async with self._unit_of_work() as session:
-            source = await self._sources(session).update_source(
+            await self._sources(session).update_source(
                 actor, source_id, sync_mode="scheduled"
             )
-            workflow_input = self._workflow_input(source, actor)
-        return await self._upsert_schedule(workflow_input, values, **self._labels(source))
+        return await self._upsert_schedule(source_id, tenant_id, values)
 
     async def delete_source_schedule(
         self, actor: AuthContext, source_id: UUID
@@ -444,41 +442,30 @@ class IntegrationLifecycleService:
             except (WorkflowExecutionNotFoundError, RPCError):
                 continue
 
-    @staticmethod
-    def _workflow_input(
-        source: dict[str, Any], actor: AuthContext
-    ) -> IngestionWorkflowInput:
-        if actor.tenant_id is None:
-            raise ControlPlaneNotFoundError("tenant context is required")
-        connection = source["integration_connection"]
-        return IngestionWorkflowInput(
-            source_id=str(source["id"]),
-            tenant_id=str(actor.tenant_id),
-            integration_connection_id=str(source["integration_connection_id"]),
-            connector_key=str(connection["connector_key"]),
-        )
+    async def _start_sync(
+        self, source_id: UUID, tenant_id: UUID, *, finished_at: datetime | None
+    ) -> bool:
+        """Start a sync workflow; ``False`` when one is already running."""
 
-    @staticmethod
-    def _labels(source: dict[str, Any]) -> dict[str, str | None]:
-        """What a run is shown as, and the Collection whose readers may see it."""
-
-        target = source.get("target_item_id")
-        return {
-            "title": source.get("display_name") or None,
-            "collection_id": str(target) if target else None,
-        }
+        try:
+            started = await self._workflows.start_source_sync(
+                str(source_id), str(tenant_id), process=False
+            )
+        except RPCError as exc:
+            raise ControlPlaneExternalUnavailableError(_SYNC_UNAVAILABLE) from exc
+        if started:
+            async with self._unit_of_work() as session:
+                await self._sources(session).show_sync_running(
+                    source_id, finished_at=finished_at
+                )
+        return started
 
     async def _upsert_schedule(
-        self,
-        input: IngestionWorkflowInput,
-        values: dict[str, Any],
-        *,
-        title: str | None = None,
-        collection_id: str | None = None,
+        self, source_id: UUID, tenant_id: UUID, values: dict[str, Any]
     ) -> dict[str, Any]:
         try:
             return await self._workflows.upsert_schedule(
-                input, values, title=title, collection_id=collection_id
+                str(source_id), str(tenant_id), values
             )
         except ValueError as exc:
             raise ControlPlaneValidationError(str(exc)) from exc
@@ -497,7 +484,14 @@ class IntegrationLifecycleService:
             session,
             providers=self._providers,
             credential_encryption_key=self._integration.credential_encryption_key,
+            processing_version=self._processing_version,
         )
+
+
+def _tenant(actor: AuthContext) -> UUID:
+    if actor.tenant_id is None:
+        raise ControlPlaneNotFoundError("tenant context is required")
+    return actor.tenant_id
 
 
 __all__ = ["IntegrationLifecycleService"]

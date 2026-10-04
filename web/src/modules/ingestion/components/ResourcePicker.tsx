@@ -8,7 +8,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { Input } from "@/components/ui/Input";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { connectionsApi, type ProviderResource } from "@/modules/knowledge/integrations-api";
+import { connectionsApi, type ProviderResource } from "@/modules/ingestion/integrations-api";
 
 export interface SelectedResource {
   resource_type: string;
@@ -25,7 +25,7 @@ interface Crumb {
  * What to read from an account that is already connected.
  *
  * Nothing is selected by default. A workspace's whole Drive is rarely what
- * anyone means, and indexing it because a checkbox started ticked is a costly
+ * anyone means, and syncing it because a checkbox started ticked is a costly
  * thing to undo — so the picker opens empty and the button stays disabled
  * until someone says what they want.
  *
@@ -193,7 +193,7 @@ export function ResourcePicker({
       <p className="knowledge-picker__summary">
         {selected.length
           ? `${selected.length} selected: ${selected.map((item) => item.name).join(", ")}`
-          : "Nothing selected yet. Only what you tick here is indexed."}
+          : "Nothing selected yet. Only what you tick here is synced."}
       </p>
     </section>
   );

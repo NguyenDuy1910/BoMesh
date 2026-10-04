@@ -1,12 +1,17 @@
 "use client";
 
 import clsx from "clsx";
-import { Check, ChevronRight, CircleAlert, FileCog, LoaderCircle } from "lucide-react";
+import { Check, ChevronRight, CircleAlert, FileText, LoaderCircle, SquareTerminal } from "lucide-react";
 import { memo, useEffect, useMemo, useState } from "react";
 
-import { assistantTurnItems, groupAssistantTurnItems } from "../assistant-turn";
+import {
+  assistantTurnItems,
+  executionSummary,
+  groupAssistantTurnItems,
+  type ExecutionTurnItem,
+} from "../assistant-turn";
 import type { AnswerSource } from "../sources";
-import type { RuntimeActivity, TurnState } from "../types";
+import type { HostedExecutionOutput, RuntimeActivity, TurnState } from "../types";
 import { appBrand } from "@/lib/brand";
 import { ProductMark } from "@/components/ui/ProductMark";
 import { ThinkingIndicator } from "@/components/patterns/ThinkingIndicator";
@@ -129,43 +134,97 @@ function activityThinkingLabel(activity: RuntimeActivity | undefined) {
   }
 }
 
+/** Lines of command output shown before the reader asks for the rest. */
+const OUTPUT_PREVIEW_LINES = 40;
+
+/**
+ * One shell run, as a quiet line that opens into what actually happened:
+ * each command, what it printed, and how it ended. The line itself says the
+ * outcome — on failure, the error the command printed — so a reader never
+ * has to open it to learn why the assistant changed course.
+ */
 function HostedExecutionActivity({
   execution,
 }: {
-  execution: Extract<ReturnType<typeof assistantTurnItems>[number], { kind: "execution" }>;
+  execution: ExecutionTurnItem;
 }) {
   const active = execution.state === "running";
   const failed = execution.state === "failed" || execution.state === "timeout";
-  const label = active
-    ? "Working with your file"
-    : execution.state === "timeout"
-      ? "File work took too long"
-      : execution.state === "failed"
-        ? "Could not complete file work"
-        : "File work completed";
+  const { label, detail } = executionSummary(execution);
   const Icon = active ? LoaderCircle : failed ? CircleAlert : Check;
 
   return (
     <details
       className={clsx("assistant-turn__execution", `assistant-turn__execution--${execution.state}`)}
-      open={active || failed}
+      open={active}
     >
-      <summary aria-label={label}>
+      <summary aria-label={detail ? `${label}: ${detail}` : label}>
         <Icon aria-hidden="true" className="assistant-turn__execution-status" size={14} />
-        <FileCog aria-hidden="true" className="assistant-turn__execution-terminal" size={16} />
+        <SquareTerminal aria-hidden="true" className="assistant-turn__execution-terminal" size={16} />
         <span className="assistant-turn__execution-label">{label}</span>
-        {execution.files.length > 0 && <span className="assistant-turn__execution-file-count">{execution.files.length} file{execution.files.length === 1 ? "" : "s"}</span>}
+        {detail && <code className="assistant-turn__execution-detail">{detail}</code>}
         <ChevronRight aria-hidden="true" className="assistant-turn__execution-caret" size={16} />
       </summary>
       <div className="assistant-turn__execution-body">
+        {execution.commands.map((command, index) => (
+          <ExecutionStep command={command} key={`${index}:${command}`} output={execution.output[index]} />
+        ))}
         {execution.files.length > 0 && (
-          <p className="assistant-turn__execution-files">
-            {execution.files.join(", ")}
-          </p>
+          <ul aria-label="Files changed" className="assistant-turn__execution-files">
+            {execution.files.map((file) => (
+              <li key={file}>
+                <FileText aria-hidden="true" size={13} />
+                {file}
+              </li>
+            ))}
+          </ul>
         )}
-        {!execution.files.length && !active && <p>The workspace is ready for the next step.</p>}
       </div>
     </details>
+  );
+}
+
+function ExecutionStep({
+  command,
+  output,
+}: {
+  command: string;
+  output?: HostedExecutionOutput;
+}) {
+  const failed = output && (output.timed_out || output.exit_code !== 0);
+  return (
+    <div className="assistant-turn__execution-step" data-failed={failed || undefined}>
+      <pre className="assistant-turn__execution-command"><span aria-hidden="true">$ </span>{command}</pre>
+      {output && (
+        <>
+          <ExecutionStream text={output.stdout} />
+          <ExecutionStream text={output.stderr} tone="error" />
+          {failed && (
+            <p className="assistant-turn__execution-exit">
+              {output.timed_out ? "Stopped: took too long" : `Exited with code ${output.exit_code}`}
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function ExecutionStream({ text, tone }: { text: string; tone?: "error" }) {
+  const [expanded, setExpanded] = useState(false);
+  const trimmed = text.replace(/\s+$/, "");
+  if (!trimmed) return null;
+  const lines = trimmed.split("\n");
+  const hidden = expanded ? 0 : Math.max(0, lines.length - OUTPUT_PREVIEW_LINES);
+  return (
+    <div className="assistant-turn__execution-output" data-tone={tone}>
+      {hidden > 0 && (
+        <button onClick={() => setExpanded(true)} type="button">
+          Show {hidden} earlier line{hidden === 1 ? "" : "s"}
+        </button>
+      )}
+      <pre>{hidden ? lines.slice(hidden).join("\n") : trimmed}</pre>
+    </div>
   );
 }
 

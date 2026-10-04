@@ -14,6 +14,10 @@ class ExecutionCapability:
     hosted_shell: bool = False
     provider_files: bool = False
     persistent_environments: bool = False
+    # Model-visible facts about the hosted runtime (paths, interpreters,
+    # libraries, network). The provider adapter owns them; the context
+    # manager only places them in the instructions.
+    guidance: str | None = None
     # Opaque adapter state. It never becomes model context or a client event;
     # the provider tool builder is the only consumer.
     environment_id: str | None = field(default=None, repr=False, compare=False)

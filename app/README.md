@@ -84,16 +84,25 @@ Google login is enabled when `BOMESH_GOOGLE_CLIENT_ID` is supplied:
   document, or limit the search to some collections. Citations and generated
   artifacts open in place.
 - Library: search, then "My files" or "Workspace" collections. Each row shows
-  the file type and date, or what it is waiting for. Upload opens the system
+  the file type and date when the document is ready, otherwise its processing
+  state: Pending, Processing, Failed or Outdated. Upload opens the system
   picker at once and uploads straight away; formats are checked in the app, not
   by the picker, because Android and iOS cannot filter Markdown, YAML or logs.
-  Files are streamed from disk, never held in memory.
+  Files are streamed from disk, never held in memory. Uploading only adds the
+  files as pending documents; nothing is processed until an ingestion run is
+  started. People with `ingestion.run` on the collection get "Process now"
+  after an upload (one run for exactly the uploaded documents), "Process" for
+  the open collection's pending and outdated documents, and "Process" or
+  "Retry processing" on one pending, outdated or failed document. The list
+  refreshes only while a document is processing or a run started from the app
+  is still active. Run history, sources and schedules live in the web console.
+  Chat attachments are read by the assistant directly and are never processed.
 - Account: workspace switch, access requests (approve/deny, or cancel your
   own), sign out.
 
 Unavailable indexed text, expired signed previews, failed streams, empty lists,
 permission errors and pending external operations are shown explicitly rather
-than replaced with fabricated results. Connector ingestion requires the configured
+than replaced with fabricated results. Processing requires the configured
 worker, and grounded answers require the configured LLM/search providers.
 
 ## Verification
@@ -110,5 +119,7 @@ Backend ACL/approval/document regressions are under
 `tests/test_mobile_workspace_flows.py`. They use the existing isolated-schema
 Postgres fixtures when `TEST_DATABASE_URL` is supplied. Flutter tests cover
 session expiry/replacement, scope isolation, interrupted
-history, SSE fragmentation/authorization, attachment ownership and form/layout
-boundaries. Use the running application for integration and visual verification.
+history, SSE fragmentation/authorization, attachment ownership, form/layout
+boundaries and the Library's processing actions (run requests, 409 messages,
+polling only while a run is active). Use the running application for
+integration and visual verification.

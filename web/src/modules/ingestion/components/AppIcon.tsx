@@ -1,7 +1,7 @@
 import { FileUp, Globe, Plug } from "lucide-react";
 
 import { cn } from "@/lib/cn";
-import { connectorKeyFor } from "@/modules/knowledge/connectors";
+import { connectorKeyFor } from "@/modules/ingestion/connectors";
 
 /**
  * The brand mark of an integration.

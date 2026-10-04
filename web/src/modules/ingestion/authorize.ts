@@ -1,6 +1,6 @@
 "use client";
 
-import { connectionsApi } from "@/modules/knowledge/integrations-api";
+import { connectionsApi } from "@/modules/ingestion/integrations-api";
 import { getApiUrl } from "@/lib/api/config";
 
 /**

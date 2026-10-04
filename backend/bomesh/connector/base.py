@@ -6,10 +6,8 @@ from typing import Any, Generic, TypeVar
 
 from bomesh.connector.protocol import (
     AnyItem,
-    Chunk,
     ConnectorCheckpoint,
     ConnectorScope,
-    DocumentItem,
     ItemChange,
     SlimItem,
 )
@@ -68,7 +66,11 @@ class CredentialsProviderInterface(abc.ABC):
 
 
 class BaseSourceConnector(abc.ABC):
-    """Async, normalized connector interface consumed by ingestion workflows."""
+    """Async, normalized connector interface consumed by source sync.
+
+    A connector discovers changes and acquires originals; it never parses
+    them. ``fetch_item`` returns a Document whose ``original`` is stored.
+    """
 
     source: str
     checkpoint_model: type[ConnectorCheckpoint] = ConnectorCheckpoint
@@ -90,8 +92,8 @@ class BaseSourceConnector(abc.ABC):
         ...
 
     async def fetch_item(self, item_id: str) -> AnyItem:
-        """Fetch one canonical item.
-        """
+        """Fetch one canonical item, storing its original."""
+
         raise NotImplementedError("connector does not implement fetch_item")
 
     @property
@@ -103,12 +105,6 @@ class BaseSourceConnector(abc.ABC):
         writes it back; returning ``None`` means nothing changed.
         """
 
-        return None
-
-    async def fetch_chunks(self, item: DocumentItem) -> tuple[Chunk, ...] | None:
-        """Return chunks already produced while fetching a document, if any."""
-
-        del item
         return None
 
     async def fetch_hierarchy(self, scope: ConnectorScope) -> list[AnyItem]:

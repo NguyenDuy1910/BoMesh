@@ -1,15 +1,6 @@
 "use client";
 
-import {
-  ArrowLeft,
-  MoreHorizontal,
-  PauseCircle,
-  PlayCircle,
-  Plus,
-  RefreshCw,
-  Trash2,
-  TriangleAlert,
-} from "lucide-react";
+import { ArrowLeft, MoreHorizontal, Plus, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 
 import { StatusPill } from "@/components/ui/StatusPill";
@@ -18,24 +9,11 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Dropdown, DropdownItem, DropdownSeparator } from "@/components/ui/Dropdown";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
-import { Tooltip } from "@/components/ui/Tooltip";
-import {
-  connectionState,
-  needsReconnect,
-  relativeTime,
-  sourceState,
-} from "@/modules/knowledge/connection-state";
-import {
-  scheduleLabel,
-  type Connection,
-  type ConnectorCapability,
-  type Source,
-} from "@/modules/knowledge/integrations-api";
-import type { Ingestion } from "@/modules/knowledge/ingestions-api";
-import { pluralize } from "@/modules/workspace-control/format";
+import { connectionState, needsReconnect } from "@/modules/ingestion/connection-state";
+import type { Connection, ConnectorCapability, Source } from "@/modules/ingestion/integrations-api";
+import { formatRelative, pluralize } from "@/modules/workspace-control/format";
 
 import { AppIcon } from "./AppIcon";
-import { SyncRunRow } from "./SyncRunRow";
 
 /**
  * One connected account.
@@ -51,30 +29,25 @@ import { SyncRunRow } from "./SyncRunRow";
 export function ConnectionDetailView({
   connection,
   sources,
-  runs,
+  renderSource,
   capability,
   onBack,
   onReconnect,
   onDisconnect,
   onRemove,
-  onAddKnowledge,
-  onSyncSource,
-  onToggleSource,
-  onRemoveSource,
+  onAddSource,
 }: {
   connection: Connection;
   sources: Source[];
-  runs: Ingestion[];
+  /** The same row the Sources list shows, with the same actions. */
+  renderSource: (source: Source) => React.ReactNode;
   /** The registry's record for this connector, for what the account can feed. */
   capability?: ConnectorCapability;
   onBack: () => void;
   onReconnect: () => Promise<void>;
   onDisconnect: () => Promise<void>;
   onRemove: () => Promise<void>;
-  onAddKnowledge: () => void;
-  onSyncSource: (sourceId: string) => Promise<void>;
-  onToggleSource: (source: Source) => Promise<void>;
-  onRemoveSource: (source: Source) => Promise<void>;
+  onAddSource: () => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -118,7 +91,7 @@ export function ConnectionDetailView({
           <Button
             className="ml-auto"
             icon={<Plus size={16} />}
-            onClick={onAddKnowledge}
+            onClick={onAddSource}
             size="md"
             variant="secondary"
           >
@@ -150,8 +123,8 @@ export function ConnectionDetailView({
             <p>
               {connection.status_detail ?? "The account no longer authorizes BoMesh."}{" "}
               {documentsAtRisk
-                ? `${pluralize(documentsAtRisk, "source has", "sources have")} stopped updating. Indexed documents still answer questions, but anything changed since then is missing.`
-                : "Nothing is indexed from it yet."}
+                ? `${pluralize(documentsAtRisk, "source has", "sources have")} stopped syncing. Ready documents still answer questions, but anything changed since then is missing.`
+                : "Nothing has been synced from it yet."}
             </p>
           </div>
           <Button
@@ -193,7 +166,7 @@ export function ConnectionDetailView({
             </div>
             <div>
               <dt>Connected</dt>
-              <dd>{relativeTime(connection.connected_at)}</dd>
+              <dd>{formatRelative(connection.connected_at)}</dd>
             </div>
             {(capability?.provider_capabilities?.length ?? 0) > 0 && (
               <div>
@@ -221,7 +194,7 @@ export function ConnectionDetailView({
             </div>
             <div>
               <dt>Last checked</dt>
-              <dd>{relativeTime(connection.last_checked_at)}</dd>
+              <dd>{formatRelative(connection.last_checked_at)}</dd>
             </div>
             <div>
               <dt>Sources</dt>
@@ -236,67 +209,7 @@ export function ConnectionDetailView({
           <h3 id="connection-sources-heading">Sources</h3>
         </div>
         {sources.length ? (
-          <ul className="knowledge-source-list">
-            {sources.map((source) => {
-              const sourceStatus = sourceState(source);
-              const paused = source.status === "paused";
-              return (
-                <li key={source.id}>
-                  <span className="knowledge-source-list__static">
-                    <span className="min-w-0 flex-1">
-                      <strong className="block truncate">
-                        {source.display_name ?? source.external_resource_id ?? "Source"}
-                      </strong>
-                      <small className="block truncate">
-                        {[
-                          scheduleLabel(source.schedule),
-                          `synced ${relativeTime(source.last_ingested_at ?? null)}`,
-                        ].join(" · ")}
-                      </small>
-                    </span>
-                    {sourceStatus.attention && (
-                      <StatusPill tone={sourceStatus.tone}>{sourceStatus.label}</StatusPill>
-                    )}
-                  </span>
-                  <Tooltip label="Sync now" side="top">
-                    <Button
-                      aria-label={`Sync ${source.display_name ?? "source"}`}
-                      disabled={source.status !== "ready"}
-                      icon={<RefreshCw size={16} />}
-                      iconOnly
-                      onClick={() =>
-                        void act(() => onSyncSource(source.id), "The sync could not be started.")}
-                      size="sm"
-                      variant="ghost"
-                    />
-                  </Tooltip>
-                  <Tooltip label={paused ? "Resume" : "Pause"} side="top">
-                    <Button
-                      aria-label={paused ? "Resume syncing" : "Pause syncing"}
-                      disabled={source.status === "connection_required"}
-                      icon={paused ? <PlayCircle size={16} /> : <PauseCircle size={16} />}
-                      iconOnly
-                      onClick={() =>
-                        void act(() => onToggleSource(source), "The source could not be changed.")}
-                      size="sm"
-                      variant="ghost"
-                    />
-                  </Tooltip>
-                  <Tooltip label="Remove" side="top">
-                    <Button
-                      aria-label={`Remove ${source.display_name ?? "source"}`}
-                      icon={<Trash2 size={16} />}
-                      iconOnly
-                      onClick={() =>
-                        void act(() => onRemoveSource(source), "The source could not be removed.")}
-                      size="sm"
-                      variant="ghost"
-                    />
-                  </Tooltip>
-                </li>
-              );
-            })}
-          </ul>
+          <ul className="knowledge-source-list">{sources.map(renderSource)}</ul>
         ) : (
           <EmptyState
             description="Add a source to choose what this account brings in."
@@ -306,30 +219,11 @@ export function ConnectionDetailView({
         )}
       </section>
 
-      <section aria-labelledby="connection-activity-heading">
-        <div className="knowledge-section-rule">
-          <h3 id="connection-activity-heading">Sync activity</h3>
-        </div>
-        {runs.length ? (
-          <ul className="knowledge-run-list">
-            {runs.map((run) => (
-              <SyncRunRow
-                ingestion={run}
-                key={run.id}
-                label={sources.find((item) => item.id === run.source_id)?.display_name ?? undefined}
-              />
-            ))}
-          </ul>
-        ) : (
-          <EmptyState size="sm" title="No activity yet" />
-        )}
-      </section>
-
       <ConfirmDialog
         confirmLabel={confirming === "remove" ? "Remove account" : "Disconnect"}
         description={
           confirming === "remove"
-            ? `Removes ${connection.display_name} and its ${pluralize(documentsAtRisk, "source")}. Indexed documents stay searchable.`
+            ? `Removes ${connection.display_name} and its ${pluralize(documentsAtRisk, "source")}. Documents they added stay in their collections.`
             : `Stops syncing ${connection.display_name} and signs it out. Its ${pluralize(documentsAtRisk, "source")} resume when you reconnect.`
         }
         onClose={() => setConfirming(null)}

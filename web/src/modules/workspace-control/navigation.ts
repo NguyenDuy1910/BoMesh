@@ -39,8 +39,9 @@ export interface ControlPlaneRoute {
  * Addresses that predate the Workspace Architecture.
  *
  * Members, roles and groups became tabs of one Access section; knowledge
- * governance, connectors and apps all became Knowledge; the audit log became
- * Activity. Each old address resolves to its successor and rewrites the bar.
+ * governance and apps became Knowledge; connectors and sources became
+ * Ingestion; the audit log became Activity. Each old address resolves to its
+ * successor and rewrites the bar.
  */
 export const legacySectionAliases: Record<string, string> = {
   "": "overview",
@@ -50,8 +51,8 @@ export const legacySectionAliases: Record<string, string> = {
   roles: "access",
   groups: "access",
   "knowledge-governance": "knowledge",
-  connectors: "knowledge",
-  sources: "knowledge",
+  connectors: "ingestion",
+  sources: "ingestion",
   apps: "knowledge",
   "apps-permissions": "knowledge",
   "agents-policies": "agent",
@@ -68,7 +69,8 @@ export const legacySectionAliases: Record<string, string> = {
    promises only what the page actually shows. */
 const DESCRIPTIONS: Record<string, string> = {
   overview: "How the workspace is used, what it knows, and what needs your attention.",
-  knowledge: "The collections, documents and sources the assistant answers from.",
+  knowledge: "The collections and documents the assistant answers from.",
+  ingestion: "Connect sources, process their documents, and manage schedules.",
   agent: "How the assistant behaves in this workspace.",
   access: "Members, groups and roles for this workspace.",
   experience: "What members see when they open this workspace.",

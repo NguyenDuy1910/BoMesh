@@ -40,7 +40,6 @@ from bomesh.storage import (
     aws_s3,
 )
 from bomesh.services import (
-    AuthContext,
     DocumentProcessingError,
     UploadTooLargeError,
 )
@@ -86,11 +85,8 @@ async def test_item_ingestion_owns_the_source_neutral_indexing_sequence(
         async def mark_index_processing(self, _: Any) -> None:
             events.append("processing")
 
-        async def merge_metadata(self, _: Any, values: dict[str, Any]) -> None:
-            assert values["processing"]["source"] == "test"
-            events.append("metadata")
-
-        async def mark_index_ready(self, _: Any) -> None:
+        async def mark_index_ready(self, _: Any, *, processed_version: str) -> None:
+            assert processed_version == "parser=p;chunker=c"
             events.append("ready")
 
         async def mark_index_failed(self, _: Any) -> None:
@@ -157,23 +153,11 @@ async def test_item_ingestion_owns_the_source_neutral_indexing_sequence(
             document_type=stored.document_type or "plain_text",
             connector_key="file",
         ),
-        processing_metadata={"source": "test"},
+        processed_version="parser=p;chunker=c",
     )
 
     assert count == 1
-    assert events == ["processing", "citations", "vectors", "metadata", "ready"]
-
-
-def _access(user_id: Any, tenant_id: Any | None = None) -> AuthContext:
-    return AuthContext(
-        user_id=user_id,
-        email="person@example.test",
-        display_name="Person",
-        tenant_id=tenant_id,
-        permission_codes=("knowledge.read",) if tenant_id else (),
-        group_ids=(),
-        role_codes=("analyst",) if tenant_id else (),
-    )
+    assert events == ["processing", "citations", "vectors", "ready"]
 
 
 def _document(
@@ -181,7 +165,6 @@ def _document(
     *,
     size_bytes: int = 1024,
     status: str = "ready",
-    processing: dict[str, str] | None = None,
 ) -> Item:
     owner_id = uuid4()
     collection_id = uuid4()
@@ -197,9 +180,7 @@ def _document(
         size_bytes=size_bytes,
         status=status,
         index_status="pending",
-        metadata_={"file_name": "sample", "processing": processing}
-        if processing
-        else {"file_name": "sample"},
+        metadata_={"file_name": "sample"},
     )
     document.upload = ItemUpload(
         item_id=document.id,
@@ -216,8 +197,6 @@ def test_upload_limits_reject_oversize_objects() -> None:
         cast(Any, None),
         object_storage=cast(Any, SimpleNamespace()),
         ingestion=cast(Any, SimpleNamespace()),
-        content=cast(Any, SimpleNamespace()),
-        workflows=cast(Any, SimpleNamespace()),
         presenter=cast(Any, SimpleNamespace()),
         max_upload_bytes=100,
     )
@@ -296,10 +275,7 @@ async def test_index_processing_streams_object_storage_to_a_temporary_path() -> 
     document = _document("text/plain", size_bytes=len(raw))
     document.storage_key = "tenant/document/raw"
 
-    processed = await service.canonicalize(
-        document,
-        access=_access(document.upload.owner_user_id, uuid4()),
-    )
+    processed = await service.canonicalize(document)
 
     assert storage.downloads == 1
     assert storage.reads == 0
@@ -320,13 +296,58 @@ async def test_index_processing_rejects_oversize_source_before_download() -> Non
     document.storage_key = "tenant/document/raw"
 
     with pytest.raises(DocumentProcessingError, match="processing limit"):
-        await service.canonicalize(
-            document,
-            access=_access(document.upload.owner_user_id, uuid4()),
-        )
+        await service.canonicalize(document)
 
     assert storage.downloads == 0
     assert storage.reads == 0
+
+
+@pytest.mark.asyncio
+async def test_a_synced_item_is_processed_under_its_connector_identity() -> None:
+    # A connector Item's chunks must cite the provider page, not an upload.
+    raw = b"<html><body>Release notes</body></html>"
+    service = StoredFileContentService(
+        object_storage=cast(Any, _StreamingStorage(raw)),
+        processor=cast(Any, _PathProcessor()),
+    )
+    document = _document("text/html", size_bytes=len(raw))
+    document.upload = None
+    document.document_type = "confluence_page"
+    document.storage_key = "tenant/document/raw"
+    document.metadata_ = {
+        "file_name": "release-notes.html",
+        "source": {
+            "connector_id": "connection-1",
+            "provider": "confluence",
+            "external_id": "page-42",
+            "external_version": "7",
+            "url": "https://wiki.example.test/pages/42",
+        },
+    }
+
+    processed = await service.canonicalize(document)
+
+    assert processed.item.source.provider == SourceProvider.CONFLUENCE
+    assert processed.item.source.external_id == "page-42"
+    assert processed.item.document_kind == DocumentKind.PAGE
+
+
+@pytest.mark.asyncio
+async def test_an_upload_is_processed_under_its_own_identity() -> None:
+    raw = b"%PDF-1.7"
+    service = StoredFileContentService(
+        object_storage=cast(Any, _StreamingStorage(raw)),
+        processor=cast(Any, _PathProcessor()),
+    )
+    document = _document("application/pdf", size_bytes=len(raw))
+    document.document_type = "pdf"
+    document.storage_key = "tenant/document/raw"
+
+    processed = await service.canonicalize(document)
+
+    assert processed.item.source.provider == SourceProvider.FILE
+    assert processed.item.source.external_id == str(document.id)
+    assert processed.item.document_kind == DocumentKind.PDF
 
 
 def test_item_ingestion_has_no_raw_processing_implementation_dependencies() -> None:

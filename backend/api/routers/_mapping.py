@@ -44,6 +44,8 @@ def source_payload(value: dict[str, Any]) -> dict[str, Any]:
         "sync_mode": value.get("sync_mode", "manual"),
         "status": value.get("status", "failed"),
         "schedule": value.get("schedule"),
+        "sync": value.get("sync"),
+        "pending_documents": value.get("pending_documents", 0),
     }
 
 

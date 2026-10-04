@@ -46,7 +46,7 @@ subject. It is not a universal join key.
 |---|---|---|
 | Conversation | `conversation_id -> messages` | `owner_user_id`; `created_by_session_id` records the creating user session |
 | Knowledge | `item_id -> citations`, `item_id -> artifact_revisions` | `created_by_user_id` only |
-| Ingestion | `integration_connection_id -> ingestion_sources -> external_resources -> item_id` | creator/owner fields only |
+| Ingestion | `integration_connection_id -> ingestion_sources -> external_resources -> item_id`; `ingestion_runs -> ingestion_run_items -> item_id` | creator/owner fields only |
 | Authorization | `principal -> role -> scope` | `user_id` or `group_id` exclusive arc |
 | Memory | `tenant_id + user_id` | Both are domain keys, not convenience copies |
 
@@ -97,29 +97,48 @@ roots, and a document cannot parent a collection. Parentage, same-tenant
 ownership, and cycle checks are enforced by database constraints/triggers and
 service validation.
 
-`status` describes raw resource lifecycle. `index_status` describes derived
-search lifecycle. A document can be available while indexing is pending or
+`status` describes raw resource lifecycle. `index_status` is the Document's
+one processing state (`pending | processing | ready | failed | unsupported`)
+and `processed_version` names the processing configuration its current index
+was built with. A document can be available while processing is pending or
 failed; clients must not collapse these states.
 
-The target HTTP contract maps this storage model to public Document states
-`pending_content | available | failed`. It does not expose `index_status` or
-the private `item_uploads.status`; indexing is represented by the separate
-public `Ingestion` resource. This API mapping is transport behavior, not a
-claim that the current database columns have already migrated.
+The HTTP contract maps this storage model to public Document states
+`pending_content | available | failed` and to a separate
+`processing.state`: `pending | processing | ready | failed | outdated |
+unsupported`, where `outdated` is `index_status = ready` with a
+`processed_version` that differs from `processing_version()` of the current
+configuration (parser, chunker, embedding model, index schema,
+contextualization model). The private `item_uploads.status` is never exposed.
 
-An upload's own Ingestion is recorded on its Item as `metadata.ingestion =
-{id, mode, trigger_type, created_at, started_at, finished_at, phases, error,
-cancelled?}`. It is opened when the bytes become available or on retry, and the
-shared ingestion core keeps it current: `index_status` transitions set the
-times, and the core writes its phases and a user-safe error as it runs.
-`mode` is `managed` (a Temporal ingestion) or `direct` (a user's own upload,
-processed by the API process). This is the one durable state of a document's
-processing for both runners; `id` is the same for both and, for a managed
-run, names its Temporal execution. A Document therefore reports its latest
-Ingestion without a new table, even after Temporal's retention has dropped
-the run. Connector-written Items have no such record; their Source's
-Ingestion indexed them. Temporal is the live source for managed execution
-detail (attempts, retries, queueing), not a second store of document state.
+### Knowledge inventory vs ingestion execution
+
+```text
+upload / archive upload / source sync  ->  Item (index_status = pending)
+Ingestion Run (manual | api | scheduled) -> ingestion_run_items -> processed index
+```
+
+Adding data changes only the inventory: an upload stores its bytes and
+registers a pending Document; a Source sync stores originals and registers,
+updates (back to pending when the provider version changed) or tombstones
+Documents. Neither parses, contextualizes, embeds, indexes, or starts a
+processing workflow.
+
+Processing happens only in an Ingestion Run. `ingestion_runs` is execution
+history; `ingestion_run_items` records each Document's participation (status,
+phases with timings, user-safe error, chunk count). The Item keeps its single
+identity across any number of runs: re-indexing after a model change is a new
+run over the same Items, never a new upload. The run's Documents are fixed
+when it is created (one `INSERT ... SELECT`), so uploads that arrive while it
+executes wait for a later run. An archive is the one exception that grows a
+run: processing it unpacks its members into new pending Documents, which are
+appended to the same run.
+
+`items.index_status` stays the one source of truth for a Document's processing
+state; run items are history, and the Document's latest run item supplies the
+error and run shown next to it. Temporal orchestrates runs and keeps no state
+the product reads; `ingestion_run_items` replaces the former per-upload
+`items.metadata.ingestion` record and Temporal-visibility listings.
 
 ### Provider-neutral ingestion
 
@@ -132,11 +151,15 @@ IntegrationConnection
 
 Provider-specific identity stays in `connector_key`, provider ID columns, and
 connector-owned JSON fields. Core tables do not use names such as `drive_file`
-or `notion_page`.
+or `notion_page`. A connector Item carries its stored original
+(`storage_key`) and provider identity (`metadata.source`), so processing reads
+every Document the same way, whatever its origin.
 
 `external_resources.(ingestion_source_id, external_id)` is the stable provider
 identity. Tombstoning a resource does not free that identity; rediscovery
-reactivates the row and preserves its canonical Item ID.
+reactivates the row and preserves its canonical Item ID. `ingestion_sources`
+keeps the latest sync's outcome (`last_synced_at`, `last_sync_status`,
+`last_sync_error`, `last_sync_summary`); there is no per-sync history table.
 
 ### Authorization
 
@@ -200,6 +223,8 @@ Indexes follow known access paths, not every foreign key:
 - connections by tenant/connector/status and owner
 - sources by connection/status and target collection
 - external resources by source/provider identity and last-seen time
+- ingestion runs by tenant/recency and tenant/status; run items by run/status,
+  run/batch (the planner), and Item/recency (a Document's latest run)
 - messages by conversation/sequence
 - authorization grants by principal/scope/role
 - audit logs by tenant/action/time and actor/session
@@ -234,16 +259,28 @@ new one for a speculative query.
   `application/vnd.bomesh.document+json`. Earlier migrations keep their
   original `bothesis_*` names because they describe history.
 - Persisted identities keep the original namespace through any rename.
-  Upload, personal/artifact collection, external-resource and public
-  ingestion IDs are uuid5 values of `bothesis:{kind}:…`, and connection
-  credentials are AES-GCM sealed with `bothesis:plugin-credential:{id}` as
-  associated data; all are derived from `bomesh.identity.PERSISTED_IDENTITY_NAMESPACE`
+  Upload, personal/artifact collection and external-resource IDs are uuid5
+  values of `bothesis:{kind}:…`, and connection credentials are AES-GCM sealed
+  with `bothesis:plugin-credential:{id}` as associated data; all are derived
+  from `bomesh.identity.PERSISTED_IDENTITY_NAMESPACE`
   and pinned by `tests/bomesh/test_persisted_identity.py`. The rename first
   changed them, which gave every user a new, empty personal collection and left
   stored credentials undecryptable; restoring the namespace re-attached the
   original rows, and the one duplicate personal collection created meanwhile
   was tombstoned. Temporal queue, workflow and activity names did change: no
   schedule or running workflow referenced the old names.
+- Migration `backend/migrations/20261004_ingestion_runs.sql` separates the
+  inventory from processing: it creates `ingestion_runs` and
+  `ingestion_run_items`, adds `items.processed_version` (backfilled from
+  `metadata.processing` in the `processing_version()` format; a missing part
+  leaves it NULL, which reads as outdated), returns Documents stuck in
+  `processing` to `pending` and drops the superseded `metadata.ingestion`
+  records, replaces `ingestion_sources.last_ingested_at/last_indexed_at` with
+  the `last_sync_*` columns, renames `item.manage` to `knowledge.manage` in
+  place (role rows and tombstones keep their history), and adds
+  `ingestion.read`, `ingestion.run`, `ingestion.manage` to every role that
+  could run or monitor ingestion before (`source.manage` tenant roles;
+  `collection.update` roles get `ingestion.run`).
 - `role_permissions` and citations retain tombstones and reactivate stable
   identities instead of creating duplicate rows.
 - Design documentation stays under `backend/docs_design`; this document and

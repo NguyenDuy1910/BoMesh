@@ -12,10 +12,12 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { PageLoadingSkeleton } from "@/components/ui/Skeleton";
-import { useToast } from "@/components/ui/Toast";
 import { useRouteState } from "@/lib/hooks/useRouteState";
 import { DocumentViewer } from "@/modules/knowledge/components/DocumentViewer";
 import { FileTypeIcon } from "@/modules/knowledge/components/FileTypeIcon";
+import { canProcess, documentMeta, PROCESSING_STATUS, runHref } from "@/modules/knowledge/document-facts";
+import { useActiveRuns } from "@/modules/knowledge/queries";
+import { useProcessing } from "@/modules/knowledge/use-processing";
 import { pluralize } from "@/modules/workspace-control/format";
 import { libraryActions, useLibrary } from "./queries";
 
@@ -28,19 +30,21 @@ import { libraryActions, useLibrary } from "./queries";
  */
 export function LibraryScreen() {
   const router = useRouter();
-  const { toast } = useToast();
-  const query = useLibrary();
+  const runs = useActiveRuns();
+  const query = useLibrary(runs.length > 0);
+  const { startRun, announceUpload } = useProcessing();
   const [selectedId, setSelectedId] = useRouteState("document");
   const [search, setSearch] = useState("");
   const [type, setType] = useState("");
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const upload = useRef<HTMLInputElement>(null);
 
   const documents = query.data?.documents ?? [];
   const collectionId = query.data?.collectionId ?? null;
+  const allowedToProcess = query.data?.canProcess ?? false;
   const selected = documents.find((item) => item.id === selectedId);
+  const viewRun = (runId: string) => router.push(runHref(runId));
   const rows = documents.filter((item) =>
     (!type || item.kind === type) && item.title.toLowerCase().includes(search.toLowerCase()),
   );
@@ -71,7 +75,7 @@ export function LibraryScreen() {
           <EmptyState
             action={
               <Button icon={<Upload aria-hidden="true" size={16} />} loading={busy} onClick={openUpload} variant="secondary">
-                Upload a file
+                Upload files
               </Button>
             }
             className="library-empty-state"
@@ -82,18 +86,23 @@ export function LibraryScreen() {
         )
       ) : (
         <div className="knowledge-rows">
-          {rows.map((item) => (
-            <DocumentRow
-              icon={<FileTypeIcon kind={item.kind} />}
-              key={item.id}
-              layout={selected ? "narrow" : "full"}
-              meta={item.source}
-              onSelect={() => { setSelectedId(item.id); setExpanded(false); }}
-              selected={item.id === selectedId}
-              title={item.title}
-              updated={item.updatedLabel}
-            />
-          ))}
+          {rows.map((item) => {
+            const status = PROCESSING_STATUS[item.state];
+            return (
+              <DocumentRow
+                icon={<FileTypeIcon kind={item.kind} label={item.fileTypeLabel} />}
+                key={item.id}
+                layout={selected ? "narrow" : "full"}
+                meta={documentMeta(item, { scoped: true, layout: selected ? "narrow" : "full" })}
+                onSelect={() => { setSelectedId(item.id); setExpanded(false); }}
+                selected={item.id === selectedId}
+                status={status.label}
+                statusTone={status.tone}
+                title={item.title}
+                updated={item.updatedLabel}
+              />
+            );
+          })}
         </div>
       )}
     </div>
@@ -143,28 +152,15 @@ export function LibraryScreen() {
         }
         search={{ value: search, onChange: setSearch, placeholder: "Search your documents…", label: "Search library" }}
       />
-      {/* Reloading fixes a failed load; it would not repeat a failed upload,
-          so that one is dismissed instead of offered a "Retry". */}
-      {(query.error || error) && (
-        <div className="mx-[var(--page-gutter)] mt-[var(--space-5)] grid gap-[var(--space-2)]">
-          {query.error && (
-            <ErrorState
-              actionLabel="Retry"
-              description={query.error}
-              layout="inline"
-              onAction={query.reload}
-              title="Your library couldn’t be loaded"
-            />
-          )}
-          {error && (
-            <ErrorState
-              actionLabel="Dismiss"
-              description={error}
-              layout="inline"
-              onAction={() => setError(null)}
-              title="Upload failed"
-            />
-          )}
+      {query.error && (
+        <div className="mx-[var(--page-gutter)] mt-[var(--space-5)]">
+          <ErrorState
+            actionLabel="Retry"
+            description={query.error}
+            layout="inline"
+            onAction={query.reload}
+            title="Your library couldn’t be loaded"
+          />
         </div>
       )}
       <SplitView
@@ -174,32 +170,38 @@ export function LibraryScreen() {
             expanded={expanded}
             onClose={() => setSelectedId("")}
             onExpand={() => setExpanded((value) => !value)}
+            onProcess={allowedToProcess && canProcess(selected)
+              ? () => void startRun({ document_ids: [selected.id], trigger: "manual" })
+              : undefined}
+            onViewRun={viewRun}
           />
         ) : null}
         list={list}
         mode={selected ? (expanded ? "detail" : "split") : "list"}
       />
       <input
-        aria-label="Upload a document"
+        aria-label="Upload files"
         className="hidden"
+        multiple
         onChange={async (event) => {
-          const file = event.target.files?.[0];
-          if (!file) return;
+          const files = Array.from(event.target.files ?? []);
+          event.target.value = "";
+          if (!files.length) return;
           setBusy(true);
-          setError(null);
           try {
-            await libraryActions.upload(file, collectionId);
-            toast({ title: `${file.name} uploaded`, variant: "success" });
+            announceUpload(await libraryActions.upload(files, collectionId), { canProcess: allowedToProcess });
           } catch (cause) {
-            setError(cause instanceof Error ? cause.message : "The file could not be uploaded.");
+            // Only creating the personal collection can fail as a whole.
+            announceUpload(
+              { documents: [], failures: files.map((file) => ({ name: file.name, reason: cause instanceof Error ? cause.message : "Upload failed." })) },
+              { canProcess: false },
+            );
           } finally {
             setBusy(false);
-            event.target.value = "";
           }
         }}
         ref={upload}
-        // Your own uploads are processed directly; archives are bulk ingestion
-        // and belong in a workspace collection. Images are not knowledge yet.
+        // Archives belong in a workspace collection; images are not knowledge yet.
         accept=".csv,.docx,.htm,.html,.json,.jsonl,.log,.markdown,.md,.pdf,.pptx,.rst,.sql,.tsv,.txt,.xlsx,.xml,.yaml,.yml"
         type="file"
       />

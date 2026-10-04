@@ -1,4 +1,5 @@
 import { getApiConfiguration, requestIdentityHeaders } from "@/lib/api/config";
+import type { KnowledgePreview } from "@/modules/knowledge/types";
 import { StreamEventDeduplicator } from "./stream-deduplicator";
 import type {
   AgentHistoryMessage,
@@ -209,6 +210,8 @@ export interface ArtifactContent {
   mime_type: string;
   content: string;
   truncated: boolean;
+  /** The document viewer's preview of the current revision of a binary file. */
+  preview?: KnowledgePreview | null;
 }
 
 /** A Collection the caller may read — the publish destination picker's options. */

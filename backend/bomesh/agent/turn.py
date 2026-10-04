@@ -14,6 +14,7 @@ from bomesh.agent import (
     TurnContext,
     duration_ms,
 )
+from bomesh.agent.artifact_stream import ArtifactProjection
 from bomesh.agent.citation_stream import CitationProjection
 from bomesh.agent.protocol import (
     TERMINAL_EVENT_TYPES,
@@ -206,6 +207,13 @@ async def run_sampling_request(
     started_at = perf_counter()
     reducer = ResponseReducer()
     projection = CitationProjection(turn.evidence, references=turn.references)
+    artifacts = ArtifactProjection(
+        tuple(
+            artifact
+            for artifact in (session.sandbox.artifacts if session.sandbox is not None else ())
+            if (artifact.id, artifact.revision) not in turn.presented_artifacts
+        )
+    )
     prompt = model_input.prompt(previous_response_id=previous_response_id)
     # Trace start: this generation contains the normalized and provider request.
     with session.tracer.generation(
@@ -232,7 +240,7 @@ async def run_sampling_request(
                 retry_base_delay_seconds=session.configuration.sampling_retry_base_delay_seconds,
             ):
                 for projected in projection.project(event):
-                    reduced = reducer.apply(projected)
+                    reduced = reducer.apply(artifacts.project(projected))
                     if not first_token_seen and isinstance(reduced, ResponseOutputTextDeltaEvent) and reduced.delta:
                         first_token_seen = True
                         generation_trace.mark_first_token()
@@ -240,6 +248,9 @@ async def run_sampling_request(
                     yield reduced, settled
         finally:
             turn.used_evidence_ids.update(projection.used_evidence_ids)
+            turn.presented_artifacts.update(
+                (artifact.id, artifact.revision) for artifact in artifacts.presented
+            )
             turn.model_duration_ms += duration_ms(started_at)
         if reducer.response is not None:
             generation_trace.set_output(

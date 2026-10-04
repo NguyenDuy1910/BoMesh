@@ -14,9 +14,10 @@ class MaterializeSandboxResource(Tool):
         return ToolSpec(
             name="materialize_sandbox_resource",
             description=(
-                "Make an available file accessible to the hosted shell on the next "
-                "sampling step. Use this before shell work that needs the file. It "
-                "does not read the file into the chat or expose storage paths."
+                "Make an available file accessible to the hosted shell, including "
+                "while a shell workspace is already running. Use this before shell "
+                "work that needs the file, then use the exact path it returns. It "
+                "does not read the file into the chat."
             ),
             input_schema={
                 "type": "object",
@@ -52,11 +53,24 @@ class MaterializeSandboxResource(Tool):
                 error=str(exc),
                 metadata={"outcome": "invalid_input", "result_count": 0},
             )
+        paths = materialized.paths
+        if not paths:
+            return ToolResult(
+                content=f"{materialized.resource.name} is prepared for the hosted shell.",
+                metadata={"outcome": "success", "result_count": 1},
+            )
+        original, *copies = paths
+        lines = [
+            f"{materialized.resource.name} is available to the hosted shell from its "
+            f"next command at: {original}",
+        ]
+        if copies:
+            lines.append(
+                "Each sheet is also available as CSV (all cells, header rows "
+                "included): " + ", ".join(copies)
+            )
         return ToolResult(
-            content=(
-                f"{materialized.resource.name} is prepared for the hosted shell. "
-                "Use the shell on the next sampling step to inspect or transform it."
-            ),
+            content="\n".join(lines),
             metadata={"outcome": "success", "result_count": 1},
         )
 

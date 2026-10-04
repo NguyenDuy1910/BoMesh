@@ -23,7 +23,7 @@ from api.routers import (
     governance,
     health,
     iam,
-    ingestions,
+    ingestion_runs,
     knowledge,
     platform,
     sources,
@@ -37,7 +37,7 @@ _CONTRACT_METADATA: dict[tuple[str, str], dict[str, Any]] = {
     ("get", "/api/v1/knowledge/home"): {"x-required-permissions": ["knowledge.read"]},
     ("get", "/api/v1/collections"): {"x-required-collection-permission": "collection.read"},
     ("post", "/api/v1/collections"): {
-        "x-required-permissions": ["item.manage"],
+        "x-required-permissions": ["knowledge.manage"],
         "x-authorization-rule": "A child also requires collection.update on its parent Collection.",
     },
     ("get", "/api/v1/collections/{collection_id}"): {"x-required-collection-permission": "collection.read"},
@@ -77,18 +77,33 @@ _CONTRACT_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "x-required-collection-permission": "collection.update",
         "x-required-collection-role": "editor",
     },
-    ("post", "/api/v1/documents/{document_id}/ingestions"): {
-        "tags": ["ingestions"],
-        "x-required-collection-permission": "collection.update",
-        "x-required-collection-role": "editor",
-    },
     ("post", "/api/v1/connections"): {
         "x-authorization-rule": "Personal connections belong to the caller; workspace-owned connections require source.manage.",
     },
     ("post", "/api/v1/connections/{connection_id}/sources"): {"tags": ["sources"]},
-    ("post", "/api/v1/sources/{source_id}/ingestions"): {"tags": ["ingestions"]},
-    ("get", "/api/v1/sources/{source_id}/ingestions"): {"tags": ["ingestions"]},
-    ("get", "/api/v1/sources/{source_id}/ingestions/{ingestion_id}"): {"tags": ["ingestions"]},
+    ("post", "/api/v1/sources/{source_id}/syncs"): {
+        "x-authorization-rule": "Same rule as other Source changes: source.manage for workspace connections; the owner for a personal connection. 409 while a sync is running.",
+    },
+    ("post", "/api/v1/ingestion-runs"): {
+        "x-required-collection-permission": "ingestion.run",
+        "x-authorization-rule": "ingestion.run on the Collection of every selected Document; a Document the caller cannot read is 404. 409 when nothing is left to process.",
+    },
+    ("get", "/api/v1/ingestion-runs"): {
+        "x-authorization-rule": "ingestion.read lists every workspace run; otherwise only the runs the caller created.",
+    },
+    ("get", "/api/v1/ingestion-runs/{ingestion_run_id}"): {
+        "x-authorization-rule": "ingestion.read, or the caller created the run; any other run is 404.",
+    },
+    ("get", "/api/v1/ingestion-runs/{ingestion_run_id}/items"): {
+        "x-authorization-rule": "Same visibility as the run; Documents in Collections the caller cannot collection.read are omitted.",
+    },
+    ("post", "/api/v1/ingestion-runs/{ingestion_run_id}/cancel"): {
+        "x-authorization-rule": "The run's creator, or ingestion.manage. 409 when the run already finished.",
+    },
+    ("post", "/api/v1/ingestion-runs/{ingestion_run_id}/retry"): {
+        "x-required-collection-permission": "ingestion.run",
+        "x-authorization-rule": "Same visibility as the run; ingestion.run on the Collection of every retried Document. 409 when nothing failed, was cancelled or was skipped.",
+    },
     ("patch", "/api/v1/workspaces/{workspace_id}"): {"x-required-permissions": ["tenant.manage"]},
     ("get", "/api/v1/workspaces/{workspace_id}/overview"): {
         "x-required-permissions": ["tenant.read"],
@@ -150,7 +165,7 @@ _ROUTERS = (
     artifacts.router,
     connections.router,
     sources.router,
-    ingestions.router,
+    ingestion_runs.router,
     workspaces.router,
     iam.router,
     governance.router,
@@ -163,27 +178,24 @@ log = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    """Resume interrupted direct ingestions; close every client at shutdown."""
+    """Repair state lost workflows left behind; close every client at shutdown."""
 
-    resuming = asyncio.create_task(_resume_direct_ingestions())
+    reconciling = asyncio.create_task(_reconcile_ingestion())
     try:
         yield
     finally:
-        resuming.cancel()
+        reconciling.cancel()
         with suppress(asyncio.CancelledError):
-            await resuming
+            await reconciling
         await get_runtime().aclose()
 
 
-async def _resume_direct_ingestions() -> None:
-    # Startup must not wait for, or fail on, the database.
+async def _reconcile_ingestion() -> None:
+    # Startup must not wait for, or fail on, the database or Temporal.
     try:
-        resumed = await get_runtime().document_service().resume_direct_ingestions()
-    except Exception:  # noqa: BLE001 - best effort; a later retry recovers the rest
-        log.warning("direct ingestions could not be resumed", exc_info=True)
-        return
-    if resumed:
-        log.info("resumed %d interrupted direct ingestions", resumed)
+        await get_runtime().ingestion_run_service().reconcile()
+    except Exception:  # noqa: BLE001 - best effort; a run's next read repairs it too
+        log.warning("ingestion runs could not be reconciled", exc_info=True)
 
 
 def create_app() -> FastAPI:

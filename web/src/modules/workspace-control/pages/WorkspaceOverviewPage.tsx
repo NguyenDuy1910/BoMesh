@@ -60,12 +60,12 @@ function OverviewDashboard({ overview }: { overview: WorkspaceOverview }) {
   const { metrics, attention, knowledge, usage, recent_activity } = overview;
   const lastTwoWeeks = usage.buckets.slice(-14);
   const trend = (key: "active_users" | "questions") => lastTwoWeeks.map((bucket) => bucket[key]);
-  // What only an administrator can fix. Indexing failures come from the same
-  // counts as the Knowledge panel, so the two never disagree; `failed_items`
-  // is content that never arrived, a different failure.
+  // What only an administrator can fix. Processing failures come from the
+  // same counts as the Knowledge panel, so the two never disagree;
+  // `failed_items` is content that never arrived, a different failure.
   const waiting = [
     { key: "requests", label: "Access requests waiting for review", href: "/workspace-control/access", value: attention.pending_approval_requests ?? 0 },
-    { key: "indexing", label: "Documents that failed to index", href: "/workspace-control/knowledge", value: knowledge.failed },
+    { key: "processing", label: "Documents that failed to process", href: "/workspace-control/knowledge", value: knowledge.failed },
     { key: "uploads", label: "Uploads whose file never arrived", href: "/workspace-control/knowledge", value: attention.failed_items ?? 0 },
   ].filter((item) => item.value > 0);
 
@@ -94,11 +94,11 @@ function OverviewDashboard({ overview }: { overview: WorkspaceOverview }) {
         />
         <Metric
           href="/workspace-control/knowledge"
-          label="Indexed documents"
+          label="Ready documents"
           note={knowledge.documents
-            ? `${Math.round((knowledge.indexed / knowledge.documents) * 100)}% of ${pluralize(knowledge.documents, "document")}`
+            ? `${Math.round((knowledge.ready / knowledge.documents) * 100)}% of ${pluralize(knowledge.documents, "document")}`
             : "No documents yet"}
-          value={knowledge.indexed}
+          value={knowledge.ready}
         />
       </MetricLedger>
 
@@ -131,7 +131,7 @@ function OverviewDashboard({ overview }: { overview: WorkspaceOverview }) {
               ))}
             </dl>
           ) : (
-            <p className="ctl-muted">Nothing needs your attention. Access requests and indexing failures appear here.</p>
+            <p className="ctl-muted">Nothing needs your attention. Access requests and processing failures appear here.</p>
           )}
         </Panel>
         <Panel aside={<Link href="/workspace-control/activity">View activity</Link>} title="Recent changes">
@@ -165,8 +165,10 @@ function KnowledgePanel({
   connections: number;
 }) {
   const parts = [
-    { key: "indexed", label: "Indexed", value: knowledge.indexed, tone: "ink" },
-    { key: "indexing", label: "Indexing", value: knowledge.indexing, tone: "muted" },
+    { key: "ready", label: "Ready", value: knowledge.ready, tone: "ink" },
+    { key: "outdated", label: "Outdated", value: knowledge.outdated, tone: "muted" },
+    { key: "processing", label: "Processing", value: knowledge.processing, tone: "muted" },
+    { key: "pending", label: "Pending", value: knowledge.pending, tone: "muted" },
     { key: "failed", label: "Failed", value: knowledge.failed, tone: "danger" },
   ] as const;
   const counted = parts.reduce((sum, part) => sum + part.value, 0);

@@ -6,8 +6,9 @@ import type {
   ConnectionStatus,
   Source,
   SourceStatus,
-} from "@/modules/knowledge/integrations-api";
-import { RECONNECT_STATUSES } from "@/modules/knowledge/integrations-api";
+} from "@/modules/ingestion/integrations-api";
+import { RECONNECT_STATUSES } from "@/modules/ingestion/integrations-api";
+import { formatRelative } from "@/modules/workspace-control/format";
 
 /**
  * How a connection's and a source's state are said out loud.
@@ -15,7 +16,7 @@ import { RECONNECT_STATUSES } from "@/modules/knowledge/integrations-api";
  * The API's vocabulary is precise and internal: `reauth_required` is the right
  * name for a grant that no longer authenticates, and the wrong thing to show a
  * person. Each state is translated once, here, so the sources list, the detail
- * page and the activity feed cannot describe the same condition differently.
+ * page and the schedules cannot describe the same condition differently.
  */
 
 export interface StateLabel {
@@ -73,17 +74,15 @@ export function byAttention(left: Connection, right: Connection): number {
   return weight(left) - weight(right) || left.display_name.localeCompare(right.display_name);
 }
 
-export function relativeTime(value: string | null): string {
-  if (!value) return "never";
-  const then = new Date(value).getTime();
-  if (Number.isNaN(then)) return "never";
-  const seconds = Math.max(0, Math.round((Date.now() - then) / 1000));
-  if (seconds < 60) return "just now";
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.round(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  return new Date(value).toLocaleDateString();
+/**
+ * Where a source's latest sync stands, in one phrase: "Syncing…",
+ * "Last synced 2h ago", "Sync failed". A sync only adds and updates
+ * documents; whether they are processed is said by the pending count.
+ */
+export function syncLine(source: Source): string {
+  const sync = source.sync;
+  if (!sync) return "Not synced yet";
+  if (sync.status === "running") return "Syncing…";
+  if (sync.status === "failed") return "Sync failed";
+  return `Last synced ${formatRelative(sync.last_synced_at, "never")}`;
 }

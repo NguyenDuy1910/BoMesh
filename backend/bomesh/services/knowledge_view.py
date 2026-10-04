@@ -7,11 +7,11 @@ from uuid import UUID
 
 from sqlalchemy import distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import joinedload
 
 from bomesh.connector.protocol import CitationInfo
 from bomesh.db.engine import SessionFactory, transaction_scope
-from bomesh.db.models import ExternalResource, IngestionSource, Item
+from bomesh.db.models import ExternalResource, Item
 from bomesh.document_index import ItemIndex
 from bomesh.knowledge import CitationResolver
 from bomesh.services import (
@@ -24,7 +24,6 @@ from bomesh.services.citation import CitationService
 from bomesh.services.identity_access.authorization import AuthorizationService
 from bomesh.services.document_presentation import (
     DocumentPresenter,
-    document_ingestion,
     public_document_status,
     viewer_elements,
 )
@@ -166,15 +165,23 @@ class KnowledgeViewService:
                 item.id: sorted(await access_service.permissions_for_item(item.id, access=access))
                 for item in collections
             }
-            recent_documents = list(
-                await session.scalars(
-                    self._document_statement(
-                        tenant_id=tenant_id,
-                        collection_ids=collection_ids,
+            recent_documents = await self._presenter.contract_documents(
+                session,
+                list(
+                    await session.scalars(
+                        select(Item)
+                        .options(joinedload(Item.upload))
+                        .where(
+                            Item.tenant_id == tenant_id,
+                            Item.item_type == "document",
+                            Item.parent_item_id.in_(collection_ids),
+                            Item.status != "deleted",
+                            Item.deleted_at.is_(None),
+                        )
+                        .order_by(Item.updated_at.desc(), Item.id)
+                        .limit(8)
                     )
-                    .order_by(Item.updated_at.desc(), Item.id)
-                    .limit(8)
-                )
+                ),
             )
         personal_collection_id = next(
             (
@@ -199,7 +206,7 @@ class KnowledgeViewService:
                 for item in collections
             ],
             "total": len(collections),
-            "recent_documents": [_document_payload(item) for item in recent_documents],
+            "recent_documents": recent_documents,
             "personal_collection_id": personal_collection_id,
         }
 
@@ -256,31 +263,6 @@ class KnowledgeViewService:
             }
             for chunk in chunks
         ]
-
-    @staticmethod
-    def _document_statement(
-        *,
-        tenant_id: UUID,
-        collection_ids: tuple[UUID, ...],
-        filters: list[Any] | None = None,
-    ) -> Any:
-        return (
-            select(Item)
-            .options(
-                selectinload(Item.external_resources)
-                .selectinload(ExternalResource.ingestion_source)
-                .selectinload(IngestionSource.integration_connection)
-            )
-            .where(
-                *(filters or [
-                    Item.tenant_id == tenant_id,
-                    Item.item_type == "document",
-                    Item.parent_item_id.in_(collection_ids),
-                    Item.status != "deleted",
-                    Item.deleted_at.is_(None),
-                ])
-            )
-        )
 
     @staticmethod
     async def _collection_counts(
@@ -373,36 +355,6 @@ def _collection_payload(
         "source_count": source_count,
         "created_at": item.created_at.isoformat(),
         "updated_at": item.updated_at.isoformat(),
-    }
-
-
-def _document_payload(item: Item) -> dict[str, Any]:
-    resource = next(
-        (candidate for candidate in item.external_resources if candidate.deleted_at is None),
-        None,
-    )
-    source = None
-    if resource is not None:
-        connection = resource.ingestion_source.integration_connection
-        source = {
-            "display_name": connection.display_name,
-            "connector_key": connection.connector_key,
-            "source_url": resource.source_url,
-        }
-    return {
-        "id": str(item.id),
-        "collection_id": str(item.parent_item_id),
-        "name": item.title,
-        "title": item.title,
-        "content_type": item.mime_type,
-        "size_bytes": item.size_bytes or 0,
-        "purpose": (item.metadata_ or {}).get("purpose", "knowledge"),
-        "status": public_document_status(item.status),
-        "latest_ingestion": document_ingestion(item),
-        "created_at": item.created_at.isoformat(),
-        "updated_at": item.updated_at.isoformat(),
-        "document_type": item.document_type,
-        "source": source,
     }
 
 

@@ -11,7 +11,7 @@ import { ErrorState } from "@/components/ui/ErrorState";
 import { PageLoadingSkeleton } from "@/components/ui/Skeleton";
 import { SectionHeader } from "@/modules/workspace-control/components/SectionHeader";
 import { pluralize, titleCase } from "@/modules/workspace-control/format";
-import { useConnectorCatalogue, type ConnectorEntry } from "@/modules/knowledge/queries";
+import { useConnectorCatalogue, type ConnectorEntry } from "@/modules/ingestion/queries";
 
 /* The registry's keys, in the short words a table column has room for. A key
    added to the backend without a word here is shown title-cased, not raw. */

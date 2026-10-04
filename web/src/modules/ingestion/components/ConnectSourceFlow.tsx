@@ -15,9 +15,9 @@ import {
   beginAuthorization,
   PopupBlocked,
   type PendingAuthorization,
-} from "@/modules/knowledge/authorize";
-import { accountLine } from "@/modules/knowledge/connection-state";
-import type { ConnectorField, KnowledgeConnector } from "@/modules/knowledge/connectors";
+} from "@/modules/ingestion/authorize";
+import { accountLine } from "@/modules/ingestion/connection-state";
+import type { ConnectorField, KnowledgeConnector } from "@/modules/ingestion/connectors";
 import {
   collectionsApi,
   connectionsApi,
@@ -26,7 +26,7 @@ import {
   type Connection,
   type ConnectorCapability,
   type SyncScheduleValue,
-} from "@/modules/knowledge/integrations-api";
+} from "@/modules/ingestion/integrations-api";
 
 import { AppIcon } from "./AppIcon";
 import { AuthorizationWaiting } from "./AuthorizationWaiting";
@@ -40,10 +40,9 @@ interface DestinationCollection {
 type Step = "account" | "content" | "done";
 type ConnectionMethod = "authorization" | "credentials";
 
-const STEPS: { id: Step; label: string }[] = [
+const STEPS: { id: Exclude<Step, "done">; label: string }[] = [
   { id: "account", label: "Connect account" },
   { id: "content", label: "Choose knowledge" },
-  { id: "done", label: "Done" },
 ];
 
 function initialValues(fields: readonly ConnectorField[]) {
@@ -79,12 +78,16 @@ function submitted(
  * consent screen.
  *
  * A connection that already exists skips the first step entirely — which is
- * what "Add knowledge" on a connected account does.
+ * what "Add source" on a connected account does.
+ *
+ * Creating a source requests its first sync, which only adds documents: they
+ * arrive in the collection as Pending until a run processes them.
  */
 export function ConnectSourceFlow({
   connector,
   capability,
   existingConnection,
+  initialCollectionId,
   canManageWorkspace,
   open,
   onClose,
@@ -95,6 +98,8 @@ export function ConnectSourceFlow({
   capability?: ConnectorCapability;
   /** Set to add knowledge to an account that is already authorized. */
   existingConnection?: Connection | null;
+  /** The destination to preselect, when the flow was opened from a collection. */
+  initialCollectionId?: string;
   /** Whether this person may connect an account on the whole workspace's behalf. */
   canManageWorkspace: boolean;
   open: boolean;
@@ -103,10 +108,10 @@ export function ConnectSourceFlow({
   onConnected: () => void;
 }) {
   const fieldId = useId();
-  const [step, setStep] = useState<Step>("account");
+  const [step, setStep] = useState<Step>(existingConnection ? "content" : "account");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [connection, setConnection] = useState<Connection | null>(null);
+  const [connection, setConnection] = useState<Connection | null>(existingConnection ?? null);
 
   const [displayName, setDisplayName] = useState("");
   const [ownerType, setOwnerType] = useState<"tenant" | "user">("tenant");
@@ -122,7 +127,7 @@ export function ConnectSourceFlow({
   const [collections, setCollections] = useState<DestinationCollection[] | null>(null);
   const [targetId, setTargetId] = useState("");
   const [newCollection, setNewCollection] = useState("");
-  const [schedule, setSchedule] = useState<SyncScheduleValue>("daily");
+  const [schedule, setSchedule] = useState<SyncScheduleValue>("manual");
   const [createdCount, setCreatedCount] = useState(0);
 
   const setup = connector?.setup;
@@ -159,13 +164,13 @@ export function ConnectSourceFlow({
     setCredentialValues(initialValues(connector.setup.credentials));
     setManualScope(initialValues(connector.setup.scope));
     setSelected([]);
-    setTargetId("");
+    setTargetId(initialCollectionId ?? "");
     setNewCollection("");
-    setSchedule("daily");
+    setSchedule("manual");
     setCollections(null);
     setCreatedCount(0);
     if (existingConnection) void loadCollections().catch(() => setCollections([]));
-  }, [canAuthorize, canManageWorkspace, connector, existingConnection, loadCollections, open]);
+  }, [canAuthorize, canManageWorkspace, connector, existingConnection, initialCollectionId, loadCollections, open]);
 
   // A dialog that closes while consent is open would leave an orphan window.
   useEffect(() => {
@@ -259,6 +264,13 @@ export function ConnectSourceFlow({
       const destination = targetId
         ? targetId
         : (await collectionsApi.create(newCollection.trim() || connector.name)).id;
+      // A manually entered space/page should not become an indistinguishable
+      // "Confluence" row beside every other source from the same account.
+      const manualName = setup.scope
+        .filter((field) => field.kind !== "boolean" && field.kind !== "secret")
+        .map((field) => String(manualScope[field.name] ?? "").trim())
+        .filter(Boolean)
+        .join(" / ") || connection.display_name;
       const plan = canDiscover
         ? selected.map((resource) => ({
             collection_id: destination,
@@ -270,7 +282,7 @@ export function ConnectSourceFlow({
         : [
             {
               collection_id: destination,
-              display_name: displayName.trim(),
+              display_name: manualName,
               config: submitted(setup.scope, manualScope),
               schedule: scheduleFor(schedule),
             },
@@ -369,7 +381,7 @@ export function ConnectSourceFlow({
             Cancel
           </Button>
           <Button disabled={!contentReady} loading={busy} onClick={() => void finish()}>
-            Start syncing
+            Add {canDiscover && selected.length !== 1 ? "sources" : "source"}
           </Button>
         </>
       )}
@@ -385,38 +397,42 @@ export function ConnectSourceFlow({
       open={open}
       title={
         step === "done"
-          ? `${connector.name} connected`
+          ? "Sources added"
           : step === "content"
-            ? `Choose ${connector.name} knowledge`
-            : `Connect ${connector.name}`
+            ? "Choose knowledge"
+            : "Connect account"
       }
     >
       <div className="knowledge-setup">
-        <header className="knowledge-setup__identity">
-          <AppIcon connector={connector.key} />
-          <div>
-            <strong>{connector.name}</strong>
-            <small>{connector.description}</small>
-          </div>
-        </header>
+        {step !== "done" && (
+          <header className="knowledge-setup__identity">
+            <AppIcon connector={connector.key} />
+            <div>
+              <strong>{connector.name}</strong>
+              <small>{connector.description}</small>
+            </div>
+          </header>
+        )}
 
-        <ol className="knowledge-setup__steps">
-          {STEPS.map((item, index) => {
-            const activeIndex = STEPS.findIndex((entry) => entry.id === step);
-            const state = index < activeIndex ? "done" : index === activeIndex ? "current" : "upcoming";
-            return (
-              <li
-                className={cn("knowledge-setup__step", `knowledge-setup__step--${state}`)}
-                key={item.id}
-              >
-                <span aria-hidden="true">
-                  {state === "done" ? <CircleCheck size={14} /> : index + 1}
-                </span>
-                {item.label}
-              </li>
-            );
-          })}
-        </ol>
+        {step !== "done" && !existingConnection && (
+          <ol className="knowledge-setup__steps">
+            {STEPS.map((item, index) => {
+              const activeIndex = STEPS.findIndex((entry) => entry.id === step);
+              const state = index < activeIndex ? "done" : index === activeIndex ? "current" : "upcoming";
+              return (
+                <li
+                  className={cn("knowledge-setup__step", `knowledge-setup__step--${state}`)}
+                  key={item.id}
+                >
+                  <span aria-hidden="true">
+                    {state === "done" ? <CircleCheck size={14} /> : index + 1}
+                  </span>
+                  {item.label}
+                </li>
+              );
+            })}
+          </ol>
+        )}
 
         {error && (
           <div className="knowledge-notice knowledge-notice--danger" role="alert">
@@ -548,7 +564,6 @@ export function ConnectSourceFlow({
             )}
 
             <FormField
-              helperText="Where these documents land in workspace knowledge."
               htmlFor={`${fieldId}-target`}
               label="Add to collection"
               required
@@ -575,7 +590,12 @@ export function ConnectSourceFlow({
               </FormField>
             )}
 
-            <FormField htmlFor={`${fieldId}-schedule`} label="Sync" required>
+            <FormField
+              helperText="Creating a source requests its first sync. A schedule syncs and processes later changes."
+              htmlFor={`${fieldId}-schedule`}
+              label="Schedule"
+              required
+            >
               <Select
                 id={`${fieldId}-schedule`}
                 onChange={(event) => setSchedule(event.target.value as SyncScheduleValue)}
@@ -590,13 +610,11 @@ export function ConnectSourceFlow({
           <div className="knowledge-setup__done">
             <CircleCheck aria-hidden="true" size={22} />
             <strong>
-              {createdCount === 1
-                ? `${connector.name} is connected`
-                : `${createdCount} sources added from ${connector.name}`}
+              {createdCount} {createdCount === 1 ? "source" : "sources"} added from {connector.name}
             </strong>
             <p>
-              The first sync is queued. Documents appear as they are read, and the
-              account&rsquo;s own page shows every run.
+              A first sync is requested for each source. Documents it finds appear as
+              Pending; process them from Sources after the sync finishes.
             </p>
           </div>
         )}

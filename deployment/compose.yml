@@ -77,24 +77,13 @@ services:
       TEMPORAL_CLI_ADDRESS: temporal:7233
       TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
     entrypoint: ["/bin/sh", "-ec"]
+    # Readiness only: workflows use no custom Search Attributes; run state
+    # lives in PostgreSQL.
     command:
       - |
         until temporal operator cluster health >/dev/null 2>&1; do sleep 1; done
         until temporal operator namespace describe \
           --namespace "$$TEMPORAL_NAMESPACE" >/dev/null 2>&1; do sleep 1; done
-        until temporal operator search-attribute list \
-          --namespace "$$TEMPORAL_NAMESPACE" >/dev/null 2>&1; do sleep 1; done
-        for attribute in TenantId IngestionSourceId IntegrationConnectionId ConnectorKey WorkflowCategory TriggerType; do
-          output="$$(temporal operator search-attribute create \
-            --namespace "$$TEMPORAL_NAMESPACE" \
-            --name "$$attribute" \
-            --type Keyword 2>&1)" || {
-              echo "$$output" | grep -qi "already exists" || {
-                echo "$$output" >&2
-                exit 1
-              }
-            }
-        done
 
   temporal-ui:
     image: temporalio/ui:${TEMPORAL_UI_VERSION:-2.34.0}

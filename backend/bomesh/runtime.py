@@ -51,6 +51,7 @@ from bomesh.services.conversation import ConversationService
 from bomesh.services.document_presentation import DocumentPresenter
 from bomesh.services.documents import DocumentService
 from bomesh.services.item_ingestion import ItemIngestionService
+from bomesh.services.archive_expansion import ArchiveExpansionService
 from bomesh.services.knowledge_query import KnowledgeQueryService
 from bomesh.services.knowledge_view import KnowledgeViewService
 from bomesh.services.preview import KnowledgePreview
@@ -58,8 +59,10 @@ from bomesh.services.agent_runtime.item_resource_resolver import ItemResourceRes
 from bomesh.services.agent_runtime.sandbox_workspace import SandboxWorkspace
 from bomesh.services.sandbox_session import SandboxSessionService
 from bomesh.services.stored_file_content import StoredFileContentService
-from bomesh.services.ingestion import IngestionService
+from bomesh.services.ingestion import IngestionRunService
+from bomesh.services.source_sync import SourceSyncService
 from bomesh.services.workflow.service import TemporalWorkflowService
+from bomesh.services import current_processing_version
 from bomesh.services.identity_access.jwt_tokens import JwtTokenService
 from bomesh.storage import S3DocumentStorage
 
@@ -124,7 +127,7 @@ class AppRuntime:
         )
 
     def document_service(self) -> DocumentService:
-        """The one Document lifecycle; it also runs users' own uploads directly."""
+        """The one Document lifecycle: adding data registers pending Documents."""
 
         if self._documents is None:
             upload = self._config.upload
@@ -132,8 +135,6 @@ class AppRuntime:
                 self.sessions(),
                 object_storage=self.object_storage(),
                 ingestion=self.ingestion_service(),
-                content=self.stored_file_content(),
-                workflows=self.workflow_service(),
                 presenter=self.document_presenter(),
                 max_upload_bytes=upload.max_upload_bytes,
                 upload_url_seconds=upload.upload_url_seconds,
@@ -144,6 +145,7 @@ class AppRuntime:
         return WorkspaceControlPlaneService(
             self.sessions(),
             vector_index=self._config.vector_index,
+            processing_version=self.processing_version(),
         )
 
     def integration_lifecycle_service(self) -> IntegrationLifecycleService:
@@ -153,15 +155,30 @@ class AppRuntime:
             integration=self._config.integration,
             providers=self.connection_providers(),
             authorization=self.integration_authorization_service(),
+            processing_version=self.processing_version(),
         )
 
-    def ingestion_lifecycle_service(self) -> IngestionService:
-        return IngestionService(
+    def ingestion_run_service(self) -> IngestionRunService:
+        """Every processing trigger — manual, API, scheduled — creates a run here."""
+
+        return IngestionRunService(
             self.sessions(),
             workflows=self.workflow_service(),
-            documents=self.document_service(),
-            sources=self.integration_lifecycle_service(),
+            processing_signature=lambda: self.item_index().current_processing_signature(),
+            run_config=self._config.ingestion_run,
         )
+
+    def source_sync_service(self) -> SourceSyncService:
+        return SourceSyncService(
+            self.sessions(),
+            index=self.item_index(),
+            raw_storage=self.object_storage(),
+            providers=self.connection_providers(),
+            credential_encryption_key=self._config.integration.credential_encryption_key,
+        )
+
+    def archive_expansion_service(self) -> ArchiveExpansionService:
+        return ArchiveExpansionService(self.sessions(), object_storage=self.object_storage())
 
     def integration_authorization_service(self) -> IntegrationAuthorizationService:
         oauth = self._config.integration.oauth
@@ -259,6 +276,7 @@ class AppRuntime:
     def document_presenter(self) -> DocumentPresenter:
         if self._presenter is None:
             self._presenter = DocumentPresenter(
+                processing_version=self.processing_version(),
                 object_storage=self.object_storage,
                 preview=self.knowledge_preview(),
                 citation_url_seconds=self._config.upload.citation_url_seconds,
@@ -285,6 +303,8 @@ class AppRuntime:
                 self.sessions(),
                 object_storage=self.object_storage,
                 documents=self.document_service,
+                preview=self.knowledge_preview,
+                stored_content=self.stored_file_content,
                 max_content_bytes=artifact.max_content_bytes,
                 download_url_seconds=artifact.download_url_seconds,
             )
@@ -328,6 +348,11 @@ class AppRuntime:
             )
         return self._index
 
+    def processing_version(self) -> str:
+        """The processing configuration a ready Document must match to be current."""
+
+        return current_processing_version(self.item_index().current_processing_signature())
+
     def knowledge_preview(self) -> KnowledgePreview:
         if self._preview is None:
             preview = self._config.preview
@@ -345,6 +370,7 @@ class AppRuntime:
             self._ingestion = ItemIngestionService(
                 self.sessions(),
                 index=self.item_index(),
+                content=self.stored_file_content(),
                 preview=self.knowledge_preview(),
             )
         return self._ingestion
@@ -477,10 +503,6 @@ class AppRuntime:
     async def aclose(self) -> None:
         """Release every client this runtime opened."""
 
-        if self._documents is not None:
-            # Direct ingestions still running are interrupted, not lost: their
-            # state is durable and the next start resumes them.
-            await self._documents.aclose()
         if self._index is not None:
             await self._index.aclose()
         for transport in (

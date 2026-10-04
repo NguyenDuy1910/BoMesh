@@ -56,10 +56,10 @@ export const CAPABILITY_AREAS: readonly CapabilityArea[] = [
         requires: ["collection.read"],
       },
       {
-        code: "item.manage",
-        label: "Create collections and manage all documents",
+        code: "knowledge.manage",
+        label: "Create collections",
         short: "create collections",
-        hint: "Create new collections and look after every document, including failed uploads.",
+        hint: "Create new collections and organize the workspace's knowledge.",
         requires: ["collection.read"],
       },
       {
@@ -79,14 +79,34 @@ export const CAPABILITY_AREAS: readonly CapabilityArea[] = [
     ],
   },
   {
-    id: "sources",
-    title: "Data sources",
+    id: "ingestion",
+    title: "Ingestion",
     capabilities: [
+      {
+        code: "ingestion.run",
+        label: "Process documents",
+        short: "process documents",
+        hint: "Start processing so documents become searchable, in any collection they can open.",
+        requires: ["collection.read"],
+      },
+      {
+        code: "ingestion.read",
+        label: "See all processing runs",
+        short: "see all runs",
+        hint: "Follow every run in the workspace, not only the ones they started.",
+      },
+      {
+        code: "ingestion.manage",
+        label: "Stop any processing run",
+        short: "stop runs",
+        hint: "Cancel runs started by anyone.",
+        requires: ["ingestion.read"],
+      },
       {
         code: "source.manage",
         label: "Connect data sources",
         short: "connect data sources",
-        hint: "Connect Google Drive, Confluence and other sources and keep them in sync.",
+        hint: "Connect Google Drive, Confluence and other sources, sync them and set their schedules.",
       },
     ],
   },

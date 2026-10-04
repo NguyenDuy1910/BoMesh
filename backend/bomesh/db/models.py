@@ -825,9 +825,14 @@ class Item(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, default="pending", server_default="pending"
     )
-    #: Derived-search lifecycle. A ready Item may still be waiting to be
-    #: parsed and indexed; the original resource remains independently usable.
+    #: The Document's processing state: pending | processing | ready | failed |
+    #: unsupported. Only an Ingestion Run moves it past ``pending``; the
+    #: original resource stays independently usable whatever its value.
     index_status: Mapped[str | None] = mapped_column(String(16))
+    #: The processing configuration (``processing_version``) the Document's
+    #: current index was built with. A ready Document whose version differs
+    #: from the current configuration is outdated.
+    processed_version: Mapped[str | None] = mapped_column(Text)
     created_by_user_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("users.id")
     )
@@ -1028,10 +1033,10 @@ class RoleAssignment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class IngestionSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """One external resource synchronized into one destination Collection.
 
-    ``status`` is the source's own enablement and health, never the state of a
-    run: a run lives in its workflow execution and is read from there. A source
-    that is enabled and reachable is ``ready`` whether or not a sync happens to
-    be in flight.
+    ``status`` is the source's own enablement and health. A sync only changes
+    the knowledge inventory (it registers, updates, and removes Items); the
+    outcome of the latest one is kept on the row. Processing what a sync
+    registered is an Ingestion Run, never part of the sync.
     """
 
     __tablename__ = "ingestion_sources"
@@ -1056,6 +1061,11 @@ class IngestionSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         CheckConstraint(
             "sync_mode IN ('manual', 'scheduled')",
             name="ingestion_source_sync_mode_is_valid",
+        ),
+        CheckConstraint(
+            "last_sync_status IS NULL OR last_sync_status IN "
+            "('running', 'succeeded', 'failed')",
+            name="ingestion_source_sync_status_is_valid",
         ),
     )
 
@@ -1082,8 +1092,12 @@ class IngestionSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         String(32), nullable=False, default="ready", server_default="ready"
     )
     status_detail: Mapped[str | None] = mapped_column(Text)
-    last_ingested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    last_indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: When the latest sync finished, how it ended, and what it changed:
+    #: ``{added, updated, removed, failed}`` document counts.
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_sync_status: Mapped[str | None] = mapped_column(String(16))
+    last_sync_error: Mapped[str | None] = mapped_column(Text)
+    last_sync_summary: Mapped[JsonObject] = _json_object_column()
     created_by_user_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("users.id")
     )
@@ -1133,6 +1147,101 @@ class ExternalResource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     ingestion_source: Mapped[IngestionSource] = relationship(
         back_populates="external_resources"
     )
+
+
+class IngestionRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """One explicit processing execution over a snapshot of Documents.
+
+    The only way a Document is parsed, contextualized, embedded, and indexed.
+    Manual, scheduled, and API triggers all create one of these, and each is
+    orchestrated by one Temporal workflow. Its Documents are fixed when it is
+    created (``ingestion_run_items``), so later uploads never join it.
+    """
+
+    __tablename__ = "ingestion_runs"
+    __table_args__ = (
+        Index(None, "tenant_id", "created_at"),
+        Index(None, "tenant_id", "status"),
+        CheckConstraint(
+            "trigger_type IN ('manual', 'scheduled', 'api')",
+            name="ingestion_run_trigger_is_valid",
+        ),
+        CheckConstraint(
+            "status IN ('queued', 'running', 'completed', 'failed', 'cancelled')",
+            name="ingestion_run_status_is_valid",
+        ),
+        CheckConstraint("item_count >= 0", name="ingestion_run_item_count_is_valid"),
+    )
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False
+    )
+    trigger_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    #: The selection as it was asked for (collection, source, states, retry
+    #: lineage); the Documents themselves are the run's items.
+    scope: Mapped[JsonObject] = _json_object_column()
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="queued", server_default="queued"
+    )
+    #: The processing configuration and batching limits fixed at creation.
+    configuration: Mapped[JsonObject] = _json_object_column()
+    item_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    #: Why the run as a whole stopped, written for people; item failures are
+    #: recorded on their items.
+    error: Mapped[str | None] = mapped_column(Text)
+    created_by_user_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("users.id")
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    items: Mapped[list[IngestionRunItem]] = relationship(back_populates="run")
+
+
+class IngestionRunItem(TimestampMixin, Base):
+    """One Document's participation in one Ingestion Run: its execution record."""
+
+    __tablename__ = "ingestion_run_items"
+    __table_args__ = (
+        Index(None, "item_id", "created_at"),
+        Index(None, "run_id", "status"),
+        Index(None, "run_id", "batch_number"),
+        CheckConstraint(
+            "status IN ('queued', 'running', 'succeeded', 'failed', 'skipped', "
+            "'cancelled')",
+            name="ingestion_run_item_status_is_valid",
+        ),
+        CheckConstraint(
+            "chunk_count IS NULL OR chunk_count >= 0",
+            name="ingestion_run_item_chunk_count_is_valid",
+        ),
+    )
+
+    run_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("ingestion_runs.id"), primary_key=True
+    )
+    item_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("items.id"), primary_key=True
+    )
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="queued", server_default="queued"
+    )
+    #: The batch the run's planner put this Document in; null until planned.
+    batch_number: Mapped[int | None] = mapped_column(Integer)
+    #: ``[{phase, started_at, finished_at, done, total}]`` as processing went.
+    phases: Mapped[list[Any]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    #: Why this Document was not processed, written for people.
+    error: Mapped[str | None] = mapped_column(Text)
+    chunk_count: Mapped[int | None] = mapped_column(Integer)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    run: Mapped[IngestionRun] = relationship(back_populates="items")
+    item: Mapped[Item] = relationship()
 
 
 class ItemUpload(TimestampMixin, Base):

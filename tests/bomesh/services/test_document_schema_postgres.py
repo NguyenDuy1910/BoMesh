@@ -48,7 +48,9 @@ async def test_final_source_storage_schema_contract() -> None:
                     'integration_connections',
                     'integration_credentials',
                     'ingestion_sources',
-                    'external_resources'
+                    'external_resources',
+                    'ingestion_runs',
+                    'ingestion_run_items'
                   )
                 """
             )
@@ -105,6 +107,8 @@ async def test_final_source_storage_schema_contract() -> None:
         "integration_credentials",
         "ingestion_sources",
         "external_resources",
+        "ingestion_runs",
+        "ingestion_run_items",
     }.issubset(table_names)
     assert {"visibility", "public_access_role_id"}.isdisjoint(
         columns_by_table["tenants"]
@@ -141,6 +145,7 @@ async def test_final_source_storage_schema_contract() -> None:
         "storage_key",
         "status",
         "index_status",
+        "processed_version",
         "deleted_at",
     }.issubset(columns_by_table["items"])
     assert {
@@ -164,8 +169,30 @@ async def test_final_source_storage_schema_contract() -> None:
         "integration_connection_id",
         "target_item_id",
         "checkpoint",
-        "last_ingested_at",
+        "last_synced_at",
+        "last_sync_status",
+        "last_sync_error",
+        "last_sync_summary",
     }.issubset(columns_by_table["ingestion_sources"])
+    assert {"last_ingested_at", "last_indexed_at"}.isdisjoint(
+        columns_by_table["ingestion_sources"]
+    )
+    assert {
+        "run_id",
+        "item_id",
+        "status",
+        "batch_number",
+        "phases",
+        "error",
+    }.issubset(columns_by_table["ingestion_run_items"])
+    assert {
+        "tenant_id",
+        "trigger_type",
+        "scope",
+        "status",
+        "configuration",
+        "item_count",
+    }.issubset(columns_by_table["ingestion_runs"])
     assert {
         "ingestion_source_id",
         "item_id",

@@ -254,7 +254,14 @@ def _native_result(item: dict[str, Any]) -> dict[str, Any]:
         for file in files:
             if not isinstance(file, dict) or file.get("provider") != "openrouter":
                 continue
-            native_file = {"type": "container_file_citation", "file_id": file["id"]}
+            # OpenRouter validates replayed citations strictly: the indexes are
+            # required even though a shell file cites no text span.
+            native_file = {
+                "type": "container_file_citation",
+                "file_id": file["id"],
+                "start_index": 0,
+                "end_index": 0,
+            }
             if file.get("name") is not None:
                 native_file["filename"] = file["name"]
             if "container_id" in native:

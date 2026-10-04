@@ -47,6 +47,7 @@ class ExtensibleProtocolModel(ProtocolModel):
 # Submodules import the shared base from this package while they are being
 # imported, so the primary contracts are re-exported only after it exists.
 from bomesh.agent.protocol.content import (  # noqa: E402
+    ARTIFACT_ANNOTATION_TYPE,
     DOCUMENT_CITATION_TYPE,
     TEXT_PART_TYPES,
     Annotation,
@@ -144,6 +145,7 @@ from bomesh.agent.protocol.events import (  # noqa: E402
 
 __all__ = [
     "CORE_ITEM_TYPES",
+    "ARTIFACT_ANNOTATION_TYPE",
     "DOCUMENT_CITATION_TYPE",
     "EXTENSION_TAG",
     "TERMINAL_EVENT_TYPES",

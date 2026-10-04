@@ -52,33 +52,58 @@ class KnowledgeCollection {
   bool can(String permission) => permissions.contains(permission);
 }
 
-class DocumentIngestion {
-  DocumentIngestion.fromJson(JsonMap value)
-    : id = textOf(value['id']),
-      status = textOf(value['status']),
-      mode = textOf(value['mode']),
+/// Where a document stands in processing (`document.processing`).
+///
+/// Adding a document only stores it as `pending`; it becomes searchable once
+/// an ingestion run processes it.
+class DocumentProcessing {
+  DocumentProcessing.fromJson(JsonMap value)
+    : state = textOf(value['state'], 'pending'),
       error = textOf(value['error']),
-      phase = textOf(objectOf(value['progress'])['phase']),
-      discovered = numberOf(objectOf(value['progress'])['discovered_count']),
-      processed = numberOf(objectOf(value['progress'])['processed_count']),
-      indexed = numberOf(objectOf(value['progress'])['indexed_count']),
-      failed = numberOf(objectOf(value['progress'])['failed_count']),
-      attempt = numberOf(value['attempt']);
-  final String id, status, mode, error, phase;
-  final int discovered, processed, indexed, failed, attempt;
-  bool get isActive => status == 'pending' || status == 'running';
-  bool get canRetry => ['failed', 'cancelled', 'timed_out'].contains(status);
-  double? get fraction =>
-      discovered > 0 ? (processed / discovered).clamp(0.0, 1.0) : null;
-  String get label => switch (status) {
-    'pending' => 'Queued for indexing',
-    'running' => phase.isEmpty ? 'Indexing' : sentenceCase(phase),
-    'completed' => 'Indexed',
-    'failed' => 'Indexing failed',
-    'cancelled' => 'Indexing cancelled',
-    'timed_out' => 'Indexing timed out',
-    _ => sentenceCase(status),
+      runId = textOf(value['run_id']);
+  final String state, error, runId;
+  bool get isProcessing => state == 'processing';
+  bool get isFailed => state == 'failed';
+
+  /// Pending and outdated documents are what a collection-wide run picks up.
+  bool get awaitsRun => state == 'pending' || state == 'outdated';
+  String get label => switch (state) {
+    'pending' => 'Pending',
+    'processing' => 'Processing',
+    'ready' => 'Ready',
+    'failed' => 'Failed',
+    'outdated' => 'Outdated',
+    'unsupported' => 'Not processed',
+    _ => sentenceCase(state),
   };
+}
+
+/// Start one ingestion run, for exactly [documentIds] or for the pending and
+/// outdated documents under [collectionId]. Returns the run id; a 409 carries
+/// the server's explanation (for example, nothing left to process).
+Future<String> startProcessing(
+  ApiClient api, {
+  List<String>? documentIds,
+  String? collectionId,
+}) async {
+  final run = await api.post(
+    '/ingestion-runs',
+    body: {
+      'document_ids': ?documentIds,
+      if (collectionId != null) ...{
+        'collection_id': collectionId,
+        'states': const ['pending', 'outdated'],
+      },
+      'trigger': 'manual',
+    },
+  );
+  return textOf(run['id']);
+}
+
+/// Whether the run is still queued or running.
+Future<bool> processingIsActive(ApiClient api, String runId) async {
+  final run = await api.get('/ingestion-runs/${Uri.encodeComponent(runId)}');
+  return const ['queued', 'running'].contains(textOf(run['status']));
 }
 
 String sentenceCase(String value) => value.isEmpty
@@ -96,9 +121,7 @@ class KnowledgeDocument {
       size = numberOf(value['size_bytes']),
       createdAt = textOf(value['created_at']),
       updatedAt = textOf(value['updated_at']),
-      ingestion = value['latest_ingestion'] is Map
-          ? DocumentIngestion.fromJson(objectOf(value['latest_ingestion']))
-          : null;
+      processing = DocumentProcessing.fromJson(objectOf(value['processing']));
   final String id,
       collectionId,
       name,
@@ -108,17 +131,20 @@ class KnowledgeDocument {
       createdAt,
       updatedAt;
   final int size;
-  final DocumentIngestion? ingestion;
+  final DocumentProcessing processing;
   bool get isImage => contentType.startsWith('image/');
   bool get isArchive =>
       contentType.contains('zip') || name.toLowerCase().endsWith('.zip');
-  bool get isActive =>
-      status == 'pending_content' || ingestion?.isActive == true;
+
+  /// Whether a run can take this document: its content is stored and its
+  /// type can be processed.
+  bool get isProcessable =>
+      status == 'available' && processing.state != 'unsupported';
+  bool get isFailed => status == 'failed' || processing.isFailed;
   String get statusLabel {
     if (status == 'pending_content') return 'Awaiting content';
     if (status == 'failed') return 'Content unavailable';
-    if (ingestion != null) return ingestion!.label;
-    return isImage ? 'Image attachment' : 'Content available';
+    return processing.label;
   }
 
   IconData get icon => contentType.contains('pdf')

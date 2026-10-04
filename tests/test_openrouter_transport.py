@@ -201,6 +201,7 @@ async def test_hosted_shell_reuses_a_sandbox_environment_without_exposing_it_to_
             model="openai/gpt-test",
             hosted_shell=True,
             environment_id="container_1",
+            workspace_file_ids=("or_file_2",),
         ),
     )
     _ = [event async for event in stream]
@@ -214,6 +215,8 @@ async def test_hosted_shell_reuses_a_sandbox_environment_without_exposing_it_to_
                 "environment": {
                     "type": "container_reference",
                     "container_id": "container_1",
+                    # A file prepared while the container runs joins it.
+                    "file_ids": ["or_file_2"],
                 },
             },
         }
@@ -247,6 +250,29 @@ async def test_files_api_is_used_only_for_explicit_materialization_and_export() 
     assert requests[0].url.path == "/api/v1/files"
     assert requests[0].headers["content-type"].startswith("multipart/form-data;")
     assert requests[1].url.path == "/api/v1/containers/container_1/files/cfile_1/content"
+
+
+@pytest.mark.asyncio
+async def test_workspace_paths_follow_openrouter_naming_and_lookup_pages_the_container() -> None:
+    pages = {
+        None: {"data": [{"id": "cfile_a", "path": "notes.txt"}], "has_more": True, "last_id": "p1"},
+        "p1": {"data": [{"id": "cfile_b", "path": "out/report.csv"}], "has_more": False},
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=pages[request.url.params.get("after")], request=request)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    transport = OpenRouterTransport(api_key="test-key", client=client)
+    found = await transport.find_file(environment_id="container_1", path="out/report.csv")
+    missing = await transport.find_file(environment_id="container_1", path="gone.csv")
+    await client.aclose()
+
+    assert transport.workspace_path(
+        file_id="or_file_011CNha8iCJcU1wXNR6q4V8w", file_name="report.csv"
+    ) == "~/NR6q4V8w-report.csv"
+    assert found == ProviderResourceRef(provider="openrouter", id="cfile_b", name="out/report.csv")
+    assert missing is None
 
 
 @pytest.mark.asyncio
@@ -311,6 +337,9 @@ async def test_hosted_execution_history_is_replayed_in_openrouter_native_shape()
             "container_id": "env_1",
             "file_id": "cfile_1",
             "filename": "out/version.txt",
+            # OpenRouter rejects a replayed citation without its indexes.
+            "start_index": 0,
+            "end_index": 0,
         }
     ]
 

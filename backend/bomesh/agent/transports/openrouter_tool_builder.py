@@ -26,16 +26,20 @@ class OpenRouterToolBuilder:
         if any(tool.get("type") == "openrouter:shell" for tool in rendered):
             return rendered
         parameters: dict[str, Any] = {"engine": "openrouter"}
+        environment: dict[str, Any] = {}
         if capability.environment_id is not None:
-            parameters["environment"] = {
+            environment = {
                 "type": "container_reference",
                 "container_id": capability.environment_id,
             }
         elif capability.workspace_file_ids:
-            parameters["environment"] = {
-                "type": "container_auto",
-                "file_ids": list(capability.workspace_file_ids),
-            }
+            environment = {"type": "container_auto"}
+        # Attached files are copied into the home directory before the step's
+        # first command — on a new container and on a running one alike.
+        if capability.workspace_file_ids:
+            environment["file_ids"] = list(capability.workspace_file_ids)
+        if environment:
+            parameters["environment"] = environment
         rendered.append({"type": "openrouter:shell", "parameters": parameters})
         return rendered
 

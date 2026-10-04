@@ -1,7 +1,7 @@
 /** The knowledge workspace endpoints: Collections, and the Items inside them. */
 
 import { apiRequest } from "@/lib/api/request";
-import type { Ingestion } from "@/modules/knowledge/ingestions-api";
+import type { DocumentProcessing } from "@/modules/ingestion/runs-api";
 import type { ApiKnowledgeCollection, ApiKnowledgeDocument } from "@/modules/knowledge/view-model";
 
 export interface KnowledgeHome {
@@ -43,13 +43,6 @@ export const knowledgeApi = {
     const documents = [first, ...rest].flatMap((page) => page.items);
     return { collection: toCollection(collection), documents: documents.map(toDocument), total: first.total };
   },
-  /**
-   * Index a document again from its stored content: a new run of its
-   * Ingestion. Refused (409) while one is queued or running, and for a
-   * document a connector wrote — its source's sync re-indexes it.
-   */
-  reindex: (documentId: string) =>
-    apiRequest<Ingestion>(`/documents/${encodeURIComponent(documentId)}/ingestions`, { method: "POST" }),
   createCollection: (title: string, description?: string) =>
     apiRequest<{ id: string; title: string }>("/collections", {
       method: "POST",
@@ -59,48 +52,76 @@ export const knowledgeApi = {
     apiRequest<{ id: string; title: string }>("/collections/personal", {
       method: "PUT",
   }),
+  /** Who can open this collection, and as what. Needs `collection.share`. */
+  collectionAccess: async (collectionId: string): Promise<CollectionGrant[]> =>
+    (await apiRequest<{ items: CollectionGrant[] }>(
+      `/collections/${encodeURIComponent(collectionId)}/access?page_size=100`,
+    )).items,
+  setCollectionAccess: (
+    collectionId: string,
+    grant: Pick<CollectionGrant, "principal_type" | "principal_id" | "role">,
+  ) =>
+    apiRequest<CollectionGrant>(
+      `/collections/${encodeURIComponent(collectionId)}/access/${grant.principal_type}/${encodeURIComponent(grant.principal_id)}`,
+      { method: "PUT", body: JSON.stringify({ role: grant.role }) },
+    ),
+  removeCollectionAccess: (
+    collectionId: string,
+    grant: Pick<CollectionGrant, "principal_type" | "principal_id">,
+  ) =>
+    apiRequest<void>(
+      `/collections/${encodeURIComponent(collectionId)}/access/${grant.principal_type}/${encodeURIComponent(grant.principal_id)}`,
+      { method: "DELETE" },
+    ),
 };
 
-interface ContractCollection { id: string; title: string; description: string | null; parent_collection_id: string | null; document_count: number; source_count: number; updated_at: string; }
+export type CollectionRole = "owner" | "editor" | "viewer";
+
+/** One person or group holding a role on a collection (`CollectionAccess`). */
+export interface CollectionGrant {
+  collection_id: string;
+  principal_type: "user" | "group";
+  principal_id: string;
+  principal_name: string | null;
+  role: CollectionRole;
+}
+
+interface ContractCollection {
+  id: string;
+  title: string;
+  description: string | null;
+  parent_collection_id: string | null;
+  document_count: number;
+  source_count: number;
+  updated_at: string;
+  permissions: string[];
+}
+
 export interface ContractDocument {
   id: string;
+  collection_id: string;
   name: string;
   content_type: string;
-  status: "pending_content" | "available" | "failed";
-  /** Null when a connector wrote it, or its content never arrived. */
-  latest_ingestion: Ingestion | null;
+  size_bytes: number;
+  processing: DocumentProcessing;
   updated_at: string;
+}
+
+/** What uploading a file answers: the Document it registered, pending. */
+export interface DocumentCreateResult {
+  document: ContractDocument;
+  created: boolean;
 }
 
 const toCollection = (v: ContractCollection): ApiKnowledgeCollection => ({ ...v, parent_item_id: v.parent_collection_id });
 
-/**
- * Where a document is, read from the document and the last time the pipeline
- * took it in. Available content with no ingestion behind it was written by a
- * connector, inside its source's sync, so it is already indexed.
- */
-export function documentStatus(v: ContractDocument): ApiKnowledgeDocument["status"] {
-  if (v.status === "pending_content") return "pending";
-  if (v.status === "failed") return "failed";
-  switch (v.latest_ingestion?.status) {
-    case undefined:
-    case "completed":
-      return "ready";
-    case "pending":
-      return "pending";
-    case "running":
-      return "processing";
-    default:
-      return "failed";
-  }
-}
-
 const toDocument = (v: ContractDocument): ApiKnowledgeDocument => ({
   id: v.id,
   title: v.name,
+  collection_id: v.collection_id,
   content_type: v.content_type,
   document_type: null,
-  status: documentStatus(v),
+  processing: v.processing,
+  size_bytes: v.size_bytes,
   updated_at: v.updated_at,
-  latest_ingestion: v.latest_ingestion,
 });

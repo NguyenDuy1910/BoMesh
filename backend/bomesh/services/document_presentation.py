@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any, Callable
+from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh.connector.protocol import (
     CitationInfo,
     SourceIdentity,
     SourceProvider,
 )
+from bomesh.db.models import IngestionRunItem
 from bomesh.services.preview import KnowledgePreview
-from bomesh.services.item_ingestion import progress_from_phases
-from bomesh.services.workflow import document_ingestion_id
 
 log = logging.getLogger(__name__)
 
@@ -27,6 +30,7 @@ _PUBLIC_DOCUMENT_STATUS = {
     "failed": "failed",
     "unsupported": "failed",
 }
+_INDEX_STATES = frozenset({"pending", "processing", "ready", "failed", "unsupported"})
 
 
 def public_document_status(status: str | None) -> str:
@@ -35,74 +39,57 @@ def public_document_status(status: str | None) -> str:
     return _PUBLIC_DOCUMENT_STATUS.get(status or "", "pending_content")
 
 
-#: An upload's internal index lifecycle, in the Ingestion contract's words.
-_INGESTION_STATUS = {
-    "pending": "pending",
-    "processing": "running",
-    "ready": "completed",
-    "failed": "failed",
-    "unsupported": "failed",
-}
+def processing_state(
+    index_status: str | None,
+    processed_version: str | None,
+    current_version: str | None,
+) -> str:
+    """A Document's public processing state.
 
-
-def document_ingestion(document: Any) -> dict[str, Any] | None:
-    """The latest Ingestion of one uploaded Document, or ``None``.
-
-    An upload's Ingestion is recorded on its Item when its bytes become
-    available (or a retry opens a new one) and is kept current by the core as
-    it runs — whether managed ingestion or a direct run processes it. A
-    Document a connector wrote has none of its own: its Source's Ingestion
-    indexed it. Content that never arrived has not started one either.
+    ``outdated`` is a ready Document whose index was built with another
+    processing configuration than the current one; without a current version
+    nothing is outdated.
     """
 
-    metadata = getattr(document, "metadata_", {}) or {}
-    index_status = getattr(document, "index_status", None)
-    record = metadata.get("ingestion")
-    if not isinstance(record, dict):
-        # Content availability is ``status == "ready"``; an index failure
-        # leaves it there, while content that never arrived is ``failed``.
-        if metadata.get("purpose") != "knowledge" or document.status != "ready":
-            return None
-        if index_status is None:
-            return None
-        # Uploaded before Ingestions were recorded: same identity, no times.
-        record = {
-            "id": str(document_ingestion_id(str(document.id))),
-            "mode": "managed",
-            "trigger_type": "upload",
-            "created_at": document.created_at.isoformat(),
-        }
-    created_at = record.get("created_at") or document.created_at.isoformat()
-    started_at = record.get("started_at")
-    finished_at = record.get("finished_at")
-    status = _INGESTION_STATUS.get(index_status or "", "pending")
-    if record.get("cancelled") and status == "failed":
-        status = "cancelled"
-    duration_ms = None
-    if started_at:
-        end = datetime.fromisoformat(finished_at) if finished_at else datetime.now(UTC)
-        duration_ms = max(0, round((end - datetime.fromisoformat(started_at)).total_seconds() * 1000))
+    if (
+        index_status == "ready"
+        and current_version is not None
+        and processed_version != current_version
+    ):
+        return "outdated"
+    return index_status if index_status in _INDEX_STATES else "pending"
+
+
+@dataclass(frozen=True, slots=True)
+class LatestRunItem:
+    """A Document's row in the most recent Ingestion Run that included it."""
+
+    run_id: UUID
+    #: Why that run could not process the Document, written for people.
+    error: str | None
+
+
+async def latest_run_items(
+    session: AsyncSession, item_ids: Iterable[UUID]
+) -> dict[UUID, LatestRunItem]:
+    """Each Document's latest run row, in one query over ``(item_id, created_at)``."""
+
+    ids = list(dict.fromkeys(item_ids))
+    if not ids:
+        return {}
+    rows = await session.execute(
+        select(IngestionRunItem.item_id, IngestionRunItem.run_id, IngestionRunItem.error)
+        .where(IngestionRunItem.item_id.in_(ids))
+        .distinct(IngestionRunItem.item_id)
+        .order_by(
+            IngestionRunItem.item_id,
+            IngestionRunItem.created_at.desc(),
+            IngestionRunItem.run_id.desc(),
+        )
+    )
     return {
-        "id": record["id"],
-        "kind": "document",
-        "mode": record.get("mode", "managed"),
-        "title": str(metadata.get("file_name") or document.title or "document"),
-        "document_id": str(document.id),
-        "collection_id": str(document.parent_item_id) if document.parent_item_id else None,
-        "source_id": None,
-        "connection_id": None,
-        "connector_key": "file",
-        "status": status,
-        "trigger_type": record.get("trigger_type", "upload"),
-        "retry_of_ingestion_id": None,
-        "attempt": 1,
-        "error": record.get("error") if status == "failed" else None,
-        "progress": progress_from_phases(record.get("phases") or [], status=status),
-        "started_at": started_at,
-        "finished_at": finished_at,
-        "duration_ms": duration_ms,
-        "created_at": created_at,
-        "updated_at": finished_at or started_at or created_at,
+        item_id: LatestRunItem(run_id=run_id, error=error)
+        for item_id, run_id, error in rows.all()
     }
 
 
@@ -116,13 +103,28 @@ class DocumentPresenter:
         preview: KnowledgePreview,
         citation_url_seconds: int,
         preview_url_seconds: int,
+        processing_version: str | None,
     ) -> None:
         self._object_storage = object_storage
         self._preview = preview
         self._citation_url_seconds = _bounded_seconds(citation_url_seconds)
         self._preview_url_seconds = _bounded_seconds(preview_url_seconds)
+        self._processing_version = processing_version
 
-    def contract_document(self, document: Any) -> dict[str, Any]:
+    async def contract_documents(
+        self, session: AsyncSession, documents: Sequence[Any]
+    ) -> list[dict[str, Any]]:
+        """Present Documents with their processing, reading run history once."""
+
+        latest = await latest_run_items(session, (document.id for document in documents))
+        return [
+            self.contract_document(document, latest_run=latest.get(document.id))
+            for document in documents
+        ]
+
+    def contract_document(
+        self, document: Any, *, latest_run: LatestRunItem | None
+    ) -> dict[str, Any]:
         """Map internal Item/upload state to the public Document contract."""
 
         upload = _loaded_upload(document)
@@ -144,7 +146,15 @@ class DocumentPresenter:
             "size_bytes": document.size_bytes or 0,
             "purpose": metadata.get("purpose", "knowledge"),
             "status": public_status,
-            "latest_ingestion": document_ingestion(document),
+            "processing": {
+                "state": processing_state(
+                    getattr(document, "index_status", None),
+                    getattr(document, "processed_version", None),
+                    self._processing_version,
+                ),
+                "error": latest_run.error if latest_run is not None else None,
+                "run_id": latest_run.run_id if latest_run is not None else None,
+            },
             "created_at": document.created_at,
             "updated_at": document.updated_at,
         }
@@ -322,8 +332,10 @@ def _loaded_upload(document: Any) -> Any | None:
 
 __all__ = [
     "DocumentPresenter",
-    "document_ingestion",
+    "LatestRunItem",
+    "latest_run_items",
     "payload_citation",
+    "processing_state",
     "public_document_status",
     "viewer_elements",
 ]

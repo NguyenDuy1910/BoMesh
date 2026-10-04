@@ -113,8 +113,10 @@ class RoleAssignmentService:
         )
         rows = (
             await self._session.execute(
-                select(RoleAssignment, Role)
+                select(RoleAssignment, Role, User, Group)
                 .join(Role, Role.id == RoleAssignment.role_id)
+                .outerjoin(User, User.id == RoleAssignment.user_id)
+                .outerjoin(Group, Group.id == RoleAssignment.group_id)
                 .where(
                     RoleAssignment.item_id == item_id,
                     RoleAssignment.deleted_at.is_(None),
@@ -129,7 +131,19 @@ class RoleAssignmentService:
             )
         ).all()
         return {
-            "items": [self.grant_payload(grant, role) for grant, role in rows],
+            "items": [
+                {
+                    **self.grant_payload(grant, role),
+                    # Who it is, as people recognize them: a group's name, or
+                    # a member's display name falling back to their email.
+                    "principal_name": (
+                        group.display_name
+                        if group is not None
+                        else (user.display_name or user.email) if user is not None else None
+                    ),
+                }
+                for grant, role, user, group in rows
+            ],
             "total": int(total or 0),
             "page": page,
             "page_size": page_size,

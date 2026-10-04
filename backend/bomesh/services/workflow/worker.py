@@ -1,8 +1,9 @@
-"""Temporal worker bootstrap: one workflow, its two Activities, shared clients."""
+"""Temporal worker bootstrap: run and sync workflows, their Activities, shared clients."""
 
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import timedelta
 from pathlib import Path
 
@@ -16,19 +17,19 @@ from temporalio.worker.workflow_sandbox import (
 from config import AppConfig, get_config
 
 from bomesh.runtime import AppRuntime
-from bomesh.services.archive_expansion import ArchiveExpansionService
 from bomesh.services.workflow import TemporalSettings
 from bomesh.services.workflow.client import TemporalClientProvider
-from bomesh.services.workflow.ingestion_activity import IngestionActivities
-from bomesh.services.workflow.ingestion_workflow import IngestionWorkflow
+from bomesh.services.workflow.ingestion_activity import (
+    IngestionRunActivities,
+    SourceSyncActivities,
+)
+from bomesh.services.workflow.ingestion_workflow import IngestionRunWorkflow, SourceSyncWorkflow
+
+log = logging.getLogger(__name__)
 
 
 class TemporalWorker:
-    """Register and run managed ingestion on clients the runtime owns.
-
-    The index, contextualizer, storage and parser are the ones the API uses
-    for direct uploads, so both runners produce the same representation.
-    """
+    """Register and run Ingestion Runs and Source syncs on clients the runtime owns."""
 
     def __init__(
         self,
@@ -41,9 +42,19 @@ class TemporalWorker:
 
     async def run(self) -> None:
         client = await TemporalClientProvider(self._settings).get()
-        await self._runtime.workflow_service().ensure_search_attributes()
+        runtime = self._runtime
+        runs = runtime.ingestion_run_service()
+        try:
+            await runs.reconcile()
+        except Exception:  # noqa: BLE001 - startup repairs are best effort
+            log.warning("ingestion reconciliation failed at worker startup", exc_info=True)
+        run_activities = IngestionRunActivities(
+            runs=runs,
+            ingestion=runtime.ingestion_service(),
+            archives=runtime.archive_expansion_service(),
+        )
+        sync_activities = SourceSyncActivities(sync=runtime.source_sync_service(), runs=runs)
         worker_config = self._config.worker
-        activities = self._activities()
         worker = Worker(
             client,
             task_queue=self._settings.task_queue,
@@ -51,8 +62,16 @@ class TemporalWorker:
             # module; that scan trips transformers' lazy alias modules (one
             # warning each) and slows startup. Worker versioning is not used.
             build_id="bomesh-ingestion",
-            workflows=[IngestionWorkflow],
-            activities=[activities.ingest_source, activities.ingest_document],
+            workflows=[IngestionRunWorkflow, SourceSyncWorkflow],
+            activities=[
+                run_activities.start_run,
+                run_activities.plan_batches,
+                run_activities.process_batch,
+                run_activities.fail_batch,
+                run_activities.finish_run,
+                sync_activities.sync_source,
+                sync_activities.create_scheduled_run,
+            ],
             # Importing a submodule of ``bomesh.services`` executes that
             # package's database-backed public boundary. Pass through only the
             # already-loaded workflow module and its lightweight contracts;
@@ -66,8 +85,7 @@ class TemporalWorker:
             ),
             max_concurrent_activities=worker_config.max_concurrent_activities,
             max_task_queue_activities_per_second=worker_config.activity_rate_limit,
-            # Heartbeats carry the live pipeline phase the monitor draws, so
-            # they are sent within ~2s instead of the SDK's 30s default.
+            # Heartbeats are how a cancel reaches a batch; keep them prompt.
             default_heartbeat_throttle_interval=timedelta(seconds=1),
             max_heartbeat_throttle_interval=timedelta(seconds=2),
             graceful_shutdown_timeout=timedelta(seconds=worker_config.graceful_shutdown_seconds),
@@ -75,23 +93,7 @@ class TemporalWorker:
         try:
             await worker.run()
         finally:
-            await self._runtime.aclose()
-
-    def _activities(self) -> IngestionActivities:
-        runtime = self._runtime
-        return IngestionActivities(
-            runtime.sessions(),
-            index=runtime.item_index(),
-            raw_storage=runtime.object_storage(),
-            stored_content=runtime.stored_file_content(),
-            archives=ArchiveExpansionService(
-                runtime.sessions(), object_storage=runtime.object_storage()
-            ),
-            workflows=runtime.workflow_service(),
-            providers=runtime.connection_providers(),
-            credential_encryption_key=self._config.integration.credential_encryption_key,
-            preview=runtime.knowledge_preview(),
-        )
+            await runtime.aclose()
 
 
 async def _main() -> None:

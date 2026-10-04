@@ -371,6 +371,43 @@ async def test_a_group_grant_reaches_its_members_and_stops_when_they_leave(
 
 
 @pytest.mark.asyncio
+async def test_collection_access_lists_who_holds_which_role_by_name(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """The list a sharer reads names each person or group and their role."""
+
+    from api.routers.collections import list_collection_access
+
+    async with session_factory.begin() as session:
+        identity = IdentityStoreService(session)
+        tenant = await identity.create_tenant("acme", "Acme")
+        owner_id = await _member(session, tenant.id, "owner@example.com")
+        group = Group(tenant_id=tenant.id, code="staff", display_name="Academic staff")
+        session.add(group)
+        await session.flush()
+        collection = await ItemService(session).create_collection(
+            tenant_id=tenant.id, title="Handbook", created_by_user_id=owner_id
+        )
+        await _grant(session, collection.id, role_code=COLLECTION_OWNER_ROLE, user_id=owner_id)
+        await _grant(session, collection.id, role_code=COLLECTION_VIEWER_ROLE, group_id=group.id)
+        grants = await RoleAssignmentService(session).list_collection_grants(collection.id)
+
+    class _ControlPlane:
+        async def list_collection_access(self, *_: object, **__: object) -> dict[str, object]:
+            return grants
+
+    page = await list_collection_access(
+        collection.id, caller=None, control_plane=_ControlPlane()  # type: ignore[arg-type]
+    )
+
+    assert {(item.principal_type, item.principal_name, item.role) for item in page.items} == {
+        ("group", "Academic staff", "viewer"),
+        ("user", "owner@example.com", "owner"),
+    }
+    assert {item.collection_id for item in page.items} == {collection.id}
+
+
+@pytest.mark.asyncio
 async def test_revoking_a_grant_removes_access_at_once(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:

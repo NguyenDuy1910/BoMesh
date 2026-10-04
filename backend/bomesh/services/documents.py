@@ -1,20 +1,13 @@
-"""The Document lifecycle, and the one place that decides who ingests an upload.
+"""The Document lifecycle: register uploaded content in the knowledge inventory.
 
 A Document is created (multipart content, or a presigned reservation that is
-finalized later), its bytes land in object storage, and the shared ingestion
-core processes it. Who runs that processing follows the destination:
+finalized later) and its bytes land in object storage. That is all adding
+data does: the Document joins its Collection ``pending`` and nothing is
+parsed, chunked, embedded or indexed. Processing happens only when someone
+starts an Ingestion Run over it (``IngestionRunService.create_run``).
 
-- A user's own system Collection ("My uploads", conversation artifacts) is
-  **direct**: this service runs ``ItemIngestionService.index_upload`` in the
-  API process right after the bytes land. No workflow infrastructure, so the
-  chat and personal-library path stays short.
-- A workspace Collection is **managed**: one Temporal ingestion, with its
-  retries, recovery and the live Activity monitor. Writing there already
-  requires Collection write access, which is the management boundary.
-
-Archives are bulk ingestion, so only workspace Collections accept them. The
-chosen mode is recorded on the Document's Ingestion record, and every later
-step (retry, monitoring) reads it from there.
+Archives are bulk knowledge, so only workspace Collections accept them; each
+is registered as one pending Document and expanded when a run processes it.
 """
 
 from __future__ import annotations
@@ -22,7 +15,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import tempfile
-from contextlib import suppress
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -36,7 +28,6 @@ from bomesh.connector.file.archive import is_archive_name
 from bomesh.db.engine import SessionFactory, transaction_scope
 from bomesh.db.models import Item
 from bomesh.services import (
-    COLLECTION_READ_PERMISSION,
     COLLECTION_UPDATE_PERMISSION,
     DEFAULT_MAX_UPLOAD_BYTES,
     DEFAULT_UPLOAD_URL_SECONDS,
@@ -46,7 +37,6 @@ from bomesh.services import (
     CollectionUpload,
     DocumentNotFoundError,
     InvalidDocumentStateError,
-    StoredFileContent,
     UploadConflictError,
     UploadStart,
     UploadTarget,
@@ -55,31 +45,19 @@ from bomesh.services import (
     require_tenant_permission,
     require_user_identity,
 )
-from bomesh.services.document_presentation import DocumentPresenter, document_ingestion
+from bomesh.services.document_presentation import DocumentPresenter
 from bomesh.services.identity_access.authorization import AuthorizationService
 from bomesh.services.item import ItemService, document_type_for_content_type
 from bomesh.services.item_ingestion import ItemIngestionService
-from bomesh.services.workflow import IngestionWorkflowInput
-from bomesh.services.workflow.service import TemporalWorkflowService
 from bomesh.storage import DocumentStorage, ObjectStorageError, StoredObject
 
 log = logging.getLogger(__name__)
 
-#: Direct ingestions one API process runs at once; the rest wait their turn.
-_DIRECT_CONCURRENCY = 4
-#: Direct ingestions an API restart may have interrupted, resumed at startup.
-_RESUME_LIMIT = 500
 _PURPOSES = frozenset({"knowledge", "conversation_attachment"})
 
 
-def ingestion_mode(collection: Item) -> str:
-    """Direct for a user's own system Collection; managed for a workspace one."""
-
-    return "direct" if collection.metadata_.get("system_kind") else "managed"
-
-
 class DocumentService:
-    """Own Documents: create, finalize content, read, list, remove, re-ingest."""
+    """Own Documents: create, finalize content, read, list, remove."""
 
     def __init__(
         self,
@@ -87,8 +65,6 @@ class DocumentService:
         *,
         object_storage: DocumentStorage,
         ingestion: ItemIngestionService,
-        content: StoredFileContent,
-        workflows: TemporalWorkflowService,
         presenter: DocumentPresenter,
         max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES,
         upload_url_seconds: int = DEFAULT_UPLOAD_URL_SECONDS,
@@ -98,13 +74,9 @@ class DocumentService:
         self._sessions = session_factory
         self._object_storage = object_storage
         self._ingestion = ingestion
-        self._content = content
-        self._workflows = workflows
         self._presenter = presenter
         self.max_upload_bytes = max_upload_bytes
         self._upload_url_seconds = upload_url_seconds
-        self._direct_slots = asyncio.Semaphore(_DIRECT_CONCURRENCY)
-        self._direct_runs: dict[UUID, asyncio.Task[None]] = {}
 
     # -- Contract operations -------------------------------------------------
 
@@ -150,9 +122,8 @@ class DocumentService:
                 purpose=purpose,
             )
             return {
-                "document": self._presenter.contract_document(reserved.item),
+                "document": await self._present(reserved.item),
                 "upload": self._presenter.upload_target(reserved.target),
-                "ingestion": document_ingestion(reserved.item),
                 "created": reserved.created,
             }
         stored = await self.upload_to_collection(
@@ -160,9 +131,8 @@ class DocumentService:
             file_name=name, content_type=content_type, content=content, purpose=purpose,
         )
         return {
-            "document": self._presenter.contract_document(stored.item),
+            "document": await self._present(stored.item),
             "upload": None,
-            "ingestion": document_ingestion(stored.item),
             "created": stored.created,
         }
 
@@ -170,15 +140,17 @@ class DocumentService:
         self, access: AuthContext, document_id: UUID
     ) -> dict[str, Any]:
         document = await self.finalize_content(access, document_id)
-        return {
-            "document": self._presenter.contract_document(document),
-            "ingestion": document_ingestion(document),
-        }
+        return {"document": await self._present(document)}
 
     async def get_contract_document(
         self, access: AuthContext, document_id: UUID
     ) -> dict[str, Any]:
-        return self._presenter.contract_document(await self.get_document(access, document_id))
+        if access.tenant_id is None:
+            raise UploadValidationError("an active tenant is required")
+        async with transaction_scope(self._sessions) as session:
+            document = await ItemService(session).get_upload_for_access(document_id, access)
+            (presented,) = await self._presenter.contract_documents(session, [document])
+            return presented
 
     async def list_documents(
         self,
@@ -215,7 +187,7 @@ class DocumentService:
                 .offset((page - 1) * page_size).limit(page_size)
             ))
             return {
-                "items": [self._presenter.contract_document(item) for item in items],
+                "items": await self._presenter.contract_documents(session, items),
                 "page": page,
                 "page_size": page_size,
                 "total": int(total),
@@ -261,7 +233,7 @@ class DocumentService:
         try:
             async with transaction_scope(self._sessions) as session:
                 collection = await self._writable_collection(access, collection_id, session)
-                _validate_supported_file(normalized_name, purpose, ingestion_mode(collection))
+                _validate_supported_file(normalized_name, purpose, collection)
                 item, created = await ItemService(session).create_or_get_collection_upload(
                     user_id, tenant_id, collection_id,
                     idempotency_key=idempotency_key, file_name=normalized_name,
@@ -274,7 +246,6 @@ class DocumentService:
 
         assert item.upload is not None
         if item.upload.status == "available":
-            await self._start_ingestion(item)
             return UploadStart(
                 item=item, upload=item.upload, upload_required=False, target=None, created=created
             )
@@ -306,15 +277,14 @@ class DocumentService:
         content: AsyncUploadStream,
         purpose: str = "knowledge",
     ) -> CollectionUpload:
-        """Store one file's bytes as a Document of ``collection_id`` and ingest it."""
+        """Store one file's bytes as a pending Document of ``collection_id``."""
 
         user_id, tenant_id = self._uploader(access, purpose)
         normalized_name = _file_name(file_name)
         normalized_type = _content_type(content_type)
         async with transaction_scope(self._sessions) as session:
             collection = await self._writable_collection(access, collection_id, session)
-            mode = ingestion_mode(collection)
-        _validate_supported_file(normalized_name, purpose, mode)
+            _validate_supported_file(normalized_name, purpose, collection)
         temporary_path, size_bytes = await self._spool(content, normalized_name)
         try:
             try:
@@ -344,16 +314,15 @@ class DocumentService:
                         item.id,
                         user_id,
                         tenant_id,
-                        ingestion_mode=mode if _is_knowledge(normalized_name) else None,
+                        processable=_is_processable(normalized_name),
                         storage_metadata={"etag": stored.etag, "version_id": stored.version_id},
                     )
-            await self._start_ingestion(item)
             return CollectionUpload(item=item, created=created)
         finally:
             temporary_path.unlink(missing_ok=True)
 
     async def finalize_content(self, access: AuthContext, document_id: UUID) -> Item:
-        """Bind a presigned object as the Document's content and ingest it."""
+        """Bind a presigned object as the Document's content; it becomes pending."""
 
         require_user_identity(access)
         if access.tenant_id is None:
@@ -362,13 +331,8 @@ class DocumentService:
             item = await ItemService(session).get_upload_for_access(
                 document_id, access, permission=COLLECTION_UPDATE_PERMISSION
             )
-            assert item.upload is not None
-            collection = await session.get(Item, item.parent_item_id)
-            if collection is None:
-                raise DocumentNotFoundError(f"collection not found: {item.parent_item_id}")
-            mode = ingestion_mode(collection)
+        assert item.upload is not None
         if item.upload.status == "available":
-            await self._start_ingestion(item)
             return item
         if not item.storage_key:
             raise ObjectStorageError("item has no object storage key")
@@ -382,155 +346,20 @@ class DocumentService:
             raise
         file_name = str(item.metadata_.get("file_name") or item.title)
         async with transaction_scope(self._sessions) as session:
-            item = await ItemService(session).mark_upload_available(
+            return await ItemService(session).mark_upload_available(
                 document_id,
                 item.upload.owner_user_id,
                 access.tenant_id,
-                ingestion_mode=mode if _is_knowledge(file_name) else None,
+                processable=_is_processable(file_name),
                 storage_metadata={"etag": stored.etag, "version_id": stored.version_id},
             )
-        await self._start_ingestion(item)
-        return item
-
-    # -- Ingestion -------------------------------------------------------------
-
-    async def restart_ingestion(
-        self, access: AuthContext, document_id: UUID, *, trigger_type: str
-    ) -> Item:
-        """Run an available upload's Ingestion again, in its original mode.
-
-        ``retry`` follows a run that did not succeed; ``manual`` re-indexes on
-        request. ``IngestionService`` decides which one may start; either way
-        the stored bytes are processed from scratch.
-        """
-
-        require_user_identity(access)
-        document = await self.get_document(
-            access, document_id, permission=COLLECTION_UPDATE_PERMISSION
-        )
-        if document.upload is None or document.upload.status != "available":
-            raise UploadConflictError("the original file is unavailable; upload the file again")
-        if document.index_status == "unsupported":
-            raise UploadConflictError("images are not processed as knowledge")
-        async with transaction_scope(self._sessions) as session:
-            items = ItemService(session)
-            collection = await session.get(Item, document.parent_item_id)
-            mode = ingestion_mode(collection) if collection is not None else "managed"
-            await items.restart_ingestion(
-                document.id, ingestion_mode=mode, trigger_type=trigger_type
-            )
-            document = await items.get_upload_for_access(
-                document.id, access, permission=COLLECTION_UPDATE_PERMISSION
-            )
-        await self._start_ingestion(document, trigger_type=trigger_type)
-        return document
-
-    async def resume_direct_ingestions(self) -> int:
-        """Restart direct ingestions an API restart interrupted.
-
-        Direct runs live in the process that started them; their state does
-        not. A run is idempotent under the core's per-document lock, so a run
-        another process is still working on simply waits and then finds
-        nothing to do.
-        """
-
-        async with transaction_scope(self._sessions) as session:
-            documents = list(
-                await session.scalars(
-                    select(Item)
-                    .options(joinedload(Item.upload))
-                    .where(
-                        Item.item_type == "document",
-                        Item.status == "ready",
-                        Item.deleted_at.is_(None),
-                        Item.index_status.in_(("pending", "processing")),
-                        Item.metadata_["ingestion"]["mode"].astext == "direct",
-                    )
-                    .limit(_RESUME_LIMIT)
-                )
-            )
-        for document in documents:
-            self._run_direct(document)
-        return len(documents)
-
-    async def aclose(self) -> None:
-        runs = list(self._direct_runs.values())
-        for run in runs:
-            run.cancel()
-        for run in runs:
-            with suppress(asyncio.CancelledError, Exception):
-                await run
-
-    async def _start_ingestion(self, document: Item, *, trigger_type: str = "upload") -> None:
-        """Hand an available upload to its runner, as its Ingestion record says."""
-
-        # A repeated upload of indexed content is a no-op; a retry or a
-        # re-index was asked for, so it always runs.
-        if document.index_status == "unsupported" or (
-            document.index_status == "ready" and trigger_type == "upload"
-        ):
-            return
-        record = document.metadata_.get("ingestion") or {}
-        if record.get("mode") == "direct":
-            self._run_direct(document)
-            return
-        upload = document.upload
-        if upload is None or upload.status != "available":
-            raise InvalidDocumentStateError("cannot ingest an unavailable upload")
-        try:
-            await self._workflows.start_ingestion(
-                IngestionWorkflowInput(
-                    tenant_id=str(document.tenant_id),
-                    document_id=str(document.id),
-                    owner_user_id=str(upload.owner_user_id),
-                    trigger_type=trigger_type,
-                ),
-                title=str(document.metadata_.get("file_name") or document.title),
-                collection_id=str(document.parent_item_id),
-            )
-        except Exception:  # noqa: BLE001 - the stored bytes are durable first
-            # A Temporal outage must not fail a successful upload: the record
-            # stays pending and a retry remains available.
-            log.exception("managed ingestion dispatch failed document_id=%s", document.id)
-
-    def _run_direct(self, document: Item) -> None:
-        if document.id in self._direct_runs or document.upload is None:
-            return
-        run = asyncio.create_task(
-            self._ingest_directly(document.id, document.upload.owner_user_id, document.tenant_id)
-        )
-        self._direct_runs[document.id] = run
-        run.add_done_callback(lambda _, key=document.id: self._direct_runs.pop(key, None))
-
-    async def _ingest_directly(
-        self, document_id: UUID, owner_user_id: UUID, tenant_id: UUID
-    ) -> None:
-        async with self._direct_slots:
-            try:
-                await self._ingestion.index_upload(
-                    document_id,
-                    owner_user_id=owner_user_id,
-                    tenant_id=tenant_id,
-                    source=self._content,
-                )
-            except Exception:  # noqa: BLE001 - the core recorded state and reason
-                log.warning("direct ingestion failed document_id=%s", document_id, exc_info=True)
 
     # -- Internals -------------------------------------------------------------
 
-    async def get_document(
-        self,
-        access: AuthContext,
-        document_id: UUID,
-        *,
-        permission: str = COLLECTION_READ_PERMISSION,
-    ) -> Item:
-        if access.tenant_id is None:
-            raise UploadValidationError("an active tenant is required")
+    async def _present(self, document: Item) -> dict[str, Any]:
         async with transaction_scope(self._sessions) as session:
-            return await ItemService(session).get_upload_for_access(
-                document_id, access, permission=permission
-            )
+            (presented,) = await self._presenter.contract_documents(session, [document])
+            return presented
 
     @staticmethod
     def _uploader(access: AuthContext, purpose: str) -> tuple[UUID, UUID]:
@@ -650,10 +479,11 @@ def _content_type(value: str) -> str:
     return normalized
 
 
-def _validate_supported_file(file_name: str, purpose: str, mode: str) -> None:
+def _validate_supported_file(file_name: str, purpose: str, collection: Item) -> None:
     if is_archive_name(file_name):
-        # Expanding an archive is bulk ingestion: workspace Collections only.
-        if purpose != "knowledge" or mode != "managed":
+        # An archive is bulk knowledge: workspace Collections only, never a
+        # user's own system Collection or a conversation.
+        if purpose != "knowledge" or collection.metadata_.get("system_kind"):
             raise UploadValidationError(
                 "archives can be added to a workspace collection, not to your own uploads"
                 " or a conversation"
@@ -675,8 +505,8 @@ def _validate_supported_file(file_name: str, purpose: str, mode: str) -> None:
     )
 
 
-def _is_knowledge(file_name: str) -> bool:
-    """Whether an upload is ingested: everything but an image attachment."""
+def _is_processable(file_name: str) -> bool:
+    """Whether a run may process an upload: everything but an image attachment."""
 
     return Path(file_name).suffix.casefold() not in FinxFileExtensions.IMAGE_EXTENSIONS
 
@@ -709,4 +539,4 @@ def _validate_stored_object(
         )
 
 
-__all__ = ["DocumentService", "ingestion_mode"]
+__all__ = ["DocumentService"]

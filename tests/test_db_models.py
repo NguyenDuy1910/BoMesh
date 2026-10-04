@@ -35,6 +35,8 @@ EXPECTED_TABLES = {
     "message_items",
     "permissions",
     "messages",
+    "ingestion_runs",
+    "ingestion_run_items",
     "ingestion_sources",
     "integration_connections",
     "integration_credentials",

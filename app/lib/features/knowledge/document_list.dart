@@ -14,8 +14,10 @@ typedef CollectionPermission = bool Function(String permission, String collectio
 /// [collectionId] is null, filtered by name.
 ///
 /// One line of supporting text per row: the file type and date when the
-/// document is ready, otherwise what it is waiting for. Rows still being
-/// indexed are re-read every few seconds until they settle.
+/// document is ready, otherwise its processing state. Adding a document only
+/// stores it; people who may run processing start it here, for the open
+/// collection or one document. The list is re-read every few seconds only
+/// while a document is processing or a run started here is still active.
 class DocumentList extends StatefulWidget {
   const DocumentList({
     super.key,
@@ -27,6 +29,7 @@ class DocumentList extends StatefulWidget {
     this.search = '',
     this.personalCollectionId,
     this.bottomPadding = 96,
+    this.watchRunId,
   });
   final ApiClient api;
   final CollectionPermission can;
@@ -37,6 +40,10 @@ class DocumentList extends StatefulWidget {
 
   /// Room under the last row for a floating action button.
   final double bottomPadding;
+
+  /// A run started elsewhere (for example "Process now" after an upload)
+  /// whose documents this list should follow until it finishes.
+  final String? watchRunId;
   @override
   State<DocumentList> createState() => _DocumentListState();
 }
@@ -45,13 +52,19 @@ class _DocumentListState extends State<DocumentList> {
   static const _pageSize = 30;
   List<KnowledgeDocument> _documents = [];
   int _total = 0, _request = 0;
-  bool _loading = true, _more = false;
+  bool _loading = true, _more = false, _starting = false;
   String? _error;
   Timer? _poll;
+
+  /// Runs started from this screen that are still queued or running. Their
+  /// documents may read "Pending" until a batch picks them up, so the list
+  /// keeps refreshing until the run itself finishes.
+  final Set<String> _runs = {};
 
   @override
   void initState() {
     super.initState();
+    if (widget.watchRunId?.isNotEmpty == true) _runs.add(widget.watchRunId!);
     _load();
   }
 
@@ -83,6 +96,16 @@ class _DocumentListState extends State<DocumentList> {
                 : _pageSize,
           };
     try {
+      final finished = <String>{};
+      for (final run in _runs.toList()) {
+        try {
+          if (!await processingIsActive(widget.api, run)) finished.add(run);
+        } catch (_) {
+          // A run that cannot be read can no longer be followed; the
+          // documents' own states still show where they stand.
+          finished.add(run);
+        }
+      }
       final value = await widget.api.get(
         '/documents',
         query: {
@@ -92,6 +115,7 @@ class _DocumentListState extends State<DocumentList> {
         },
       );
       if (!mounted || request != _request) return;
+      _runs.removeAll(finished);
       final documents = objectList(value['items']).map(KnowledgeDocument.fromJson).toList();
       setState(() {
         if (more) {
@@ -107,7 +131,8 @@ class _DocumentListState extends State<DocumentList> {
         _loading = false;
         _more = false;
       });
-      if (_documents.any((document) => document.isActive)) {
+      if (_runs.isNotEmpty ||
+          _documents.any((document) => document.processing.isProcessing)) {
         _poll = Timer(const Duration(seconds: 5), () => _load(quiet: true));
       }
     } catch (error) {
@@ -131,6 +156,49 @@ class _DocumentListState extends State<DocumentList> {
   bool _canAsk(KnowledgeDocument document) =>
       document.status == 'available' && !document.isArchive && !document.isImage;
 
+  bool _canProcess(String collectionId) => widget.can('ingestion.run', collectionId);
+
+  /// Failed documents are retried; pending and outdated ones processed.
+  /// Ready, processing and unsupported documents offer nothing here.
+  String? _processLabel(KnowledgeDocument document) {
+    if (!document.isProcessable || !_canProcess(document.collectionId)) return null;
+    return switch (document.processing.state) {
+      'failed' => 'Retry processing',
+      'pending' || 'outdated' => 'Process',
+      _ => null,
+    };
+  }
+
+  /// Pending or outdated documents of the open collection, as far as loaded.
+  int get _awaiting => _documents
+      .where((document) => document.isProcessable && document.processing.awaitsRun)
+      .length;
+
+  Future<void> _process({List<String>? documentIds, String? collectionId}) async {
+    if (_starting) return;
+    setState(() => _starting = true);
+    try {
+      final run = await startProcessing(
+        widget.api,
+        documentIds: documentIds,
+        collectionId: collectionId,
+      );
+      if (!mounted) return;
+      if (run.isNotEmpty) _runs.add(run);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Processing started')),
+      );
+      await _load(quiet: true);
+    } catch (error) {
+      // A 409 explains itself, e.g. the documents are already being processed.
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString())));
+      }
+    } finally {
+      if (mounted) setState(() => _starting = false);
+    }
+  }
+
   Future<void> _open(KnowledgeDocument document) async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -148,7 +216,7 @@ class _DocumentListState extends State<DocumentList> {
   }
 
   Future<void> _actions(KnowledgeDocument document) async {
-    final retry = _canEdit(document) && document.ingestion?.canRetry == true;
+    final process = _processLabel(document);
     final action = await showModalBottomSheet<String>(
       context: context,
       useSafeArea: true,
@@ -172,11 +240,11 @@ class _DocumentListState extends State<DocumentList> {
                 title: const Text('Ask about this document'),
                 onTap: () => Navigator.pop(sheetContext, 'ask'),
               ),
-            if (retry)
+            if (process != null)
               ListTile(
-                leading: const Icon(Icons.refresh_rounded),
-                title: const Text('Try indexing again'),
-                onTap: () => Navigator.pop(sheetContext, 'retry'),
+                leading: const Icon(Icons.play_arrow_rounded),
+                title: Text(process),
+                onTap: () => Navigator.pop(sheetContext, 'process'),
               ),
             if (_canDelete(document))
               ListTile(
@@ -192,13 +260,8 @@ class _DocumentListState extends State<DocumentList> {
     switch (action) {
       case 'ask':
         widget.onAskDocument(document.id, document.name);
-      case 'retry':
-        await _mutate(
-          () => widget.api.post(
-            '/ingestions/${Uri.encodeComponent(document.ingestion!.id)}/retry',
-          ),
-          'Indexing started again',
-        );
+      case 'process':
+        await _process(documentIds: [document.id]);
       case 'delete':
         if (await confirmKnowledgeAction(
           context,
@@ -230,6 +293,14 @@ class _DocumentListState extends State<DocumentList> {
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
+    final collectionId = widget.collectionId;
+    final awaiting = _awaiting;
+    final offerProcess = collectionId != null &&
+        widget.search.isEmpty &&
+        _error == null &&
+        _runs.isEmpty &&
+        awaiting > 0 &&
+        _canProcess(collectionId);
     return RefreshIndicator(
       onRefresh: () => _load(),
       child: NotificationListener<ScrollNotification>(
@@ -256,7 +327,17 @@ class _DocumentListState extends State<DocumentList> {
                   danger: true,
                 ),
               )
-            else if (_documents.isEmpty)
+            else if (offerProcess)
+              _ProcessBanner(
+                text: _documents.length < _total
+                    ? 'Some documents are not processed yet'
+                    : awaiting == 1
+                    ? '1 document is not processed yet'
+                    : '$awaiting documents are not processed yet',
+                busy: _starting,
+                onProcess: () => _process(collectionId: collectionId),
+              ),
+            if (_error == null && _documents.isEmpty)
               widget.empty,
             for (final document in _documents)
               DocumentRow(
@@ -290,15 +371,19 @@ class DocumentRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final failed = document.status == 'failed' || document.ingestion?.canRetry == true;
     final kind = document.name.contains('.')
         ? document.name.split('.').last.toUpperCase()
         : 'File';
-    final (String detail, Color tone) = failed
-        ? ('Couldn’t be indexed', colors.danger)
-        : document.isActive
+    final state = document.processing.state;
+    final (String detail, Color tone) = document.isFailed
+        ? (document.statusLabel, colors.danger)
+        : document.status == 'pending_content'
+        ? (document.statusLabel, colors.textSecondary)
+        : state == 'processing'
         ? ('Processing…', colors.brand)
-        : ('$kind · ${readableDate(document.updatedAt)}', colors.textSecondary);
+        : state == 'ready' || state == 'unsupported'
+        ? ('$kind · ${readableDate(document.updatedAt)}', colors.textSecondary)
+        : (document.statusLabel, colors.textSecondary);
     return ListTile(
       contentPadding: const EdgeInsets.fromLTRB(16, 2, 4, 2),
       onTap: onTap,
@@ -320,4 +405,54 @@ class DocumentRow extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The open collection has documents that are not processed yet.
+class _ProcessBanner extends StatelessWidget {
+  const _ProcessBanner({
+    required this.text,
+    required this.busy,
+    required this.onProcess,
+  });
+  final String text;
+  final bool busy;
+  final VoidCallback onProcess;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+    padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+    decoration: BoxDecoration(
+      color: context.colors.subtle,
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(text, style: Theme.of(context).textTheme.bodyMedium),
+              Text(
+                'They can be searched once processed.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: context.colors.textSecondary,
+                ),
+              ),
+            ],
+          ),
+        ),
+        busy
+            ? const Padding(
+                padding: EdgeInsets.all(12),
+                child: SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              )
+            : TextButton(onPressed: onProcess, child: const Text('Process')),
+      ],
+    ),
+  );
 }

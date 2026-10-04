@@ -603,10 +603,77 @@ html[data-reduced-motion="true"] *::after {
   overflow-wrap: anywhere;
 }
 .assistant-turn__execution-body p { margin: 0; color: var(--text-tertiary); }
-.assistant-turn__execution-files {
-  overflow-wrap: anywhere;
+/* The outcome line: a failure names its error in code type, clipped to one
+   line so the summary never wraps into a paragraph. */
+.assistant-turn__execution-detail {
+  min-width: 0;
+  max-width: 34rem;
+  overflow: hidden;
   color: var(--text-tertiary);
+  font: 0.75rem/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.assistant-turn__execution--failed .assistant-turn__execution-detail,
+.assistant-turn__execution--timeout .assistant-turn__execution-detail { color: var(--status-danger-text); }
+.assistant-turn__execution[open] { width: 100%; }
+.assistant-turn__execution-step {
+  display: grid;
+  overflow: hidden;
+  border-radius: 0.4375rem;
+  background: var(--code-surface);
+}
+.assistant-turn__execution-body .assistant-turn__execution-step pre {
+  max-height: none;
+  border-radius: 0;
+  background: transparent;
+}
+.assistant-turn__execution-command { color: var(--code-text); font-weight: 550; }
+.assistant-turn__execution-command > span { opacity: 0.5; user-select: none; }
+.assistant-turn__execution-output {
+  display: grid;
+  border-top: 1px solid color-mix(in oklab, var(--code-text) 12%, transparent);
+}
+.assistant-turn__execution-body .assistant-turn__execution-output pre {
+  max-height: 18rem;
+  opacity: 0.85;
+}
+/* The step sits on the dark code surface in both themes, so error text is a
+   light red rather than the page's danger text. */
+.assistant-turn__execution-output[data-tone="error"] pre {
+  color: color-mix(in oklab, var(--status-danger-solid) 60%, white);
+  opacity: 1;
+}
+.assistant-turn__execution-output > button {
+  justify-self: start;
+  margin: 0.375rem 0.75rem 0;
+  color: color-mix(in oklab, var(--code-text) 75%, transparent);
   font-size: var(--text-size-meta);
+}
+.assistant-turn__execution-output > button:hover { text-decoration: underline; }
+.assistant-turn__execution-body .assistant-turn__execution-exit {
+  padding: 0.25rem 0.75rem 0.5rem;
+  color: color-mix(in oklab, var(--status-danger-solid) 60%, white);
+  font: 0.6875rem/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+.assistant-turn__execution-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-secondary);
+  font-size: var(--text-size-meta);
+}
+.assistant-turn__execution-files > li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3125rem;
+  border-radius: 999px;
+  background: var(--surface-subtle);
+  padding: 0.1875rem 0.5rem;
+  overflow-wrap: anywhere;
 }
 
 @keyframes assistant-activity-breathe {
@@ -1344,7 +1411,10 @@ html[data-reduced-motion="true"] *::after {
 /* A produced document opened in the activity panel. */
 .artifact-preview {
   display: grid;
+  min-width: 0;
   gap: 0.75rem;
+  /* The panel body is unpadded; previews pad themselves like .source-preview. */
+  padding: 1rem 1.25rem 1.5rem;
 }
 
 .artifact-preview__meta {
@@ -1363,10 +1433,33 @@ html[data-reduced-motion="true"] *::after {
 
 .artifact-preview__notice {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
   color: var(--text-tertiary);
   font-size: 0.8125rem;
+}
+
+.artifact-preview__download {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--text-accent);
+}
+
+.artifact-preview__text {
+  margin: 0;
+  overflow-x: auto;
+  font: 0.8125rem/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.artifact-preview__image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin-inline: auto;
 }@media (prefers-reduced-motion: reduce) {
   .artifact-preview__spinner { animation: none; }
 }

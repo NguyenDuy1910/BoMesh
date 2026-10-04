@@ -21,6 +21,7 @@ import { PlatformUsersPage } from "@/modules/workspace-control/pages/PlatformUse
 import { SettingsPage } from "@/modules/workspace-control/pages/SettingsPage";
 import { SystemHealthPage } from "@/modules/workspace-control/pages/SystemHealthPage";
 import { WorkspaceOverviewPage } from "@/modules/workspace-control/pages/WorkspaceOverviewPage";
+import { IngestionScreen } from "@/modules/ingestion/components/IngestionScreen";
 import { KnowledgeScreen } from "@/modules/knowledge/components/KnowledgeScreen";
 
 /**
@@ -45,6 +46,8 @@ export function ControlPlanePage({ section: rawSection }: { section: string }) {
       return <WorkspaceOverviewPage />;
     case "knowledge":
       return <KnowledgeScreen />;
+    case "ingestion":
+      return <IngestionScreen />;
     case "agent":
       return <AgentsPoliciesPage />;
     case "access":

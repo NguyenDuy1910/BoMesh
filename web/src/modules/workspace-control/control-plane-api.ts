@@ -94,15 +94,14 @@ export function useControlPlaneQuery<T>(path: string | null) {
   return { data, error, loading, refreshing, reload };
 }
 
-/** Upload one local file directly into a governed collection. */
+/**
+ * Upload one local file into a collection. The original is stored and
+ * registered as a pending document; nothing is processed until a run asks.
+ */
 export function uploadCollectionFile<T>(
   collectionId: string,
   file: File,
-  options: {
-    idempotencyKey: string;
-    onProgress?: (percent: number) => void;
-    onProcessing?: () => void;
-  },
+  options: { idempotencyKey: string },
 ): Promise<T> {
   const configuration = getApiConfiguration();
   if (!configuration) {
@@ -125,12 +124,6 @@ export function uploadCollectionFile<T>(
     for (const [name, value] of Object.entries(requestIdentityHeaders(configuration))) {
       request.setRequestHeader(name, value);
     }
-    request.upload.onprogress = (event) => {
-      if (event.lengthComputable) {
-        options.onProgress?.(Math.round((event.loaded / event.total) * 100));
-      }
-    };
-    request.upload.onload = () => options.onProcessing?.();
     request.onerror = () => reject(new ControlPlaneApiError(
       `The upload could not reach the ${appBrand.productName} API.`,
     ));

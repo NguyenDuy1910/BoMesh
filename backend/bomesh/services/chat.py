@@ -239,9 +239,9 @@ def _artifact_ids(sandbox: SandboxRuntime | None) -> tuple[UUID, ...]:
     if sandbox is None:
         return ()
     result: list[UUID] = []
-    for value in sandbox.artifact_ids:
+    for artifact in sandbox.artifacts:
         try:
-            artifact_id = UUID(value)
+            artifact_id = UUID(artifact.id)
         except ValueError:
             continue
         if artifact_id not in result:

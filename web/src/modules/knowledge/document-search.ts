@@ -5,12 +5,8 @@
  */
 
 import { apiRequest, queryString } from "@/lib/api/request";
-import {
-  type ContractDocument,
-  documentStatus,
-  knowledgeApi,
-} from "@/modules/knowledge/knowledge-api";
-import type { ApiKnowledgeDocument } from "@/modules/knowledge/view-model";
+import type { ProcessingState } from "@/modules/ingestion/runs-api";
+import { type ContractDocument, knowledgeApi } from "@/modules/knowledge/knowledge-api";
 
 /** Where a found passage sits in its document. */
 export interface DocumentMatch {
@@ -25,13 +21,9 @@ export interface FoundDocument {
   name: string;
   collectionId: string | null;
   updatedAt: string | null;
-  status: ApiKnowledgeDocument["status"];
+  status: ProcessingState;
   /** The passage that matched a content search, strongest first. */
   match?: DocumentMatch;
-}
-
-interface ContractDocumentWithCollection extends ContractDocument {
-  collection_id: string;
 }
 
 interface ContractSearchResult {
@@ -54,7 +46,7 @@ export async function findDocumentsByName(
   query: string,
   signal?: AbortSignal,
 ): Promise<FoundDocument[]> {
-  const page = await apiRequest<{ items: ContractDocumentWithCollection[] }>(
+  const page = await apiRequest<{ items: ContractDocument[] }>(
     `/documents${queryString({ search: query, page_size: NAME_RESULT_LIMIT })}`,
     { signal },
   );
@@ -63,12 +55,12 @@ export async function findDocumentsByName(
     name: document.name,
     collectionId: document.collection_id,
     updatedAt: document.updated_at,
-    status: documentStatus(document),
+    status: document.processing.state,
   }));
 }
 
 /**
- * Documents whose indexed content answers the query, one entry per document.
+ * Documents whose processed content answers the query, one entry per document.
  *
  * The search ranks passages; a document keeps its strongest passage, so the
  * list reads as documents while still showing why each one was found.
@@ -95,7 +87,7 @@ export async function findDocumentsByContent(
       name: item.name,
       collectionId: item.collection_id,
       updatedAt: null,
-      // Only indexed content can match, so every content result is searchable.
+      // Only processed content can match, so every content result is ready.
       status: "ready",
       match: item.metadata?.chunk_id
         ? {
@@ -116,8 +108,8 @@ export async function recentDocuments(): Promise<FoundDocument[]> {
   return home.recent_documents.map((document) => ({
     id: document.id,
     name: document.title,
-    collectionId: null,
+    collectionId: document.collection_id,
     updatedAt: document.updated_at,
-    status: document.status,
+    status: document.processing.state,
   }));
 }

@@ -1,7 +1,8 @@
 /**
  * Domain types for the knowledge side of workspace control: collections, the
- * documents inside them, the sources that fill them and the grants that decide
- * who can read them.
+ * documents inside them, where a document came from, and the grants that
+ * decide who can read them. Sources and connections live in
+ * `@/modules/ingestion/integrations-api`.
  */
 
 export interface Paginated<T> {
@@ -44,50 +45,6 @@ export interface KnowledgeItem {
   metadata?: Record<string, unknown>;
   inherit_access?: boolean;
   role_assignments?: CollectionGrant[];
-}
-
-export interface IntegrationConnection {
-  [key: string]: unknown;
-  id: string;
-  connector_key: string;
-  display_name: string;
-  config: Record<string, unknown>;
-  credential_configured: boolean;
-  owner_type: "tenant" | "user";
-  status: "draft" | "active" | "disabled" | "error";
-  source_count: number;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface IngestionSchedule {
-  id: string;
-  schedule_type: "cron" | "interval";
-  cron_expression: string;
-  timezone: string | null;
-  enabled: boolean;
-  overlap_policy: "skip" | "queue" | "replace";
-  next_run_at: string | null;
-  last_run_at?: string | null;
-}
-
-export interface IngestionSource {
-  [key: string]: unknown;
-  id: string;
-  integration_connection_id: string;
-  target_item_id: string;
-  display_name: string | null;
-  config: Record<string, unknown>;
-  checkpoint: Record<string, unknown>;
-  status: "active" | "disabled" | "error";
-  last_ingested_at: string | null;
-  last_indexed_at: string | null;
-  integration_connection: {
-    id: string;
-    display_name: string;
-    connector_key: string;
-  };
-  schedule: IngestionSchedule | null;
 }
 
 export interface CollectionGrant {

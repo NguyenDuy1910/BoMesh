@@ -1,43 +1,42 @@
 "use client";
 
-import { RefreshCw, X } from "lucide-react";
+import { Play, X } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 
 /**
  * What a selection can have done to it.
  *
- * The bar replaces nothing and pushes nothing around: it takes the strip above
- * the rows only while a selection exists. Remove is separated from the
- * reversible action and confirmed elsewhere, so the destructive one is never
- * the neighbour of the routine one. Re-index sends the whole selection; the
- * backend refuses what it cannot re-index and says why.
+ * The bar takes the strip above the rows only while a selection exists. Run
+ * processing is its one primary action; Delete is set apart and confirmed
+ * elsewhere, so the destructive action is never the neighbour of the routine
+ * one. The backend leaves out what is already being processed and says so.
  */
 export function DocumentBulkBar({
   count,
-  onReindex,
+  processing,
+  onProcess,
   onRemove,
   onClear,
 }: {
   count: number;
-  onReindex: () => void;
+  /** A run is being created for this selection. */
+  processing: boolean;
+  /** Omitted when the caller may not start a run. */
+  onProcess?: () => void;
   onRemove: () => void;
   onClear: () => void;
 }) {
   return (
     <div className="knowledge-bulk-bar" role="status">
-      <span>{count.toLocaleString()} {count === 1 ? "document" : "documents"} selected</span>
-      <Button
-        icon={<RefreshCw size={14} />}
-        onClick={onReindex}
-        size="sm"
-        title="Index again from the stored file, with the current models"
-        variant="ghost"
-      >
-        Re-index
-      </Button>
+      <span>{count.toLocaleString()} {count === 1 ? "item" : "items"} selected</span>
+      {onProcess && (
+        <Button icon={<Play size={14} />} loading={processing} onClick={onProcess} size="sm">
+          Make searchable
+        </Button>
+      )}
       <Button className="text-[var(--status-danger-text)] hover:bg-[var(--status-danger-bg)]" onClick={onRemove} size="sm" variant="ghost">
-        Remove
+        Delete
       </Button>
       <Button
         aria-label="Clear selection"

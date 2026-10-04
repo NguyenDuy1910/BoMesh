@@ -159,96 +159,130 @@ class DocumentStatus(StrEnum):
     failed = "failed"
 
 
-class IngestionStatus(StrEnum):
-    pending = "pending"
-    running = "running"
-    completed = "completed"
-    failed = "failed"
-    cancelled = "cancelled"
-    timed_out = "timed_out"
+# --- Ingestion runs -----------------------------------------------------------
+#: A Document's processing state, as Knowledge shows it. ``outdated`` is a ready
+#: Document whose index was built with a processing configuration that has
+#: since changed; ``unsupported`` content is kept but never processed.
+ProcessingState = Literal["pending", "processing", "ready", "failed", "outdated", "unsupported"]
+#: States a run may select Documents by.
+RunSelectableState = Literal["pending", "failed", "outdated", "ready"]
+IngestionRunStatus = Literal["queued", "running", "completed", "failed", "cancelled"]
+IngestionRunItemStatus = Literal["queued", "running", "succeeded", "failed", "skipped", "cancelled"]
+IngestionRunTrigger = Literal["manual", "scheduled", "api"]
 
 
-IngestionPhase = Literal[
-    "queued", "downloading", "parsing", "contextualizing", "embedding", "storing",
-    "expanding", "syncing", "completed", "failed", "cancelled",
-]
-IngestionStatusValue = Literal[
-    "pending", "running", "completed", "failed", "cancelled", "timed_out"
-]
+class DocumentProcessing(BaseModel):
+    """Where a Document stands in processing; the detail lives on its latest run."""
+
+    state: ProcessingState
+    #: Why the latest run could not process it, written for people.
+    error: str | None = None
+    #: The latest Ingestion Run that included this Document.
+    run_id: UUID | None = None
 
 
-class IngestionProgress(BaseModel):
-    phase: IngestionPhase
-    discovered_count: int = Field(default=0, ge=0)
-    processed_count: int = Field(default=0, ge=0)
-    indexed_count: int = Field(default=0, ge=0)
-    deleted_count: int = Field(default=0, ge=0)
-    failed_count: int = Field(default=0, ge=0)
+class IngestionRunCreate(BaseModel):
+    """What to process. Selectors narrow each other; at least one is required.
 
+    ``document_ids`` names Documents explicitly (any state, so a re-index is a
+    selection). Otherwise the run takes the Documents under ``collection_id``
+    (its whole subtree), or of ``source_id``, or of the workspace, whose state
+    is in ``states`` (default ``pending`` and ``outdated``).
+    """
 
-class Ingestion(BaseModel):
-    id: UUID
-    kind: Literal["document", "source"]
-    #: ``managed``: a Temporal ingestion (workspace knowledge, Sources);
-    #: ``direct``: a user's own upload processed by the API itself.
-    mode: Literal["managed", "direct"] = "managed"
-    title: str | None = None
-    document_id: UUID | None = None
+    model_config = ConfigDict(extra="forbid")
+
+    document_ids: list[UUID] | None = Field(default=None, min_length=1, max_length=1_000)
     collection_id: UUID | None = None
     source_id: UUID | None = None
-    connection_id: UUID | None = None
-    connector_key: str | None = None
-    status: IngestionStatusValue
-    trigger_type: Literal["manual", "scheduled", "webhook", "initial", "upload", "retry"]
-    retry_of_ingestion_id: UUID | None = None
-    attempt: int = Field(default=1, ge=1)
+    states: list[RunSelectableState] | None = Field(default=None, min_length=1)
+    #: ``manual`` when a person asked from a BoMesh client; ``api`` otherwise.
+    trigger: Literal["manual", "api"] = "api"
+
+    @model_validator(mode="after")
+    def _requires_a_selector(self) -> IngestionRunCreate:
+        if not (self.document_ids or self.collection_id or self.source_id or self.states):
+            raise ValueError("choose documents, a collection, a source, or states to process")
+        return self
+
+
+class IngestionRunScope(BaseModel):
+    """The selection a run was created from; its Documents are the run's items."""
+
+    selected_documents: int | None = Field(default=None, ge=0)
+    collection_id: UUID | None = None
+    source_id: UUID | None = None
+    states: list[RunSelectableState] = Field(default_factory=list)
+    retry_of_run_id: UUID | None = None
+
+
+class IngestionRunCounts(BaseModel):
+    total: int = Field(ge=0)
+    queued: int = Field(default=0, ge=0)
+    running: int = Field(default=0, ge=0)
+    succeeded: int = Field(default=0, ge=0)
+    failed: int = Field(default=0, ge=0)
+    skipped: int = Field(default=0, ge=0)
+    cancelled: int = Field(default=0, ge=0)
+
+
+class IngestionRunActor(BaseModel):
+    id: UUID
+    email: str | None = None
+    display_name: str | None = None
+
+
+class IngestionRun(BaseModel):
+    id: UUID
+    status: IngestionRunStatus
+    trigger: IngestionRunTrigger
+    scope: IngestionRunScope
+    counts: IngestionRunCounts
+    #: Why the run as a whole stopped, written for people.
     error: str | None = None
-    progress: IngestionProgress | None = None
+    created_by: IngestionRunActor | None = None
+    #: Processing configuration fixed at creation (models, versions, batching).
+    configuration: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
     started_at: datetime | None = None
     finished_at: datetime | None = None
-    duration_ms: int | None = Field(default=None, ge=0)
-    created_at: datetime
     updated_at: datetime
 
 
-class IngestionEvent(BaseModel):
-    id: str
-    type: Literal[
-        "queued", "started", "phase", "retrying", "completed", "failed", "cancelled", "timed_out"
-    ]
-    at: datetime
-    attempt: int | None = None
-    phase: IngestionPhase | None = None
-    message: str | None = None
-    duration_ms: int | None = Field(default=None, ge=0)
+class IngestionRunPage(BaseModel):
+    items: list[IngestionRun]
+    page: int = Field(ge=1)
+    page_size: int = Field(ge=1, le=100)
+    total: int = Field(ge=0)
 
 
-class IngestionEventList(BaseModel):
-    items: list[IngestionEvent]
+class IngestionRunPhase(BaseModel):
+    phase: Literal["parsing", "contextualizing", "embedding", "storing", "downloading", "expanding"]
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    done: int = Field(default=0, ge=0)
+    total: int = Field(default=0, ge=0)
 
 
-class IngestionSummaryBucket(BaseModel):
-    start: datetime
-    started: int = Field(ge=0)
-    completed: int = Field(ge=0)
-    failed: int = Field(ge=0)
+class IngestionRunItem(BaseModel):
+    document_id: UUID
+    name: str
+    collection_id: UUID | None = None
+    status: IngestionRunItemStatus
+    #: The phase it is in, or ended in.
+    phase: str | None = None
+    error: str | None = None
+    chunk_count: int | None = Field(default=None, ge=0)
+    phases: list[IngestionRunPhase] = Field(default_factory=list)
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
 
 
-class IngestionDurations(BaseModel):
-    p50: int = Field(ge=0)
-    p95: int = Field(ge=0)
-    max: int = Field(ge=0)
-
-
-class IngestionSummary(BaseModel):
-    window: Literal["1h", "24h", "7d"]
-    generated_at: datetime
-    bucket_seconds: int = Field(ge=1)
-    totals: dict[IngestionStatusValue, int]
-    by_kind: dict[Literal["document", "source"], int]
-    buckets: list[IngestionSummaryBucket]
-    duration_ms: IngestionDurations | None = None
-    active: int = Field(ge=0)
+class IngestionRunItemPage(BaseModel):
+    items: list[IngestionRunItem]
+    page: int = Field(ge=1)
+    page_size: int = Field(ge=1, le=100)
+    total: int = Field(ge=0)
 
 
 class Document(BaseModel):
@@ -259,7 +293,7 @@ class Document(BaseModel):
     size_bytes: int = Field(ge=0)
     purpose: Literal["knowledge", "conversation_attachment"]
     status: Literal["pending_content", "available", "failed"]
-    latest_ingestion: Ingestion | None = None
+    processing: DocumentProcessing
     created_at: datetime
     updated_at: datetime
 
@@ -283,13 +317,11 @@ class DocumentContentInstructions(BaseModel):
 class DocumentCreateResult(BaseModel):
     document: Document
     upload: DocumentContentInstructions | None = None
-    ingestion: Ingestion | None = None
     created: bool
 
 
 class DocumentContentResult(BaseModel):
     document: Document
-    ingestion: Ingestion | None = None
 
 
 class DocumentSearchRequest(BaseModel):
@@ -348,6 +380,9 @@ class CollectionAccess(BaseModel):
     collection_id: UUID
     principal_type: Literal["user", "group"]
     principal_id: UUID
+    #: Who it is, as people recognize them: a group's name, or a member's
+    #: display name (their email when they have none).
+    principal_name: str | None = None
     role: Literal["owner", "editor", "viewer"]
     created_at: datetime
     updated_at: datetime
@@ -400,6 +435,8 @@ class ArtifactContent(BaseModel):
     mime_type: str
     content: str
     truncated: bool = False
+    # The document viewer's preview of a binary revision; see document_viewer.md.
+    preview: dict[str, Any] | None = None
 
 
 class ArtifactPublishRequest(BaseModel):
@@ -584,6 +621,18 @@ class ProviderResourcePage(BaseModel):
     items: list[dict[str, Any]]
 
 
+class SourceSync(BaseModel):
+    """The latest sync: it registers, updates and removes Documents, never processes them."""
+
+    status: Literal["running", "succeeded", "failed"]
+    last_synced_at: datetime | None = None
+    error: str | None = None
+    added: int = Field(default=0, ge=0)
+    updated: int = Field(default=0, ge=0)
+    removed: int = Field(default=0, ge=0)
+    failed: int = Field(default=0, ge=0)
+
+
 class Source(BaseModel):
     id: UUID
     connection_id: UUID
@@ -594,6 +643,10 @@ class Source(BaseModel):
     resource_type: str | None = None
     external_resource_id: str | None = None
     schedule: "Schedule | None" = None
+    #: ``None`` until the first sync starts.
+    sync: SourceSync | None = None
+    #: The Source's Documents waiting for processing (pending or outdated).
+    pending_documents: int = Field(default=0, ge=0)
 
 
 class SourceCreate(StrictRequest):
@@ -613,13 +666,6 @@ class SourceUpdate(StrictRequest):
 
 class SourcePage(PageFields):
     items: list[Source]
-
-
-class SourceStatus(BaseModel):
-    source_id: UUID
-    source_status: str
-    connection_status: str
-    latest_ingestion: Ingestion | None = None
 
 
 class SchedulePut(StrictRequest):
@@ -670,13 +716,15 @@ class WorkspaceUpdate(StrictRequest):
 
 
 class KnowledgeHealth(BaseModel):
-    """Non-deleted Items; index counts describe Documents only."""
+    """Non-deleted Items; processing counts describe Documents only."""
 
     collections: int = Field(ge=0)
     documents: int = Field(ge=0)
-    indexed: int = Field(ge=0)
-    indexing: int = Field(ge=0)
+    ready: int = Field(ge=0)
+    processing: int = Field(ge=0)
+    pending: int = Field(ge=0)
     failed: int = Field(ge=0)
+    outdated: int = Field(ge=0)
 
 
 class UsageCounts(BaseModel):
@@ -928,16 +976,20 @@ __all__ = [
     "SourceCreate",
     "SourceUpdate",
     "SourcePage",
-    "SourceStatus",
+    "SourceSync",
     "SchedulePut",
     "SchedulePatch",
     "Schedule",
-    "Ingestion",
-    "IngestionEvent",
-    "IngestionEventList",
-    "IngestionPage",
-    "IngestionProgress",
-    "IngestionSummary",
+    "DocumentProcessing",
+    "IngestionRun",
+    "IngestionRunActor",
+    "IngestionRunCounts",
+    "IngestionRunCreate",
+    "IngestionRunItem",
+    "IngestionRunItemPage",
+    "IngestionRunPage",
+    "IngestionRunPhase",
+    "IngestionRunScope",
     "Workspace",
     "WorkspacePage",
     "WorkspaceUpdate",

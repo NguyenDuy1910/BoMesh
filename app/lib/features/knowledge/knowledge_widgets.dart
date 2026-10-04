@@ -60,8 +60,7 @@ class DocumentStatusBadge extends StatelessWidget {
   final KnowledgeDocument document;
   @override
   Widget build(BuildContext context) {
-    final failed =
-        document.status == 'failed' || document.ingestion?.canRetry == true;
+    final failed = document.isFailed;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
@@ -78,12 +77,28 @@ class DocumentStatusBadge extends StatelessWidget {
   }
 }
 
-class IngestionProgressCard extends StatelessWidget {
-  const IngestionProgressCard({super.key, required this.document});
+/// A document's processing state, its error when processing failed, and what
+/// the state means for asking about it.
+class ProcessingCard extends StatelessWidget {
+  const ProcessingCard({super.key, required this.document});
   final KnowledgeDocument document;
   @override
   Widget build(BuildContext context) {
-    final ingestion = document.ingestion;
+    final processing = document.processing;
+    final explanation = document.status == 'pending_content'
+        ? 'The server is waiting for this file’s content. It is not yet available to read.'
+        : document.status == 'failed'
+        ? 'The file’s content could not be stored. Upload it again.'
+        : switch (processing.state) {
+            'pending' => 'Added, not processed yet. It can be searched once it is processed.',
+            'processing' => 'Being processed. It can be searched when this finishes.',
+            'ready' => 'Processed and searchable.',
+            'failed' => 'Processing did not finish. Try again from the library.',
+            'outdated' => 'Searchable, but processed with older settings. Process it again to update it.',
+            _ => document.isImage
+                ? 'Images are available to the conversation, but are not processed.'
+                : 'This file type is kept but not processed.',
+          };
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -93,54 +108,18 @@ class IngestionProgressCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Wrap(
-            spacing: 12,
-            runSpacing: 8,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              DocumentStatusBadge(document: document),
-              if (ingestion != null)
-                Text(
-                  '${sentenceCase(ingestion.mode)} ingestion · Attempt ${ingestion.attempt}',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-            ],
-          ),
-          if (ingestion?.isActive == true) ...[
+          DocumentStatusBadge(document: document),
+          if (processing.isProcessing) ...[
             const SizedBox(height: 12),
-            LinearProgressIndicator(
-              value: ingestion!.fraction,
-              semanticsLabel: ingestion.label,
-            ),
+            LinearProgressIndicator(semanticsLabel: processing.label),
           ],
-          if (ingestion != null &&
-              (ingestion.discovered > 0 || ingestion.indexed > 0)) ...[
-            const SizedBox(height: 12),
+          const SizedBox(height: 8),
+          Text(explanation, style: Theme.of(context).textTheme.bodySmall),
+          if (processing.isFailed && processing.error.isNotEmpty) ...[
+            const SizedBox(height: 8),
             Text(
-              '${ingestion.processed} of ${ingestion.discovered} processed · ${ingestion.indexed} indexed${ingestion.failed > 0 ? ' · ${ingestion.failed} failed' : ''}',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ],
-          if (ingestion?.error.isNotEmpty == true) ...[
-            const SizedBox(height: 12),
-            Text(
-              ingestion!.error,
+              processing.error,
               style: TextStyle(color: context.colors.danger),
-            ),
-          ],
-          if (document.status == 'pending_content') ...[
-            const SizedBox(height: 8),
-            const Text(
-              'The server is waiting for this file’s content. It is not yet available to read.',
-            ),
-          ],
-          if (ingestion == null && document.status == 'available') ...[
-            const SizedBox(height: 8),
-            Text(
-              document.isImage
-                  ? 'Image attachments are available to the conversation, but are not indexed.'
-                  : 'Content is available. Indexing is tracked separately from content availability.',
-              style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
         ],

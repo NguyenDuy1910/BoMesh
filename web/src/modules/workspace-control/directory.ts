@@ -123,8 +123,8 @@ export interface WorkspaceOverview {
   metrics: Record<string, number>;
   attention: Record<string, number>;
   recent_activity: AuditEvent[];
-  /** Non-deleted collections and documents, by where indexing left them. */
-  knowledge: { collections: number; documents: number; indexed: number; indexing: number; failed: number };
+  /** Non-deleted collections and documents, documents by processing state. */
+  knowledge: { collections: number; documents: number; ready: number; processing: number; pending: number; failed: number; outdated: number };
   /** Thirty daily buckets in `timezone`, with the last seven days against the seven before. */
   usage: {
     timezone: string;

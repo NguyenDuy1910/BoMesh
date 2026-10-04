@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
@@ -38,13 +39,27 @@ from bomesh.services import (
     InvalidDocumentStateError,
     conversation_access_filter,
 )
-from bomesh.services.workflow import document_ingestion_id
 
 _ITEM_STATUSES = {"pending", "processing", "ready", "failed", "unsupported", "deleted"}
 _INDEX_STATUSES = {"pending", "processing", "ready", "failed", "unsupported"}
 _PARENT_RELATIONS = {"contains", "child", "attachment", "embedded"}
-#: Index states that end an Ingestion; entering one records ``finished_at``.
-_TERMINAL_INDEX_STATUSES = {"ready", "failed", "unsupported"}
+#: Metadata processing derives from a stored original. It stays valid exactly
+#: as long as that original does.
+_DERIVED_METADATA_KEYS = ("preview", "processing")
+
+
+@dataclass(frozen=True, slots=True)
+class IngestedItem:
+    """One connector Item after registration, and what registration changed.
+
+    ``created``: the Item had no live registration before (new, or rediscovered
+    after a tombstone). ``changed``: its content may differ from what was last
+    processed, so the Document waits for processing again.
+    """
+
+    item: Item
+    created: bool
+    changed: bool
 
 
 class ItemService:
@@ -400,13 +415,24 @@ class ItemService:
         metadata: Mapping[str, Any] | None = None,
         storage_key: str | None = None,
         status: str = "ready",
-    ) -> Item:
+    ) -> IngestedItem:
+        """Register or refresh one connector Item in the knowledge inventory.
+
+        A Document that is new, or whose provider version, etag or stored
+        original changed, waits for processing (``pending``). An unchanged one
+        keeps its processing state, so a sync never sends unchanged content
+        through processing again.
+        """
+
         source = await self._ingestion_source(source_id)
         normalized_external_id = _required_text(external_id, "external id")
         normalized_type = _item_type(item_type)
         identity_key = _required_text(
             canonical_external_id or normalized_external_id, "canonical external id"
         )
+        normalized_version = _optional_text(external_version)
+        normalized_etag = _optional_text(etag)
+        normalized_storage_key = _optional_text(storage_key)
         resource_metadata = dict(metadata or {})
         resource_metadata["canonical_external_id"] = identity_key
         now = datetime.now(UTC)
@@ -418,9 +444,15 @@ class ItemService:
             )
             .with_for_update()
         )
+        live_resource = (
+            existing_resource
+            if existing_resource is not None and existing_resource.deleted_at is None
+            else None
+        )
 
         if normalized_type == "collection":
             item = source.target_item
+            created = changed = live_resource is None
         else:
             parent_id = source.target_item_id
             if parent_external_id:
@@ -443,10 +475,8 @@ class ItemService:
                 "title": _required_text(title, "item title"),
                 "mime_type": _optional_text(mime_type, max_length=255),
                 "size_bytes": _size(size_bytes),
-                "storage_key": _optional_text(storage_key),
-                "metadata_": dict(metadata or {}),
+                "storage_key": normalized_storage_key,
                 "status": _item_status(status),
-                "index_status": "pending",
                 "deleted_at": None,
             }
             await self._validate_parent(
@@ -455,18 +485,42 @@ class ItemService:
                 child_type="document",
             )
             item = await self._session.get(Item, item_id, with_for_update=True)
+            if live_resource is None or item is None or item.status == "deleted":
+                created = changed = True
+            else:
+                created = False
+                changed = (
+                    live_resource.external_version != normalized_version
+                    or live_resource.etag != normalized_etag
+                    or item.storage_key != normalized_storage_key
+                )
+            item_metadata = dict(metadata or {})
             if item is None:
-                item = Item(id=item_id, **values)
+                item = Item(
+                    id=item_id, **values, metadata_=item_metadata, index_status="pending"
+                )
                 self._session.add(item)
             else:
+                if not changed:
+                    item_metadata = {
+                        **{
+                            key: item.metadata_[key]
+                            for key in _DERIVED_METADATA_KEYS
+                            if key in item.metadata_
+                        },
+                        **item_metadata,
+                    }
                 for attribute, value in values.items():
                     setattr(item, attribute, value)
+                item.metadata_ = item_metadata
+                if changed:
+                    item.index_status = "pending"
             await self._session.flush()
 
         resource_values = {
             "item_id": item.id,
-            "external_version": _optional_text(external_version),
-            "etag": _optional_text(etag),
+            "external_version": normalized_version,
+            "etag": normalized_etag,
             "external_updated_at": external_updated_at,
             "source_url": _optional_text(source_url),
             "metadata_": resource_metadata,
@@ -485,14 +539,15 @@ class ItemService:
             for attribute, value in resource_values.items():
                 setattr(existing_resource, attribute, value)
         await self._session.flush()
-        return item
+        return IngestedItem(item=item, created=created, changed=changed)
 
     async def soft_delete_external_resource(
         self, source_id: UUID, external_id: str
     ) -> Item | None:
         external_resource = await self._session.scalar(
             select(ExternalResource)
-            .options(joinedload(ExternalResource.item))
+            # Every resource has its Item; an inner join lets both rows lock.
+            .options(joinedload(ExternalResource.item, innerjoin=True))
             .where(
                 ExternalResource.ingestion_source_id == source_id,
                 ExternalResource.external_id == _required_text(external_id, "external id"),
@@ -629,9 +684,16 @@ class ItemService:
         owner_user_id: UUID,
         tenant_id: UUID,
         *,
-        ingestion_mode: str | None,
+        processable: bool,
         storage_metadata: Mapping[str, Any] | None = None,
     ) -> Item:
+        """Register the uploaded bytes: the Document joins the inventory as pending.
+
+        Nothing is processed here. A processable Document waits, ``pending``,
+        for an Ingestion Run someone starts; anything else (an image attached
+        to a conversation) is kept for the agent to open and is never indexed.
+        """
+
         item = await self.get_owned_upload(
             item_id, owner_user_id, tenant_id, include_deleted=True, for_update=True
         )
@@ -648,13 +710,7 @@ class ItemService:
         item.upload.uploaded_at = datetime.now(UTC)
         if storage_metadata:
             item.metadata_ = {**dict(item.metadata_), "storage": dict(storage_metadata)}
-        if ingestion_mode is None:
-            # Not knowledge (an image attached to a conversation): kept for
-            # the agent to open, never indexed, so it has no Ingestion.
-            item.index_status = "unsupported"
-        else:
-            item.index_status = "pending"
-            _begin_ingestion(item, trigger_type="upload", mode=ingestion_mode)
+        item.index_status = "pending" if processable else "unsupported"
         await self._session.flush()
         await self._session.refresh(item, attribute_names=["updated_at"])
         return item
@@ -684,29 +740,6 @@ class ItemService:
         await self._session.flush()
         return item
 
-    async def restart_ingestion(
-        self, item_id: UUID, *, ingestion_mode: str, trigger_type: str
-    ) -> Item:
-        """Open a new run of an available upload's Ingestion (a retry or a re-index)."""
-
-        item = await self._get_internal(item_id)
-        if item.status == "deleted":
-            raise InvalidDocumentStateError("cannot ingest a deleted item")
-        item.index_status = "pending"
-        _begin_ingestion(item, trigger_type=trigger_type, mode=ingestion_mode)
-        await self._session.flush()
-        return item
-
-    async def update_ingestion_record(self, item_id: UUID, **fields: Any) -> Item:
-        """Merge ``fields`` (phases, error) into an upload's Ingestion record."""
-
-        item = await self._get_internal(item_id)
-        ingestion = item.metadata_.get("ingestion")
-        if isinstance(ingestion, dict):
-            item.metadata_ = {**dict(item.metadata_), "ingestion": {**ingestion, **fields}}
-            await self._session.flush()
-        return item
-
     async def tombstone(self, item_id: UUID) -> Item:
         """Remove an Item from normal reads; the row stays as lineage."""
 
@@ -715,20 +748,22 @@ class ItemService:
         await self._session.flush()
         return item
 
+    async def mark_index_pending(self, item_id: UUID) -> Item:
+        """Content changed (or processing stopped short): the Document awaits a run."""
+
+        return await self._set_index_status(item_id, "pending")
+
     async def mark_index_processing(self, item_id: UUID) -> Item:
         return await self._set_index_status(item_id, "processing")
 
-    async def mark_index_ready(self, item_id: UUID) -> Item:
-        return await self._set_index_status(item_id, "ready")
+    async def mark_index_ready(self, item_id: UUID, *, processed_version: str) -> Item:
+        item = await self._set_index_status(item_id, "ready")
+        item.processed_version = _required_text(processed_version, "processed version")
+        await self._session.flush()
+        return item
 
     async def mark_index_failed(self, item_id: UUID) -> Item:
         return await self._set_index_status(item_id, "failed")
-
-    async def mark_ingestion_cancelled(self, item_id: UUID) -> Item:
-        """End a cancelled run: not indexed, and not a failure of the file."""
-
-        await self._set_index_status(item_id, "failed")
-        return await self.update_ingestion_record(item_id, cancelled=True)
 
     async def link_message(
         self,
@@ -793,21 +828,6 @@ class ItemService:
         if item.item_type != "document":
             raise InvalidDocumentStateError("only documents have an index lifecycle")
         item.index_status = _index_status(status)
-        ingestion = item.metadata_.get("ingestion")
-        if isinstance(ingestion, dict):
-            # Only uploads carry their own Ingestion; a connector Item is
-            # indexed inside its Source's Ingestion and has no record here.
-            now = datetime.now(UTC).isoformat()
-            if item.index_status == "processing":
-                # Set once per run: later steps re-enter processing.
-                ingestion = {
-                    **ingestion,
-                    "started_at": ingestion.get("started_at") or now,
-                    "finished_at": None,
-                }
-            elif item.index_status in _TERMINAL_INDEX_STATUSES:
-                ingestion = {**ingestion, "finished_at": now}
-            item.metadata_ = {**dict(item.metadata_), "ingestion": ingestion}
         await self._session.flush()
         return item
 
@@ -885,31 +905,6 @@ class ItemService:
         if child_type == "collection" and parent.item_type != "collection":
             raise InvalidDocumentStateError("a Document may not contain a Collection")
         return parent
-
-
-def _begin_ingestion(item: Item, *, trigger_type: str, mode: str) -> None:
-    """Record a new Ingestion of an upload: the processing its bytes now await.
-
-    ``mode`` is ``managed`` (Temporal) or ``direct`` (run in-process for a
-    user's own upload). The id is the same either way, and for a managed run
-    it names the Temporal execution too.
-    """
-
-    if mode not in {"managed", "direct"}:
-        raise ValueError("ingestion mode must be managed or direct")
-    item.metadata_ = {
-        **dict(item.metadata_),
-        "ingestion": {
-            "id": str(document_ingestion_id(str(item.id))),
-            "mode": mode,
-            "trigger_type": trigger_type,
-            "created_at": datetime.now(UTC).isoformat(),
-            "started_at": None,
-            "finished_at": None,
-            "phases": [],
-            "error": None,
-        },
-    }
 
 
 def _tombstone(item: Item) -> None:
@@ -992,4 +987,4 @@ def _optional_text(value: str | None, *, max_length: int | None = None) -> str |
     return _required_text(value, "value", max_length=max_length)
 
 
-__all__ = ["ItemService"]
+__all__ = ["IngestedItem", "ItemService"]

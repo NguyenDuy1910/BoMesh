@@ -16,11 +16,11 @@ follows `api_contract.md` and names current owning services.
 | POST | `/collections/{collection_id}/documents/upload` | direct multipart upload | knowledge/control plane UI | `DocumentService.upload_to_collection` | collection write ACL | rename; merge with reservation | `/collections/{collection_id}/documents` (`multipart/form-data`) |
 | POST | `/documents/uploads` | presigned Document reservation | chat upload UI | `DocumentService.reserve_upload` | caller + destination Collection | merge into Document creation | `/collections/{collection_id}/documents` (`application/json`) |
 | POST | `/documents/{document_id}/complete` | validate presigned object | chat upload UI | `DocumentService.finalize_content` | caller + Document ownership | rename method; remove Upload resource | `PUT /documents/{document_id}/content` |
-| POST | `/documents/{document_id}/retry` | document indexing retry | knowledge UI | `IngestionService.retry_ingestion` → `DocumentService.restart_ingestion` | caller | merge | `/ingestions/{ingestion_id}/retry` |
+| POST | `/documents/{document_id}/retry` | document indexing retry | knowledge UI | `IngestionRunService.create_run` | `ingestion.run` | merge into runs | `POST /ingestion-runs` (`document_ids`) |
 | POST | `/documents/search` | semantic search | knowledge UI | `KnowledgeQueryService.search` | permission-filtered | keep | same |
 | GET/DELETE | `/documents/{doc_id}` | document read/removal | chat/knowledge UI | `DocumentService` | caller + collection | rename ID | `/documents/{document_id}` |
 | GET/POST/PATCH/DELETE | `/admin/collections*` | Collection CRUD/ACL | control plane UI | `WorkspaceControlPlaneService`, `ItemCatalogService` | workspace access | merge | `/collections*` |
-| GET/POST/PATCH/DELETE | `/admin/items*` | mixed Item inventory/retry | control plane UI | `ItemCatalogService` | item manage | split/merge | `/collections`, `/documents`, `/ingestions` |
+| GET/POST/PATCH/DELETE | `/admin/items*` | mixed Item inventory/retry | control plane UI | `ItemCatalogService` | knowledge manage | split/merge | `/collections`, `/documents`, `/ingestion-runs` |
 | GET | `/admin/overview` | workspace dashboard | control plane UI | `DashboardService.overview` | workspace read | move | `/workspaces/{workspace_id}/overview` |
 | GET/PATCH | `/admin/spaces*` | workspace profile | control plane UI | `TenantService` | workspace read/manage | rename | `/workspaces*` |
 | GET/POST/PATCH | `/admin/users*` | workspace users | control plane UI | `UserService` | user manage | move | `/users*` |
@@ -36,8 +36,9 @@ follows `api_contract.md` and names current owning services.
 | GET | `/admin/platform/health` | platform health | platform control UI | `HealthService` | platform permission | move | `/platform/health` |
 | GET/POST/PATCH/DELETE | `/connections*` | connection resource | integrations UI | `IntegrationLifecycleService` | connection capabilities | keep, rename IDs | `/connections*` |
 | GET/POST/PATCH/DELETE | `/sources*` | source/schedule resource | integrations UI | `IntegrationLifecycleService` | source capabilities | keep, remove action routes | `/sources*` |
-| GET/POST | `/ingestions*` | ingestion runs | integrations UI | `IngestionService`, Temporal adapter | source manage or Collection read | rename IDs | `/ingestions*` |
-| POST | `/sources/{source_id}/ingestions` | start source ingestion | integrations UI | `IntegrationLifecycleService.ingest_source` | source manage | keep | same |
+| GET/POST | `/ingestions*`, `POST /documents/{document_id}/ingestions` | per-target Temporal ingestions (one workflow per Document/Source) | integrations UI, knowledge UI | `IngestionRunService` | `ingestion.read` / `ingestion.run` / `ingestion.manage` | replace with Ingestion Runs (one run, many Documents; Postgres state) | `/ingestion-runs*` |
+| POST | `/sources/{source_id}/ingestions` | sync + index a Source | integrations UI | `IntegrationLifecycleService.sync_source` | source manage | split: sync registers, runs process | `POST /sources/{source_id}/syncs` + `POST /ingestion-runs` |
+| GET | `/sources/{source_id}/ingestions*`, `/sources/{source_id}/status` | source run history / health projection | integrations UI | `IntegrationLifecycleService` | source manage | remove; latest sync is `Source.sync` | `GET /sources/{source_id}` |
 | POST | `/sources/{source_id}/schedule/pause` | schedule state command | integrations UI | Temporal schedule adapter | source manage | remove | PATCH schedule `enabled=false` |
 | POST | `/sources/{source_id}/schedule/resume` | schedule state command | integrations UI | Temporal schedule adapter | source manage | remove | PATCH schedule `enabled=true` |
 | POST | `/auth/guest-sessions` | provider-shaped guest Session creation | auth client | `AuthenticationService.create_guest_session` | public | remove (no anonymous access) | *(none)* |
@@ -70,6 +71,13 @@ legacy paths or fields:
 /documents/{document_id}/complete
 /schedule/pause
 /schedule/resume
+/ingestions
+/sources/{source_id}/ingestions
+/sources/{source_id}/status
+/documents/{document_id}/ingestions
+latest_ingestion
+ingestion_id
+item.manage
 /auth/guest-sessions
 /auth/password
 /auth/google

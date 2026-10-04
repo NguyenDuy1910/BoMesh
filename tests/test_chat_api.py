@@ -169,7 +169,7 @@ async def test_finalized_document_loads_server_timestamp_before_presentation() -
         document.id,
         uuid4(),
         uuid4(),
-        ingestion_mode="managed",
+        processable=True,
         storage_metadata={"etag": "etag-finalized"},
     )
     result = DocumentPresenter(
@@ -177,11 +177,13 @@ async def test_finalized_document_loads_server_timestamp_before_presentation() -
         preview=SimpleNamespace(resolve=lambda *_, **__: None),
         citation_url_seconds=300,
         preview_url_seconds=300,
-    ).contract_document(finalized)
+        processing_version=None,
+    ).contract_document(finalized, latest_run=None)
 
     assert finalized.status == "ready"
     assert finalized.upload.status == "available"
     assert result["status"] == "available"
+    assert result["processing"]["state"] == "pending"
     assert result["updated_at"] == now
 
 def test_public_chat_events_strip_provider_workspace_bindings() -> None:
@@ -445,6 +447,12 @@ class ReasoningTransport(native.ScriptedResponsesTransport):
 
 
 class _SessionContext:
+    """Stands in for the session factory; ``begin()`` is what transaction_scope opens."""
+
+    @classmethod
+    def begin(cls) -> _SessionContext:
+        return cls()
+
     async def __aenter__(self) -> _SessionContext:
         return self
 
@@ -570,11 +578,10 @@ def test_collection_upload_route_accepts_multipart_without_a_connector(
                 "size_bytes": 15,
                 "purpose": "knowledge",
                 "status": "available",
-                "latest_ingestion": None,
+                "processing": {"state": "pending", "error": None, "run_id": None},
                 "created_at": now,
                 "updated_at": now,
             },
-            "ingestion": None,
             "created": True,
         }
 
@@ -598,6 +605,7 @@ def test_collection_upload_route_accepts_multipart_without_a_connector(
     assert response.status_code == 201, response.text
     assert response.json()["document"]["collection_id"] == str(collection_id)
     assert response.json()["document"]["status"] == "available"
+    assert response.json()["document"]["processing"]["state"] == "pending"
 
 
 
