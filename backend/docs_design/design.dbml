@@ -206,10 +206,11 @@ Table items {
   mime_type varchar(255)
   size_bytes bigint
   storage_key text [note: 'Durable object key only; no raw bytes']
-  metadata jsonb [not null, default: `{}`, note: 'Uploads: purpose, file_name, storage, archive lineage, and ingestion = {id, trigger_type, created_at, started_at, finished_at, cancelled?, phases?} (the upload\'s own latest Ingestion)']
+  metadata jsonb [not null, default: `{}`, note: 'Uploads: purpose, file_name, storage, archive lineage. Connector Items: file_name, source (provider identity: provider, connector_id, external_id, external_version, etag, url) and connector metadata. Processing writes preview and processing signature; never a run record']
   inherit_access boolean [not null, default: true, note: 'Only a Collection may end inheritance; a Document always inherits']
   status varchar(16) [not null, default: 'pending', note: 'Raw resource lifecycle: pending | processing | ready | failed | unsupported | deleted']
-  index_status varchar(16) [note: 'Document-only derived search lifecycle: pending | processing | ready | failed | unsupported']
+  index_status varchar(16) [note: 'Document-only processing state: pending | processing | ready | failed | unsupported. Adding data sets pending; only an Ingestion Run moves it further']
+  processed_version text [note: 'processing_version() of the configuration the current index was built with; ready AND processed_version <> current = outdated']
   created_by_user_id uuid
   deleted_at timestamptz
   created_at timestamptz [not null]
@@ -233,7 +234,7 @@ Table artifact_revisions {
   conversation_id uuid
   request_id varchar(64)
   created_by_user_id uuid
-  exports jsonb [not null, default: `{}`]
+  exports jsonb [not null, default: `{}`, note: 'Derived outputs of this immutable revision; `preview` is its document-viewer manifest (document_viewer.md)']
   deleted_at timestamptz
   created_at timestamptz [not null]
   indexes {
@@ -340,12 +341,13 @@ Table ingestion_sources {
   resource_type varchar(64) [note: 'Provider resource kind, for example folder or shared_drive']
   external_resource_id text [note: 'Provider resource identifier; unique per active connection and resource type']
   config jsonb [not null, default: `{}`, note: 'Connector-owned external scope']
-  checkpoint jsonb [not null, default: `{}`]
   sync_mode varchar(16) [not null, default: 'manual', note: 'manual | scheduled']
   status varchar(32) [not null, default: 'ready', note: 'ready | paused | failed | connection_required | disabled']
   status_detail text
-  last_ingested_at timestamptz
-  last_indexed_at timestamptz
+  last_synced_at timestamptz [note: 'When the latest sync finished']
+  last_sync_status varchar(16) [note: 'running | succeeded | failed; null until the first sync']
+  last_sync_error text [note: 'User-safe reason the latest sync failed']
+  last_sync_summary jsonb [not null, default: `{}`, note: '{added, updated, removed, failed} Documents of the latest sync']
   created_by_user_id uuid
   deleted_at timestamptz
   created_at timestamptz [not null]
@@ -375,6 +377,51 @@ Table external_resources {
     (ingestion_source_id, external_id) [unique, note: 'Tombstoned rows are reactivated on rediscovery; this preserves stable provider identity without duplicate rows.']
     item_id
     (ingestion_source_id, last_seen_at)
+  }
+}
+
+// One explicit processing execution over a snapshot of Documents. Manual, API
+// and scheduled triggers all create one; one Temporal workflow orchestrates it.
+// Adding data (upload, sync) never creates one.
+Table ingestion_runs {
+  id uuid [pk]
+  tenant_id uuid [not null]
+  trigger_type varchar(16) [not null, note: 'manual | scheduled | api']
+  scope jsonb [not null, default: `{}`, note: 'The selection as asked: {selected_documents, collection_id, source_id, states, retry_of_run_id}']
+  status varchar(16) [not null, default: 'queued', note: 'queued | running | completed | failed | cancelled. completed allows failed items; failed means the run itself stopped']
+  configuration jsonb [not null, default: `{}`, note: 'Fixed at creation: processing_version, models, batch_max_items, batch_max_bytes, parallelism']
+  item_count int [not null, default: 0]
+  error text [note: 'User-safe reason the run as a whole stopped']
+  created_by_user_id uuid [note: 'Null for scheduled runs']
+  started_at timestamptz
+  finished_at timestamptz
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  indexes {
+    (tenant_id, created_at)
+    (tenant_id, status)
+  }
+}
+
+// Execution history of one Document in one run. The Document (items) stays
+// the one persistent identity; it participates in many runs.
+Table ingestion_run_items {
+  run_id uuid [not null]
+  item_id uuid [not null, note: 'A Document Item of the run\'s tenant (service-validated)']
+  status varchar(16) [not null, default: 'queued', note: 'queued | running | succeeded | failed | skipped | cancelled']
+  batch_number int [note: 'Assigned by the run planner; null until planned']
+  phases jsonb [not null, default: `[]`, note: '[{phase, started_at, finished_at, done, total}]']
+  error text [note: 'User-safe reason this Document was not processed']
+  chunk_count int
+  started_at timestamptz
+  finished_at timestamptz
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  indexes {
+    (run_id, item_id) [pk]
+    (item_id, created_at)
+    (run_id, status)
+    (run_id, batch_number)
   }
 }
 
@@ -540,6 +587,10 @@ Ref: ingestion_sources.target_item_id > items.id
 Ref: ingestion_sources.created_by_user_id > users.id
 Ref: external_resources.item_id > items.id
 Ref: external_resources.ingestion_source_id > ingestion_sources.id
+Ref: ingestion_runs.tenant_id > tenants.id
+Ref: ingestion_runs.created_by_user_id > users.id
+Ref: ingestion_run_items.run_id > ingestion_runs.id
+Ref: ingestion_run_items.item_id > items.id
 Ref: conversations.tenant_id > tenants.id
 Ref: conversations.owner_user_id > users.id
 Ref: conversations.created_by_session_id > access_sessions.id

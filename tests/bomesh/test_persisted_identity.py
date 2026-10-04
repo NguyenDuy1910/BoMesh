@@ -19,7 +19,6 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from bomesh.services.integration_credential import IntegrationCredentialService
 from bomesh.services.item import ItemService
-from bomesh.services.workflow import public_ingestion_id
 
 TENANT = UUID("00000000-0000-0000-0000-000000000001")
 USER = UUID("d9dd5362-b584-45c7-8120-dcace0f36dfd")
@@ -41,9 +40,6 @@ def test_derived_identities_keep_the_original_namespace() -> None:
     )
     assert ItemService.external_item_id(source, "page-42") == uuid5(
         NAMESPACE_URL, f"bothesis:external-resource:{source}:page-42"
-    )
-    assert public_ingestion_id("ingestion:doc-1") == uuid5(
-        NAMESPACE_URL, "bothesis:ingestion:ingestion:doc-1"
     )
 
 

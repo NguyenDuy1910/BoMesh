@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import base64
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from temporalio.service import RPCError, RPCStatusCode
 
 from bomesh.db.models import Base, IngestionSource, IntegrationConnection, Item
 from bomesh.integrations.atlassian import AtlassianConnectionProvider
@@ -45,6 +46,8 @@ from bomesh.services.integration_authorization import (
 )
 from bomesh.services.integration_connections import IntegrationConnectionService
 from bomesh.services.integration_credential import IntegrationCredentialService
+from bomesh.services.integration_lifecycle import IntegrationLifecycleService
+from config import IntegrationConfig
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 
@@ -182,6 +185,45 @@ def _authorization() -> IntegrationAuthorizationService:
         _providers(),
         state=OAuthStateCodec(STATE_SECRET),
         client_origin="https://app.example",
+    )
+
+
+class FakeWorkflows:
+    """Temporal as the lifecycle sees it: sync starts and schedule reads."""
+
+    def __init__(self) -> None:
+        self.started: list[tuple[str, str, bool]] = []
+        self.running = False
+        self.unavailable = False
+        #: Runs as the workflow starts: a sync that finishes before the
+        #: request that started it has answered.
+        self.on_start: Callable[[str], Awaitable[None]] | None = None
+
+    async def start_source_sync(self, source_id: str, tenant_id: str, *, process: bool) -> bool:
+        if self.unavailable:
+            raise RPCError("unavailable", RPCStatusCode.UNAVAILABLE, b"")
+        if self.running:
+            return False
+        self.started.append((source_id, tenant_id, process))
+        if self.on_start is not None:
+            await self.on_start(source_id)
+        return True
+
+    async def describe_schedule(self, source_id: str) -> None:
+        del source_id
+        return None
+
+
+def _lifecycle(
+    session_factory: async_sessionmaker[AsyncSession], workflows: FakeWorkflows
+) -> IntegrationLifecycleService:
+    return IntegrationLifecycleService(
+        session_factory,
+        workflows=workflows,  # type: ignore[arg-type]
+        integration=IntegrationConfig(credential_encryption_key=ENCRYPTION_KEY),
+        providers=_providers(),
+        authorization=_authorization(),
+        processing_version="pv-current",
     )
 
 
@@ -611,3 +653,110 @@ async def test_removing_a_connection_keeps_its_indexed_items(
         assert stored_source.deleted_at is not None
         assert stored_collection is not None
         assert stored_collection.deleted_at is None
+
+
+def _space_source(collection: Item, space: str = "ENG") -> dict[str, Any]:
+    """What the create-source route hands the lifecycle."""
+
+    return {
+        "target_item_id": collection.id,
+        "display_name": space,
+        "resource_type": "space",
+        "external_resource_id": space,
+        "config": {},
+        "schedule": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_creating_a_source_starts_its_first_sync_and_no_processing(
+    session_factory: async_sessionmaker[AsyncSession], atlassian: FakeAtlassian
+) -> None:
+    async with session_factory.begin() as session:
+        actor, collection = await _workspace(session)
+        connection = await _authorize(session, actor)
+    workflows = FakeWorkflows()
+
+    source = await _lifecycle(session_factory, workflows).create_source(
+        actor, UUID(connection["id"]), _space_source(collection)
+    )
+
+    assert workflows.started == [(source["id"], str(actor.tenant_id), False)]
+    assert source["sync"]["status"] == "running"
+    assert source["pending_documents"] == 0
+
+
+@pytest.mark.asyncio
+async def test_a_first_sync_that_cannot_start_leaves_the_source_saying_so(
+    session_factory: async_sessionmaker[AsyncSession], atlassian: FakeAtlassian
+) -> None:
+    async with session_factory.begin() as session:
+        actor, collection = await _workspace(session)
+        connection = await _authorize(session, actor)
+    workflows = FakeWorkflows()
+    workflows.unavailable = True
+
+    source = await _lifecycle(session_factory, workflows).create_source(
+        actor, UUID(connection["id"]), _space_source(collection)
+    )
+
+    assert source["status"] == "ready"
+    assert source["sync"]["status"] == "failed"
+    assert source["sync"]["error"] == "The first sync could not be started. Use Sync to try again."
+
+
+@pytest.mark.asyncio
+async def test_a_sync_request_is_refused_while_one_runs_or_the_source_is_paused(
+    session_factory: async_sessionmaker[AsyncSession], atlassian: FakeAtlassian
+) -> None:
+    async with session_factory.begin() as session:
+        actor, collection = await _workspace(session)
+        connection = await _authorize(session, actor)
+    workflows = FakeWorkflows()
+    lifecycle = _lifecycle(session_factory, workflows)
+    source_id = UUID(
+        (
+            await lifecycle.create_source(
+                actor, UUID(connection["id"]), _space_source(collection)
+            )
+        )["id"]
+    )
+
+    workflows.running = True
+    with pytest.raises(ControlPlaneConflictError, match="already running"):
+        await lifecycle.sync_source(actor, source_id)
+
+    workflows.running = False
+    synced = await lifecycle.sync_source(actor, source_id)
+    assert synced["sync"]["status"] == "running"
+    assert [process for _, _, process in workflows.started] == [False, False]
+
+    async with session_factory.begin() as session:
+        await _sources(session).update_source(actor, source_id, status="paused")
+    with pytest.raises(ControlPlaneConflictError, match="paused"):
+        await lifecycle.sync_source(actor, source_id)
+
+
+@pytest.mark.asyncio
+async def test_a_sync_that_finished_before_the_request_answered_is_not_shown_running(
+    session_factory: async_sessionmaker[AsyncSession], atlassian: FakeAtlassian
+) -> None:
+    async with session_factory.begin() as session:
+        actor, collection = await _workspace(session)
+        connection = await _authorize(session, actor)
+    workflows = FakeWorkflows()
+
+    async def finish_at_once(source_id: str) -> None:
+        async with session_factory.begin() as session:
+            await IngestionSourceService(session).finish_sync(
+                UUID(source_id), succeeded=True, error=None, counts={"added": 2}
+            )
+
+    workflows.on_start = finish_at_once
+
+    source = await _lifecycle(session_factory, workflows).create_source(
+        actor, UUID(connection["id"]), _space_source(collection)
+    )
+
+    assert source["sync"]["status"] == "succeeded"
+    assert source["sync"]["added"] == 2

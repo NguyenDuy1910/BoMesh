@@ -34,7 +34,6 @@ make init
 5. Rebuilds PostgreSQL from the current SQLAlchemy models.
 6. Seeds a deterministic local administrator and membership.
 7. Recreates the derived Qdrant collection with dense and BM25 vectors.
-8. Registers the Temporal Search Attributes used by ingestion visibility.
 
 The command is deliberately destructive to local derived and database state.
 It drops the PostgreSQL `public` schema, clears Temporal persistence, and

@@ -1,18 +1,20 @@
 "use client";
 
-import {RefreshCw, Trash2, X} from "lucide-react";
+import { Play, Trash2, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 
 import { Button } from "@/components/ui/Button";
-import { answerAvailability, documentFacts } from "@/modules/knowledge/document-facts";
+import { answerAvailability, documentFacts, PROCESSING_STATUS } from "@/modules/knowledge/document-facts";
 import type { WorkspaceKnowledgeDocument } from "@/modules/knowledge/workspace-repository";
 
 interface DocumentDetailsDrawerProps {
   document: WorkspaceKnowledgeDocument;
   open: boolean;
   onClose: () => void;
-  /** Set only when there is a failed indexing to retry. */
-  onRetryIndexing?: () => void;
+  /** Starts a run for this document; omitted when none can be started. */
+  onProcess?: () => void;
+  /** Opens the run that last processed this document. */
+  onViewRun?: (runId: string) => void;
   onRequestRemove?: () => void;
   showLifecycleActions?: boolean;
 }
@@ -29,7 +31,8 @@ export function DocumentDetailsDrawer({
   document,
   open,
   onClose,
-  onRetryIndexing,
+  onProcess,
+  onViewRun,
   onRequestRemove,
   showLifecycleActions = true,
 }: DocumentDetailsDrawerProps) {
@@ -55,7 +58,8 @@ export function DocumentDetailsDrawer({
   if (!open) return null;
 
   const facts = documentFacts(document);
-  const indexed = document.state === "indexed";
+  const status = PROCESSING_STATUS[document.state];
+  const runId = document.runId;
 
   return (
     <aside aria-label="Document details" className="knowledge-details" ref={panelRef}>
@@ -77,36 +81,45 @@ export function DocumentDetailsDrawer({
           <div><dt>Path</dt><dd>{facts.path}</dd></div>
           {document.owner && <div><dt>Owner</dt><dd>{document.owner}</dd></div>}
           <div><dt>Modified</dt><dd>{facts.modifiedLabel}</dd></div>
-          <div><dt>Indexed</dt><dd>{facts.indexedLabel}</dd></div>
-          <div><dt>File</dt><dd>{facts.fileTypeLabel} · {document.pagesLabel} · {document.size}</dd></div>
-          <div>
-            <dt>Search availability</dt>
-            <dd className={indexed ? "knowledge-details__value--ok" : undefined}>
-              {answerAvailability(document)}
-            </dd>
-          </div>
+          <div><dt>File</dt><dd>{[facts.fileTypeLabel, document.pagesLabel, document.size].filter(Boolean).join(" · ")}</dd></div>
         </dl>
 
-        {(document.indexingNote || document.failureReason) && (
-          <details className="knowledge-details__disclosure">
-            <summary>Indexing</summary>
-            <p>{document.indexingNote ?? document.failureReason}</p>
-          </details>
-        )}
+        <section aria-labelledby="knowledge-details-processing" className="pt-[var(--space-5)]">
+          <h4 className="knowledge-eyebrow" id="knowledge-details-processing">Processing</h4>
+          <dl className="knowledge-details__facts">
+            <div>
+              <dt>State</dt>
+              <dd className={document.state === "failed" ? "text-[var(--status-danger-text)]" : undefined}>
+                {status.label}
+              </dd>
+            </div>
+            {document.state === "failed" && document.processingError && (
+              <div><dt>Error</dt><dd>{document.processingError}</dd></div>
+            )}
+            <div><dt>In answers</dt><dd>{answerAvailability(document)}</dd></div>
+          </dl>
+          {runId && onViewRun && (
+            <Button className="mt-[var(--space-2)]" onClick={() => onViewRun(runId)} size="sm" variant="secondary">
+              View run
+            </Button>
+          )}
+        </section>
       </div>
 
       {showLifecycleActions && (
         <footer className="knowledge-details__actions">
           <button
-            disabled={!onRetryIndexing}
-            onClick={onRetryIndexing}
+            disabled={!onProcess}
+            onClick={onProcess}
             type="button"
           >
-            <RefreshCw aria-hidden="true" size={16} />Retry indexing
+            <Play aria-hidden="true" size={16} />Run processing
           </button>
-          <button className="knowledge-details__danger" onClick={onRequestRemove} type="button">
-            <Trash2 aria-hidden="true" size={16} />Remove from knowledge
-          </button>
+          {onRequestRemove && (
+            <button className="knowledge-details__danger" onClick={onRequestRemove} type="button">
+              <Trash2 aria-hidden="true" size={16} />Delete
+            </button>
+          )}
         </footer>
       )}
     </aside>

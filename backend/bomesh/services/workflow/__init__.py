@@ -1,9 +1,11 @@
-"""Shared contracts and configuration for managed (Temporal) ingestion.
+"""Shared contracts and configuration for Temporal orchestration.
 
-One workflow type runs every managed ingestion; its input names the target:
-a connector Source to sync, or one stored Document to index (or expand, for
-an archive). Uploads a user makes for themselves do not come through here:
-they run the same ingestion core directly (``DocumentService``).
+Two workflows run on the ingestion task queue. ``IngestionRunWorkflow``
+processes one Ingestion Run's snapshot of Documents in bounded batches;
+``SourceSyncWorkflow`` syncs one Source's inventory and, when scheduled, then
+creates a run for what the sync left pending. Postgres holds every run, item
+and sync state; Temporal only orchestrates. This module stays free of
+database-backed imports so the workflow sandbox can pass it through.
 """
 
 from __future__ import annotations
@@ -11,20 +13,20 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field
-from typing import Any
-from uuid import NAMESPACE_URL, UUID, uuid5
-
-from bomesh.identity import PERSISTED_IDENTITY_NAMESPACE
 
 INGESTION_TASK_QUEUE = "bomesh-ingestion"
-INGESTION_WORKFLOW_NAME = "bomesh.ingestion"
-SOURCE_INGESTION_ACTIVITY_NAME = "bomesh.ingest_source"
-DOCUMENT_INGESTION_ACTIVITY_NAME = "bomesh.ingest_document"
-#: Failure types whose message is written for people and may be shown.
-DOCUMENT_FAILURE_TYPE = "DocumentIngestionError"
-INTERRUPTED_FAILURE_TYPE = "IngestionInterrupted"
-PROVIDER_FAILURE_TYPE = "ModelProviderRejected"
-TRIGGER_TYPES = frozenset({"manual", "scheduled", "webhook", "initial", "upload", "retry"})
+INGESTION_RUN_WORKFLOW_NAME = "bomesh.ingestion_run"
+SOURCE_SYNC_WORKFLOW_NAME = "bomesh.source_sync"
+START_RUN_ACTIVITY = "bomesh.ingestion_run.start"
+PLAN_BATCHES_ACTIVITY = "bomesh.ingestion_run.plan_batches"
+PROCESS_BATCH_ACTIVITY = "bomesh.ingestion_run.process_batch"
+FAIL_BATCH_ACTIVITY = "bomesh.ingestion_run.fail_batch"
+FINISH_RUN_ACTIVITY = "bomesh.ingestion_run.finish"
+SYNC_SOURCE_ACTIVITY = "bomesh.source_sync.sync"
+CREATE_SCHEDULED_RUN_ACTIVITY = "bomesh.source_sync.create_scheduled_run"
+#: The failure type a ``process_batch`` raises when the model provider refused
+#: the key, credit or model: the run stops instead of retrying.
+PROVIDER_REJECTED_FAILURE_TYPE = "ModelProviderRejected"
 TEMPORAL_DEFAULT_NAMESPACE = "default"
 TEMPORAL_DEFAULT_TARGET = "127.0.0.1:7233"
 
@@ -65,108 +67,88 @@ class TemporalSettings:
 
 
 @dataclass(frozen=True, slots=True)
-class IngestionWorkflowInput:
-    """One managed ingestion: sync ``source_id``, or index ``document_id``."""
+class IngestionRunInput:
+    """One Ingestion Run; ``next_batch_number`` carries across continue-as-new."""
 
+    run_id: str
     tenant_id: str
-    source_id: str | None = None
-    connector_key: str | None = None
-    integration_connection_id: str | None = None
-    test_connection: bool = True
-    document_id: str | None = None
-    owner_user_id: str | None = None
-    trigger_type: str = "manual"
-
-    def __post_init__(self) -> None:
-        if not self.tenant_id.strip():
-            raise ValueError("tenant_id must not be blank")
-        if (self.source_id is None) == (self.document_id is None):
-            raise ValueError("an ingestion targets exactly one Source or one Document")
-        if self.source_id is not None and not (
-            self.source_id.strip() and (self.connector_key or "").strip()
-        ):
-            raise ValueError("a Source ingestion needs its source id and connector key")
-        if self.document_id is not None and not (
-            self.document_id.strip() and (self.owner_user_id or "").strip()
-        ):
-            raise ValueError("a Document ingestion needs its document id and owner")
-        if self.trigger_type not in TRIGGER_TYPES:
-            raise ValueError("unsupported ingestion trigger type")
-
-    @property
-    def kind(self) -> str:
-        return "source" if self.source_id is not None else "document"
-
-    @property
-    def target_id(self) -> str:
-        return str(self.source_id if self.source_id is not None else self.document_id)
+    next_batch_number: int = 0
 
 
 @dataclass(frozen=True, slots=True)
-class IngestionProgress:
-    phase: str = "queued"
-    discovered_count: int = 0
-    processed_count: int = 0
-    indexed_count: int = 0
-    deleted_count: int = 0
-    failed_count: int = 0
+class RunStart:
+    """Whether a run still has work, and how many batches may run at once."""
+
+    active: bool
+    parallelism: int = 1
 
 
 @dataclass(frozen=True, slots=True)
-class IngestionResult:
-    """What one managed ingestion did; kept in history for its timeline.
+class PlanBatchesInput:
+    run_id: str
+    first_batch_number: int
+    max_batches: int
 
-    Document runs report ``indexed_count`` chunks (or ``document_count``
-    Documents extracted from an archive) and their ``phases``
-    (``{phase, started_at, finished_at, done, total}``, in order).
-    """
 
-    source_id: str | None = None
-    document_id: str | None = None
-    discovered_count: int = 0
-    processed_count: int = 0
-    indexed_count: int = 0
-    deleted_count: int = 0
-    failed_count: int = 0
-    checkpoint_advanced: bool = False
-    duration_ms: int = 0
-    document_count: int = 0
-    phases: list[dict[str, Any]] = field(default_factory=list)
+@dataclass(frozen=True, slots=True)
+class RunBatch:
+    number: int
+    item_ids: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class ProcessBatchInput:
+    run_id: str
+    tenant_id: str
+    batch_number: int
+    item_ids: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class FailBatchInput:
+    run_id: str
+    batch_number: int
+
+
+@dataclass(frozen=True, slots=True)
+class FinishRunInput:
+    """``outcome``: completed, failed or cancelled; ``error`` explains a failed run."""
+
+    run_id: str
+    outcome: str
+    error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SourceSyncInput:
+    """Sync one Source; ``process`` then creates a run for what is pending."""
+
+    source_id: str
+    tenant_id: str
+    process: bool = False
 
 
 class WorkflowExecutionNotFoundError(LookupError):
     """Raised when a Temporal workflow or schedule is not present."""
 
 
-def ingestion_workflow_id(target_id: str) -> str:
-    """The one execution id of a Source's or a Document's managed ingestion."""
+def ingestion_run_workflow_id(run_id: str) -> str:
+    return f"ingestion-run:{_required(run_id, 'run_id')}"
 
-    normalized = target_id.strip()
-    if not normalized:
-        raise ValueError("ingestion target id must not be blank")
-    return f"ingestion:{normalized}"
+
+def source_sync_workflow_id(source_id: str) -> str:
+    return f"source-sync:{_required(source_id, 'source_id')}"
 
 
 def ingestion_schedule_id(source_id: str) -> str:
-    normalized = source_id.strip()
+    return f"ingestion-schedule:{_required(source_id, 'source_id')}"
+
+
+def _required(value: str, name: str) -> str:
+    normalized = value.strip()
     if not normalized:
-        raise ValueError("source_id must not be blank")
-    return f"ingestion-schedule:{normalized}"
-
-
-def document_ingestion_id(document_id: str) -> UUID:
-    """A Document's ingestion id, whichever runner (managed or direct) ran it."""
-
-    return public_ingestion_id(ingestion_workflow_id(document_id))
-
-
-def public_ingestion_id(workflow_id: str) -> UUID:
-    """The contract ``ingestion_id`` of one Temporal workflow; the workflow id stays private."""
-
-    normalized = workflow_id.strip()
-    if not normalized:
-        raise ValueError("workflow_id must not be blank")
-    return uuid5(NAMESPACE_URL, f"{PERSISTED_IDENTITY_NAMESPACE}:ingestion:{normalized}")
+        raise ValueError(f"{name} must not be blank")
+    return normalized
 
 
 def _environment_boolean(name: str, *, default: bool = False) -> bool:
@@ -183,21 +165,28 @@ def _environment_boolean(name: str, *, default: bool = False) -> bool:
 
 
 __all__ = [
-    "DOCUMENT_FAILURE_TYPE",
-    "DOCUMENT_INGESTION_ACTIVITY_NAME",
+    "CREATE_SCHEDULED_RUN_ACTIVITY",
+    "FAIL_BATCH_ACTIVITY",
+    "FINISH_RUN_ACTIVITY",
+    "INGESTION_RUN_WORKFLOW_NAME",
     "INGESTION_TASK_QUEUE",
-    "INGESTION_WORKFLOW_NAME",
-    "INTERRUPTED_FAILURE_TYPE",
-    "PROVIDER_FAILURE_TYPE",
-    "SOURCE_INGESTION_ACTIVITY_NAME",
-    "TRIGGER_TYPES",
-    "IngestionProgress",
-    "IngestionResult",
-    "IngestionWorkflowInput",
+    "PLAN_BATCHES_ACTIVITY",
+    "PROCESS_BATCH_ACTIVITY",
+    "PROVIDER_REJECTED_FAILURE_TYPE",
+    "SOURCE_SYNC_WORKFLOW_NAME",
+    "START_RUN_ACTIVITY",
+    "SYNC_SOURCE_ACTIVITY",
+    "FailBatchInput",
+    "FinishRunInput",
+    "IngestionRunInput",
+    "PlanBatchesInput",
+    "ProcessBatchInput",
+    "RunBatch",
+    "RunStart",
+    "SourceSyncInput",
     "TemporalSettings",
     "WorkflowExecutionNotFoundError",
-    "document_ingestion_id",
+    "ingestion_run_workflow_id",
     "ingestion_schedule_id",
-    "ingestion_workflow_id",
-    "public_ingestion_id",
+    "source_sync_workflow_id",
 ]

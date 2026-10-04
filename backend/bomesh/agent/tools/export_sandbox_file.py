@@ -47,24 +47,12 @@ class ExportSandboxFile(Tool):
                 error=str(exc),
                 metadata={"outcome": "invalid_input", "result_count": 0},
             )
-        await invocation.report_progress(
-            "artifact",
-            {
-                "artifact": {
-                    "id": artifact.id,
-                    "title": artifact.title,
-                    "file_name": artifact.name,
-                    "mime_type": artifact.mime_type,
-                    "revision": artifact.revision,
-                    "size_bytes": artifact.size_bytes,
-                    "updated_at": artifact.updated_at or "",
-                }
-            },
-        )
+        await invocation.report_progress("artifact", {"artifact": artifact.reference()})
         return ToolResult(
             content=(
                 f"Saved {artifact.name} as a conversation artifact (revision "
-                f"{artifact.revision})."
+                f"{artifact.revision}). The user already sees it as a download "
+                "card in this chat; refer to it by name, without a link or path."
             ),
             metadata={"outcome": "success", "result_count": 1},
         )

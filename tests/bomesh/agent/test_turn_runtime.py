@@ -27,6 +27,7 @@ from bomesh.agent import (
     ImageInput,
     ResourceRef,
     ResolvedStepSettings,
+    SandboxArtifact,
     Session,
     SessionConfiguration,
     SessionServices,
@@ -548,101 +549,127 @@ async def test_hosted_shell_capability_reaches_the_provider_prompt_without_a_loc
     assert prompt.tools == ()
     assert prompt.execution_capability == step.execution_capability
     assert prompt.tool_choice == "auto"
+    # The model is told what the shell can do before its first command.
+    assert "<hosted_shell>" in prompt.instructions
+    assert "python3" in prompt.instructions
 
 
-@pytest.mark.asyncio
-async def test_sandbox_workspace_materializes_reuses_and_exports_without_host_paths() -> None:
-    class Provider:
-        provider = "openrouter"
+def _workbook(rows: list[list[object]]) -> bytes:
+    from io import BytesIO
 
-        def __init__(self) -> None:
-            self.uploads: list[tuple[str, bytes]] = []
-            self.downloads: list[tuple[str, str]] = []
+    from openpyxl import Workbook
 
-        async def upload_file(self, *, file_name: str, mime_type: str, data: bytes):
-            assert mime_type == "text/csv"
-            self.uploads.append((file_name, data))
-            return ProviderResourceRef(
-                provider="openrouter", id="or_file_1", name=file_name
-            )
+    book = Workbook()
+    sheet = book.active
+    for row in rows:
+        sheet.append(row)
+    buffer = BytesIO()
+    book.save(buffer)
+    return buffer.getvalue()
 
-        async def download_file(self, *, environment_id: str, file_id: str) -> bytes:
-            self.downloads.append((environment_id, file_id))
-            return b"month,total\nJan,10\n"
 
-    class Sessions:
-        def __init__(self) -> None:
-            self.state: SandboxSessionState | None = None
+class _SandboxProvider:
+    provider = "openrouter"
 
-        async def active(self, *_: Any, **__: Any) -> SandboxSessionState | None:
-            return self.state
+    def __init__(self) -> None:
+        self.uploads: list[tuple[str, bytes]] = []
+        self.downloads: list[tuple[str, str]] = []
+        self.saved: dict[str, str] = {}
 
-        async def recoverable(self, *_: Any, **__: Any) -> SandboxSessionState | None:
-            return None
+    async def upload_file(self, *, file_name: str, mime_type: str, data: bytes):
+        self.uploads.append((file_name, data))
+        return ProviderResourceRef(
+            provider="openrouter", id=f"or_file_{len(self.uploads):08d}", name=file_name
+        )
 
-        async def ensure(self, *_: Any, **__: Any) -> SandboxSessionState:
-            assert self.state is None
-            self.state = SandboxSessionState(
-                id=uuid4(), provider="openrouter", status="active"
-            )
-            return self.state
+    async def download_file(self, *, environment_id: str, file_id: str) -> bytes:
+        self.downloads.append((environment_id, file_id))
+        return b"month,total\nJan,10\n"
 
-        async def record_materialization(
-            self, _: AuthContext, *, resource: SandboxManifestResource,
-            provider_file: SandboxProviderFile, **__: Any
-        ) -> SandboxSessionState:
-            assert self.state is not None
-            self.state = replace(
-                self.state,
-                manifest=(resource,),
-                materialized_files=(provider_file,),
-            )
-            return self.state
+    def workspace_path(self, *, file_id: str, file_name: str) -> str:
+        return f"~/{file_id[-8:]}-{file_name}"
 
-        async def record_execution(
-            self, _: AuthContext, *, environment_id: str,
-            files: tuple[SandboxProviderFile, ...], **__: Any
-        ) -> SandboxSessionState:
-            assert self.state is not None
-            self.state = replace(
-                self.state, environment_id=environment_id, observed_files=files
-            )
-            return self.state
+    async def find_file(self, *, environment_id: str, path: str):
+        file_id = self.saved.get(path)
+        return ProviderResourceRef(provider="openrouter", id=file_id, name=path) if file_id else None
 
-        async def record_resource(
-            self, _: AuthContext, *, resource: SandboxManifestResource, **__: Any
-        ) -> SandboxSessionState:
-            assert self.state is not None
-            self.state = replace(self.state, manifest=(*self.state.manifest, resource))
-            return self.state
 
-        async def expire(self, *_: Any, **__: Any) -> None:
-            raise AssertionError("the provider did not expire")
+class _SandboxSessions:
+    def __init__(self) -> None:
+        self.state: SandboxSessionState | None = None
 
-    class Artifacts:
-        async def source_file(self, _: AuthContext, document_id):  # type: ignore[no-untyped-def]
-            return WorkspaceSource(
-                document_id=str(document_id),
-                title="Revenue",
-                file_name="revenue.csv",
-                mime_type="text/csv",
-                data=b"month,total\nJan,10\n",
-            )
+    async def active(self, *_: Any, **__: Any) -> SandboxSessionState | None:
+        return self.state
 
-        async def record_generated(self, _: AuthContext, **__: Any) -> dict[str, object]:
-            return {
-                "id": str(UUID(int=44)),
-                "title": "Analysis",
-                "file_name": "analysis.csv",
-                "mime_type": "text/csv",
-                "size_bytes": 19,
-                "revision": 1,
-                "updated_at": "2026-09-10T00:00:00Z",
-            }
+    async def recoverable(self, *_: Any, **__: Any) -> SandboxSessionState | None:
+        return None
 
-    provider = Provider()
-    sessions = Sessions()
-    access = AuthContext(
+    async def ensure(self, *_: Any, **__: Any) -> SandboxSessionState:
+        if self.state is None:
+            self.state = SandboxSessionState(id=uuid4(), provider="openrouter", status="active")
+        return self.state
+
+    async def record_materialization(
+        self, _: AuthContext, *, resource: SandboxManifestResource,
+        provider_files: tuple[SandboxProviderFile, ...], **__: Any
+    ) -> SandboxSessionState:
+        assert self.state is not None
+        self.state = replace(
+            self.state,
+            manifest=(*self.state.manifest, resource),
+            materialized_files=(*self.state.materialized_files, *provider_files),
+        )
+        return self.state
+
+    async def record_execution(
+        self, _: AuthContext, *, environment_id: str,
+        files: tuple[SandboxProviderFile, ...], delivered_file_ids: tuple[str, ...] = (),
+        **__: Any
+    ) -> SandboxSessionState:
+        assert self.state is not None
+        self.state = replace(
+            self.state,
+            environment_id=environment_id,
+            observed_files=files,
+            materialized_files=tuple(
+                replace(file, delivered=True) if file.id in delivered_file_ids else file
+                for file in self.state.materialized_files
+            ),
+        )
+        return self.state
+
+    async def record_resource(
+        self, _: AuthContext, *, resource: SandboxManifestResource, **__: Any
+    ) -> SandboxSessionState:
+        assert self.state is not None
+        self.state = replace(self.state, manifest=(*self.state.manifest, resource))
+        return self.state
+
+    async def expire(self, *_: Any, **__: Any) -> None:
+        raise AssertionError("the provider did not expire")
+
+
+class _SandboxArtifacts:
+    def __init__(self, sources: dict[str, WorkspaceSource]) -> None:
+        self.sources = sources
+
+    async def source_file(self, _: AuthContext, document_id):  # type: ignore[no-untyped-def]
+        return self.sources[str(document_id)]
+
+    async def record_generated(self, _: AuthContext, **fields: Any) -> dict[str, object]:
+        return {
+            "id": str(UUID(int=44)),
+            "title": "Analysis",
+            "file_name": fields["file_name"],
+            "mime_type": "text/csv",
+            "size_bytes": 19,
+            "revision": 1,
+            "updated_at": "2026-09-10T00:00:00Z",
+        }
+
+
+def _sandbox_access() -> AuthContext:
+    return AuthContext(
         user_id=uuid4(),
         email="owner@example.com",
         display_name=None,
@@ -651,48 +678,149 @@ async def test_sandbox_workspace_materializes_reuses_and_exports_without_host_pa
         group_ids=(),
         role_codes=("member",),
     )
-    resource = ResourceRef(
-        id=str(UUID(int=33)), name="revenue.csv", mime_type="text/csv", size_bytes=19
+
+
+def _shell_ran(*files: ProviderResourceRef) -> tuple[HostedExecutionResultItem, ...]:
+    return (
+        HostedExecutionResultItem(
+            call_id="call_1",
+            output=(ExecutionOutput(stdout="", exit_code=0),),
+            environment={"provider": "openrouter", "id": "container_1"},
+            files=files,
+        ),
     )
+
+
+@pytest.mark.asyncio
+async def test_sandbox_workspace_names_paths_adds_files_to_a_running_shell_and_exports() -> None:
+    revenue_id, roster_id = str(UUID(int=33)), str(UUID(int=34))
+    provider = _SandboxProvider()
     workspace = SandboxWorkspace(
-        access=access,
+        access=_sandbox_access(),
         conversation_id=uuid4(),
         request_id="a" * 32,
         provider=provider,
-        sessions=sessions,  # type: ignore[arg-type]
-        artifacts=Artifacts(),  # type: ignore[arg-type]
-    )
-    capability = ExecutionCapability(
-        provider="openrouter", model="model", hosted_shell=True
-    )
-
-    await workspace.materialize_resource(resource)
-    prepared = await workspace.configure_execution(capability)
-    await workspace.observe_execution(
-        (
-            HostedExecutionResultItem(
-                call_id="call_1",
-                output=(ExecutionOutput(stdout="", exit_code=0),),
-                environment={"provider": "openrouter", "id": "container_1"},
-                files=(
-                    ProviderResourceRef(
-                        provider="openrouter", id="cfile_1", name="analysis.csv"
-                    ),
-                ),
+        sessions=_SandboxSessions(),  # type: ignore[arg-type]
+        artifacts=_SandboxArtifacts({  # type: ignore[arg-type]
+            revenue_id: WorkspaceSource(
+                document_id=revenue_id, title="Revenue", file_name="revenue.csv",
+                mime_type="text/csv", data=b"month,total\nJan,10\n",
             ),
-        )
+            roster_id: WorkspaceSource(
+                document_id=roster_id, title="Roster", file_name="roster.xlsx",
+                mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                data=_workbook([["Student roster"], [], ["Id", "Name"], ["12142004", "Lan"]]),
+            ),
+        }),
     )
-    resumed = await workspace.configure_execution(capability)
-    artifact = await workspace.promote_file(
-        "analysis.csv", summary="Saved analysis"
+    capability = ExecutionCapability(provider="openrouter", model="model", hosted_shell=True)
+
+    revenue = await workspace.materialize_resource(
+        ResourceRef(id=revenue_id, name="revenue.csv", mime_type="text/csv")
+    )
+    first = await workspace.configure_execution(capability)
+    await workspace.observe_execution(
+        _shell_ran(ProviderResourceRef(provider="openrouter", id="cfile_1", name="analysis.csv"))
     )
 
-    assert provider.uploads == [("revenue.csv", b"month,total\nJan,10\n")]
-    assert prepared.workspace_file_ids == ("or_file_1",)
-    assert resumed.environment_id == "container_1"
-    assert provider.downloads == [("container_1", "cfile_1")]
-    assert artifact.id == str(UUID(int=44))
-    assert workspace.artifact_ids == (str(UUID(int=44)),)
+    # The shell is running now; a file prepared later still reaches it, once.
+    roster = await workspace.materialize_resource(
+        ResourceRef(id=roster_id, name="roster.xlsx", mime_type="application/octet-stream")
+    )
+    second = await workspace.configure_execution(capability)
+    await workspace.observe_execution(_shell_ran())
+    third = await workspace.configure_execution(capability)
+
+    assert revenue.paths == ("~/00000001-revenue.csv",)
+    assert roster.paths == ("~/00000002-roster.xlsx", "~/00000003-roster.csv")
+    assert provider.uploads[2] == ("roster.csv", b"Student roster\n\nId,Name\n12142004,Lan\n")
+    assert first.environment_id is None
+    assert first.workspace_file_ids == ("or_file_00000001",)
+    assert second.environment_id == "container_1"
+    assert second.workspace_file_ids == ("or_file_00000002", "or_file_00000003")
+    assert third.workspace_file_ids == ()
+
+    # Export accepts the path as the model wrote it, and finds files the
+    # shell no longer reports.
+    provider.saved["out/summary.csv"] = "cfile_2"
+    reported = await workspace.promote_file("~/analysis.csv", summary="Saved analysis")
+    unreported = await workspace.promote_file("out/summary.csv", summary="Saved summary")
+
+    assert provider.downloads == [("container_1", "cfile_1"), ("container_1", "cfile_2")]
+    assert (reported.name, unreported.name) == ("analysis.csv", "out/summary.csv")
+    # One card per document: a later export of the same document replaces it.
+    assert workspace.artifacts == (unreported,)
+
+
+class _ExportedFiles:
+    """A request workspace that already exported one file in this turn."""
+
+    def __init__(self, *artifacts: SandboxArtifact) -> None:
+        self.artifacts = artifacts
+
+    async def configure_execution(self, capability: ExecutionCapability) -> ExecutionCapability:
+        return capability
+
+    async def observe_execution(self, items: tuple[Any, ...]) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_a_saved_file_is_attached_once_to_the_answer_that_presents_it() -> None:
+    """Restored conversations rebuild file cards from this annotation alone."""
+
+    report = SandboxArtifact(
+        id=str(UUID(int=44)), title="report.xlsx", name="report.xlsx",
+        mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        revision=2, size_bytes=1900, updated_at="2026-10-04T00:00:00Z",
+    )
+    transport = ScriptedResponsesTransport(
+        [
+            [
+                *created("resp_a"),
+                *message(item_id="msg_1", output_index=0, deltas=["Saved the report."], phase="commentary"),
+                *function_call(
+                    item_id="fc_1", output_index=1, call_id="call_1",
+                    name="knowledge_search", argument_deltas=['{"query":"leave"}'],
+                ),
+                *completed("resp_a"),
+            ],
+            [
+                *created("resp_b"),
+                *message(item_id="msg_2", output_index=0, deltas=["Here it is."], phase="final_answer"),
+                *completed("resp_b"),
+            ],
+        ]
+    )
+    registry = ToolRegistry()
+    registry.register(Lookup())
+    configuration = SessionConfiguration(max_model_turns=3, max_tool_rounds=2)
+    session = RecordingSession(
+        configuration,
+        SessionServices(model=transport, tool_registry=registry, sandbox_runtime=_ExportedFiles(report)),
+        ContextManager(configuration=configuration),
+    )
+
+    events = [event async for event in run_turn(session, _turn(_context()))]
+
+    messages = [
+        event.item for event in events
+        if event.type == "response.output_item.done" and event.item.type == "message"
+    ]
+    artifact_annotations = [
+        [annotation for annotation in item.content[0].annotations if annotation["type"] == "bomesh:artifact"]
+        for item in messages
+    ]
+    end = len("Saved the report.")
+    assert artifact_annotations == [
+        [{
+            "type": "bomesh:artifact",
+            "start_index": end,
+            "end_index": end,
+            "artifact": report.reference(),
+        }],
+        [],
+    ]
 
 
 class SlowTool(Lookup):

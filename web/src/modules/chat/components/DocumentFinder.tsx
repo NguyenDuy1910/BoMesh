@@ -338,8 +338,9 @@ function FinderRow({
 }
 
 function statusLabel(status: FoundDocument["status"]) {
-  if (status === "pending" || status === "processing") return "Processing, not in answers yet";
-  if (status === "failed") return "Can’t be searched";
+  if (status === "pending") return "Not processed yet, not in answers";
+  if (status === "processing") return "Processing, not in answers yet";
+  if (status === "failed") return "Couldn’t be processed";
   if (status === "unsupported") return "Preview only";
   return undefined;
 }

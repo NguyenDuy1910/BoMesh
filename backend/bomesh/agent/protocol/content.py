@@ -31,6 +31,14 @@ OpenRouter emits file-cache descriptors, and BoMesh adds
 vocabulary into the common contract for no gain.
 """
 
+ARTIFACT_ANNOTATION_TYPE = "bomesh:artifact"
+"""A file the turn produced, attached to the answer text that presents it.
+
+It replaces the provider's ``container_file_citation``: it names the durable
+conversation artifact (``artifact``: id, title, file name, type, revision,
+size, update time) and never a container or provider file id.
+"""
+
 DOCUMENT_CITATION_TYPE = "bomesh:document_citation"
 """The BoMesh citation annotation type.
 

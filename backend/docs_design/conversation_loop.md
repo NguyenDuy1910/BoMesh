@@ -49,6 +49,45 @@ Evidence → bounded context → citable source references
 - `KnowledgeQueryService` (`/knowledge` search API) uses the same retriever with
   a single query.
 
+## Hosted shell work (`materialize_sandbox_resource`, `export_sandbox_file`)
+
+Exact work over a file (finding a code in a spreadsheet, filtering rows,
+totals, producing a file) is shell work: `read_resource` and search see only
+part of a long file. The shell is the provider's hosted container (OpenRouter
+`openrouter:shell`), one per conversation, recorded in `sandbox_sessions`.
+
+- **The model knows the runtime before its first command.** The provider's
+  `ExecutionCapability.guidance` (home directory, `python3`, installed
+  libraries, no internet) is placed in the instructions as `<hosted_shell>`
+  whenever the shell is offered.
+- **Preparing a file returns its shell path.** `materialize_sandbox_resource`
+  uploads an authorized Item and answers with the exact path the shell sees
+  (OpenRouter: `~/<last 8 of file id>-<name>`). A workbook (`.xlsx`, `.xlsm`)
+  also arrives as one CSV per non-empty sheet, every cell kept, because the
+  container has pandas but no Excel reader and nothing can be installed.
+- **Files can join a running shell.** A file prepared after the container
+  started is attached to the next shell request (`container_reference` with
+  `file_ids`) and then marked delivered, so it is copied exactly once.
+  `provider_state.materialized_files[].delivered` tracks this; entries
+  without the flag predate it and count as delivered.
+- **Export by home-relative path.** `export_sandbox_file` accepts `x` or
+  `~/x`. A file the shell no longer reports (results list at most 10 changed
+  files) is looked up in the container before the export is refused.
+- **Clients see what ran.** `hosted_execution_result` items carry the
+  commands and their stdout/stderr/exit status (never provider ids). The web
+  chat shows each run as one line — "Ran code", "Ran 3 commands, 1 failed"
+  or "Code hit an error", followed by the failing command's last error line —
+  that opens into the commands and their output.
+- **File cards survive a reload.** The answer text that follows an export
+  carries a `bomesh:artifact` annotation per saved revision (agent
+  `ArtifactProjection`, beside `CitationProjection`), so web and mobile
+  rebuild the card from the stored turn, not only from live tool progress.
+- **Exported files are cards, not links.** The export result tells the model
+  the user already sees a download card, so the answer names the file
+  instead of inventing a path. Replayed shell results carry their file
+  citations in OpenRouter's full shape (`start_index`/`end_index`), so a turn
+  can keep working after a step that wrote files.
+
 ## Flutter conversation client
 
 Flutter consumes the existing `POST /api/v1/agent/chat` OpenResponses SSE stream;

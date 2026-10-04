@@ -1,4 +1,4 @@
-"""Ingestion source resources and schedules."""
+"""Ingestion source resources, their syncs, and schedules."""
 
 from __future__ import annotations
 
@@ -7,21 +7,16 @@ from uuid import UUID
 
 from fastapi import APIRouter, Query, Response, status
 
-from api.deps import Caller, ConnectionLifecycle, Ingestions
+from api.deps import Caller, ConnectionLifecycle
 from api.routers import (
-    Ingestion,
-    IngestionPage,
     Schedule,
     SchedulePatch,
     SchedulePut,
     Source,
     SourcePage,
-    SourceStatus,
     SourceUpdate,
 )
 from api.routers._mapping import source_payload
-from bomesh.services.ingestion import ingestion_resource
-from bomesh.services import ControlPlaneNotFoundError
 
 router = APIRouter(prefix="/sources", tags=["sources"])
 
@@ -81,65 +76,19 @@ async def delete_source(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.get("/{source_id}/status", response_model=SourceStatus)
-async def get_source_status(
-    source_id: UUID, caller: Caller, connections: ConnectionLifecycle
-) -> SourceStatus:
-    value = await connections.get_source_status(caller, source_id)
-    return SourceStatus(
-        source_id=source_id,
-        source_status=value.get("source_status", "failed"),
-        connection_status=value.get("connection_status", "error"),
-        latest_ingestion=(
-            ingestion_resource(value["workflow"])
-            if value.get("workflow")
-            else None
-        ),
-    )
-
-
 @router.post(
-    "/{source_id}/ingestions",
-    tags=["ingestions"],
-    response_model=Ingestion,
+    "/{source_id}/syncs",
+    response_model=Source,
     status_code=status.HTTP_202_ACCEPTED,
 )
-async def create_source_ingestion(
+async def create_source_sync(
     source_id: UUID, caller: Caller, connections: ConnectionLifecycle
-) -> Ingestion:
-    return Ingestion.model_validate(
-        ingestion_resource(await connections.ingest_source(caller, source_id))
+) -> Source:
+    """Sync the Source's inventory now; processing is a separate Ingestion Run."""
+
+    return Source.model_validate(
+        source_payload(await connections.sync_source(caller, source_id))
     )
-
-
-@router.get("/{source_id}/ingestions", response_model=IngestionPage, tags=["ingestions"])
-async def list_source_ingestions(
-    source_id: UUID,
-    caller: Caller,
-    ingestions: Ingestions,
-    page: Annotated[int, Query(ge=1)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
-) -> IngestionPage:
-    return IngestionPage.model_validate(
-        await ingestions.list_ingestions(
-            caller, source_id=source_id, page=page, page_size=page_size
-        )
-    )
-
-
-@router.get(
-    "/{source_id}/ingestions/{ingestion_id}", response_model=Ingestion, tags=["ingestions"]
-)
-async def get_source_ingestion(
-    source_id: UUID,
-    ingestion_id: UUID,
-    caller: Caller,
-    ingestions: Ingestions,
-) -> Ingestion:
-    value = await ingestions.get_ingestion(caller, ingestion_id)
-    if str(value.get("source_id")) != str(source_id):
-        raise ControlPlaneNotFoundError(f"ingestion not found: {ingestion_id}")
-    return Ingestion.model_validate(value)
 
 
 @router.get("/{source_id}/schedule", response_model=Schedule)

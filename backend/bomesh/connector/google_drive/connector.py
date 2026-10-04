@@ -1,4 +1,4 @@
-"""Google Drive adapter producing canonical Items for governed ingestion."""
+"""Google Drive adapter: discovers changed files and stores their originals."""
 
 from __future__ import annotations
 
@@ -12,12 +12,12 @@ from urllib.parse import quote
 import httpx
 
 from bomesh.connector.base import BaseSourceConnector
-from bomesh.connector.file import FileProcessor, FinxFileExtensions
+from bomesh.connector.file import FinxFileExtensions
+from bomesh.connector.originals import original_key, store_original
 from bomesh.connector.protocol import (
     AccessPolicy,
     AnyItem,
     ChangeType,
-    Chunk,
     CollectionItem,
     CollectionKind,
     ConnectorCheckpoint,
@@ -31,7 +31,6 @@ from bomesh.connector.protocol import (
     StorageObject,
 )
 from bomesh.connector.protocol import RawObjectStore
-from bomesh.storage import StoredObject
 
 from .checkpoint import GoogleDriveCheckpoint
 
@@ -99,7 +98,6 @@ class GoogleDriveConnector(BaseSourceConnector):
         if self._folder_id and self._shared_drive_id:
             raise ValueError("Google Drive source may select a folder or a Shared Drive, not both")
         self._scope = self._scope_value()
-        self._processed_chunks: dict[str, tuple[Chunk, ...]] = {}
         self._files: dict[str, dict[str, Any]] = {}
         self._next_checkpoint = GoogleDriveCheckpoint()
         self._storage: RawObjectStore | None = None
@@ -158,7 +156,6 @@ class GoogleDriveConnector(BaseSourceConnector):
         scope: ConnectorScope,
     ) -> list[ItemChange]:
         self._validate_scope(scope)
-        self._processed_chunks.clear()
         typed_checkpoint = (
             checkpoint
             if isinstance(checkpoint, GoogleDriveCheckpoint)
@@ -178,6 +175,8 @@ class GoogleDriveConnector(BaseSourceConnector):
             return await self._initial_changes()
 
     async def fetch_item(self, item_id: str) -> DocumentItem:
+        """Download (or export) one file and store it as the Document's original."""
+
         file = self._files.get(item_id)
         if file is None:
             file = await self._file(item_id)
@@ -198,11 +197,8 @@ class GoogleDriveConnector(BaseSourceConnector):
             file_name=file_name,
             content_type=content_type,
         )
-        processed = await asyncio.to_thread(
-            FileProcessor(max_file_bytes=_MAX_SOURCE_FILE_BYTES).process_bytes,
-            content,
-            file_name=file_name,
-            item_id=source.external_id,
+        return DocumentItem(
+            id=source.external_id,
             title=_required_text(file.get("name"), "Google Drive file name"),
             source=source,
             document_kind=_document_kind(content_type),
@@ -210,17 +206,9 @@ class GoogleDriveConnector(BaseSourceConnector):
             access=_access_policy(file),
             metadata=_metadata(file, exported_content_type=content_type),
             original=stored,
+            created_at=_parse_timestamp(file.get("createdTime")),
+            updated_at=_parse_timestamp(file.get("modifiedTime")),
         )
-        self._processed_chunks[processed.item.id] = processed.chunks
-        return processed.item.model_copy(
-            update={
-                "created_at": _parse_timestamp(file.get("createdTime")),
-                "updated_at": _parse_timestamp(file.get("modifiedTime")),
-            }
-        )
-
-    async def fetch_chunks(self, item: DocumentItem) -> tuple[Chunk, ...] | None:
-        return self._processed_chunks.pop(item.id, None)
 
     async def fetch_hierarchy(self, scope: ConnectorScope) -> list[AnyItem]:
         self._validate_scope(scope)
@@ -402,30 +390,19 @@ class GoogleDriveConnector(BaseSourceConnector):
         file_name: str,
         content_type: str,
     ) -> StorageObject:
-        if self._storage is None:
-            raise RuntimeError("Google Drive ingestion requires configured object storage")
-        key = (
-            f"tenants/{_storage_part(self._tenant_id)}/sources/"
-            f"{_storage_part(self._connector_id)}/google_drive/"
-            f"{_storage_part(file_id)}/{_storage_part(file_name)}"
-        )
-        stored = await asyncio.to_thread(
-            self._storage.put_bytes,
-            data,
-            key,
-            content_type=content_type,
-        )
-        if not isinstance(stored, StoredObject):
-            raise RuntimeError("configured object storage returned invalid metadata")
-        return StorageObject(
-            provider=_optional_text(getattr(self._storage, "provider", None)),
-            bucket=_optional_text(getattr(self._storage, "bucket", None)),
-            key=key,
+        return await asyncio.to_thread(
+            store_original,
+            self._storage,
+            key=original_key(
+                tenant_id=self._tenant_id,
+                connection_id=self._connector_id,
+                provider=SourceProvider.GOOGLE_DRIVE.value,
+                external_id=file_id,
+                file_name=file_name,
+            ),
             file_name=file_name,
-            size_bytes=stored.size_bytes,
-            content_type=stored.content_type or content_type,
-            etag=stored.etag,
-            version_id=stored.version_id,
+            content_type=content_type,
+            data=data,
         )
 
     async def _get_json(
@@ -694,10 +671,6 @@ def _access_policy(file: dict[str, Any]) -> AccessPolicy:
         elif permission_type == "anyone":
             reader_ids.append("google_anyone:public")
     return AccessPolicy.from_reader_ids(reader_ids)
-
-
-def _storage_part(value: str) -> str:
-    return quote(value, safe="-_.")
 
 
 def _drive_literal(value: str) -> str:

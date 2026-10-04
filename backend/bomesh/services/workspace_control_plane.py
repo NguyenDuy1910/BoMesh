@@ -41,9 +41,11 @@ class WorkspaceControlPlaneService:
         session_factory: SessionFactory,
         *,
         vector_index: VectorIndexConfig,
+        processing_version: str | None,
     ) -> None:
         self._sessions = session_factory
         self._vector_index = vector_index
+        self._processing_version = processing_version
 
     # -- Tenants ------------------------------------------------------------
 
@@ -51,7 +53,9 @@ class WorkspaceControlPlaneService:
         self, actor: AuthContext, *, tz: str = "UTC"
     ) -> dict[str, Any]:
         async with self._unit_of_work() as session:
-            return await DashboardService(session).overview(actor, tz=tz)
+            return await DashboardService(
+                session, processing_version=self._processing_version
+            ).overview(actor, tz=tz)
 
     async def workspace_activity(
         self, actor: AuthContext, workspace_id: UUID, **filters: Any
@@ -249,17 +253,6 @@ class WorkspaceControlPlaneService:
         async with self._catalog() as (session, service):
             del session
             return await service.update_status(actor, item_id, status=status)
-
-    async def retry_item(self, actor: AuthContext, item_id: UUID) -> dict[str, Any]:
-        async with self._catalog() as (session, service):
-            del session
-            result = await service.retry_item(actor, item_id)
-        ingestion_source_id = result.pop("ingestion_source_id", None)
-        if ingestion_source_id is not None:
-            result["ingestion_run"] = await self.ingest_source(
-                actor, UUID(ingestion_source_id)
-            )
-        return result
 
     async def delete_item(self, actor: AuthContext, item_id: UUID) -> None:
         async with self._catalog() as (session, service):

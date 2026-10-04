@@ -13,8 +13,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 import api.app as api_app
 import api.deps as api_deps
 from bomesh.services import AuthContext
-from bomesh.services.document_presentation import public_document_status
-from bomesh.services.knowledge_view import _document_payload
+from bomesh.services.document_presentation import (
+    DocumentPresenter,
+    LatestRunItem,
+    public_document_status,
+)
 
 
 def _caller() -> AuthContext:
@@ -52,7 +55,7 @@ def _document(document_id: UUID, collection_id: UUID) -> dict[str, object]:
         "size_bytes": 100,
         "purpose": "knowledge",
         "status": "available",
-        "latest_ingestion": None,
+        "processing": {"state": "outdated", "error": None, "run_id": None},
         "created_at": "2026-09-12T09:00:00+00:00",
         "updated_at": "2026-09-12T10:00:00+00:00",
     }
@@ -107,31 +110,64 @@ def test_knowledge_and_collection_routes_follow_resource_contract(monkeypatch) -
     assert home.status_code == 200, home.text
     assert home.json()["recent_documents"][0]["id"] == str(document_id)
     assert home.json()["recent_documents"][0]["status"] == "available"
+    assert home.json()["recent_documents"][0]["processing"]["state"] == "outdated"
     assert collections.status_code == 200, collections.text
     assert created.status_code == 201, created.text
     assert collection.status_code == 200, collection.text
     assert calls == ["home", "list", "create", "get"]
 
 
-def test_knowledge_projection_maps_internal_ready_status_to_public_available() -> None:
+def test_document_processing_follows_index_state_and_current_version() -> None:
     now = datetime.now(timezone.utc)
-    item = SimpleNamespace(
-        id=uuid4(),
-        parent_item_id=uuid4(),
-        title="Policy.pdf",
-        mime_type="application/pdf",
-        size_bytes=100,
-        metadata_={"purpose": "knowledge"},
-        status="ready",
-        created_at=now,
-        updated_at=now,
-        document_type="pdf",
-        external_resources=[],
+    current = "parser=p;chunker=c;embedding=e;schema=1;context=off"
+
+    def presented(
+        index_status: str,
+        processed_version: str | None,
+        *,
+        processing_version: str | None = current,
+        latest_run: LatestRunItem | None = None,
+    ) -> dict[str, object]:
+        item = SimpleNamespace(
+            id=uuid4(),
+            parent_item_id=uuid4(),
+            title="Policy.pdf",
+            mime_type="application/pdf",
+            size_bytes=100,
+            metadata_={"purpose": "knowledge"},
+            status="ready",
+            index_status=index_status,
+            processed_version=processed_version,
+            created_at=now,
+            updated_at=now,
+        )
+        presenter = DocumentPresenter(
+            object_storage=lambda: None,
+            preview=SimpleNamespace(resolve=lambda *_, **__: None),  # type: ignore[arg-type]
+            citation_url_seconds=300,
+            preview_url_seconds=300,
+            processing_version=processing_version,
+        )
+        return presenter.contract_document(item, latest_run=latest_run)
+
+    run_id = uuid4()
+    failed = presented(
+        "failed", None, latest_run=LatestRunItem(run_id=run_id, error="The file is encrypted.")
     )
 
-    payload = _document_payload(item)
-
-    assert payload["status"] == "available"
+    assert failed["status"] == "available"
+    assert failed["processing"] == {
+        "state": "failed", "error": "The file is encrypted.", "run_id": run_id,
+    }
+    assert presented("ready", current)["processing"]["state"] == "ready"
+    assert presented("ready", "parser=old")["processing"]["state"] == "outdated"
+    assert presented("ready", None)["processing"]["state"] == "outdated"
+    assert presented("ready", "parser=old", processing_version=None)["processing"]["state"] == "ready"
+    assert presented("pending", "parser=old")["processing"]["state"] == "pending"
+    assert presented("processing", None)["processing"]["state"] == "processing"
+    assert presented("unsupported", None)["processing"] == {
+        "state": "unsupported", "error": None, "run_id": None,
+    }
 
 
 def test_public_document_status_collapses_internal_lifecycle_values() -> None:

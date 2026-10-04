@@ -64,30 +64,31 @@ Full storage and schema detail lives in [Data schema](data.schema.md).
 ## Ingestion and retrieval
 
 ```text
-Connector or upload
+Upload or Source sync (adds data; never processes)
     ↓
-Item metadata + raw bytes in object storage
+Item metadata + raw bytes in object storage, processing state pending
     ↓
 ├─ direct, access-checked resource reads / model file materialization
-├─ Preview → derived WebP assets + versioned manifest
-└─ independent indexing lifecycle
+└─ Ingestion Run (explicit: manual, API, schedule; one workflow per run)
       ↓
-   Docling → canonical Chunk[]
+   Docling → canonical Chunk[] (+ Preview → WebP assets, rendition)
     ↓
 ContextualChunk → embedding + BM25 payload → Qdrant
     ↓
-tenant / tombstone / ACL filter → fused multi-query candidates → relevance rerank → Evidence
+tenant / tombstone / Collection filter → fused multi-query candidates → relevance rerank → Evidence
     ↓
 agent response with citations
 ```
 
-The connector advances a scope checkpoint only after a successful complete
-run. Chunk identifiers are deterministic and Qdrant replaces one Item's index
-on update, so retries can be safe without a generation-based index model.
-For native files, `Item.status` records raw-resource readiness and the
-document-only `Item.index_status` records derived search readiness. A file can
-therefore be attached to chat and read directly while its semantic index is
-pending or has failed.
+Knowledge (what exists: Collections, Documents, access) and Ingestion
+(sources, sync, runs, schedules) are separate. The agent reads knowledge by
+Collection and never cares whether a Document came from an upload or a
+connector. The connector advances a scope checkpoint only after a successful
+complete sync. Chunk identifiers are deterministic and Qdrant replaces one
+Item's index when it is re-processed, so retries are safe without a
+generation-based index model. `Item.status` records raw-resource readiness and
+the document-only `Item.index_status` records processing state, so a file can
+be attached to chat and read directly while it is pending or failed.
 Preview failures do not replace or mutate the original object and do not enter
 chunking or Qdrant. Preview page numbers align with citation pages; existing
 normalized citation bounding boxes provide the region mapping used by viewers.

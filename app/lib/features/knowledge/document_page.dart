@@ -104,7 +104,7 @@ class _DocumentPageState extends State<DocumentPage> {
         if (!quiet && focusIndex >= 0) _assetIndex = focusIndex;
         if (_assetIndex >= viewer.assets.length) _assetIndex = 0;
       });
-      if (document.isActive) {
+      if (document.processing.isProcessing) {
         _poll = Timer(const Duration(seconds: 5), () => _load(quiet: true));
       }
     } catch (error) {
@@ -501,10 +501,10 @@ class _DocumentPageState extends State<DocumentPage> {
         if (elements.isEmpty)
           KnowledgeNotice(
             title: needle.isEmpty
-                ? 'No indexed text available'
+                ? 'No processed text available'
                 : 'No matching passages',
             message: needle.isEmpty
-                ? 'Content may still be indexing, or this format has no searchable text layer. Open the original to read it.'
+                ? 'The document may not be processed yet, or this format has no searchable text layer. Open the original to read it.'
                 : 'Try another phrase. Search covers the text returned for this viewer.',
           ),
         for (final element in elements)
@@ -558,7 +558,7 @@ class _DocumentPageState extends State<DocumentPage> {
     padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
     physics: const AlwaysScrollableScrollPhysics(),
     children: [
-      if (_document != null) IngestionProgressCard(document: _document!),
+      if (_document != null) ProcessingCard(document: _document!),
       const SizedBox(height: 16),
       Card(
         child: Padding(

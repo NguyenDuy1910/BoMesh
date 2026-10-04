@@ -1,466 +1,216 @@
 "use client";
 
-import { ArrowUpDown, Check, FolderPlus, ListFilter, LoaderCircle, Plug, Plus, Upload } from "lucide-react";
-import { Fragment, useMemo, useRef, useState } from "react";
+import { ArrowLeft, ChevronRight, FolderPlus, LoaderCircle, Plug, Plus, Upload, UsersRound } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { SplitView } from "@/components/layout/SplitView";
+import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { Dropdown, DropdownItem, DropdownLabel, DropdownSeparator } from "@/components/ui/Dropdown";
+import { Dropdown, DropdownItem } from "@/components/ui/Dropdown";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
+import { SearchInput } from "@/components/ui/SearchInput";
+import { PageLoadingSkeleton } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
-import { useAuthSession } from "@/lib/hooks/useAuthSession";
 import { hasSessionPermission } from "@/lib/auth/session";
+import { useAuthSession } from "@/lib/hooks/useAuthSession";
 import { useRouteState } from "@/lib/hooks/useRouteState";
+import { canProcess, runHref } from "@/modules/knowledge/document-facts";
+import { knowledgeActions, useActiveRuns, useKnowledge } from "@/modules/knowledge/queries";
+import { useProcessing } from "@/modules/knowledge/use-processing";
+import type {
+  WorkspaceKnowledgeCollection,
+  WorkspaceKnowledgeDocument,
+} from "@/modules/knowledge/workspace-repository";
 import { SectionHeader } from "@/modules/workspace-control/components/SectionHeader";
 import { pluralize } from "@/modules/workspace-control/format";
-import { authorizeConnection, AuthorizationCancelled, PopupBlocked } from "@/modules/knowledge/authorize";
-import { describeConnector, type KnowledgeConnector } from "@/modules/knowledge/connectors";
-import {
-  connectionsApi,
-  sourcesApi,
-  type Connection,
-} from "@/modules/knowledge/integrations-api";
-import { canRetryIndexing } from "@/modules/knowledge/document-facts";
-import { knowledgeActions, useConnections, useConnectorCatalogue, useKnowledge } from "@/modules/knowledge/queries";
-import type { WorkspaceKnowledgeDocument } from "@/modules/knowledge/workspace-repository";
 
-import { ConnectSourceFlow } from "./ConnectSourceFlow";
-import { ConnectionDetailView } from "./ConnectionDetailView";
-import { ConnectorDetail } from "./ConnectorDetail";
+import { CollectionShareDialog } from "./CollectionAccess";
+import { CollectionCards, CollectionFacts, CollectionTile } from "./CollectionCards";
 import { CreateCollectionDialog } from "./CreateCollectionDialog";
 import { DocumentViewer } from "./DocumentViewer";
 import { DocumentsView } from "./DocumentsView";
-import { KnowledgeScopeSelect, KnowledgeToolbar, knowledgeTabs, type KnowledgeTab } from "./KnowledgeToolbar";
-import { SourcesView } from "./SourcesView";
-import { SyncActivityView } from "./SyncActivityView";
 
-interface Choice {
-  value: string;
-  label: string;
-}
+/** The most documents one run may name; the API refuses more. */
+const MAX_RUN_DOCUMENTS = 1000;
 
-interface FilterGroup {
-  /** The state this group narrows. One group per independent dimension. */
-  key: "status" | "type";
-  label: string;
-  options: readonly Choice[];
-}
+const KNOWLEDGE_PATH = "/workspace-control/knowledge";
+
+/** Case- and accent-insensitive text, so "tot nghiep" finds "tốt nghiệp". */
+const fold = (text: string) =>
+  text.normalize("NFD").replace(/\p{Diacritic}/gu, "").replace(/đ/g, "d").replace(/Đ/g, "D").toLowerCase();
 
 /**
- * What the two quiet menus offer, per subview.
+ * Knowledge: what the workspace knows, organized into collections.
  *
- * Every subview has both, because the toolbar has to keep its shape: an icon
- * group that changes width between tabs makes the search field slide, and a
- * strip that moves on every click reads as a page reloading. They are not
- * filler — each list narrows or orders the thing that subview actually shows.
- */
-const FILTERS: Record<KnowledgeTab, readonly FilterGroup[]> = {
-  documents: [
-    {
-      key: "status",
-      label: "Status",
-      options: [
-        { value: "indexed", label: "Indexed" },
-        { value: "indexing", label: "Indexing" },
-        { value: "failed", label: "Not indexed" },
-        { value: "restricted", label: "Restricted" },
-      ],
-    },
-    {
-      key: "type",
-      label: "Format",
-      options: [
-        { value: "pdf", label: "PDF" },
-        { value: "document", label: "Documents" },
-        { value: "spreadsheet", label: "Spreadsheets" },
-        { value: "unsupported", label: "Other formats" },
-      ],
-    },
-  ],
-  sources: [
-    {
-      key: "status",
-      label: "Account",
-      options: [
-        { value: "connected", label: "Healthy" },
-        { value: "reauth_required", label: "Reconnect needed" },
-        { value: "expired", label: "Access expired" },
-        { value: "disconnected", label: "Disconnected" },
-      ],
-    },
-  ],
-  activity: [
-    {
-      key: "status",
-      label: "Outcome",
-      options: [
-        { value: "complete", label: "Completed" },
-        { value: "running", label: "In progress" },
-        { value: "failed", label: "Failed" },
-      ],
-    },
-    {
-      key: "type",
-      label: "Kind",
-      options: [
-        { value: "", label: "All" },
-        { value: "document", label: "Documents" },
-        { value: "source", label: "Sources" },
-      ],
-    },
-  ],
-};
-
-const SORTS: Record<KnowledgeTab, readonly Choice[]> = {
-  documents: [
-    { value: "recent", label: "Recently updated" },
-    { value: "name", label: "Name" },
-  ],
-  sources: [
-    { value: "name", label: "Name" },
-    { value: "attention", label: "Needs attention first" },
-  ],
-  activity: [
-    { value: "newest", label: "Newest first" },
-    { value: "oldest", label: "Oldest first" },
-  ],
-};
-
-const DEFAULT_SORT: Record<KnowledgeTab, string> = {
-  documents: "recent",
-  sources: "name",
-  activity: "newest",
-};
-
-const SEARCH_COPY: Record<KnowledgeTab, { placeholder: string; label: string }> = {
-  documents: { placeholder: "Search documents…", label: "Search documents" },
-  sources: { placeholder: "Search accounts…", label: "Search connected accounts" },
-  activity: { placeholder: "Search activity…", label: "Search sync activity" },
-};
-
-/** What the filter and sort menus name, for assistive technology. */
-const SUBJECT: Record<KnowledgeTab, string> = {
-  documents: "documents",
-  sources: "connected accounts",
-  activity: "sync activity",
-};
-
-/**
- * Knowledge.
- *
- * One shell, three subviews, and a selection that lives in the address. The
- * header, the tab bar and the scope stay put whichever subview is showing —
- * only the surface below the tab bar is replaced, which is what makes moving
- * between documents, sources and activity feel like staying in one place.
+ * A library with two kinds of page. The home page is the shelf of top-level
+ * collections, with one search across everything. A collection's page is a
+ * folder: where it sits, what it is for, who it is shared with, the
+ * collections inside it and its items. Moving between them is real
+ * navigation, so the browser's Back works and the breadcrumb leads home.
+ * How content is processed belongs to Ingestion: here an item only says,
+ * quietly, that it is not searchable yet.
  */
 export function KnowledgeScreen() {
-  const query = useKnowledge();
-  const catalogue = useConnectorCatalogue();
-  // Connections load apart from documents: connecting an account must refresh
-  // the accounts list without re-reading every document in the workspace.
-  const integrations = useConnections();
+  const runs = useActiveRuns();
+  // Runs still refresh the list while they work; they are just not shown here.
+  const query = useKnowledge(runs.length > 0);
   const session = useAuthSession();
-  // Shared accounts are administered; a personal one is the member's own. The
-  // API enforces this — the interface only avoids offering what it will refuse.
-  const canManageWorkspace = hasSessionPermission(session, "source.manage");
-  const canCreateCollection = hasSessionPermission(session, "item.manage");
+  const canCreateCollection = hasSessionPermission(session, "knowledge.manage");
+  const router = useRouter();
   const { toast } = useToast();
+  const { startRun, announceUpload } = useProcessing();
 
-  const [tabParam, setTab] = useRouteState("tab", "documents");
   const [selectedId, setSelectedId] = useRouteState("document");
-  const [scope, setScope] = useRouteState("scope");
-  const [connectionId, setConnectionId] = useRouteState("connection");
-  const [connectorKey, setConnectorKey] = useRouteState("connector");
+  const [scope] = useRouteState("scope");
 
   const [search, setSearch] = useState("");
-  const [statusByTab, setStatusByTab] = useState<Record<string, string>>({});
-  const [typeByTab, setTypeByTab] = useState<Record<string, string>>({});
-  const [sortByTab, setSortByTab] = useState<Record<string, string>>({});
   const [expanded, setExpanded] = useState(false);
   const [selection, setSelection] = useState<string[]>([]);
-  const [connecting, setConnecting] = useState<KnowledgeConnector | null>(null);
   const [creatingCollection, setCreatingCollection] = useState(false);
-  /** Set when adding knowledge to an account that is already authorized. */
-  const [addingTo, setAddingTo] = useState<Connection | null>(null);
-  const [syncingId, setSyncingId] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [removalIds, setRemovalIds] = useState<string[] | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
 
-  const tab = (knowledgeTabs.some((item) => item.id === tabParam) ? tabParam : "documents") as KnowledgeTab;
-  const status = statusByTab[tab] ?? "";
-  const type = typeByTab[tab] ?? "";
-  const sort = sortByTab[tab] ?? DEFAULT_SORT[tab];
-  const setStatus = (value: string) => setStatusByTab((current) => ({ ...current, [tab]: value }));
-  const setType = (value: string) => setTypeByTab((current) => ({ ...current, [tab]: value }));
-  const setSort = (value: string) => setSortByTab((current) => ({ ...current, [tab]: value }));
   const snapshot = query.data;
   const documents = useMemo(() => snapshot?.documents ?? [], [snapshot]);
   const collections = useMemo(() => snapshot?.collections ?? [], [snapshot]);
-  // Uploading needs the Collection's identity, not the label in the scope filter.
-  const scopeCollectionId = useMemo(
-    () => collections.find((collection) => collection.name === scope)?.id ?? null,
-    [collections, scope],
-  );
-  const requestUpload = () => {
-    if (scopeCollectionId ?? snapshot?.personalCollectionId) {
-      uploadRef.current?.click();
-      return;
-    }
-    setCreatingCollection(true);
-  };
-  const connections = useMemo(() => integrations.data?.connections ?? [], [integrations.data]);
-  const sources = useMemo(() => integrations.data?.sources ?? [], [integrations.data]);
-  const runs = useMemo(() => integrations.data?.runs ?? [], [integrations.data]);
+  const byId = useMemo(() => new Map(collections.map((collection) => [collection.id, collection])), [collections]);
+  const current = scope ? collections.find((collection) => collection.name === scope) : undefined;
 
+  /** A collection's parent, when the reader may see it. */
+  const parentOf = (collection: WorkspaceKnowledgeCollection) =>
+    collection.parentId ? byId.get(collection.parentId) : undefined;
+
+  const childrenOf = useMemo(() => {
+    const map = new Map<string | null, WorkspaceKnowledgeCollection[]>();
+    for (const collection of collections) {
+      const parent = collection.parentId && byId.has(collection.parentId) ? collection.parentId : null;
+      map.set(parent, [...(map.get(parent) ?? []), collection]);
+    }
+    return map;
+  }, [byId, collections]);
+
+  const nested = useMemo(
+    () => new Map([...childrenOf].filter(([id]) => id).map(([id, children]) => [id as string, children.length])),
+    [childrenOf],
+  );
+
+  // The open collection and everything nested in it.
+  const subtree = useMemo(() => {
+    if (!current) return null;
+    const ids = new Set<string>();
+    const walk = (id: string) => {
+      ids.add(id);
+      for (const child of childrenOf.get(id) ?? []) walk(child.id);
+    };
+    walk(current.id);
+    return ids;
+  }, [childrenOf, current]);
+
+  // Every page starts unsearched and unselected.
+  useEffect(() => {
+    setSearch("");
+    setSelection([]);
+    setExpanded(false);
+  }, [scope]);
+
+  const needle = fold(search.trim());
+  const searching = Boolean(needle);
+
+  // Browsing a collection shows its own items; a search reaches its whole
+  // subtree, or the whole workspace from the home page.
   const rows = useMemo(() => {
-    const needle = search.trim().toLowerCase();
+    if (!searching && !current) return [];
     return documents
-      .filter((item) =>
-        (!scope || item.collection === scope)
-        && (!status || item.state === status)
-        && (!type || item.kind === type)
-        && item.title.toLowerCase().includes(needle))
-      .sort((left, right) => (sort === "name" ? left.title.localeCompare(right.title) : 0));
-  }, [documents, scope, search, sort, status, type]);
+      .filter((document) => (current
+        ? searching
+          ? Boolean(document.collectionId && subtree?.has(document.collectionId))
+          : document.collectionId === current.id
+        : true))
+      .filter((document) => !needle
+        || fold(document.title).includes(needle)
+        || fold(document.collection).includes(needle))
+      .sort((left, right) => (right.modifiedAt ?? "").localeCompare(left.modifiedAt ?? ""));
+  }, [current, documents, needle, searching, subtree]);
+
+  const shelfCollections = useMemo(() => {
+    if (!searching) return childrenOf.get(current?.id ?? null) ?? [];
+    return collections.filter((collection) =>
+      (!subtree || (subtree.has(collection.id) && collection.id !== current?.id))
+      && (fold(collection.name).includes(needle)
+        || fold(collection.description ?? "").includes(needle)));
+  }, [childrenOf, collections, current, needle, searching, subtree]);
 
   const selected = documents.find((item) => item.id === selectedId);
-  const selectedConnection = connections.find((item) => item.id === connectionId);
-  // Reading about a connector is a state of this subview, not a route of its
-  // own: one component introduces every connector, so adding one never adds a
-  // page. The key lives in the address so the page can be linked to.
-  const selectedEntry = connectorKey
-    ? (catalogue.data?.find((entry) => entry.connector.key === connectorKey)
-      ?? { connector: describeConnector(connectorKey) })
-    : undefined;
-  const filtered = Boolean(status || type);
+  const canRunAny = collections.some((collection) => collection.canProcess);
 
-  /**
-   * Opening a document is a move from acting on many to reading one, and
-   * changing scope is a move to a different set. Both end a selection rather
-   * than carrying it into a list where the selected rows are not even visible.
-   */
+  /* Going into a collection is navigation the browser remembers. */
+  const open = (collection: WorkspaceKnowledgeCollection | null) => {
+    router.push(collection ? `${KNOWLEDGE_PATH}?scope=${encodeURIComponent(collection.name)}` : KNOWLEDGE_PATH, { scroll: false });
+  };
+
   const openDocument = (document: WorkspaceKnowledgeDocument) => {
     setSelectedId(document.id);
     setSelection([]);
     setExpanded(false);
   };
 
-  /** Opening a document from Activity is a move to the list it lives in. */
-  const openDocumentById = (documentId: string) => {
-    const document = documents.find((item) => item.id === documentId);
-    if (!document) return;
-    setTab("documents");
-    openDocument(document);
-  };
+  const connectSource = () => router.push(
+    `/workspace-control/ingestion${current ? `?collection=${encodeURIComponent(current.id)}` : ""}`,
+  );
 
-  const browseCollection = (name: string) => {
-    setScope(name);
-    setSelection([]);
-    setExpanded(false);
-  };
-
-  const clearFilters = () => {
-    setStatus("");
-    setType("");
-    setSearch("");
-  };
-
-
-  const act = async (work: () => Promise<void>, failure: string) => {
-    setError(null);
-    try {
-      await work();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : failure);
+  const requestUpload = () => {
+    if (current ?? snapshot?.personalCollectionId) {
+      uploadRef.current?.click();
+      return;
     }
+    setCreatingCollection(true);
   };
 
-  /**
-   * Retry the failed ones among `targets`. A selection mixes states, so the
-   * rest are left alone and the toast says how many were actually retried.
-   */
-  const retryIndexing = (targets: WorkspaceKnowledgeDocument[]) =>
-    act(async () => {
-      const retried = await knowledgeActions.retryIndexing(targets);
-      const skipped = targets.length - retried;
-      if (!retried) {
-        toast({ title: "Nothing to retry", description: "None of these documents failed to index." });
-        return;
-      }
-      toast({
-        title: retried === 1 ? "Retrying indexing" : `Retrying ${retried} documents`,
-        description: skipped
-          ? `${pluralize(skipped, "other document")} in the selection didn’t fail, so ${skipped === 1 ? "it was" : "they were"} left as ${skipped === 1 ? "it is" : "they are"}.`
-          : retried === 1
-            ? "It shows as Indexing until it can be searched."
-            : "They show as Indexing until they can be searched.",
-        variant: "success",
-      });
-    }, "Indexing could not be retried. Try again in a moment.");
-
-  /**
-   * Index the selected documents again, whatever their last indexing did.
-   * The backend decides which can be; the toast says how many started and
-   * repeats its reasons for the rest, counted.
-   */
-  const reindexSelection = () =>
-    act(async () => {
-      const targets = documents.filter((document) => selection.includes(document.id));
-      const { started, refused } = await knowledgeActions.reindex(targets);
-      const reasons = [...refused].map(([reason, count]) => `${count.toLocaleString()} not started: ${reason}.`).join(" ");
-      if (started) setSelection([]);
-      toast({
-        title: started
-          ? `Re-indexing ${pluralize(started, "document")}`
-          : "Nothing re-indexed",
-        description: reasons || "They show as Indexing until they can be searched again.",
-        variant: started && !refused.size ? "success" : undefined,
-      });
-    }, "The documents couldn’t be re-indexed. Try again in a moment.");
+  const processSelection = async () => {
+    if (selection.length > MAX_RUN_DOCUMENTS) {
+      setError(`Up to ${MAX_RUN_DOCUMENTS.toLocaleString()} items can be made searchable at once. Select fewer.`);
+      return;
+    }
+    setStarting(true);
+    if (await startRun({ document_ids: selection, trigger: "manual" })) setSelection([]);
+    setStarting(false);
+  };
 
   const removeDocuments = async () => {
     const ids = removalIds ?? [];
     if (!ids.length) return;
-    await act(async () => {
+    setError(null);
+    try {
       await Promise.all(ids.map((id) => knowledgeActions.remove(id)));
-      setSelection((current) => current.filter((id) => !ids.includes(id)));
+      setSelection((existing) => existing.filter((id) => !ids.includes(id)));
       if (selectedId && ids.includes(selectedId)) setSelectedId("");
       toast({
-        title: ids.length === 1 ? "Removed from knowledge" : `${ids.length} documents removed`,
+        title: ids.length === 1 ? "Item deleted" : `${ids.length.toLocaleString()} items deleted`,
         description: ids.length === 1
           ? "It stops appearing in answers within a minute."
           : "They stop appearing in answers within a minute.",
         variant: "success",
       });
-    }, "The document could not be removed.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "The items couldn’t be deleted. Try again.");
+    }
     setRemovalIds(null);
   };
 
-  /** Everything that changes connections reloads them, and only them. */
-  const connectionAction = (work: () => Promise<void>) =>
-    act(async () => {
-      await work();
-      integrations.reload();
-    }, "The connected account could not be changed.");
-
-  const reconnect = (connection: Connection) =>
-    connectionAction(async () => {
-      try {
-        await authorizeConnection({
-          connectorKey: connection.connector_key,
-          ownerType: connection.owner_type === "workspace" ? "tenant" : "user",
-          connectionId: connection.id,
-        });
-        toast({
-          title: `${connection.display_name} reconnected`,
-          description: "Its sources start updating again from the next sync.",
-          variant: "success",
-        });
-      } catch (cause) {
-        // Closing the provider window is a decision, not a failure.
-        if (cause instanceof AuthorizationCancelled) return;
-        if (cause instanceof PopupBlocked) throw new Error(cause.message);
-        throw cause;
-      }
-    });
-
-  const syncConnection = (id: string) => {
-    const owned = sources.filter((source) => source.connection_id === id);
-    setSyncingId(id);
-    return act(async () => {
-      await Promise.all(owned.map((source) => sourcesApi.syncNow(source.id)));
-      toast({
-        title: owned.length === 1 ? "Sync started" : `${owned.length} syncs started`,
-        variant: "success",
-      });
-      integrations.reload();
-    }, "The sync could not be started.").finally(() => setSyncingId(null));
-  };
-
-  const scopeOptions = [
-    { value: "", label: "All knowledge", detail: snapshot ? snapshot.documentCount.toLocaleString() : undefined },
-    ...collections.map((collection) => ({
-      value: collection.name,
-      label: collection.name,
-      detail: collection.documentCount.toLocaleString(),
-      disabled: collection.restricted,
-    })),
-  ];
-
-  const pick = (key: FilterGroup["key"], value: string) => {
-    if (key === "type") setType(type === value ? "" : value);
-    else setStatus(status === value ? "" : value);
-  };
-  const isPicked = (key: FilterGroup["key"], value: string) =>
-    (key === "type" ? type : status) === value;
-
-  const connectSource = () => { setTab("sources"); setConnectionId(""); setConnectorKey(""); };
-
-  /* Filter and sort on every subview, so the tab bar keeps its shape. */
-  const toolbarActions = (
-    <>
-      <Dropdown
-        align="right"
-        ariaLabel={`Filter ${SUBJECT[tab]}`}
-        buttonClassName="knowledge-icon-button"
-        label={<ListFilter aria-hidden="true" size={18} />}
-        showChevron={false}
-        title="Filter"
-      >
-        {FILTERS[tab].map((group) => (
-          <Fragment key={group.key}>
-            <DropdownLabel>{group.label}</DropdownLabel>
-            {group.options.map((option) => (
-              <DropdownItem
-                key={option.value}
-                onClick={() => pick(group.key, option.value)}
-                selected={isPicked(group.key, option.value)}
-              >
-                <Check
-                  aria-hidden="true"
-                  className={isPicked(group.key, option.value) ? "h-3.5 w-3.5" : "h-3.5 w-3.5 opacity-0"}
-                />
-                {option.label}
-              </DropdownItem>
-            ))}
-          </Fragment>
-        ))}
-        {filtered && (
-          <>
-            <DropdownSeparator />
-            <DropdownItem onClick={clearFilters}>Clear filters</DropdownItem>
-          </>
-        )}
-      </Dropdown>
-
-      <Dropdown
-        align="right"
-        ariaLabel={`Sort ${SUBJECT[tab]}`}
-        buttonClassName="knowledge-icon-button"
-        label={<ArrowUpDown aria-hidden="true" size={18} />}
-        showChevron={false}
-        title="Sort"
-      >
-        {SORTS[tab].map((option) => (
-          <DropdownItem key={option.value} onClick={() => setSort(option.value)} selected={sort === option.value}>
-            {option.label}
-          </DropdownItem>
-        ))}
-      </Dropdown>
-    </>
-  );
-
   /* The page's one primary action. Uploading, organizing and connecting all
-     add to the workspace rather than to the open subview, so they share one
-     labelled menu in the header instead of three icons in the tab bar. */
+     add to the workspace, so they share one labelled menu. */
   const addMenu = (
     <Dropdown
       align="right"
       buttonClassName="knowledge-add-trigger"
-      disabled={busy}
-      label={busy ? (
+      disabled={uploading}
+      label={uploading ? (
         <>
           <LoaderCircle aria-hidden="true" className="motion-safe:animate-spin" size={16} />
           Uploading…
@@ -471,11 +221,11 @@ export function KnowledgeScreen() {
           Add
         </>
       )}
-      showChevron={!busy}
+      showChevron={!uploading}
     >
       <DropdownItem onClick={requestUpload}>
         <Upload aria-hidden="true" size={16} />
-        Upload files
+        {current ? `Upload to ${current.name}` : "Upload files"}
       </DropdownItem>
       {canCreateCollection && (
         <DropdownItem onClick={() => setCreatingCollection(true)}>
@@ -485,87 +235,185 @@ export function KnowledgeScreen() {
       )}
       <DropdownItem onClick={connectSource}>
         <Plug aria-hidden="true" size={16} />
-        Connect a source
+        Connect source
       </DropdownItem>
     </Dropdown>
   );
 
-  const health = snapshot && integrations.data
-    ? [
-      pluralize(snapshot.documentCount, "document"),
-      pluralize(connections.length, "connected account"),
-      pluralize(sources.length, "source"),
-    ].join(" · ")
-    : undefined;
-
-  const documentsSurface = (
-    <SplitView
-      detail={selected ? (
-        <DocumentViewer
-          document={selected}
-          expanded={expanded}
-          onClose={() => setSelectedId("")}
-          onExpand={() => setExpanded((value) => !value)}
-          onRetryIndexing={canRetryIndexing(selected) ? () => void retryIndexing([selected]) : undefined}
-          onRequestRemove={() => setRemovalIds([selected.id])}
-        />
-      ) : null}
-      list={(
-        <DocumentsView
-          collections={collections}
-          compact={Boolean(selected)}
-          documents={rows}
-          filtered={filtered}
-          loading={!snapshot && !query.error}
-          onClearFilters={clearFilters}
-          onClearSelection={() => setSelection([])}
-          onConnectSource={connectSource}
-          onOpenCollection={browseCollection}
-          onOpenDocument={openDocument}
-          onReindexSelection={() => void reindexSelection()}
-          onRemoveSelection={() => setRemovalIds(selection)}
-          onToggleDocument={(id, checked) =>
-            setSelection((current) => checked ? [...new Set([...current, id])] : current.filter((item) => item !== id))}
-          onSelectDocuments={setSelection}
-          onCreateCollection={canCreateCollection ? () => setCreatingCollection(true) : undefined}
-          onUpload={requestUpload}
-          onWidenScope={() => setScope("")}
-          scope={scope}
-          search={search}
-          selectedId={selectedId}
-          selection={selection}
-          totalDocumentCount={snapshot?.documentCount ?? documents.length}
-        />
-      )}
-      mode={selected ? (expanded ? "detail" : "split") : "list"}
+  const header = current ? (
+    <header className="knowledge-folder">
+      <nav aria-label="Breadcrumb" className="knowledge-crumbs">
+        <button
+          aria-label={`Back to ${parentOf(current)?.name ?? "Knowledge"}`}
+          className="knowledge-crumbs__back"
+          onClick={() => open(parentOf(current) ?? null)}
+          type="button"
+        >
+          <ArrowLeft aria-hidden="true" size={16} />
+        </button>
+        <ol>
+          <li><button onClick={() => open(null)} type="button">Knowledge</button></li>
+          {(() => {
+            const trail: WorkspaceKnowledgeCollection[] = [];
+            for (let at = parentOf(current); at && trail.length < 8; at = parentOf(at)) trail.unshift(at);
+            return trail.map((collection) => (
+              <li key={collection.id}>
+                <ChevronRight aria-hidden="true" size={14} />
+                <button onClick={() => open(collection)} type="button">{collection.name}</button>
+              </li>
+            ));
+          })()}
+          <li aria-current="page">
+            <ChevronRight aria-hidden="true" size={14} />
+            <span>{current.name}</span>
+          </li>
+        </ol>
+      </nav>
+      <div className="knowledge-folder__main">
+        <CollectionTile collection={current} size="lg" />
+        <div className="knowledge-folder__text">
+          <h1>{current.name}</h1>
+          {current.description && <p>{current.description}</p>}
+          <CollectionFacts collection={current} inside={nested.get(current.id) ?? 0} />
+        </div>
+        <div className="knowledge-folder__actions">
+          {current.canShare && (
+            <Button icon={<UsersRound size={16} />} onClick={() => setSharing(true)} variant="secondary">
+              Share
+            </Button>
+          )}
+          {addMenu}
+        </div>
+      </div>
+    </header>
+  ) : (
+    <SectionHeader
+      actions={addMenu}
+      className="document-workspace__head"
+      description="What your workspace knows, organized into collections."
+      section="knowledge"
     />
   );
 
+  const itemList = (heading: string) => (
+    <DocumentsView
+      compact={Boolean(selected)}
+      documents={rows}
+      heading={heading}
+      loading={!snapshot && !query.error}
+      onClearSearch={() => setSearch("")}
+      onClearSelection={() => setSelection([])}
+      onOpenDocument={openDocument}
+      onProcessSelection={canRunAny ? () => void processSelection() : undefined}
+      onRemoveSelection={() => setRemovalIds(selection)}
+      onSearchEverywhere={current ? () => open(null) : undefined}
+      onToggleDocument={(id, checked) =>
+        setSelection((existing) => checked ? [...new Set([...existing, id])] : existing.filter((item) => item !== id))}
+      // An empty collection invites adding, unless it only holds collections.
+      onUpload={current && !searching && !childrenOf.get(current.id)?.length ? requestUpload : undefined}
+      processingSelection={starting}
+      scope={current?.name ?? ""}
+      search={search}
+      selectedId={selectedId}
+      selection={selection}
+    />
+  );
+
+  const shelf = (title: string) => shelfCollections.length > 0 && (
+    <section aria-label={title} className="knowledge-section">
+      <div className="knowledge-list-heading">
+        <h2 className="knowledge-eyebrow">{title}</h2>
+        <span>{pluralize(shelfCollections.length, "collection")}</span>
+      </div>
+      <CollectionCards collections={shelfCollections} nested={nested} onOpen={open} />
+    </section>
+  );
+
+  const body = (() => {
+    if (!snapshot) {
+      return query.error ? null : (
+        <div className="knowledge-page knowledge-page--scroll"><PageLoadingSkeleton label="Loading knowledge" /></div>
+      );
+    }
+    if (scope && !current) {
+      return (
+        <div className="knowledge-page knowledge-page--scroll">
+          <EmptyState
+            action={<Button onClick={() => open(null)} variant="secondary">Back to Knowledge</Button>}
+            description="It may have been renamed or deleted, or it isn’t shared with you."
+            size="sm"
+            title={`“${scope}” isn’t available`}
+          />
+        </div>
+      );
+    }
+    if (searching) {
+      return (
+        <div className="knowledge-page">
+          {shelf("Collections")}
+          {itemList("Items")}
+        </div>
+      );
+    }
+    if (current) {
+      return (
+        <div className="knowledge-page">
+          {shelf("Collections inside")}
+          {itemList("Items")}
+        </div>
+      );
+    }
+    if (!collections.length) {
+      return (
+        <div className="knowledge-page knowledge-page--scroll">
+          <EmptyState
+            action={(
+              <>
+                {canCreateCollection && <Button onClick={() => setCreatingCollection(true)} variant="secondary">New collection</Button>}
+                <Button onClick={requestUpload} variant="ghost">Upload files</Button>
+              </>
+            )}
+            description="Collections group what your workspace knows, so the assistant can answer from it."
+            size="sm"
+            title="No knowledge yet"
+          />
+        </div>
+      );
+    }
+    return <div className="knowledge-page">{shelf("Collections")}</div>;
+  })();
+
+  const selectedCollection = selected?.collectionId ? byId.get(selected.collectionId) : undefined;
+  const processSelected = selected && canProcess(selected) && (selectedCollection?.canProcess ?? false)
+    ? () => void startRun({ document_ids: [selected.id], trigger: "manual" })
+    : undefined;
+
   return (
     <section aria-label="Workspace knowledge" className="document-workspace">
-      <SectionHeader actions={addMenu} className="document-workspace__head" description={health} section="knowledge" />
+      {header}
 
-      <KnowledgeToolbar
-        actions={toolbarActions}
-        onTabChange={(next) => { setTab(next); setSelection([]); }}
-        scope={tab === "documents"
-          ? <KnowledgeScopeSelect onChange={(value) => { setScope(value); setSelection([]); }} options={scopeOptions} value={scope} />
-          : undefined}
-        search={{ value: search, onChange: setSearch, ...SEARCH_COPY[tab] }}
-        tab={tab}
-      />
+      <div className="knowledge-searchbar">
+        <SearchInput
+          ariaLabel={current ? `Search ${current.name}` : "Search knowledge"}
+          className="knowledge-searchbar__field"
+          debounceMs={120}
+          onChange={setSearch}
+          placeholder={current ? `Search ${current.name}…` : "Search knowledge…"}
+          value={search}
+        />
+      </div>
 
       {/* A failed load and a failed action are different problems: reloading
           fixes the first, but would not repeat the second — so the action
           failure is dismissed rather than offered a "Retry" that does nothing. */}
-      {(query.error || integrations.error || error) && (
+      {(query.error || error) && (
         <div className="mx-[var(--page-gutter)] mt-[var(--space-5)] grid gap-[var(--space-2)]">
-          {(query.error || integrations.error) && (
+          {query.error && (
             <ErrorState
               actionLabel="Retry"
-              description={query.error ?? integrations.error ?? ""}
+              description={query.error}
               layout="inline"
-              onAction={() => { query.reload(); integrations.reload(); }}
+              onAction={query.reload}
               title="Knowledge couldn’t be loaded"
             />
           )}
@@ -580,118 +428,38 @@ export function KnowledgeScreen() {
         </div>
       )}
 
-      {tab === "documents" && documentsSurface}
-
-      {tab === "sources" && (selectedConnection ? (
-        <ConnectionDetailView
-          capability={catalogue.data?.find(
-            (entry) => entry.connector.key === selectedConnection.connector_key,
-          )?.capability}
-          connection={selectedConnection}
-          onAddKnowledge={() => {
-            setAddingTo(selectedConnection);
-            setConnecting(describeConnector(selectedConnection.connector_key));
-          }}
-          onBack={() => setConnectionId("")}
-          onDisconnect={() => connectionAction(async () => {
-            await connectionsApi.disconnect(selectedConnection.id);
-            toast({ title: `${selectedConnection.display_name} disconnected`, variant: "success" });
-          })}
-          onReconnect={() => reconnect(selectedConnection)}
-          onRemove={() => connectionAction(async () => {
-            await connectionsApi.remove(selectedConnection.id);
-            setConnectionId("");
-            toast({ title: "Connected account removed", variant: "success" });
-          })}
-          onRemoveSource={(source) => connectionAction(async () => {
-            await sourcesApi.remove(source.id);
-            toast({ title: "Source removed", variant: "success" });
-          })}
-          onSyncSource={(id) => connectionAction(async () => {
-            await sourcesApi.syncNow(id);
-            toast({ title: "Sync started", variant: "success" });
-          })}
-          onToggleSource={(source) => connectionAction(async () => {
-            await sourcesApi.update(source.id, {
-              status: source.status === "paused" ? "ready" : "paused",
-            });
-          })}
-          runs={runs.filter((run) => run.connection_id === selectedConnection.id)}
-          sources={sources.filter(
-            (source) => source.connection_id === selectedConnection.id,
+      {selected ? (
+        <SplitView
+          detail={(
+            <DocumentViewer
+              document={selected}
+              expanded={expanded}
+              onClose={() => setSelectedId("")}
+              onExpand={() => setExpanded((value) => !value)}
+              onProcess={processSelected}
+              onRequestRemove={() => setRemovalIds([selected.id])}
+              onViewRun={(runId) => router.push(runHref(runId))}
+            />
           )}
+          list={itemList(current?.name ?? "Items")}
+          mode={expanded || !rows.length ? "detail" : "split"}
         />
-      ) : selectedEntry ? (
-        <ConnectorDetail
-          available={Boolean(
-            catalogue.data?.some((entry) => entry.connector.key === selectedEntry.connector.key),
-          )}
-          capability={selectedEntry.capability}
-          connections={connections.filter(
-            (connection) => connection.connector_key === selectedEntry.connector.key,
-          )}
-          connector={selectedEntry.connector}
-          onBack={() => setConnectorKey("")}
-          onConnect={() => setConnecting(selectedEntry.connector)}
-          onOpenConnection={(id) => { setConnectorKey(""); setConnectionId(id); }}
-        />
-      ) : (
-        <SourcesView
-          catalogue={catalogue}
-          connections={connections}
-          live={integrations.data?.live ?? false}
-          onAddKnowledge={(connection) => {
-            setAddingTo(connection);
-            setConnecting(describeConnector(connection.connector_key));
-          }}
-          onConnect={setConnecting}
-          onOpenConnection={setConnectionId}
-          onOpenConnector={(connector) => setConnectorKey(connector.key)}
-          onReconnect={(connection) => void reconnect(connection)}
-          onSync={(id) => void syncConnection(id)}
-          search={search}
-          sort={sort}
-          sources={sources}
-          status={status}
-          syncingId={syncingId}
-        />
-      ))}
-
-      {tab === "activity" && (
-        <SyncActivityView
-          collections={collections}
-          documents={documents}
-          kind={type}
-          onOpenDocument={openDocumentById}
-          search={search}
-          sort={sort}
-          status={status}
-        />
-      )}
+      ) : body}
 
       <input
-        aria-label="Upload knowledge file"
+        aria-label="Upload files"
         className="hidden"
+        multiple
         onChange={async (event) => {
-          const file = event.target.files?.[0];
-          if (!file) return;
-          setBusy(true);
-          await act(async () => {
-            const target = scopeCollectionId ?? snapshot?.personalCollectionId;
-            if (!target) {
-              throw new Error("Choose a collection before uploading.");
-            }
-            await knowledgeActions.upload(file, target);
-            toast(file.name.toLowerCase().endsWith(".zip")
-              ? {
-                  title: `${file.name} uploaded`,
-                  description: "Its files are extracted and indexed one by one. Each appears here as its own document.",
-                  variant: "success",
-                }
-              : { title: "Document uploaded", variant: "success" });
-          }, "Upload failed.");
-          setBusy(false);
+          const files = Array.from(event.target.files ?? []);
           event.target.value = "";
+          const target = current?.id ?? snapshot?.personalCollectionId;
+          if (!files.length || !target) return;
+          setUploading(true);
+          setError(null);
+          const outcome = await knowledgeActions.upload(files, target);
+          setUploading(false);
+          announceUpload(outcome, { canProcess: byId.get(target)?.canProcess ?? true });
         }}
         ref={uploadRef}
         // Knowledge formats and archives of them; images are not knowledge yet.
@@ -699,23 +467,16 @@ export function KnowledgeScreen() {
         type="file"
       />
 
-      <ConnectSourceFlow
-        canManageWorkspace={canManageWorkspace}
-        capability={catalogue.data?.find((entry) => entry.connector.key === connecting?.key)?.capability}
-        connector={connecting}
-        existingConnection={addingTo}
-        onClose={() => { setConnecting(null); setAddingTo(null); }}
-        onConnected={() => { integrations.reload(); query.reload(); }}
-        open={Boolean(connecting)}
-      />
+      {current?.canShare && (
+        <CollectionShareDialog collection={current} onClose={() => setSharing(false)} open={sharing} />
+      )}
 
       <CreateCollectionDialog
         onClose={() => setCreatingCollection(false)}
         onCreate={async ({ title, description }) => {
           const collection = await knowledgeActions.createCollection(title, description);
-          setScope(collection.title);
+          router.push(`${KNOWLEDGE_PATH}?scope=${encodeURIComponent(collection.title)}`, { scroll: false });
           toast({
-            action: { label: "View collection", onClick: () => setScope(collection.title) },
             description: "Upload files or connect a source to fill it.",
             title: `${collection.title} created`,
             variant: "success",
@@ -725,16 +486,16 @@ export function KnowledgeScreen() {
       />
 
       <ConfirmDialog
-        confirmLabel={removalIds?.length === 1 ? "Remove document" : "Remove documents"}
+        confirmLabel={removalIds?.length === 1 ? "Delete item" : "Delete items"}
         description={
           removalIds?.length === 1
-            ? "It stops appearing in answers. The original file stays in its source."
-            : `${removalIds?.length ?? 0} documents stop appearing in answers. The original files stay in their sources.`
+            ? "It is removed from knowledge and stops appearing in answers."
+            : `${removalIds?.length ?? 0} items are removed from knowledge and stop appearing in answers.`
         }
         onClose={() => setRemovalIds(null)}
         onConfirm={removeDocuments}
         open={Boolean(removalIds?.length)}
-        title={removalIds?.length === 1 ? "Remove from knowledge?" : "Remove these documents?"}
+        title={removalIds?.length === 1 ? "Delete this item?" : "Delete these items?"}
       />
     </section>
   );

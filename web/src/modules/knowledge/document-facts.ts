@@ -1,5 +1,6 @@
 import type { StatusTone } from "@/components/ui/StatusPill";
-import { canRetry } from "@/modules/knowledge/ingestion-state";
+import type { ProcessingState } from "@/modules/ingestion/runs-api";
+import { formatDateTime } from "@/modules/workspace-control/format";
 
 import type {
   KnowledgeAgentSection,
@@ -20,7 +21,6 @@ export interface DocumentFacts {
   extentLabel: string;
   path: string;
   modifiedLabel: string;
-  indexedLabel: string;
   sections: KnowledgeAgentSection[];
   /** Whether the format can be paged through at all. */
   pageable: boolean;
@@ -52,26 +52,10 @@ export function documentFacts(document: WorkspaceKnowledgeDocument): DocumentFac
     fileTypeLabel,
     extentLabel: document.pagesLabel,
     path: document.path ?? document.collection ?? "Unfiled",
-    modifiedLabel: document.modifiedAt ?? document.updatedLabel,
-    indexedLabel: indexedLabel(document),
+    modifiedLabel: document.modifiedAt ? formatDateTime(document.modifiedAt) : document.updatedLabel,
     sections,
-    pageable: document.kind !== "unsupported" && document.kind !== "archive" && document.state !== "restricted",
+    pageable: document.kind !== "unsupported" && document.kind !== "archive",
   };
-}
-
-function indexedLabel(document: WorkspaceKnowledgeDocument): string {
-  switch (document.state) {
-    case "indexed":
-      return document.indexedAt ?? "Indexed";
-    case "indexing":
-      return "In progress";
-    case "failed":
-      return "Failed";
-    case "restricted":
-      return "Access lost";
-    case "unsupported":
-      return "Never indexed";
-  }
 }
 
 export interface DocumentStatus {
@@ -80,58 +64,64 @@ export interface DocumentStatus {
 }
 
 /**
- * How a document's lifecycle reads on a row.
+ * How each processing state reads, in the words every surface uses.
  *
- * `unsupported` is deliberately neutral rather than red: nothing went wrong
- * and nothing can be retried, so an alarm colour would send the reader looking
- * for a fix that does not exist.
- *
- * An archive is never "Indexed": it is not read in answers. Its files are, as
- * Documents of their own, so its lifecycle is extraction.
+ * `unsupported` is neutral rather than red: nothing went wrong and no run can
+ * change it, so an alarm colour would send the reader looking for a fix that
+ * does not exist.
  */
-export function documentStatus(document: WorkspaceKnowledgeDocument): DocumentStatus {
-  if (document.kind === "archive") {
-    switch (document.state) {
-      case "indexed":
-        return { label: "Extracted", tone: "neutral" };
-      case "failed":
-      case "unsupported":
-        return { label: "Not extracted", tone: "danger" };
-      default:
-        return { label: "Extracting", tone: "warning" };
-    }
-  }
-  switch (document.state) {
-    case "indexed":
-      return document.answerIncluded === false
-        ? { label: "Excluded", tone: "neutral" }
-        : { label: "Indexed", tone: "success" };
-    case "indexing":
-      return { label: "Indexing", tone: "warning" };
-    case "failed":
-      return { label: "Not indexed", tone: "danger" };
-    case "restricted":
-      return { label: "Restricted", tone: "warning" };
-    case "unsupported":
-      return { label: "Not indexed", tone: "neutral" };
-  }
-}
-
-/** Whether grounded answers can quote this document right now. */
-export function answerAvailability(document: WorkspaceKnowledgeDocument): string {
-  if (document.kind === "archive") return "Its files are added as separate documents";
-  if (document.state !== "indexed") return "Not available in answers";
-  return document.answerIncluded === false ? "Excluded from answers" : "Included in answers";
-}
+export const PROCESSING_STATUS: Record<ProcessingState, DocumentStatus> = {
+  pending: { label: "Pending", tone: "neutral" },
+  processing: { label: "Processing", tone: "info" },
+  ready: { label: "Ready", tone: "success" },
+  failed: { label: "Failed", tone: "danger" },
+  outdated: { label: "Outdated", tone: "warning" },
+  unsupported: { label: "Unsupported", tone: "neutral" },
+};
 
 /**
- * Whether "Retry indexing" can do anything for this document: it failed, and
- * there is an ingestion to run again. A connector-written document has none —
- * its source's next sync is what indexes it again.
+ * Whether the assistant can find this knowledge, in one phrase — the only
+ * processing fact Knowledge shows. Ready and outdated content is searchable;
+ * how it got there is Ingestion's business. `undefined` means nothing to say.
  */
-export function canRetryIndexing(document: WorkspaceKnowledgeDocument): boolean {
-  return document.state === "failed"
-    && Boolean(document.latestIngestion && canRetry(document.latestIngestion));
+export function searchAvailability(document: WorkspaceKnowledgeDocument): string | undefined {
+  switch (document.state) {
+    case "ready":
+    case "outdated":
+      return undefined;
+    case "unsupported":
+      return "Can’t be searched";
+    default:
+      return "Not searchable yet";
+  }
+}
+
+/** Whether a run would do anything for this document. */
+export function canProcess(document: WorkspaceKnowledgeDocument): boolean {
+  return document.state !== "unsupported" && document.state !== "processing";
+}
+
+/** Whether answers can quote this document right now. */
+export function answerAvailability(document: WorkspaceKnowledgeDocument): string {
+  if (document.kind === "archive") {
+    return document.state === "ready"
+      ? "Its files were added as separate documents"
+      : "Its files are unpacked when it is processed";
+  }
+  switch (document.state) {
+    case "ready":
+    case "outdated":
+      return "Used in answers";
+    case "unsupported":
+      return "This format can’t be used in answers";
+    default:
+      return "Not available for search yet";
+  }
+}
+
+/** Where a run is read in detail. */
+export function runHref(runId: string): string {
+  return `/workspace-control/ingestion?run=${encodeURIComponent(runId)}`;
 }
 
 /**
@@ -148,10 +138,9 @@ export function documentMeta(
 ): string {
   const facts = documentFacts(document);
   return [
-    scoped ? null : document.source,
     scoped ? null : document.collection,
     facts.fileTypeLabel,
-    document.pagesLabel,
+    document.size,
     layout === "narrow" ? document.updatedLabel : null,
   ]
     .filter(Boolean)

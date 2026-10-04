@@ -13,7 +13,7 @@ from bomesh.runtime import AppRuntime
 from bomesh.services import AuthenticationError, AuthContext, AuthorizationError, JwtClaims
 from bomesh.services.workspace_control_plane import WorkspaceControlPlaneService
 from bomesh.services.integration_lifecycle import IntegrationLifecycleService
-from bomesh.services.ingestion import IngestionService
+from bomesh.services.ingestion import IngestionRunService
 from bomesh.services.artifact import ArtifactService
 from bomesh.services.chat import ChatService
 from bomesh.services.knowledge_query import KnowledgeQueryService
@@ -136,10 +136,10 @@ def get_integration_lifecycle_service(
     return runtime.integration_lifecycle_service()
 
 
-def get_ingestion_service(
+def get_ingestion_run_service(
     runtime: Annotated[AppRuntime, Depends(get_runtime)],
-) -> IngestionService:
-    return runtime.ingestion_lifecycle_service()
+) -> IngestionRunService:
+    return runtime.ingestion_run_service()
 
 
 def get_artifact_service(
@@ -166,7 +166,7 @@ WorkspaceControlPlane = Annotated[WorkspaceControlPlaneService, Depends(get_work
 ConnectionLifecycle = Annotated[
     IntegrationLifecycleService, Depends(get_integration_lifecycle_service)
 ]
-Ingestions = Annotated[IngestionService, Depends(get_ingestion_service)]
+IngestionRuns = Annotated[IngestionRunService, Depends(get_ingestion_run_service)]
 Artifacts = Annotated[ArtifactService, Depends(get_artifact_service)]
 Health = Annotated[HealthService, Depends(get_health_service)]
 
@@ -179,7 +179,7 @@ __all__ = [
     "Documents",
     "Health",
     "ConnectionLifecycle",
-    "Ingestions",
+    "IngestionRuns",
     "KnowledgeQuery",
     "KnowledgeView",
     "Runtime",

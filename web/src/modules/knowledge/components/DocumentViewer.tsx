@@ -6,7 +6,7 @@ import {
   Minimize2,
   MoreHorizontal,
   PanelRight,
-  RefreshCw,
+  Play,
   Trash2,
   X,
 } from "lucide-react";
@@ -17,7 +17,7 @@ import { Dropdown, DropdownItem, DropdownSeparator } from "@/components/ui/Dropd
 import { Tabs } from "@/components/ui/Tabs";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { useRouteState } from "@/lib/hooks/useRouteState";
-import { answerAvailability, documentFacts, documentStatus } from "@/modules/knowledge/document-facts";
+import { answerAvailability, documentFacts } from "@/modules/knowledge/document-facts";
 import type { WorkspaceKnowledgeDocument } from "@/modules/knowledge/workspace-repository";
 
 import { DocumentDetailsDrawer } from "./DocumentDetailsDrawer";
@@ -36,8 +36,9 @@ export function DocumentViewer({
   actions,
   onExpand,
   onClose,
-  onRetryIndexing,
-  onRequestRemove = () => undefined,
+  onProcess,
+  onViewRun,
+  onRequestRemove,
   expanded = false,
   showAgentView = true,
   showLifecycleActions = true,
@@ -47,10 +48,12 @@ export function DocumentViewer({
   actions?: React.ReactNode;
   onExpand?: () => void;
   onClose?: () => void;
-  /** Set only when there is a failed indexing to retry. */
-  onRetryIndexing?: () => void;
+  /** Starts a run for this document; omitted when none can be started. */
+  onProcess?: () => void;
+  /** Opens the run that last processed this document. */
+  onViewRun?: (runId: string) => void;
+  /** Omitted where documents cannot be deleted from this surface. */
   onRequestRemove?: () => void;
-  onToggleAnswerAvailability?: (included: boolean) => void;
   expanded?: boolean;
   showAgentView?: boolean;
   showLifecycleActions?: boolean;
@@ -70,7 +73,6 @@ export function DocumentViewer({
   }, [document.id]);
 
   const facts = documentFacts(document);
-  const status = documentStatus(document);
 
   return (
     <article aria-label={document.title} className="knowledge-viewer">
@@ -96,13 +98,17 @@ export function DocumentViewer({
             label={<MoreHorizontal aria-hidden="true" size={16} />}
             showChevron={false}
           >
-            <DropdownItem disabled={!onRetryIndexing} onClick={onRetryIndexing}>
-              <RefreshCw aria-hidden="true" size={16} />Retry indexing
+            <DropdownItem disabled={!onProcess} onClick={onProcess}>
+              <Play aria-hidden="true" size={16} />Run processing
             </DropdownItem>
-            <DropdownSeparator />
-            <DropdownItem destructive onClick={onRequestRemove}>
-              <Trash2 aria-hidden="true" size={16} />Remove from knowledge
-            </DropdownItem>
+            {onRequestRemove && (
+              <>
+                <DropdownSeparator />
+                <DropdownItem destructive onClick={onRequestRemove}>
+                  <Trash2 aria-hidden="true" size={16} />Delete
+                </DropdownItem>
+              </>
+            )}
           </Dropdown>
         )}
           {onClose && (
@@ -121,10 +127,7 @@ export function DocumentViewer({
       </header>
 
       <p className="knowledge-viewer__facts">
-        <span>{document.pagesLabel} · {document.size} · updated {facts.modifiedLabel}</span>
-        <span className={`knowledge-viewer__status knowledge-viewer__status--${status.tone}`}>
-          <span aria-hidden="true" />{status.label}
-        </span>
+        <span>{[document.pagesLabel, document.size, `updated ${document.updatedLabel}`].filter(Boolean).join(" · ")}</span>
         <span>{answerAvailability(document)}</span>
       </p>
 
@@ -168,7 +171,8 @@ export function DocumentViewer({
         document={document}
         key={document.id}
         onPageChange={setPage}
-        onRetryIndexing={onRetryIndexing}
+        onProcess={onProcess}
+        onViewRun={onViewRun}
         onSearchChange={setSearch}
         onZoomChange={setZoom}
         page={page}
@@ -180,7 +184,8 @@ export function DocumentViewer({
       <DocumentDetailsDrawer
         document={document}
         onClose={() => setDetailsOpen(false)}
-        onRetryIndexing={onRetryIndexing}
+        onProcess={onProcess}
+        onViewRun={onViewRun}
         onRequestRemove={onRequestRemove}
         open={detailsOpen}
         showLifecycleActions={showLifecycleActions}

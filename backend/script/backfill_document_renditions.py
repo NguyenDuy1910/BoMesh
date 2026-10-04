@@ -130,10 +130,7 @@ async def _backfill_one(
         await runtime.object_storage().download_to_path(
             item.storage_key, path, max_bytes=max_bytes
         )
-        # Access is irrelevant here: only the parsed content is kept.
-        processed = await content.process_path(
-            item, path, user_id=item.created_by_user_id or item.id
-        )
+        processed = await content.process_path(item, path)
         manifest = await preview.generate(
             item, source_path=path, content=processed.item
         )

@@ -53,7 +53,7 @@ class ItemResourceResolver:
         item = await self._item(resource)
         if item.upload is not None and item.upload.status != "available":
             raise DocumentProcessingError("resource content is not available")
-        canonical = await self._content.canonicalize(item, access=self._access)
+        canonical = await self._content.canonicalize(item)
         text = canonical.item.get_text_content().strip()
         limit = min(max_characters, self._max_read_characters)
         return text if len(text) <= limit else f"{text[:limit].rstrip()}…"

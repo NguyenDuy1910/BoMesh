@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -101,8 +101,15 @@ GROUP_MANAGE_PERMISSION = "group.manage"
 SOURCE_MANAGE_PERMISSION = "source.manage"
 ACCESS_MANAGE_PERMISSION = "access.manage"
 AUDIT_READ_PERMISSION = "audit.read"
-ITEM_MANAGE_PERMISSION = "item.manage"
+KNOWLEDGE_MANAGE_PERMISSION = "knowledge.manage"
 KNOWLEDGE_READ_PERMISSION = "knowledge.read"
+
+#: Ingestion execution capabilities. Running processing is a Collection
+#: capability: the documents a run touches are governed by their Collection,
+#: so an editor can process what they added without workspace administration.
+INGESTION_READ_PERMISSION = "ingestion.read"
+INGESTION_RUN_PERMISSION = "ingestion.run"
+INGESTION_MANAGE_PERMISSION = "ingestion.manage"
 
 #: Collection capabilities. Documents are governed by the Collection that
 #: contains them, so they need no permissions of their own.
@@ -171,8 +178,8 @@ PERMISSION_CATALOG: tuple[PermissionDefinition, ...] = (
         GROUP_MANAGE_PERMISSION, "Manage groups and group membership", _TENANT_ONLY
     ),
     PermissionDefinition(
-        ITEM_MANAGE_PERMISSION,
-        "Manage canonical Item lifecycle and indexing",
+        KNOWLEDGE_MANAGE_PERMISSION,
+        "Create and organize the workspace's Collections",
         _TENANT_ONLY,
     ),
     PermissionDefinition(
@@ -185,7 +192,22 @@ PERMISSION_CATALOG: tuple[PermissionDefinition, ...] = (
     ),
     PermissionDefinition(
         SOURCE_MANAGE_PERMISSION,
-        "Manage data sources, scopes, and ingestion",
+        "Manage data sources, their sync, and their schedules",
+        _TENANT_ONLY,
+    ),
+    PermissionDefinition(
+        INGESTION_READ_PERMISSION,
+        "See every ingestion run in the workspace",
+        _TENANT_ONLY,
+    ),
+    PermissionDefinition(
+        INGESTION_RUN_PERMISSION,
+        "Start processing for the documents of a Collection",
+        _TENANT_OR_COLLECTION,
+    ),
+    PermissionDefinition(
+        INGESTION_MANAGE_PERMISSION,
+        "Cancel any ingestion run in the workspace",
         _TENANT_ONLY,
     ),
     PermissionDefinition(
@@ -256,7 +278,10 @@ SYSTEM_ROLES: tuple[RoleDefinition, ...] = (
             COLLECTION_SHARE_PERMISSION,
             COLLECTION_UPDATE_PERMISSION,
             GROUP_MANAGE_PERMISSION,
-            ITEM_MANAGE_PERMISSION,
+            INGESTION_MANAGE_PERMISSION,
+            INGESTION_READ_PERMISSION,
+            INGESTION_RUN_PERMISSION,
+            KNOWLEDGE_MANAGE_PERMISSION,
             KNOWLEDGE_READ_PERMISSION,
             ROLE_MANAGE_PERMISSION,
             SOURCE_MANAGE_PERMISSION,
@@ -280,13 +305,14 @@ SYSTEM_ROLES: tuple[RoleDefinition, ...] = (
             COLLECTION_READ_PERMISSION,
             COLLECTION_SHARE_PERMISSION,
             COLLECTION_UPDATE_PERMISSION,
+            INGESTION_RUN_PERMISSION,
         ),
     ),
     RoleDefinition(
         COLLECTION_EDITOR_ROLE,
         "Collection Editor",
         COLLECTION_SCOPE,
-        (COLLECTION_READ_PERMISSION, COLLECTION_UPDATE_PERMISSION),
+        (COLLECTION_READ_PERMISSION, COLLECTION_UPDATE_PERMISSION, INGESTION_RUN_PERMISSION),
     ),
     RoleDefinition(
         COLLECTION_VIEWER_ROLE,
@@ -312,6 +338,48 @@ DEFAULT_UPLOAD_URL_SECONDS = 600
 DEFAULT_PROCESSING_MAX_BYTES = 100 * 1024 * 1024
 PARSER_VERSION = "docling-2.121"
 CHUNKER_VERSION = "docling-hybrid-line-v1"
+
+
+def processing_version(
+    *,
+    parser_version: str,
+    chunker_version: str,
+    embedding_model: str,
+    index_schema_version: int | str,
+    contextualization_enabled: bool,
+    contextualization_model: str | None,
+) -> str:
+    """Name the processing configuration a Document's index was built with.
+
+    A ready Document whose ``items.processed_version`` differs from the current
+    one is outdated. Migration ``20261004_ingestion_runs.sql`` backfills the
+    same format with SQL, so both must change together.
+    """
+
+    context = (
+        contextualization_model
+        if contextualization_enabled and contextualization_model
+        else "off"
+    )
+    return (
+        f"parser={parser_version};chunker={chunker_version};"
+        f"embedding={embedding_model};schema={index_schema_version};context={context}"
+    )
+
+
+def current_processing_version(signature: Mapping[str, Any]) -> str:
+    """The version processing produces now, from ``ItemIndex.current_processing_signature``."""
+
+    return processing_version(
+        parser_version=PARSER_VERSION,
+        chunker_version=CHUNKER_VERSION,
+        embedding_model=str(signature["embedding_model"]),
+        index_schema_version=signature["index_schema_version"],
+        contextualization_enabled=bool(signature["contextualization_enabled"]),
+        contextualization_model=signature.get("contextualization_model"),
+    )
+
+
 PREVIEW_SCHEMA_VERSION = 1
 PREVIEW_RENDERER_VERSION = "webp-v1"
 DEFAULT_PREVIEW_MAX_SOURCE_BYTES = 100 * 1024 * 1024
@@ -536,6 +604,9 @@ class SandboxProviderFile:
     id: str
     name: str
     resource_id: str | None = None
+    # False until a shell step has copied the file into the running workspace;
+    # files added to a live workspace ride on the next shell request.
+    delivered: bool = True
 
     def __post_init__(self) -> None:
         if not self.id.strip() or not self.name.strip():
@@ -573,14 +644,9 @@ class CanonicalDocumentContent:
 
 @runtime_checkable
 class StoredFileContent(Protocol):
-    """Raw-source boundary consumed by the chat document index pipeline."""
+    """Raw-source boundary: a Document's stored original as canonical content."""
 
-    async def canonicalize(
-        self,
-        document: Item,
-        *,
-        access: AuthContext,
-    ) -> CanonicalDocumentContent: ...
+    async def canonicalize(self, document: Item) -> CanonicalDocumentContent: ...
 
     async def image_data_url(self, document: Item) -> str: ...
 
@@ -955,7 +1021,9 @@ __all__ = [
     "DocumentUnavailableError",
     "GROUP_MANAGE_PERMISSION",
     "INACTIVE_STATUS",
-    "ITEM_MANAGE_PERMISSION",
+    "INGESTION_MANAGE_PERMISSION",
+    "INGESTION_READ_PERMISSION",
+    "INGESTION_RUN_PERMISSION",
     "IdentityConflictError",
     "IdentityInactiveError",
     "IdentityNotFoundError",
@@ -963,6 +1031,7 @@ __all__ = [
     "IdentityServiceError",
     "InvalidDocumentStateError",
     "JwtClaims",
+    "KNOWLEDGE_MANAGE_PERMISSION",
     "KNOWLEDGE_READ_PERMISSION",
     "KnowledgePreviewView",
     "MESSAGE_ITEM_RELATIONS",
@@ -971,6 +1040,8 @@ __all__ = [
     "OWNER_TYPES",
     "OWNER_USER",
     "PARSER_VERSION",
+    "current_processing_version",
+    "processing_version",
     "PERMISSIONS_BY_CODE",
     "PERMISSION_CATALOG",
     "PLATFORM_ADMIN_ROLE",

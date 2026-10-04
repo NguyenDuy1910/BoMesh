@@ -2,7 +2,6 @@
 
 import { apiRequest, queryString } from "@/lib/api/request";
 import { queryString as controlPlaneQueryString } from "@/modules/workspace-control/control-plane-api";
-import type { Ingestion } from "@/modules/knowledge/ingestions-api";
 import type { KnowledgeItem, Paginated } from "@/modules/workspace-control/collections";
 
 /**
@@ -19,6 +18,10 @@ import type { KnowledgeItem, Paginated } from "@/modules/workspace-control/colle
  * without anyone signing in five times. Nothing here ever handles a token: a
  * connection is identified by its id, and the secret behind it never leaves
  * the server.
+ *
+ * A source's sync only changes the knowledge inventory: it registers, updates
+ * and removes Documents, which then wait as pending until an Ingestion Run
+ * processes them.
  */
 
 /** Why a connection cannot be used, in the connection's own words. */
@@ -32,11 +35,7 @@ export type ConnectionStatus =
   | "disconnected";
 
 /**
- * Enablement and health, never the state of a run.
- *
- * A sync in flight is a property of that run, not of the source: a source that
- * is `ready` may or may not have something happening right now, and its
- * activity says which.
+ * Enablement and health. Whether a sync is running right now is `Source.sync`.
  */
 export type SourceStatus =
   | "ready"
@@ -109,6 +108,7 @@ export interface ProviderResource {
   url: string | null;
 }
 
+/** A schedule as it is written (OpenAPI `SchedulePut`). */
 export interface SourceSchedule {
   schedule_type: "cron" | "interval";
   cron_expression: string;
@@ -117,28 +117,43 @@ export interface SourceSchedule {
   overlap_policy: "skip" | "queue" | "replace";
 }
 
+/**
+ * A schedule as the API answers it (OpenAPI `Schedule`). Each firing syncs the
+ * source, then processes whatever the sync left pending or outdated.
+ */
+export interface Schedule extends SourceSchedule {
+  id: string;
+  next_run_at: string | null;
+  last_run_at: string | null;
+}
+
+/** The latest sync (OpenAPI `SourceSync`). It never processes anything. */
+export interface SourceSync {
+  status: "running" | "succeeded" | "failed";
+  last_synced_at: string | null;
+  /** Why it failed, written for people. */
+  error: string | null;
+  added: number;
+  updated: number;
+  removed: number;
+  failed: number;
+}
+
+/** A source exactly as `/sources` returns it (OpenAPI `Source`). */
 export interface Source {
   id: string;
   connection_id: string;
   collection_id: string;
+  sync_mode: "manual" | "scheduled";
+  status: SourceStatus;
   display_name: string | null;
   resource_type: string | null;
   external_resource_id: string | null;
-  config?: Record<string, unknown>;
-  sync_mode: "manual" | "scheduled";
-  status: SourceStatus;
-  status_detail?: string | null;
-  last_ingested_at?: string | null;
-  last_indexed_at?: string | null;
-  integration_connection?: {
-    id: string;
-    display_name: string;
-    connector_key: string;
-    status: ConnectionStatus;
-    owner_type: "workspace" | "user";
-    account_label: string | null;
-  };
-  schedule: SourceSchedule | null;
+  schedule: Schedule | null;
+  /** Null until the first sync starts. */
+  sync: SourceSync | null;
+  /** Its Documents waiting for processing (pending or outdated). */
+  pending_documents: number;
 }
 
 export const connectionsApi = {
@@ -233,39 +248,42 @@ export const connectionsApi = {
     }),
 };
 
+const sourcePath = (id: string) => `/sources/${encodeURIComponent(id)}`;
+
 export const sourcesApi = {
   list: (params: { connection_id?: string; status?: string } = {}) =>
     apiRequest<Paginated<Source>>(`/sources${queryString({ page_size: 100, ...params })}`),
 
-  get: (id: string) => apiRequest<Source>(`/sources/${id}`),
+  get: (id: string) => apiRequest<Source>(sourcePath(id)),
 
-  update: (
-    id: string,
-    body: {
-      display_name?: string;
-      status?: "ready" | "paused" | "disabled";
-      schedule?: SourceSchedule | null;
-      clear_schedule?: boolean;
-    },
-  ) =>
-    apiRequest<Source>(`/sources/${id}`, {
+  update: (id: string, body: { display_name?: string; status?: "ready" | "paused" | "disabled" }) =>
+    apiRequest<Source>(sourcePath(id), {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
 
-  remove: (id: string) => apiRequest<void>(`/sources/${id}`, { method: "DELETE" }),
+  remove: (id: string) => apiRequest<void>(sourcePath(id), { method: "DELETE" }),
 
-  /** Starts a sync now; the Ingestion it answers with is the one to watch. */
-  syncNow: (id: string) =>
-    apiRequest<Ingestion>(
-      `/sources/${id}/ingestions`,
-      { method: "POST" },
-    ),
+  /** Starts a sync now (409 while one is running). It registers Documents; it processes none. */
+  sync: (id: string) =>
+    apiRequest<Source>(`${sourcePath(id)}/syncs`, { method: "POST" }),
 
-  runs: (id: string) =>
-    apiRequest<Paginated<Ingestion>>(
-      `/sources/${id}/ingestions${queryString({ page_size: 20 })}`,
-    ),
+  /** Creates or replaces the source's schedule. */
+  putSchedule: (id: string, body: SourceSchedule) =>
+    apiRequest<Schedule>(`${sourcePath(id)}/schedule`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+
+  /** Pauses or resumes the schedule without changing its cadence. */
+  setScheduleEnabled: (id: string, enabled: boolean) =>
+    apiRequest<Schedule>(`${sourcePath(id)}/schedule`, {
+      method: "PATCH",
+      body: JSON.stringify({ enabled }),
+    }),
+
+  removeSchedule: (id: string) =>
+    apiRequest<void>(`${sourcePath(id)}/schedule`, { method: "DELETE" }),
 };
 
 /** Destination collections. A source has to land in one. */
@@ -283,7 +301,7 @@ export const collectionsApi = {
 };
 
 /**
- * How often a source runs, as a person would say it.
+ * How often a source is synced and processed, as a person would say it.
  *
  * The backend takes a cron expression; offering one to an administrator would
  * be asking them to learn a syntax to answer "how often".
@@ -310,9 +328,14 @@ export function scheduleFor(value: SyncScheduleValue): SourceSchedule | null {
     : null;
 }
 
-export function scheduleLabel(schedule: SourceSchedule | null): string {
-  if (!schedule) return "Only when synced manually";
-  const match = SYNC_SCHEDULES.find((item) => item.cron === schedule.cron_expression);
-  if (!match) return schedule.cron_expression;
-  return schedule.enabled ? match.label : `${match.label} (paused)`;
+/** The cadence choice a schedule matches, or `custom` for a cron written elsewhere. */
+export function scheduleValue(schedule: SourceSchedule | null): SyncScheduleValue | "custom" {
+  if (!schedule) return "manual";
+  return SYNC_SCHEDULES.find((item) => item.cron === schedule.cron_expression)?.value ?? "custom";
+}
+
+/** How often, in words: "Every day at 02:00", or the expression when it is not one of ours. */
+export function scheduleCadence(schedule: SourceSchedule): string {
+  return SYNC_SCHEDULES.find((item) => item.cron === schedule.cron_expression)?.label
+    ?? `Custom (${schedule.cron_expression})`;
 }

@@ -60,13 +60,16 @@ Schedule ──runs a ingestion source──▶ Knowledge Base
 
 ### Connect a source after creation
 
-1. From the header, Add content menu, Items empty state, or Sources tab,
-   select **Connect source**.
-2. Choose an existing validated connection, or open **Connect a new source**.
-3. New connector setup carries a safe return path back to the originating
-   Knowledge Base.
-4. The selected connection creates a ingestion source without a schedule.
-5. The first import is requested separately and its result appears in Activity.
+1. Open **Ingestion → Sources**, either directly or from **Connect source** in
+   Knowledge. The latter carries the current collection as the destination.
+2. Connector types are visible on the page. Choose one directly; there is no
+   separate connector-picker dialog or second action on the connector tile.
+3. To reuse an authorized account, choose **Add source** on that account and
+   skip authorization. A new account authorizes or verifies credentials first.
+4. Choose the provider content and destination collection. Sync cadence starts
+   as manual; a schedule can be selected explicitly or configured later.
+5. Creating a source requests its first sync. Documents arrive Pending; a
+   separate Ingestion Run processes them for search and answers.
 
 ### Configure automation
 
@@ -92,7 +95,7 @@ Schedule ──runs a ingestion source──▶ Knowledge Base
 | List | Partial data error | Collections remain openable; missing counts/owners are disclosed. |
 | Detail Items | Empty | “Add your first knowledge” with Upload, Create item, and Connect source actions. |
 | Ingestion source | Submitting | Selected connection and form remain stable; duplicate source submit blocked. |
-| Ingestion source | Import request failed | Ingestion-source success is retained and reported separately from failed import start. |
+| Ingestion source | First sync failed | Source remains created; failure is shown on its row with a retry sync action. |
 | Schedules | Empty | Explains that ingestion source is a prerequisite, not Knowledge Base creation. |
 | Destructive action | Confirming | Real confirmation dialog; archive uses the existing tombstone endpoint. |
 
@@ -109,9 +112,11 @@ Schedule ──runs a ingestion source──▶ Knowledge Base
 - Collection list payloads now include metadata, access inheritance, and the
   creator user ID so description and owner filtering are grounded in server
   data.
-- Ingestion sources use the Integration Connection and Ingestion Source APIs.
-  Schedule creation/update continues to use the schedule member on the existing
-  ingestion-source update contract.
+- A connection is created through `/connections` or provider authorization.
+  A source is created from that connection via
+  `POST /connections/{connection_id}/sources`; its first sync is requested at
+  creation, while processing remains a separate `POST /ingestion-runs`.
+  Automation uses the separate `/sources/{source_id}/schedule` resource.
 - Archive continues to call the existing Item delete boundary, which writes a
   lifecycle tombstone rather than physically deleting business data.
 

@@ -13,17 +13,17 @@ from urllib.parse import urljoin
 from urllib.parse import urlparse
 
 import httpx
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-from ..file import FileProcessor, FinxFileExtensions
-from bomesh.connector.protocol import AnyContentPart, Chunk, RawObjectStore
+from ..file import FinxFileExtensions
+from bomesh.connector.originals import store_original
+from bomesh.connector.protocol import RawObjectStore, StorageObject
 
 log = logging.getLogger(__name__)
 
 CONFLUENCE_OAUTH_TOKEN_URL = "https://auth.atlassian.com/oauth/token"
 
 _ATTACHMENT_SIZE_THRESHOLD = 10 * 1024 * 1024
-_ATTACHMENT_CHAR_COUNT_THRESHOLD = 500_000
 
 
 class TokenResponse(BaseModel):
@@ -45,18 +45,11 @@ def validate_attachment_filetype(
     return get_file_ext(attachment.get("title", "")) in FinxFileExtensions.KNOWLEDGE_EXTENSIONS
 
 
-class AttachmentProcessingResult(BaseModel):
-    text: str | None
-    file_name: str | None
-    content: list[AnyContentPart] = Field(default_factory=list)
-    chunks: tuple[Chunk, ...] = ()
+class AttachmentDownload(BaseModel):
+    """One attachment's stored original, or why it was skipped."""
+
+    original: StorageObject | None = None
     error: str | None = None
-    storage_provider: str | None = None
-    storage_bucket: str | None = None
-    storage_key: str | None = None
-    storage_region: str | None = None
-    mime_type: str | None = None
-    size_bytes: int | None = None
 
 
 def _safe_storage_part(value: str) -> str:
@@ -66,31 +59,6 @@ def _safe_storage_part(value: str) -> str:
     )
     return cleaned.strip("._") or "unnamed"
 
-
-def _storage_metadata(
-    storage: RawObjectStore | None,
-    storage_key: str | None,
-    *,
-    mime_type: str,
-    size_bytes: int,
-) -> dict[str, Any]:
-    if storage is None or storage_key is None:
-        return {"mime_type": mime_type, "size_bytes": size_bytes}
-    object_key = getattr(storage, "object_key", lambda key: key)(storage_key)
-    return {
-        "storage_provider": getattr(storage, "provider", None),
-        "storage_bucket": (
-            getattr(storage, "bucket", None)
-            or getattr(storage, "bucket_name", None)
-        ),
-        "storage_key": object_key,
-        "storage_region": (
-            getattr(storage, "region", None)
-            or getattr(storage, "region_name", None)
-        ),
-        "mime_type": mime_type,
-        "size_bytes": size_bytes,
-    }
 
 def _make_attachment_link(
     confluence_client: Any,
@@ -121,34 +89,28 @@ def _make_attachment_link(
     return download_link
 
 
-def process_attachment(
+def download_attachment(
     confluence_client: Any,
     attachment: dict[str, Any],
     parent_content_id: str | None,
-    storage: RawObjectStore | None = None,
-    document_id: str | None = None,
-    processor: FileProcessor | None = None,
-) -> AttachmentProcessingResult:
-    # Download and extract text from a Confluence attachment.
+    *,
+    storage: RawObjectStore | None,
+    storage_key: str,
+) -> AttachmentDownload:
+    """Download one attachment and store it, unread, as its Document's original."""
+
     try:
         media_type: str = attachment.get("metadata", {}).get("mediaType", "")
         if not validate_attachment_filetype(attachment):
-            return AttachmentProcessingResult(
-                text=None,
-                file_name=None,
-                error=f"Unsupported file type: {media_type}",
-            )
+            return AttachmentDownload(error=f"Unsupported file type: {media_type}")
 
         attachment_link = _make_attachment_link(
             confluence_client, attachment, parent_content_id
         )
         if not attachment_link:
-            return AttachmentProcessingResult(
-                text=None, file_name=None, error="Failed to make attachment link"
-            )
+            return AttachmentDownload(error="Failed to make attachment link")
 
         attachment_size = int(attachment.get("extensions", {}).get("fileSize") or 0)
-
         if attachment_size > _ATTACHMENT_SIZE_THRESHOLD:
             log.warning(
                 "Skipping %s due to size. size=%d threshold=%d",
@@ -156,10 +118,8 @@ def process_attachment(
                 attachment_size,
                 _ATTACHMENT_SIZE_THRESHOLD,
             )
-            return AttachmentProcessingResult(
-                text=None,
-                file_name=None,
-                error=f"Attachment too large: {attachment_size} bytes",
+            return AttachmentDownload(
+                error=f"Attachment too large: {attachment_size} bytes"
             )
 
         log.info(
@@ -181,23 +141,18 @@ def process_attachment(
                     attachment_link,
                     resp.status_code,
                 )
-                return AttachmentProcessingResult(
-                    text=None,
-                    file_name=None,
-                    error=f"Attachment download status code is {resp.status_code}",
+                return AttachmentDownload(
+                    error=f"Attachment download status code is {resp.status_code}"
                 )
             content_length = int((getattr(resp, "headers", {}) or {}).get("content-length") or 0)
             if content_length > _ATTACHMENT_SIZE_THRESHOLD:
-                return AttachmentProcessingResult(
-                    text=None,
-                    file_name=None,
-                    error=f"Attachment too large: {content_length} bytes",
+                return AttachmentDownload(
+                    error=f"Attachment too large: {content_length} bytes"
                 )
 
             attachment_title = attachment["title"]
-            safe_title = _safe_storage_part(attachment_title)
             with tempfile.TemporaryDirectory(prefix="bomesh-confluence-") as directory:
-                path = Path(directory) / safe_title
+                path = Path(directory) / _safe_storage_part(attachment_title)
                 downloaded_size = 0
                 with path.open("wb") as target:
                     for block in resp.iter_content(chunk_size=1024 * 1024):
@@ -205,85 +160,39 @@ def process_attachment(
                             continue
                         downloaded_size += len(block)
                         if downloaded_size > _ATTACHMENT_SIZE_THRESHOLD:
-                            return AttachmentProcessingResult(
-                                text=None,
-                                file_name=None,
-                                error=(
-                                    f"Attachment too large: {downloaded_size} bytes"
-                                ),
+                            return AttachmentDownload(
+                                error=f"Attachment too large: {downloaded_size} bytes"
                             )
                         target.write(block)
                 if downloaded_size == 0:
-                    return AttachmentProcessingResult(
-                        text=None,
-                        file_name=None,
-                        error="attachment content is empty",
-                    )
-
-                storage_key: str | None = None
-                if storage:
-                    safe_doc_id = _safe_storage_part(
-                        document_id or parent_content_id or "unknown"
-                    )
-                    storage_key = f"files/confluence/{safe_doc_id}/{safe_title}"
-                    storage.put_path(path, storage_key, content_type=media_type)
-                    log.info(
-                        "Stored attachment: key=%s size=%d",
-                        storage_key,
-                        downloaded_size,
-                    )
-
-                processed = (processor or FileProcessor()).process_path(
-                    path,
-                    file_name=attachment_title,
-                    item_id=document_id,
-                )
-            text = processed.text
-
-            if len(text) > _ATTACHMENT_CHAR_COUNT_THRESHOLD:
-                return AttachmentProcessingResult(
-                    text=None,
-                    file_name=None,
-                    error=f"Attachment text too long: {len(text)} chars",
-                )
-
-            return AttachmentProcessingResult(
-                text=text,
-                file_name=attachment_title,
-                content=processed.item.content,
-                chunks=processed.chunks,
-                error=None,
-                **_storage_metadata(
+                    return AttachmentDownload(error="attachment content is empty")
+                original = store_original(
                     storage,
-                    storage_key,
-                    mime_type=media_type,
-                    size_bytes=downloaded_size,
-                ),
-            )
-        except Exception as e:
-            return AttachmentProcessingResult(
-                text=None, file_name=None, error=f"Failed to extract text: {e}"
-            )
+                    key=storage_key,
+                    file_name=attachment_title,
+                    content_type=media_type or "application/octet-stream",
+                    path=path,
+                )
+            log.info("Stored attachment: key=%s size=%d", storage_key, downloaded_size)
+            return AttachmentDownload(original=original)
         finally:
             close = getattr(resp, "close", None)
             if callable(close):
                 close()
-
     except Exception as e:
-        return AttachmentProcessingResult(
-            text=None, file_name=None, error=f"Failed to process attachment: {e}"
-        )
+        return AttachmentDownload(error=f"Failed to download attachment: {e}")
 
 
-def convert_attachment_to_content(
+def store_attachment(
     confluence_client: Any,
     attachment: dict[str, Any],
     page_id: str,
-    storage: RawObjectStore | None = None,
-    document_id: str | None = None,
-    processor: FileProcessor | None = None,
-) -> AttachmentProcessingResult | None:
-    # Process a Confluence attachment and return its text content.
+    *,
+    storage: RawObjectStore | None,
+    storage_key: str,
+) -> StorageObject | None:
+    """Store one knowledge attachment's original; ``None`` when it is skipped."""
+
     media_type = attachment.get("metadata", {}).get("mediaType", "")
     if media_type.startswith("video/") or media_type == "application/gliffy+json":
         log.warning(
@@ -293,13 +202,12 @@ def convert_attachment_to_content(
         )
         return None
 
-    result = process_attachment(
+    result = download_attachment(
         confluence_client,
         attachment,
         page_id,
-        storage,
-        document_id=document_id,
-        processor=processor,
+        storage=storage,
+        storage_key=storage_key,
     )
     if result.error is not None:
         log.warning(
@@ -308,8 +216,7 @@ def convert_attachment_to_content(
             result.error,
         )
         return None
-
-    return result
+    return result.original
 
 
 def build_confluence_document_id(

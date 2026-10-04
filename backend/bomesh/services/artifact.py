@@ -28,6 +28,9 @@ from bomesh.services import (
     ArtifactValidationError,
     AuthContext,
     DocumentNotFoundError,
+    DocumentProcessingError,
+    PreviewManifest,
+    StoredFileContent,
     require_tenant_permission,
     require_user_identity,
     timestamp,
@@ -37,6 +40,7 @@ from bomesh.services.identity_access.authorization import AuthorizationService
 from bomesh.services.documents import DocumentService
 from bomesh.services.identity_access.identity_store import resolve_agent_access
 from bomesh.services.item import ItemService
+from bomesh.services.preview import KnowledgePreview
 from bomesh.storage import DocumentStorage, ObjectNotFoundError
 
 log = logging.getLogger(__name__)
@@ -95,6 +99,8 @@ class ArtifactService:
         *,
         object_storage: Callable[[], DocumentStorage],
         documents: Callable[[], DocumentService],
+        preview: Callable[[], KnowledgePreview],
+        stored_content: Callable[[], StoredFileContent],
         max_content_bytes: int,
         download_url_seconds: int,
     ) -> None:
@@ -103,6 +109,8 @@ class ArtifactService:
         self._sessions = session_factory
         self._object_storage = object_storage
         self._documents = documents
+        self._preview = preview
+        self._stored_content = stored_content
         self._max_content_bytes = max_content_bytes
         self._download_url_seconds = download_url_seconds
 
@@ -396,7 +404,12 @@ class ArtifactService:
     async def content(
         self, access: AuthContext, artifact_id: UUID, *, revision: int | None = None
     ) -> dict[str, Any]:
-        """Return one revision's text for in-app preview."""
+        """Return one revision for in-app preview.
+
+        A Markdown revision is its own preview. Any other revision (Word,
+        Excel, PDF, CSV, an image) also carries the document viewer's
+        ``preview``: a CSV reads as a table there, not as run-on text.
+        """
 
         require_tenant_permission(access, KNOWLEDGE_READ_PERMISSION)
         async with transaction_scope(self._sessions) as session:
@@ -417,9 +430,65 @@ class ArtifactService:
             "mime_type": selected.mime_type,
             "content": text,
             "truncated": truncated,
+            "preview": (
+                None
+                if selected.mime_type == ARTIFACT_MIME_TYPE
+                else await self._viewer_preview(item, selected)
+            ),
         }
 
     # -- Internals ----------------------------------------------------------
+
+    async def _viewer_preview(
+        self, item: Item, revision: ArtifactRevision
+    ) -> dict[str, Any] | None:
+        """One revision as the Knowledge document viewer reads it.
+
+        A revision is an immutable original of an ordinary document, so it is
+        previewed by the same parse and preview pipeline as Knowledge
+        documents, and its manifest is kept on the revision (``exports``).
+        It is built on first view rather than when the agent writes the
+        file, so a turn never waits on a parse nobody asked for. An image
+        needs no parse: the original is shown.
+        """
+
+        preview = self._preview()
+        document = _revision_document(item, revision)
+        if not revision.mime_type.startswith("image/") and not (
+            await preview.has_current_rendition(document)
+        ):
+            try:
+                try:
+                    content = (await self._stored_content().canonicalize(document)).item
+                except DocumentProcessingError:
+                    # Unparsable content still gets its PDF pages, if it has any.
+                    content = None
+                manifest = await preview.generate(document, content=content)
+            except Exception as exc:  # noqa: BLE001 - a preview is best effort
+                log.warning(
+                    "artifact preview generation failed artifact_id=%s revision=%s error_type=%s",
+                    item.id,
+                    revision.revision_number,
+                    type(exc).__name__,
+                )
+                manifest = None
+            if manifest is not None:
+                document.metadata_ = {
+                    **document.metadata_,
+                    "preview": await self._record_preview(revision.id, manifest),
+                }
+        view = preview.resolve(document, expires_seconds=self._download_url_seconds)
+        return view.model_dump(mode="json") if view is not None else None
+
+    async def _record_preview(
+        self, revision_id: UUID, manifest: PreviewManifest
+    ) -> dict[str, Any]:
+        payload = manifest.model_dump(mode="json")
+        async with transaction_scope(self._sessions) as session:
+            row = await session.get(ArtifactRevision, revision_id, with_for_update=True)
+            if row is not None:
+                row.exports = {**dict(row.exports), "preview": payload}
+        return payload
 
     async def _create(
         self,
@@ -795,6 +864,29 @@ def _summary(value: str) -> str:
 def _file_name(title: str, *, suffix: str = ".md") -> str:
     stem = re.sub(r"[^A-Za-z0-9._-]+", "-", title).strip("-._")[:120] or "document"
     return f"{stem}{suffix}"
+
+
+def _revision_document(item: Item, revision: ArtifactRevision) -> Item:
+    """A transient document Item whose original is one artifact revision.
+
+    It is never added to a session; it only lets the Knowledge parse and
+    preview services, which read an Item's original, read a revision's.
+    """
+
+    return Item(
+        id=item.id,
+        tenant_id=item.tenant_id,
+        parent_item_id=item.parent_item_id,
+        item_type="document",
+        title=item.title,
+        mime_type=revision.mime_type,
+        size_bytes=revision.size_bytes,
+        storage_key=revision.storage_key,
+        metadata_={
+            "file_name": _stored_file_name(item),
+            "preview": revision.exports.get("preview"),
+        },
+    )
 
 
 def _stored_file_name(item: Item) -> str:

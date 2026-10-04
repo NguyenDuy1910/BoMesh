@@ -15,7 +15,7 @@ tags:
   - name: artifacts
   - name: connections
   - name: sources
-  - name: ingestions
+  - name: ingestion-runs
   - name: workspaces
   - name: iam
   - name: governance
@@ -181,7 +181,7 @@ paths:
     post:
       tags: [collections]
       operationId: createCollection
-      x-required-permissions: [item.manage]
+      x-required-permissions: [knowledge.manage]
       x-authorization-rule: A child also requires collection.update on its parent Collection.
       requestBody:
         required: true
@@ -418,30 +418,6 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '409': {$ref: '#/components/responses/Conflict'}
         '422': {$ref: '#/components/responses/ValidationError'}
-  /api/v1/documents/{document_id}/ingestions:
-    post:
-      tags: [ingestions]
-      operationId: createDocumentIngestion
-      x-required-collection-permission: collection.update
-      x-required-collection-role: editor
-      description: >-
-        Re-index an uploaded Document: start a new `manual` run of its Ingestion
-        (same `ingestion_id`), processing the stored content from scratch.
-        `409` while a run is queued or running, for content that is not
-        processed as knowledge, or when the original file is unavailable
-        (a connector-written Document is re-indexed by its Source's sync).
-      parameters:
-        - {$ref: '#/components/parameters/DocumentId'}
-      responses:
-        '202':
-          description: Accepted Ingestion
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/Ingestion'}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-        '403': {$ref: '#/components/responses/Forbidden'}
-        '404': {$ref: '#/components/responses/NotFound'}
-        '409': {$ref: '#/components/responses/Conflict'}
   /api/v1/artifacts/{artifact_id}:
     get:
       tags: [artifacts]
@@ -665,52 +641,26 @@ paths:
       operationId: deleteSource
       responses:
         '204': {description: Source tombstoned}
-  /api/v1/sources/{source_id}/status:
-    get:
+  /api/v1/sources/{source_id}/syncs:
+    post:
       tags: [sources]
-      operationId: getSourceStatus
+      operationId: syncSource
+      x-authorization-rule: Same rule as other Source changes; source.manage for workspace connections, the owner for a personal connection. 409 while a sync is running.
+      description: >-
+        Sync now: discover what changed at the provider, store new or changed
+        originals, register or update their Documents (pending when changed) and
+        tombstone removed ones. Never processes; processing is an Ingestion Run.
       parameters:
         - {$ref: '#/components/parameters/SourceId'}
-      responses:
-        '200':
-          description: Source health projection
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/SourceStatus'}
-  /api/v1/sources/{source_id}/ingestions:
-    parameters:
-      - {$ref: '#/components/parameters/SourceId'}
-    post:
-      tags: [ingestions]
-      operationId: createSourceIngestion
       responses:
         '202':
-          description: Accepted Ingestion
+          description: Sync started
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/Ingestion'}
-    get:
-      tags: [ingestions]
-      operationId: listSourceIngestions
-      responses:
-        '200':
-          description: Source Ingestions
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/IngestionPage'}
-  /api/v1/sources/{source_id}/ingestions/{ingestion_id}:
-    get:
-      tags: [ingestions]
-      operationId: getSourceIngestion
-      parameters:
-        - {$ref: '#/components/parameters/SourceId'}
-        - {$ref: '#/components/parameters/IngestionId'}
-      responses:
-        '200':
-          description: Source Ingestion
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/Ingestion'}
+              schema: {$ref: '#/components/schemas/Source'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
   /api/v1/sources/{source_id}/schedule:
     parameters:
       - {$ref: '#/components/parameters/SourceId'}
@@ -756,115 +706,121 @@ paths:
       operationId: deleteSourceSchedule
       responses:
         '204': {description: Schedule removed}
-  /api/v1/ingestions:
-    get:
-      tags: [ingestions]
-      operationId: listIngestions
+  /api/v1/ingestion-runs:
+    post:
+      tags: [ingestion-runs]
+      operationId: createIngestionRun
+      x-required-collection-permission: ingestion.run
       description: >-
-        Managed Ingestions (Temporal) of documents and sources, newest first, read live.
-        Document Ingestions are listed only for Collections the caller can read; source
-        Ingestions only with source.manage. Pending/running items carry live progress.
-        Direct Ingestions (a user's own uploads) are not listed; read them through
-        Document.latest_ingestion or GET /ingestions/{ingestion_id}. Each Ingestion appears once,
-        at its latest run (retries and repeated manual syncs reuse its id); status filters match
-        that run.
+        The one way Documents are processed. Snapshots the selected Documents
+        (explicit document_ids, or a collection subtree / source / the workspace
+        filtered by states, default pending and outdated), leaves out Documents
+        busy in another run, and starts one workflow for the run.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/IngestionRunCreate'}
+      responses:
+        '202':
+          description: Run created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IngestionRun'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/ValidationError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+    get:
+      tags: [ingestion-runs]
+      operationId: listIngestionRuns
+      x-authorization-rule: ingestion.read lists every run in the workspace; otherwise only runs the caller created.
       parameters:
         - {$ref: '#/components/parameters/Page'}
         - {$ref: '#/components/parameters/PageSize'}
-        - name: kind
+        - name: status
           in: query
-          schema: {type: string, enum: [document, source]}
-        - name: collection_id
-          in: query
-          schema: {type: string, format: uuid}
-        - name: document_id
-          in: query
-          schema: {type: string, format: uuid}
+          schema: {$ref: '#/components/schemas/IngestionRunStatus'}
         - name: source_id
           in: query
           schema: {type: string, format: uuid}
-        - name: connection_id
+        - name: collection_id
           in: query
           schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Runs, newest first
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IngestionRunPage'}
+  /api/v1/ingestion-runs/{ingestion_run_id}:
+    get:
+      tags: [ingestion-runs]
+      operationId: getIngestionRun
+      x-authorization-rule: ingestion.read, or the run's creator.
+      parameters:
+        - {$ref: '#/components/parameters/IngestionRunId'}
+      responses:
+        '200':
+          description: Run
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IngestionRun'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/ingestion-runs/{ingestion_run_id}/items:
+    get:
+      tags: [ingestion-runs]
+      operationId: listIngestionRunItems
+      x-authorization-rule: As the run; Documents in Collections the caller cannot read are omitted.
+      parameters:
+        - {$ref: '#/components/parameters/IngestionRunId'}
+        - {$ref: '#/components/parameters/Page'}
+        - {$ref: '#/components/parameters/PageSize'}
         - name: status
           in: query
-          schema: {$ref: '#/components/schemas/IngestionStatus'}
+          schema: {$ref: '#/components/schemas/IngestionRunItemStatus'}
       responses:
         '200':
-          description: Workspace Ingestions
+          description: The run's Documents, running and failed first
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/IngestionPage'}
-        '503': {$ref: '#/components/responses/ServiceUnavailable'}
-  /api/v1/ingestions/summary:
-    get:
-      tags: [ingestions]
-      operationId: getIngestionSummary
-      description: Throughput, outcomes and durations of the Ingestions the caller may see, started inside the window.
-      parameters:
-        - name: window
-          in: query
-          schema: {type: string, enum: ['1h', '24h', '7d'], default: '24h'}
-      responses:
-        '200':
-          description: Ingestion summary
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/IngestionSummary'}
-        '503': {$ref: '#/components/responses/ServiceUnavailable'}
-  /api/v1/ingestions/{ingestion_id}:
-    get:
-      tags: [ingestions]
-      operationId: getIngestion
-      parameters:
-        - {$ref: '#/components/parameters/IngestionId'}
-      responses:
-        '200':
-          description: Ingestion detail with live progress
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/Ingestion'}
+              schema: {$ref: '#/components/schemas/IngestionRunItemPage'}
         '404': {$ref: '#/components/responses/NotFound'}
-  /api/v1/ingestions/{ingestion_id}/events:
-    get:
-      tags: [ingestions]
-      operationId: listIngestionEvents
-      description: "The Ingestion's timeline, oldest first: queued, attempts, pipeline phases and outcome."
-      parameters:
-        - {$ref: '#/components/parameters/IngestionId'}
-      responses:
-        '200':
-          description: Ingestion timeline
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/IngestionEventList'}
-        '404': {$ref: '#/components/responses/NotFound'}
-  /api/v1/ingestions/{ingestion_id}/retry:
+  /api/v1/ingestion-runs/{ingestion_run_id}/cancel:
     post:
-      tags: [ingestions]
-      operationId: retryIngestion
+      tags: [ingestion-runs]
+      operationId: cancelIngestionRun
+      x-authorization-rule: The run's creator, or ingestion.manage.
       parameters:
-        - {$ref: '#/components/parameters/IngestionId'}
+        - {$ref: '#/components/parameters/IngestionRunId'}
       responses:
         '202':
-          description: Retried Ingestion
+          description: Cancellation requested
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/Ingestion'}
+              schema: {$ref: '#/components/schemas/IngestionRun'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
         '409': {$ref: '#/components/responses/Conflict'}
-  /api/v1/ingestions/{ingestion_id}/cancel:
+  /api/v1/ingestion-runs/{ingestion_run_id}/retry:
     post:
-      tags: [ingestions]
-      operationId: cancelIngestion
+      tags: [ingestion-runs]
+      operationId: retryIngestionRun
+      x-required-collection-permission: ingestion.run
+      description: A new manual run over this run's failed, cancelled and skipped Documents.
       parameters:
-        - {$ref: '#/components/parameters/IngestionId'}
+        - {$ref: '#/components/parameters/IngestionRunId'}
       responses:
-        '200':
-          description: Cancelled Ingestion
+        '202':
+          description: The new run
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/Ingestion'}
+              schema: {$ref: '#/components/schemas/IngestionRun'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
         '409': {$ref: '#/components/responses/Conflict'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
   /api/v1/workspaces:
     get:
       tags: [workspaces]
@@ -1240,7 +1196,7 @@ components:
     ArtifactId: {name: artifact_id, in: path, required: true, schema: {type: string, format: uuid}}
     ConnectionId: {name: connection_id, in: path, required: true, schema: {type: string, format: uuid}}
     SourceId: {name: source_id, in: path, required: true, schema: {type: string, format: uuid}}
-    IngestionId: {name: ingestion_id, in: path, required: true, schema: {type: string, format: uuid}}
+    IngestionRunId: {name: ingestion_run_id, in: path, required: true, schema: {type: string, format: uuid}}
     ApprovalRequestId: {name: approval_request_id, in: path, required: true, schema: {type: string, format: uuid}}
     PrincipalType: {name: principal_type, in: path, required: true, schema: {type: string, enum: [user, group]}}
     PrincipalId: {name: principal_id, in: path, required: true, schema: {type: string, format: uuid}}
@@ -1436,6 +1392,9 @@ components:
         collection_id: {type: string, format: uuid}
         principal_type: {type: string, enum: [user, group]}
         principal_id: {type: string, format: uuid}
+        principal_name:
+          type: [string, 'null']
+          description: Read-only display name of the group, or the user's display name or email.
         role: {type: string, enum: [owner, editor, viewer]}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
@@ -1453,7 +1412,7 @@ components:
     Document:
       type: object
       additionalProperties: false
-      required: [id, collection_id, name, content_type, size_bytes, purpose, status, created_at, updated_at]
+      required: [id, collection_id, name, content_type, size_bytes, purpose, status, processing, created_at, updated_at]
       properties:
         id: {type: string, format: uuid}
         collection_id: {type: string, format: uuid}
@@ -1462,9 +1421,7 @@ components:
         size_bytes: {type: integer, minimum: 0}
         purpose: {type: string, enum: [knowledge, conversation_attachment]}
         status: {$ref: '#/components/schemas/DocumentStatus'}
-        latest_ingestion:
-          description: The Document's own latest Ingestion (uploads). Null for connector-written Documents, which are indexed by their Source's Ingestion, for content that never arrived, and for image conversation attachments, which are never ingested (images are not knowledge in this phase).
-          anyOf: [{$ref: '#/components/schemas/Ingestion'}, {type: 'null'}]
+        processing: {$ref: '#/components/schemas/DocumentProcessing'}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
     DocumentPage:
@@ -1528,21 +1485,19 @@ components:
     DocumentCreateResult:
       type: object
       additionalProperties: false
-      required: [document, upload, ingestion, created]
+      required: [document, upload, created]
       properties:
         document: {$ref: '#/components/schemas/Document'}
         upload: {anyOf: [{$ref: '#/components/schemas/DocumentContentInstructions'}, {type: 'null'}]}
-        ingestion: {anyOf: [{$ref: '#/components/schemas/Ingestion'}, {type: 'null'}]}
         created:
           type: boolean
           description: True only when this request created the Document; false on an idempotent replay.
     DocumentContentResult:
       type: object
       additionalProperties: false
-      required: [document, ingestion]
+      required: [document]
       properties:
         document: {$ref: '#/components/schemas/Document'}
-        ingestion: {anyOf: [{$ref: '#/components/schemas/Ingestion'}, {type: 'null'}]}
     KnowledgeHome:
       type: object
       required: [collections, recent_documents, personal_collection_id]
@@ -1609,6 +1564,10 @@ components:
         mime_type: {type: string}
         content: {type: string}
         truncated: {type: boolean}
+        preview:
+          description: For a revision that is not Markdown, the document viewer preview (same shape as `KnowledgeDocumentViewer.preview`); null for Markdown revisions.
+          type: [object, 'null']
+          additionalProperties: true
     ArtifactPublish:
       type: object
       required: [collection_id]
@@ -1708,6 +1667,21 @@ components:
         sync_mode: {type: string, enum: [manual, scheduled]}
         status: {type: string, enum: [ready, paused, failed, connection_required, disabled]}
         schedule: {anyOf: [{$ref: '#/components/schemas/Schedule'}, {type: 'null'}]}
+        sync:
+          description: The latest sync (it registers, updates and removes Documents; it never processes). Null before the first sync.
+          anyOf:
+            - type: object
+              required: [status]
+              properties:
+                status: {type: string, enum: [running, succeeded, failed]}
+                last_synced_at: {type: [string, 'null'], format: date-time}
+                error: {type: [string, 'null'], description: User-safe reason the sync failed}
+                added: {type: integer, minimum: 0}
+                updated: {type: integer, minimum: 0}
+                removed: {type: integer, minimum: 0}
+                failed: {type: integer, minimum: 0}
+            - {type: 'null'}
+        pending_documents: {type: integer, minimum: 0, description: The Source's Documents that are pending or outdated}
     SourceCreate:
       type: object
       required: [collection_id]
@@ -1733,14 +1707,6 @@ components:
         - type: object
           required: [items]
           properties: {items: {type: array, items: {$ref: '#/components/schemas/Source'}}}
-    SourceStatus:
-      type: object
-      required: [source_id, source_status, connection_status]
-      properties:
-        source_id: {type: string, format: uuid}
-        source_status: {type: string}
-        connection_status: {type: string}
-        latest_ingestion: {anyOf: [{$ref: '#/components/schemas/Ingestion'}, {type: 'null'}]}
     SchedulePut:
       type: object
       required: [schedule_type, cron_expression, enabled, overlap_policy]
@@ -1767,106 +1733,107 @@ components:
             id: {type: string, format: uuid}
             next_run_at: {type: [string, 'null'], format: date-time}
             last_run_at: {type: [string, 'null'], format: date-time}
-    IngestionStatus: {type: string, enum: [pending, running, completed, failed, cancelled, timed_out]}
-    IngestionPhase:
+    ProcessingState:
       type: string
-      enum: [queued, downloading, parsing, contextualizing, embedding, storing, expanding, syncing, completed, failed, cancelled]
-    Ingestion:
+      enum: [pending, processing, ready, failed, outdated, unsupported]
+      description: outdated is a ready Document indexed with a processing configuration that has since changed; unsupported content is kept but never processed.
+    DocumentProcessing:
       type: object
-      required: [id, kind, mode, status, trigger_type, attempt, created_at, updated_at]
+      additionalProperties: false
+      required: [state]
+      properties:
+        state: {$ref: '#/components/schemas/ProcessingState'}
+        error: {type: [string, 'null'], description: Why the latest run could not process it, written for people}
+        run_id: {type: [string, 'null'], format: uuid, description: The latest Ingestion Run that included the Document}
+    IngestionRunStatus: {type: string, enum: [queued, running, completed, failed, cancelled]}
+    IngestionRunItemStatus: {type: string, enum: [queued, running, succeeded, failed, skipped, cancelled]}
+    IngestionRunCreate:
+      type: object
+      additionalProperties: false
+      description: At least one selector. document_ids names Documents in any state; otherwise collection_id (subtree), source_id or the workspace, filtered by states (default pending and outdated).
+      properties:
+        document_ids: {type: [array, 'null'], minItems: 1, maxItems: 1000, items: {type: string, format: uuid}}
+        collection_id: {type: [string, 'null'], format: uuid}
+        source_id: {type: [string, 'null'], format: uuid}
+        states: {type: [array, 'null'], minItems: 1, items: {type: string, enum: [pending, failed, outdated, ready]}}
+        trigger: {type: string, enum: [manual, api], default: api}
+    IngestionRun:
+      type: object
+      required: [id, status, trigger, scope, counts, created_at, updated_at]
       properties:
         id: {type: string, format: uuid}
-        kind: {type: string, enum: [document, source]}
-        mode:
-          type: string
-          enum: [managed, direct]
-          description: managed runs are Temporal ingestions (workspace Collections, Sources); direct runs process a user's own upload in the API. Both run the same ingestion core.
-        title: {type: [string, 'null'], description: Document file name or Source display name}
-        document_id: {type: [string, 'null'], format: uuid}
-        collection_id: {type: [string, 'null'], format: uuid, description: Destination Collection}
-        source_id: {type: [string, 'null'], format: uuid}
-        connection_id: {type: [string, 'null'], format: uuid}
-        connector_key: {type: [string, 'null'], description: file for uploads}
-        status: {$ref: '#/components/schemas/IngestionStatus'}
-        trigger_type: {type: string, enum: [manual, scheduled, webhook, initial, upload, retry]}
-        retry_of_ingestion_id: {type: [string, 'null'], format: uuid}
-        attempt: {type: integer, minimum: 1, description: Current or last worker attempt}
-        error: {type: [string, 'null'], description: User-safe failure reason; internal causes are never exposed}
-        progress:
-          anyOf:
-            - type: object
-              required: [phase]
-              properties:
-                phase: {$ref: '#/components/schemas/IngestionPhase'}
-                discovered_count: {type: integer, minimum: 0, description: 'documents: chunks; archives: accepted files; sources: items'}
-                processed_count: {type: integer, minimum: 0}
-                indexed_count: {type: integer, minimum: 0}
-                deleted_count: {type: integer, minimum: 0}
-                failed_count: {type: integer, minimum: 0}
-            - {type: 'null'}
-        started_at: {type: [string, 'null'], format: date-time}
-        finished_at: {type: [string, 'null'], format: date-time}
-        duration_ms: {type: [integer, 'null'], minimum: 0, description: Elapsed while running}
-        created_at: {type: string, format: date-time}
-        updated_at: {type: string, format: date-time}
-    IngestionEvent:
-      type: object
-      required: [id, type, at]
-      properties:
-        id: {type: string}
-        type: {type: string, enum: [queued, started, phase, retrying, completed, failed, cancelled, timed_out]}
-        at: {type: string, format: date-time}
-        attempt: {type: [integer, 'null'], minimum: 1}
-        phase: {anyOf: [{$ref: '#/components/schemas/IngestionPhase'}, {type: 'null'}]}
-        message: {type: [string, 'null']}
-        duration_ms: {type: [integer, 'null'], minimum: 0, description: For a finished phase}
-    IngestionEventList:
-      type: object
-      required: [items]
-      properties:
-        items: {type: array, items: {$ref: '#/components/schemas/IngestionEvent'}}
-    IngestionSummary:
-      type: object
-      required: [window, generated_at, bucket_seconds, totals, by_kind, buckets, duration_ms, active]
-      properties:
-        window: {type: string, enum: ['1h', '24h', '7d']}
-        generated_at: {type: string, format: date-time}
-        bucket_seconds: {type: integer, description: '1h: 300, 24h: 3600, 7d: 21600'}
-        totals:
-          type: object
-          description: Ingestions started inside the window, by status
-          additionalProperties: {type: integer, minimum: 0}
-        by_kind:
+        status: {$ref: '#/components/schemas/IngestionRunStatus'}
+        trigger: {type: string, enum: [manual, scheduled, api]}
+        scope:
           type: object
           properties:
-            document: {type: integer, minimum: 0}
-            source: {type: integer, minimum: 0}
-        buckets:
-          type: array
-          items:
-            type: object
-            required: [start, started, completed, failed]
-            properties:
-              start: {type: string, format: date-time}
-              started: {type: integer, minimum: 0}
-              completed: {type: integer, minimum: 0}
-              failed: {type: integer, minimum: 0, description: failed, timed out and cancelled}
-        duration_ms:
+            selected_documents: {type: [integer, 'null'], minimum: 0}
+            collection_id: {type: [string, 'null'], format: uuid}
+            source_id: {type: [string, 'null'], format: uuid}
+            states: {type: array, items: {type: string, enum: [pending, failed, outdated, ready]}}
+            retry_of_run_id: {type: [string, 'null'], format: uuid}
+        counts:
+          type: object
+          required: [total]
+          properties:
+            total: {type: integer, minimum: 0}
+            queued: {type: integer, minimum: 0}
+            running: {type: integer, minimum: 0}
+            succeeded: {type: integer, minimum: 0}
+            failed: {type: integer, minimum: 0}
+            skipped: {type: integer, minimum: 0}
+            cancelled: {type: integer, minimum: 0}
+        error: {type: [string, 'null'], description: Why the run as a whole stopped, written for people}
+        created_by:
           anyOf:
             - type: object
-              required: [p50, p95, max]
+              required: [id]
               properties:
-                p50: {type: integer, minimum: 0}
-                p95: {type: integer, minimum: 0}
-                max: {type: integer, minimum: 0}
+                id: {type: string, format: uuid}
+                email: {type: [string, 'null']}
+                display_name: {type: [string, 'null']}
             - {type: 'null'}
-        active: {type: integer, minimum: 0, description: Pending and running now}
-    IngestionPage:
+        configuration: {type: object, additionalProperties: true, description: Processing configuration fixed at creation (technical detail)}
+        created_at: {type: string, format: date-time}
+        started_at: {type: [string, 'null'], format: date-time}
+        finished_at: {type: [string, 'null'], format: date-time}
+        updated_at: {type: string, format: date-time}
+    IngestionRunPage:
       allOf:
         - {$ref: '#/components/schemas/PageFields'}
         - type: object
           required: [items]
-          properties: {items: {type: array, items: {$ref: '#/components/schemas/Ingestion'}}}
+          properties: {items: {type: array, items: {$ref: '#/components/schemas/IngestionRun'}}}
+    IngestionRunItem:
+      type: object
+      required: [document_id, name, status]
+      properties:
+        document_id: {type: string, format: uuid}
+        name: {type: string}
+        collection_id: {type: [string, 'null'], format: uuid}
+        status: {$ref: '#/components/schemas/IngestionRunItemStatus'}
+        phase: {type: [string, 'null'], description: The phase it is in, or ended in}
+        error: {type: [string, 'null'], description: User-safe reason; internal causes are never exposed}
+        chunk_count: {type: [integer, 'null'], minimum: 0}
+        phases:
+          type: array
+          items:
+            type: object
+            required: [phase]
+            properties:
+              phase: {type: string, enum: [parsing, contextualizing, embedding, storing, downloading, expanding]}
+              started_at: {type: [string, 'null'], format: date-time}
+              finished_at: {type: [string, 'null'], format: date-time}
+              done: {type: integer, minimum: 0}
+              total: {type: integer, minimum: 0}
+        started_at: {type: [string, 'null'], format: date-time}
+        finished_at: {type: [string, 'null'], format: date-time}
+    IngestionRunItemPage:
+      allOf:
+        - {$ref: '#/components/schemas/PageFields'}
+        - type: object
+          required: [items]
+          properties: {items: {type: array, items: {$ref: '#/components/schemas/IngestionRunItem'}}}
     Workspace:
       type: object
       required: [id, code, name, status]
@@ -1901,14 +1868,16 @@ components:
         generated_at: {type: string, format: date-time}
     KnowledgeHealth:
       type: object
-      description: Non-deleted Items. Index counts cover Documents only (`unsupported` is in none of them).
-      required: [collections, documents, indexed, indexing, failed]
+      description: Non-deleted Items. Processing counts cover Documents only (`unsupported` is in none of them).
+      required: [collections, documents, ready, processing, pending, failed, outdated]
       properties:
         collections: {type: integer, minimum: 0}
         documents: {type: integer, minimum: 0}
-        indexed: {type: integer, minimum: 0, description: index_status ready}
-        indexing: {type: integer, minimum: 0, description: index_status pending or processing}
-        failed: {type: integer, minimum: 0, description: index_status failed}
+        ready: {type: integer, minimum: 0}
+        processing: {type: integer, minimum: 0}
+        pending: {type: integer, minimum: 0}
+        failed: {type: integer, minimum: 0}
+        outdated: {type: integer, minimum: 0, description: ready but built with an older processing configuration}
     UsageCounts:
       type: object
       required: [active_users, questions, sign_ins]

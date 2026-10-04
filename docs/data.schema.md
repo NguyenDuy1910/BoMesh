@@ -19,8 +19,9 @@ each child remains independently persisted. Binary-backed Items store only
 `storage_key`, MIME type, size, and metadata in PostgreSQL.
 
 An Item's `status` is its durable resource lifecycle. Documents also have an
-`index_status` (`pending`, `processing`, `ready`, `failed`, or `unsupported`)
-for the derived semantic projection. This lets an authorized agent read a
+`index_status` (`pending`, `processing`, `ready`, `failed`, or `unsupported`),
+their one processing state, and a `processed_version` naming the processing
+configuration their index was built with. This lets an authorized agent read a
 stored upload directly while its Qdrant representation is not yet ready.
 
 Source configuration is separate: `integration_connections` owns reusable
@@ -33,8 +34,11 @@ any of these source-layer records.
 
 Native uploads use `item_uploads` for idempotency and upload lifecycle. They do
 not create Integration Connections, Ingestion Sources, or External Resources.
-Collection uploads schedule the existing Item indexing pipeline in Temporal;
-the workflow changes only `index_status` and derived citations/index points.
+Adding data (an upload or a Source sync) only registers pending Documents.
+Processing is an explicit Ingestion Run: `ingestion_runs` is its execution
+history and `ingestion_run_items` each Document's part in it (status, phases,
+user-safe error); the run changes only `index_status`, `processed_version`
+and derived citations/index points.
 
 S3-compatible object storage is mandatory for original file bytes. Presigned
 URLs are generated at runtime and are never persisted. PostgreSQL has no blob
@@ -46,9 +50,10 @@ into Qdrant. PostgreSQL does not persist chunks. Qdrant points use deterministic
 IDs derived from the canonical Item identity and chunk index, and carry bounded
 tenant, Collection, source, citation, and lifecycle lineage.
 
-Ingestion Sources advance `checkpoint` only after a complete successful run.
-Temporal owns schedule and execution history. There is no generation or
-blue/green scope state in PostgreSQL.
+Ingestion Sources advance `checkpoint` only after a complete successful sync
+and keep the latest sync's outcome. Temporal only orchestrates runs, syncs and
+schedules; PostgreSQL holds their state. There is no generation or blue/green
+scope state in PostgreSQL.
 
 `message_items` associates messages with canonical Items through `attachment`,
 `reference`, or `output` relations. Runtime deletion is tombstone-only: Items,

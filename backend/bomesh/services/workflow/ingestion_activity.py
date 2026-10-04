@@ -1,343 +1,277 @@
-"""Side-effecting Temporal Activities of managed ingestion.
+"""Side-effecting Temporal Activities of Ingestion Runs and Source syncs.
 
-Two Activities, one per target, and both only orchestrate the shared core:
-``ingest_source`` runs a connector Source through ``ConnectorPipeline`` into
-``ItemIngestionService``; ``ingest_document`` runs one stored Document through
-``ItemIngestionService.index_upload`` (or expands an archive and starts an
-ingestion per child). Heartbeats carry the core's ``PhaseRecorder`` snapshot,
-which is what the live monitor draws.
+They only orchestrate the services that own each step: ``IngestionRunService``
+keeps run and item state, ``ItemIngestionService`` processes one Document,
+``ArchiveExpansionService`` turns an archive into Documents, and
+``SourceSyncService`` syncs a Source's inventory.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from contextlib import suppress
-from dataclasses import asdict
-from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
 import httpx
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
-from bomesh.connector import ConnectorPipeline, ConnectorPipelineConfig
-from bomesh.connector.pipeline import ConnectorPipelineError, PipelineResult
-from bomesh.connector.registry import ConnectorRegistry
-from bomesh.db.engine import transaction_scope
-from bomesh.db.models import IngestionSource, Item
-from bomesh.document_index import EmbeddingRejectedError, ItemIndex
-from bomesh.integrations.registry import ConnectionProviderRegistry
+from bomesh.document_index import EmbeddingRejectedError
 from bomesh.services import (
+    ConnectionAuthorizationRequiredError,
     ControlPlaneNotFoundError,
     ControlPlaneValidationError,
+    DocumentNotFoundError,
     DocumentProcessingError,
     InvalidDocumentStateError,
-    StoredFileContent,
 )
 from bomesh.services.archive_expansion import ArchiveExpansionService
-from bomesh.services.ingestion_sources import IngestionSourceService
-from bomesh.services.integration_connections import IntegrationConnectionService
-from bomesh.services.item import ItemService
+from bomesh.services.ingestion import IngestionRunService, NothingToProcessError
 from bomesh.services.item_ingestion import ItemIngestionService, PhaseRecorder, failure_message
-from bomesh.services.preview import KnowledgePreview
+from bomesh.services.source_sync import SourceSyncService
 from bomesh.services.workflow import (
-    DOCUMENT_FAILURE_TYPE,
-    DOCUMENT_INGESTION_ACTIVITY_NAME,
-    INTERRUPTED_FAILURE_TYPE,
-    PROVIDER_FAILURE_TYPE,
-    SOURCE_INGESTION_ACTIVITY_NAME,
-    IngestionResult,
-    IngestionWorkflowInput,
+    CREATE_SCHEDULED_RUN_ACTIVITY,
+    FAIL_BATCH_ACTIVITY,
+    FINISH_RUN_ACTIVITY,
+    PLAN_BATCHES_ACTIVITY,
+    PROCESS_BATCH_ACTIVITY,
+    PROVIDER_REJECTED_FAILURE_TYPE,
+    START_RUN_ACTIVITY,
+    SYNC_SOURCE_ACTIVITY,
+    FailBatchInput,
+    FinishRunInput,
+    PlanBatchesInput,
+    ProcessBatchInput,
+    RunBatch,
+    RunStart,
+    SourceSyncInput,
 )
-from bomesh.services.workflow.service import TemporalWorkflowService
-from bomesh.storage import DocumentStorage
 
 log = logging.getLogger(__name__)
 
-_NON_RETRYABLE_FAILURE_TYPES = frozenset(
-    {
-        "ControlPlaneNotFoundError",
-        "EmbeddingRejectedError",
-        "InvalidDocumentStateError",
-        "PermissionError",
-        "ValueError",
-    }
-)
-#: How often a running Activity repeats its last heartbeat (the SDK throttles
-#: the rest); a phase can run long without reporting.
+#: How often a running Activity repeats its heartbeat (the SDK throttles the
+#: rest); a phase can run long without reporting.
 _HEARTBEAT_SECONDS = 1.0
+#: How often a Document's phases in flight are written to its run item.
+_PHASE_PERSIST_SECONDS = 2.0
+#: Errors a Document's content causes; retrying cannot change them.
+_DOCUMENT_ERRORS = (
+    DocumentProcessingError,
+    DocumentNotFoundError,
+    InvalidDocumentStateError,
+    ValueError,
+)
+#: Sync failures retrying cannot fix: configuration, identity, or a removed Source.
+_PERMANENT_SYNC_ERRORS = (
+    ConnectionAuthorizationRequiredError,
+    ControlPlaneNotFoundError,
+    ControlPlaneValidationError,
+    InvalidDocumentStateError,
+    PermissionError,
+    ValueError,
+)
 
 
-class IngestionActivities:
-    """Load targets by stable ids and run them through the ingestion core."""
+class IngestionRunActivities:
+    """The Activities of ``IngestionRunWorkflow``."""
 
     def __init__(
         self,
-        session_factory: async_sessionmaker[AsyncSession],
         *,
-        index: ItemIndex,
-        raw_storage: DocumentStorage,
-        stored_content: StoredFileContent,
+        runs: IngestionRunService,
+        ingestion: ItemIngestionService,
         archives: ArchiveExpansionService,
-        workflows: TemporalWorkflowService,
-        registry: ConnectorRegistry | None = None,
-        providers: ConnectionProviderRegistry | None = None,
-        credential_encryption_key: str | None = None,
-        pipeline_config: ConnectorPipelineConfig | None = None,
-        preview: KnowledgePreview | None = None,
     ) -> None:
-        self._session_factory = session_factory
-        self._index = index
-        self._raw_storage = raw_storage
-        self._stored_content = stored_content
+        self._runs = runs
+        self._ingestion = ingestion
         self._archives = archives
-        self._workflows = workflows
-        self._registry = registry
-        self._providers = providers
-        self._credential_encryption_key = credential_encryption_key
-        self._pipeline_config = pipeline_config
-        self._preview = preview
 
-    # -- Source -------------------------------------------------------------
+    @activity.defn(name=START_RUN_ACTIVITY)
+    async def start_run(self, run_id: str) -> RunStart:
+        active, parallelism = await self._runs.start(UUID(run_id))
+        return RunStart(active=active, parallelism=parallelism)
 
-    @activity.defn(name=SOURCE_INGESTION_ACTIVITY_NAME)
-    async def ingest_source(self, input: IngestionWorkflowInput) -> IngestionResult:
-        assert input.source_id is not None
-        heartbeat = asyncio.create_task(_heartbeat(lambda: {"phase": "syncing"}))
-        try:
-            result = await self._sync(UUID(input.source_id), test_connection=input.test_connection)
-        except ConnectorPipelineError as exc:
-            non_retryable = bool(exc.result.failures) and all(
-                self._is_non_retryable_failure(failure.error_type, failure.message)
-                for failure in exc.result.failures
+    @activity.defn(name=PLAN_BATCHES_ACTIVITY)
+    async def plan_batches(self, input: PlanBatchesInput) -> list[RunBatch]:
+        planned = await self._runs.plan_batches(
+            UUID(input.run_id),
+            first_batch_number=input.first_batch_number,
+            max_batches=input.max_batches,
+        )
+        return [
+            RunBatch(number=number, item_ids=[str(item_id) for item_id in item_ids])
+            for number, item_ids in planned
+        ]
+
+    @activity.defn(name=PROCESS_BATCH_ACTIVITY)
+    async def process_batch(self, input: ProcessBatchInput) -> None:
+        """Process a batch's Documents one after another.
+
+        A Document's own failure is recorded on it and the batch goes on. An
+        infrastructure failure raises so Temporal retries the batch; Documents
+        it already finished are not processed again. A provider refusal fails
+        that Document and stops the run.
+        """
+
+        run_id = UUID(input.run_id)
+        tenant_id = UUID(input.tenant_id)
+        current: dict[str, Any] = {"item": None, "recorder": None}
+        heartbeat = asyncio.create_task(
+            _heartbeat(
+                lambda: {
+                    "batch": input.batch_number,
+                    "item": current["item"],
+                    **(current["recorder"].snapshot() if current["recorder"] else {}),
+                }
             )
-            raise ApplicationError(
-                str(exc),
-                [asdict(failure) for failure in exc.result.failures],
-                type="IngestionItemError" if non_retryable else "IngestionTransientError",
-                non_retryable=non_retryable,
-            ) from exc
-        except httpx.HTTPStatusError as exc:
-            non_retryable = exc.response.status_code in {400, 401, 403, 404, 422}
-            raise ApplicationError(
-                str(exc), type="ConnectorHTTPError", non_retryable=non_retryable
-            ) from exc
-        except (
-            ControlPlaneNotFoundError,
-            ControlPlaneValidationError,
-            InvalidDocumentStateError,
-            PermissionError,
-            ValueError,
-        ) as exc:
-            raise ApplicationError(str(exc), type=type(exc).__name__, non_retryable=True) from exc
+        )
+        try:
+            for raw_item_id in input.item_ids:
+                item_id = UUID(raw_item_id)
+                if not await self._runs.claim_item(run_id, item_id):
+                    continue
+                recorder = PhaseRecorder()
+                current.update(item=raw_item_id, recorder=recorder)
+                await self._process_item(run_id, tenant_id, item_id, recorder)
         finally:
             await _stop(heartbeat)
-        return IngestionResult(
-            source_id=input.source_id,
-            discovered_count=result.discovered_changes,
-            processed_count=result.processed_items,
-            indexed_count=result.written_chunks,
-            deleted_count=result.deleted_items,
-            failed_count=len(result.failures),
-            checkpoint_advanced=result.checkpoint_advanced,
-            duration_ms=result.duration_ms,
-        )
 
-    async def _sync(self, source_id: UUID, *, test_connection: bool) -> PipelineResult:
-        async with transaction_scope(self._session_factory) as session:
-            source, connector = await self._sources(session).runtime_for_source(source_id)
-            resolved_source_id = source.id
-            integration_connection_id = source.integration_connection_id
-            connector_key = source.integration_connection.connector_key
-            tenant_id = source.integration_connection.tenant_id
-            checkpoint_data = dict(source.checkpoint or {})
-
-        if connector.source != connector_key:
-            raise ValueError("connector key does not match integration connection")
-        set_storage = getattr(connector, "set_storage", None)
-        if set_storage is not None:
-            set_storage(self._raw_storage)
-        scopes = await connector.list_scopes()
-        if len(scopes) != 1:
-            raise ValueError("an ingestion source must resolve to exactly one runtime scope")
-
-        pipeline = ConnectorPipeline(
-            connector,
-            ItemIngestionService(
-                self._session_factory,
-                index=self._index,
-                ingestion_source_id=resolved_source_id,
-                preview=self._preview or KnowledgePreview(self._raw_storage),
-            ),
-            tenant_id=str(tenant_id),
-            connector_id=str(integration_connection_id),
-            config=self._pipeline_config or ConnectorPipelineConfig(),
-        )
-        try:
-            result = await pipeline.run_scope(
-                scopes[0],
-                connector.checkpoint_model.model_validate(checkpoint_data),
-                test_connection=test_connection,
-            )
-        finally:
-            # A connector that refreshed its own token mid-run holds the only
-            # copy of the rotated secret. Persist it whether the run succeeded
-            # or not, or the next run starts from a credential that is gone.
-            await self._persist_rotated_credentials(integration_connection_id, connector)
-        await self._complete(resolved_source_id, result)
-        return result
-
-    def _sources(self, session: AsyncSession) -> IngestionSourceService:
-        return IngestionSourceService(
-            session,
-            registry=self._registry,
-            providers=self._providers,
-            credential_encryption_key=self._credential_encryption_key,
-        )
-
-    async def _persist_rotated_credentials(
-        self, integration_connection_id: UUID, connector: object
+    async def _process_item(
+        self, run_id: UUID, tenant_id: UUID, item_id: UUID, recorder: PhaseRecorder
     ) -> None:
-        rotated = getattr(connector, "refreshed_credentials", None)
-        if not rotated:
-            return
-        async with transaction_scope(self._session_factory) as session:
-            await IntegrationConnectionService(
-                session,
-                registry=self._registry,
-                providers=self._providers,
-                credential_encryption_key=self._credential_encryption_key,
-            ).persist_rotated_credentials(integration_connection_id, rotated)
-
-    async def _complete(self, source_id: UUID, result: PipelineResult) -> None:
-        async with transaction_scope(self._session_factory) as session:
-            source = await session.scalar(
-                select(IngestionSource).where(IngestionSource.id == source_id).with_for_update()
-            )
-            if source is None or source.deleted_at is not None:
-                raise InvalidDocumentStateError(f"ingestion source not found: {source_id}")
-            if result.checkpoint_advanced:
-                source.checkpoint = result.checkpoint.model_dump(mode="json")
-            finished = datetime.now(UTC)
-            source.last_ingested_at = finished
-            source.last_indexed_at = finished
-            await session.flush()
-
-    @staticmethod
-    def _is_non_retryable_failure(error_type: str, message: str) -> bool:
-        if error_type in _NON_RETRYABLE_FAILURE_TYPES:
-            return True
-        if error_type != "HTTPStatusError":
-            return False
-        return any(token in message for token in ("400", "401", "403", "404", "422"))
-
-    # -- Document -----------------------------------------------------------
-
-    @activity.defn(name=DOCUMENT_INGESTION_ACTIVITY_NAME)
-    async def ingest_document(self, input: IngestionWorkflowInput) -> IngestionResult:
-        assert input.document_id is not None and input.owner_user_id is not None
-        document_id = UUID(input.document_id)
-        recorder = PhaseRecorder()
-        heartbeat = asyncio.create_task(_heartbeat(recorder.snapshot))
+        persisting = asyncio.create_task(self._persist_phases(run_id, item_id, recorder))
         try:
-            return await self._ingest_document(input, document_id, recorder)
+            chunk_count = await self._process(run_id, tenant_id, item_id, recorder)
         except asyncio.CancelledError:
-            # Cancelled from the monitor: the Document must not stay "running".
-            with suppress(Exception):
-                async with transaction_scope(self._session_factory) as session:
-                    await ItemService(session).mark_ingestion_cancelled(document_id)
+            await _stop(persisting)
+            await self._runs.record_item_outcome(
+                run_id, item_id, status="cancelled", phases=recorder.close()
+            )
             raise
-        except (DocumentProcessingError, ValueError) as exc:
-            # The core has recorded the state and the reason. Retrying cannot
-            # make an immutable upload readable. ``from None``: Temporal would
-            # otherwise ship the Python cause chain, which is not for people.
-            log.warning("document ingestion failed document_id=%s", document_id, exc_info=exc)
-            raise ApplicationError(
-                failure_message(exc),
-                {"phases": recorder.phases},
-                type=DOCUMENT_FAILURE_TYPE,
-                non_retryable=True,
-            ) from None
         except EmbeddingRejectedError as exc:
-            # The provider refused the key, credit or model: every retry would
-            # parse and contextualize again only to be refused again.
+            await _stop(persisting)
+            message = failure_message(exc)
             log.warning(
-                "document ingestion rejected by the model provider document_id=%s: %s",
-                document_id,
+                "model provider refused processing run_id=%s document_id=%s: %s",
+                run_id,
+                item_id,
                 exc,
             )
+            await self._runs.record_item_outcome(
+                run_id, item_id, status="failed", error=message, phases=recorder.close()
+            )
+            # Every other Document would be refused the same way: stop the run.
             raise ApplicationError(
-                failure_message(exc),
-                {"phases": recorder.phases},
-                type=PROVIDER_FAILURE_TYPE,
-                non_retryable=True,
+                message, type=PROVIDER_REJECTED_FAILURE_TYPE, non_retryable=True
             ) from None
-        except Exception as exc:
-            # Infrastructure (storage, model, index) failed; Temporal retries.
-            log.exception("document ingestion interrupted document_id=%s", document_id)
-            raise ApplicationError(
-                failure_message(exc),
-                {"phases": recorder.phases},
-                type=INTERRUPTED_FAILURE_TYPE,
-            ) from None
-        finally:
-            await _stop(heartbeat)
+        except _DOCUMENT_ERRORS as exc:
+            await _stop(persisting)
+            log.info("document processing failed run_id=%s document_id=%s", run_id, item_id)
+            await self._runs.record_item_outcome(
+                run_id,
+                item_id,
+                status="failed",
+                error=failure_message(exc),
+                phases=recorder.close(),
+            )
+            return
+        except Exception:
+            await _stop(persisting)
+            # Infrastructure: the run item stays running so the retry takes it again.
+            with suppress(Exception):
+                await self._runs.record_item_phases(run_id, item_id, recorder.close())
+            log.exception("document processing interrupted run_id=%s document_id=%s", run_id, item_id)
+            raise
+        await _stop(persisting)
+        await self._runs.record_item_outcome(
+            run_id,
+            item_id,
+            status="succeeded",
+            chunk_count=chunk_count,
+            phases=recorder.close(completed=True),
+        )
 
-    async def _ingest_document(
-        self, input: IngestionWorkflowInput, document_id: UUID, recorder: PhaseRecorder
-    ) -> IngestionResult:
-        owner_user_id = UUID(str(input.owner_user_id))
-        tenant_id = UUID(input.tenant_id)
+    async def _process(
+        self, run_id: UUID, tenant_id: UUID, item_id: UUID, recorder: PhaseRecorder
+    ) -> int | None:
         expanded = await self._archives.expand_if_archive(
-            document_id,
-            owner_user_id=owner_user_id,
+            item_id,
             tenant_id=tenant_id,
-            start_child=self._start_child,
+            processed_version=self._ingestion.processing_version(),
             progress=recorder,
         )
         if expanded is not None:
-            return IngestionResult(
-                document_id=str(expanded.archive_id),
-                document_count=len(expanded.document_ids),
-                phases=recorder.close(completed=True),
+            # The members are this run's Documents now; the archive is done.
+            await self._runs.append_items(run_id, expanded.document_ids)
+            return None
+        return await self._ingestion.process_document(
+            item_id, tenant_id=tenant_id, progress=recorder
+        )
+
+    async def _persist_phases(
+        self, run_id: UUID, item_id: UUID, recorder: PhaseRecorder
+    ) -> None:
+        seen = recorder.version
+        while True:
+            await asyncio.sleep(_PHASE_PERSIST_SECONDS)
+            if recorder.version != seen:
+                seen = recorder.version
+                with suppress(Exception):
+                    await self._runs.record_item_phases(run_id, item_id, recorder.phases)
+
+    @activity.defn(name=FAIL_BATCH_ACTIVITY)
+    async def fail_batch(self, input: FailBatchInput) -> None:
+        await self._runs.fail_batch(UUID(input.run_id), input.batch_number)
+
+    @activity.defn(name=FINISH_RUN_ACTIVITY)
+    async def finish_run(self, input: FinishRunInput) -> None:
+        await self._runs.finish(UUID(input.run_id), outcome=input.outcome, error=input.error)
+
+
+class SourceSyncActivities:
+    """The Activities of ``SourceSyncWorkflow``."""
+
+    def __init__(self, *, sync: SourceSyncService, runs: IngestionRunService) -> None:
+        self._sync = sync
+        self._runs = runs
+
+    @activity.defn(name=SYNC_SOURCE_ACTIVITY)
+    async def sync_source(self, input: SourceSyncInput) -> None:
+        heartbeat = asyncio.create_task(_heartbeat(lambda: {"phase": "syncing"}))
+        try:
+            await self._sync.sync(UUID(input.source_id))
+        except httpx.HTTPStatusError as exc:
+            raise ApplicationError(
+                str(exc),
+                type="ConnectorHTTPError",
+                non_retryable=exc.response.status_code in {400, 401, 403, 404, 422},
+            ) from exc
+        except _PERMANENT_SYNC_ERRORS as exc:
+            raise ApplicationError(str(exc), type=type(exc).__name__, non_retryable=True) from exc
+        finally:
+            await _stop(heartbeat)
+
+    @activity.defn(name=CREATE_SCHEDULED_RUN_ACTIVITY)
+    async def create_scheduled_run(self, input: SourceSyncInput) -> str | None:
+        """Process what the scheduled sync left pending; nothing pending is not an error."""
+
+        try:
+            run = await self._runs.create_run(
+                None,
+                trigger="scheduled",
+                tenant_id=UUID(input.tenant_id),
+                source_id=UUID(input.source_id),
+                states=["pending", "outdated"],
             )
-        document = await ItemIngestionService(
-            self._session_factory, index=self._index, preview=self._preview
-        ).index_upload(
-            document_id,
-            owner_user_id=owner_user_id,
-            tenant_id=tenant_id,
-            source=self._stored_content,
-            progress=recorder,
-        )
-        stored = next((phase for phase in recorder.phases if phase["phase"] == "storing"), None)
-        return IngestionResult(
-            document_id=str(document.id),
-            indexed_count=int(stored["total"]) if stored else 0,
-            phases=recorder.phases,
-        )
-
-    async def _start_child(self, child: Item) -> None:
-        # A dispatch failure fails this Activity: nobody else would start the
-        # child, and a retry is idempotent.
-        assert child.upload is not None
-        await self._workflows.start_ingestion(
-            IngestionWorkflowInput(
-                tenant_id=str(child.tenant_id),
-                document_id=str(child.id),
-                owner_user_id=str(child.upload.owner_user_id),
-                trigger_type="upload",
-            ),
-            title=child.title,
-            collection_id=str(child.parent_item_id),
-        )
+        except NothingToProcessError:
+            return None
+        return str(run["id"])
 
 
-async def _heartbeat(details: Any) -> None:
+async def _heartbeat(details: Callable[[], Any]) -> None:
     while True:
         activity.heartbeat(details())
         await asyncio.sleep(_HEARTBEAT_SECONDS)
@@ -349,4 +283,4 @@ async def _stop(task: asyncio.Task[None]) -> None:
         await task
 
 
-__all__ = ["IngestionActivities"]
+__all__ = ["IngestionRunActivities", "SourceSyncActivities"]

@@ -17,7 +17,7 @@ Base URL: `/api/v1` for product APIs. `/health` remains unversioned liveness.
    `tenant_id` internally until a migration is justified.
 3. Resource IDs use the full domain name and UUID format where durable IDs are
    UUIDs: `workspace_id`, `user_id`, `role_id`, `group_id`, `collection_id`,
-   `document_id`, `connection_id`, `source_id`, `ingestion_id`,
+   `document_id`, `connection_id`, `source_id`, `ingestion_run_id`,
    `approval_request_id`, and `artifact_id`.
 4. Temporal workflow IDs, storage keys, vector IDs, and provider IDs are
    internal implementation details. They never become public primary IDs.
@@ -63,14 +63,33 @@ using `x-required-collection-permission`. Conditional ownership/reviewer rules
 are documented separately; they are not unconditional workspace requirements.
 
 Runtime workspace permissions are `tenant.read`, `tenant.manage`,
-`user.manage`, `role.manage`, `group.manage`, `source.manage`, `item.manage`,
-`knowledge.read`, `collection.read`, `collection.update`, `collection.share`,
-`collection.delete`, `access.manage`, and `audit.read`. There are no
-`iam.*`, `knowledge.documents.*`, or `knowledge.collections.*` capabilities.
+`user.manage`, `role.manage`, `group.manage`, `knowledge.read`,
+`knowledge.manage`, `collection.read`, `collection.update`,
+`collection.share`, `collection.delete`, `source.manage`, `ingestion.read`,
+`ingestion.run`, `ingestion.manage`, `access.manage`, and `audit.read`. There
+are no `iam.*`, `item.*`, `knowledge.documents.*`, or `knowledge.collections.*`
+capabilities, and no `graph.*` capability until a knowledge graph exists.
+
+Knowledge and Ingestion are separate capability families:
+
+| Family | Permission | Scope | Grants |
+| --- | --- | --- | --- |
+| Knowledge | `knowledge.read` | tenant | search and chat over permitted knowledge |
+| Knowledge | `knowledge.manage` | tenant | create workspace Collections |
+| Knowledge | `collection.read/update/share/delete` | tenant or Collection | read, add/remove content, share, delete a Collection |
+| Ingestion | `source.manage` | tenant | connections, sources, sync, schedules |
+| Ingestion | `ingestion.run` | tenant or Collection | start processing for a Collection's Documents |
+| Ingestion | `ingestion.read` | tenant | see every run in the workspace (others see runs they started) |
+| Ingestion | `ingestion.manage` | tenant | cancel any run |
+
 Effective Collection permissions combine the caller's workspace grants with
-direct and inherited user/group ACL grants. `item.manage` alone does not grant
+direct and inherited user/group ACL grants, so a scoped grant such as
+`collection.read` or `ingestion.run` on one Collection is a Collection-role
+assignment, not a separate mechanism. `knowledge.manage` alone does not grant
 Collection visibility. Document reads use `collection.read`; creation, content
 finalization, and deletion use `collection.update` (ACL editor or equivalent).
+The system Collection roles are owner (`read, update, share, delete,
+ingestion.run`), editor (`read, update, ingestion.run`) and viewer (`read`).
 Search also requires `knowledge.read`. Private conversation attachments remain
 owner-only, including deletion; Collection editor access does not override this.
 
@@ -166,7 +185,7 @@ projection and has no Collection mutation behavior.
 | Method | Path | Auth | Permission |
 | --- | --- | --- | --- |
 | GET | `/collections` | bearer | filter by effective `collection.read` |
-| POST | `/collections` | bearer | `item.manage`; child also requires parent `collection.update` |
+| POST | `/collections` | bearer | `knowledge.manage`; child also requires parent `collection.update` |
 | GET | `/collections/{collection_id}` | bearer | effective `collection.read` |
 | PATCH | `/collections/{collection_id}` | bearer | effective `collection.update` |
 | DELETE | `/collections/{collection_id}` | bearer | effective `collection.delete` |
@@ -177,14 +196,17 @@ projection and has no Collection mutation behavior.
 | PUT | `/collections/personal` | bearer | signed-in user with `knowledge.read` |
 
 `principal_type` is `user` or `group`. PUT body is `{ "role": "owner" |
-"editor" | "viewer" }`; principal identity is in URL. Existing internal role
-codes may remain `collection_owner`, `collection_editor`, and
-`collection_viewer` behind transport mapping.
+"editor" | "viewer" }`; principal identity is in URL. Internal role codes stay
+`collection_owner`, `collection_editor`, and `collection_viewer`; both the
+list and the PUT response map them to `owner|editor|viewer`. Each
+`CollectionAccess` also carries a read-only `principal_name` (group display
+name, else user display name or email; `null` if the principal is gone) so
+clients can say who holds a role without a directory lookup.
 
 `Collection.permissions` is the effective caller-specific permission list,
 not the ACL role name or a global permission catalogue. Clients use it to
 enable resource actions. Listing, reading, updating, and deleting Collections
-do not additionally require `item.manage`; creation does, including children.
+do not additionally require `knowledge.manage`; creation does, including children.
 An inaccessible Collection is hidden as `404`; a readable Collection with an
 insufficient mutation permission returns `403`.
 
@@ -196,7 +218,6 @@ insufficient mutation permission returns `403`.
 | GET | `/documents/{document_id}` | bearer | Document metadata and lifecycle |
 | PUT | `/documents/{document_id}/content` | bearer | Validate reserved content and make it available |
 | DELETE | `/documents/{document_id}` | bearer | Delete document from normal use |
-| POST | `/documents/{document_id}/ingestions` | bearer | Re-index: start a new run of the Document's Ingestion |
 | POST | `/documents/search` | bearer | Permission-filtered semantic search |
 
 `POST /collections/{collection_id}/documents` is the only Document creation
@@ -207,23 +228,34 @@ Document first and return `DocumentCreateResult`; no public Upload resource or
 
 `PUT /documents/{document_id}/content` finalizes a presigned object by checking
 server-owned storage metadata. Document status is limited to
-`pending_content|available|failed`. Index/search processing remains the
-separate Ingestion lifecycle; there is no Document-level retry route.
+`pending_content|available|failed`.
 
 Those are public API states. Internal Item and upload-ledger statuses may use
 different storage-oriented values and must be mapped at the API boundary.
 
-`POST /documents/{document_id}/ingestions` re-indexes an uploaded Document on
-request, whatever its last run's outcome — the way `POST
-/sources/{source_id}/ingestions` re-syncs a Source. It needs Collection update,
-starts a `manual` run under the Document's one `ingestion_id` (mode unchanged),
-and processes the stored bytes from scratch, so a changed embedding,
-contextualization or parser setting takes effect. A queued or running run is a
-`409`, as are an unavailable original, content not processed as knowledge,
-and a connector-written Document (no upload to re-run; its Source's sync
-re-indexes it). Each `409` carries a user-facing reason, which the Web UI
-shows as-is when a bulk re-index refuses some of a selection. Retrying a
-failed run stays `POST /ingestions/{ingestion_id}/retry`.
+Adding a Document only adds it to the inventory. Neither creation transport
+nor content finalization parses, indexes, or starts any processing: the
+Document reads back with `processing.state = pending`. An archive is one
+pending Document until a run processes it, which unpacks its members into new
+pending Documents of the same Collection and processes them in that run.
+Archives are accepted only into workspace Collections (not personal uploads
+or conversation attachments). A conversation attachment is read by the agent
+directly from its stored original, so it needs no run to be usable in chat.
+
+Every `Document` carries `processing = {state, error, run_id}`:
+
+- `state` is `pending | processing | ready | failed | outdated | unsupported`.
+  `outdated` is a ready Document whose index was built with a processing
+  configuration (parser, chunker, embedding model, index schema,
+  contextualization model) that has since changed; `unsupported` content
+  (for example an image attached to a conversation) is kept but never
+  processed.
+- `error` and `run_id` come from the Document's latest Ingestion Run item:
+  the reason, written for people, that it could not be processed, and the run
+  to open for detail.
+
+Processing, re-processing and retrying are all `POST /ingestion-runs`; there
+is no Document-level processing route.
 
 ### Artifacts
 
@@ -232,6 +264,22 @@ failed run stays `POST /ingestions/{ingestion_id}/retry`.
 | GET | `/artifacts/{artifact_id}` | bearer | Artifact and revisions |
 | GET | `/artifacts/{artifact_id}/revisions/{revision}/content` | bearer | Revision content |
 | POST | `/artifacts/{artifact_id}/publish` | bearer | Publish revision into Collection |
+
+`ArtifactContent.content` is a text revision's text. Every revision that is
+not Markdown (Word, Excel, PDF, CSV, image) also returns `preview`, the same
+object the Knowledge document viewer returns (`original`, page `assets`,
+`rendition`; see document_viewer.md), so clients render it with the shared
+document view. Each revision is previewed on its first read by the Knowledge
+parse and preview pipeline and its manifest is kept in
+`artifact_revisions.exports.preview`; later reads only re-sign URLs. A
+Markdown revision's `preview` is `null`.
+
+A file saved during a chat turn is announced twice: live, as the export
+tool's `artifact` progress, and durably, as a zero-width `bomesh:artifact`
+annotation (`artifact`: id, title, file_name, mime_type, revision,
+size_bytes, updated_at) at the end of the first answer text that follows it,
+once per revision. Clients rebuild a restored conversation's file cards from
+the annotation, as they rebuild citations.
 
 ### Connections and sources
 
@@ -251,10 +299,7 @@ failed run stays `POST /ingestions/{ingestion_id}/retry`.
 | GET | `/sources/{source_id}` | bearer | Source detail |
 | PATCH | `/sources/{source_id}` | bearer | Partial source update |
 | DELETE | `/sources/{source_id}` | bearer | Lifecycle removal |
-| GET | `/sources/{source_id}/status` | bearer | Source health projection |
-| POST | `/sources/{source_id}/ingestions` | bearer | Start ingestion |
-| GET | `/sources/{source_id}/ingestions` | bearer | Source ingestion list |
-| GET | `/sources/{source_id}/ingestions/{ingestion_id}` | bearer | One source ingestion |
+| POST | `/sources/{source_id}/syncs` | bearer | Sync now: register what changed |
 | GET | `/sources/{source_id}/schedule` | bearer | Schedule state |
 | PUT | `/sources/{source_id}/schedule` | bearer | Replace/upsert schedule |
 | PATCH | `/sources/{source_id}/schedule` | bearer | Change schedule fields, including `enabled` |
@@ -283,61 +328,112 @@ A Source's `connection_id`, destination `collection_id`, `resource_type`, and
 change that binding, create a new Source. `PATCH /sources/{source_id}` accepts
 `display_name`, `status`, and `config`; supplying `config` replaces the entire
 connector scope/configuration, not a merge, and resets the checkpoint so the
-next ingestion rediscovers the scope. Schedules have their own resource.
+next sync rediscovers the scope. Schedules have their own resource.
 
-### Ingestions
+A sync changes only the inventory. It discovers what changed at the provider,
+stores each new or changed original in object storage (key
+`tenants/{tenant}/sources/{connection}/{provider}/{external_id}/{file_name}`),
+registers or updates its Document (back to `pending` when the provider
+version, ETag or stored original changed; an unchanged Document keeps its
+state and is not downloaded again, so unchanged data is never reprocessed),
+and tombstones Documents removed at the source (their index content and
+citations are removed at once, so deleted data stops being retrievable). It
+never parses or indexes. Creating a Source starts its first sync; if that
+cannot start, the Source is still created and its sync reads as failed. `POST
+/sources/{source_id}/syncs` starts one and returns `202` with the Source. It
+follows the rule of every other Source change (`source.manage` for a
+workspace Connection, the owner for a personal one); a sync already running,
+or a paused, disabled or reconnect-required Source, is `409` with the reason.
 
-| Method | Path | Auth | Purpose |
+`Source.sync` is the latest sync: `{status: running|succeeded|failed,
+last_synced_at, error, added, updated, removed, failed}`, `null` before the
+first one. `failed` means the sync itself stopped (connection, sign-in,
+provider error); Documents that could not be fetched leave it `succeeded` with
+`failed > 0`, a user-safe `error`, and the checkpoint unadvanced so the next
+sync tries them again. `Source.pending_documents` counts the Source's
+Documents that are pending or outdated. A schedule means "sync, then process
+what changed": each firing syncs the Source and, if anything is pending or
+outdated, creates one `scheduled` Ingestion Run for exactly those Documents.
+
+### Ingestion runs
+
+| Method | Path | Auth | Permission |
 | --- | --- | --- | --- |
-| GET | `/ingestions` | bearer | Managed Ingestions (documents and sources), newest first, live |
-| GET | `/ingestions/summary` | bearer | Throughput, outcomes and durations for `1h`/`24h`/`7d` |
-| GET | `/ingestions/{ingestion_id}` | bearer | Ingestion detail with live progress |
-| GET | `/ingestions/{ingestion_id}/events` | bearer | Timeline: queued, attempts, phases, outcome |
-| POST | `/ingestions/{ingestion_id}/retry` | bearer | Retry failed/cancelled/timed-out ingestion |
-| POST | `/ingestions/{ingestion_id}/cancel` | bearer | Cancel pending/running ingestion |
+| POST | `/ingestion-runs` | bearer | `ingestion.run` on every selected Document's Collection |
+| GET | `/ingestion-runs` | bearer | `ingestion.read` for every run; otherwise runs the caller created |
+| GET | `/ingestion-runs/{ingestion_run_id}` | bearer | as list |
+| GET | `/ingestion-runs/{ingestion_run_id}/items` | bearer | as list; items in unreadable Collections are omitted |
+| POST | `/ingestion-runs/{ingestion_run_id}/cancel` | bearer | creator or `ingestion.manage` |
+| POST | `/ingestion-runs/{ingestion_run_id}/retry` | bearer | `ingestion.run` on the retried Documents |
 
-One resource, two kinds, two runners, one core. A `document` Ingestion
-processes one upload or expands one archive; a `source` Ingestion
-synchronizes one Source. Every kind runs the same ingestion core
-(`ItemIngestionService`), and `mode` says who ran it:
+An Ingestion Run is the only way Documents are processed (parsed,
+contextualized, chunked, embedded, indexed). Manual (`trigger: manual`, a
+person in a BoMesh client), API (`trigger: api`, the default) and scheduled
+triggers all go through `IngestionRunService.create_run`; there is no
+upload-, source- or retry-specific processing path. One run is one Temporal
+workflow over many Documents: 100 selected Documents are one run, never 100
+workflows.
 
-- `managed`: one Temporal `IngestionWorkflow` (Sources, and uploads into
-  workspace Collections). Live state comes from Temporal through
-  `TemporalWorkflowService` only (search attributes `TenantId`, `CollectionId`,
-  `WorkflowCategory`, and a `title` memo). These are what `GET /ingestions`,
-  the summary and the Activity monitor show.
-- `direct`: a user's own upload (chat attachment, personal library) processed
-  by the API process on arrival. It is read from the Document's Ingestion
-  record; it is not listed by `GET /ingestions`, and it cannot be cancelled.
+`IngestionRunCreate` selects Documents. `document_ids` (≤ 1000) names them
+explicitly, in any state, which is how a re-index is asked for; otherwise the
+run takes the Documents under `collection_id` (its whole subtree), of
+`source_id`, or of the whole workspace (personal Collections excluded), whose
+state is in `states` (`pending | failed | outdated | ready`, default `pending`
+and `outdated`). At least one selector is required (`422`). Only Documents
+the caller may process count: an unreadable named Document is `404`, a
+readable one without `ingestion.run` is `403`. Documents already queued or
+running in another run are left out; if nothing remains the answer is `409`
+with the reason "Nothing to process: …" (errors use the API's shared error
+body). The selection is snapshotted when the run is created, so Documents
+added while it runs wait for a later run; an archive in the run is the one
+exception, since its unpacked members join the run (so `counts.total` can
+grow). `POST` answers `202` with the run, or `503` "Processing could not be
+started. Try again in a moment." when the workflow cannot start (the run is
+then recorded as failed).
 
-`IngestionService` owns the resource for both runners and routes retry, and a
-Document re-index, to the owning lifecycle (`DocumentService` for documents,
-in their original mode; `IntegrationLifecycleService.ingest_source` for
-Sources).
+`IngestionRun` is `{id, status, trigger, scope, counts, error, created_by,
+configuration, created_at, started_at, finished_at, updated_at}`:
 
-Visibility follows the data a run touches. A document Ingestion is visible to
-readers of its Collection, and retry/cancel need Collection update. A source
-Ingestion needs `source.manage`. A run the caller may not see is `404`.
+- `status`: `queued | running | completed | failed | cancelled`. A run that
+  processed every Document is `completed` even when some of them failed;
+  `failed` means the run itself stopped (for example the model provider
+  refused the account's key or credit), with the reason in `error`; its
+  unprocessed Documents are `skipped`.
+- `counts`: `{total, queued, running, succeeded, failed, skipped, cancelled}`.
+- `scope`: `{selected_documents, collection_id, source_id, states,
+  retry_of_run_id}` as asked.
+- `configuration`: the processing configuration fixed at creation
+  (`processing_version`, models, batching limits) — technical detail.
 
-`progress.phase` is where the run is: documents go `queued · parsing ·
-contextualizing · embedding · storing`, archives go `queued · downloading ·
-expanding`, sources go `syncing`. Counts are chunks, accepted files, or items.
-Live phase comes from the core's `PhaseRecorder`: a managed run heartbeats it
-(about every 2s), and every document run also writes it to the Document's
-Ingestion record, so finished phases, with durations, rebuild the timeline
-either way. `error` carries only messages written for people; infrastructure
-causes are logged, never returned.
+`GET /ingestion-runs/{ingestion_run_id}/items` pages
+`{document_id, name, collection_id, status, phase, error, chunk_count, phases,
+started_at, finished_at}`, running and failed first. `status` is `queued |
+running | succeeded | failed | skipped | cancelled`; `phases` are `parsing ·
+contextualizing · embedding · storing` (archives: `downloading · expanding`)
+with timings. `error` carries only messages written for people;
+infrastructure causes are logged, never returned.
 
-An Ingestion is one target's execution chain, not one attempt: a retry, or
-another manual sync of the same Source, is a new run under the same
-`ingestion_id`. Reads address its latest run, and `GET /ingestions` lists each
-Ingestion once, at that run, with `status` filters matched against it (a
-superseded failure is not "failed"). Scheduled syncs are separate Ingestions.
+`cancel` stops a queued or running run (`409` once finished). It answers
+`202` with the run already `cancelled` and its queued Documents `cancelled`;
+Documents in flight stop at their next step and return to `pending`, and
+`finished_at` is set when they have. `retry` creates a new `manual` run over
+the failed, cancelled and skipped Documents of a run (`scope.retry_of_run_id`
+set; `409` "Nothing to retry: …" when there are none) — nothing is uploaded
+again.
 
-Responses expose `ingestion_id`; the Temporal `workflow_id`, run id, event
-types and payloads stay internal. Retrying reuses the same ingestion id. The
-Web UI's Sync activity tab polls these endpoints (2s while anything runs, 15s
-otherwise); there is no push channel.
+Execution: the workflow plans the snapshot into batches packed by size
+(bounded by `BOMESH_INGESTION_BATCH_MAX_ITEMS` and
+`BOMESH_INGESTION_BATCH_MAX_BYTES`), runs at most
+`BOMESH_INGESTION_RUN_PARALLELISM` batch activities at once, records every
+Document's status and phases in PostgreSQL as it goes, retries a failed batch
+without redoing its finished Documents (after the last attempt, that batch's
+unfinished Documents fail with "Processing was interrupted before it
+finished." and the run goes on), and continues as new when its history
+grows. One Document's failure never fails the others. Postgres is the only
+store of run state; Temporal ids stay internal and nothing reads Temporal
+visibility. A run whose workflow was lost (terminated, never dispatched) is
+reconciled to `failed` at startup or when read. Clients poll run detail
+(about every 2s while it runs); there is no push channel.
 
 ### Workspace IAM and governance
 
@@ -415,10 +511,10 @@ not expose audit records through a weaker permission. Its `knowledge` and
 `usage` blocks are aggregate counts only (no identities, no audit rows), so
 `tenant.read` suffices for them:
 
-- `knowledge` = `{collections, documents, indexed, indexing, failed}` over
-  non-deleted Items (`status <> 'deleted'`, `deleted_at` null). `indexed` is
-  `index_status = ready`, `indexing` is `pending|processing`, `failed` is
-  `failed`; `unsupported` Documents count only in `documents`.
+- `knowledge` = `{collections, documents, ready, processing, pending, failed,
+  outdated}` over non-deleted Items (`status <> 'deleted'`, `deleted_at`
+  null), with Document counts by `processing.state` (as on `Document`);
+  `unsupported` Documents count only in `documents`.
 - `usage` = `{timezone, buckets, totals, previous}`: 30 daily buckets of
   `{start, active_users, questions, sign_ins}` (oldest first, zero-filled);
   `totals` covers the last 7 local days — the same span as the `7d` activity
@@ -510,7 +606,7 @@ routes exist in final contract.
 | `active_tenant_id` | `active_workspace_id` | token claim mapped at API boundary |
 | `tenants` | `workspaces` | auth response only |
 | `integration_connection_id` | `connection_id` | service method migration required |
-| `workflow_id` | `ingestion_id` | Temporal ID stays private |
+| `workflow_id`, `ingestion_id` | `ingestion_run_id` | Temporal ID stays private; one run spans many Documents |
 | `doc_id` | `document_id` | route/path/schema rename |
 | public `upload_id` | `document_id` | internal one-to-one upload ledger remains private |
 | `item_id` for Collection | `collection_id` | Item remains internal aggregate |
@@ -520,8 +616,9 @@ routes exist in final contract.
 | `/knowledge/collections` | `/collections`, `/knowledge/home` | split resource/projection |
 | `/admin/*` workspace resources | root resource paths | remove namespace |
 | `/admin/platform/*` | `/platform/*` | platform-only permission |
-| `/documents/{document_id}/retry` | `/ingestions/{ingestion_id}/retry` | one retry use-case |
-| `/items/{item_id}/retry` | `/ingestions/{ingestion_id}/retry` | one retry use-case |
+| `/documents/{document_id}/retry`, `/ingestions/{ingestion_id}/retry` | `POST /ingestion-runs` or `POST /ingestion-runs/{ingestion_run_id}/retry` | one processing entry point |
+| `/items/{item_id}/retry`, `POST /documents/{document_id}/ingestions` | `POST /ingestion-runs` with `document_ids` | one processing entry point |
+| `POST /sources/{source_id}/ingestions` | `POST /sources/{source_id}/syncs` (inventory) + `POST /ingestion-runs` (processing) | sync and processing are separate |
 | `/document-uploads` | `/collections/{collection_id}/documents` | upload is Document creation transport |
 | `/documents/{document_id}/complete` | `PUT /documents/{document_id}/content` | finalize Document content |
 | `/schedule/pause`, `/schedule/resume` | `PATCH .../schedule` | state update |

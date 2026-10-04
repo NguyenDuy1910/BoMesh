@@ -439,7 +439,7 @@ function UnrenderedSource({ viewer }: { viewer: KnowledgeItemViewer }) {
       <PreviewNotice
         icon="spinner"
         title="Preview is still being prepared"
-        detail="This source has been indexed. Its page previews are still rendering."
+        detail="This document is processed. Its page previews are still being drawn."
       />
     );
   }

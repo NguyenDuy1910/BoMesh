@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -140,10 +141,16 @@ class SandboxSessionService:
         *,
         session_id: UUID,
         resource: SandboxManifestResource,
-        provider_file: SandboxProviderFile,
+        provider_files: Sequence[SandboxProviderFile],
     ) -> SandboxSessionState:
-        """Record a successfully uploaded durable resource for workspace rebuild."""
+        """Record a successfully uploaded durable resource for workspace rebuild.
 
+        One resource may arrive as several provider files: the original and
+        any shell-friendly renditions of it (a spreadsheet's sheets as CSV).
+        """
+
+        if not provider_files:
+            raise ValueError("a materialized resource needs at least one provider file")
         async with transaction_scope(self._sessions) as session:
             row = await _active_session(session, access, session_id)
             resources = list(_manifest_resources(row.manifest))
@@ -151,7 +158,7 @@ class SandboxSessionService:
                 resources.append(resource)
             files = list(_provider_files(row.provider_state, "materialized_files"))
             files = [item for item in files if item.resource_id != resource.resource_id]
-            files.append(provider_file)
+            files.extend(provider_files)
             row.manifest = {"resources": [_resource_payload(item) for item in resources]}
             row.provider_state = _provider_state(
                 row.provider_state,
@@ -189,16 +196,27 @@ class SandboxSessionService:
         session_id: UUID,
         environment_id: str,
         files: Iterable[SandboxProviderFile],
+        delivered_file_ids: Iterable[str] = (),
     ) -> SandboxSessionState:
-        """Persist the latest provider environment and observable workspace files."""
+        """Persist the latest provider environment and observable workspace files.
+
+        ``delivered_file_ids`` are the materialized files that shell step
+        attached; they are inside the workspace now and are not sent again.
+        """
 
         normalized_environment = _identifier(environment_id, "sandbox environment")
         observed = _unique_files(files)
+        delivered = set(delivered_file_ids)
         async with transaction_scope(self._sessions) as session:
             row = await _active_session(session, access, session_id)
+            materialized = tuple(
+                replace(item, delivered=True) if item.id in delivered else item
+                for item in _provider_files(row.provider_state, "materialized_files")
+            )
             row.provider_state = _provider_state(
                 row.provider_state,
                 environment_id=normalized_environment,
+                materialized_files=materialized,
                 observed_files=observed,
             )
             row.last_used_at = datetime.now(UTC)
@@ -324,6 +342,9 @@ def _provider_files(value: object, key: str) -> tuple[SandboxProviderFile, ...]:
                 id=_identifier(item.get("id"), "provider file"),
                 name=_identifier(item.get("name"), "provider file name"),
                 resource_id=_optional_identifier(item.get("resource_id")),
+                # Files recorded before delivery tracking were attached when
+                # their workspace started.
+                delivered=item.get("delivered", True) is not False,
             )
         except ValueError:
             continue
@@ -388,7 +409,12 @@ def _resource_payload(resource: SandboxManifestResource) -> dict[str, object]:
 
 
 def _file_payload(file: SandboxProviderFile) -> dict[str, object]:
-    return {"id": file.id, "name": file.name, "resource_id": file.resource_id}
+    return {
+        "id": file.id,
+        "name": file.name,
+        "resource_id": file.resource_id,
+        "delivered": file.delivered,
+    }
 
 
 def _identifier(value: object, label: str) -> str:

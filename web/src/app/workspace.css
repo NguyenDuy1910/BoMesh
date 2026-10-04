@@ -134,18 +134,6 @@
   background: var(--action-primary-pressed);
 }
 
-/* ── Tab bar ───────────────────────────────────────────────────────────────
-   The shared `.tab-bar` owns the divider and the height; the workspace is
-   full-bleed, so the bar only adds the page gutter. */
-.knowledge-bar {
-  padding-inline: var(--page-gutter);
-}
-
-.knowledge-bar__search {
-  min-width: 9rem;
-  flex: 0 1 17.5rem;
-}
-
 /* Quiet toolbar control: an 18px glyph with a 36px target, and no chrome at
    rest. It overrides the bordered dropdown trigger it is sometimes applied to
    so a menu and a plain action never look like two different weights. */
@@ -172,23 +160,6 @@
 .knowledge-icon-button--sm {
   width: 2rem;
   height: 2rem;
-}
-
-/* The scope control states where the reader is browsing. It is chromeless so
-   the place name reads as a heading rather than as a form field. */
-.knowledge-scope-trigger {
-  max-width: 12rem;
-  background: transparent;
-  color: var(--text-primary);
-}
-
-.knowledge-scope-trigger:not(:focus-visible) {
-  box-shadow: none;
-}
-
-.knowledge-scope-trigger:hover {
-  background: var(--surface-hover);
-  color: var(--text-primary);
 }
 
 /* ── Section labels ────────────────────────────────────────────────────────
@@ -231,30 +202,6 @@
   color: var(--text-tertiary);
   font-size: var(--text-size-meta);
   line-height: var(--text-lh-meta);
-}
-
-/* A select control leads the documents heading, on the same line as the row
-   checkboxes below it: the checkbox selects everything shown, the chevron
-   beside it selects by status or type. */
-.knowledge-list-heading__title {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.knowledge-select-menu {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.125rem;
-}
-
-.knowledge-select-menu .knowledge-select-menu__trigger {
-  width: 1.5rem;
-  height: 1.5rem;
-  min-height: 0;
-  padding: 0;
-  color: var(--text-tertiary);
 }
 
 .knowledge-muted {
@@ -304,6 +251,380 @@
   color: var(--text-accent);
   font-size: var(--text-size-ui);
   font-weight: 500;
+}
+
+/* ── Library ───────────────────────────────────────────────────────────────
+   Knowledge reads as a library. Home is the shelf of collections; a
+   collection's page is a folder with a breadcrumb home. Each collection wears
+   one colour everywhere, so it is recognised before it is read. Processing
+   never shapes the page. */
+.knowledge-page {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding-bottom: var(--space-10);
+}
+
+.knowledge-page--scroll {
+  padding: var(--space-5) var(--page-gutter) var(--space-10);
+}
+
+.knowledge-section {
+  padding: var(--space-5) var(--page-gutter) 0;
+}
+
+.knowledge-searchbar {
+  flex-shrink: 0;
+  padding: 0 var(--page-gutter) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.knowledge-searchbar__field {
+  max-width: 36rem;
+}
+
+/* A collection's colour: a tinted tile carrying the mark in full strength.
+   The tint is mixed from the surface so the same tone works in both themes. */
+.knowledge-tile {
+  --tile: #7c5cd6;
+  display: inline-grid;
+  width: 2.5rem;
+  height: 2.5rem;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--tile) 14%, var(--surface-base));
+  color: var(--tile);
+}
+
+.knowledge-tile--lg {
+  width: 3.25rem;
+  height: 3.25rem;
+  border-radius: var(--radius-lg);
+}
+
+.knowledge-tile[data-tone="indigo"] { --tile: #4f63d9; }
+.knowledge-tile[data-tone="sky"] { --tile: #1f86c9; }
+.knowledge-tile[data-tone="cyan"] { --tile: #0e8a9a; }
+.knowledge-tile[data-tone="magenta"] { --tile: #c0449b; }
+.knowledge-tile[data-tone="slate"] { --tile: #5b6b84; }
+.knowledge-tile[data-tone="muted"] { --tile: var(--text-tertiary); }
+
+/* Dark surfaces swallow a light tint; the tile needs more of its hue there. */
+[data-theme="dark"] .knowledge-tile {
+  background: color-mix(in oklab, var(--tile) 26%, var(--surface-base));
+  color: color-mix(in oklab, var(--tile) 70%, white);
+}
+
+.knowledge-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-4);
+  color: var(--text-tertiary);
+  font-size: var(--text-size-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.knowledge-facts > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3125rem;
+}
+
+/* Shelf: one card per collection. */
+.knowledge-shelf {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fill, minmax(16.5rem, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.knowledge-shelf__card {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 10rem;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+  border-radius: var(--radius-xl);
+  background: var(--surface-base);
+  padding: var(--space-4) var(--space-4) var(--space-4);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  text-align: left;
+  transition:
+    box-shadow var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
+}
+
+.knowledge-shelf__card:hover:not(:disabled) {
+  box-shadow: inset 0 0 0 1px var(--border-default), var(--elevation-2);
+  transform: translateY(-1px);
+}
+
+.knowledge-shelf__card:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.knowledge-shelf__card:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+
+.knowledge-shelf__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: var(--space-1);
+}
+
+.knowledge-shelf__go {
+  color: var(--text-tertiary);
+  opacity: 0;
+  transform: translateX(-4px);
+  transition:
+    opacity var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
+}
+
+.knowledge-shelf__card:hover:not(:disabled) .knowledge-shelf__go,
+.knowledge-shelf__card:focus-visible .knowledge-shelf__go {
+  opacity: 1;
+  transform: none;
+}
+
+.knowledge-shelf__name {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: var(--text-size-body);
+  font-weight: 600;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.knowledge-shelf__about {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: var(--text-size-ui);
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.knowledge-shelf__card .knowledge-facts {
+  margin-top: auto;
+  padding-top: var(--space-2);
+}
+
+/* A collection's page: breadcrumb home, then the folder's own heading. */
+.knowledge-folder {
+  display: grid;
+  flex-shrink: 0;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--page-gutter) var(--space-5);
+}
+
+.knowledge-crumbs {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.knowledge-crumbs__back {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+}
+
+.knowledge-crumbs__back:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.knowledge-crumbs ol {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-size-ui);
+  list-style: none;
+}
+
+.knowledge-crumbs li {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.knowledge-crumbs li button {
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-1);
+  color: var(--text-secondary);
+}
+
+.knowledge-crumbs li button:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.knowledge-crumbs li[aria-current] span {
+  padding: 2px var(--space-1);
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.knowledge-crumbs__back:focus-visible,
+.knowledge-crumbs li button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.knowledge-folder__main {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+
+.knowledge-folder__text {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: var(--space-2);
+}
+
+.knowledge-folder__text h1 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--text-size-h2);
+  font-weight: 600;
+  line-height: var(--text-lh-h2);
+}
+
+.knowledge-folder__text p {
+  max-width: 48rem;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-size-ui);
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
+.knowledge-folder__actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+@media (max-width: 720px) {
+  .knowledge-folder__main { flex-wrap: wrap; }
+  .knowledge-folder__actions { width: 100%; }
+}
+
+/* More rows on request rather than hundreds at once. */
+.knowledge-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+  color: var(--text-tertiary);
+  font-size: var(--text-size-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Share dialog: add at the top, everyone with access below. */
+.knowledge-share {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.knowledge-share__add {
+  display: grid;
+  align-items: center;
+  gap: var(--space-2);
+  grid-template-columns: minmax(0, 1fr) 7.5rem auto;
+}
+
+.knowledge-share__role {
+  width: 7.5rem;
+}
+
+.knowledge-share__people {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.knowledge-share__list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.knowledge-share__list > li {
+  display: grid;
+  align-items: center;
+  gap: var(--space-3);
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  padding-block: var(--space-2);
+}
+
+.knowledge-share__list > li + li {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.knowledge-share__who {
+  display: grid;
+  min-width: 0;
+}
+
+.knowledge-share__who strong {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: var(--text-size-ui);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.knowledge-share__who small {
+  color: var(--text-tertiary);
+  font-size: var(--text-size-meta);
+}
+
+.knowledge-share__note {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-size-meta);
+  line-height: var(--text-lh-meta);
+}
+
+.knowledge-share__note a {
+  color: var(--text-accent);
+}
+
+.knowledge-share__note svg {
+  display: inline;
+  margin-right: var(--space-1);
+  vertical-align: -2px;
 }
 
 /* ── Split ─────────────────────────────────────────────────────────────────
@@ -624,10 +945,11 @@
   color: var(--status-success-solid);
 }
 
-.knowledge-agent__summary--failed > summary > svg,
-.knowledge-agent__summary--unsupported > summary > svg { color: var(--status-danger-solid); }
-.knowledge-agent__summary--indexing > summary > svg { color: var(--status-warning-solid); }
-.knowledge-agent__summary--restricted > summary > svg { color: var(--status-warning-solid); }
+.knowledge-agent__summary--failed > summary > svg { color: var(--status-danger-solid); }
+.knowledge-agent__summary--processing > summary > svg { color: var(--status-info-solid); }
+.knowledge-agent__summary--outdated > summary > svg { color: var(--status-warning-solid); }
+.knowledge-agent__summary--pending > summary > svg,
+.knowledge-agent__summary--unsupported > summary > svg { color: var(--text-tertiary); }
 
 .knowledge-agent__summary summary > span:first-of-type {
   min-width: 0;
@@ -769,28 +1091,6 @@
   overflow-wrap: anywhere;
 }
 
-.knowledge-details__value--ok {
-  color: var(--status-success-text);
-}
-
-.knowledge-details__disclosure {
-  padding-block: var(--space-3);
-  font-size: var(--text-size-meta);
-}
-
-.knowledge-details__disclosure summary {
-  color: var(--text-secondary);
-  font-size: var(--text-size-ui);
-  cursor: pointer;
-}
-
-.knowledge-details__disclosure p {
-  margin-top: var(--space-2);
-  color: var(--text-tertiary);
-  line-height: var(--text-lh-ui);
-  overflow-wrap: anywhere;
-}
-
 .knowledge-details__actions {
   display: grid;
   flex-shrink: 0;
@@ -879,9 +1179,7 @@
   flex-shrink: 0;
 }
 
-/* ── App icons ─────────────────────────────────────────────────────────────
-   One container for every integration mark, so a directory of fifteen logos
-   of different silhouettes still reads as one column. */
+/* Integration marks keep their published colors on a consistent plate. */
 .knowledge-app-icon {
   display: grid;
   width: 2.5rem;
@@ -930,20 +1228,8 @@ html.dark .knowledge-app-icon {
 }
 
 /* ── Sources ───────────────────────────────────────────────────────────────
-   A connection manager. A healthy source says so by being listed here at all,
-   so it carries no badge — only trouble earns one. */
-.knowledge-sources,
-.knowledge-activity {
-  min-height: 0;
-  flex: 1;
-  overflow-y: auto;
-  padding: var(--space-5) var(--page-gutter) var(--space-12);
-}
-
-.knowledge-sources > * + * {
-  margin-top: var(--section-gap);
-}
-
+   Source and account rows, on Ingestion's Sources tab. A healthy account says
+   so by being listed at all, so it carries no badge — only trouble earns one. */
 .knowledge-source-list {
   margin: 0;
   padding: 0;
@@ -1028,101 +1314,139 @@ html.dark .knowledge-app-icon {
 }
 
 /* ── Connector directory ───────────────────────────────────────────────────
-   An app browser, not a configuration table: no cards, no borders, two
-   columns of quiet rows. */
-/* Two columns on a desktop, one when the pane narrows. A third column would
-   turn a browsable directory into a grid of tiles. The grid bleeds by the
-   rows' inline padding so each mark starts on the page gutter. */
+   The whole tile connects one account; unavailable types are informational. */
+.knowledge-connectors__heading {
+  margin-bottom: var(--space-4);
+}
+
+.knowledge-connectors__heading h2 {
+  color: var(--text-primary);
+  font-size: var(--text-size-h2);
+  font-weight: 600;
+  line-height: var(--text-lh-h2);
+}
+
+.knowledge-connectors__heading p {
+  margin-top: var(--space-1);
+  color: var(--text-secondary);
+  font-size: var(--text-size-ui);
+  line-height: var(--text-lh-ui);
+}
+
 .knowledge-connectors {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-1) var(--space-6);
-  margin-inline: calc(var(--space-3) * -1);
+  gap: var(--space-3);
 }
 
-/* A directory row does two things: it opens the connector's page, and it
-   offers the shortcut for someone who already knows what they are adding. Two
-   controls, one hover surface, so the row still reads as a single object. */
-.knowledge-connectors__item {
+.knowledge-connectors__tile {
   display: flex;
   min-width: 0;
-  align-items: center;
-  border-radius: var(--radius-md);
-  color: var(--text-tertiary);
-  transition: background-color var(--duration-fast) var(--ease-out);
-}
-
-.knowledge-connectors__item:hover {
-  background: var(--surface-hover);
-}
-
-.knowledge-connectors__open {
-  display: flex;
-  min-width: 0;
-  flex: 1;
+  min-height: 6.5rem;
   align-items: center;
   gap: var(--space-4);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
-  padding: var(--space-3);
+  background: var(--surface-base);
+  padding: var(--space-4);
+  color: var(--text-primary);
   text-align: left;
 }
 
-.knowledge-connectors__add {
-  display: grid;
-  width: 2.25rem;
-  height: 2.25rem;
-  flex-shrink: 0;
-  place-items: center;
-  margin-right: var(--space-3);
-  border-radius: var(--radius-sm);
-  color: var(--text-tertiary);
-  transition: background-color var(--duration-fast) var(--ease-out),
-    color var(--duration-fast) var(--ease-out);
+button.knowledge-connectors__tile {
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
 }
 
-.knowledge-connectors__add:hover {
+button.knowledge-connectors__tile:hover {
+  border-color: var(--border-default);
+  background: var(--surface-hover);
+  box-shadow: var(--elevation-1);
+}
+
+button.knowledge-connectors__tile:active {
   background: var(--accent-soft);
-  color: var(--text-accent);
 }
 
-.knowledge-connectors strong,
-.knowledge-connectors small {
-  display: block;
+button.knowledge-connectors__tile:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.knowledge-connectors__tile--unavailable {
+  background: var(--surface-inset);
+  color: var(--text-secondary);
+}
+
+.knowledge-connectors__mark {
+  width: 3rem;
+  height: 3rem;
+  border-radius: var(--radius-md);
+  background: var(--surface-inset);
+}
+
+.knowledge-connectors__mark .knowledge-app-icon__mark {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.knowledge-connectors__content {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.knowledge-connectors__content strong {
   overflow: hidden;
+  color: var(--text-primary);
+  font-size: var(--text-size-nav);
+  font-weight: 600;
+  line-height: var(--text-lh-nav);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.knowledge-connectors strong {
-  color: var(--text-primary);
-  font-size: var(--text-size-nav);
-  font-weight: 500;
-  line-height: var(--text-lh-nav);
-}
-
-.knowledge-connectors small {
-  margin-top: 0.0625rem;
-  color: var(--text-tertiary);
+.knowledge-connectors__content small {
+  color: var(--text-secondary);
   font-size: var(--text-size-meta);
   line-height: var(--text-lh-meta);
+  text-wrap: pretty;
+}
+
+.knowledge-connectors__connected {
+  align-self: flex-start;
+  color: var(--text-secondary);
+  font-size: var(--text-size-caption);
+  font-weight: 600;
+}
+
+.knowledge-connectors__action {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--text-accent);
+  font-size: var(--text-size-meta);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.knowledge-connectors__action svg {
+  flex-shrink: 0;
 }
 
 /* ── Detail pages ──────────────────────────────────────────────────────────
-   A connector's page and a connected account's page are states of the
-   Sources subview. Both scroll themselves, start on the gutter the tab bar's
-   first label does, and space their sections by the page's section gap. */
-.knowledge-connector-page,
+   Connected accounts still use the Sources tab's detail surface. */
 .knowledge-source-detail {
   display: flex;
-  min-height: 0;
-  flex: 1;
   flex-direction: column;
   gap: var(--section-gap);
-  overflow-y: auto;
-  padding: var(--space-5) var(--page-gutter) var(--space-12);
 }
 
-.knowledge-connector-page > *,
 .knowledge-source-detail > * {
   flex-shrink: 0;
 }
@@ -1138,114 +1462,6 @@ html.dark .knowledge-app-icon {
 /* The page's gap already spaces the notice from what follows. */
 .knowledge-source-detail > .knowledge-notice {
   margin-bottom: 0;
-}
-
-/* ── Connector page ────────────────────────────────────────────────────────
-   What a connector is, before anyone commits to one. It is a state of the
-   Sources subview rather than a route of its own, so one stylesheet block
-   serves every connector the deployment will ever register. */
-.knowledge-connector-page__header {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-}
-
-.knowledge-connector-page__mark {
-  width: 3.5rem;
-  height: 3.5rem;
-  border-radius: var(--radius-md);
-}
-
-.knowledge-connector-page__mark .knowledge-app-icon__mark {
-  width: 1.75rem;
-  height: 1.75rem;
-}
-
-.knowledge-connector-page__header h2 {
-  color: var(--text-primary);
-  font-size: var(--text-size-h2);
-  font-weight: 600;
-  line-height: var(--text-lh-h2);
-}
-
-.knowledge-connector-page__header p {
-  margin-top: 0.125rem;
-  color: var(--text-tertiary);
-  font-size: var(--text-size-ui);
-}
-
-.knowledge-connector-page__summary,
-.knowledge-connector-page__unavailable {
-  max-width: 68ch;
-  color: var(--text-secondary);
-  font-size: var(--text-size-body);
-  line-height: 1.6;
-  text-wrap: pretty;
-}
-
-.knowledge-connector-page__unavailable {
-  font-size: var(--text-size-ui);
-  color: var(--text-tertiary);
-}
-
-.knowledge-connector-page__columns {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
-  gap: var(--space-4) var(--space-10);
-}
-
-.knowledge-connector-page__list {
-  display: grid;
-  gap: var(--space-2);
-  margin: 0;
-  padding: var(--space-3) 0 0;
-  list-style: none;
-}
-
-.knowledge-connector-page__list li {
-  position: relative;
-  padding-left: var(--space-4);
-  color: var(--text-secondary);
-  font-size: var(--text-size-ui);
-  line-height: var(--text-lh-ui);
-}
-
-.knowledge-connector-page__list li::before {
-  position: absolute;
-  top: 0.5rem;
-  left: 0.25rem;
-  width: 0.25rem;
-  height: 0.25rem;
-  border-radius: var(--radius-full);
-  background: var(--border-default);
-  content: "";
-}
-
-/* Three promises about handling, kept as one quiet band rather than three
-   cards: they are read once and then trusted. */
-.knowledge-connector-page__assurances {
-  display: grid;
-  gap: var(--space-2);
-  margin: 0;
-  border-radius: var(--radius-md);
-  background: var(--surface-inset);
-  padding: var(--space-4);
-  box-shadow: inset 0 0 0 1px var(--border-subtle);
-  list-style: none;
-}
-
-.knowledge-connector-page__assurances li {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  color: var(--text-secondary);
-  font-size: var(--text-size-ui);
-  line-height: var(--text-lh-ui);
-}
-
-.knowledge-connector-page__assurances svg {
-  flex-shrink: 0;
-  color: var(--text-tertiary);
 }
 
 /* ── Connector setup ───────────────────────────────────────────────────────
@@ -1541,877 +1757,253 @@ html.dark .knowledge-app-icon {
 .knowledge-kv__value--ok { color: var(--status-success-text); }
 .knowledge-kv__value--bad { color: var(--status-danger-text); }
 
-/* ── Sync runs ─────────────────────────────────────────────────────────────
-   A log reads as a log: one line per ingestion, starting on the text column.
-   A failure spends its second line on the reason; a healthy one on where the
-   work landed. When a line opens details, its hover surface bleeds outward by
-   its own inline padding so the text still starts on the column. */
-.knowledge-run-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
+/* ── Ingestion ─────────────────────────────────────────────────────────────
+   Runs, sources and schedules sit in an ordinary control page: the shell pads
+   and scrolls it, so nothing here adds a gutter of its own. Colour is kept for
+   what needs someone — a failure — and everything else stays in ink. */
+.ingestion-panel {
+  padding-top: var(--space-4);
 }
 
-.knowledge-run {
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-.knowledge-run__summary {
-  display: flex;
-  width: 100%;
-  min-height: 3.25rem;
-  align-items: center;
-  gap: var(--space-3);
-  padding-block: var(--space-2);
-  text-align: left;
-}
-
-.knowledge-run__summary--button {
-  width: calc(100% + var(--space-3) * 2);
-  margin-inline: calc(var(--space-3) * -1);
-  border-radius: var(--radius-sm);
-  padding-inline: var(--space-3);
-  transition: background-color var(--duration-fast) var(--ease-out);
-}
-
-.knowledge-run__summary--button:hover {
-  background: var(--surface-hover);
-}
-
-.knowledge-run__summary--button[aria-current="true"] {
-  background: var(--surface-selected);
-}
-
-.knowledge-run__title {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  flex-direction: column;
-  gap: 0.125rem;
-  color: var(--text-primary);
+.ingestion-intro {
+  margin-bottom: var(--space-3);
+  color: var(--text-secondary);
   font-size: var(--text-size-ui);
+  line-height: var(--text-lh-ui);
 }
 
-.knowledge-run__title strong,
-.knowledge-run__detail {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.knowledge-run__title strong {
-  font-weight: 600;
-}
-
-.knowledge-run__detail {
-  color: var(--text-tertiary);
-  font-size: var(--text-size-meta);
-  font-variant-numeric: tabular-nums;
-}
-
-.knowledge-run__detail--bad {
+/* Why something failed: quiet beside its name, but never grey. */
+.ingestion-problem,
+.knowledge-source-list li > .knowledge-source-list__static > span > small.ingestion-problem {
   color: var(--status-danger-text);
 }
 
-.knowledge-run__duration,
-.knowledge-run__time {
-  flex-shrink: 0;
+.ingestion-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--text-accent);
+  font-size: var(--text-size-ui);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.ingestion-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.ingestion-pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  padding-top: var(--space-3);
+  color: var(--text-tertiary);
   font-size: var(--text-size-meta);
   font-variant-numeric: tabular-nums;
-  text-align: right;
 }
 
-.knowledge-run__duration {
-  width: 4.5rem;
-  color: var(--text-secondary);
+.ingestion-pager > span {
+  margin-right: var(--space-2);
 }
 
-.knowledge-run__time {
-  min-width: 4rem;
-  color: var(--text-tertiary);
+.ingestion-sources > * + * {
+  margin-top: var(--section-gap);
 }
 
-/* ── Ingestion monitor ─────────────────────────────────────────────────────
-   The pipeline as it runs: three instruments for the window, a lane per
-   ingestion in flight, then the log. The detail panel docks over the right
-   edge like a document's details and, where there is room, the monitor makes
-   space for it instead of sliding under it. */
-.knowledge-activity-frame {
-  position: relative;
+/* A source keeps its actions in view: syncing is what a source is for, and
+   the pending count is the reason to press Process. */
+.ingestion-source__actions {
   display: flex;
-  min-height: 0;
-  flex: 1;
-}
-
-@media (min-width: 75rem) {
-  .knowledge-activity-frame:has(.knowledge-ingestion-panel) > .knowledge-monitor {
-    padding-right: calc(24rem + var(--space-6));
-  }
-}
-
-/* The instruments answer to the monitor's own width, not the viewport's: an
-   open detail panel takes 24rem of it. */
-.knowledge-monitor {
-  container-type: inline-size;
-}
-
-.knowledge-monitor > * + * {
-  margin-top: var(--space-6);
-}
-
-.knowledge-monitor__head {
-  display: flex;
-  flex-wrap: wrap;
+  flex-shrink: 0;
   align-items: center;
-  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.ingestion-source__pending {
+  color: var(--text-secondary);
+  font-size: var(--text-size-meta);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Run detail: the way back and the run's identity, then progress, then the
+   documents. Sections are spaced by the page's section gap. */
+.ingestion-run {
+  display: flex;
+  flex-direction: column;
+  gap: var(--section-gap);
+}
+
+.ingestion-run > .knowledge-notice {
+  margin-bottom: 0;
+}
+
+.ingestion-run__header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
   gap: var(--space-3);
 }
 
-.knowledge-live {
-  display: inline-flex;
-  align-items: center;
+.ingestion-run__header h2 {
+  color: var(--text-primary);
+  font-size: var(--text-size-h2);
+  font-weight: 600;
+  line-height: var(--text-lh-h2);
+  text-wrap: balance;
+}
+
+.ingestion-run__header p {
+  margin-top: 0.125rem;
+  color: var(--text-tertiary);
+  font-size: var(--text-size-meta);
+}
+
+.ingestion-progress {
+  display: grid;
   gap: var(--space-2);
+}
+
+.ingestion-progress > p {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: var(--text-size-ui);
+}
+
+.ingestion-progress > p strong {
+  color: var(--text-primary);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.ingestion-progress > p span {
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.ingestion-progress__track {
+  display: flex;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-inset);
+}
+
+.ingestion-progress__track i {
+  display: block;
+  height: 100%;
+  background: color-mix(in oklab, var(--text-primary) 55%, var(--surface-base));
+  transition: width var(--duration-base) var(--ease-out);
+}
+
+.ingestion-progress__track i[data-tone="danger"] {
+  background: var(--status-danger-solid);
+}
+
+.ingestion-progress__counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-secondary);
+  font-size: var(--text-size-meta);
+}
+
+.ingestion-progress__counts strong {
+  color: var(--text-primary);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.ingestion-run__items-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+/* Technical details: closed by default, and plain when open. */
+.ingestion-technical {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--space-3);
+}
+
+.ingestion-technical > summary {
+  width: fit-content;
+  cursor: pointer;
   color: var(--text-secondary);
   font-size: var(--text-size-ui);
   font-weight: 500;
 }
 
-.knowledge-live__dot {
-  position: relative;
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: var(--radius-full);
-  background: var(--status-neutral-solid);
-}
-
-.knowledge-live[data-live] .knowledge-live__dot {
-  background: var(--status-success-solid);
-}
-
-.knowledge-live[data-stale] .knowledge-live__dot {
-  background: var(--status-warning-solid);
-}
-
-/* A ring that breathes out from the dot. The word beside it already says
-   "Live", so with motion reduced nothing is lost when it stops. */
-.knowledge-live[data-live] .knowledge-live__dot::after,
-.knowledge-timeline__event[data-live] .knowledge-timeline__dot::after {
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: inherit;
-  animation: knowledge-live-pulse 2s var(--ease-out) infinite;
-  content: "";
-}
-
-@keyframes knowledge-live-pulse {
-  from { opacity: 0.55; transform: scale(1); }
-  to { opacity: 0; transform: scale(2.75); }
-}
-
-.knowledge-monitor__quiet {
-  display: grid;
-  gap: 0.125rem;
-  border: 1px dashed var(--border-default);
-  border-radius: var(--radius-md);
-  padding: var(--space-4);
-  font-size: var(--text-size-ui);
-}
-
-.knowledge-monitor__quiet strong {
+.ingestion-technical > summary:hover {
   color: var(--text-primary);
-  font-weight: 600;
 }
 
-.knowledge-monitor__quiet span {
-  color: var(--text-tertiary);
+.ingestion-technical[open] > summary {
+  margin-bottom: var(--space-2);
 }
 
-/* Instruments */
-.knowledge-instruments {
-  display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr);
-  gap: var(--space-4);
+/* Label and value stay within reading distance of each other. */
+.ingestion-technical .knowledge-kv {
+  max-width: 40rem;
 }
 
-.knowledge-instrument {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: var(--space-4);
-  border-radius: var(--radius-md);
-  background: var(--surface-base);
-  padding: var(--space-4);
-  box-shadow: inset 0 0 0 1px var(--border-subtle);
-}
-
-.knowledge-instrument--placeholder {
-  min-height: 13rem;
-  box-shadow: none;
-}
-
-.knowledge-instrument__head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-3);
-}
-
-.knowledge-instrument__head > span {
-  overflow: hidden;
-  color: var(--text-tertiary);
-  font-size: var(--text-size-meta);
-  font-variant-numeric: tabular-nums;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.knowledge-instruments-empty {
-  border-radius: var(--radius-md);
-  box-shadow: inset 0 0 0 1px var(--border-subtle);
-}
-
-.knowledge-swatch {
-  display: inline-block;
-  width: 0.5rem;
-  height: 0.5rem;
-  flex-shrink: 0;
-  border-radius: 2px;
-}
-
-.knowledge-swatch--completed { background: var(--status-success-solid); }
-.knowledge-swatch--failed { background: var(--status-danger-solid); }
-.knowledge-swatch--cancelled { background: var(--status-neutral-solid); }
-.knowledge-swatch--running { background: var(--status-info-solid); }
-.knowledge-swatch--started {
-  width: 0.75rem;
-  height: 2px;
-  border-radius: 1px;
-  background: var(--accent-primary);
-}
-
-.knowledge-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-4);
-  color: var(--text-tertiary);
-  font-size: var(--text-size-meta);
-}
-
-.knowledge-legend span {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-/* Throughput */
-.knowledge-throughput {
-  display: grid;
-  grid-template-areas:
-    "scale plot"
-    ". axis"
-    "legend legend";
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: var(--space-1) var(--space-2);
-  margin: 0;
-}
-
-.knowledge-throughput .knowledge-legend {
-  grid-area: legend;
-  margin-top: var(--space-2);
-}
-
-.knowledge-throughput__scale {
-  display: flex;
-  grid-area: scale;
-  flex-direction: column;
-  justify-content: space-between;
-  color: var(--text-tertiary);
-  font-size: var(--text-size-caption);
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-  text-align: right;
-}
-
-.knowledge-throughput__plot {
-  position: relative;
-  height: 8.5rem;
-  grid-area: plot;
-  border-radius: var(--radius-xs);
-  touch-action: pan-y;
-}
-
-.knowledge-throughput__plot:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-}
-
-.knowledge-throughput__svg {
-  display: block;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-}
-
-.knowledge-throughput__grid { stroke: var(--border-subtle); stroke-dasharray: 2 3; stroke-width: 1; }
-.knowledge-throughput__baseline { stroke: var(--border-default); stroke-width: 1; }
-.knowledge-throughput__focus { fill: var(--surface-hover); }
-.knowledge-throughput__completed { fill: var(--status-success-solid); }
-.knowledge-throughput__failed { fill: var(--status-danger-solid); }
-.knowledge-throughput__started { stroke: var(--accent-primary); stroke-linecap: round; stroke-width: 2; }
-.knowledge-throughput__now { stroke: var(--text-tertiary); stroke-dasharray: 3 3; stroke-width: 1; }
-
-.knowledge-throughput__axis {
-  position: relative;
-  height: 1rem;
-  grid-area: axis;
-  color: var(--text-tertiary);
-  font-size: var(--text-size-caption);
-  font-variant-numeric: tabular-nums;
-}
-
-.knowledge-throughput__axis span {
-  position: absolute;
-  top: 0;
-  white-space: nowrap;
-}
-
-.knowledge-throughput__axis span[data-align="center"] { transform: translateX(-50%); }
-.knowledge-throughput__axis span[data-align="end"] { transform: translateX(-100%); }
-
-.knowledge-throughput__tooltip {
-  position: absolute;
-  z-index: 3;
-  bottom: calc(100% + var(--space-2));
-  display: grid;
-  min-width: 9rem;
-  gap: 0.125rem;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-xs);
-  background: var(--surface-raised);
-  padding: var(--space-2) var(--space-3);
-  box-shadow: var(--elevation-2);
-  color: var(--text-secondary);
-  font-size: var(--text-size-meta);
-  font-variant-numeric: tabular-nums;
-  pointer-events: none;
-  white-space: nowrap;
-}
-
-.knowledge-throughput__tooltip strong {
-  color: var(--text-primary);
-  font-weight: 600;
-}
-
-.knowledge-throughput__tooltip span {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-/* Outcomes */
-.knowledge-outcomes {
-  display: flex;
-  align-items: center;
-  gap: var(--space-5);
-  margin: 0;
-}
-
-.knowledge-outcomes__ring {
-  position: relative;
-  width: 7.5rem;
-  flex-shrink: 0;
-  aspect-ratio: 1;
-}
-
-.knowledge-outcomes__ring svg {
-  width: 100%;
-  height: 100%;
-  transform: rotate(-90deg);
-}
-
-.knowledge-outcomes__track,
-.knowledge-outcomes__slice {
-  fill: none;
-  stroke-width: 10;
-}
-
-.knowledge-outcomes__track { stroke: var(--surface-inset); }
-.knowledge-outcomes__slice { transition: stroke-dasharray var(--duration-slow) var(--ease-out), stroke-dashoffset var(--duration-slow) var(--ease-out); }
-.knowledge-outcomes__slice--completed { stroke: var(--status-success-solid); }
-.knowledge-outcomes__slice--failed { stroke: var(--status-danger-solid); }
-.knowledge-outcomes__slice--cancelled { stroke: var(--status-neutral-solid); }
-.knowledge-outcomes__slice--running { stroke: var(--status-info-solid); }
-
-.knowledge-outcomes__center {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-content: center;
-  text-align: center;
-}
-
-.knowledge-outcomes__center strong {
-  color: var(--text-primary);
-  font-size: var(--text-size-h2);
-  font-variant-numeric: tabular-nums;
-  font-weight: 640;
-  letter-spacing: -0.02em;
-  line-height: 1.1;
-}
-
-.knowledge-outcomes__center span {
-  color: var(--text-tertiary);
-  font-size: var(--text-size-caption);
-}
-
-.knowledge-outcomes__legend {
-  display: grid;
-  min-width: 0;
-  flex: 1;
-  gap: var(--space-2);
-  margin: 0;
-  padding: 0;
-  font-size: var(--text-size-meta);
-  list-style: none;
-}
-
-.knowledge-outcomes__legend li {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  color: var(--text-secondary);
-}
-
-.knowledge-outcomes__legend strong {
-  margin-left: auto;
-  color: var(--text-primary);
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-}
-
-/* Duration */
-.knowledge-duration {
-  display: grid;
-  gap: var(--space-4);
-}
-
-.knowledge-duration__bar {
-  position: relative;
-  height: 0.5rem;
-  margin: var(--space-3) 0.25rem 0;
-  border-radius: var(--radius-full);
-  background: var(--surface-inset);
-}
-
-.knowledge-duration__band {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  min-width: 0.25rem;
-  border-radius: var(--radius-full);
-  background: var(--accent-soft-hover);
-  box-shadow: inset 0 0 0 1px var(--accent-primary);
-}
-
-.knowledge-duration__tick {
-  position: absolute;
-  top: -0.25rem;
-  width: 2px;
-  height: 1rem;
-  border-radius: 1px;
-  background: var(--accent-primary);
-  transform: translateX(-50%);
-}
-
-.knowledge-duration__tick--max { background: var(--text-tertiary); }
-
-.knowledge-duration__stats {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--space-2);
-  margin: 0;
-}
-
-.knowledge-duration__stats dt {
-  color: var(--text-tertiary);
-  font-size: var(--text-size-caption);
-}
-
-.knowledge-duration__stats dd {
-  margin: 0;
-  color: var(--text-primary);
-  font-size: var(--text-size-ui);
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-}
-
-.knowledge-duration__active {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
-  border-top: 1px solid var(--border-subtle);
-  padding-top: var(--space-3);
-  color: var(--text-tertiary);
-  font-size: var(--text-size-meta);
-}
-
-.knowledge-duration__active strong {
-  color: var(--text-primary);
-  font-size: var(--text-size-h3);
-  font-variant-numeric: tabular-nums;
-  font-weight: 640;
-}
-
-/* Lanes — the signature: every ingestion in flight, on its own track. The
-   title is the lane's one control; its ::after stretches over the whole lane
-   so any point opens it, and the lane wears the focus ring for it. */
-.knowledge-lanes {
-  display: grid;
-  gap: var(--space-2);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.knowledge-lane {
-  position: relative;
-  display: grid;
-  gap: var(--space-3);
-  border-radius: var(--radius-md);
-  background: var(--surface-base);
-  padding: var(--space-3) var(--space-4);
-  box-shadow: inset 0 0 0 1px var(--border-subtle);
-  transition: background-color var(--duration-fast) var(--ease-out);
-}
-
-.knowledge-lane:hover { background: var(--surface-hover); }
-.knowledge-lane[data-selected] { box-shadow: inset 0 0 0 1px var(--border-focus); }
-
-.knowledge-lane:has(.knowledge-lane__open:focus-visible) {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-}
-
-.knowledge-lane__open:focus-visible { outline: none; }
-
-.knowledge-lane__open::after {
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  content: "";
-}
-
-.knowledge-lane__head {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: var(--space-3);
-}
-
-.knowledge-lane__identity {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  flex-direction: column;
-  gap: 0.125rem;
-}
-
-.knowledge-lane__open,
-.knowledge-lane__meta {
-  overflow: hidden;
-  text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.knowledge-lane__open {
-  color: var(--text-primary);
-  font-size: var(--text-size-ui);
-  font-weight: 600;
-}
-
-.knowledge-lane__meta {
-  color: var(--text-secondary);
-  font-size: var(--text-size-meta);
-  font-variant-numeric: tabular-nums;
-}
-
-.knowledge-lane__attempt {
-  flex-shrink: 0;
-  border-radius: var(--radius-full);
-  background: var(--status-warning-bg);
-  padding: 0.0625rem var(--space-2);
-  color: var(--status-warning-text);
-  font-size: var(--text-size-caption);
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.knowledge-lane__elapsed {
-  min-width: 3.5rem;
-  flex-shrink: 0;
-  color: var(--text-tertiary);
-  font-size: var(--text-size-meta);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-  white-space: nowrap;
-}
-
-.knowledge-lane__track {
-  display: flex;
-  gap: 3px;
-}
-
-.knowledge-lane__step {
-  display: grid;
-  min-width: 0;
-  flex: 1;
-  gap: var(--space-1);
-}
-
-.knowledge-lane__bar {
-  position: relative;
-  display: block;
-  height: 0.375rem;
-  overflow: hidden;
-  border-radius: var(--radius-full);
-}
-
-.knowledge-lane__step[data-state="done"] .knowledge-lane__bar { background: var(--accent-primary); }
-.knowledge-lane__step[data-state="active"] .knowledge-lane__bar { background: var(--accent-soft); }
-
-/* Steps still ahead are a hairline centred on the track. */
-.knowledge-lane__step[data-state="todo"] .knowledge-lane__bar {
-  background: linear-gradient(var(--border-default), var(--border-default)) center / 100% 1px no-repeat;
-}
-
-.knowledge-lane__fill {
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 100%;
-  overflow: hidden;
-  border-radius: inherit;
-  background: var(--accent-primary);
-  opacity: 0.4;
-  transition: width var(--duration-slow) var(--ease-out);
-}
-
-.knowledge-lane__fill[data-counted] { opacity: 1; }
-
-/* The sheen says "moving" without claiming a number. It is removed with
-   reduced motion, at the end of this section. */
-.knowledge-lane__fill::after {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 50%), transparent);
-  animation: knowledge-lane-sheen 1.8s var(--ease-out) infinite;
-  content: "";
-  transform: translateX(-100%);
-}
-
-@keyframes knowledge-lane-sheen {
-  to { transform: translateX(100%); }
-}
-
-.knowledge-lane__label {
-  overflow: hidden;
-  color: var(--text-tertiary);
-  font-size: var(--text-size-caption);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.knowledge-lane__step[data-state="done"] .knowledge-lane__label { color: var(--text-secondary); }
-.knowledge-lane__step[data-state="active"] .knowledge-lane__label { color: var(--text-accent); font-weight: 600; }
-
-/* Detail panel: the details drawer's frame, from the top of the monitor. */
-.knowledge-ingestion-panel {
-  z-index: 3;
-  top: 0;
-  width: min(24rem, 100%);
-  border-top-left-radius: 0;
-}
-
-.knowledge-ingestion-panel__header {
-  align-items: flex-start;
-  gap: var(--space-3);
-}
-
-.knowledge-ingestion-panel__header h3 {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.knowledge-ingestion-panel__meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-1) var(--space-2);
-  margin-top: var(--space-1);
-  color: var(--text-tertiary);
-  font-size: var(--text-size-meta);
-}
-
-.knowledge-ingestion-panel__progress {
-  display: grid;
-  gap: var(--space-2);
-  border-bottom: 1px solid var(--border-subtle);
-  padding-block: var(--space-3);
-}
-
-.knowledge-ingestion-panel__progress p {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--space-3);
-  font-size: var(--text-size-ui);
-}
-
-.knowledge-ingestion-panel__progress strong {
-  color: var(--text-primary);
-  font-weight: 600;
-}
-
-.knowledge-ingestion-panel__progress span {
-  color: var(--text-tertiary);
-  font-variant-numeric: tabular-nums;
-}
-
-.knowledge-ingestion-panel__notice {
-  margin: var(--space-3) 0 0;
-}
-
-.knowledge-ingestion-panel__counts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-3);
-}
-
-.knowledge-ingestion-panel__counts strong {
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-}
-
-.knowledge-ingestion-panel__timeline {
-  padding-block: var(--space-4) var(--space-2);
-}
-
-.knowledge-ingestion-panel__timeline > h4 {
-  margin-bottom: var(--space-3);
-}
-
-.knowledge-ingestion-panel__error {
-  padding: var(--space-1) var(--space-2);
-  color: var(--status-danger-text);
-  font-size: var(--text-size-meta);
-}
-
-.knowledge-details__disclosure code {
-  border-radius: var(--radius-xs);
-  background: var(--surface-subtle);
-  padding: 0.0625rem var(--space-1);
-  color: var(--text-secondary);
+.ingestion-technical code {
   font-family: var(--font-mono);
+  font-size: var(--text-size-meta);
 }
 
-/* Timeline: a dot per event on one line, oldest at the top. */
-.knowledge-timeline {
+.ingestion-technical > h4 {
+  margin: var(--space-5) 0 var(--space-2);
+}
+
+.ingestion-technical__phases {
+  display: grid;
+  gap: var(--space-2);
   margin: 0;
   padding: 0;
   list-style: none;
+  font-size: var(--text-size-meta);
+  line-height: var(--text-lh-meta);
 }
 
-.knowledge-timeline__event {
-  position: relative;
+.ingestion-technical__phases li {
   display: grid;
-  grid-template-columns: 0.75rem minmax(0, 1fr);
-  gap: var(--space-3);
-  padding-bottom: var(--space-4);
+  gap: 0.125rem;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: var(--space-2);
 }
 
-.knowledge-timeline__event:last-child { padding-bottom: 0; }
-
-.knowledge-timeline__event::before {
-  position: absolute;
-  top: 1.1rem;
-  bottom: 0.1rem;
-  left: calc(0.375rem - 0.5px);
-  width: 1px;
-  background: var(--border-default);
-  content: "";
-}
-
-.knowledge-timeline__event:last-child::before { display: none; }
-
-.knowledge-timeline__dot {
-  position: relative;
-  width: 0.625rem;
-  height: 0.625rem;
-  margin: 0.3rem auto 0;
-  border-radius: var(--radius-full);
-  background: var(--surface-raised);
-  box-shadow: inset 0 0 0 2px var(--status-neutral-solid);
-}
-
-.knowledge-timeline__event[data-tone="info"] .knowledge-timeline__dot { box-shadow: inset 0 0 0 2px var(--status-info-solid); }
-.knowledge-timeline__event[data-tone="warning"] .knowledge-timeline__dot { box-shadow: inset 0 0 0 2px var(--status-warning-solid); }
-.knowledge-timeline__event[data-tone="success"] .knowledge-timeline__dot { background: var(--status-success-solid); box-shadow: none; }
-.knowledge-timeline__event[data-tone="danger"] .knowledge-timeline__dot { background: var(--status-danger-solid); box-shadow: none; }
-.knowledge-timeline__event[data-live] .knowledge-timeline__dot { background: var(--status-info-solid); box-shadow: none; }
-
-.knowledge-timeline__title {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0 var(--space-2);
+.ingestion-technical__phases strong {
   color: var(--text-primary);
-  font-size: var(--text-size-ui);
+  font-weight: 500;
 }
 
-.knowledge-timeline__title strong { font-weight: 600; }
-
-.knowledge-timeline__title span,
-.knowledge-timeline__title time {
+.ingestion-technical__phases span {
   color: var(--text-tertiary);
-  font-size: var(--text-size-meta);
-  font-variant-numeric: tabular-nums;
 }
 
-.knowledge-timeline__title time { margin-left: auto; }
-
-.knowledge-timeline__message {
-  margin-top: 0.125rem;
-  color: var(--text-secondary);
-  font-size: var(--text-size-meta);
-  line-height: var(--text-lh-ui);
-  overflow-wrap: anywhere;
+/* Work left undone, not work gone wrong: the notice keeps its shape and loses
+   its alarm. */
+.knowledge-notice[data-tone="neutral"] {
+  background: var(--surface-inset);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
 }
 
-.knowledge-timeline__event[data-tone="danger"] .knowledge-timeline__message { color: var(--status-danger-text); }
-
-@container (max-width: 56rem) {
-  .knowledge-instruments { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .knowledge-instrument--wide { grid-column: 1 / -1; }
+.knowledge-notice[data-tone="neutral"] > svg {
+  color: var(--text-tertiary);
 }
 
-@container (max-width: 32rem) {
-  .knowledge-instruments { grid-template-columns: minmax(0, 1fr); }
-}
-
-@media (max-width: 40rem) {
-  .knowledge-run__duration { display: none; }
-  /* Only the current step is named; the rest keep their place on the track. */
-  .knowledge-lane__step:not([data-state="active"]) .knowledge-lane__label { visibility: hidden; }
-  .knowledge-lane { padding-inline: var(--space-3); }
-}
-
-/* The workspace-wide reduced-motion rule matches elements, not their
-   pseudo-elements, and the pulse and the sheen are both drawn on ::after. */
-@media (prefers-reduced-motion: reduce) {
-  .knowledge-live__dot::after,
-  .knowledge-timeline__dot::after,
-  .knowledge-lane__fill::after { display: none; }
+.knowledge-notice[data-tone="neutral"] strong {
+  color: var(--text-primary);
 }
 
 /* ── Configuration forms ─────────────────────────────────────────────────
@@ -2552,18 +2144,36 @@ html.dark .knowledge-app-icon {
     flex: 1 1 100%;
   }
   .utility-bar .utility-bar__actions { margin-left: auto; }
-  /* The search takes the first row of Knowledge's controls; scope and the
-     quiet menus share the row under it. */
-  .knowledge-bar .tab-bar__end { justify-content: flex-start; }
-  .knowledge-bar__search { order: -1; flex: 1 1 100%; }
   .knowledge-viewer__stage { margin-inline: 0; border-radius: 0; padding: var(--space-4) var(--space-3) var(--space-10); }
   .knowledge-viewer__stage .doc-rendition { padding: var(--space-5); }
   .knowledge-details { top: 0; width: 100%; border-left: 0; border-radius: 0; }
+  .knowledge-source-list .ingestion-source { flex-wrap: wrap; }
+  .knowledge-source-list .ingestion-source > .knowledge-source-list__static {
+    min-height: 0;
+    flex-basis: 100%;
+    padding-bottom: var(--space-1);
+  }
+  .ingestion-source__actions {
+    width: 100%;
+    flex-wrap: wrap;
+    padding: 0 0 var(--space-3) calc(1.75rem + var(--space-4));
+  }
+  .ingestion-source__actions > :last-child { margin-left: auto; }
+  .knowledge-source-list .ingestion-account { flex-wrap: wrap; }
+  .knowledge-source-list .ingestion-account > button {
+    min-height: 0;
+    flex-basis: 100%;
+    margin-inline-start: 0;
+    padding: var(--space-3) 0 var(--space-1);
+  }
+  .ingestion-account > .ingestion-source__actions > :last-child { margin-left: 0; }
+  .ingestion-panel { padding-bottom: calc(6rem + env(safe-area-inset-bottom)); }
   .chat-mobile-menu { display: grid; }
   .global-assistant-launcher { right: 1rem; bottom: max(5rem, calc(env(safe-area-inset-bottom) + 4rem)); }
 }
 
 @media (max-width: 32rem) {
+  .knowledge-connectors__tile { gap: var(--space-3); padding: var(--space-3); }
   .knowledge-viewer__header { flex-wrap: wrap; padding-inline: var(--space-3); }
   .knowledge-viewer__header > div:not(.knowledge-viewer__actions) { flex-basis: 60%; }
   .knowledge-viewer__actions { margin-left: auto; }

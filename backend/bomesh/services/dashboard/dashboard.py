@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh.db.models import (
@@ -46,10 +46,14 @@ class DashboardService:
         self,
         session: AsyncSession,
         *,
+        processing_version: str | None = None,
         audit: AuditService | None = None,
         activity: ActivityService | None = None,
     ) -> None:
         self._session = session
+        #: The processing configuration current Documents are built with;
+        #: ``None`` reports nothing as outdated.
+        self._processing_version = processing_version
         self._audit = audit or AuditService(session)
         self._activity = activity or ActivityService(session)
 
@@ -120,14 +124,23 @@ class DashboardService:
             if actor.has_permissions(AUDIT_READ_PERMISSION)
             else {"items": []}
         )
+        document = Item.item_type == "document"
+        ready = Item.index_status == "ready"
+        outdated = (
+            and_(ready, Item.processed_version.is_distinct_from(self._processing_version))
+            if self._processing_version is not None
+            else false()
+        )
         knowledge = (
             await self._session.execute(
                 select(
                     func.count().filter(Item.item_type == "collection"),
-                    func.count().filter(Item.item_type == "document"),
-                    func.count().filter(Item.index_status == "ready"),
-                    func.count().filter(Item.index_status.in_(("pending", "processing"))),
-                    func.count().filter(Item.index_status == "failed"),
+                    func.count().filter(document),
+                    func.count().filter(document, ready, ~outdated),
+                    func.count().filter(document, Item.index_status == "processing"),
+                    func.count().filter(document, Item.index_status == "pending"),
+                    func.count().filter(document, Item.index_status == "failed"),
+                    func.count().filter(document, outdated),
                 ).where(
                     Item.tenant_id == tenant_id,
                     Item.status != "deleted",
@@ -148,7 +161,15 @@ class DashboardService:
             "recent_activity": recent["items"],
             "knowledge": dict(
                 zip(
-                    ("collections", "documents", "indexed", "indexing", "failed"),
+                    (
+                        "collections",
+                        "documents",
+                        "ready",
+                        "processing",
+                        "pending",
+                        "failed",
+                        "outdated",
+                    ),
                     (int(value) for value in knowledge),
                     strict=True,
                 )

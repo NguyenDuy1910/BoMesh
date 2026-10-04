@@ -21,7 +21,8 @@
     "hierarchy": "parent_item_id",
     "object_metadata": ["storage_key", "mime_type", "size_bytes"],
     "lifecycle": ["pending", "processing", "ready", "failed", "unsupported", "deleted"],
-    "index_lifecycle": ["pending", "processing", "ready", "failed", "unsupported"]
+    "index_lifecycle": ["pending", "processing", "ready", "failed", "unsupported"],
+    "processing_version": "items.processed_version; ready with an older version is outdated"
   },
   "integration_entities": {
     "integration_connections": "reusable connector configuration",
@@ -29,11 +30,11 @@
     "ingestion_sources": "independently checkpointed external scopes targeting Collection Items",
     "external_resources": "external identity and version state mapped to canonical Items",
     "incremental_identity": "(ingestion_source_id, external_id) -> item_id",
-    "execution_history": "Temporal"
+    "execution_history": "PostgreSQL: ingestion_runs, ingestion_run_items, ingestion_sources.last_sync_*"
   },
   "upload_entities": {
     "item_uploads": "native upload idempotency and lifecycle without external-resource tracking",
-    "native_upload_indexing": "Temporal dispatch of the existing Item indexing pipeline after durable file availability"
+    "processing": "uploads and syncs only register pending Documents; an explicit Ingestion Run (one Temporal workflow per run) processes them"
   },
   "chat_entities": {
     "message_items": ["attachment", "reference", "output"]

@@ -11,10 +11,11 @@ passage, and the Library's "Original" view has no real content at all.
 
 ## Decision
 
-Ingestion already parses every document once into a canonical `DocumentItem`
-whose `content` is a list of typed parts (`text`, `table`, `code`, `image`,
-`link`, `structured`), each with the same `element_id` that citation spans
-point at. That parse is the rendition. At ingestion time, BoMesh serializes
+Processing (an Ingestion Run) already parses every document once into a
+canonical `DocumentItem` whose `content` is a list of typed parts (`text`,
+`table`, `code`, `image`, `link`, `structured`), each with the same
+`element_id` that citation spans point at. That parse is the rendition. At
+processing time, BoMesh serializes
 it into one **document rendition** — compact JSON, gzip-compressed — and stores
 it beside the existing page previews. The browser downloads it directly from
 object storage through a short-lived signed URL and renders it with React.
@@ -111,15 +112,25 @@ default; an S3/R2 bucket needs a CORS rule).
 
 ## Producing renditions
 
-- **Ingestion.** `ItemIngestionService` passes the canonical `DocumentItem` it
-  just parsed to `KnowledgePreview.generate(document, content=item)` on both the
-  upload and the connector path. There is no second parse.
+- **Processing.** `ItemIngestionService.process_document` passes the
+  canonical `DocumentItem` it just parsed from the stored original to
+  `KnowledgePreview.generate(document, content=item)`, for uploads and
+  connector Documents alike. There is no second parse. A Document that has
+  never been processed has no rendition yet.
 - **Backfill.** `backend/script/backfill_document_renditions.py` writes
   renditions for documents indexed before this design: it re-parses the stored
   original (no embeddings, no model calls) and merges the manifest. It is
   idempotent and skips documents whose rendition is current.
 - Rendition failure never fails ingestion; the viewer falls back to the cited
   passage.
+- **Conversation artifacts.** A file the agent produced is never ingested,
+  so its revision is previewed on first view instead: `ArtifactService`
+  parses the revision's original with the same `StoredFileContent` parser and
+  writes the same rendition and page images through `KnowledgePreview`,
+  keeping the manifest in `artifact_revisions.exports.preview`. Every
+  revision except Markdown is previewed this way (a CSV becomes a table);
+  images are shown as themselves. The chat's document panel renders it with
+  `DocumentRenditionView`.
 
 ## Reading (web)
 

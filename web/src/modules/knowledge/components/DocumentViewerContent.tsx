@@ -1,9 +1,8 @@
 "use client";
 
-import { LockKeyhole, TriangleAlert } from "lucide-react";
+import { TriangleAlert } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
-import { EmptyState } from "@/components/ui/EmptyState";
 import type { WorkspaceKnowledgeDocument } from "@/modules/knowledge/workspace-repository";
 
 import { AgentDocumentView } from "./AgentDocumentView";
@@ -18,8 +17,10 @@ interface DocumentViewerContentProps {
   onPageChange: (page: number) => void;
   onZoomChange: (zoom: number) => void;
   onSearchChange: (value: string) => void;
-  /** Set only when there is a failed indexing to retry. */
-  onRetryIndexing?: () => void;
+  /** Starts a run for this document; omitted when none can be started. */
+  onProcess?: () => void;
+  /** Opens the run that last processed this document. */
+  onViewRun?: (runId: string) => void;
 }
 
 /**
@@ -39,21 +40,11 @@ export function DocumentViewerContent({
   onPageChange,
   onZoomChange,
   onSearchChange,
-  onRetryIndexing,
+  onProcess,
+  onViewRun,
 }: DocumentViewerContentProps) {
-  if (document.state === "restricted") {
-    return (
-      <div className="knowledge-viewer__stage">
-        <EmptyState
-          description={`Permissions in ${document.source} changed, so this document can no longer be read here. Its owner can restore access.`}
-          icon={<LockKeyhole size={20} />}
-          title="Access to this document has changed"
-        />
-      </div>
-    );
-  }
-
   const Renderer = documentRenderers[document.kind];
+  const runId = document.runId;
 
   return (
     <div className="knowledge-viewer__stage">
@@ -61,15 +52,14 @@ export function DocumentViewerContent({
         <div className="knowledge-notice knowledge-notice--danger" role="alert">
           <TriangleAlert aria-hidden="true" size={16} />
           <div>
-            <strong>
-              {document.latestIngestion && document.latestIngestion.attempt > 1
-                ? `Indexing failed after ${document.latestIngestion.attempt} attempts`
-                : "This document could not be indexed"}
-            </strong>
-            <p>{document.failureReason ?? "BoMesh could not read the file, so it never appears in an answer."}</p>
+            <strong>Processing failed</strong>
+            <p>{document.processingError ?? "This document couldn’t be read, so it isn’t used in answers."}</p>
           </div>
-          {onRetryIndexing && (
-            <Button onClick={onRetryIndexing} size="sm" variant="secondary">Retry indexing</Button>
+          {runId && onViewRun && (
+            <Button onClick={() => onViewRun(runId)} size="sm" variant="ghost">View run</Button>
+          )}
+          {onProcess && (
+            <Button onClick={onProcess} size="sm" variant="secondary">Run processing</Button>
           )}
         </div>
       )}

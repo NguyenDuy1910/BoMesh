@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { assistantTurnItems, groupAssistantTurnItems } from "../src/modules/chat/assistant-turn.ts";
+import { assistantTurnItems, executionSummary, groupAssistantTurnItems } from "../src/modules/chat/assistant-turn.ts";
 import type { TurnState } from "../src/modules/chat/types.ts";
 
 test("renders message items directly from semantic item state", () => {
@@ -199,3 +199,21 @@ function turnWithFinalMessage(): TurnState {
     },
   };
 }
+
+test("a shell run with a failing command names that command's own error", () => {
+  const summary = executionSummary({
+    kind: "execution",
+    id: "run-1",
+    callId: "shell-1",
+    state: "failed",
+    commands: ["ls ~", "python -c 'print(1)'"],
+    output: [
+      // A warning on a successful command is not the cause.
+      { stdout: "data.xlsx\n", stderr: "warning: locale not set\n", exit_code: 0, timed_out: false },
+      { stdout: "", stderr: "Traceback (most recent call last):\n  File x\nbash: python: command not found\n", exit_code: 127, timed_out: false },
+    ],
+    files: [],
+  });
+
+  assert.deepEqual(summary, { label: "Ran 2 commands, 1 failed", detail: "bash: python: command not found" });
+});

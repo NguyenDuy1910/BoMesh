@@ -29,10 +29,11 @@ test("the User Workspace rail stays light", () => {
   );
 });
 
-test("Workspace control owns six sections plus a separated Settings", () => {
+test("Workspace control owns seven sections plus a separated Settings", () => {
+  // Knowledge is the inventory; Ingestion, right after it, is what processes it.
   assert.deepEqual(
     workspaceControlRailItems.map((item) => item.label),
-    ["Overview", "Knowledge", "Agent", "Access", "Experience", "Activity"],
+    ["Overview", "Knowledge", "Ingestion", "Agent", "Access", "Experience", "Activity"],
   );
   assert.deepEqual(workspaceControlRailTail.map((item) => item.label), ["Settings"]);
 });
@@ -70,6 +71,8 @@ test("only the destination that owns the route is current", () => {
 
   // Everything else owns its nested detail addresses.
   assert.equal(at("knowledge", workspaceControlRailItems, "/workspace-control/knowledge/doc-1"), true);
+  assert.equal(at("ingestion", workspaceControlRailItems, "/workspace-control/ingestion"), true);
+  assert.equal(at("knowledge", workspaceControlRailItems, "/workspace-control/ingestion"), false);
   assert.equal(at("users", platformControlRailItems, "/workspace-control/platform/users/u-1"), true);
 
   // An action starts something where you already are; it is never current.
@@ -85,6 +88,14 @@ test("a rail only offers what the caller may actually open", () => {
     visibleRailItems(workspaceControlRailItems, holding("knowledge.read")).map((item) => item.id),
     ["knowledge"],
   );
+  // Reading runs, running them, or managing sources each opens Ingestion.
+  for (const code of ["ingestion.read", "ingestion.run", "source.manage"]) {
+    assert.deepEqual(
+      visibleRailItems(workspaceControlRailItems, holding(code)).map((item) => item.id),
+      ["ingestion"],
+      code,
+    );
+  }
   // Someone with nothing granted can open no admin section at all.
   assert.deepEqual(visibleRailItems(workspaceControlRailItems, holding()).map((item) => item.id), []);
   // An item with no permission codes is always offered.

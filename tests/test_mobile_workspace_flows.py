@@ -146,7 +146,7 @@ async def test_nested_collection_creation_needs_parent_update_not_just_item_mana
         for member in (editor, viewer):
             await join_tenant(
                 session, await session.get(User, member.user_id), member.tenant_id,
-                role_code="collection-creator", permission_codes=("item.manage",),
+                role_code="collection-creator", permission_codes=("knowledge.manage",),
             )
         creator = await identity.get_context(viewer.user_id, tenant_id=viewer.tenant_id)
         writer = await identity.get_context(editor.user_id, tenant_id=editor.tenant_id)
@@ -166,7 +166,9 @@ async def test_group_patch_distinguishes_omission_from_null_and_keeps_member_met
     async with session_factory.begin() as session:
         admin_id = (await session.get(Item, collection_id)).created_by_user_id
         admin = await IdentityStoreService(session).get_context(admin_id, tenant_id=member.tenant_id)
-    control = WorkspaceControlPlaneService(session_factory, vector_index=VectorIndexConfig())
+    control = WorkspaceControlPlaneService(
+        session_factory, vector_index=VectorIndexConfig(), processing_version=None
+    )
     created = await control.create_group(
         admin, {"code": "editors", "display_name": "Editors", "description": "Knowledge editors"},
     )
@@ -200,7 +202,9 @@ async def test_roles_and_groups_are_created_by_name_alone(session_factory):
     async with session_factory.begin() as session:
         admin_id = (await session.get(Item, collection_id)).created_by_user_id
         admin = await IdentityStoreService(session).get_context(admin_id, tenant_id=member.tenant_id)
-    control = WorkspaceControlPlaneService(session_factory, vector_index=VectorIndexConfig())
+    control = WorkspaceControlPlaneService(
+        session_factory, vector_index=VectorIndexConfig(), processing_version=None
+    )
 
     first = await control.create_role(
         admin, RoleCreate(display_name="Quản lý tài liệu", permission_codes=["knowledge.read"]).model_dump(),

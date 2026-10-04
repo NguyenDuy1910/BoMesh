@@ -76,7 +76,7 @@ export function ControlPlaneCommandPalette({
   // round trip; section matching stays instant and local.
   useEffect(() => {
     const term = query.trim();
-    if (!open || term.length < 2 || !hasSessionPermission(getAuthSession(), "item.manage")) {
+    if (!open || term.length < 2 || !hasSessionPermission(getAuthSession(), "knowledge.manage")) {
       setItems([]);
       return;
     }

@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 from datetime import datetime, timezone
 from typing import Any
 
 from .base import BaseSourceConnector, CheckpointedConnector
 from bomesh.connector.protocol import (
     AnyItem,
-    Chunk,
     CollectionItem,
     ConnectorCheckpoint,
     ConnectorScope,
@@ -70,7 +68,7 @@ class CheckpointedSourceConnectorAdapter(BaseSourceConnector):
 
     @property
     def refreshed_credentials(self) -> dict[str, Any] | None:
-        """Surface a wrapped connector's rotated credentials to ingestion."""
+        """Surface a wrapped connector's rotated credentials to the sync."""
 
         return getattr(self.connector, "refreshed_credentials", None)
 
@@ -142,17 +140,6 @@ class CheckpointedSourceConnectorAdapter(BaseSourceConnector):
             return self._items[external_id].model_copy(deep=True)
         except KeyError as exc:
             raise KeyError(f"Item {external_id!r} was not discovered") from exc
-
-    async def fetch_chunks(self, item: DocumentItem) -> tuple[Chunk, ...] | None:
-        """Forward source-owned chunks when the checkpoint connector provides them."""
-
-        fetcher = getattr(self.connector, "fetch_chunks", None)
-        if fetcher is None:
-            return None
-        chunks = fetcher(item)
-        if inspect.isawaitable(chunks):
-            chunks = await chunks
-        return tuple(chunks) if chunks is not None else None
 
     async def fetch_hierarchy(self, scope: ConnectorScope) -> list[AnyItem]:
         del scope

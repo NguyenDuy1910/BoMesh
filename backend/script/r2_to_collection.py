@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Ingest the crawled R2 corpus into one workspace Collection, file by file.
+"""Load the crawled R2 corpus into one workspace Collection, file by file.
 
 ``ute_lib.py`` mirrors website files into R2 under ``R2_PREFIX``. This script
 creates one ``knowledge`` Document per object through the public Document API
-(``POST /api/v1/collections/{collection_id}/documents``, multipart), so every
-file takes the normal managed Ingestion: parse, chunk, contextualize, embed,
-index, cite. No archive is built; authorization, limits and lifecycle are the
-API's own.
+(``POST /api/v1/collections/{collection_id}/documents``, multipart). Adding a
+Document never processes it: every file lands pending. With ``--process`` the
+script then starts ONE Ingestion Run for the Collection's pending Documents
+(``POST /api/v1/ingestion-runs``), which parses, chunks, contextualizes,
+embeds, indexes and cites them. No archive is built; authorization, limits and
+lifecycle are the API's own.
 
 Re-running is safe: each Document's ``Idempotency-Key`` derives from its R2
 path, so a file already created is replayed (``200``), not duplicated, and a
@@ -19,9 +21,9 @@ file whose bytes changed since is reported as a conflict.
 Reads R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET and
 R2_PREFIX (default ``raw``) from the root ``.env``, like ``ute_lib.py``. The
 API account needs Collection write access in its active workspace (and
-``knowledge.collections.create`` when the Collection does not exist yet).
-``manifest.csv`` maps every R2 key to its Document, source URL and Ingestion;
-``skipped.csv`` says why an object was left out.
+``knowledge.manage`` when the Collection does not exist yet; ``ingestion.run``
+for ``--process``). ``manifest.csv`` maps every R2 key to its Document and
+source URL; ``skipped.csv`` says why an object was left out.
 """
 
 from __future__ import annotations
@@ -64,7 +66,7 @@ _RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 DEFAULT_OUTPUT = BACKEND_ROOT.parent / ".cache" / "r2-knowledge"
 MANIFEST_FIELDS = [
     "r2_key", "path", "name", "size_bytes", "source_url",
-    "result", "document_id", "ingestion_id", "error",
+    "result", "document_id", "error",
 ]
 
 
@@ -121,6 +123,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--dry-run", action="store_true", help="Plan only; no API calls")
+    parser.add_argument(
+        "--process",
+        action="store_true",
+        help="After loading, start one Ingestion Run for the Collection's pending documents",
+    )
     return parser.parse_args()
 
 
@@ -347,27 +354,33 @@ class BoMeshApi:
             raise ApiError(response)
         return ("created" if response.status_code == 201 else "replayed"), response.json()
 
+    def process_collection(self, collection_id: str) -> dict[str, Any]:
+        """Start one run for the Collection's pending and outdated Documents."""
+
+        return self.json(
+            "POST",
+            "/ingestion-runs",
+            json={"collection_id": collection_id, "states": ["pending", "outdated"]},
+        )
+
 
 # -- Run -----------------------------------------------------------------------
 
 
-def _ingest_one(
+def _load_one(
     r2: Any, bucket: str, api: BoMeshApi, collection_id: str, source: SourceObject
 ) -> dict[str, Any]:
     row: dict[str, Any] = {
         "r2_key": source.key, "path": source.path, "name": source.name,
         "size_bytes": source.size, "source_url": "", "result": "failed",
-        "document_id": "", "ingestion_id": "", "error": "",
+        "document_id": "", "error": "",
     }
     try:
         data, row["source_url"] = _download(r2, bucket, source)
         result, body = api.create_document(
             collection_id, source, data, _idempotency_key(bucket, source.path)
         )
-        ingestion = body.get("ingestion") or body["document"].get("latest_ingestion") or {}
-        row.update(
-            result=result, document_id=body["document"]["id"], ingestion_id=ingestion.get("id", "")
-        )
+        row.update(result=result, document_id=body["document"]["id"])
     except ApiError as exc:
         row.update(result="conflict" if exc.status_code == 409 else "failed", error=str(exc))
     except Exception as exc:  # noqa: BLE001 - one file never stops the run
@@ -399,7 +412,7 @@ def main() -> int:
         files = files[: args.limit]
 
     print(f"r2://{bucket}/{prefix}: {len(objects)} objects")
-    print(f"ingesting {len(files)} files ({sum(f.size for f in files) / _MIB:.1f} MiB)")
+    print(f"loading {len(files)} files ({sum(f.size for f in files) / _MIB:.1f} MiB)")
     for reason, count in Counter(skip.reason for skip in skipped).most_common():
         print(f"  skipped {count:5d}  {reason}")
     if args.dry_run or not files:
@@ -423,21 +436,28 @@ def main() -> int:
         ):
             writer = csv.DictWriter(manifest, fieldnames=MANIFEST_FIELDS)
             writer.writeheader()
-            ingested = pool.map(
-                lambda source: _ingest_one(r2, bucket, api, collection["id"], source), files
+            loaded = pool.map(
+                lambda source: _load_one(r2, bucket, api, collection["id"], source), files
             )
-            for index, row in enumerate(ingested, start=1):
+            for index, row in enumerate(loaded, start=1):
                 writer.writerow(row)
                 manifest.flush()
                 results[row["result"]] += 1
                 detail = row["document_id"] or row["error"]
                 print(f"[{index:4d}/{len(files)}] {row['result']:8s} {row['path']}  {detail}")
+        if args.process:
+            try:
+                run = api.process_collection(collection["id"])
+                print(f"ingestion run {run['id']}: {run['counts']['total']} documents queued")
+            except ApiError as exc:
+                print(f"no ingestion run started: {exc}")
     finally:
         api.close()
 
     print(", ".join(f"{count} {result}" for result, count in results.most_common()))
     print(f"manifest: {args.out / 'manifest.csv'}")
-    print("Each Document runs its own managed Ingestion; follow them in /ingestions.")
+    if not args.process:
+        print("Documents are pending; process them with --process or from Ingestion in the web app.")
     return 0 if results["failed"] == 0 and results["conflict"] == 0 else 1
 
 

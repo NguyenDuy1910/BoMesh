@@ -67,6 +67,8 @@ class SandboxMaterialization:
     """A durable resource made available to the next hosted-shell step."""
 
     resource: ResourceRef
+    # Where the shell finds it: the original first, then any renditions.
+    paths: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +92,19 @@ class SandboxArtifact:
             raise ValueError("sandbox artifact revision must be positive")
         if self.size_bytes < 0:
             raise ValueError("sandbox artifact size must not be negative")
+
+    def reference(self) -> dict[str, Any]:
+        """The client-facing description of this revision; never its content."""
+
+        return {
+            "id": self.id,
+            "title": self.title,
+            "file_name": self.name,
+            "mime_type": self.mime_type,
+            "revision": self.revision,
+            "size_bytes": self.size_bytes,
+            "updated_at": self.updated_at or "",
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -206,7 +221,9 @@ class SandboxRuntime(Protocol):
     async def promote_file(self, file_name: str, *, summary: str) -> SandboxArtifact: ...
 
     @property
-    def artifact_ids(self) -> tuple[str, ...]: ...
+    def artifacts(self) -> tuple[SandboxArtifact, ...]:
+        """Files exported in this request, newest revision of each, in order."""
+        ...
 
 
 if TYPE_CHECKING:
@@ -378,6 +395,8 @@ class TurnContext:
     used_evidence_ids: set[str] = field(default_factory=set)
     executed_tool_signatures: set[str] = field(default_factory=set)
     references: CitationReferences = field(default_factory=CitationReferences)
+    # (artifact id, revision) already attached to an answer in this turn.
+    presented_artifacts: set[tuple[str, int]] = field(default_factory=set)
 
 
 @dataclass(frozen=True, slots=True)

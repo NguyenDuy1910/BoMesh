@@ -571,6 +571,34 @@ class WorkerConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class IngestionRunConfig:
+    """How one Ingestion Run packs and spreads its Documents.
+
+    A batch holds at most ``batch_max_items`` Documents and ``batch_max_bytes``
+    of originals (a larger file is a batch of its own); at most
+    ``parallelism`` batches of one run are processed at once.
+    """
+
+    batch_max_items: int = 8
+    batch_max_bytes: int = 64 * 1024 * 1024
+    parallelism: int = 4
+
+    def __post_init__(self) -> None:
+        if min(self.batch_max_items, self.batch_max_bytes, self.parallelism) < 1:
+            raise RuntimeError("ingestion run batching limits must be greater than zero")
+
+    @classmethod
+    def from_environment(cls) -> IngestionRunConfig:
+        return cls(
+            batch_max_items=_positive_integer("BOMESH_INGESTION_BATCH_MAX_ITEMS", default=8),
+            batch_max_bytes=_positive_integer(
+                "BOMESH_INGESTION_BATCH_MAX_BYTES", default=64 * 1024 * 1024
+            ),
+            parallelism=_positive_integer("BOMESH_INGESTION_RUN_PARALLELISM", default=4),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class OAuthClientConfig:
     """One provider's registered OAuth application."""
 
@@ -684,6 +712,7 @@ class AppConfig:
     integration: IntegrationConfig = field(default_factory=IntegrationConfig)
     observability: ObservabilityConfig = field(default_factory=ObservabilityConfig)
     worker: WorkerConfig = field(default_factory=WorkerConfig)
+    ingestion_run: IngestionRunConfig = field(default_factory=IngestionRunConfig)
 
     @classmethod
     def from_environment(cls) -> AppConfig:
@@ -703,6 +732,7 @@ class AppConfig:
             integration=IntegrationConfig.from_environment(),
             observability=ObservabilityConfig.from_environment(),
             worker=WorkerConfig.from_environment(),
+            ingestion_run=IngestionRunConfig.from_environment(),
         )
 
 
@@ -729,6 +759,7 @@ __all__ = [
     "AppConfig",
     "ArtifactConfig",
     "IdentityConfig",
+    "IngestionRunConfig",
     "IntegrationConfig",
     "IntegrationOAuthConfig",
     "ModelConfig",

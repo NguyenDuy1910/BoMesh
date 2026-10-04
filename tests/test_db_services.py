@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import base64
 import os
 from collections.abc import AsyncIterator
@@ -22,6 +21,8 @@ from bomesh.db.models import (
     Citation,
     Conversation,
     ExternalResource,
+    IngestionRun,
+    IngestionRunItem,
     IngestionSource,
     IntegrationConnection,
     IntegrationCredential,
@@ -60,8 +61,6 @@ from bomesh.services import (
     AuthContext,
     AuthorizationError,
     DocumentNotFoundError,
-    DocumentProcessingError,
-    UploadConflictError,
     UploadTooLargeError,
     UploadValidationError,
     VerifiedGoogleIdentity,
@@ -71,7 +70,10 @@ from bomesh.services import (
 from bomesh.services.approval_request import ApprovalRequestService
 from bomesh.services.dashboard.activity import ActivityService
 from bomesh.services.dashboard.dashboard import DashboardService
+from bomesh.connector.file import FileProcessor
 from bomesh.services.artifact import ArtifactService
+from bomesh.services.preview import KnowledgePreview
+from bomesh.services.stored_file_content import StoredFileContentService
 from bomesh.services.identity_access.auth import AuthenticationService
 from bomesh.services.identity_access.access_session import AccessSessionService
 from bomesh.services.identity_access.identity_store import IdentityStoreService
@@ -89,9 +91,7 @@ from bomesh.services.item_catalog import ItemCatalogService
 from bomesh.services.sandbox_session import SandboxSessionService
 from bomesh.services.documents import DocumentService
 from bomesh.services.document_presentation import DocumentPresenter
-from bomesh.services.ingestion import IngestionService
-from bomesh.services.workflow import WorkflowExecutionNotFoundError
-from sqlalchemy import func, select, text
+from sqlalchemy import event, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
@@ -943,6 +943,7 @@ async def test_workspace_overview_reports_knowledge_health_and_usage(
         session.add(collection)
         await session.flush()
         deleted_at = datetime.now(UTC)
+        current = "parser=p;chunker=c;embedding=e;schema=1;context=off"
         session.add_all(
             Item(
                 tenant_id=tenant.id,
@@ -951,12 +952,13 @@ async def test_workspace_overview_reports_knowledge_health_and_usage(
                 parent_relation="contains",
                 document_type="pdf",
                 title=f"Document {index}",
-                status="deleted" if index_status == "deleted" else "ready",
-                index_status="ready" if index_status == "deleted" else index_status,
-                deleted_at=deleted_at if index_status == "deleted" else None,
+                status="deleted" if state == "deleted" else "ready",
+                index_status="ready" if state in {"deleted", "outdated"} else state,
+                processed_version="parser=old" if state == "outdated" else current,
+                deleted_at=deleted_at if state == "deleted" else None,
             )
-            for index, index_status in enumerate(
-                ["ready", "ready", "pending", "processing", "failed", "unsupported", "deleted"]
+            for index, state in enumerate(
+                ["ready", "outdated", "pending", "processing", "failed", "unsupported", "deleted"]
             )
         )
         # Nine local days ago lies in the 7 days before the last 7; forty in no bucket.
@@ -970,14 +972,18 @@ async def test_workspace_overview_reports_knowledge_health_and_usage(
         await _ask(session, member, tenant.id, old_session, at=midnight - timedelta(days=40))
 
         member_context = await identity.get_context(member.id, tenant_id=tenant.id)
-        overview = await DashboardService(session).overview(member_context, tz=zone)
+        overview = await DashboardService(
+            session, processing_version=current
+        ).overview(member_context, tz=zone)
 
         assert overview["knowledge"] == {
             "collections": 1,
             "documents": 6,
-            "indexed": 2,
-            "indexing": 2,
+            "ready": 1,
+            "processing": 1,
+            "pending": 1,
             "failed": 1,
+            "outdated": 1,
         }
         # tenant.read alone sees aggregate usage but no audit records.
         assert overview["recent_activity"] == []
@@ -1112,17 +1118,37 @@ async def test_sandbox_recovery_state_is_private_to_its_conversation_owner(
             mime_type="text/csv",
             size_bytes=12,
         ),
-        provider_file=SandboxProviderFile(
-            id="or_file_1", name="revenue.csv", resource_id=str(UUID(int=19))
+        provider_files=(
+            SandboxProviderFile(
+                id="or_file_1",
+                name="revenue.csv",
+                resource_id=str(UUID(int=19)),
+                delivered=False,
+            ),
         ),
     )
 
     assert recorded.manifest[0].resource_id == str(UUID(int=19))
+    assert [file.delivered for file in recorded.materialized_files] == [False]
+    # A shell step that attached the file delivers it for good.
+    executed = await sandboxes.record_execution(
+        owner_access,
+        session_id=created.id,
+        environment_id="container_1",
+        files=(),
+        delivered_file_ids=("or_file_1",),
+    )
+    assert [file.delivered for file in executed.materialized_files] == [True]
     async with session_factory() as session:
         row = await session.get(SandboxSession, created.id)
         assert row is not None
         assert row.provider_state["materialized_files"] == [
-            {"id": "or_file_1", "name": "revenue.csv", "resource_id": str(UUID(int=19))}
+            {
+                "id": "or_file_1",
+                "name": "revenue.csv",
+                "resource_id": str(UUID(int=19)),
+                "delivered": True,
+            }
         ]
     with pytest.raises(DocumentNotFoundError):
         await sandboxes.active(
@@ -1539,7 +1565,7 @@ async def test_external_resource_mapping_preserves_canonical_item_identity(
         session.add(resource)
         await session.flush()
 
-        updated = await ItemService(session).upsert_ingested_item(
+        updated = (await ItemService(session).upsert_ingested_item(
             source.id,
             "page-42",
             canonical_external_id="confluence:page-42",
@@ -1548,7 +1574,7 @@ async def test_external_resource_mapping_preserves_canonical_item_identity(
             document_type="confluence_page",
             external_version="v2",
             etag="etag-v2",
-        )
+        )).item
 
         assert updated.id == existing_item.id
         assert updated.title == "Updated title"
@@ -1577,7 +1603,7 @@ async def test_admin_collection_creation_is_tenant_scoped_and_audited(
         await join_tenant(
             session, owner, tenant.id, role_code="knowledge-admin",
             permission_codes=(
-                "access.manage", "item.manage", "collection.read",
+                "access.manage", "knowledge.manage", "collection.read",
                 "collection.share", "collection.update",
             ),
         )
@@ -1704,38 +1730,37 @@ class _PresignedUploadStorage:
             version_id="version-finalized",
         )
 
-class _UnavailableIngestion:
-    async def index_upload(self, *_: object, **__: object) -> Item:
-        raise DocumentProcessingError("indexing is outside this integration test")
+class _NoProcessing:
+    """``ItemIngestionService`` as uploads see it: any call is recorded."""
 
-
-class _RecordingIndexWorkflow:
     def __init__(self) -> None:
-        self.requests: list[object] = []
+        self.calls: list[str] = []
 
-    async def start_ingestion(self, input: object, **_: object) -> dict[str, bool]:
-        self.requests.append(input)
-        return {"started": True}
+    def __getattr__(self, name: str) -> Any:
+        async def record(*_: object, **__: object) -> None:
+            self.calls.append(name)
+
+        return record
 
 
 def _uploads(
     session_factory: async_sessionmaker[AsyncSession],
-    storage: _UploadStorage,
-    workflows: _RecordingIndexWorkflow | None = None,
+    storage: object,
+    *,
     ingestion: object | None = None,
+    processing_version: str | None = None,
     **kwargs: object,
 ) -> DocumentService:
     return DocumentService(
         session_factory,
         object_storage=storage,  # type: ignore[arg-type]
-        ingestion=ingestion or _UnavailableIngestion(),  # type: ignore[arg-type]
-        content=object(),  # type: ignore[arg-type]
-        workflows=workflows or _RecordingIndexWorkflow(),  # type: ignore[arg-type]
+        ingestion=ingestion or _NoProcessing(),  # type: ignore[arg-type]
         presenter=DocumentPresenter(
             object_storage=lambda: storage,
             preview=SimpleNamespace(resolve=lambda *_, **__: None),  # type: ignore[arg-type]
             citation_url_seconds=300,
             preview_url_seconds=300,
+            processing_version=processing_version,
         ),
         **kwargs,
     )
@@ -1792,8 +1817,7 @@ async def test_collection_upload_is_authorized_parented_and_retry_safe(
         session_factory
     )
     storage = _UploadStorage()
-    workflows = _RecordingIndexWorkflow()
-    uploads = _uploads(session_factory, storage, workflows)
+    uploads = _uploads(session_factory, storage)
 
     first = await uploads.upload_to_collection(
         editor,
@@ -1830,7 +1854,6 @@ async def test_collection_upload_is_authorized_parented_and_retry_safe(
     assert first.item.upload.status == "available"
     assert first.item.status == "ready"
     assert first.item.index_status == "pending"
-    assert len(workflows.requests) == 3
     assert len(storage.uploads) == 2
     assert storage.uploads[0][1] == b"governed policy"
     async with session_factory() as session:
@@ -1851,22 +1874,66 @@ async def test_collection_upload_is_authorized_parented_and_retry_safe(
     assert visible.id == first.item.id
 
 
-class _RecordingIngestion:
-    def __init__(self) -> None:
-        self.indexed: list[UUID] = []
+@pytest.mark.asyncio
+async def test_uploads_register_pending_documents_and_never_process_them(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    collection_id, editor, _, _ = await _collection_upload_contexts(session_factory)
+    storage = _UploadStorage()
+    ingestion = _NoProcessing()
+    documents = _uploads(session_factory, storage, ingestion=ingestion)
 
-    async def index_upload(self, document_id: UUID, **_: object) -> None:
-        self.indexed.append(document_id)
+    async def upload(batch: str) -> list[dict[str, Any]]:
+        return [
+            await documents.create_document(
+                editor, collection_id, idempotency_key=f"{batch}-{index}",
+                name=f"{batch}-{index}.txt", content_type="text/plain",
+                content=_AsyncUpload(f"{batch} policy {index}".encode()),
+            )
+            for index in range(100)
+        ]
+
+    async def stored_state() -> tuple[list[tuple[str, int]], int, int]:
+        async with session_factory() as session:
+            states = (
+                await session.execute(
+                    select(Item.index_status, func.count())
+                    .where(Item.parent_item_id == collection_id, Item.processed_version.is_(None))
+                    .group_by(Item.index_status)
+                )
+            ).all()
+            runs = await session.scalar(select(func.count()).select_from(IngestionRun))
+            citations = await session.scalar(select(func.count()).select_from(Citation))
+        return [tuple(row) for row in states], int(runs or 0), int(citations or 0)
+
+    first = await upload("first")
+
+    assert all(result["created"] for result in first)
+    assert {result["document"]["processing"]["state"] for result in first} == {"pending"}
+    assert await stored_state() == ([("pending", 100)], 0, 0)
+
+    second = await upload("second")
+    listed = await documents.list_documents(
+        editor, collection_id=collection_id, page_size=100
+    )
+
+    assert {result["document"]["processing"]["state"] for result in second} == {"pending"}
+    # The bytes are stored; nothing was parsed, indexed, or handed to a run.
+    assert len(storage.uploads) == 200
+    assert ingestion.calls == []
+    assert await stored_state() == ([("pending", 200)], 0, 0)
+    assert listed["total"] == 200
+    assert {
+        (document["status"], document["processing"]["state"]) for document in listed["items"]
+    } == {("available", "pending")}
 
 
 @pytest.mark.asyncio
-async def test_own_uploads_are_processed_directly_and_workspace_uploads_are_managed(
+async def test_archives_and_attachments_are_registered_pending(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     workspace_id, editor, _, _ = await _collection_upload_contexts(session_factory)
-    workflows = _RecordingIndexWorkflow()
-    ingestion = _RecordingIngestion()
-    documents = _uploads(session_factory, _UploadStorage(), workflows, ingestion)
+    documents = _uploads(session_factory, _UploadStorage())
     async with session_factory.begin() as session:
         personal_id = await ItemService(session).ensure_personal_collection(
             editor.user_id,
@@ -1875,31 +1942,44 @@ async def test_own_uploads_are_processed_directly_and_workspace_uploads_are_mana
             title="My uploads",
             system_kind="personal_uploads",
         )
-    personal = {"id": personal_id}
 
-    mine = await documents.upload_to_collection(
-        editor, personal["id"], idempotency_key="chat-1", file_name="notes.txt",
+    attached = await documents.create_document(
+        editor, personal_id, idempotency_key="chat-1", name="notes.txt",
         content_type="text/plain", content=_AsyncUpload(b"my notes"),
         purpose="conversation_attachment",
     )
-    for _ in range(100):
-        if ingestion.indexed:
-            break
-        await asyncio.sleep(0.01)
-    shared = await documents.upload_to_collection(
-        editor, workspace_id, idempotency_key="kb-1", file_name="policy.txt",
-        content_type="text/plain", content=_AsyncUpload(b"workspace policy"),
+    archive = await documents.create_document(
+        editor, workspace_id, idempotency_key="kb-zip", name="bulk.zip",
+        content_type="application/zip", content=_AsyncUpload(b"PK"),
     )
 
-    # The user's own upload never touches Temporal; the workspace one only does.
-    assert ingestion.indexed == [mine.item.id]
-    assert mine.item.metadata_["ingestion"]["mode"] == "direct"
-    assert [request.document_id for request in workflows.requests] == [str(shared.item.id)]
-    assert shared.item.metadata_["ingestion"]["mode"] == "managed"
+    # The agent reads an attachment without processing; a run may process it.
+    assert attached["document"]["purpose"] == "conversation_attachment"
+    assert attached["document"]["processing"]["state"] == "pending"
+    # An archive is one pending Document until a run expands it.
+    assert archive["document"]["processing"]["state"] == "pending"
+    async with session_factory() as session:
+        stored = await session.get(Item, archive["document"]["id"])
+        children = await session.scalar(
+            select(func.count()).select_from(Item).where(
+                Item.parent_item_id == archive["document"]["id"]
+            )
+        )
+    assert stored is not None and stored.document_type == "archive"
+    assert children == 0
+    for collection_id, purpose in (
+        (personal_id, "knowledge"),
+        (workspace_id, "conversation_attachment"),
+    ):
+        with pytest.raises(UploadValidationError, match="workspace collection"):
+            await documents.create_document(
+                editor, collection_id, idempotency_key=f"zip-{purpose}", name="bulk.zip",
+                content_type="application/zip", content=_AsyncUpload(b"PK"), purpose=purpose,
+            )
     with pytest.raises(UploadValidationError, match="workspace collection"):
-        await documents.upload_to_collection(
-            editor, personal["id"], idempotency_key="zip-1", file_name="bulk.zip",
-            content_type="application/zip", content=_AsyncUpload(b"PK"),
+        await documents.create_document(
+            editor, personal_id, idempotency_key="zip-presigned", name="bulk.zip",
+            content_type="application/zip", size_bytes=2,
         )
 
 
@@ -1908,9 +1988,7 @@ async def test_an_image_is_a_conversation_attachment_never_knowledge(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     workspace_id, editor, _, _ = await _collection_upload_contexts(session_factory)
-    workflows = _RecordingIndexWorkflow()
-    ingestion = _RecordingIngestion()
-    documents = _uploads(session_factory, _UploadStorage(), workflows, ingestion)
+    documents = _uploads(session_factory, _UploadStorage())
     async with session_factory.begin() as session:
         personal_id = await ItemService(session).ensure_personal_collection(
             editor.user_id,
@@ -1926,101 +2004,17 @@ async def test_an_image_is_a_conversation_attachment_never_knowledge(
                 editor, collection_id, idempotency_key=f"kb-image-{collection_id}",
                 file_name="chart.png", content_type="image/png", content=_AsyncUpload(b"png"),
             )
-    attached = await documents.upload_to_collection(
-        editor, personal_id, idempotency_key="chat-image", file_name="chart.png",
+    attached = await documents.create_document(
+        editor, personal_id, idempotency_key="chat-image", name="chart.png",
         content_type="image/png", content=_AsyncUpload(b"png"),
         purpose="conversation_attachment",
     )
-    await asyncio.sleep(0.05)
 
-    # Kept for the agent to open; never indexed, so no Ingestion at all.
-    assert attached.item.upload.status == "available"
-    assert attached.item.index_status == "unsupported"
-    assert "ingestion" not in attached.item.metadata_
-    assert ingestion.indexed == [] and workflows.requests == []
-    with pytest.raises(UploadConflictError, match="not processed as knowledge"):
-        await documents.restart_ingestion(editor, attached.item.id, trigger_type="retry")
-
-
-class _TemporalIngestions(_RecordingIndexWorkflow):
-    """Managed runs as Temporal reports them: the latest run of each document."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.status: dict[str, str] = {}
-
-    async def start_ingestion(self, input: Any, **kwargs: object) -> dict[str, bool]:
-        self.status[input.document_id] = "running"
-        return await super().start_ingestion(input, **kwargs)
-
-    async def describe_ingestion(self, workflow_id: str) -> dict[str, Any]:
-        document_id = workflow_id.rsplit(":", 1)[-1]
-        if document_id not in self.status:
-            raise WorkflowExecutionNotFoundError(workflow_id)
-        latest = next(r for r in reversed(self.requests) if r.document_id == document_id)
-        return {
-            "workflow_id": workflow_id,
-            "kind": "document",
-            "document_id": document_id,
-            "status": self.status[document_id],
-            "trigger_type": latest.trigger_type,
-        }
-
-
-@pytest.mark.asyncio
-async def test_an_indexed_document_is_reindexed_on_request_but_never_doubled(
-    session_factory: async_sessionmaker[AsyncSession],
-) -> None:
-    workspace_id, editor, viewer, _ = await _collection_upload_contexts(session_factory)
-    workflows = _TemporalIngestions()
-    documents = _uploads(session_factory, _UploadStorage(), workflows)
-    ingestions = IngestionService(
-        session_factory,
-        workflows=workflows,  # type: ignore[arg-type]
-        documents=documents,
-        sources=None,  # type: ignore[arg-type]
-    )
-    uploaded = await documents.upload_to_collection(
-        editor, workspace_id, idempotency_key="kb-reindex", file_name="policy.txt",
-        content_type="text/plain", content=_AsyncUpload(b"workspace policy"),
-    )
-    document_id = uploaded.item.id
-
-    # The first run is still going: a re-index would double it.
-    with pytest.raises(ControlPlaneConflictError, match="already being indexed"):
-        await ingestions.start_document_ingestion(editor, document_id)
-
-    # It finished and the document is indexed.
-    workflows.status[str(document_id)] = "completed"
-    async with session_factory.begin() as session:
-        (await session.get(Item, document_id)).index_status = "ready"
-
-    with pytest.raises(AuthorizationError, match="collection.update"):
-        await ingestions.start_document_ingestion(viewer, document_id)
-    started = await ingestions.start_document_ingestion(editor, document_id)
-
-    assert started["status"] == "running"
-    assert started["trigger_type"] == "manual"
-    assert str(started["id"]) == uploaded.item.metadata_["ingestion"]["id"]
-    assert [request.trigger_type for request in workflows.requests] == ["upload", "manual"]
-    async with session_factory() as session:
-        document = await session.get(Item, document_id)
-        # Pending, not ready: the core's "index is current" shortcut cannot skip it.
-        assert document.index_status == "pending"
-        assert document.metadata_["ingestion"]["trigger_type"] == "manual"
-
-    # A connector wrote this one: there is no upload to run again.
-    async with session_factory.begin() as session:
-        synced = Item(
-            id=uuid4(), tenant_id=editor.tenant_id, item_type="document",
-            parent_item_id=workspace_id, parent_relation="child",
-            document_type="confluence_page", title="Synced page",
-            status="ready", index_status="ready",
-        )
-        session.add(synced)
-    with pytest.raises(ControlPlaneConflictError, match="re-indexed by its source's sync"):
-        await ingestions.start_document_ingestion(editor, synced.id)
-
+    # Kept for the agent to open; no run ever processes it.
+    assert attached["document"]["status"] == "available"
+    assert attached["document"]["processing"] == {
+        "state": "unsupported", "error": None, "run_id": None,
+    }
 
 
 @pytest.mark.asyncio
@@ -2029,8 +2023,8 @@ async def test_presigned_finalization_presents_updated_document_after_session_cl
 ) -> None:
     collection_id, editor, _, _ = await _collection_upload_contexts(session_factory)
     storage = _PresignedUploadStorage()
-    workflows = _RecordingIndexWorkflow()
-    uploads = _uploads(session_factory, storage, workflows)
+    ingestion = _NoProcessing()
+    uploads = _uploads(session_factory, storage, ingestion=ingestion)
     async with session_factory.begin() as session:
         document, created = await ItemService(session).create_or_get_collection_upload(
             editor.user_id,
@@ -2047,13 +2041,115 @@ async def test_presigned_finalization_presents_updated_document_after_session_cl
     result = await uploads.finalize_document_content(editor, document.id)
 
     assert created is True
-    # A workspace Collection's upload is managed ingestion, queued once.
-    assert result["ingestion"]["mode"] == "managed"
-    assert result["ingestion"]["status"] == "pending"
+    assert set(result) == {"document"}
     assert result["document"]["id"] == document.id
     assert result["document"]["status"] == "available"
+    assert result["document"]["processing"]["state"] == "pending"
     assert isinstance(result["document"]["updated_at"], datetime)
-    assert len(workflows.requests) == 1
+    assert ingestion.calls == []
+    async with session_factory() as session:
+        assert await session.scalar(select(func.count()).select_from(IngestionRun)) == 0
+
+
+@pytest.mark.asyncio
+async def test_document_processing_reports_state_and_latest_run(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    collection_id, editor, _, _ = await _collection_upload_contexts(session_factory)
+    current = "parser=p;chunker=c;embedding=e;schema=1;context=off"
+    earlier = datetime.now(UTC) - timedelta(hours=1)
+    async with session_factory.begin() as session:
+        def document(name: str, index_status: str, processed_version: str | None = None) -> Item:
+            return Item(
+                id=uuid4(), tenant_id=editor.tenant_id, item_type="document",
+                parent_item_id=collection_id, parent_relation="contains",
+                document_type="plain_text", title=name, mime_type="text/plain",
+                status="ready", index_status=index_status,
+                processed_version=processed_version,
+            )
+
+        items = {
+            name: document(name, *state)
+            for name, state in {
+                "pending": ("pending",),
+                "processing": ("processing",),
+                "ready": ("ready", current),
+                "outdated": ("ready", "parser=old"),
+                "never-versioned": ("ready",),
+                "failed": ("failed",),
+                "requeued": ("pending",),
+                "image": ("unsupported",),
+            }.items()
+        }
+        session.add_all(items.values())
+        old_run, new_run = (
+            IngestionRun(id=uuid4(), tenant_id=editor.tenant_id, trigger_type="manual", status=status)
+            for status in ("completed", "running")
+        )
+        session.add_all([old_run, new_run])
+        await session.flush()
+        session.add_all([
+            IngestionRunItem(
+                run_id=old_run.id, item_id=items["failed"].id, status="failed",
+                error="An older failure.", created_at=earlier,
+            ),
+            IngestionRunItem(
+                run_id=new_run.id, item_id=items["failed"].id, status="failed",
+                error="The file is password protected.",
+            ),
+            IngestionRunItem(
+                run_id=old_run.id, item_id=items["requeued"].id, status="failed",
+                error="The file is password protected.", created_at=earlier,
+            ),
+            IngestionRunItem(run_id=new_run.id, item_id=items["requeued"].id, status="queued"),
+            IngestionRunItem(
+                run_id=old_run.id, item_id=items["ready"].id, status="succeeded",
+                chunk_count=3, created_at=earlier,
+            ),
+        ])
+
+    run_queries: list[str] = []
+
+    def count_run_queries(_conn: Any, _cursor: Any, statement: str, *_: Any) -> None:
+        if "ingestion_run_items" in statement:
+            run_queries.append(statement)
+
+    engine = session_factory.kw["bind"].sync_engine
+    event.listen(engine, "before_cursor_execute", count_run_queries)
+    try:
+        listed = await _uploads(
+            session_factory, _UploadStorage(), processing_version=current
+        ).list_documents(editor, collection_id=collection_id, page_size=100)
+    finally:
+        event.remove(engine, "before_cursor_execute", count_run_queries)
+    unversioned = await _uploads(session_factory, _UploadStorage()).list_documents(
+        editor, collection_id=collection_id, page_size=100
+    )
+
+    processing = {document["name"]: document["processing"] for document in listed["items"]}
+    assert {name: value["state"] for name, value in processing.items()} == {
+        "pending": "pending",
+        "processing": "processing",
+        "ready": "ready",
+        "outdated": "outdated",
+        "never-versioned": "outdated",
+        "failed": "failed",
+        "requeued": "pending",
+        "image": "unsupported",
+    }
+    # The latest run explains the Document; older runs do not.
+    assert processing["failed"] == {
+        "state": "failed", "error": "The file is password protected.", "run_id": new_run.id,
+    }
+    assert processing["requeued"] == {"state": "pending", "error": None, "run_id": new_run.id}
+    assert processing["ready"] == {"state": "ready", "error": None, "run_id": old_run.id}
+    assert processing["pending"] == {"state": "pending", "error": None, "run_id": None}
+    # One run lookup for the whole page.
+    assert len(run_queries) == 1
+    # Without a current processing version nothing is outdated.
+    assert {
+        document["name"]: document["processing"]["state"] for document in unversioned["items"]
+    }["outdated"] == "ready"
 
 @pytest.mark.asyncio
 async def test_collection_upload_rejects_tenant_permission_and_collection_states(
@@ -2234,6 +2330,30 @@ class InMemoryObjectStorage:
             raise ObjectNotFoundError(f"object not found: {key}")
         return self.objects[key][0]
 
+    async def head(self, key: str) -> StoredObject:
+        if key not in self.objects:
+            raise ObjectNotFoundError(f"object not found: {key}")
+        data, content_type = self.objects[key]
+        return StoredObject(size_bytes=len(data), content_type=content_type)
+
+    async def download_to_path(self, key: str, path: Path, *, max_bytes: int) -> StoredObject:
+        stored = await self.head(key)
+        path.write_bytes(self.objects[key][0])
+        return stored
+
+
+def _workbook_bytes(rows: list[list[object]]) -> bytes:
+    from io import BytesIO
+
+    from openpyxl import Workbook
+
+    book = Workbook()
+    for row in rows:
+        book.active.append(row)
+    buffer = BytesIO()
+    book.save(buffer)
+    return buffer.getvalue()
+
 
 class StubUploads:
     """Stand in for ``DocumentService.upload_to_collection``.
@@ -2345,10 +2465,19 @@ async def test_conversation_files_keep_every_revision_under_a_private_collection
     storage.objects[source_document.storage_key] = (b"# NDA\n\nBetween [A] and [B].\n", "text/markdown")
 
     uploads = StubUploads()
+    # The real preview pipeline Knowledge documents use, over the in-memory store.
+    preview = KnowledgePreview(storage)  # type: ignore[arg-type]
+    parser = StoredFileContentService(
+        object_storage=storage,  # type: ignore[arg-type]
+        processor=FileProcessor(max_file_bytes=1_000_000),
+        max_processing_bytes=1_000_000,
+    )
     service = ArtifactService(
         session_factory,
         object_storage=lambda: storage,
         documents=lambda: uploads,
+        preview=lambda: preview,
+        stored_content=lambda: parser,
         max_content_bytes=1_000_000,
         download_url_seconds=60,
     )
@@ -2421,21 +2550,78 @@ async def test_conversation_files_keep_every_revision_under_a_private_collection
     assert detail["conversation_id"] == str(conversation.id)
     first_content = await service.content(writer_context, artifact_id, revision=1)
     assert "2026-09-01" in first_content["content"]
-    # A binary revision is named, never decoded as text.
+    # Text is its own preview; the document viewer is for binary files.
+    assert first_content["preview"] is None
+    # A binary revision is named, never decoded as text...
     binary = await service.content(writer_context, UUID(chart["id"]))
     assert binary["content"].startswith("(binary document: image/png")
+    # ...and an image is previewed as itself.
+    assert binary["preview"]["original"]["content_type"] == "image/png"
+    assert binary["preview"]["rendition"] is None
+
+    # An Office file opens in the document viewer, parsed once on first view.
+    sheet_rows = [["Student", "Faculty"], ["Lê Hùng Anh", "Điện - Điện tử"]]
+    roster = await service.record_generated(
+        writer_context,
+        conversation_id=conversation.id,
+        request_id="req-5",
+        file_name="roster.xlsx",
+        mime_type="",
+        data=_workbook_bytes(sheet_rows),
+        summary="Produced roster.xlsx",
+    )
+    roster_id = UUID(roster["id"])
+    viewed = (await service.content(writer_context, roster_id))["preview"]
+    renditions = [key for key in storage.objects if key.endswith("/document.json.gz")]
+    assert viewed["rendition"]["block_count"] > 0
+    assert len(renditions) == 1
+    await service.content(writer_context, roster_id)
+    assert [key for key in storage.objects if key.endswith("/document.json.gz")] == renditions
+    # Text that is not Markdown is laid out by the viewer: a CSV is a table.
+    contacts = await service.record_generated(
+        writer_context,
+        conversation_id=None,
+        request_id="req-csv",
+        file_name="contacts.csv",
+        mime_type="text/csv",
+        data="Name,Phone\nAn,0901\nBinh,0912\n".encode(),
+        summary="Produced contacts.csv",
+    )
+    contacts_preview = (await service.content(writer_context, UUID(contacts["id"])))["preview"]
+    assert contacts_preview["rendition"]["block_count"] == 1
+    # Every revision keeps its own preview: the card the user clicks may
+    # still name revision 1 while the agent is writing revision 2.
+    await service.record_generated(
+        writer_context,
+        conversation_id=conversation.id,
+        request_id="req-6",
+        file_name="roster.xlsx",
+        mime_type="",
+        data=_workbook_bytes([*sheet_rows, ["Phan Văn Luận", "Điện - Điện tử"]]),
+        summary="Produced roster.xlsx",
+    )
+    older = (await service.content(writer_context, roster_id, revision=1))["preview"]
+    newer = (await service.content(writer_context, roster_id))["preview"]
+    assert older["rendition"]["version"] == viewed["rendition"]["version"]
+    assert newer["rendition"]["version"] != older["rendition"]["version"]
+    assert newer["original"]["url"].endswith("/revisions/2/roster.xlsx")
 
     working = await service.conversation_artifacts(
         writer_context, conversation.id, content_characters=12
     )
-    assert [artifact.file_name for artifact in working] == ["Q3-memo.md", "revenue.png"]
+    assert [artifact.file_name for artifact in working] == [
+        "Q3-memo.md",
+        "revenue.png",
+        "roster.xlsx",
+    ]
     assert working[0].revision == 2
     assert working[0].content_truncated is True
     assert working[0].content.startswith("# Q3 memo")
 
     # Rebuilding a workspace reads the current revision of each file back out.
     files = await service.conversation_files(writer_context, conversation.id)
-    assert {(source.file_name, source.data) for source in files} == {
+    assert {source.file_name for source in files} == {"Q3-memo.md", "revenue.png", "roster.xlsx"}
+    assert {(source.file_name, source.data) for source in files} >= {
         ("Q3-memo.md", b"# Q3 memo\n\nDate: 2026-09-06\n"),
         ("revenue.png", b"\x89PNG fake"),
     }

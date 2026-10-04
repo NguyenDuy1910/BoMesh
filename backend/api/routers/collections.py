@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Query, Response, status
@@ -112,10 +112,11 @@ async def list_collection_access(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> CollectionAccessPage:
+    value = await control_plane.list_collection_access(
+        caller, collection_id, page=page, page_size=page_size
+    )
     return CollectionAccessPage.model_validate(
-        await control_plane.list_collection_access(
-            caller, collection_id, page=page, page_size=page_size
-        )
+        {**value, "items": [_access(collection_id, grant) for grant in value["items"]]}
     )
 
 
@@ -140,16 +141,7 @@ async def put_collection_access(
             "role_code": f"collection_{body.role}",
         },
     )
-    return CollectionAccess.model_validate(
-        {
-            "collection_id": collection_id,
-            "principal_type": principal_type,
-            "principal_id": principal_id,
-            "role": body.role,
-            "created_at": value.get("created_at"),
-            "updated_at": value.get("updated_at"),
-        }
-    )
+    return CollectionAccess.model_validate(_access(collection_id, value))
 
 
 @router.delete(
@@ -170,6 +162,20 @@ async def delete_collection_access(
         principal_id=principal_id,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def _access(collection_id: UUID, grant: dict[str, Any]) -> dict[str, Any]:
+    """One grant in the contract's words: the role without its internal prefix."""
+
+    return {
+        "collection_id": collection_id,
+        "principal_type": grant["principal_type"],
+        "principal_id": grant["principal_id"],
+        "principal_name": grant.get("principal_name"),
+        "role": str(grant["role_code"]).removeprefix("collection_"),
+        "created_at": grant.get("created_at"),
+        "updated_at": grant.get("updated_at"),
+    }
 
 
 __all__ = ["router"]

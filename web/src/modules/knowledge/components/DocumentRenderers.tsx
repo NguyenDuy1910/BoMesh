@@ -177,12 +177,13 @@ export function UnsupportedRenderer({ document }: Pick<RendererProps, "document"
       <FileQuestion aria-hidden="true" size={22} />
       <h3>Preview unavailable</h3>
       <p>
-        {document.state === "indexing"
-          ? "This document is still being read. Its preview appears when indexing finishes."
-          : document.state === "indexed"
-            ? "No readable preview has been produced for this document yet."
-            : document.failureReason
-              ?? `BoMesh cannot render ${document.fileTypeLabel ?? "this format"} files, so the document is stored but never used in answers.`}
+        {document.state === "pending" || document.state === "processing"
+          ? "A preview appears once this document is processed."
+          : document.state === "failed"
+            ? document.processingError ?? "This document couldn’t be read."
+            : document.state === "unsupported"
+              ? `${document.fileTypeLabel ?? "This format"} can’t be previewed or used in answers.`
+              : "No preview is available for this document."}
       </p>
       {document.externalUrl && (
         <div className="knowledge-unsupported__actions">
@@ -197,8 +198,8 @@ export function UnsupportedRenderer({ document }: Pick<RendererProps, "document"
 }
 
 /**
- * An archive is an upload record: what it contained became Documents of the
- * same Collection, each read, indexed and cited on its own.
+ * An archive is an upload record: processing unpacks it, and what it held
+ * becomes Documents of the same Collection, each read and cited on its own.
  */
 export function ArchiveRenderer({ document }: Pick<RendererProps, "document">) {
   return (
@@ -207,8 +208,10 @@ export function ArchiveRenderer({ document }: Pick<RendererProps, "document">) {
       <h3>Archive</h3>
       <p>
         {document.state === "failed"
-          ? document.failureReason ?? "This archive could not be extracted, so none of its files were added."
-          : `The supported files in ${document.title} are added to ${document.collection} as separate documents. Open them from the collection to read or cite them.`}
+          ? document.processingError ?? "This archive couldn’t be unpacked, so none of its files were added."
+          : document.state === "ready" || document.state === "outdated"
+            ? `The files in ${document.title} were added to ${document.collection} as separate documents.`
+            : `The files in ${document.title} are unpacked into ${document.collection} when it’s processed.`}
       </p>
     </div>
   );

@@ -2,13 +2,11 @@
 
 An archive is not knowledge by itself; the files inside it are. Each accepted
 member becomes an upload in the archive's own Collection — the same Item,
-upload record and object a person gets by uploading that file directly — and
-is ingested through the same core, so Docling parsing, contextual chunking,
-embeddings, citations and previews apply to it without a second pipeline.
-
-Archives are bulk ingestion, so only managed ingestion expands them; the
-caller decides how each child is ingested (``start_child``). This module
-knows nothing of Temporal.
+upload record and object a person gets by uploading that file directly —
+registered ``pending`` with its original stored. Expansion happens inside the
+Ingestion Run that processes the archive; the run then takes the members in
+as its own items, so they go through the same core as everything else. This
+module knows nothing of runs or Temporal.
 
 Children sit directly under the Collection, not under the archive Document:
 retrieval scopes every chunk by its Document's Collection
@@ -17,9 +15,9 @@ Document would be indexed out of every reader's reach. Children point back to
 the archive through ``metadata["archive"]``.
 
 Expansion is idempotent. A child's idempotency key is derived from the archive
-and the member's path, its bytes are stored only while its upload is still
-pending, and every child is started before the archive is finalized — so a
-retry resumes where a failed attempt stopped.
+and the member's path, and its bytes are stored only while its upload is still
+pending, so a retry resumes where a failed attempt stopped; an archive already
+expanded answers with the children it produced.
 """
 
 from __future__ import annotations
@@ -29,14 +27,16 @@ import hashlib
 import logging
 import mimetypes
 import tempfile
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.orm import joinedload
 
+from bomesh.connector.file import FinxFileExtensions
 from bomesh.connector.file.archive import (
     ArchiveError,
     ArchiveLimits,
@@ -62,12 +62,13 @@ _MAX_REPORTED_SKIPS = 200
 @dataclass(frozen=True, slots=True)
 class ArchiveExpansionResult:
     archive_id: UUID
+    #: Children still waiting to be processed (not ready yet).
     document_ids: tuple[UUID, ...]
     skipped: int
 
 
 class ArchiveExpansionService:
-    """Own the lifecycle from stored archive to started child Documents."""
+    """Own the lifecycle from stored archive to registered child Documents."""
 
     def __init__(
         self,
@@ -84,29 +85,30 @@ class ArchiveExpansionService:
         self,
         document_id: UUID,
         *,
-        owner_user_id: UUID,
         tenant_id: UUID,
-        start_child: Callable[[Item], Awaitable[None]],
+        processed_version: str,
         progress: IndexProgress | None = None,
     ) -> ArchiveExpansionResult | None:
         """Expand ``document_id`` when it is an archive; ``None`` for any other file.
 
-        ``start_child`` is called for each child not indexed yet, before the
-        archive is finalized. A successful expansion then removes the archive
-        Document: what it held now lives in its Collection as ordinary
-        Documents, and the archive record stays only as their lineage. A
-        failed one keeps it, so the failure stays visible and retryable.
+        A successful expansion marks the archive processed with
+        ``processed_version`` and removes it: what it held now lives in its
+        Collection as ordinary pending Documents, and the archive record stays
+        only as their lineage. A failed one keeps it, so the failure stays
+        visible and retryable.
         """
 
-        archive = await self._load(document_id, owner_user_id=owner_user_id, tenant_id=tenant_id)
+        archive = await self._load(document_id, tenant_id=tenant_id)
         if archive.document_type != ARCHIVE_DOCUMENT_TYPE:
             return None
+        assert archive.upload is not None
+        owner_user_id = archive.upload.owner_user_id
         if archive.status == "deleted":
-            # A retried run after the expansion already finished and removed it.
+            # A retried attempt after the expansion already finished.
             summary = archive.metadata_.get("archive") or {}
             return ArchiveExpansionResult(
                 archive_id=archive.id,
-                document_ids=(),
+                document_ids=await self._waiting_children(archive.id, tenant_id=tenant_id),
                 skipped=int(summary.get("skipped_count") or 0),
             )
         async with transaction_scope(self._session_factory) as session:
@@ -138,10 +140,13 @@ class ArchiveExpansionService:
             # The bytes are what they are; retrying cannot make them readable.
             await self._record(archive.id, status="failed", error=str(exc))
             raise DocumentProcessingError(str(exc)) from exc
-        for child in children:
-            if child.index_status != "ready":
-                await start_child(child)
-        await self._record(archive.id, status="ready", listing=listing, children=children)
+        await self._record(
+            archive.id,
+            status="ready",
+            listing=listing,
+            children=children,
+            processed_version=processed_version,
+        )
         log.info(
             "archive expanded archive_id=%s documents=%d skipped=%d",
             archive.id,
@@ -150,23 +155,51 @@ class ArchiveExpansionService:
         )
         return ArchiveExpansionResult(
             archive_id=archive.id,
-            document_ids=tuple(child.id for child in children),
+            document_ids=tuple(
+                child.id
+                for child in children
+                if child.index_status not in {"ready", "unsupported"}
+            ),
             skipped=len(listing.skipped),
         )
 
-    async def _load(
-        self, document_id: UUID, *, owner_user_id: UUID, tenant_id: UUID
-    ) -> Item:
+    async def _load(self, document_id: UUID, *, tenant_id: UUID) -> Item:
         async with transaction_scope(self._session_factory) as session:
-            document = await ItemService(session).get_owned_upload(
-                document_id, owner_user_id, tenant_id, include_deleted=True
+            document = await session.scalar(
+                select(Item)
+                .options(joinedload(Item.upload))
+                .where(
+                    Item.id == document_id,
+                    Item.tenant_id == tenant_id,
+                    Item.item_type == "document",
+                )
             )
-            assert document.upload is not None
-            if document.status == "deleted" and document.document_type != ARCHIVE_DOCUMENT_TYPE:
-                raise DocumentUnavailableError("document was removed")
-            if document.upload.status != "available":
-                raise DocumentUnavailableError("document content is not available")
-            return document
+        if document is None:
+            raise DocumentUnavailableError("document was removed")
+        if document.document_type == ARCHIVE_DOCUMENT_TYPE and (
+            document.upload is None or document.upload.status != "available"
+        ):
+            raise DocumentUnavailableError("archive content is not available")
+        return document
+
+    async def _waiting_children(
+        self, archive_id: UUID, *, tenant_id: UUID
+    ) -> tuple[UUID, ...]:
+        async with transaction_scope(self._session_factory) as session:
+            return tuple(
+                await session.scalars(
+                    select(Item.id)
+                    .where(
+                        Item.tenant_id == tenant_id,
+                        Item.item_type == "document",
+                        Item.status != "deleted",
+                        Item.deleted_at.is_(None),
+                        Item.index_status.not_in(("ready", "unsupported")),
+                        Item.metadata_["archive"]["document_id"].astext == str(archive_id),
+                    )
+                    .order_by(Item.id)
+                )
+            )
 
     async def _download(self, archive: Item, path: Path) -> None:
         if not archive.storage_key:
@@ -237,8 +270,7 @@ class ArchiveExpansionService:
                 child.id,
                 owner_user_id,
                 archive.tenant_id,
-                # Expanding is bulk, managed ingestion; so is each child.
-                ingestion_mode="managed",
+                processable=_is_processable(member.name),
                 storage_metadata={"etag": stored.etag, "version_id": stored.version_id},
             )
 
@@ -250,6 +282,7 @@ class ArchiveExpansionService:
         listing: ArchiveListing | None = None,
         children: list[Item] | None = None,
         error: str | None = None,
+        processed_version: str | None = None,
     ) -> None:
         summary: dict[str, object] = {
             "status": status,
@@ -268,7 +301,8 @@ class ArchiveExpansionService:
             items = ItemService(session)
             await items.merge_metadata(archive_id, {"archive": summary})
             if status == "ready":
-                await items.mark_index_ready(archive_id)
+                assert processed_version is not None
+                await items.mark_index_ready(archive_id, processed_version=processed_version)
                 await items.tombstone(archive_id)
             else:
                 await items.mark_index_failed(archive_id)
@@ -284,6 +318,12 @@ def _content_type(file_name: str) -> str:
     if file_name.casefold().endswith((".md", ".markdown")):
         return "text/markdown"
     return (guessed or "application/octet-stream").casefold()
+
+
+def _is_processable(file_name: str) -> bool:
+    """Every member but an image is processed, as for a direct upload."""
+
+    return Path(file_name).suffix.casefold() not in FinxFileExtensions.IMAGE_EXTENSIONS
 
 
 __all__ = ["ARCHIVE_DOCUMENT_TYPE", "ArchiveExpansionResult", "ArchiveExpansionService"]

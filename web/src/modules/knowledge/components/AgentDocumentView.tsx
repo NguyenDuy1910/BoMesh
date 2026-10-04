@@ -70,10 +70,9 @@ export function AgentDocumentView({
 }
 
 function RetrievalSummary({ document }: { document: WorkspaceKnowledgeDocument }) {
-  const facts = documentFacts(document);
-  const indexed = document.state === "indexed";
-  const working = document.state === "indexing";
-  const Icon = indexed ? CircleCheck : working ? LoaderCircle : CircleAlert;
+  const ready = document.state === "ready" || document.state === "outdated";
+  const working = document.state === "processing";
+  const Icon = ready ? CircleCheck : working ? LoaderCircle : CircleAlert;
 
   return (
     <details className={`knowledge-agent__summary knowledge-agent__summary--${document.state}`}>
@@ -83,16 +82,15 @@ function RetrievalSummary({ document }: { document: WorkspaceKnowledgeDocument }
           className={working ? "motion-safe:animate-spin" : undefined}
           size={16}
         />
-        <span>
-          {indexed
-            ? `Indexed ${facts.indexedLabel} · ${answerAvailability(document).toLowerCase()}`
-            : working
-              ? "Indexing — passages appear as they are read"
-              : `Not indexed · ${answerAvailability(document).toLowerCase()}`}
-        </span>
-        <span className="knowledge-agent__summary-toggle">Retrieval details</span>
+        <span>{answerAvailability(document)}</span>
+        <span className="knowledge-agent__summary-toggle">Details</span>
       </summary>
-      <p>{document.indexingNote ?? document.failureReason ?? "No extraction record has been written for this document yet."}</p>
+      <p>
+        {document.processingError
+          ?? (ready
+            ? "Passages come from the text read when this document was processed."
+            : "Passages appear once this document is processed.")}
+      </p>
     </details>
   );
 }

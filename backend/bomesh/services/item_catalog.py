@@ -20,8 +20,7 @@ from bomesh.services import (
     COLLECTION_DELETE_PERMISSION,
     COLLECTION_UPDATE_PERMISSION,
     DocumentNotFoundError,
-    ITEM_MANAGE_PERMISSION,
-    ControlPlaneConflictError,
+    KNOWLEDGE_MANAGE_PERMISSION,
     ControlPlaneNotFoundError,
     ControlPlaneValidationError,
     AuthContext,
@@ -57,7 +56,7 @@ class ItemCatalogService:
         inherit_access: bool = True,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        tenant_id = require_tenant_permission(actor, ITEM_MANAGE_PERMISSION)
+        tenant_id = require_tenant_permission(actor, KNOWLEDGE_MANAGE_PERMISSION)
         if parent_item_id is not None:
             parent = await AuthorizationService(self._session).require_item(
                 parent_item_id, access=actor, permission=COLLECTION_UPDATE_PERMISSION,
@@ -165,7 +164,7 @@ class ItemCatalogService:
         sort: str = "updated_at",
         direction: str = "desc",
     ) -> dict[str, Any]:
-        tenant_id = require_tenant_permission(actor, ITEM_MANAGE_PERMISSION)
+        tenant_id = require_tenant_permission(actor, KNOWLEDGE_MANAGE_PERMISSION)
         page, page_size, offset = normalize_page(page, page_size)
         filters = [
             Item.tenant_id == tenant_id,
@@ -292,7 +291,7 @@ class ItemCatalogService:
         }
 
     async def get_item(self, actor: AuthContext, item_id: UUID) -> dict[str, Any]:
-        tenant_id = require_tenant_permission(actor, ITEM_MANAGE_PERMISSION)
+        tenant_id = require_tenant_permission(actor, KNOWLEDGE_MANAGE_PERMISSION)
         item = await self._session.scalar(
             select(Item)
             .options(
@@ -393,32 +392,8 @@ class ItemCatalogService:
         )
         return await self.get_collection(actor, item.id)
 
-    async def retry_item(self, actor: AuthContext, item_id: UUID) -> dict[str, Any]:
-        payload = await self.get_item(actor, item_id)
-        if payload["status"] != "failed":
-            raise ControlPlaneConflictError("only failed items can be retried")
-        external_resource = await self._session.scalar(
-            select(ExternalResource).where(
-                ExternalResource.item_id == item_id,
-                ExternalResource.deleted_at.is_(None),
-            )
-        )
-        if external_resource is None:
-            item = await self._session.get(Item, item_id)
-            assert item is not None
-            item.status = "pending"
-            return {
-                "item": await self.get_item(actor, item.id),
-                "ingestion_run": None,
-            }
-        return {
-            "item": payload,
-            "ingestion_source_id": str(external_resource.ingestion_source_id),
-            "ingestion_run": None,
-        }
-
     async def delete_item(self, actor: AuthContext, item_id: UUID) -> None:
-        require_tenant_permission(actor, ITEM_MANAGE_PERMISSION)
+        require_tenant_permission(actor, KNOWLEDGE_MANAGE_PERMISSION)
         payload = await self.get_item(actor, item_id)
         if self._ingestion is None:
             raise RuntimeError("Item deletion requires ItemIngestionService")

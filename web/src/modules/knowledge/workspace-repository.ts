@@ -6,23 +6,17 @@
  * split exists because the screen shows a person "18 pages · 1.1 MB · synced
  * 8 minutes ago", and none of those are columns.
  */
-import type { Ingestion } from "@/modules/knowledge/ingestions-api";
+import type { ProcessingState } from "@/modules/ingestion/runs-api";
 
 export type KnowledgeDocumentKind = "pdf" | "document" | "spreadsheet" | "archive" | "unsupported";
 
 /**
- * Where a document sits in its own lifecycle.
- *
- * `unsupported` is separate from `failed` on purpose: a failed index can be
- * retried and may succeed, while an unsupported format never will. Offering
- * "Retry indexing" for the second one would be a lie.
+ * Where a document stands in processing, as the backend reports it
+ * (`Document.processing.state`). `unsupported` is separate from `failed` on
+ * purpose: a failed document may succeed in a new run, an unsupported format
+ * never will.
  */
-export type KnowledgeDocumentState =
-  | "indexed"
-  | "indexing"
-  | "failed"
-  | "restricted"
-  | "unsupported";
+export type KnowledgeDocumentState = ProcessingState;
 
 /** One retrievable passage, as the agent holds it. */
 export interface KnowledgeAgentSection {
@@ -38,13 +32,13 @@ export interface WorkspaceKnowledgeDocument {
   title: string;
   kind: KnowledgeDocumentKind;
   state: KnowledgeDocumentState;
+  /** The Collection Item it lives in. */
+  collectionId?: string;
   collection: string;
   source: string;
   updatedLabel: string;
   size: string;
   pagesLabel: string;
-  /** Whether grounded answers may use this document once it is indexed. */
-  answerIncluded?: boolean;
   /** A lifecycle tombstone. Normal workspace reads exclude this document. */
   removedAt?: string;
   agentView: string[];
@@ -61,16 +55,10 @@ export interface WorkspaceKnowledgeDocument {
   externalUrl?: string;
   owner?: string;
   modifiedAt?: string;
-  indexedAt?: string;
-  /** Why indexing cannot succeed, stated in the viewer above the content. */
-  failureReason?: string;
-  /** Diagnostics, kept behind a disclosure in the details drawer. */
-  indexingNote?: string;
-  /**
-   * The last time the pipeline took this document in. Absent for a document a
-   * connector wrote, which is indexed inside its source's sync instead.
-   */
-  latestIngestion?: Pick<Ingestion, "id" | "status" | "error" | "attempt">;
+  /** Why its latest run could not process it, written for people. */
+  processingError?: string;
+  /** The latest run that included it. */
+  runId?: string;
   /** Retrieval-ready passages. Falls back to `agentView` lines. */
   sections?: KnowledgeAgentSection[];
 }
@@ -84,19 +72,20 @@ export interface WorkspaceKnowledgeCollection {
   source: string;
   kind: "folder" | "upload" | "web";
   documentCount: number;
+  /** Connected sources that sync into it; 0 means people upload to it. */
+  sourceCount?: number;
+  /** What it holds, in its owner's words. */
+  description?: string;
+  /** Whether the caller may see and change who can open it. */
+  canShare?: boolean;
+  /** The Collection it is nested in; null at the top of the tree. */
+  parentId: string | null;
+  /** Whether the caller may run processing over its documents. */
+  canProcess: boolean;
   /**
    * Visible but not openable. The count still reconciles with the workspace
    * total, which is why the row stays rather than being filtered away.
    */
   restricted?: boolean;
   owner?: string;
-}
-
-export interface KnowledgeWorkspaceSnapshot {
-  workspaceName: string;
-  documentCount: number;
-  sourceCount: number;
-  lastSyncLabel: string;
-  collections: WorkspaceKnowledgeCollection[];
-  documents: WorkspaceKnowledgeDocument[];
 }

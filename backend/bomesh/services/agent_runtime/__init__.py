@@ -24,6 +24,16 @@ class SandboxProvider(Protocol):
         self, *, environment_id: str, file_id: str
     ) -> bytes: ...
 
+    def workspace_path(self, *, file_id: str, file_name: str) -> str:
+        """Where an uploaded file appears inside the shell's workspace."""
+        ...
+
+    async def find_file(
+        self, *, environment_id: str, path: str
+    ) -> ProviderResourceRef | None:
+        """Look up a workspace file by its path relative to the home directory."""
+        ...
+
 
 @dataclass(frozen=True, slots=True)
 class AgentKnowledgeSearchResult:

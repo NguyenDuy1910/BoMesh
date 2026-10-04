@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import math
 import os
+from pathlib import PurePosixPath
 from typing import Any, cast
 from urllib.parse import quote
 
@@ -43,7 +44,6 @@ from bomesh.document_index import EmbeddingRejectedError
 
 #: Embedding responses no retry can change: bad request, key, credit, model.
 _REJECTED_EMBEDDING_STATUSES = frozenset({400, 401, 402, 403, 404, 422})
-
 
 class OpenRouterTransport:
     """Expose OpenRouter Responses and embedding operations."""
@@ -219,6 +219,55 @@ class OpenRouterTransport:
         )
         response.raise_for_status()
         return response.content
+
+    def workspace_path(self, *, file_id: str, file_name: str) -> str:
+        """Where an attached file appears in the container.
+
+        OpenRouter copies an attached file into the home directory as the last
+        eight characters of its id, a dash, and its base name, so two files
+        with one name never collide.
+        """
+
+        identifier = _provider_identifier(file_id, "file id")
+        base = PurePosixPath(_file_name(file_name)).name
+        return f"~/{identifier[-8:]}-{base}"
+
+    async def find_file(
+        self, *, environment_id: str, path: str
+    ) -> ProviderResourceRef | None:
+        """Find a saved container file by its path under the home directory."""
+
+        container = _provider_identifier(environment_id, "container id")
+        wanted = path.strip()
+        after: str | None = None
+        # Bounded: a workspace with more than 10,000 saved files is not one a
+        # chat turn should be searching.
+        for _ in range(10):
+            params: dict[str, str | int] = {"limit": 1000}
+            if after is not None:
+                params["after"] = after
+            response = await self._client.get(
+                f"{self._base_url}/containers/{quote(container, safe='')}/files",
+                headers=self._headers,
+                params=params,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            entries = payload.get("data") if isinstance(payload, dict) else None
+            for entry in entries if isinstance(entries, list) else ():
+                if isinstance(entry, dict) and entry.get("path") == wanted:
+                    return ProviderResourceRef(
+                        provider=self.provider,
+                        id=_provider_identifier(entry.get("id"), "file id"),
+                        name=wanted,
+                    )
+            if not (isinstance(payload, dict) and payload.get("has_more")):
+                return None
+            last = payload.get("last_id")
+            if not isinstance(last, str) or not last:
+                return None
+            after = last
+        return None
 
     async def embed_query(self, query: str) -> list[float]:
         """Embed one non-empty query for document retrieval."""

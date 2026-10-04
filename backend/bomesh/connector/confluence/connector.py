@@ -20,10 +20,10 @@ from ..base import SlimConnectorWithPermSync
 from ..protocol import ConnectorFailure
 from ..protocol import ItemFailure
 from ..protocol import SlimItem
+from bomesh.connector.originals import original_key, store_original
 from bomesh.connector.protocol import (
     AccessPolicy,
     AnyItem,
-    Chunk,
     CollectionItem,
     CollectionKind,
     DocumentItem,
@@ -31,16 +31,13 @@ from bomesh.connector.protocol import (
     Hierarchy,
     SourceIdentity,
     SourceProvider,
-    StorageObject,
-    TextPart,
 )
-from bomesh.connector.file import FileProcessor
 from bomesh.connector.protocol import RawObjectStore
 from ._confluence import FinxConfluence
 from .checkpoint import ConfluenceCheckpoint
-from .utils import AttachmentProcessingResult, build_confluence_document_id
-from .utils import convert_attachment_to_content
+from .utils import build_confluence_document_id
 from .utils import datetime_from_string
+from .utils import store_attachment
 
 log = logging.getLogger(__name__)
 
@@ -86,20 +83,9 @@ def _http_status(exc: BaseException) -> int | None:
     return getattr(response, "status_code", None)
 
 
-def _attachment_storage_object(
-    content: AttachmentProcessingResult,
-) -> StorageObject | None:
-    if not content.storage_key:
-        return None
-    return StorageObject(
-        provider=content.storage_provider,
-        bucket=content.storage_bucket,
-        region=content.storage_region,
-        key=content.storage_key,
-        file_name=content.file_name,
-        size_bytes=content.size_bytes,
-        content_type=content.mime_type,
-    )
+def _page_file_name(title: str, page_id: str) -> str:
+    name = " ".join(title.replace("/", "-").replace("\\", "-").split())
+    return f"{name or page_id}.html"
 
 
 def _attachment_document_kind(mime_type: str | None) -> DocumentKind:
@@ -163,16 +149,9 @@ class ConfluenceConnector(
         self._included_page_text_cache: dict[str, str | None] = {}
         self._user_display_name_cache: dict[str, str] = {}
         self._storage: RawObjectStore | None = None
-        self._file_processor = FileProcessor()
-        self._processed_chunks: dict[str, tuple[Chunk, ...]] = {}
 
     def set_storage(self, storage: RawObjectStore) -> None:
         self._storage = storage
-
-    async def fetch_chunks(self, item: DocumentItem) -> tuple[Chunk, ...] | None:
-        """Return attachment chunks produced by the same Docling pass."""
-
-        return self._processed_chunks.pop(item.id, None)
 
     @property
     def confluence_client(self) -> FinxConfluence:
@@ -352,6 +331,22 @@ class ConfluenceConnector(
             else SourceProvider.CONFLUENCE.value
         )
 
+    def _tenant_id(self) -> str:
+        return (
+            self._credentials_provider.get_tenant_id()
+            if self._credentials_provider is not None
+            else "default"
+        )
+
+    def _original_key(self, external_id: str, file_name: str) -> str:
+        return original_key(
+            tenant_id=self._tenant_id(),
+            connection_id=self._connector_id(),
+            provider=SourceProvider.CONFLUENCE.value,
+            external_id=external_id,
+            file_name=file_name,
+        )
+
     def _normalized_page_soup(self, page: dict[str, Any]) -> Any:
         body = page.get("body", {})
         html = body.get("storage", body.get("view", {})).get("value", "")
@@ -438,7 +433,7 @@ class ConfluenceConnector(
         return _format_soup_text(soup) if soup is not None else ""
 
     def _extract_page_html(self, page: dict[str, Any]) -> str:
-        """Retain normalized HTML structure for Docling conversion."""
+        """The page's normalized HTML: what is stored as its original."""
 
         soup = self._normalized_page_soup(page)
         return str(soup) if soup is not None else ""
@@ -539,7 +534,6 @@ class ConfluenceConnector(
                 self.wiki_base, page["_links"]["webui"], self.is_cloud
             )
             stable_id = f"confluence::{page_id}"
-            self._processed_chunks.pop(stable_id, None)
 
             metadata: dict[str, str | list[str]] = {
                 "doc_type": "confluence_page"
@@ -584,27 +578,32 @@ class ConfluenceConnector(
                 etag=str(page.get("version", {}).get("when") or "") or None,
                 url=page_url,
             )
-            processed = self._file_processor.process_bytes(
-                self._extract_page_html(page).encode("utf-8"),
-                file_name=f"{page_id}.html",
-                item_id=stable_id,
+            html = self._extract_page_html(page)
+            if not html.strip():
+                raise ValueError("page has no content")
+            file_name = _page_file_name(page_title, page_id)
+            original = store_original(
+                self._storage,
+                key=self._original_key(stable_id, file_name),
+                file_name=file_name,
+                content_type="text/html",
+                data=html.encode("utf-8"),
+            )
+            return DocumentItem(
+                id=stable_id,
                 title=page_title,
                 source=source,
                 document_kind=DocumentKind.PAGE,
                 hierarchy=_page_hierarchy(page),
                 access=page_access or AccessPolicy(),
                 metadata=metadata,
-            )
-            self._processed_chunks[stable_id] = processed.chunks
-            return processed.item.model_copy(
-                update={
-                    "updated_at": datetime_from_string(page["version"]["when"]),
-                    "created_at": (
-                        datetime_from_string(page["history"]["createdDate"])
-                        if page.get("history", {}).get("createdDate")
-                        else None
-                    ),
-                }
+                original=original,
+                updated_at=datetime_from_string(page["version"]["when"]),
+                created_at=(
+                    datetime_from_string(page["history"]["createdDate"])
+                    if page.get("history", {}).get("createdDate")
+                    else None
+                ),
             )
         except Exception:
             log.exception("Failed to convert page %s", page_id)
@@ -628,7 +627,6 @@ class ConfluenceConnector(
         attachment_title = attachment.get("title", attachment_id)
         stable_page_id = f"confluence::{page_id}"
         stable_att_id = f"{stable_page_id}::att::{attachment_id}"
-        self._processed_chunks.pop(stable_att_id, None)
         attachment_url = build_confluence_document_id(
             self.wiki_base,
             attachment.get("_links", {}).get(
@@ -637,15 +635,14 @@ class ConfluenceConnector(
             ),
             self.is_cloud,
         )
-        content = convert_attachment_to_content(
-            confluence_client=self.confluence_client,
-            attachment=attachment,
-            page_id=page_id,
+        original = store_attachment(
+            self.confluence_client,
+            attachment,
+            page_id,
             storage=self._storage,
-            document_id=stable_att_id,
-            processor=self._file_processor,
+            storage_key=self._original_key(stable_att_id, attachment_title),
         )
-        if content is None:
+        if original is None:
             return None
 
         metadata: dict[str, str | list[str]] = {
@@ -654,28 +651,14 @@ class ConfluenceConnector(
             "attachment_id": attachment_id,
             "parent_content_id": stable_page_id,
             "doc_type": "confluence_attachment",
+            "file_name": original.file_name or attachment_title,
         }
         version_when = attachment.get("version", {}).get("when")
         if parent_doc:
             if "labels" in parent_doc.metadata:
                 metadata["labels"] = parent_doc.metadata["labels"]
             metadata["parent_page"] = parent_doc.title
-        metadata.update(
-            {
-                key: str(value)
-                for key, value in {
-                    "file_name": content.file_name,
-                    "mime_type": content.mime_type,
-                    "size_bytes": content.size_bytes,
-                }.items()
-                if value is not None
-            }
-        )
-
-        original = _attachment_storage_object(content)
-        if not content.text:
-            return None
-        item = DocumentItem(
+        return DocumentItem(
             id=stable_att_id,
             title=attachment_title,
             source=SourceIdentity(
@@ -690,30 +673,9 @@ class ConfluenceConnector(
             access=parent_doc.access if parent_doc else AccessPolicy(),
             metadata=metadata,
             updated_at=(datetime_from_string(version_when) if version_when else None),
-            document_kind=_attachment_document_kind(content.mime_type),
-            content=(
-                content.content
-                or [TextPart(text=content.text, link=attachment_url)]
-            ),
+            document_kind=_attachment_document_kind(original.content_type),
             original=original,
         )
-
-        if content.chunks:
-            self._processed_chunks[stable_att_id] = tuple(
-                chunk
-                if (
-                    chunk.item_id == stable_att_id
-                    and chunk.id == f"{stable_att_id}:{chunk.chunk_index}"
-                )
-                else chunk.model_copy(
-                    update={
-                        "id": f"{stable_att_id}:{chunk.chunk_index}",
-                        "item_id": stable_att_id,
-                    }
-                )
-                for chunk in content.chunks
-            )
-        return item
 
     def _fetch_page_attachments(
         self,
@@ -950,7 +912,6 @@ class ConfluenceConnector(
         self._seen_hierarchy_node_ids = set()
         self._included_page_text_cache = {}
         self._user_display_name_cache = {}
-        self._processed_chunks.clear()
         return (yield from self._fetch_document_batches(checkpoint, start, end))
 
     def build_dummy_checkpoint(self) -> ConfluenceCheckpoint:
