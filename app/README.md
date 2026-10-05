@@ -1,11 +1,11 @@
 # BoMesh Flutter application
 
-Flutter client for the existing `/api/v1` API, focused on the two things people
-do on a phone: ask questions (Chat) and manage their documents (Library).
-Workspace administration — members, roles, groups, sharing, connectors, sync
-activity, audit — lives in the web console; the app keeps only access-request
-review, badged on the account button. Permissions and collection ACLs are
-enforced by the backend; the app uses returned permissions to show actions.
+Flutter client for the existing `/api/v1` API. Three destinations, following
+`docs/mobile-ux-blueprint.html`: **Ask** (the assistant), **Library** (your
+files and the workspace's collections) and **Manage** (workspace and platform
+operations, shown only to people holding a management permission).
+Permissions and collection ACLs are enforced by the backend; the app uses the
+returned permissions to decide which sections and actions to show.
 
 ## Run
 
@@ -76,29 +76,47 @@ Google login is enabled when `BOMESH_GOOGLE_CLIENT_ID` is supplied:
 - Native server client IDs and the backend's allowed Google audience must agree.
   Do not embed an OAuth client secret in Flutter.
 
+## Structure
+
+- `lib/ui/` — the design system: theme tokens (light and dark, warm paper and
+  ink with one violet accent), tone tiles, file tiles, avatars, status pills,
+  app header, list groups and rows, search field, segmented switch, attention
+  and metric cards, FAB, sticky action bar, sheets (options, pickers,
+  confirmations, text prompts), loading/empty/error states and formatting.
+  Screens compose these; they do not style Material widgets themselves.
+- `lib/app/` — app root, appearance (Auto/Light/Dark, remembered per device),
+  the three-tab shell (each tab keeps its own navigation stack), the account
+  sheet, and `WorkspaceScope` (the workspace API client, the session, which
+  Manage sections are open, and app-wide actions).
+- `lib/features/` — `auth`, `chat` (Ask), `knowledge` (Library, documents,
+  collections, sharing, uploads) and `manage` (overview, ingestion, access,
+  activity, settings, platform).
+
 ## Workflows
 
-- Chat: one header (conversations, title, new chat, account); streaming
-  text/reasoning/tool activity, stop/retry/edit, conversation
-  search/rename/pin/delete. One "+" adds context: upload a file, use a library
-  document, or limit the search to some collections. Citations and generated
-  artifacts open in place.
-- Library: search, then "My files" or "Workspace" collections. Each row shows
-  the file type and date when the document is ready, otherwise its processing
-  state: Pending, Processing, Failed or Outdated. Upload opens the system
-  picker at once and uploads straight away; formats are checked in the app, not
-  by the picker, because Android and iOS cannot filter Markdown, YAML or logs.
-  Files are streamed from disk, never held in memory. Uploading only adds the
-  files as pending documents; nothing is processed until an ingestion run is
-  started. People with `ingestion.run` on the collection get "Process now"
-  after an upload (one run for exactly the uploaded documents), "Process" for
-  the open collection's pending and outdated documents, and "Process" or
-  "Retry processing" on one pending, outdated or failed document. The list
-  refreshes only while a document is processing or a run started from the app
-  is still active. Run history, sources and schedules live in the web console.
-  Chat attachments are read by the assistant directly and are never processed.
-- Account: workspace switch, access requests (approve/deny, or cancel your
-  own), sign out.
+- Ask: the composer is the screen. History, new chat and account sit in the
+  header; "+" adds a file, a Library document or limits the search to
+  collections. Answers stream in place with one quiet line per piece of work
+  ("Searched 6 sources", "Ran code"), tappable citations that open the source
+  passage, and file cards (Preview / Download) for files the assistant made.
+  History lives on its own screen (search, pinned, by day; rename, pin, delete
+  from a row's "···").
+- Library: search, then "My files" or "Workspace" collections. Rows show the
+  file type, size and date; a document says "Not searchable yet" only when it
+  is. A document opens its preview with one action, "Ask about this document".
+  Upload opens a sheet: choose where, optionally "Make searchable right away"
+  (one ingestion run for exactly the uploaded files), then pick files. Files
+  are streamed from disk and checked by extension in the app.
+- Manage → Workspace: what needs a decision first (access requests, failed
+  documents), the workspace at a glance, then the sections the person may open:
+  Knowledge (collections, sharing, adding knowledge), Ingestion (runs with
+  progress, run detail with "Retry failed", sources with "Sync now"), Access
+  (members, groups, roles, access requests), Activity (usage chart, sign-ins,
+  audit) and Settings (workspace name). Manage → Platform (platform
+  permissions only): system health, tenants, users and audit, read-only.
+- Account sheet (avatar): workspace switch, appearance, sign out.
+- On the web only: connecting a new source (OAuth), editing what a role can do,
+  Agent and Experience settings.
 
 Unavailable indexed text, expired signed previews, failed streams, empty lists,
 permission errors and pending external operations are shown explicitly rather
@@ -118,8 +136,9 @@ flutter build apk --debug
 Backend ACL/approval/document regressions are under
 `tests/test_mobile_workspace_flows.py`. They use the existing isolated-schema
 Postgres fixtures when `TEST_DATABASE_URL` is supplied. Flutter tests cover
-session expiry/replacement, scope isolation, interrupted
-history, SSE fragmentation/authorization, attachment ownership, form/layout
-boundaries and the Library's processing actions (run requests, 409 messages,
-polling only while a run is active). Use the running application for
-integration and visual verification.
+session expiry/replacement, scope isolation, interrupted history, SSE
+fragmentation/authorization, attachment ownership, History rename, form/layout
+boundaries and "Make searchable" (run requests for a collection or one
+document, 409 messages, failed reasons, and nothing offered without
+`ingestion.run`). Use the running application for integration and visual
+verification against `docs/mobile-ux-blueprint.html`.

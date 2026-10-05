@@ -51,22 +51,9 @@ class ChatController extends ChangeNotifier {
         value.progress != UploadProgress.failed,
   );
   String get conversationId => activeConversationId ?? _draftId;
-  String get conversationTitle =>
-      conversations
-          .where((value) => value.id == activeConversationId)
-          .firstOrNull
-          ?.title ??
-      'New conversation';
-  bool get hasMessageError =>
-      messages.any((message) => message.turn?.status == 'failed');
   List<ChatCollection> get selectedCollections => collections
       .where((value) => selectedCollectionIds.contains(value.id))
       .toList();
-  String get activityCollectionLabel => selectedCollections.length == 1
-      ? selectedCollections.first.title
-      : selectedCollections.isEmpty
-      ? 'permitted knowledge'
-      : 'selected collections';
   bool get hasUnavailableScope =>
       !collectionsLoading &&
       selectedCollectionIds.isNotEmpty &&
@@ -81,10 +68,11 @@ class ChatController extends ChangeNotifier {
       if (documentId == null) {
         final selected = await _store.selectedConversation();
         if (_disposed || view != _viewToken) return;
-        activeConversationId = selected == ''
+        // Only a conversation someone had open is reopened; otherwise Ask
+        // starts on its home, with recent chats one tap away.
+        activeConversationId = selected == null || selected.isEmpty
             ? null
-            : saved.where((value) => value.id == selected).firstOrNull?.id ??
-                  saved.firstOrNull?.id;
+            : saved.where((value) => value.id == selected).firstOrNull?.id;
         final restored = activeConversationId == null
             ? <ChatMessage>[]
             : await _store.getMessages(activeConversationId!);
@@ -286,14 +274,10 @@ class ChatController extends ChangeNotifier {
     _notify();
   }
 
-  void editRequest(String assistantId) {
-    final index = messages.indexWhere((message) => message.id == assistantId);
-    if (index < 0 || isGenerating) return;
-    final user = messages
-        .take(index)
-        .where((message) => message.role == ChatRole.user)
-        .lastOrNull;
-    if (user != null) setDraft(user.text);
+  void clearError() {
+    if (error == null || _disposed) return;
+    error = null;
+    _notify();
   }
 
   void editArtifact(ChatArtifact artifact) =>
@@ -702,4 +686,3 @@ String _titleFromMessage(String value) {
   if (cleaned.isEmpty) return 'New conversation';
   return cleaned.length > 54 ? '${cleaned.substring(0, 51)}…' : cleaned;
 }
-

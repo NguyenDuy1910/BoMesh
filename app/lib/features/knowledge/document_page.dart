@@ -1,60 +1,80 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../../app/app_theme.dart';
+import '../../app/workspace_scope.dart';
 import '../../core/api_client.dart';
+import '../../ui/ui.dart';
+import '../auth/session.dart';
+import 'document_viewer.dart';
 import 'knowledge_models.dart';
-import 'knowledge_widgets.dart';
 
-/// A source is always resolved afresh through the permission-checked viewer.
-/// Opening a citation never changes ownership or deletes a referenced document.
+/// One document: its own preview first, then one big action to ask about it.
+///
+/// A file that is not searchable yet says so once, with the one fix. Rarer
+/// actions (make searchable, download, delete) live in "···". The source is
+/// always resolved afresh through the permission-checked viewer.
 class DocumentPage extends StatefulWidget {
   const DocumentPage({
     super.key,
-    required this.api,
     required this.documentId,
     this.chunkId,
-    this.onAskDocument,
+    this.offerAsk = true,
   });
-  final ApiClient api;
   final String documentId;
+
+  /// The cited passage to open at, from an answer's source.
   final String? chunkId;
-  final void Function(String documentId, String title)? onAskDocument;
+
+  /// Whether "Ask about this document" is offered.
+  final bool offerAsk;
+
   @override
   State<DocumentPage> createState() => _DocumentPageState();
 }
 
+enum _Stage { pages, text }
+
 class _DocumentPageState extends State<DocumentPage> {
+  ApiClient? _api;
+  late AuthSession _session;
   KnowledgeViewer? _viewer;
   KnowledgeDocument? _document;
-  String? _error;
-  bool _loading = true;
-  bool _restricted = false;
+  KnowledgeCollection? _collection;
+  Object? _error;
+  bool _loading = true, _restricted = false, _starting = false;
   int _request = 0;
-  int _assetIndex = 0;
-  String _tab = 'preview';
-  String _query = '';
-  final _search = TextEditingController();
   Timer? _poll;
+  _Stage? _stage;
+
+  /// The run started here, followed until it finishes.
+  String? _runId;
+
+  DocumentRendition? _rendition;
+  String? _renditionVersion;
+  Object? _renditionError;
+  final _firstCited = GlobalKey();
 
   @override
-  void initState() {
-    super.initState();
-    _load();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final scope = WorkspaceScope.of(context);
+    _session = scope.session;
+    if (!identical(scope.api, _api)) {
+      _api = scope.api;
+      _load();
+    }
   }
 
   @override
   void didUpdateWidget(covariant DocumentPage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.documentId != widget.documentId ||
-        oldWidget.chunkId != widget.chunkId ||
-        oldWidget.api != widget.api) {
-      _assetIndex = 0;
-      _query = '';
-      _search.clear();
+        oldWidget.chunkId != widget.chunkId) {
+      _stage = null;
+      _rendition = null;
+      _renditionVersion = null;
       _load();
     }
   }
@@ -63,562 +83,524 @@ class _DocumentPageState extends State<DocumentPage> {
   void dispose() {
     _request++;
     _poll?.cancel();
-    _search.dispose();
     super.dispose();
   }
+
+  ApiClient get _client => _api!;
+  String get _path => Uri.encodeComponent(widget.documentId);
 
   Future<void> _load({bool quiet = false}) async {
     _poll?.cancel();
     final request = ++_request;
-    final token = widget.api.accessToken;
     if (!quiet) {
       setState(() {
         _loading = true;
         _error = null;
-        _viewer = null;
-        _document = null;
       });
     }
     try {
+      // A run that finished is noticed before the document is read again,
+      // so the read shows where the run left it.
+      var runId = _runId;
+      if (runId != null) {
+        try {
+          if (!await processingIsActive(_client, runId)) runId = null;
+        } catch (_) {
+          runId = null;
+        }
+      }
       final values = await Future.wait([
-        widget.api.get(
-          '/knowledge/documents/${Uri.encodeComponent(widget.documentId)}',
+        _client.get(
+          '/knowledge/documents/$_path',
           query: {'chunk': widget.chunkId},
         ),
-        widget.api.get('/documents/${Uri.encodeComponent(widget.documentId)}'),
+        _client.get('/documents/$_path'),
       ]);
-      if (!mounted || request != _request || token != widget.api.accessToken) {
-        return;
-      }
       final viewer = KnowledgeViewer.fromJson(values[0]);
       final document = KnowledgeDocument.fromJson(values[1]);
-      final focusIndex = viewer.assets.indexWhere(
-        (asset) => asset.page == viewer.focusPage,
-      );
+      var collection = _collection?.id == document.collectionId
+          ? _collection
+          : null;
+      if (collection == null && document.collectionId.isNotEmpty) {
+        try {
+          collection = KnowledgeCollection.fromJson(
+            await _client.get(
+              '/collections/${Uri.encodeComponent(document.collectionId)}',
+            ),
+          );
+        } catch (_) {
+          // Only its name and per-collection permissions come from here; the
+          // workspace-wide permissions still apply.
+        }
+      }
+      if (!mounted || request != _request) return;
       setState(() {
         _viewer = viewer;
         _document = document;
+        _collection = collection;
+        _runId = runId;
         _loading = false;
         _error = null;
         _restricted = false;
-        if (!quiet && focusIndex >= 0) _assetIndex = focusIndex;
-        if (_assetIndex >= viewer.assets.length) _assetIndex = 0;
       });
-      if (document.processing.isProcessing) {
+      unawaited(_loadRendition(viewer));
+      if (!quiet) _revealCited();
+      if (document.processing.isProcessing || runId != null) {
         _poll = Timer(const Duration(seconds: 5), () => _load(quiet: true));
       }
     } catch (error) {
-      if (!mounted || request != _request || token != widget.api.accessToken) {
-        return;
-      }
+      if (!mounted || request != _request) return;
+      if (quiet && _viewer != null) return;
       setState(() {
         _loading = false;
         _viewer = null;
         _document = null;
         _restricted =
-            error is ApiException && [401, 403, 404].contains(error.status);
-        _error = error.toString();
+            error is ApiException && const [403, 404].contains(error.status);
+        _error = error;
       });
     }
   }
 
-  Future<void> _openOriginal({bool external = false}) async {
+  /// The whole-document rendition, read once per version.
+  Future<void> _loadRendition(
+    KnowledgeViewer viewer, {
+    bool retry = false,
+  }) async {
+    if (viewer.renditionUrl.isEmpty) return;
+    final version = viewer.renditionVersion;
+    if (!retry && _renditionVersion == version) return;
+    setState(() {
+      _renditionVersion = version;
+      _renditionError = null;
+    });
     try {
-      // Signed URLs are short-lived: reauthorize immediately before opening.
-      final value = await widget.api.get(
-        '/knowledge/documents/${Uri.encodeComponent(widget.documentId)}',
-        query: {'chunk': widget.chunkId},
+      final rendition = await loadRendition(widget.documentId, viewer);
+      if (!mounted || _renditionVersion != version) return;
+      setState(() => _rendition = rendition);
+      _revealCited();
+    } catch (error) {
+      if (!mounted || _renditionVersion != version) return;
+      setState(() => _renditionError = error);
+    }
+  }
+
+  /// Scroll to the cited part once it is on screen.
+  void _revealCited() {
+    if (widget.chunkId == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final target = _firstCited.currentContext;
+      if (target != null && target.mounted) {
+        Scrollable.ensureVisible(
+          target,
+          alignment: 0.15,
+          duration: const Duration(milliseconds: 300),
+        );
+      }
+    });
+  }
+
+  bool _allowed(String permission) =>
+      allowedOn(_session, _collection, permission);
+
+  bool get _becomingSearchable =>
+      _runId != null || (_document?.processing.isProcessing ?? false);
+
+  bool get _canMakeSearchable =>
+      _document != null &&
+      _document!.needsRun &&
+      !_becomingSearchable &&
+      _allowed('ingestion.run');
+
+  Future<void> _makeSearchable() async {
+    if (_starting) return;
+    setState(() => _starting = true);
+    try {
+      final run = await startProcessing(
+        _client,
+        documentIds: [widget.documentId],
       );
       if (!mounted) return;
-      final viewer = KnowledgeViewer.fromJson(value);
+      _runId = run.isEmpty ? null : run;
+      await _load(quiet: true);
+    } catch (error) {
+      // A 409 explains itself, e.g. it is already being made searchable.
+      if (mounted) showError(context, error);
+    } finally {
+      if (mounted) setState(() => _starting = false);
+    }
+  }
+
+  /// Signed links are short-lived: re-read the viewer right before opening.
+  Future<void> _openOriginal({bool external = false}) async {
+    try {
+      final viewer = KnowledgeViewer.fromJson(
+        await _client.get(
+          '/knowledge/documents/$_path',
+          query: {'chunk': widget.chunkId},
+        ),
+      );
       final uri = Uri.tryParse(
         external ? viewer.externalUrl : viewer.originalUrl,
       );
       if (uri == null ||
-          !['http', 'https'].contains(uri.scheme) ||
+          !const ['http', 'https'].contains(uri.scheme) ||
           uri.host.isEmpty) {
-        throw const ApiException(
-          'No safe source link is available for this document.',
-        );
+        throw const ApiException('There’s no safe link to this file.');
       }
-      final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
-      if (!opened) {
-        throw const ApiException('No application could open this source.');
+      if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+        throw const ApiException('No app could open this file.');
       }
     } catch (error) {
-      if (!mounted) return;
-      if (error is ApiException && [401, 403, 404].contains(error.status)) {
-        setState(() {
-          _viewer = null;
-          _document = null;
-          _restricted = true;
-          _error = error.toString();
-        });
-      } else {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(error.toString())));
-      }
+      if (mounted) showError(context, error);
     }
   }
 
-  @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: Text(
-        _viewer?.title ?? 'Document',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
+  Future<void> _delete() async {
+    final document = _document!;
+    final confirmed = await confirmAction(
+      context,
+      title: 'Delete “${document.name}”?',
+      message: 'It stops appearing in answers. Past conversations keep what they said.',
+      confirmLabel: 'Delete',
+      destructive: true,
+    );
+    if (!confirmed || !mounted) return;
+    try {
+      await _client.delete('/documents/$_path');
+      if (!mounted) return;
+      showToast(context, 'Deleted');
+      Navigator.of(context).pop();
+    } catch (error) {
+      if (mounted) showError(context, error);
+    }
+  }
+
+  Future<void> _more() async {
+    final viewer = _viewer!;
+    final action = await showAppSheet<String>(
+      context,
+      builder: (sheetContext) => Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (_canMakeSearchable)
+            SheetOption(
+              icon: Icons.auto_awesome_rounded,
+              tone: Tone.violet,
+              title: 'Make searchable',
+              subtitle: 'So the assistant can use it',
+              onTap: () => Navigator.pop(sheetContext, 'searchable'),
+            ),
+          if (viewer.originalUrl.isNotEmpty)
+            SheetOption(
+              icon: Icons.download_rounded,
+              title: 'Download',
+              onTap: () => Navigator.pop(sheetContext, 'download'),
+            ),
+          if (viewer.externalUrl.isNotEmpty)
+            SheetOption(
+              icon: Icons.open_in_new_rounded,
+              title: 'Open where it came from',
+              subtitle: Uri.tryParse(viewer.externalUrl)?.host,
+              onTap: () => Navigator.pop(sheetContext, 'source'),
+            ),
+          if (_allowed('collection.update'))
+            SheetOption(
+              icon: Icons.delete_outline_rounded,
+              danger: true,
+              title: 'Delete',
+              subtitle: 'Stops appearing in answers',
+              onTap: () => Navigator.pop(sheetContext, 'delete'),
+            ),
+        ],
       ),
-      actions: [
-        IconButton(
-          tooltip: 'Refresh document',
-          onPressed: _loading ? null : _load,
-          icon: const Icon(Icons.refresh),
-        ),
-      ],
-    ),
-    body: SafeArea(
-      top: false,
-      child: _loading
-          ? const Center(
-              child: CircularProgressIndicator(
-                semanticsLabel: 'Opening document',
-              ),
-            )
-          : _error != null
-          ? ListView(
-              padding: const EdgeInsets.all(24),
+    );
+    if (!mounted) return;
+    switch (action) {
+      case 'searchable':
+        await _makeSearchable();
+      case 'download':
+        await _openOriginal();
+      case 'source':
+        await _openOriginal(external: true);
+      case 'delete':
+        await _delete();
+    }
+  }
+
+  bool get _hasMore {
+    final viewer = _viewer;
+    if (viewer == null || _document == null) return false;
+    return _canMakeSearchable ||
+        viewer.originalUrl.isNotEmpty ||
+        viewer.externalUrl.isNotEmpty ||
+        _allowed('collection.update');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final viewer = _viewer;
+    final document = _document;
+    final ask =
+        widget.offerAsk &&
+        viewer != null &&
+        (document?.askable ?? viewer.status == 'available');
+    return Scaffold(
+      appBar: AppHeader(
+        actions: [
+          if (_hasMore)
+            IconButton(
+              tooltip: 'More',
+              onPressed: _more,
+              icon: const Icon(Icons.more_horiz_rounded),
+            ),
+        ],
+      ),
+      bottomNavigationBar: ask
+          ? StickyActionBar(
               children: [
-                KnowledgeNotice(
-                  title: _restricted
-                      ? 'This source is not available to your account'
-                      : 'Document could not be opened',
-                  message: _restricted
-                      ? 'It may have been removed or its permissions changed. No source content is shown.'
-                      : _error,
-                  icon: _restricted ? Icons.lock_outline : Icons.error_outline,
-                  onAction: _load,
-                  danger: !_restricted,
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: () =>
+                        WorkspaceScope.of(context)
+                            .askAboutDocument(widget.documentId, viewer.title),
+                    icon: const Icon(Icons.auto_awesome_rounded, size: 18),
+                    label: const Text('Ask about this document'),
+                  ),
                 ),
               ],
             )
-          : _viewer == null
-          ? const SizedBox.shrink()
-          : _content(),
-    ),
-  );
+          : null,
+      body: _loading
+          ? const LoadingView(label: 'Opening document')
+          : _error != null
+          ? _restricted
+                ? const EmptyView(
+                    icon: Icons.lock_outline_rounded,
+                    title: 'This document isn’t available to you',
+                    message:
+                        'It may have been removed, or who can open it changed.',
+                  )
+                : ErrorView(
+                    error: _error!,
+                    title: 'This document couldn’t be opened',
+                    onRetry: _load,
+                  )
+          : RefreshIndicator(
+              onRefresh: () => _load(quiet: true),
+              child: CustomScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                slivers: [
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                    sliver: SliverList.list(children: _header(viewer!)),
+                  ),
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+                    sliver: _content(viewer),
+                  ),
+                ],
+              ),
+            ),
+    );
+  }
 
-  Widget _content() {
-    final viewer = _viewer!;
-    return Align(
-      alignment: Alignment.topCenter,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 920),
-        child: Column(
+  List<Widget> _header(KnowledgeViewer viewer) {
+    final colors = context.colors;
+    final document = _document;
+    final name = document?.name ?? viewer.title;
+    final contentType = document?.contentType ?? viewer.contentType;
+    final meta = [
+      FileKind.typeWord(contentType: contentType, name: name),
+      if ((document?.size ?? 0) > 0) readableBytes(document!.size),
+      if (_collection != null) _collection!.title,
+      if (document != null) relativeTime(document.updatedAt),
+    ].where((part) => part.isNotEmpty).join(' · ');
+    final notice = _notice();
+    final pages = viewer.assets.isNotEmpty;
+    final text = viewer.renditionUrl.isNotEmpty || viewer.elements.isNotEmpty;
+    return [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(4, 6, 4, 16),
+        child: Row(
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+            FileTile(
+              contentType: contentType,
+              name: name,
+              size: TileSize.large,
+            ),
+            const SizedBox(width: 14),
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    viewer.title,
-                    style: Theme.of(context).textTheme.headlineSmall,
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    viewer.contentType,
-                    style: TextStyle(color: context.colors.textSecondary),
-                  ),
-                  const SizedBox(height: 16),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      if (viewer.originalUrl.isNotEmpty)
-                        OutlinedButton.icon(
-                          onPressed: _openOriginal,
-                          icon: const Icon(Icons.open_in_new, size: 18),
-                          label: const Text('Open original'),
-                        ),
-                      if (widget.onAskDocument != null &&
-                          viewer.status == 'available')
-                        FilledButton.icon(
-                          onPressed: () => widget.onAskDocument!(
-                            widget.documentId,
-                            viewer.title,
-                          ),
-                          icon: const Icon(Icons.chat_bubble_outline, size: 18),
-                          label: const Text('Ask document'),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  SizedBox(
-                    width: double.infinity,
-                    child: SegmentedButton<String>(
-                      segments: const [
-                        ButtonSegment(value: 'preview', label: Text('Preview')),
-                        ButtonSegment(value: 'text', label: Text('Text')),
-                        ButtonSegment(value: 'details', label: Text('Details')),
-                      ],
-                      selected: {_tab},
-                      showSelectedIcon: false,
-                      onSelectionChanged: (value) =>
-                          setState(() => _tab = value.first),
+                    name,
+                    style: TextStyle(
+                      color: colors.ink,
+                      fontSize: 19,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.4,
+                      height: 1.25,
                     ),
                   ),
+                  const SizedBox(height: 4),
+                  Text(
+                    meta,
+                    style: TextStyle(color: colors.ink3, fontSize: 13),
+                  ),
                 ],
-              ),
-            ),
-            Expanded(
-              child: RefreshIndicator(
-                onRefresh: _load,
-                child: _tab == 'text'
-                    ? _textView(viewer)
-                    : _tab == 'details'
-                    ? _details(viewer)
-                    : _preview(viewer),
               ),
             ),
           ],
         ),
       ),
-    );
+      if (notice != null) ...[notice, const SizedBox(height: 12)],
+      if (viewer.quote.isNotEmpty) ...[
+        CitedPassage(text: viewer.quote, section: viewer.section),
+        const SizedBox(height: 12),
+      ] else if (widget.chunkId?.isNotEmpty ?? false) ...[
+        const InlineNotice(text: 'The exact passage isn’t available any more.'),
+        const SizedBox(height: 12),
+      ],
+      if (pages && text)
+        Segmented<_Stage>(
+          segments: const {_Stage.pages: 'Pages', _Stage.text: 'Text'},
+          selected: _stage ?? _Stage.pages,
+          onChanged: (stage) => setState(() => _stage = stage),
+        ),
+    ];
   }
 
-  Widget _quote(KnowledgeViewer viewer) => Container(
-    padding: const EdgeInsets.all(20),
-    margin: const EdgeInsets.only(bottom: 16),
-    decoration: BoxDecoration(
-      color: context.colors.brandSoft,
-      borderRadius: BorderRadius.circular(16),
-      border: Border(left: BorderSide(color: context.colors.brand, width: 4)),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                'Cited passage',
-                style: Theme.of(context).textTheme.titleSmall,
-              ),
-            ),
-            IconButton(
-              tooltip: 'Copy cited passage',
-              icon: const Icon(Icons.copy_outlined, size: 20),
-              onPressed: () async {
-                await Clipboard.setData(ClipboardData(text: viewer.quote));
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Passage copied')),
-                  );
+  /// The one thing to know about whether the assistant can use it.
+  Widget? _notice() {
+    final document = _document;
+    if (document == null) return null;
+    final processing = document.processing;
+    final canRun = _allowed('ingestion.run') && document.isProcessable;
+    if (_becomingSearchable) {
+      return const InlineNotice(
+        icon: Icons.autorenew_rounded,
+        text:
+            'Becoming searchable. The assistant can use it once this finishes.',
+      );
+    }
+    if (processing.isFailed) {
+      return InlineNotice(
+        tone: StatusTone.danger,
+        icon: Icons.error_outline_rounded,
+        text: processing.error.isEmpty
+            ? 'It couldn’t be made searchable.'
+            : 'It couldn’t be made searchable: ${processing.error}',
+        actionLabel: canRun ? 'Try again' : null,
+        onAction: canRun && !_starting ? _makeSearchable : null,
+      );
+    }
+    if (processing.awaitsRun) {
+      return InlineNotice(
+        tone: StatusTone.warning,
+        icon: Icons.warning_amber_rounded,
+        text: 'Not searchable yet — the assistant can’t use it until it is.',
+        actionLabel: canRun ? 'Make searchable' : null,
+        onAction: canRun && !_starting ? _makeSearchable : null,
+      );
+    }
+    if (processing.state == 'unsupported') {
+      return const InlineNotice(
+        text:
+            'This kind of file can’t be searched. You can still read it here.',
+      );
+    }
+    return null;
+  }
+
+  Widget _content(KnowledgeViewer viewer) {
+    final colors = context.colors;
+    final pages = viewer.assets.isNotEmpty;
+    final stage = _stage ?? (pages ? _Stage.pages : _Stage.text);
+    if (pages && stage == _Stage.pages) {
+      return SliverToBoxAdapter(
+        child: PageViewer(
+          key: ValueKey(widget.documentId),
+          viewer: viewer,
+          onRetry: () => _load(quiet: true),
+        ),
+      );
+    }
+    if (viewer.renditionUrl.isNotEmpty && _renditionError == null) {
+      final rendition = _rendition;
+      if (rendition == null) {
+        return const SliverToBoxAdapter(
+          child: LoadingView(label: 'Loading the document'),
+        );
+      }
+      final cited = citedTargets(
+        rendition,
+        viewer.citedElementIds,
+        viewer.quote,
+      );
+      return RenditionSliver(
+        rendition: rendition,
+        spreadsheet: viewer.isSpreadsheet,
+        citedBlocks: cited.blocks,
+        citedRows: cited.rows,
+        firstCitedKey: _firstCited,
+      );
+    }
+    final failed = _renditionError != null
+        ? Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: InlineNotice(
+              tone: StatusTone.danger,
+              text: friendlyError(_renditionError!),
+              actionLabel: 'Try again',
+              onAction: () async {
+                // A fresh viewer read re-signs the link.
+                await _load(quiet: true);
+                final fresh = _viewer;
+                if (fresh != null) {
+                  await _loadRendition(fresh, retry: true);
                 }
               },
             ),
-          ],
-        ),
-        if (viewer.section.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Text(
-              viewer.section,
-              style: TextStyle(color: context.colors.brand),
-            ),
+          )
+        : null;
+    if (viewer.elements.isNotEmpty) {
+      return SliverMainAxisGroup(
+        slivers: [
+          if (failed != null) SliverToBoxAdapter(child: failed),
+          ElementsSliver(
+            elements: viewer.elements,
+            cited: viewer.citedElementIds,
+            firstCitedKey: _firstCited,
           ),
-        SelectableText(viewer.quote, style: const TextStyle(height: 1.6)),
-      ],
-    ),
-  );
-
-  Widget _preview(KnowledgeViewer viewer) {
-    final asset = viewer.assets.isEmpty ? null : viewer.assets[_assetIndex];
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
-      physics: const AlwaysScrollableScrollPhysics(),
-      children: [
-        if (viewer.quote.isNotEmpty) _quote(viewer),
-        if (widget.chunkId?.isNotEmpty == true && viewer.quote.isEmpty)
-          const Padding(
-            padding: EdgeInsets.only(bottom: 16),
-            child: Text(
-              'No exact passage is available for this citation. The original source is not reconstructed.',
-            ),
-          ),
-        if (asset != null) ...[
-          Row(
-            children: [
-              IconButton(
-                tooltip: 'Previous page',
-                onPressed: _assetIndex > 0
-                    ? () => setState(() => _assetIndex--)
-                    : null,
-                icon: const Icon(Icons.chevron_left),
-              ),
-              Expanded(
-                child: Text(
-                  'Page ${asset.page > 0 ? asset.page : _assetIndex + 1}${viewer.pageCount > 0 ? ' of ${viewer.pageCount}' : ''}',
-                  textAlign: TextAlign.center,
-                ),
-              ),
-              IconButton(
-                tooltip: 'Next page',
-                onPressed: _assetIndex + 1 < viewer.assets.length
-                    ? () => setState(() => _assetIndex++)
-                    : null,
-                icon: const Icon(Icons.chevron_right),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: ColoredBox(
-              color: context.colors.surface,
-              child: AspectRatio(
-                aspectRatio: asset.width > 0 && asset.height > 0
-                    ? asset.width / asset.height
-                    : .707,
-                child: InteractiveViewer(
-                  minScale: 1,
-                  maxScale: 5,
-                  child: LayoutBuilder(
-                    builder: (context, constraints) => Image.network(
-                      asset.url,
-                      key: ValueKey(asset.url),
-                      width: constraints.maxWidth,
-                      height: constraints.maxHeight,
-                      fit: BoxFit.contain,
-                      semanticLabel:
-                          '${viewer.title}, page ${asset.page > 0 ? asset.page : _assetIndex + 1}',
-                      loadingBuilder: (context, child, progress) =>
-                          progress == null
-                          ? child
-                          : const Center(
-                              child: CircularProgressIndicator(
-                                semanticsLabel: 'Loading source page',
-                              ),
-                            ),
-                      errorBuilder: (context, error, stack) => Center(
-                        child: SingleChildScrollView(
-                          padding: const EdgeInsets.all(16),
-                          child: KnowledgeNotice(
-                            title: 'This page could not be loaded',
-                            message: 'Check your connection, then try again. The Text tab still shows the document’s content.',
-                            onAction: _load,
-                            actionLabel: 'Try again',
-                          ),
-                        ),
-                      ),
-                      frameBuilder: (context, child, frame, synchronous) {
-                        if (frame == null && !synchronous) return child;
-                        final regions = viewer.normalizedCoordinates
-                            ? viewer.regions.where(
-                                (region) =>
-                                    region.page == asset.page &&
-                                    region.width > 0 &&
-                                    region.height > 0,
-                              )
-                            : <CitationRegion>[];
-                        return Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            child,
-                            for (final region in regions)
-                              Positioned(
-                                left: region.x * constraints.maxWidth,
-                                top: region.y * constraints.maxHeight,
-                                width: region.width * constraints.maxWidth,
-                                height: region.height * constraints.maxHeight,
-                                child: IgnorePointer(
-                                  child: ColoredBox(
-                                    color: context.colors.brand.withValues(
-                                      alpha: .20,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                          ],
-                        );
-                      },
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Pinch to zoom. Swipe within a zoomed page to pan.',
-            style: Theme.of(context).textTheme.bodySmall,
-            textAlign: TextAlign.center,
-          ),
-          if (viewer.truncated)
-            const Padding(
-              padding: EdgeInsets.only(top: 12),
-              child: Text(
-                'Only some page previews are available. Open the original for the complete document.',
-              ),
-            ),
-        ] else
-          KnowledgeNotice(
-            title: viewer.status == 'pending_content'
-                ? 'Waiting for content'
-                : 'No rendered page preview',
-            message: 'Read the indexed text or open the original document. Missing pages are never recreated from an answer.',
-            actionLabel: 'Read text',
-            onAction: () => setState(() => _tab = 'text'),
-            icon: Icons.description_outlined,
-          ),
-      ],
-    );
-  }
-
-  Widget _textView(KnowledgeViewer viewer) {
-    final needle = _query.toLowerCase().trim();
-    final elements = viewer.elements
-        .where(
-          (element) =>
-              needle.isEmpty || element.text.toLowerCase().contains(needle),
-        )
-        .toList();
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
-      physics: const AlwaysScrollableScrollPhysics(),
-      children: [
-        TextField(
-          controller: _search,
-          decoration: const InputDecoration(
-            labelText: 'Find in available text',
-            prefixIcon: Icon(Icons.search),
-          ),
-          onChanged: (value) => setState(() => _query = value),
-        ),
-        const SizedBox(height: 16),
-        if (viewer.quote.isNotEmpty && needle.isEmpty) _quote(viewer),
-        if (elements.isEmpty)
-          KnowledgeNotice(
-            title: needle.isEmpty
-                ? 'No processed text available'
-                : 'No matching passages',
-            message: needle.isEmpty
-                ? 'The document may not be processed yet, or this format has no searchable text layer. Open the original to read it.'
-                : 'Try another phrase. Search covers the text returned for this viewer.',
-          ),
-        for (final element in elements)
+        ],
+      );
+    }
+    return SliverToBoxAdapter(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ?failed,
           Container(
-            margin: const EdgeInsets.only(bottom: 12),
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color:
-                  viewer.regions.any((region) => region.elementId == element.id)
-                  ? context.colors.brandSoft
-                  : context.colors.surface,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: context.colors.border),
+              color: colors.subtle,
+              borderRadius: BorderRadius.circular(14),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (element.page > 0 || element.section.isNotEmpty) ...[
-                  Text(
-                    [
-                      if (element.page > 0) 'Page ${element.page}',
-                      if (element.section.isNotEmpty) element.section,
-                    ].join(' · '),
-                    style: Theme.of(context).textTheme.labelMedium
-                        ?.copyWith(color: context.colors.brand),
-                  ),
-                  const SizedBox(height: 12),
-                ],
-                SelectableText(
-                  element.text,
-                  style: const TextStyle(height: 1.65),
-                ),
-              ],
-            ),
-          ),
-        if (elements.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
             child: Text(
-              widget.chunkId == null
-                  ? 'Indexed source text. Long documents may include only the first 100 indexed passages; the original contains the complete file.'
-                  : 'Text is focused on the cited passage.',
-              style: Theme.of(context).textTheme.bodySmall,
+              viewer.status == 'pending_content'
+                  ? 'Its content is still arriving.'
+                  : viewer.originalUrl.isNotEmpty
+                  ? 'There’s no preview of this file yet. Download it from “···” to read it.'
+                  : 'There’s no preview of this file yet.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: colors.ink3, fontSize: 14, height: 1.45),
             ),
           ),
-      ],
+        ],
+      ),
     );
   }
-
-  Widget _details(KnowledgeViewer viewer) => ListView(
-    padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
-    physics: const AlwaysScrollableScrollPhysics(),
-    children: [
-      if (_document != null) ProcessingCard(document: _document!),
-      const SizedBox(height: 16),
-      Card(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Source information',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 16),
-              _fact('Access', 'Authorized for this account'),
-              _fact('Format', viewer.contentType),
-              if (_document != null) ...[
-                _fact('Size', readableBytes(_document!.size)),
-                _fact('Created', readableDate(_document!.createdAt)),
-                _fact('Updated', readableDate(_document!.updatedAt)),
-                _fact('Purpose', sentenceCase(_document!.purpose)),
-              ],
-              if (viewer.section.isNotEmpty)
-                _fact('Cited section', viewer.section),
-              if (viewer.focusPage > 0)
-                _fact('Cited page', '${viewer.focusPage}'),
-              if (viewer.externalUrl.isNotEmpty) ...[
-                _fact(
-                  'Source',
-                  Uri.tryParse(viewer.externalUrl)?.host ?? 'External source',
-                ),
-                OutlinedButton.icon(
-                  onPressed: () => _openOriginal(external: true),
-                  icon: const Icon(Icons.open_in_new),
-                  label: const Text('Visit source'),
-                ),
-              ],
-              const SizedBox(height: 8),
-              Text(
-                'Originals and page previews use temporary signed links. Refreshing rechecks your access.',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ],
-          ),
-        ),
-      ),
-    ],
-  );
-
-  Widget _fact(String label, String value) => Padding(
-    padding: const EdgeInsets.only(bottom: 16),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: Theme.of(context).textTheme.labelMedium
-              ?.copyWith(color: context.colors.textSecondary),
-        ),
-        const SizedBox(height: 4),
-        SelectableText(value),
-      ],
-    ),
-  );
 }

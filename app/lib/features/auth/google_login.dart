@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
 import '../../app/app_config.dart';
+import '../../ui/ui.dart';
 import 'session.dart';
 import 'google_button_native.dart'
     if (dart.library.js_interop) 'google_button_web.dart'
@@ -96,12 +97,23 @@ class _GoogleLoginState extends State<GoogleLogin> {
           child: platform.googleButton(onPressed: _signIn),
         ),
       if (!_ready && _error == null)
-        const Center(child: CircularProgressIndicator()),
-      if (_error != null)
-        Text(
-          _error!,
-          style: TextStyle(color: Theme.of(context).colorScheme.error),
+        const SizedBox(
+          height: 52,
+          child: Center(
+            child: SizedBox.square(
+              dimension: 22,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          ),
         ),
+      if (_error != null) ...[
+        if (_ready) const SizedBox(height: 10),
+        InlineNotice(
+          text: _error!,
+          icon: Icons.error_outline_rounded,
+          tone: StatusTone.danger,
+        ),
+      ],
     ],
   );
 }

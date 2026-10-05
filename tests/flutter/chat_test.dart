@@ -15,22 +15,24 @@ import 'package:shared_preferences_platform_interface/shared_preferences_async_p
 
 AuthSession identity({String user = 'analyst', String workspace = 'team-a'}) =>
     AuthSession.fromJson({
-  'access_token': 'token',
-  'session_id': user,
-  'user_id': user,
-  'active_workspace_id': workspace,
-  'expires_at': DateTime.now().add(const Duration(hours: 1)).toIso8601String(),
-  'permissions': ['knowledge.read'],
-  'platform_permissions': [],
-  'workspaces': [
-    {
-      'id': workspace,
-      'code': workspace,
-      'name': workspace,
+      'access_token': 'token',
+      'session_id': user,
+      'user_id': user,
+      'active_workspace_id': workspace,
+      'expires_at': DateTime.now()
+          .add(const Duration(hours: 1))
+          .toIso8601String(),
       'permissions': ['knowledge.read'],
-    },
-  ],
-});
+      'platform_permissions': [],
+      'workspaces': [
+        {
+          'id': workspace,
+          'code': workspace,
+          'name': workspace,
+          'permissions': ['knowledge.read'],
+        },
+      ],
+    });
 
 ChatMessage question({List<ConversationDocument> documents = const []}) =>
     ChatMessage(

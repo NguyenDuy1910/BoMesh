@@ -49,7 +49,7 @@ class ChatService {
     handle = ChatStreamHandle(events: controller.stream, cancel: cancel);
     _streams.add(handle);
     controller.onCancel = cancel;
-    final request = http.Request('POST', api.uri('/api/v1/agent/chat'))
+    final request = http.Request('POST', api.uri('/agent/chat'))
       ..headers.addAll({
         ...api.headers,
         'Accept': 'text/event-stream',
@@ -126,46 +126,59 @@ class ChatService {
     return handle;
   }
 
-  Future<List<ChatCollection>> listCollections() async {
+  /// Active collections the person can read; with [writable], only those
+  /// they may add documents to.
+  Future<List<ChatCollection>> listCollections({bool writable = false}) async {
     _checkSession();
-    final result = <ChatCollection>[];
-    var page = 1;
-    while (true) {
-      final payload = await api.get(
-        '/api/v1/collections',
-        query: {'page': page, 'page_size': 100},
-      );
-      _checkSession();
-      final items = objectList(payload['items']);
-      result.addAll(
-        items
-            .where((value) => value['status'] != 'archived')
-            .map(ChatCollection.fromJson),
-      );
-      if (items.isEmpty ||
-          page * 100 >= (payload['total'] as num? ?? items.length)) {
-        break;
-      }
-      page += 1;
-    }
-    return result;
+    final items = await readAllPages(api, '/collections');
+    _checkSession();
+    return items
+        .where((value) => value['status'] != 'archived')
+        .where(
+          (value) =>
+              !writable ||
+              (value['permissions'] is List &&
+                  (value['permissions'] as List).contains('collection.update')),
+        )
+        .map(ChatCollection.fromJson)
+        .toList();
   }
 
-  Future<List<JsonMap>> searchDocuments(
-    String query,
-    List<String> collectionIds,
-  ) async {
+  /// One page of the documents the person can read, newest first, for
+  /// choosing one to ask about. Files attached only to a chat are left out.
+  Future<({List<JsonMap> items, int total})> listDocuments({
+    String search = '',
+    int page = 1,
+    int pageSize = 40,
+  }) async {
     _checkSession();
-    final response = await api.post(
-      '/api/v1/documents/search',
-      body: {
-        'query': query.trim(),
-        'top_k': 20,
-        'collection_ids': collectionIds,
+    final payload = await api.get(
+      '/documents',
+      query: {
+        'page': page,
+        'page_size': pageSize,
+        'status': 'available',
+        if (search.trim().isNotEmpty) 'search': search.trim(),
       },
     );
     _checkSession();
-    return objectList(response['items']);
+    return (
+      items: objectList(payload['items'])
+          .where((value) => value['purpose'] != 'conversation_attachment')
+          .toList(),
+      total: intOf(payload['total']),
+    );
+  }
+
+  /// The cited passage, read through the permission-checked viewer.
+  Future<String> citationPassage(String documentId, String chunkId) async {
+    _checkSession();
+    final payload = await api.get(
+      '/knowledge/documents/${Uri.encodeComponent(documentId)}',
+      query: {'chunk': chunkId},
+    );
+    _checkSession();
+    return textOf(objectOf(payload['focus'])['chunk_text']).trim();
   }
 
   Future<ConversationDocument> uploadDocument(
@@ -174,7 +187,7 @@ class ChatService {
   }) async {
     _checkSession();
     onProgress(UploadProgress.starting);
-    final personal = await api.put('/api/v1/collections/personal');
+    final personal = await api.put('/collections/personal');
     _checkSession();
     final id = textOf(personal['id']);
     if (id.isEmpty) {
@@ -184,7 +197,7 @@ class ChatService {
     }
     onProgress(UploadProgress.uploading);
     final result = await api.upload(
-      '/api/v1/collections/${Uri.encodeComponent(id)}/documents',
+      '/collections/${Uri.encodeComponent(id)}/documents',
       file: file.source,
       fields: const {'purpose': 'conversation_attachment'},
       idempotencyKey: file.idempotencyKey,
@@ -201,7 +214,8 @@ class ChatService {
       id: textOf(document['id']),
       fileName: textOf(document['name'], file.source.fileName),
       contentType: textOf(document['content_type'], file.source.contentType),
-      sizeBytes: (document['size_bytes'] as num?)?.toInt() ?? file.source.length,
+      sizeBytes:
+          (document['size_bytes'] as num?)?.toInt() ?? file.source.length,
       mode: 'indexed',
       status: 'available',
       origin: 'upload',
@@ -211,7 +225,7 @@ class ChatService {
   Future<void> releaseDocument(String documentId) async {
     _checkSession();
     try {
-      await api.delete('/api/v1/documents/${Uri.encodeComponent(documentId)}');
+      await api.delete('/documents/${Uri.encodeComponent(documentId)}');
     } on ApiException catch (cause) {
       if (cause.status != 404) rethrow;
     }
@@ -219,20 +233,44 @@ class ChatService {
 
   Future<JsonMap> artifact(String id) {
     _checkSession();
-    return api.get('/api/v1/artifacts/${Uri.encodeComponent(id)}');
+    return api.get('/artifacts/${Uri.encodeComponent(id)}');
   }
 
   Future<JsonMap> artifactContent(String id, int revision) {
     _checkSession();
     return api.get(
-      '/api/v1/artifacts/${Uri.encodeComponent(id)}/revisions/$revision/content',
+      '/artifacts/${Uri.encodeComponent(id)}/revisions/$revision/content',
     );
   }
 
+  /// A fresh signed link to one revision's file. Links are short-lived, so
+  /// the detail is read again at the moment of download.
+  Future<Uri> artifactDownload(String id, int revision) async {
+    final detail = await artifact(id);
+    _checkSession();
+    final match = objectList(detail['revisions'])
+        .where((value) => intOf(value['revision']) == revision)
+        .firstOrNull;
+    final url = textOf(
+      match?['download_url'],
+      intOf(detail['revision']) == revision
+          ? textOf(detail['download_url'])
+          : '',
+    );
+    final uri = Uri.tryParse(url);
+    if (uri == null || !const ['https', 'http'].contains(uri.scheme)) {
+      throw const ChatRequestException(
+        'A download link is not available for this revision.',
+      );
+    }
+    return uri;
+  }
+
+  /// Copies the artifact's latest revision into [collectionId].
   Future<JsonMap> publishArtifact(String id, String collectionId) {
     _checkSession();
     return api.post(
-      '/api/v1/artifacts/${Uri.encodeComponent(id)}/publish',
+      '/artifacts/${Uri.encodeComponent(id)}/publish',
       body: {'collection_id': collectionId},
     );
   }

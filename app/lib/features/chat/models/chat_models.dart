@@ -11,6 +11,7 @@ class ChatConversation {
     this.titleSource = 'generated',
     this.deletedAt,
     this.pinned = false,
+    this.fileCount = 0,
   });
 
   final String id;
@@ -21,12 +22,16 @@ class ChatConversation {
   final DateTime? deletedAt;
   final bool pinned;
 
+  /// Files attached to or made in this conversation, for its meta line.
+  final int fileCount;
+
   ChatConversation copyWith({
     String? title,
     String? titleSource,
     DateTime? updatedAt,
     DateTime? deletedAt,
     bool? pinned,
+    int? fileCount,
   }) {
     return ChatConversation(
       id: id,
@@ -36,6 +41,7 @@ class ChatConversation {
       updatedAt: updatedAt ?? this.updatedAt,
       deletedAt: deletedAt ?? this.deletedAt,
       pinned: pinned ?? this.pinned,
+      fileCount: fileCount ?? this.fileCount,
     );
   }
 
@@ -45,6 +51,7 @@ class ChatConversation {
       title: json['title'] as String? ?? 'New conversation',
       titleSource: json['title_source'] as String? ?? 'generated',
       pinned: json['pinned'] == true,
+      fileCount: json['file_count'] as int? ?? 0,
       createdAt: DateTime.fromMillisecondsSinceEpoch(
         json['created_at'] as int? ?? 0,
       ),
@@ -63,6 +70,7 @@ class ChatConversation {
     'title': title,
     'title_source': titleSource,
     'pinned': pinned,
+    'file_count': fileCount,
     'created_at': createdAt.millisecondsSinceEpoch,
     'updated_at': updatedAt.millisecondsSinceEpoch,
     if (deletedAt case final value?) 'deleted_at': value.millisecondsSinceEpoch,
@@ -490,6 +498,10 @@ class ChatTurnState {
           AssistantTurnItem.tool(
             id: item.callId ?? item.id,
             name: activity?.toolName ?? item.name ?? 'hosted_execution',
+            commands: switch (item.extension['commands']) {
+              final List<dynamic> values => values.whereType<String>().toList(),
+              _ => const <String>[],
+            },
             state:
                 activity?.state ??
                 (output != null
@@ -633,6 +645,7 @@ class AssistantTurnItem {
     this.name = '',
     this.resultCount,
     this.phase,
+    this.commands = const <String>[],
   });
 
   factory AssistantTurnItem.message({
@@ -653,12 +666,14 @@ class AssistantTurnItem {
     required String name,
     required String state,
     int? resultCount,
+    List<String> commands = const <String>[],
   }) => AssistantTurnItem._(
     kind: AssistantTurnItemKind.tool,
     id: id,
     name: name,
     state: state,
     resultCount: resultCount,
+    commands: commands,
   );
 
   factory AssistantTurnItem.reasoning({
@@ -679,6 +694,9 @@ class AssistantTurnItem {
   final String name;
   final int? resultCount;
   final String? phase;
+
+  /// The commands a code step ran, shown on request — never its output.
+  final List<String> commands;
 }
 
 class RuntimeActivity {

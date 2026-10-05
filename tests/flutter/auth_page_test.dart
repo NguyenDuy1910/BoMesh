@@ -116,10 +116,7 @@ void main() {
         );
         await tester.pumpAndSettle();
         await tester.ensureVisible(
-          find.widgetWithText(
-            TextButton,
-            'New to BoMesh? Create an account',
-          ),
+          find.widgetWithText(TextButton, 'Create an account'),
         );
         await tester.pumpAndSettle();
       }
