@@ -133,6 +133,17 @@ Google login passes the provider-issued ID credential through the same session
 endpoint. Native client IDs, callback schemes and backend audience configuration
 must match the deployed application; Flutter does not embed a provider secret.
 
+The app's Manage destination is presentation over the same permissions, never
+an authorization layer: it appears only when the session holds at least one
+management permission, and each section follows the web workspace-control
+codes (Overview `tenant.read`; Ingestion `ingestion.read`/`ingestion.run`/
+`source.manage`; Access `user.manage`/`group.manage`/`role.manage`/
+`access.manage`; Activity `audit.read`; Settings `tenant.manage`). Knowledge
+management on mobile needs `knowledge.manage` or `collection.share`, because
+reading knowledge is already the Library. The Platform switch needs any
+`platform.*.read` in `platform_permissions`. Every request is still authorized
+by the API.
+
 ## Local full-access test accounts
 
 `backend/script/seed_account.py` is an idempotent local-development utility,

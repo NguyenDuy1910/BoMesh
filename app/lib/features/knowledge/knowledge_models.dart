@@ -1,35 +1,5 @@
-import 'package:flutter/material.dart';
-
 import '../../core/api_client.dart';
-
-int numberOf(Object? value) =>
-    value is num ? value.toInt() : int.tryParse(textOf(value)) ?? 0;
-
-String readableDate(String value) {
-  final date = DateTime.tryParse(value)?.toLocal();
-  if (date == null) return 'Not recorded';
-  const months = [
-    'Jan',
-    'Feb',
-    'Mar',
-    'Apr',
-    'May',
-    'Jun',
-    'Jul',
-    'Aug',
-    'Sep',
-    'Oct',
-    'Nov',
-    'Dec',
-  ];
-  return '${date.day} ${months[date.month - 1]} ${date.year}';
-}
-
-String readableBytes(int bytes) {
-  if (bytes < 1024) return '$bytes B';
-  if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-  return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-}
+import '../auth/session.dart';
 
 class KnowledgeCollection {
   KnowledgeCollection.fromJson(JsonMap value)
@@ -38,8 +8,8 @@ class KnowledgeCollection {
       description = textOf(value['description']),
       parentId = textOf(value['parent_collection_id']),
       status = textOf(value['status'], 'active'),
-      documentCount = numberOf(value['document_count']),
-      sourceCount = numberOf(value['source_count']),
+      documentCount = intOf(value['document_count']),
+      sourceCount = intOf(value['source_count']),
       permissions =
           (value['permissions'] is List
                   ? value['permissions'] as List
@@ -52,6 +22,56 @@ class KnowledgeCollection {
   bool can(String permission) => permissions.contains(permission);
 }
 
+/// Whether [session] may do [permission] on [collection]: granted on the
+/// collection itself, or across the whole workspace.
+bool allowedOn(
+  AuthSession session,
+  KnowledgeCollection? collection,
+  String permission,
+) => session.can(permission) || (collection?.can(permission) ?? false);
+
+/// The collections that start a tree: no parent, or a parent this person
+/// cannot read (a sub-collection shared on its own).
+List<KnowledgeCollection> topLevelOf(List<KnowledgeCollection> collections) {
+  final readable = {for (final collection in collections) collection.id};
+  return collections
+      .where(
+        (collection) =>
+            collection.parentId.isEmpty ||
+            !readable.contains(collection.parentId),
+      )
+      .toList();
+}
+
+/// Lower case without accents, so "thong bao" finds "Thông báo".
+String foldText(String value) {
+  final buffer = StringBuffer();
+  for (final rune in value.toLowerCase().runes) {
+    final character = String.fromCharCode(rune);
+    buffer.write(_unaccented[character] ?? character);
+  }
+  return buffer.toString();
+}
+
+final Map<String, String> _unaccented = {
+  for (final MapEntry(:key, :value) in const {
+    'a': 'àáảãạăằắẳẵặâầấẩẫậäåāą',
+    'c': 'çćč',
+    'd': 'đď',
+    'e': 'èéẻẽẹêềếểễệëēęě',
+    'i': 'ìíỉĩịîïī',
+    'n': 'ñńň',
+    'o': 'òóỏõọôồốổỗộơờớởỡợöøō',
+    'r': 'ř',
+    's': 'śšş',
+    't': 'ť',
+    'u': 'ùúủũụưừứửữựûüūů',
+    'y': 'ỳýỷỹỵÿ',
+    'z': 'źżž',
+  }.entries)
+    for (final accented in value.split('')) accented: key,
+};
+
 /// Where a document stands in processing (`document.processing`).
 ///
 /// Adding a document only stores it as `pending`; it becomes searchable once
@@ -59,23 +79,16 @@ class KnowledgeCollection {
 class DocumentProcessing {
   DocumentProcessing.fromJson(JsonMap value)
     : state = textOf(value['state'], 'pending'),
-      error = textOf(value['error']),
-      runId = textOf(value['run_id']);
-  final String state, error, runId;
+      error = textOf(value['error']);
+  final String state, error;
   bool get isProcessing => state == 'processing';
   bool get isFailed => state == 'failed';
 
   /// Pending and outdated documents are what a collection-wide run picks up.
   bool get awaitsRun => state == 'pending' || state == 'outdated';
-  String get label => switch (state) {
-    'pending' => 'Pending',
-    'processing' => 'Processing',
-    'ready' => 'Ready',
-    'failed' => 'Failed',
-    'outdated' => 'Outdated',
-    'unsupported' => 'Not processed',
-    _ => sentenceCase(state),
-  };
+
+  /// The assistant cannot use it yet, and a run can change that.
+  bool get notSearchable => awaitsRun || isFailed;
 }
 
 /// Start one ingestion run, for exactly [documentIds] or for the pending and
@@ -106,10 +119,6 @@ Future<bool> processingIsActive(ApiClient api, String runId) async {
   return const ['queued', 'running'].contains(textOf(run['status']));
 }
 
-String sentenceCase(String value) => value.isEmpty
-    ? ''
-    : '${value[0].toUpperCase()}${value.substring(1).replaceAll('_', ' ')}';
-
 class KnowledgeDocument {
   KnowledgeDocument.fromJson(JsonMap value)
     : id = textOf(value['id']),
@@ -118,7 +127,7 @@ class KnowledgeDocument {
       contentType = textOf(value['content_type']),
       status = textOf(value['status']),
       purpose = textOf(value['purpose']),
-      size = numberOf(value['size_bytes']),
+      size = intOf(value['size_bytes']),
       createdAt = textOf(value['created_at']),
       updatedAt = textOf(value['updated_at']),
       processing = DocumentProcessing.fromJson(objectOf(value['processing']));
@@ -140,31 +149,21 @@ class KnowledgeDocument {
   /// type can be processed.
   bool get isProcessable =>
       status == 'available' && processing.state != 'unsupported';
-  bool get isFailed => status == 'failed' || processing.isFailed;
-  String get statusLabel {
-    if (status == 'pending_content') return 'Awaiting content';
-    if (status == 'failed') return 'Content unavailable';
-    return processing.label;
-  }
 
-  IconData get icon => contentType.contains('pdf')
-      ? Icons.picture_as_pdf_outlined
-      : isImage
-      ? Icons.image_outlined
-      : isArchive
-      ? Icons.folder_zip_outlined
-      : contentType.contains('spreadsheet') || contentType.contains('csv')
-      ? Icons.table_chart_outlined
-      : Icons.description_outlined;
+  /// Not searchable, and a run could make it so.
+  bool get needsRun => isProcessable && processing.notSearchable;
+
+  /// Whether the assistant can be asked about it.
+  bool get askable => status == 'available' && !isArchive && !isImage;
 }
 
 class ViewerAsset {
   ViewerAsset.fromJson(JsonMap value)
     : url = textOf(value['url']),
       contentType = textOf(value['content_type']),
-      page = numberOf(value['page']),
-      width = numberOf(value['width']),
-      height = numberOf(value['height']);
+      page = intOf(value['page']),
+      width = intOf(value['width']),
+      height = intOf(value['height']);
   final String url, contentType;
   final int page, width, height;
 }
@@ -173,7 +172,7 @@ class ViewerElement {
   ViewerElement.fromJson(JsonMap value)
     : id = textOf(value['element_id']),
       text = textOf(value['text']),
-      page = numberOf(value['page']),
+      page = intOf(value['page']),
       section = textOf(value['section']);
   final String id, text, section;
   final int page;
@@ -181,7 +180,7 @@ class ViewerElement {
 
 class CitationRegion {
   CitationRegion.fromJson(JsonMap value)
-    : page = numberOf(value['page']),
+    : page = intOf(value['page']),
       elementId = textOf(value['element_id']),
       x = _coordinate(objectOf(value['bounding_box'])['x']),
       y = _coordinate(objectOf(value['bounding_box'])['y']),
@@ -205,6 +204,12 @@ class KnowledgeViewer {
               .isNotEmpty
           ? textOf(objectOf(objectOf(value['preview'])['original'])['url'])
           : textOf(value['document_url']),
+      renditionUrl = textOf(
+        objectOf(objectOf(value['preview'])['rendition'])['url'],
+      ),
+      renditionVersion = textOf(
+        objectOf(objectOf(value['preview'])['rendition'])['version'],
+      ),
       assets = objectList(objectOf(value['preview'])['assets'])
           .map(ViewerAsset.fromJson)
           .where((asset) => asset.contentType.startsWith('image/'))
@@ -216,7 +221,7 @@ class KnowledgeViewer {
       section = textOf(
         objectOf(objectOf(value['focus'])['citation'])['section'],
       ),
-      focusPage = numberOf(
+      focusPage = intOf(
         objectOf(objectOf(value['focus'])['citation'])['page_start'],
       ),
       regions = objectList(
@@ -226,12 +231,14 @@ class KnowledgeViewer {
           objectOf(value['preview'])['coordinate_space'] ==
           'normalized_top_left',
       truncated = objectOf(value['preview'])['truncated'] == true,
-      pageCount = numberOf(objectOf(value['preview'])['page_count']);
+      pageCount = intOf(objectOf(value['preview'])['page_count']);
   final String title,
       contentType,
       status,
       externalUrl,
       originalUrl,
+      renditionUrl,
+      renditionVersion,
       quote,
       section;
   final List<ViewerAsset> assets;
@@ -239,4 +246,150 @@ class KnowledgeViewer {
   final List<CitationRegion> regions;
   final int focusPage, pageCount;
   final bool normalizedCoordinates, truncated;
+
+  /// The parsed parts the citation points at.
+  Set<String> get citedElementIds => {
+    for (final region in regions)
+      if (region.elementId.isNotEmpty) region.elementId,
+  };
+
+  /// A sheet's "pages" are its sheets.
+  bool get isSpreadsheet => const {
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-excel',
+    'text/csv',
+    'text/tab-separated-values',
+  }.contains(contentType.split(';').first.trim().toLowerCase());
 }
+
+/// One typed part of the whole-document rendition (see
+/// `backend/docs_design/document_viewer.md`): heading, paragraph, table,
+/// code, image or link. [id] is the part's `element_id`, the same value a
+/// citation span points at.
+class RenditionBlock {
+  RenditionBlock.fromJson(JsonMap value)
+    : id = textOf(value['id']),
+      kind = textOf(value['kind']),
+      text = textOf(value['text']),
+      level = intOf(value['level']).clamp(1, 4),
+      page = value['page'] is num ? (value['page'] as num).toInt() : null,
+      caption = textOf(value['caption']),
+      columns = _cells(value['columns']),
+      rows = value['rows'] is List
+          ? [for (final row in value['rows'] as List) _cells(row)]
+          : const [],
+      totalRows = intOf(value['total_rows']),
+      url = textOf(value['url']),
+      language = textOf(value['language']);
+  static List<String> _cells(Object? value) => value is List
+      ? [for (final cell in value) cell == null ? '' : cell.toString()]
+      : const [];
+
+  static const kinds = {
+    'heading',
+    'paragraph',
+    'table',
+    'code',
+    'image',
+    'link',
+  };
+
+  final String id, kind, text, caption, url, language;
+  final int level, totalRows;
+  final int? page;
+  final List<String> columns;
+  final List<List<String>> rows;
+
+  /// Everything the block says, for matching against a passage.
+  String get allText => kind == 'table'
+      ? [caption, ...columns, for (final row in rows) row.join(' ')].join(' ')
+      : text;
+}
+
+class DocumentRendition {
+  DocumentRendition.fromJson(JsonMap value)
+    : truncated = value['truncated'] == true,
+      blocks = objectList(value['blocks'])
+          .map(RenditionBlock.fromJson)
+          .where(
+            (block) =>
+                block.id.isNotEmpty &&
+                RenditionBlock.kinds.contains(block.kind),
+          )
+          .toList() {
+    if (value['schema'] != 1 || value['blocks'] is! List) {
+      throw const FormatException(
+        'The document text is in a format this app does not read.',
+      );
+    }
+  }
+  final bool truncated;
+  final List<RenditionBlock> blocks;
+}
+
+/// What a citation points at in a rendition: the cited blocks, and the cited
+/// rows of each cited table (by block id).
+///
+/// Span element ids name the cited blocks. A passage indexed before spans
+/// carried ids falls back to the first block containing its opening words. In
+/// a cited table, a row is cited when its first cell and at least one other
+/// cell (or its only cell) appear in the passage as whole values.
+({Set<String> blocks, Map<String, Set<int>> rows}) citedTargets(
+  DocumentRendition rendition,
+  Set<String> elementIds,
+  String chunkText,
+) {
+  final passage = _normalize(chunkText);
+  final cited = rendition.blocks
+      .where((block) => elementIds.contains(block.id))
+      .toList();
+  if (cited.isEmpty && passage.isNotEmpty) {
+    final opening = passage.length > 60 ? passage.substring(0, 60) : passage;
+    final match = rendition.blocks
+        .where((block) => _normalize(block.allText).contains(opening))
+        .firstOrNull;
+    if (match != null) cited.add(match);
+  }
+  final rows = <String, Set<int>>{};
+  for (final block in cited) {
+    if (block.kind != 'table' || passage.isEmpty) continue;
+    final matched = {
+      for (var index = 0; index < block.rows.length; index++)
+        if (_rowInPassage(block.rows[index], passage)) index,
+    };
+    if (matched.isNotEmpty) rows[block.id] = matched;
+  }
+  return (blocks: {for (final block in cited) block.id}, rows: rows);
+}
+
+bool _rowInPassage(List<String> row, String passage) {
+  final cells = row.map(_normalize).where((cell) => cell.length >= 2).toList();
+  if (cells.isEmpty || !_quotes(passage, cells.first)) return false;
+  return cells.length == 1 ||
+      cells.skip(1).any((cell) => _quotes(passage, cell));
+}
+
+final _wordCharacter = RegExp(r'[\p{L}\p{N}]', unicode: true);
+
+/// Whether [value] occurs in [passage] not as part of a longer word or number.
+bool _quotes(String passage, String value) {
+  for (
+    var at = passage.indexOf(value);
+    at >= 0;
+    at = passage.indexOf(value, at + 1)
+  ) {
+    final before = at > 0 ? passage[at - 1] : '';
+    final end = at + value.length;
+    final after = end < passage.length ? passage[end] : '';
+    final startsWord = _wordCharacter.hasMatch(value[0]);
+    final endsWord = _wordCharacter.hasMatch(value[value.length - 1]);
+    if ((before.isEmpty || !_wordCharacter.hasMatch(before) || !startsWord) &&
+        (after.isEmpty || !_wordCharacter.hasMatch(after) || !endsWord)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+String _normalize(String text) =>
+    text.replaceAll(RegExp(r'\s+'), ' ').trim().toLowerCase();

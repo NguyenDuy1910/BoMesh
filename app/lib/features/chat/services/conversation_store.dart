@@ -81,6 +81,14 @@ class ConversationStore {
       messages.map((message) => message.toJson()).toList(),
     );
     final now = DateTime.now();
+    final files = {
+      for (final message in messages) ...[
+        ...message.documents.map((document) => 'document:${document.id}'),
+        ...?message.turn?.artifacts.map(
+          (artifact) => 'artifact:${artifact.id}',
+        ),
+      ],
+    }.length;
     return _enqueue(() async {
       final values = await _readConversations();
       final index = values.indexWhere((value) => value.id == id);
@@ -91,10 +99,14 @@ class ConversationStore {
             title: title,
             createdAt: now,
             updatedAt: now,
+            fileCount: files,
           ),
         );
       } else {
-        values[index] = values[index].copyWith(updatedAt: now);
+        values[index] = values[index].copyWith(
+          updatedAt: now,
+          fileCount: files,
+        );
       }
       await _preferences.setString(_messageKey(id), encoded);
       await _writeConversations(values);

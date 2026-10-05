@@ -2,291 +2,253 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../../../app/app_theme.dart';
-import '../../../core/uploads.dart';
+import '../../../ui/ui.dart';
 import '../services/chat_service.dart';
 import '../state/chat_controller.dart';
-import 'document_picker.dart';
+import 'chat_sheets.dart';
 
+/// The question being written: what it searches (on a new chat), the files
+/// it carries, and the one primary action — send, or stop while answering.
 class ChatComposer extends StatefulWidget {
-  const ChatComposer({super.key, required this.controller});
+  const ChatComposer({
+    super.key,
+    required this.controller,
+    required this.hint,
+    this.showScope = false,
+  });
   final ChatController controller;
+  final String hint;
+
+  /// The "All knowledge ▾" chip; a follow-up keeps the chat's scope.
+  final bool showScope;
+
   @override
   State<ChatComposer> createState() => _ChatComposerState();
 }
 
 class _ChatComposerState extends State<ChatComposer> {
-  final _textController = TextEditingController();
-  final _focusNode = FocusNode();
+  final _text = TextEditingController();
+  final _focus = FocusNode();
   int _draftRevision = 0;
+
+  ChatController get _controller => widget.controller;
 
   @override
   void initState() {
     super.initState();
-    _draftRevision = widget.controller.draftRevision;
-    _textController.text = widget.controller.draftText;
+    _draftRevision = _controller.draftRevision;
+    _text.text = _controller.draftText;
+    _controller.addListener(_syncDraft);
+    _focus.addListener(_focusChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant ChatComposer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller == widget.controller) return;
+    oldWidget.controller.removeListener(_syncDraft);
     widget.controller.addListener(_syncDraft);
-    _focusNode.addListener(_focusChanged);
+    _draftRevision = widget.controller.draftRevision;
+    _text.text = widget.controller.draftText;
+  }
+
+  @override
+  void dispose() {
+    _controller.removeListener(_syncDraft);
+    _focus.removeListener(_focusChanged);
+    _text.dispose();
+    _focus.dispose();
+    super.dispose();
   }
 
   void _focusChanged() {
     if (mounted) setState(() {});
   }
 
+  /// Text the controller puts in the composer (edit, continue editing, a
+  /// suggestion) replaces what is there and brings up the keyboard.
   void _syncDraft() {
-    if (!mounted || _draftRevision == widget.controller.draftRevision) return;
-    _draftRevision = widget.controller.draftRevision;
-    final value = widget.controller.draftText;
-    _textController.value = TextEditingValue(
+    if (!mounted || _draftRevision == _controller.draftRevision) return;
+    _draftRevision = _controller.draftRevision;
+    final value = _controller.draftText;
+    _text.value = TextEditingValue(
       text: value,
       selection: TextSelection.collapsed(offset: value.length),
     );
-    if (value.isNotEmpty) _focusNode.requestFocus();
+    if (value.isNotEmpty) _focus.requestFocus();
     setState(() {});
-  }
-
-  @override
-  void dispose() {
-    widget.controller.removeListener(_syncDraft);
-    _focusNode.removeListener(_focusChanged);
-    _textController.dispose();
-    _focusNode.dispose();
-    super.dispose();
   }
 
   void _send() {
-    final value = _textController.text;
-    if (!widget.controller.canSend(value)) return;
-    _textController.clear();
+    final value = _text.text;
+    if (!_controller.canSend(value)) return;
+    _text.clear();
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() {});
-    unawaited(widget.controller.sendMessage(value));
-  }
-
-  /// Everything that adds context to a question, in one labelled menu rather
-  /// than three unlabelled icons.
-  Future<void> _openAddMenu() async {
-    final controller = widget.controller;
-    final full = controller.attachments.length >= 10;
-    final scope = controller.selectedCollectionIds.length;
-    final choice = await showModalBottomSheet<String>(
-      context: context,
-      useSafeArea: true,
-      showDragHandle: true,
-      builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              enabled: !full,
-              leading: const Icon(Icons.upload_file_outlined),
-              title: const Text('Upload a file'),
-              subtitle: Text(full ? 'Up to 10 files per question' : 'PDF, Office, text or an image'),
-              onTap: () => Navigator.pop(sheetContext, 'upload'),
-            ),
-            ListTile(
-              enabled: !full,
-              leading: const Icon(Icons.description_outlined),
-              title: const Text('Use a document from your library'),
-              onTap: () => Navigator.pop(sheetContext, 'document'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.folder_outlined),
-              title: const Text('Search only some collections'),
-              subtitle: Text(scope == 0 ? 'Now: everything you can access' : 'Now: $scope selected'),
-              onTap: () => Navigator.pop(sheetContext, 'scope'),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (!mounted || choice == null) return;
-    switch (choice) {
-      case 'upload':
-        await _pickFiles();
-      case 'document':
-        await showModalBottomSheet<void>(
-          context: context,
-          isScrollControlled: true,
-          useSafeArea: true,
-          builder: (_) => DocumentPicker(controller: controller),
-        );
-      case 'scope':
-        await showModalBottomSheet<void>(
-          context: context,
-          isScrollControlled: true,
-          useSafeArea: true,
-          builder: (_) => _CollectionPicker(controller: controller),
-        );
-    }
-  }
-
-  Future<void> _pickFiles() async {
-    final conversationId = widget.controller.conversationId;
-    try {
-      final picked = await pickUploads(
-        extensions: {...knowledgeExtensions, ...imageExtensions},
-        limit: 10 - widget.controller.attachments.length,
-      );
-      if (!mounted || conversationId != widget.controller.conversationId) {
-        return;
-      }
-      for (final file in picked.accepted) {
-        unawaited(widget.controller.addAttachment(file));
-      }
-      if (picked.rejected.isNotEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(picked.rejected.join('\n'))),
-        );
-      }
-    } catch (cause) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('The file could not be opened: $cause')),
-        );
-      }
-    }
+    unawaited(_controller.sendMessage(value));
   }
 
   @override
   Widget build(BuildContext context) {
-    final controller = widget.controller;
     final colors = context.colors;
-    final compact = MediaQuery.sizeOf(context).width < 600;
-    return SafeArea(
-      top: false,
-      minimum: EdgeInsets.fromLTRB(compact ? 12 : 24, 8, compact ? 12 : 24, 8),
-      child: Center(
-        heightFactor: 1,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 864),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: colors.surface,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: _focusNode.hasFocus ? colors.brand : colors.border,
-              ),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(4, 4, 6, 4),
+    final controller = _controller;
+    final length = _text.text.length;
+    final enabled = controller.isConfigured && !controller.isLoading;
+    return ColoredBox(
+      color: colors.canvas,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+          child: Center(
+            heightFactor: 1,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 720),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   if (controller.hasUnavailableScope)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 8),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              'A selected collection is unavailable. Choose a new scope before sending.',
-                              style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(color: colors.danger),
-                            ),
-                          ),
-                          TextButton(
-                            onPressed: controller.clearCollections,
-                            child: const Text('Clear'),
-                          ),
-                        ],
+                      child: InlineNotice(
+                        text: 'A collection you chose is no longer available.',
+                        icon: Icons.warning_amber_rounded,
+                        tone: StatusTone.warning,
+                        actionLabel: 'Search all',
+                        onAction: controller.clearCollections,
                       ),
                     ),
-                  if (controller.selectedCollections.isNotEmpty)
-                    SizedBox(
-                      height: 48,
-                      child: ListView.separated(
-                        scrollDirection: Axis.horizontal,
-                        itemCount: controller.selectedCollections.length,
-                        separatorBuilder: (_, _) => const SizedBox(width: 8),
-                        itemBuilder: (_, index) {
-                          final collection =
-                              controller.selectedCollections[index];
-                          return InputChip(
-                            avatar: const Icon(Icons.folder_outlined, size: 18),
-                            label: ConstrainedBox(
-                              constraints: const BoxConstraints(maxWidth: 190),
-                              child: Text(
-                                collection.title,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            onDeleted: controller.isGenerating
-                                ? null
-                                : () => controller.toggleCollection(
-                                    collection.id,
-                                  ),
-                          );
-                        },
+                  if (widget.showScope && enabled)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(2, 0, 2, 8),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: _ScopeChip(controller: controller),
                       ),
                     ),
                   if (controller.attachments.isNotEmpty)
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxHeight: 148),
-                      child: ListView.builder(
-                        shrinkWrap: true,
-                        itemCount: controller.attachments.length,
-                        itemBuilder: (_, index) => _AttachmentRow(
-                          controller: controller,
-                          attachment: controller.attachments[index],
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: SizedBox(
+                        height: 48,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: controller.attachments.length,
+                          separatorBuilder: (_, _) => const SizedBox(width: 8),
+                          itemBuilder: (_, index) => _AttachmentChip(
+                            controller: controller,
+                            attachment: controller.attachments[index],
+                          ),
                         ),
                       ),
                     ),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      IconButton(
-                        tooltip: 'Add a file or choose what to search',
-                        onPressed: controller.isConfigured && !controller.isGenerating
-                            ? _openAddMenu
-                            : null,
-                        color: controller.selectedCollectionIds.isEmpty
-                            ? colors.textSecondary
-                            : colors.brand,
-                        icon: const Icon(Icons.add_circle_outline_rounded),
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 140),
+                    constraints: const BoxConstraints(minHeight: 52),
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: colors.canvas,
+                      borderRadius: BorderRadius.circular(26),
+                      border: Border.all(
+                        color: _focus.hasFocus
+                            ? colors.brand
+                            : colors.lineStrong,
                       ),
-                      Expanded(
-                        child: TextField(
-                          controller: _textController,
-                          focusNode: _focusNode,
-                          enabled: controller.isConfigured && !controller.isLoading,
-                          minLines: 1,
-                          maxLines: compact ? 4 : 6,
-                          maxLength: 4000,
-                          textCapitalization: TextCapitalization.sentences,
-                          keyboardType: TextInputType.multiline,
-                          onChanged: (_) => setState(() {}),
-                          decoration: InputDecoration(
-                            hintText: 'Ask anything',
-                            filled: false,
-                            border: InputBorder.none,
-                            enabledBorder: InputBorder.none,
-                            focusedBorder: InputBorder.none,
-                            contentPadding: const EdgeInsets.symmetric(vertical: 10),
-                            counterText: _textController.text.length > 3500
-                                ? '${_textController.text.length}/4000'
-                                : '',
+                      boxShadow: [
+                        BoxShadow(
+                          color: colors.ink.withValues(alpha: 0.06),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        _RoundButton(
+                          tooltip: 'Add a file',
+                          icon: Icons.add_rounded,
+                          background: colors.subtle,
+                          foreground: colors.ink2,
+                          onPressed: enabled && !controller.isGenerating
+                              ? () => openAttachSheet(context, controller)
+                              : null,
+                        ),
+                        Expanded(
+                          child: TextField(
+                            controller: _text,
+                            focusNode: _focus,
+                            enabled: enabled,
+                            minLines: 1,
+                            maxLines: 5,
+                            maxLength: 4000,
+                            textCapitalization: TextCapitalization.sentences,
+                            keyboardType: TextInputType.multiline,
+                            onChanged: (_) => setState(() {}),
+                            style: TextStyle(
+                              color: colors.ink,
+                              fontSize: 16,
+                              height: 1.4,
+                            ),
+                            decoration: InputDecoration(
+                              hintText: widget.hint,
+                              hintStyle: TextStyle(
+                                color: colors.ink3,
+                                fontSize: 16,
+                              ),
+                              filled: false,
+                              isDense: true,
+                              counterText: '',
+                              border: InputBorder.none,
+                              enabledBorder: InputBorder.none,
+                              focusedBorder: InputBorder.none,
+                              disabledBorder: InputBorder.none,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 11,
+                              ),
+                            ),
                           ),
-                          style: Theme.of(context).textTheme.bodyLarge,
                         ),
-                      ),
-                      IconButton.filled(
-                        tooltip: controller.isGenerating
-                            ? 'Stop response'
-                            : 'Send message',
-                        onPressed: controller.isGenerating
-                            ? controller.stop
-                            : controller.canSend(_textController.text)
-                            ? _send
-                            : null,
-                        icon: Icon(
-                          controller.isGenerating
-                              ? Icons.stop_rounded
-                              : Icons.arrow_upward_rounded,
-                        ),
-                      ),
-                    ],
+                        if (controller.isGenerating)
+                          _RoundButton(
+                            tooltip: 'Stop response',
+                            icon: Icons.stop_rounded,
+                            background: colors.brand,
+                            foreground: colors.onBrand,
+                            onPressed: controller.stop,
+                          )
+                        else if (controller.canSend(_text.text))
+                          _RoundButton(
+                            tooltip: 'Send',
+                            icon: Icons.arrow_upward_rounded,
+                            background: colors.brand,
+                            foreground: colors.onBrand,
+                            onPressed: _send,
+                          )
+                        else
+                          _RoundButton(
+                            tooltip: 'Send',
+                            icon: Icons.arrow_upward_rounded,
+                            background: colors.subtle,
+                            foreground: colors.ink3,
+                          ),
+                      ],
+                    ),
                   ),
+                  if (length > 3500)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6, right: 8),
+                      child: Text(
+                        '${groupedNumber(length)} / 4,000',
+                        textAlign: TextAlign.right,
+                        style: TextStyle(
+                          color: length >= 4000 ? colors.danger : colors.ink3,
+                          fontSize: 11.5,
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -297,191 +259,219 @@ class _ChatComposerState extends State<ChatComposer> {
   }
 }
 
-class _AttachmentRow extends StatelessWidget {
-  const _AttachmentRow({required this.controller, required this.attachment});
+class _RoundButton extends StatelessWidget {
+  const _RoundButton({
+    required this.tooltip,
+    required this.icon,
+    required this.background,
+    required this.foreground,
+    this.onPressed,
+  });
+  final String tooltip;
+  final IconData icon;
+  final Color background, foreground;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) => IconButton(
+    tooltip: tooltip,
+    onPressed: onPressed,
+    style: IconButton.styleFrom(
+      fixedSize: const Size(42, 42),
+      minimumSize: const Size(42, 42),
+      shape: const CircleBorder(),
+      backgroundColor: background,
+      foregroundColor: foreground,
+      disabledBackgroundColor: background,
+      disabledForegroundColor: foreground,
+    ),
+    icon: Icon(icon, size: 22),
+  );
+}
+
+/// "All knowledge ▾" — the collections a new question searches.
+class _ScopeChip extends StatelessWidget {
+  const _ScopeChip({required this.controller});
   final ChatController controller;
-  final ComposerAttachment attachment;
+
   @override
   Widget build(BuildContext context) {
-    final active =
-        attachment.progress != UploadProgress.ready &&
-        attachment.progress != UploadProgress.failed;
-    final label =
-        attachment.error ??
-        switch (attachment.progress) {
-          UploadProgress.starting => 'Preparing upload…',
-          UploadProgress.uploading => 'Uploading…',
-          UploadProgress.validating => 'Checking content…',
-          UploadProgress.failed => 'Upload failed',
-          UploadProgress.ready =>
-            attachment.document?.isUpload == true
-                ? 'Attached to your next question'
-                : 'From your library',
-        };
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: active
-          ? const SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          : Icon(
-              attachment.progress == UploadProgress.failed
-                  ? Icons.error_outline
-                  : Icons.description_outlined,
-              color: attachment.error == null
-                  ? context.colors.brand
-                  : context.colors.danger,
-            ),
-      title: Text(
-        attachment.fileName,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
+    final colors = context.colors;
+    final scoped = controller.selectedCollectionIds.isNotEmpty;
+    return Material(
+      color: scoped ? colors.brandSoft : colors.subtle,
+      shape: StadiumBorder(
+        side: BorderSide(color: scoped ? colors.brandSoft : colors.line),
       ),
-      subtitle: Text(
-        label,
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-          color: attachment.error == null ? null : context.colors.danger,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: controller.isGenerating
+            ? null
+            : () => openScopeSheet(context, controller),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 30, maxWidth: 280),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.menu_book_outlined,
+                  size: 14,
+                  color: scoped ? colors.brandInk : colors.ink2,
+                ),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    scopeLabel(controller.selectedCollections),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: scoped ? colors.brandInk : colors.ink2,
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Icon(
+                  Icons.expand_more_rounded,
+                  size: 16,
+                  color: scoped ? colors.brandInk : colors.ink2,
+                ),
+              ],
+            ),
+          ),
         ),
       ),
-      trailing: Row(
+    );
+  }
+}
+
+/// A file going with the question: its type, its name, and how its upload
+/// is doing.
+class _AttachmentChip extends StatelessWidget {
+  const _AttachmentChip({required this.controller, required this.attachment});
+  final ChatController controller;
+  final ComposerAttachment attachment;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final failed = attachment.progress == UploadProgress.failed;
+    final uploading = !failed && attachment.progress != UploadProgress.ready;
+    final document = attachment.document;
+    final status = switch (attachment.progress) {
+      UploadProgress.starting => 'Preparing…',
+      UploadProgress.uploading => 'Uploading…',
+      UploadProgress.validating => 'Checking…',
+      UploadProgress.failed => 'Upload failed',
+      UploadProgress.ready =>
+        document?.isUpload ?? false
+            ? readableBytes(document!.sizeBytes)
+            : 'From Library',
+    };
+    final chip = Container(
+      padding: const EdgeInsets.fromLTRB(6, 6, 2, 6),
+      decoration: BoxDecoration(
+        color: colors.canvas,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: failed ? colors.danger : colors.line),
+      ),
+      child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (attachment.progress == UploadProgress.failed)
-            IconButton(
-              tooltip: 'Retry upload',
-              onPressed: () => controller.retryAttachment(attachment.key),
-              icon: const Icon(Icons.refresh),
+          SizedBox.square(
+            dimension: 32,
+            child: uploading
+                ? const Center(
+                    child: SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                : failed
+                ? const ToneTile(
+                    tone: Tone.danger,
+                    icon: Icons.error_outline_rounded,
+                    size: TileSize.small,
+                  )
+                : FileTile(
+                    contentType: document?.contentType ?? '',
+                    name: attachment.fileName,
+                    size: TileSize.small,
+                  ),
+          ),
+          const SizedBox(width: 8),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 160),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  attachment.fileName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: colors.ink,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                Text(
+                  status,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: failed ? colors.danger : colors.ink3,
+                    fontSize: 11.5,
+                  ),
+                ),
+              ],
             ),
-          IconButton(
-            tooltip: 'Remove attachment',
+          ),
+          if (failed)
+            _ChipButton(
+              tooltip: 'Retry upload',
+              icon: Icons.refresh_rounded,
+              onPressed: () => controller.retryAttachment(attachment.key),
+            ),
+          _ChipButton(
+            tooltip: 'Remove file',
+            icon: Icons.close_rounded,
             onPressed: () => controller.removeAttachment(attachment.key),
-            icon: const Icon(Icons.close, size: 20),
           ),
         ],
       ),
     );
+    final error = attachment.error;
+    return error == null
+        ? chip
+        : Tooltip(message: friendlyError(error), child: chip);
   }
 }
 
-class _CollectionPicker extends StatefulWidget {
-  const _CollectionPicker({required this.controller});
-  final ChatController controller;
-  @override
-  State<_CollectionPicker> createState() => _CollectionPickerState();
-}
+class _ChipButton extends StatelessWidget {
+  const _ChipButton({
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+  });
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback onPressed;
 
-class _CollectionPickerState extends State<_CollectionPicker> {
-  String _query = '';
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: widget.controller,
-    builder: (context, _) {
-      final controller = widget.controller;
-      final values = controller.collections
-          .where(
-            (value) => value.title.toLowerCase().contains(_query.toLowerCase()),
-          )
-          .toList();
-      return Padding(
-        padding: EdgeInsets.fromLTRB(
-          20,
-          16,
-          20,
-          MediaQuery.viewInsetsOf(context).bottom + 16,
-        ),
-        child: SizedBox(
-          height: MediaQuery.sizeOf(context).height * 0.62,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Knowledge scope',
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Close scope picker',
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.close),
-                  ),
-                ],
-              ),
-              const Text(
-                'Leave selections empty to search all knowledge you can access. Select up to 20 collections.',
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                decoration: const InputDecoration(
-                  labelText: 'Find a collection',
-                  prefixIcon: Icon(Icons.search),
-                ),
-                onChanged: (value) => setState(() => _query = value),
-              ),
-              const SizedBox(height: 8),
-              Expanded(
-                child: controller.collectionsLoading
-                    ? const Center(child: CircularProgressIndicator())
-                    : controller.collectionsError != null
-                    ? Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(controller.collectionsError!),
-                            TextButton.icon(
-                              onPressed: controller.loadCollections,
-                              icon: const Icon(Icons.refresh),
-                              label: const Text('Retry'),
-                            ),
-                          ],
-                        ),
-                      )
-                    : values.isEmpty
-                    ? const Center(child: Text('No collections found.'))
-                    : ListView.builder(
-                        itemCount: values.length,
-                        itemBuilder: (_, index) {
-                          final value = values[index];
-                          return CheckboxListTile(
-                            contentPadding: EdgeInsets.zero,
-                            title: Text(value.title),
-                            value: controller.selectedCollectionIds.contains(
-                              value.id,
-                            ),
-                            onChanged:
-                                controller.selectedCollectionIds.length < 20 ||
-                                    controller.selectedCollectionIds.contains(
-                                      value.id,
-                                    )
-                                ? (_) => controller.toggleCollection(value.id)
-                                : null,
-                          );
-                        },
-                      ),
-              ),
-              Row(
-                children: [
-                  TextButton(
-                    onPressed: controller.clearCollections,
-                    child: const Text('Use all permitted'),
-                  ),
-                  const Spacer(),
-                  FilledButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('Done'),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      );
-    },
+  Widget build(BuildContext context) => IconButton(
+    tooltip: tooltip,
+    onPressed: onPressed,
+    style: IconButton.styleFrom(
+      minimumSize: const Size(34, 34),
+      fixedSize: const Size(34, 34),
+      padding: EdgeInsets.zero,
+      foregroundColor: context.colors.ink3,
+    ),
+    icon: Icon(icon, size: 17),
   );
 }

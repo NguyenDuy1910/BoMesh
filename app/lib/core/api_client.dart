@@ -21,6 +21,33 @@ List<JsonMap> objectList(Object? value) => value is List
     : <JsonMap>[];
 String textOf(Object? value, [String fallback = '']) =>
     value?.toString() ?? fallback;
+int intOf(Object? value) =>
+    value is num ? value.toInt() : int.tryParse(textOf(value)) ?? 0;
+
+/// Every item of a paged list (`{items, page, page_size, total}`), reading
+/// pages of [pageSize] until [total] or [limit] items are in.
+Future<List<JsonMap>> readAllPages(
+  ApiClient api,
+  String path, {
+  Map<String, Object?> query = const {},
+  int pageSize = 100,
+  int limit = 1000,
+}) async {
+  final items = <JsonMap>[];
+  for (var page = 1; ; page++) {
+    final body = await api.get(
+      path,
+      query: {...query, 'page': page, 'page_size': pageSize},
+    );
+    final batch = objectList(body['items']);
+    items.addAll(batch);
+    if (batch.length < pageSize ||
+        items.length >= intOf(body['total']) ||
+        items.length >= limit) {
+      return items;
+    }
+  }
+}
 
 class ApiException implements Exception {
   const ApiException(this.message, {this.code, this.status, this.requestId});
