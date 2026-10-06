@@ -6,7 +6,8 @@
  * `element_id`s, the same values citation spans point at, which is what lets a
  * citation highlight exactly what it quotes.
  */
-import type { PreviewRendition, ViewerCitation } from "./types";
+import { resolveHighlightRange, type HighlightRange } from "./highlight.ts";
+import type { PreviewRendition, ViewerCitation, ViewerCitationSpan, ViewerElement } from "./types";
 
 interface BlockBase {
   id: string;
@@ -236,4 +237,163 @@ const SPREADSHEET_TYPES: Record<string, true> = {
 /** Whether a MIME type is a sheet, whose "pages" are sheets. */
 export function isSpreadsheetType(contentType: string): boolean {
   return SPREADSHEET_TYPES[contentType.split(";", 1)[0]?.trim().toLowerCase() ?? ""] === true;
+}
+
+/** One cited passage as a reader arrived at it: where it is, and what it says. */
+export interface PassageCitation {
+  citation?: Pick<ViewerCitation, "spans"> | null;
+  chunkText?: string | null;
+}
+
+export interface CitedMark {
+  /** The passage the reader is on, rather than another cited one. */
+  focus: boolean;
+  /** The quoted part of a text block; absent marks the whole block. */
+  range?: HighlightRange;
+  /** Cited row indexes of a table. */
+  rows?: Set<number>;
+}
+
+export interface CitedMarks {
+  /** What to mark in each cited block, by block id. */
+  blocks: Map<string, CitedMark>;
+  /** The first block of the focused passage, in document order: scroll here. */
+  focusBlockId?: string;
+}
+
+/**
+ * Every cited passage of one document, as evidence marks on its blocks.
+ *
+ * A span's element-local offsets mark exactly the quoted words when they fit
+ * the block's text; a passage that is part of one block is found by its text;
+ * anything else marks the whole block rather than guessing a range. When two
+ * passages cite the same block, the focused one decides the mark.
+ */
+export function citedMarks(
+  rendition: DocumentRendition,
+  passages: readonly PassageCitation[],
+  focusIndex: number,
+): CitedMarks {
+  const blocks = new Map<string, CitedMark>();
+  const order = new Map(rendition.blocks.map((block, index) => [block.id, index]));
+  let focusBlockId: string | undefined;
+  // The focused passage goes first so it claims the blocks it shares.
+  const ordered = passages
+    .map((passage, index) => ({ passage, focus: index === focusIndex }))
+    .sort((left, right) => Number(right.focus) - Number(left.focus));
+
+  for (const { passage, focus } of ordered) {
+    const targets = citedTargets(rendition, passage.citation, passage.chunkText);
+    for (const block of rendition.blocks) {
+      if (!targets.blockIds.has(block.id) || blocks.has(block.id)) continue;
+      const spans = (passage.citation?.spans ?? []).filter((span) => span.element_id === block.id);
+      const rows = targets.rows.get(block.id);
+      blocks.set(block.id, {
+        focus,
+        ...(block.kind === "table" ? (rows ? { rows } : {}) : textRange(markableText(block), spans, passage.chunkText)),
+      });
+      if (focus && (focusBlockId === undefined || order.get(block.id)! < order.get(focusBlockId)!)) focusBlockId = block.id;
+    }
+  }
+  return { blocks, focusBlockId };
+}
+
+/** The text a block shows, which is what offsets and marks refer to. */
+export function markableText(block: Exclude<RenditionBlock, TableBlock>): string {
+  return block.kind === "link" ? block.text || block.url : block.text;
+}
+
+function textRange(text: string, spans: ViewerCitationSpan[], chunkText: string | null | undefined): { range?: HighlightRange } {
+  const focus = { chunk_text: chunkText ?? "" };
+  const ranges = spans
+    .map((span) => resolveHighlightRange(text, focus, span))
+    .filter((range): range is HighlightRange => range !== undefined && range.end > range.start);
+  if (ranges.length) {
+    return { range: { start: Math.min(...ranges.map((range) => range.start)), end: Math.max(...ranges.map((range) => range.end)) } };
+  }
+  const quoted = chunkText?.trim() ? resolveHighlightRange(text, { chunk_text: chunkText.trim() }) : undefined;
+  return quoted && quoted.end > quoted.start ? { range: quoted } : {};
+}
+
+export interface OutlineEntry {
+  id: string;
+  title: string;
+  /** 1 for a top-level heading, 2 for the one under it. */
+  level: 1 | 2;
+}
+
+/** At most this many outline entries; a longer outline stops being a map. */
+const OUTLINE_LIMIT = 80;
+
+/**
+ * The document's headings for "On this page": the top two levels present.
+ * A document whose headings all sit at level 3 still gets an outline.
+ */
+export function renditionOutline(rendition: DocumentRendition): OutlineEntry[] {
+  const headings = rendition.blocks.filter(
+    (block): block is HeadingBlock => block.kind === "heading" && block.text.trim().length > 0,
+  );
+  if (!headings.length) return [];
+  const top = Math.min(...headings.map((heading) => heading.level));
+  return headings
+    .filter((heading) => heading.level <= top + 1)
+    .slice(0, OUTLINE_LIMIT)
+    .map((heading) => ({
+      id: heading.id,
+      title: heading.text.trim().replaceAll(/\s+/g, " "),
+      level: heading.level === top ? 1 : 2,
+    }));
+}
+
+export interface RenditionPage {
+  /** Source page (sheet for a spreadsheet); null when the parse had none. */
+  page: number | null;
+  blocks: RenditionBlock[];
+}
+
+/**
+ * Blocks grouped into the pages they came from, in reading order. A block
+ * without a page stays on the page before it, so a document with no page
+ * numbers at all is one page.
+ */
+export function renditionPages(rendition: DocumentRendition): RenditionPage[] {
+  const pages: RenditionPage[] = [];
+  for (const block of rendition.blocks) {
+    const current = pages.at(-1);
+    if (current && (block.page === null || block.page === current.page)) {
+      current.blocks.push(block);
+    } else if (current && current.page === null) {
+      // Blocks before the first numbered one belong to that page.
+      current.page = block.page;
+      current.blocks.push(block);
+    } else {
+      pages.push({ page: block.page, blocks: [block] });
+    }
+  }
+  return pages;
+}
+
+/**
+ * A document indexed before renditions existed, read from the passages the
+ * index holds (the viewer's `elements`): each passage a paragraph under its
+ * section heading. It is the indexed text, not the file's layout.
+ */
+export function elementsRendition(elements: readonly ViewerElement[]): DocumentRendition {
+  const blocks: RenditionBlock[] = [];
+  let section = "";
+  for (const element of elements) {
+    const heading = element.section?.trim() ?? "";
+    if (heading && heading !== section) {
+      blocks.push({
+        id: `section:${element.element_id}`,
+        kind: "heading",
+        level: Math.min(4, Math.max(1, element.section_path.length || 1)),
+        text: heading,
+        page: element.page ?? null,
+      });
+    }
+    section = heading || section;
+    if (element.text.trim()) blocks.push({ id: element.element_id, kind: "paragraph", text: element.text, page: element.page ?? null });
+  }
+  return { schema: 1, truncated: false, blocks };
 }

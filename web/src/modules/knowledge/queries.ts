@@ -2,80 +2,83 @@
 
 import { useEffect, useRef, useSyncExternalStore } from "react";
 
-import { getApiConfiguration } from "@/lib/api/config";
-import { apiRequest } from "@/lib/api/request";
-import { apiRevision, invalidateApiData, subscribeApiData } from "@/lib/api/revision";
+import { ApiError } from "@/lib/api/request";
+import { apiRevision, subscribeApiData } from "@/lib/api/revision";
 import { useApiQuery } from "@/lib/hooks/useApiQuery";
 import { afterVisibleDelay } from "@/lib/hooks/usePolling";
+import { sourcesApi, type Source } from "@/modules/ingestion/integrations-api";
+import { listDiscoverableCollections, type DiscoverableCollection } from "@/modules/knowledge/api";
 import {
-  ingestionRunsApi,
-  type IngestionRun,
-  type IngestionRunCreate,
-} from "@/modules/ingestion/runs-api";
-import { uploadCollectionFile } from "@/modules/workspace-control/control-plane-api";
-import { knowledgeApi, type DocumentCreateResult } from "@/modules/knowledge/knowledge-api";
-import { toWorkspaceCollection, toWorkspaceDocument } from "@/modules/knowledge/view-model";
-import type {
-  WorkspaceKnowledgeCollection,
-  WorkspaceKnowledgeDocument,
-} from "@/modules/knowledge/workspace-repository";
+  knowledgeApi,
+  type Collection,
+  type CollectionGrant,
+  type ContractDocument,
+} from "@/modules/knowledge/knowledge-api";
+import { memberName, workspaceDirectoryApi } from "@/modules/manage/access/directory";
 
-/** How long after an answer a view under way is read again. */
+/** How long after an answer a list with documents in processing is read again. */
 const REFRESH_MS = 3000;
 
-/**
- * Everything the Knowledge screen reads: the Collections the caller may
- * browse, and the Documents inside each.
- *
- * `processing` says whether a run is at work somewhere; while it is, or while
- * any document listed is still processing, the list is read again a few
- * seconds after each answer so states move without a reload. Nothing else
- * polls — an upload only registers pending documents.
- */
-export function useKnowledge(processing: boolean) {
-  const revision = useSyncExternalStore(subscribeApiData, apiRevision, () => 0);
-  const query = useApiQuery<KnowledgeSnapshot>(async () => {
-    const home = await knowledgeApi.home();
-    const collections = home.collections;
-    // Documents live inside Collections, so the workspace view is the union of
-    // what each readable Collection holds.
-    const pages = await Promise.all(
-      collections.map((collection) =>
-        knowledgeApi
-          .collection(collection.id)
-          .then((page) => page.documents.map((document) => toWorkspaceDocument(document, collection.title)))
-          .catch(() => []),
-      ),
-    );
-    return {
-      documentCount: collections.reduce((total, collection) => total + collection.document_count, 0),
-      collections: collections.map(toWorkspaceCollection),
-      documents: pages.flat(),
-      personalCollectionId: home.personal_collection_id,
-    };
-  }, revision);
-
-  const { data, reload } = query;
-  useRefreshWhile(
-    processing || (data?.documents.some((document) => document.state === "processing") ?? false),
-    data,
-    reload,
-  );
-  return query;
+function useRevision() {
+  return useSyncExternalStore(subscribeApiData, apiRevision, () => 0);
 }
 
-export interface KnowledgeSnapshot {
-  documentCount: number;
-  collections: WorkspaceKnowledgeCollection[];
-  documents: WorkspaceKnowledgeDocument[];
-  personalCollectionId: string | null;
+/** The caller's readable knowledge bases and their private one (`GET /knowledge/home`). */
+export function useKnowledgeHome() {
+  const revision = useRevision();
+  return useApiQuery(() => knowledgeApi.home(), revision);
+}
+
+/** Knowledge bases the caller has met but cannot read (`collection.discovery`, pending). */
+export function useDiscoverableCollections(enabled: boolean) {
+  const revision = useRevision();
+  return useApiQuery<DiscoverableCollection[]>(
+    async () => (enabled ? (await listDiscoverableCollections()).items : []),
+    `${enabled}:${revision}`,
+  );
+}
+
+export type CollectionView =
+  | { kind: "ready"; collection: Collection; documents: ContractDocument[] | null; documentsError: string | null }
+  /** 404: it does not exist, was archived, or is not shared with the caller. */
+  | { kind: "unavailable" };
+
+/**
+ * One knowledge base and all of its documents. A collection the caller
+ * cannot read answers 404 (never 403), and reads as `unavailable`.
+ */
+export function useCollectionView(collectionId: string) {
+  const revision = useRevision();
+  const query = useApiQuery<CollectionView>(async () => {
+    const [collection, documents] = await Promise.allSettled([
+      knowledgeApi.collection(collectionId),
+      knowledgeApi.documents(collectionId),
+    ]);
+    if (collection.status === "rejected") {
+      const cause = collection.reason;
+      if (cause instanceof ApiError && (cause.status === 404 || cause.status === 403)) return { kind: "unavailable" };
+      throw cause;
+    }
+    return {
+      kind: "ready",
+      collection: collection.value,
+      documents: documents.status === "fulfilled" ? documents.value : null,
+      documentsError: documents.status === "rejected"
+        ? documents.reason instanceof Error ? documents.reason.message : "Documents didn’t load."
+        : null,
+    };
+  }, `${collectionId}:${revision}`);
+
+  const view = query.data;
+  const processing = view?.kind === "ready"
+    && Boolean(view.documents?.some((document) => document.processing.state === "processing"));
+  useRefreshWhile(processing, view, query.reload);
+  return query;
 }
 
 /**
  * Read again `REFRESH_MS` after each answer while `active`, and once more when
  * it stops: the read that saw the last work finish may predate the result.
- * Re-arming on every new answer, rather than on an interval, means a slow
- * read is never overlapped by the next one.
  */
 export function useRefreshWhile(active: boolean, data: unknown, reload: () => void) {
   const wasActive = useRef(false);
@@ -91,79 +94,69 @@ export function useRefreshWhile(active: boolean, data: unknown, reload: () => vo
   }, [active, data, reload]);
 }
 
-const ACTIVE_RUN_STATUSES = ["running", "queued"] as const;
-
-/**
- * The Ingestion Runs still at work, running first, as the caller may see them.
- *
- * Best-effort: a caller who cannot read runs simply sees none, which only
- * hides the progress line — it never blocks the documents.
- */
-export function useActiveRuns(): IngestionRun[] {
-  const revision = useSyncExternalStore(subscribeApiData, apiRevision, () => 0);
-  const query = useApiQuery<IngestionRun[]>(async () => {
-    if (!getApiConfiguration()) return [];
-    const pages = await Promise.all(
-      ACTIVE_RUN_STATUSES.map((status) =>
-        ingestionRunsApi.list({ status, page_size: 20 }).catch(() => ({ items: [] as IngestionRun[] })),
-      ),
-    );
-    return pages.flatMap((page) => page.items);
-  }, revision);
-  const runs = query.data ?? [];
-  useRefreshWhile(runs.length > 0, query.data, query.reload);
-  return runs;
+/** Sources whose destination is this knowledge base, as far as the caller may see them. */
+export function useCollectionSources(collectionId: string, enabled: boolean) {
+  const revision = useRevision();
+  return useApiQuery<Source[]>(async () => {
+    if (!enabled) return [];
+    const page = await sourcesApi.list();
+    return page.items.filter((source) => source.collection_id === collectionId);
+  }, `${collectionId}:${enabled}:${revision}`);
 }
 
-/** What an upload of several files did, file by file. */
-export interface UploadOutcome {
-  /** The Documents registered, pending, in upload order. */
-  documents: { id: string; name: string }[];
-  /** The files that were refused, with the reason the API gave. */
-  failures: { name: string; reason: string }[];
+/** Who can open this knowledge base, and as what (`collection.share`). */
+export function useCollectionGrants(collectionId: string, enabled: boolean) {
+  const revision = useRevision();
+  return useApiQuery<CollectionGrant[]>(
+    async () => (enabled ? knowledgeApi.access(collectionId) : []),
+    `${collectionId}:${enabled}:${revision}`,
+  );
 }
 
+export interface Principal {
+  key: string;
+  type: "user" | "group";
+  id: string;
+  name: string;
+  /** Email for a person, member count for a group. */
+  detail: string;
+}
+
+export const principalKey = (grant: Pick<CollectionGrant, "principal_type" | "principal_id">) =>
+  `${grant.principal_type}:${grant.principal_id}`;
+
 /**
- * Writes the Knowledge and Library screens perform.
- *
- * Each one goes to the endpoint that owns that lifecycle and then invalidates,
- * so the list a person is looking at reflects what the server now holds rather
- * than what the click optimistically assumed.
+ * The workspace's active people and groups, for sharing. Each list needs its
+ * own directory permission; `null` means neither could be read.
  */
-export const knowledgeActions = {
-  async createCollection(title: string, description?: string) {
-    const collection = await knowledgeApi.createCollection(title, description);
-    invalidateApiData();
-    return collection;
-  },
-  /**
-   * Store files in a Collection as pending Documents. Nothing is processed: a
-   * run does that, when someone asks for one. One refused file does not stop
-   * the others.
-   */
-  async upload(files: File[], collectionId: string): Promise<UploadOutcome> {
-    const results = await Promise.allSettled(
-      files.map((file) =>
-        uploadCollectionFile<DocumentCreateResult>(collectionId, file, { idempotencyKey: crypto.randomUUID() }),
-      ),
-    );
-    const outcome: UploadOutcome = { documents: [], failures: [] };
-    results.forEach((result, index) => {
-      const name = files[index].name;
-      if (result.status === "fulfilled") outcome.documents.push({ id: result.value.document.id, name });
-      else outcome.failures.push({ name, reason: result.reason instanceof Error ? result.reason.message : "Upload failed." });
-    });
-    if (outcome.documents.length) invalidateApiData();
-    return outcome;
-  },
-  /** Start one Ingestion Run over a selection. */
-  async process(body: IngestionRunCreate) {
-    const run = await ingestionRunsApi.create(body);
-    invalidateApiData();
-    return run;
-  },
-  async remove(documentId: string) {
-    await apiRequest(`/documents/${documentId}`, { method: "DELETE" });
-    invalidateApiData();
-  },
-};
+export function usePrincipals(enabled: boolean) {
+  return useApiQuery<Principal[] | null>(async () => {
+    if (!enabled) return [];
+    const [groups, members] = await Promise.allSettled([workspaceDirectoryApi.groups(), workspaceDirectoryApi.members()]);
+    if (groups.status === "rejected" && members.status === "rejected") return null;
+    return [
+      ...(groups.status === "fulfilled"
+        ? groups.value.items
+          .filter((group) => group.status === "active")
+          .map((group) => ({
+            key: `group:${group.id}`,
+            type: "group" as const,
+            id: group.id,
+            name: group.display_name,
+            detail: `${group.member_count.toLocaleString()} ${group.member_count === 1 ? "member" : "members"}`,
+          }))
+        : []),
+      ...(members.status === "fulfilled"
+        ? members.value.items
+          .filter((member) => member.status === "active")
+          .map((member) => ({
+            key: `user:${member.id}`,
+            type: "user" as const,
+            id: member.id,
+            name: memberName(member),
+            detail: member.email,
+          }))
+        : []),
+    ];
+  }, String(enabled));
+}

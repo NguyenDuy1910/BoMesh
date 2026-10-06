@@ -134,9 +134,36 @@ default; an S3/R2 bucket needs a CORS rule).
 
 ## Reading (web)
 
-- One shared document view renders a rendition for both the chat source panel
-  and the Library's "Original" view; PDFs keep page images, with the text view
-  available beside them.
+- One shared document view renders a rendition for the full document viewer,
+  the chat source panel and the chat file panel; PDFs keep page images, with
+  the text view available beside them.
+- The full viewer is `/documents/{document_id}`. It reads
+  `GET /documents/{document_id}` (name, Collection, size, `processing`),
+  `GET /collections/{collection_id}` (name and the caller's permissions) and
+  `GET /knowledge/documents/{document_id}` (preview and rendition), and lays
+  the rendition out as one sheet per source page with an outline of its top
+  two heading levels. A document indexed before renditions existed is shown
+  from the viewer's `elements` (the indexed passages under their sections).
+- Citations open it as `/documents/{document_id}?chunk=<chunk_id>`, with one
+  `chunk` parameter per passage an answer cited in that document, in citation
+  order. The first is read through `?chunk=` on the viewer read (its
+  `focus.chunk_text`); every passage is resolved through
+  `GET /knowledge/documents/{document_id}/citations/{chunk_id}`. Each cited
+  block gets an evidence mark on exactly the quoted words when the span's
+  element-local offsets fit the block's text (or the passage is found inside
+  the block), the whole block otherwise, and the cited rows of a table. The
+  viewer scrolls to the focused passage and steps through the others; a
+  passage that no longer resolves (the document was reprocessed) is reported,
+  not guessed.
+- A document that is not ready shows its processing state and re-reads
+  `GET /documents/{document_id}` until it is; a failed one shows the reason
+  and, with `ingestion.run` on its Collection, retries through
+  `POST /ingestion-runs` (`document_ids: [id]`). A document the caller cannot
+  read (`403`, or a viewer `404` for a Document whose metadata is readable)
+  offers a request for access to its Collection; an unknown one is `404`.
+- "Ask about this document" and "Ask about this" on a text selection open
+  `/chat?q=<draft>&scope=<collection_id>&doc=<document_id>`; the draft is not
+  sent.
 - Performance:
   - The rendition is fetched once per document version and kept in an
     in-memory cache keyed by `item:version`; stepping between citations of one

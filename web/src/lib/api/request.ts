@@ -11,18 +11,26 @@ import { appBrand } from "@/lib/brand";
  * reading an error never has to know which screen produced it.
  */
 export class ApiError extends Error {
-  constructor(
-    message: string,
-    readonly status?: number,
-  ) {
+  readonly status?: number;
+
+  constructor(message: string, status?: number) {
     super(message);
     this.name = "ApiError";
+    this.status = status;
   }
 }
 
 /** True when the API says the account behind a connection must authorize again. */
 export function needsReauthorization(error: unknown): boolean {
   return error instanceof ApiError && error.status === 409;
+}
+
+/** The list envelope every paginated collection endpoint returns. */
+export interface Paginated<T> {
+  items: T[];
+  total: number;
+  page?: number;
+  page_size?: number;
 }
 
 export async function apiRequest<T>(

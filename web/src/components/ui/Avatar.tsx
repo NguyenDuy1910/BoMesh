@@ -1,67 +1,55 @@
-"use client";
-
+import { initialsOf, paletteIndex } from "@/components/ui/interaction";
 import { cn } from "@/lib/cn";
 
-const sizeClasses = {
-  xs: "h-5 w-5 text-[0.5625rem]",
-  sm: "h-6 w-6 text-[0.625rem]",
-  md: "h-7 w-7 text-[length:var(--text-size-caption)]",
-  rail: "h-[26px] w-[26px] text-[0.625rem]",
-  lg: "h-9 w-9 text-xs",
+const sizeClass = {
+  xs: "h-5 w-5 text-[9px]",
+  sm: "h-6 w-6 text-[10px]",
+  rail: "h-[26px] w-[26px] text-[10px]",
+  md: "h-7 w-7 text-[11px]",
+  lg: "h-9 w-9 text-[length:var(--text-size-meta)]",
+  xl: "h-12 w-12 text-lg",
 } as const;
 
+/* Written out in full so Tailwind generates every palette class. */
+const PALETTE = [
+  "bg-avatar-1",
+  "bg-avatar-2",
+  "bg-avatar-3",
+  "bg-avatar-4",
+  "bg-avatar-5",
+  "bg-avatar-6",
+  "bg-avatar-7",
+  "bg-avatar-8",
+  "bg-avatar-9",
+  "bg-avatar-10",
+] as const;
+
 /**
- * Deterministic hue so the same person keeps the same colour on every screen,
- * confined to a band around the brand violet.
- *
- * A full 360° spread puts some avatars in green, amber and red — the three
- * hues that mean something specific in this console. A person is not a status,
- * so the band stops short of them while still separating one face from the
- * next. Saturation and lightness are fixed at values that clear 4.5:1 against
- * the white initials across the whole band.
+ * A person's initials on a colour derived from their name, so the same person
+ * keeps the same colour on every screen. Decorative: the name is always
+ * written next to it.
  */
-const HUE_START = 225;
-const HUE_RANGE = 60;
-
-function hueFor(seed: string) {
-  let hash = 0;
-  for (let index = 0; index < seed.length; index += 1) {
-    hash = (hash * 31 + seed.charCodeAt(index)) % 360;
-  }
-  return HUE_START + (hash % HUE_RANGE);
-}
-
-export function initialsOf(name: string) {
-  const parts = name
-    .replace(/@.*/, "")
-    .split(/[\s._-]+/)
-    .filter(Boolean);
-  if (!parts.length) return "?";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-}
-
 export function Avatar({
   name,
   size = "md",
   className,
 }: {
   name: string;
-  size?: keyof typeof sizeClasses;
+  size?: keyof typeof sizeClass;
   className?: string;
 }) {
-  const hue = hueFor(name || "?");
+  const seed = name || "?";
   return (
     <span
       aria-hidden="true"
       className={cn(
-        "inline-flex shrink-0 items-center justify-center rounded-full font-semibold text-white",
-        sizeClasses[size],
+        "inline-grid shrink-0 place-items-center rounded-full font-semibold leading-none tracking-[-0.01em] text-[var(--text-on-accent)]",
+        PALETTE[paletteIndex(seed, PALETTE.length)],
+        sizeClass[size],
         className,
       )}
-      style={{ background: `hsl(${hue} 46% 32%)` }}
     >
-      {initialsOf(name)}
+      {initialsOf(seed)}
     </span>
   );
 }

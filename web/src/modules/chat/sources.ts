@@ -1,4 +1,5 @@
 import { isMessageItem, isOutputTextPart, orderedTurnItems } from "./message-stream.ts";
+import { documentHref } from "../knowledge/preview.ts";
 import { DOCUMENT_CITATION_TYPE } from "./types.ts";
 import type { CitationReference, CitationSpan, TurnState } from "./types";
 
@@ -77,8 +78,9 @@ function toAnswerSource(citation: CitationReference): AnswerSource | null {
   const chunkId = citation.chunk_id?.trim();
   if (!itemId || !chunkId) return null;
   const spans = citation.spans ?? [];
-  const internalUrl = citation.internal_url?.trim()
-    || `/knowledge/documents/${encodeURIComponent(itemId)}?chunk=${encodeURIComponent(chunkId)}`;
+  // The reader route, not the API path a stored citation may carry: the
+  // document reader resolves the passage through the authorized focus endpoint.
+  const internalUrl = documentHref(itemId, [chunkId]);
   const originalUrl = citation.original_url?.trim() || citation.source?.url?.trim() || undefined;
   // Zero means unnumbered; collection order fills it in as the fallback.
   const number = typeof citation.number === "number" && citation.number > 0 ? citation.number : 0;

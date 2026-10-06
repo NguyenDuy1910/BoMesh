@@ -1,15 +1,23 @@
 "use client";
 
 import { ExternalLink, FileWarning, Image as ImageIcon } from "lucide-react";
-import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
+import { Highlight } from "@/components/patterns/Highlight";
+import { Button } from "@/components/ui/Button";
 import { PageLoadingSkeleton } from "@/components/ui/Skeleton";
+import { cn } from "@/lib/cn";
 import {
   blockText,
-  citedTargets,
+  citedMarks,
   isSpreadsheetType,
   loadRendition,
+  markableText,
+  renditionPages,
+  type CitedMark,
+  type CitedMarks,
   type DocumentRendition,
+  type PassageCitation,
   type RenditionBlock,
   type TableBlock,
 } from "../rendition";
@@ -20,45 +28,62 @@ import { Marked } from "./Marked";
 const ROW_GROUP = 100;
 /** Rows sampled to size a table's columns; the rest wrap inside them. */
 const COLUMN_SAMPLE = 200;
-const NO_TARGETS = { blockIds: new Set<string>(), rows: new Map<string, Set<number>>() };
+const NO_MARKS: CitedMarks = { blocks: new Map() };
+const NO_PASSAGES: PassageCitation[] = [];
 
-/**
- * The whole document, read from its rendition.
- *
- * Shared by the chat source panel and the Library. Long documents and large
- * sheets stay cheap because blocks and row groups use `content-visibility`,
- * so only what is on screen is laid out; the cited block or rows are
- * highlighted and scrolled to whenever the citation changes.
- */
-export function DocumentRenditionView({
-  chunkText,
-  citation,
-  contentType,
-  itemId,
-  onRetry,
-  originalUrl,
-  rendition,
-  search = "",
-}: {
+interface RenditionViewProps {
   itemId: string;
   rendition: PreviewRendition;
   /** Decides whether `page` reads as a sheet or a page. */
   contentType: string;
+  /** One cited passage; shorthand for `passages={[{ citation, chunkText }]}`. */
   citation?: Pick<ViewerCitation, "spans"> | null;
   chunkText?: string | null;
+  /** Every cited passage of this document, in citation order. */
+  passages?: readonly PassageCitation[];
+  /** The passage in `passages` the reader is on. */
+  focusIndex?: number;
+  /** `pages` sets each source page on its own sheet, as the full viewer does. */
+  layout?: "column" | "pages";
+  /** The document's page count, for "Page 3 of 48"; defaults to the pages present. */
+  pageCount?: number | null;
   /** Find-in-document. Empty when the reader is not searching. */
   search?: string;
   originalUrl?: string | null;
   /** Re-sign the URLs; a failed download may only have outlived its URL. */
   onRetry?: () => void;
-}) {
+}
+
+/**
+ * The whole document, read from its rendition.
+ *
+ * Shared by the document viewer (`layout="pages"`: one sheet per source page),
+ * the chat source panel and the chat file panel (`layout="column"`). Long
+ * documents and large sheets stay cheap because blocks and row groups use
+ * `content-visibility`, so only what is on screen is laid out. Cited passages
+ * are evidence marks on the quoted words (rows, in a table); the focused one is
+ * scrolled to whenever it changes.
+ */
+export function DocumentRenditionView({
+  chunkText,
+  citation,
+  contentType,
+  focusIndex = 0,
+  itemId,
+  layout = "column",
+  onRetry,
+  originalUrl,
+  pageCount,
+  passages,
+  rendition,
+  search = "",
+}: RenditionViewProps) {
   const key = `${itemId}:${rendition.version}`;
   const [attempt, setAttempt] = useState(0);
   const [loaded, setLoaded] = useState<{ key: string; document?: DocumentRendition; failed?: true }>();
   // Each viewer read re-signs the URL; only the version names new content, so
   // a loaded version is never read again for a fresh URL.
   const loadedKey = useRef<string>(undefined);
-  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (loadedKey.current === key) return;
@@ -75,72 +100,108 @@ export function DocumentRenditionView({
   }, [attempt, itemId, key, rendition]);
 
   const document = loaded?.key === key ? loaded.document : undefined;
-  const targets = useMemo(
-    () => (document ? citedTargets(document, citation, chunkText) : NO_TARGETS),
-    [chunkText, citation, document],
-  );
-  const query = useDeferredValue(search).trim().toLowerCase();
-
-  // Scroll to the citation once its blocks are on the page.
-  useEffect(() => {
-    if (!document || !targets.blockIds.size) return;
-    const target = containerRef.current?.querySelector(".doc-rendition__cited");
-    return target ? reveal(target) : undefined;
-  }, [document, targets]);
-
-  useEffect(() => {
-    const target = query ? containerRef.current?.querySelector("mark") : null;
-    return target ? reveal(target) : undefined;
-  }, [query]);
 
   if (loaded?.key === key && loaded.failed) {
     return (
       <div className="source-preview__notice" role="alert">
         <FileWarning aria-hidden="true" size={18} />
-        <p className="source-preview__notice-title">The document text could not be loaded</p>
+        <p className="source-preview__notice-title">The document text didn’t load</p>
         <p className="source-preview__notice-detail">Try again, or open the original file.</p>
-        <button
-          className="source-preview__notice-retry"
+        <Button
+          className="mt-2"
           onClick={() => {
             setLoaded(undefined);
             // Re-signing hands back a new `rendition`, which reloads it.
             if (onRetry) onRetry();
             else setAttempt((value) => value + 1);
           }}
-          type="button"
+          size="sm"
+          variant="secondary"
         >
-          Retry
-        </button>
+          Try again
+        </Button>
       </div>
     );
   }
   if (!document) return <PageLoadingSkeleton className="doc-rendition__loading" label="Loading document text" />;
+  return (
+    <RenditionDocument
+      chunkText={chunkText}
+      citation={citation}
+      contentType={contentType}
+      document={document}
+      focusIndex={focusIndex}
+      layout={layout}
+      originalUrl={originalUrl}
+      pageCount={pageCount}
+      passages={passages}
+      search={search}
+    />
+  );
+}
 
-  const separators = new Set(document.blocks.map((block) => block.page).filter((page) => page !== null)).size > 1;
+type RenditionDocumentProps = Omit<RenditionViewProps, "itemId" | "rendition" | "onRetry"> & {
+  document: DocumentRendition;
+};
+
+/**
+ * A rendition already in hand, drawn with its evidence marks. The viewer also
+ * uses it for documents indexed before renditions existed, built from the
+ * passages the index holds.
+ */
+export function RenditionDocument({
+  chunkText,
+  citation,
+  contentType,
+  document,
+  focusIndex = 0,
+  layout = "column",
+  originalUrl,
+  pageCount,
+  passages,
+  search = "",
+}: RenditionDocumentProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const cited = useMemo(
+    () => passages ?? (citation || chunkText ? [{ citation, chunkText }] : NO_PASSAGES),
+    [chunkText, citation, passages],
+  );
+  const marks = useMemo(
+    () => (cited.length ? citedMarks(document, cited, focusIndex) : NO_MARKS),
+    [cited, document, focusIndex],
+  );
+  const query = useDeferredValue(search).trim().toLowerCase();
+
+  // Scroll to the focused passage once its blocks are on the page.
+  useEffect(() => {
+    if (!marks.focusBlockId) return;
+    const block = containerRef.current?.querySelector(`[data-block-id="${CSS.escape(marks.focusBlockId)}"]`);
+    const target = block?.querySelector("mark[data-focus], [data-cited-row]") ?? block;
+    return target ? reveal(target) : undefined;
+  }, [marks]);
+
+  useEffect(() => {
+    const target = query ? containerRef.current?.querySelector("mark.knowledge-mark") : null;
+    return target ? reveal(target) : undefined;
+  }, [query]);
+
   const pageLabel = isSpreadsheetType(contentType) ? "Sheet" : "Page";
   const matching = query
     ? document.blocks.filter((block) => blockText(block).toLowerCase().includes(query))
     : document.blocks;
   const matched = new Set(matching);
-  let currentPage: number | null = null;
-
-  return (
-    <div className="doc-rendition" ref={containerRef}>
+  const slot = (block: RenditionBlock, separator?: string) => (
+    <BlockSlot
+      block={block}
+      key={block.id}
+      mark={marks.blocks.get(block.id)}
+      query={matched.has(block) && query ? query : ""}
+      separator={separator}
+    />
+  );
+  const notes = (
+    <>
       {query && !matching.length && <p className="doc-rendition__note">Nothing in this document matches “{search.trim()}”.</p>}
-      {document.blocks.map((block) => {
-        const separator = separators && block.page !== null && block.page !== currentPage;
-        if (block.page !== null) currentPage = block.page;
-        return (
-          <BlockSlot
-            block={block}
-            cited={targets.blockIds.has(block.id)}
-            citedRows={targets.rows.get(block.id)}
-            key={block.id}
-            query={matched.has(block) && query ? query : ""}
-            separator={separator ? `${pageLabel} ${block.page}` : undefined}
-          />
-        );
-      })}
       {!document.blocks.length && <p className="doc-rendition__note">This document has no readable text.</p>}
       {document.truncated && (
         <p className="doc-rendition__note doc-rendition__note--end">
@@ -152,7 +213,63 @@ export function DocumentRenditionView({
           )}
         </p>
       )}
+    </>
+  );
+
+  if (layout === "pages") {
+    const pages = renditionPages(document);
+    const total = Math.max(pageCount ?? 0, ...pages.map((page) => page.page ?? 0));
+    return (
+      <div className="doc-rendition doc-rendition--pages" ref={containerRef}>
+        {pages.map((page, index) => {
+          const name = page.page === null ? undefined : `${pageLabel} ${page.page}`;
+          return (
+            <Fragment key={`${page.page ?? "none"}:${index}`}>
+              <section
+                aria-label={name}
+                className={cn("doc-reader-page", pageLabel === "Sheet" && "doc-reader-page--sheet")}
+                data-page={page.page ?? undefined}
+              >
+                {page.blocks.map((block) => slot(block))}
+              </section>
+              {name && pages.length > 1 && (
+                <p className="doc-reader-page-no">{total > 1 ? `${name} of ${total}` : name}</p>
+              )}
+            </Fragment>
+          );
+        })}
+        {(query || !document.blocks.length || document.truncated) && <div className="doc-reader-notes">{notes}</div>}
+      </div>
+    );
+  }
+
+  const separators = new Set(document.blocks.map((block) => block.page).filter((page) => page !== null)).size > 1;
+  let currentPage: number | null = null;
+  return (
+    <div className="doc-rendition" ref={containerRef}>
+      {document.blocks.map((block) => {
+        const separator = separators && block.page !== null && block.page !== currentPage;
+        if (block.page !== null) currentPage = block.page;
+        return slot(block, separator ? `${pageLabel} ${block.page}` : undefined);
+      })}
+      {notes}
     </div>
+  );
+}
+
+/**
+ * A block's text with its evidence mark (the quoted words, or all of it) and
+ * any find-in-document matches outside the mark.
+ */
+function CitedText({ text, mark, query }: { text: string; mark?: CitedMark; query: string }) {
+  if (!mark) return <Marked query={query} text={text} />;
+  const { start, end } = mark.range ?? { start: 0, end: text.length };
+  return (
+    <>
+      {start > 0 && <Marked query={query} text={text.slice(0, start)} />}
+      <Highlight focus={mark.focus}>{text.slice(start, end)}</Highlight>
+      {end < text.length && <Marked query={query} text={text.slice(end)} />}
+    </>
   );
 }
 
@@ -162,32 +279,31 @@ export function DocumentRenditionView({
  */
 const BlockSlot = memo(function BlockSlot({
   block,
-  cited,
-  citedRows,
+  mark,
   query,
   separator,
 }: {
   block: RenditionBlock;
-  cited: boolean;
-  citedRows?: Set<number>;
+  mark?: CitedMark;
   query: string;
   separator?: string;
 }) {
-  // A table with cited rows highlights the rows, not the whole grid.
-  const highlighted = cited && !citedRows;
-  const className = `doc-rendition__block doc-rendition__${block.kind}${highlighted ? " doc-rendition__cited" : ""}`;
+  // A table with cited rows marks the rows; one without marks the whole grid.
+  const boxed = mark && block.kind === "table" && !mark.rows;
+  const className = `doc-rendition__block doc-rendition__${block.kind}${boxed ? " doc-rendition__cited" : ""}`;
+  const text = block.kind === "table" ? "" : markableText(block);
   return (
     <>
       {separator && <div className="doc-rendition__page" role="separator">{separator}</div>}
       {block.kind === "heading" ? (
         <Heading className={className} id={block.id} level={block.level}>
-          <Marked query={query} text={block.text} />
+          <CitedText mark={mark} query={query} text={text} />
         </Heading>
       ) : block.kind === "paragraph" ? (
-        <p className={className} data-block-id={block.id}><Marked query={query} text={block.text} /></p>
+        <p className={className} data-block-id={block.id}><CitedText mark={mark} query={query} text={text} /></p>
       ) : block.kind === "code" ? (
         <pre className={className} data-block-id={block.id} data-language={block.language ?? undefined}>
-          <code><Marked query={query} text={block.text} /></code>
+          <code><CitedText mark={mark} query={query} text={text} /></code>
         </pre>
       ) : block.kind === "image" ? (
         block.text ? (
@@ -195,7 +311,7 @@ const BlockSlot = memo(function BlockSlot({
             <ImageIcon aria-hidden="true" size={14} />
             <figcaption>
               <span className="doc-rendition__image-label">Image</span>
-              <Marked query={query} text={block.text} />
+              <CitedText mark={mark} query={query} text={text} />
             </figcaption>
           </figure>
         ) : null
@@ -203,15 +319,15 @@ const BlockSlot = memo(function BlockSlot({
         <p className={className} data-block-id={block.id}>
           {/^(?:https?:|mailto:)/i.test(block.url) ? (
             <a href={block.url} rel="noopener noreferrer" target="_blank">
-              <Marked query={query} text={block.text || block.url} />
+              <CitedText mark={mark} query={query} text={text} />
               <ExternalLink aria-hidden="true" size={12} />
             </a>
           ) : (
-            <Marked query={query} text={block.text || block.url} />
+            <CitedText mark={mark} query={query} text={text} />
           )}
         </p>
       ) : (
-        <Table block={block} className={className} citedRows={citedRows} query={query} />
+        <Table block={block} className={className} citedRows={mark?.rows} query={query} />
       )}
     </>
   );
@@ -332,6 +448,7 @@ const RowGroup = memo(function RowGroup({
           <div
             aria-rowindex={index + 2}
             className={cited?.has(index) ? "doc-rendition__row doc-rendition__row--cited doc-rendition__cited" : "doc-rendition__row"}
+            data-cited-row={cited?.has(index) || undefined}
             key={index}
             role="row"
           >

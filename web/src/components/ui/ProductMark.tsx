@@ -11,9 +11,9 @@ interface ProductMarkProps {
 }
 
 const sizeClasses = {
-  sm: "h-7 w-7 rounded-md [&_svg]:h-3.5 [&_svg]:w-3.5",
-  md: "h-8 w-8 rounded-lg [&_svg]:h-4 [&_svg]:w-4",
-  lg: "h-11 w-11 rounded-xl [&_svg]:h-5 [&_svg]:w-5",
+  sm: "h-7 w-7 rounded-lg [&_svg]:h-3.5 [&_svg]:w-3.5",
+  md: "h-8 w-8 rounded-(--radius-sheet) [&_svg]:h-4 [&_svg]:w-4",
+  lg: "h-11 w-11 rounded-2xl [&_svg]:h-5 [&_svg]:w-5",
 };
 
 export function ProductMark({

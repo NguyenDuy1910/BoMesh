@@ -1,8 +1,27 @@
 import type { Metadata, Viewport } from "next";
+import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 import Script from "next/script";
 import { AuthGate } from "@/components/auth/AuthGate";
+import { appearanceBootScript } from "@/lib/appearance";
 import { appBrand } from "@/lib/brand";
 import "./globals.css";
+
+// Bound to --font-plex-sans / --font-plex-mono on <html>; tokens.css builds
+// --font-sans / --font-mono on them.
+const plexSans = IBM_Plex_Sans({
+  subsets: ["latin", "latin-ext", "vietnamese"],
+  weight: ["400", "500", "600", "700"],
+  style: ["normal", "italic"],
+  variable: "--font-plex-sans",
+  display: "swap",
+});
+
+const plexMono = IBM_Plex_Mono({
+  subsets: ["latin", "latin-ext", "vietnamese"],
+  weight: ["400", "500", "600"],
+  variable: "--font-plex-mono",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: appBrand.productName,
@@ -19,9 +38,11 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  // A <meta> tag cannot read CSS variables: these mirror --surface-canvas in
+  // tokens.css (light and dark).
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#fcfbff" },
-    { media: "(prefers-color-scheme: dark)", color: "#111113" },
+    { media: "(prefers-color-scheme: light)", color: "#f1f2f4" },
+    { media: "(prefers-color-scheme: dark)", color: "#0b0d10" },
   ],
 };
 
@@ -29,18 +50,17 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600&display=swap"
-          rel="stylesheet"
-        />
-      </head>
+    <html
+      className={`${plexSans.variable} ${plexMono.variable}`}
+      data-accent="indigo"
+      data-bg="plain"
+      data-density="comfortable"
+      lang="en"
+      suppressHydrationWarning
+    >
       <body>
-        <Script id="bomesh-theme" strategy="beforeInteractive">
-          {`(function(){try{var t=localStorage.getItem("bomesh-theme")||"system";var d=t==="dark"||(t==="system"&&matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.dataset.theme=d?"dark":"light";document.documentElement.classList.toggle("dark",d)}catch(e){}})();`}
+        <Script id="bomesh-appearance" strategy="beforeInteractive">
+          {appearanceBootScript}
         </Script>
         <a className="skip-link" href="#main-content">Skip to main content</a>
         <AuthGate>{children}</AuthGate>

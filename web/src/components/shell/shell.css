@@ -1,127 +1,376 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   Application shell
+   Product shell (prototype `#app`, `.side`, `.main`, `.sheet`)
    ---------------------------------------------------------------------------
-   The frame every product context shares: a navigation rail, a working area,
-   and an optional contextual inspector. Only the geometry lives here — colour,
-   shape and density come from tokens.css, and everything inside the rail is
-   composed from components/shell/SidebarShell.tsx.
+   The canvas holds the sidebar; every page renders on one rounded hairline
+   sheet beside it. Only geometry and the sidebar's item recipes live here —
+   colours, radii, shadows and density all come from tokens.css.
+   ≤1100px the sidebar becomes a 68px icon rail that can expand as an
+   overlay; ≤640px it leaves the flow for a mobile bar.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-.shell {
-  display: flex;
+.app-shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   height: 100dvh;
   overflow: hidden;
-  background: var(--surface-canvas);
+  background: var(--canvas-background);
 }
 
-.shell-nav {
-  width: var(--nav-w);
-}
-
-.shell-nav[data-collapsed] {
-  width: var(--nav-w-collapsed);
-}
-
-/* The working area is the primary white surface; the rail beside it stays on
-   the tinted canvas, which is what separates them — not a heavier border. */
-.shell__main {
-  display: flex;
+.app-main {
   min-width: 0;
-  flex: 1;
-  flex-direction: column;
-  background: var(--surface-base);
-}
-
-.shell__scroll {
-  flex: 1;
-  overflow-y: auto;
-}
-
-.shell__page {
-  width: 100%;
-  max-width: var(--page-max);
-  margin-inline: auto;
-  padding: var(--space-5) var(--page-gutter) var(--space-12);
-}
-
-.shell__page--narrow {
-  max-width: var(--page-max-narrow);
-}
-
-/* A surface that manages its own scrolling — the document workspaces — takes
-   the working area whole. The page wrapper would otherwise pad and centre it,
-   so its toolbar would sit inside a second gutter and its list and reader
-   would scroll the page instead of themselves. Opting in by what the surface
-   renders keeps the shell from having to know which routes those are. */
-.shell__page:has(> .document-workspace) {
-  display: flex;
-  height: 100%;
-  max-width: none;
-  overflow: hidden;
-  padding: 0;
-}
-
-/* The shell is stable across navigation. Only this route outlet is replaced,
-   so the transition never moves the rail, main surface, or global controls. */
-.shell__route-outlet {
-  animation: shell-route-enter 150ms var(--ease-out) both;
-}
-
-.shell__main > .shell__route-outlet {
-  display: flex;
   min-height: 0;
+  padding: 8px 8px 8px 0;
+}
+
+.app-sheet {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: auto;
+  border-radius: var(--radius-sheet);
+  background: var(--surface-base);
+  box-shadow: var(--shadow-sheet);
+  outline: none;
+}
+
+.app-sheet[data-bare] {
+  overflow: hidden;
+}
+
+.app-mobile-bar {
+  display: none;
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────────────────── */
+
+.side {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  padding: 10px 10px 10px 12px;
+  background: var(--canvas-background);
+}
+
+.ws-switch,
+.side-me {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: var(--radius-md);
+  text-align: left;
+  color: var(--text-primary);
+}
+
+.ws-switch {
+  margin-bottom: 6px;
+}
+
+.ws-switch:hover,
+.side-me:hover,
+.ws-switch[aria-expanded="true"],
+.side-me[aria-expanded="true"] {
+  background: var(--surface-pressed);
+}
+
+.ws-name {
+  display: block;
+  overflow: hidden;
+  font-size: var(--text-size-body);
+  font-weight: 600;
+  line-height: 1.25;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ws-meta {
+  display: block;
+  overflow: hidden;
+  font-size: var(--text-size-caption);
+  line-height: 1.25;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.side-grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.mode-chip {
+  padding: 2px 7px;
+  border-radius: var(--radius-full);
+  background: var(--text-primary);
+  color: var(--text-inverse);
+  font-size: var(--text-size-caption);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.3;
+}
+
+.new-chat {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: var(--control-md);
+  margin-bottom: 6px;
+  padding: 0 10px;
+  border-radius: var(--radius-md);
+  background: var(--surface-base);
+  box-shadow: var(--shadow-sheet);
+  color: var(--text-accent);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.new-chat:hover {
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-2), 0 0 0 1px var(--border-default);
+}
+
+.nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: var(--nav-item-height);
+  padding: 0 10px;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-weight: 500;
+  text-align: left;
+  text-decoration: none;
+}
+
+.nav-item:hover {
+  background: var(--surface-pressed);
+  color: var(--text-primary);
+}
+
+.nav-item[aria-current="page"],
+.nav-item[aria-expanded="true"] {
+  background: var(--surface-base);
+  box-shadow: var(--shadow-sheet);
+  color: var(--text-primary);
+}
+
+.nav-item svg,
+.new-chat svg {
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+
+.nav-item kbd {
+  margin-left: auto;
+}
+
+.nav-count {
+  display: grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: var(--radius-full);
+  background: var(--accent-primary);
+  color: var(--text-on-accent);
+  font-size: var(--text-size-caption);
+  font-weight: 600;
+  line-height: 1;
+}
+
+.nav-count[data-tone="quiet"] {
+  background: var(--surface-inset);
+  color: var(--text-primary);
+  box-shadow: inset 0 0 0 1px var(--border-default);
+}
+
+.nav-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 10px 4px;
+  color: var(--text-tertiary);
+  font-size: var(--text-size-caption);
+  font-weight: 500;
+}
+
+.nav-label a {
+  color: var(--text-accent);
+  font-size: var(--text-size-caption);
+  text-decoration: none;
+}
+
+.nav-label a:hover,
+.nav-label a[aria-current="page"] {
+  text-decoration: underline;
+}
+
+.recents {
+  flex: 1;
+  min-height: 60px;
+  margin: 0 -4px;
+  padding: 0 4px;
+  overflow: auto;
+}
+
+.recent {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: 13.5px;
+  text-decoration: none;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.recent:hover {
+  background: var(--surface-pressed);
+  color: var(--text-primary);
+}
+
+.recent[aria-current="page"] {
+  background: var(--surface-base);
+  box-shadow: var(--shadow-sheet);
+  color: var(--text-primary);
+}
+
+.side-spacer {
   flex: 1;
 }
 
-.shell__scroll > .shell__route-outlet {
-  min-height: 100%;
+.side-foot {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-default);
 }
 
-.chat-content-enter {
-  animation: chat-content-fade-in 240ms var(--ease-out) both;
+.only-collapsed {
+  display: none !important;
 }
 
-@keyframes chat-content-fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+.app-scrim {
+  display: none;
 }
 
+/* ── Tablet: 68px icon rail, expandable as an overlay ────────────────────── */
 
-@keyframes shell-route-enter {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
-}
+@media (max-width: 1100px) {
+  .app-shell {
+    grid-template-columns: var(--sidebar-rail) minmax(0, 1fr);
+  }
 
-/* Below --bp-nav the rail leaves the flow and becomes an overlay. The value
-   equals Tailwind's `lg`, which the shells use for the controls that open
-   and collapse it, so the rail and its controls always flip together. */
-@media (max-width: 1023.98px) {
-  .shell-nav {
+  .side:not([data-expanded]) {
+    align-items: center;
+    padding: 10px 8px;
+  }
+
+  .side:not([data-expanded]) .hide-collapsed {
+    display: none !important;
+  }
+
+  .side:not([data-expanded]) .only-collapsed {
+    display: flex !important;
+  }
+
+  .side:not([data-expanded]) .nav-item,
+  .side:not([data-expanded]) .new-chat {
+    justify-content: center;
+    width: 44px;
+    height: 40px;
+    padding: 0;
+  }
+
+  .side:not([data-expanded]) .ws-switch,
+  .side:not([data-expanded]) .side-me {
+    justify-content: center;
+    width: 44px;
+    padding: 6px;
+  }
+
+  .side:not([data-expanded]) .nav-count {
+    position: absolute;
+    top: 2px;
+    right: 0;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    font-size: 10px;
+  }
+
+  .side:not([data-expanded]) .nav-label {
+    justify-content: center;
+    padding: 10px 0 4px;
+  }
+
+  .side:not([data-expanded]) .nav-label::before {
+    content: "";
+    width: 20px;
+    height: 1px;
+    background: var(--border-default);
+  }
+
+  .side:not([data-expanded]) .side-foot {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+  }
+
+  .side[data-expanded] {
     position: fixed;
-    inset-block: 0;
-    inset-inline-start: 0;
-    width: var(--nav-w);
-    transform: translateX(-100%);
-    box-shadow: var(--elevation-3);
-    transition: transform var(--duration-base) var(--ease-out);
+    inset: 0 auto 0 0;
+    z-index: 70;
+    width: var(--sidebar-width);
+    background: var(--surface-canvas);
+    box-shadow: var(--shadow-modal);
   }
 
-  .shell-nav[data-collapsed] {
-    width: var(--nav-w);
+  .app-scrim[data-open] {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 69;
+    background: var(--scrim-soft);
+  }
+}
+
+/* ── Phone: a mobile bar opens the sidebar as an overlay ─────────────────── */
+
+@media (max-width: 640px) {
+  .app-shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
-  .shell-nav[data-open] {
-    transform: translateX(0);
+  .side:not([data-expanded]) {
+    display: none;
+  }
+
+  .app-main {
+    padding: 0 6px 6px;
+  }
+
+  .app-mobile-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 52px;
+    padding: 0 8px;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .shell-nav {
-    transition: none;
-  }
-
-  .shell__route-outlet {
+  .side[data-expanded] {
     animation: none;
   }
-
 }

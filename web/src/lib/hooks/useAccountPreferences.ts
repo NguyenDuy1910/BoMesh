@@ -1,83 +1,119 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 
+import {
+  APPEARANCE_CHANGE_EVENT,
+  APPEARANCE_STORAGE_KEY,
+  DEFAULT_APPEARANCE,
+  parseAppearance,
+  type AppearancePreferences,
+} from "@/lib/appearance";
 import { getAuthSession } from "@/lib/auth/session";
 
-export interface AccountPreferences {
+/** Chat behaviour; kept per signed-in user in this browser. */
+interface ChatPreferences {
   enterToSend: boolean;
-  reduceMotion: boolean;
   showAgentActivity: boolean;
 }
 
-const defaults: AccountPreferences = {
-  enterToSend: true,
-  reduceMotion: false,
-  showAgentActivity: true,
-};
+export type AccountPreferences = AppearancePreferences & ChatPreferences;
 
-const changeEvent = "bomesh-account-preferences";
+const chatDefaults: ChatPreferences = { enterToSend: true, showAgentActivity: true };
+const defaults: AccountPreferences = { ...DEFAULT_APPEARANCE, ...chatDefaults };
+const appearanceKeys = Object.keys(DEFAULT_APPEARANCE) as (keyof AppearancePreferences)[];
+const chatChangeEvent = "bomesh-account-preferences";
 
-function storageKey() {
-  const userId = getAuthSession()?.user_id;
-  return `bomesh.account.preferences.${userId ?? "anonymous"}`;
+function chatStorageKey() {
+  return `bomesh.account.preferences.${getAuthSession()?.user_id ?? "anonymous"}`;
 }
 
-function readPreferences(): AccountPreferences {
-  if (typeof window === "undefined") return defaults;
+function readStorage(key: string): string | null {
   try {
-    const value = JSON.parse(window.localStorage.getItem(storageKey()) ?? "{}") as Partial<AccountPreferences>;
-    return {
-      enterToSend: value.enterToSend ?? defaults.enterToSend,
-      reduceMotion: value.reduceMotion ?? defaults.reduceMotion,
-      showAgentActivity: value.showAgentActivity ?? defaults.showAgentActivity,
-    };
+    return window.localStorage.getItem(key);
   } catch {
-    return defaults;
+    return null;
   }
 }
 
-function applyPreferences(preferences: AccountPreferences) {
-  document.documentElement.dataset.reducedMotion = preferences.reduceMotion ? "true" : "false";
+function writeStorage(key: string, value: string | null) {
+  try {
+    if (value === null) window.localStorage.removeItem(key);
+    else window.localStorage.setItem(key, value);
+  } catch {
+    // Storage can be unavailable (private mode, quota); the change is not kept.
+  }
 }
 
-/** Personal, browser-local preferences shared by every workspace for one user. */
+// useSyncExternalStore needs a stable snapshot, so the parsed value is reused
+// until either stored string (or the signed-in user) changes.
+let cached: { source: string; value: AccountPreferences } | null = null;
+
+function getSnapshot(): AccountPreferences {
+  const chatKey = chatStorageKey();
+  const chatRaw = readStorage(chatKey);
+  const appearanceRaw = readStorage(APPEARANCE_STORAGE_KEY);
+  const source = `${chatKey}\n${chatRaw}\n${appearanceRaw}`;
+  if (cached?.source === source) return cached.value;
+  let chat: Partial<ChatPreferences> = {};
+  try {
+    chat = JSON.parse(chatRaw ?? "{}") as Partial<ChatPreferences>;
+  } catch {
+    // A corrupt entry is ignored; the defaults apply.
+  }
+  const value: AccountPreferences = {
+    ...parseAppearance(appearanceRaw),
+    enterToSend: typeof chat.enterToSend === "boolean" ? chat.enterToSend : chatDefaults.enterToSend,
+    showAgentActivity:
+      typeof chat.showAgentActivity === "boolean" ? chat.showAgentActivity : chatDefaults.showAgentActivity,
+  };
+  cached = { source, value };
+  return value;
+}
+
+function subscribe(onChange: () => void) {
+  window.addEventListener(APPEARANCE_CHANGE_EVENT, onChange);
+  window.addEventListener(chatChangeEvent, onChange);
+  window.addEventListener("storage", onChange);
+  return () => {
+    window.removeEventListener(APPEARANCE_CHANGE_EVENT, onChange);
+    window.removeEventListener(chatChangeEvent, onChange);
+    window.removeEventListener("storage", onChange);
+  };
+}
+
+function save(next: AccountPreferences | null) {
+  if (next === null) {
+    writeStorage(APPEARANCE_STORAGE_KEY, null);
+    writeStorage(chatStorageKey(), null);
+  } else {
+    const appearance = Object.fromEntries(appearanceKeys.map((key) => [key, next[key]]));
+    writeStorage(APPEARANCE_STORAGE_KEY, JSON.stringify(appearance));
+    writeStorage(
+      chatStorageKey(),
+      JSON.stringify({ enterToSend: next.enterToSend, showAgentActivity: next.showAgentActivity }),
+    );
+  }
+  // The boot script in app/layout.tsx listens for this and re-applies the
+  // <html> attributes; subscribed hooks re-read their snapshot.
+  window.dispatchEvent(new Event(APPEARANCE_CHANGE_EVENT));
+  window.dispatchEvent(new Event(chatChangeEvent));
+}
+
+/**
+ * The one preferences hook. Appearance (theme, accent, background, density,
+ * reduced motion) is device-wide and painted on <html> before first render;
+ * chat behaviour is kept per user. Option lists for the UI live in
+ * `@/lib/appearance`.
+ */
 export function useAccountPreferences() {
-  const [preferences, setPreferences] = useState<AccountPreferences>(defaults);
-
-  useEffect(() => {
-    const sync = () => setPreferences(readPreferences());
-    sync();
-    window.addEventListener(changeEvent, sync);
-    window.addEventListener("storage", sync);
-    return () => {
-      window.removeEventListener(changeEvent, sync);
-      window.removeEventListener("storage", sync);
-    };
-  }, []);
-
-  useEffect(() => applyPreferences(preferences), [preferences]);
+  const preferences = useSyncExternalStore(subscribe, getSnapshot, () => defaults);
 
   const updatePreferences = useCallback((change: Partial<AccountPreferences>) => {
-    const next = { ...readPreferences(), ...change };
-    try {
-      window.localStorage.setItem(storageKey(), JSON.stringify(next));
-      window.dispatchEvent(new Event(changeEvent));
-    } catch {
-      // Preferences remain usable for this browser session if storage is unavailable.
-    }
-    setPreferences(next);
+    save({ ...getSnapshot(), ...change });
   }, []);
 
-  const resetPreferences = useCallback(() => {
-    try {
-      window.localStorage.removeItem(storageKey());
-      window.dispatchEvent(new Event(changeEvent));
-    } catch {
-      // The in-memory reset still applies below.
-    }
-    setPreferences(defaults);
-  }, []);
+  const resetPreferences = useCallback(() => save(null), []);
 
   return { preferences, resetPreferences, updatePreferences };
 }

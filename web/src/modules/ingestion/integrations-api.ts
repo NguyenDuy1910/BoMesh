@@ -1,8 +1,6 @@
 "use client";
 
-import { apiRequest, queryString } from "@/lib/api/request";
-import { queryString as controlPlaneQueryString } from "@/modules/workspace-control/control-plane-api";
-import type { KnowledgeItem, Paginated } from "@/modules/workspace-control/collections";
+import { apiRequest, queryString, type Paginated } from "@/lib/api/request";
 
 /**
  * Connections and Sources.
@@ -199,10 +197,11 @@ export const connectionsApi = {
       body: JSON.stringify(body),
     }),
 
-  rename: (id: string, display_name: string) =>
+  /** Replaces a credential-backed connection's secret, e.g. a new Confluence API token. */
+  updateCredentials: (id: string, credentials: Record<string, unknown>) =>
     apiRequest<Connection>(`/connections/${id}`, {
       method: "PATCH",
-      body: JSON.stringify({ display_name }),
+      body: JSON.stringify({ credentials }),
     }),
 
   /** Throws with the provider's own reason when the account can no longer be read. */
@@ -211,13 +210,6 @@ export const connectionsApi = {
       `/connections/${id}/validate`,
       { method: "POST" },
     ),
-
-  /** Revokes the grant and stops its sources, keeping both so a reconnect resumes them. */
-  disconnect: (id: string) =>
-    apiRequest<Connection>(`/connections/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ status: "disconnected" }),
-    }),
 
   remove: (id: string) =>
     apiRequest<void>(`/connections/${id}`, { method: "DELETE" }),
@@ -290,7 +282,7 @@ export const sourcesApi = {
 export const collectionsApi = {
   list: () =>
     apiRequest<Paginated<KnowledgeItem>>(
-      `/collections${controlPlaneQueryString({ page_size: 100 })}`,
+      `/collections${queryString({ page_size: 100 })}`,
     ),
 
   create: (title: string) =>
@@ -300,42 +292,50 @@ export const collectionsApi = {
     }),
 };
 
-/**
- * How often a source is synced and processed, as a person would say it.
- *
- * The backend takes a cron expression; offering one to an administrator would
- * be asking them to learn a syntax to answer "how often".
- */
-export const SYNC_SCHEDULES = [
-  { value: "hourly", label: "Every hour", cron: "0 * * * *" },
-  { value: "six-hourly", label: "Every 6 hours", cron: "0 */6 * * *" },
-  { value: "daily", label: "Every day at 02:00", cron: "0 2 * * *" },
-  { value: "manual", label: "Only when I sync it", cron: null },
-] as const;
-
-export type SyncScheduleValue = (typeof SYNC_SCHEDULES)[number]["value"];
-
-export function scheduleFor(value: SyncScheduleValue): SourceSchedule | null {
-  const cron = SYNC_SCHEDULES.find((item) => item.value === value)?.cron;
-  return cron
-    ? {
-        schedule_type: "cron",
-        cron_expression: cron,
-        timezone: null,
-        enabled: true,
-        overlap_policy: "skip",
-      }
-    : null;
+/** The collection view `GET /collections` returns, as the destination picker reads it. */
+interface ExternalResource {
+  id: string;
+  external_id: string;
+  source_url: string | null;
+  ingestion_source_id: string;
+  integration_connection: {
+    id: string;
+    display_name: string;
+    connector_key: string;
+  };
 }
 
-/** The cadence choice a schedule matches, or `custom` for a cron written elsewhere. */
-export function scheduleValue(schedule: SourceSchedule | null): SyncScheduleValue | "custom" {
-  if (!schedule) return "manual";
-  return SYNC_SCHEDULES.find((item) => item.cron === schedule.cron_expression)?.value ?? "custom";
+export interface KnowledgeItem {
+  [key: string]: unknown;
+  id: string;
+  item_type: "collection" | "document";
+  document_type: string | null;
+  title: string;
+  mime_type: string | null;
+  size_bytes: number | null;
+  parent_item_id: string | null;
+  parent_relation: string | null;
+  status: "pending" | "processing" | "ready" | "failed" | "unsupported";
+  indexed: boolean;
+  item_count?: number;
+  source_count?: number;
+  created_by_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+  external_resources: ExternalResource[];
+  metadata?: Record<string, unknown>;
+  inherit_access?: boolean;
+  role_assignments?: CollectionGrant[];
 }
 
-/** How often, in words: "Every day at 02:00", or the expression when it is not one of ours. */
-export function scheduleCadence(schedule: SourceSchedule): string {
-  return SYNC_SCHEDULES.find((item) => item.cron === schedule.cron_expression)?.label
-    ?? `Custom (${schedule.cron_expression})`;
+interface CollectionGrant {
+  [key: string]: unknown;
+  item_id?: string | null;
+  principal_type: "user" | "group";
+  principal_id: string;
+  role_id?: string;
+  role_code: "collection_owner" | "collection_editor" | "collection_viewer";
+  role_display_name?: string;
+  created_at?: string;
+  updated_at?: string;
 }

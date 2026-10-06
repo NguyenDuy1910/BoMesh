@@ -1,120 +1,163 @@
 import {
   Activity,
   BookOpen,
-  Bot,
   Building2,
   ChartColumn,
-  Contrast,
-  Import,
-  LayoutGrid,
+  Cpu,
+  House,
+  Inbox,
   Plug,
   Plus,
   Search,
+  Server,
   Settings,
-  ShieldCheck,
+  Sparkles,
   Users,
   type LucideIcon,
 } from "lucide-react";
 
-/**
- * The three product modes.
- *
- * They never share a rail. The rail a person is looking at is how they know
- * which mode they are in, so every mode owns its own item list and its own
- * header treatment. Moving between modes is always an explicit control.
- */
-export type ProductMode = "workspace" | "workspace-control" | "platform-control";
+import type { PendingFeatureKey } from "@/lib/api/pending";
+import {
+  canAccessPlatformControl,
+  hasAnySessionPermission,
+  hasPlatformPermission,
+  hasSessionPermission,
+  type AuthSession,
+} from "@/lib/auth/session";
 
-export interface RailItem {
+/**
+ * The one navigation definition: the product shell's sidebar, the command
+ * palette's "Go to" pages and the address gate all read these lists. Items
+ * appear by permission; the API still authorizes every request.
+ */
+
+/** Which attention count an item shows. */
+export type NavBadge = "inbox" | "sources" | "requests" | "outages";
+
+export interface NavItem {
   id: string;
   label: string;
-  href: string;
   icon: LucideIcon;
+  /** Where it goes. Absent for items that open a layer (search, inbox). */
+  href?: string;
   /**
-   * `action` starts something in the place you already are; `destination` is
-   * somewhere you go. Only a destination can be the current item, so a rail
-   * never appears to have two selections.
+   * `action` starts something where you are (a new chat, the palette, the
+   * inbox); `destination` is somewhere you go. Only a destination is ever the
+   * current item, so the sidebar never shows two selections.
    */
   kind: "action" | "destination";
-  permissionCodes?: readonly string[];
+  /** Every one of these workspace permissions is needed. */
+  allOf?: readonly string[];
+  /** Any one of these workspace permissions is enough. */
+  anyOf?: readonly string[];
+  /** Any one of these platform permissions is enough. */
+  platformAnyOf?: readonly string[];
+  /** Hidden while this not-yet-connected API feature is turned off. */
+  pendingFeature?: PendingFeatureKey;
+  badge?: NavBadge;
+  /** Further address prefixes this destination owns (a document belongs to Knowledge). */
+  owns?: readonly string[];
+  /** Keyboard shortcut shown beside the label. */
+  shortcut?: string;
 }
 
-/**
- * Mode 1 — User Workspace.
- *
- * Deliberately light. Workspace settings, roles, connectors and system
- * configuration are absent, not disabled: an ordinary user never sees them,
- * and a workspace operator reaches them from the workspace switcher instead.
- */
-export const workspaceRailItems: readonly RailItem[] = [
-  { id: "new-chat", label: "New chat", href: "/app?action=new", icon: Plus, kind: "action" },
-  { id: "search", label: "Search", href: "/app?action=search", icon: Search, kind: "action" },
-  { id: "library", label: "Library", href: "/library", icon: BookOpen, kind: "destination" },
+/** Everyone in a workspace: ask, find, read. */
+export const WORKSPACE_NAV: readonly NavItem[] = [
+  { id: "new-chat", label: "New chat", href: "/chat", icon: Plus, kind: "action" },
+  { id: "inbox", label: "Inbox", icon: Inbox, kind: "action", pendingFeature: "notifications.inbox", badge: "inbox" },
+  { id: "search", label: "Search", icon: Search, kind: "action", shortcut: "⌘K" },
+  { id: "knowledge", label: "Knowledge", href: "/knowledge", icon: BookOpen, kind: "destination", owns: ["/documents"] },
 ];
 
-/** Mode 2 — Workspace control for selected workspace. */
-export const workspaceControlRailItems: readonly RailItem[] = [
-  { id: "overview", label: "Overview", href: "/workspace-control", icon: LayoutGrid, kind: "destination", permissionCodes: ["tenant.read"] },
-  { id: "knowledge", label: "Knowledge", href: "/workspace-control/knowledge", icon: BookOpen, kind: "destination", permissionCodes: ["knowledge.read"] },
-  { id: "ingestion", label: "Ingestion", href: "/workspace-control/ingestion", icon: Import, kind: "destination", permissionCodes: ["ingestion.read", "ingestion.run", "source.manage"] },
-  { id: "agent", label: "Agent", href: "/workspace-control/agent", icon: Bot, kind: "destination", permissionCodes: ["tenant.manage"] },
-  { id: "access", label: "Access", href: "/workspace-control/access", icon: ShieldCheck, kind: "destination", permissionCodes: ["user.manage", "role.manage", "group.manage", "access.manage"] },
-  { id: "experience", label: "Experience", href: "/workspace-control/experience", icon: Contrast, kind: "destination", permissionCodes: ["tenant.manage"] },
-  { id: "activity", label: "Activity", href: "/workspace-control/activity", icon: Activity, kind: "destination", permissionCodes: ["audit.read"] },
+/** The Manage section: only the items the caller may open are listed. */
+export const MANAGE_NAV: readonly NavItem[] = [
+  { id: "overview", label: "Overview", href: "/manage/overview", icon: House, kind: "destination", allOf: ["tenant.read", "tenant.manage"] },
+  { id: "sources", label: "Sources", href: "/manage/sources", icon: Plug, kind: "destination", anyOf: ["source.manage", "ingestion.read"], badge: "sources" },
+  {
+    id: "access",
+    label: "People & access",
+    href: "/manage/access",
+    icon: Users,
+    kind: "destination",
+    anyOf: ["user.manage", "role.manage", "group.manage", "access.manage"],
+    badge: "requests",
+  },
+  {
+    id: "assistant",
+    label: "Assistant setup",
+    href: "/manage/assistant",
+    icon: Sparkles,
+    kind: "destination",
+    anyOf: ["tenant.manage"],
+    pendingFeature: "workspace.assistant_settings",
+  },
+  { id: "activity", label: "Activity", href: "/manage/activity", icon: Activity, kind: "destination", anyOf: ["audit.read"] },
+  { id: "settings", label: "Settings", href: "/manage/settings", icon: Settings, kind: "destination", anyOf: ["tenant.manage"] },
 ];
 
-/** Settings sits below the spacer, separated from the sections above it. */
-export const workspaceControlRailTail: readonly RailItem[] = [
-  { id: "settings", label: "Settings", href: "/workspace-control/settings", icon: Settings, kind: "destination", permissionCodes: ["tenant.manage"] },
+/** The platform console: the same shell, a different sidebar. */
+export const PLATFORM_NAV: readonly NavItem[] = [
+  { id: "p-workspaces", label: "Workspaces", href: "/platform/workspaces", icon: Building2, kind: "destination", platformAnyOf: ["platform.tenant.read"] },
+  { id: "p-users", label: "Users", href: "/platform/users", icon: Users, kind: "destination", platformAnyOf: ["platform.user.read"] },
+  { id: "p-connectors", label: "Connectors", href: "/platform/connectors", icon: Plug, kind: "destination", platformAnyOf: ["platform.tenant.read"], pendingFeature: "platform.connectors" },
+  { id: "p-capabilities", label: "AI capabilities", href: "/platform/capabilities", icon: Cpu, kind: "destination", platformAnyOf: ["platform.tenant.read"], pendingFeature: "platform.capabilities" },
+  { id: "p-usage", label: "Usage", href: "/platform/usage", icon: ChartColumn, kind: "destination", platformAnyOf: ["platform.tenant.read"], pendingFeature: "platform.usage" },
+  { id: "p-audit", label: "Audit log", href: "/platform/audit", icon: Activity, kind: "destination", platformAnyOf: ["platform.audit.read"] },
+  { id: "p-health", label: "System health", href: "/platform/health", icon: Server, kind: "destination", platformAnyOf: ["platform.health.read"], badge: "outages" },
 ];
 
-/**
- * Mode 3 — Platform control. Separate control plane for platform operators.
- *
- * This is the only surface in the product that speaks in tenants; everywhere a
- * normal user can reach, the same object is a workspace.
- */
-export const platformControlRailItems: readonly RailItem[] = [
-  { id: "tenants", label: "Tenants", href: "/workspace-control/platform", icon: Building2, kind: "destination" },
-  { id: "users", label: "Users", href: "/workspace-control/platform/users", icon: Users, kind: "destination" },
-  { id: "models", label: "Models & capabilities", href: "/workspace-control/platform/models", icon: Bot, kind: "destination" },
-  { id: "integrations", label: "Connectors", href: "/workspace-control/platform/integrations", icon: Plug, kind: "destination" },
-  { id: "usage", label: "Usage", href: "/workspace-control/platform/usage", icon: ChartColumn, kind: "destination" },
-  { id: "audit", label: "Audit", href: "/workspace-control/platform/audit", icon: Activity, kind: "destination" },
-  { id: "system", label: "System", href: "/workspace-control/platform/system", icon: Settings, kind: "destination" },
-];
+/** Whether a not-yet-connected feature is switched on; defaults to on (tests, previews). */
+export type FeatureCheck = (key: PendingFeatureKey) => boolean;
 
-/** Which mode an address belongs to. Nothing inside a page widens scope. */
-export function modeForPath(pathname: string): ProductMode {
-  if (pathname === "/workspace-control/platform" || pathname.startsWith("/workspace-control/platform/")) return "platform-control";
-  if (pathname === "/workspace-control" || pathname.startsWith("/workspace-control/")) return "workspace-control";
-  return "workspace";
+const allFeatures: FeatureCheck = () => true;
+
+/** Whether the caller may open one item. */
+export function canOpenNavItem(item: NavItem, session: AuthSession | null, isEnabled: FeatureCheck = allFeatures): boolean {
+  if (item.pendingFeature && !isEnabled(item.pendingFeature)) return false;
+  if (item.allOf && !item.allOf.every((code) => hasSessionPermission(session, code))) return false;
+  if (item.anyOf && !hasAnySessionPermission(session, item.anyOf)) return false;
+  if (item.platformAnyOf && !item.platformAnyOf.some((code) => hasPlatformPermission(session, code))) return false;
+  return true;
 }
 
-/**
- * Whether a rail item is the current place.
- *
- * Exact landings (`/workspace-control`, `/workspace-control/platform`) must not match their own
- * children, or two rows would light up at once. Every other destination owns
- * its nested detail addresses.
- */
-export function isRailItemActive(item: RailItem, pathname: string): boolean {
-  if (item.kind === "action") return false;
+/** The items of one list the caller is actually authorized to open. */
+export function visibleNavItems(
+  items: readonly NavItem[],
+  session: AuthSession | null,
+  isEnabled: FeatureCheck = allFeatures,
+): NavItem[] {
+  return items.filter((item) => canOpenNavItem(item, session, isEnabled));
+}
+
+function ownsPath(prefix: string, pathname: string): boolean {
+  return pathname === prefix || pathname.startsWith(`${prefix}/`);
+}
+
+/** Whether an item is the current place. Actions never are. */
+export function isNavItemActive(item: NavItem, pathname: string): boolean {
+  if (item.kind === "action" || !item.href) return false;
   const [path] = item.href.split("?");
-  if (path === "/workspace-control" || path === "/workspace-control/platform") return pathname === path;
-  return pathname === path || pathname.startsWith(`${path}/`);
+  return ownsPath(path, pathname) || Boolean(item.owns?.some((prefix) => ownsPath(prefix, pathname)));
+}
+
+/** The platform console owns every `/platform` address; the sidebar swaps there. */
+export function isPlatformPath(pathname: string): boolean {
+  return ownsPath("/platform", pathname);
 }
 
 /**
- * Whether the holder of a session has any one of a set of permissions.
- *
- * Passed in rather than imported so this contract stays a pure description of
- * the navigation — it has no opinion on how a session is stored or read, and
- * can be exercised without one.
+ * Whether the caller may open an address. Management and platform addresses
+ * follow their nav item; `/manage` and `/platform` themselves open when any
+ * of their items does. Everything else in the product is open to members
+ * (what a page shows inside is still decided by the API).
  */
-export type PermissionCheck = (codes: readonly string[]) => boolean;
-
-/** The items of one mode that the caller is actually authorised to open. */
-export function visibleRailItems(items: readonly RailItem[], can: PermissionCheck): RailItem[] {
-  return items.filter((item) => !item.permissionCodes || can(item.permissionCodes));
+export function canAccessPath(pathname: string, session: AuthSession | null, isEnabled: FeatureCheck = allFeatures): boolean {
+  const [path] = pathname.split("?");
+  if (path === "/manage") return visibleNavItems(MANAGE_NAV, session, isEnabled).length > 0;
+  if (path === "/platform") return canAccessPlatformControl(session) && visibleNavItems(PLATFORM_NAV, session, isEnabled).length > 0;
+  for (const item of [...MANAGE_NAV, ...PLATFORM_NAV]) {
+    if (isNavItemActive(item, path)) return canOpenNavItem(item, session, isEnabled);
+  }
+  if (ownsPath("/manage", path) || ownsPath("/platform", path)) return false;
+  return Boolean(session);
 }

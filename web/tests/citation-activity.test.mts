@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  isSameActivity,
-  knowledgeDocumentActivity,
-} from "../src/modules/chat/activity.ts";
+import { isSamePanel, type ChatPanel } from "../src/modules/chat/panel.ts";
 import {
   adjacentPage,
   citationPages,
@@ -15,12 +12,17 @@ import {
   previewPages,
   regionStyle,
 } from "../src/modules/knowledge/preview.ts";
-import type { AnswerSource } from "../src/modules/chat/sources.ts";
+import { answerSources, type AnswerSource } from "../src/modules/chat/sources.ts";
+import { DOCUMENT_CITATION_TYPE, type TurnState } from "../src/modules/chat/types.ts";
 import type {
   KnowledgePreview,
   PreviewAsset,
   ViewerCitation,
 } from "../src/modules/knowledge/types.ts";
+
+function sourcesPanel(source: AnswerSource, chunkId = source.chunkId): ChatPanel {
+  return { kind: "sources", messageId: "assistant-1", sourceId: source.id, chunkId };
+}
 
 function source(overrides: Partial<AnswerSource> = {}): AnswerSource {
   return {
@@ -29,7 +31,7 @@ function source(overrides: Partial<AnswerSource> = {}): AnswerSource {
     title: "Lesson 3.pdf",
     itemId: "item-1",
     chunkId: "item-1:12",
-    internalUrl: "/knowledge/documents/item-1?chunk=item-1%3A12",
+    internalUrl: "/documents/item-1?chunk=item-1%3A12",
     used: true,
     spans: [],
     passages: [],
@@ -66,63 +68,65 @@ function citation(overrides: Partial<ViewerCitation> = {}): ViewerCitation {
   return { section_path: [], spans: [], ...overrides };
 }
 
-// --- citation -> activity state -------------------------------------------
+// --- citation -> sources panel ----------------------------------------------
 
-test("a citation becomes a knowledge document activity without copying the source", () => {
-  const activity = knowledgeDocumentActivity(source({ page: 7 }));
+test("re-clicking the open citation keeps the panel, another passage replaces it", () => {
+  const open = sourcesPanel(source());
 
-  assert.deepEqual(activity, {
-    type: "knowledge_document",
-    citationId: "source-a1b2c3d4",
-    itemId: "item-1",
-    chunkId: "item-1:12",
-    passageIds: [],
-    title: "Lesson 3.pdf",
-    page: 7,
-  });
+  assert.equal(isSamePanel(open, sourcesPanel(source())), true);
+  assert.equal(isSamePanel(null, open), false);
+  // Another passage of the same document is a different focus.
+  assert.equal(isSamePanel(open, sourcesPanel(source(), "item-1:40")), false);
+  // The same document cited by another answer is another panel.
+  assert.equal(isSamePanel(open, { ...open, messageId: "assistant-2" }), false);
 });
 
-test("re-clicking the open citation is a no-op, another citation replaces it", () => {
-  const open = knowledgeDocumentActivity(source({ page: 3 }));
-
-  assert.equal(isSameActivity(open, knowledgeDocumentActivity(source({ page: 3 }))), true);
-  assert.equal(isSameActivity(null, open), false);
-  // Another citation in the same document is a different activity.
-  assert.equal(
-    isSameActivity(
-      open,
-      knowledgeDocumentActivity(source({ id: "source-99", chunkId: "item-1:40", page: 8 })),
-    ),
-    false,
-  );
+test("the sources panel, a file and the files list never count as the same panel", () => {
+  const file: ChatPanel = { kind: "file", artifactId: "artifact-1", revision: 2 };
+  assert.equal(isSamePanel(file, { kind: "file", artifactId: "artifact-1", revision: 2 }), true);
+  assert.equal(isSamePanel(file, { kind: "file", artifactId: "artifact-1", revision: 3 }), false);
+  assert.equal(isSamePanel(file, { kind: "files" }), false);
+  assert.equal(isSamePanel({ kind: "files" }, { kind: "files" }), true);
+  assert.equal(isSamePanel(sourcesPanel(source()), file), false);
 });
 
-test("an inline chip opens the panel at the cited page of the right document", () => {
-  // The chip click path: the answer's citation carries only identity plus the
-  // cited page, and the panel re-resolves the document from that.
-  const activity = knowledgeDocumentActivity(source({
-    id: "ref_1",
-    index: 1,
-    itemId: "item-7",
-    chunkId: "item-7:31",
-    page: 7,
-  }));
+test("a citation opens the document reader at its passage, never the API path", () => {
+  const turn: TurnState = {
+    id: "turn-1",
+    status: "completed",
+    responseOrder: ["response-1"],
+    responses: {
+      "response-1": {
+        id: "response-1",
+        status: "completed",
+        itemOrder: ["message-1"],
+        items: {
+          "message-1": {
+            type: "message",
+            id: "message-1",
+            role: "assistant",
+            status: "completed",
+            content: [{
+              type: "output_text",
+              text: "Per diem is USD 75 [1].",
+              annotations: [{
+                type: DOCUMENT_CITATION_TYPE,
+                citation: {
+                  number: 1,
+                  item_id: "item-7",
+                  chunk_id: "item-7:31",
+                  title: "Travel policy.pdf",
+                  internal_url: "/api/v1/knowledge/documents/item-7?chunk=item-7:31",
+                },
+              }],
+            }],
+          },
+        },
+      },
+    },
+  };
 
-  assert.equal(activity.type, "knowledge_document");
-  assert.equal(activity.itemId, "item-7");
-  assert.equal(activity.page, 7);
-  // Nothing about the preview is copied into activity state.
-  assert.equal("preview" in activity, false);
-  assert.equal("spans" in activity, false);
-});
-
-test("clicking a second chip in the same document switches page in place", () => {
-  const first = knowledgeDocumentActivity(source({ id: "ref_1", chunkId: "d:1", page: 3 }));
-  const second = knowledgeDocumentActivity(source({ id: "ref_2", chunkId: "d:9", page: 8 }));
-
-  assert.equal(isSameActivity(first, second), false);
-  assert.equal(first.itemId, second.itemId);
-  assert.equal(second.page, 8);
+  assert.equal(answerSources(turn)[0]?.internalUrl, "/documents/item-7?chunk=item-7%3A31");
 });
 
 // --- citation -> page ------------------------------------------------------

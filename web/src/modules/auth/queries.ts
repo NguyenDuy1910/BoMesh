@@ -1,23 +1,10 @@
 "use client";
 
-import { useCallback, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useRef, useState } from "react";
 
-import { apiRevision, subscribeApiData } from "@/lib/api/revision";
 import { getAuthSession } from "@/lib/auth/session";
-import { useApiQuery } from "@/lib/hooks/useApiQuery";
+import { ApiError } from "@/lib/api/request";
 import { switchWorkspace as requestWorkspaceSwitch } from "@/modules/auth/api";
-
-/**
- * The workspaces this person may switch to.
- *
- * They come from the session the API issued: a token carries exactly the
- * memberships it was minted for, so the switcher can never offer a workspace
- * the server would then refuse.
- */
-export function useWorkspaces() {
-  const revision = useSyncExternalStore(subscribeApiData, apiRevision, () => 0);
-  return useApiQuery(async () => getAuthSession()?.workspaces ?? [], revision);
-}
 
 /**
  * Switch exactly one workspace at a time and retain a recoverable error beside
@@ -44,7 +31,16 @@ export function useWorkspaceSwitch() {
       await requestWorkspaceSwitch(workspaceId);
       return true;
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not change workspace.");
+      // The API's detail names internal ids; say what happened instead.
+      setError(
+        cause instanceof ApiError && cause.status === 403
+          ? "You’re no longer a member of that workspace. Ask its admin to add you again."
+          : cause instanceof ApiError && cause.status === 401
+            ? "Your session has expired. Please sign in again."
+            : cause instanceof ApiError && cause.status === undefined
+              ? cause.message
+              : "The workspace couldn’t be opened. Try again in a moment.",
+      );
       return false;
     } finally {
       requestInFlight.current = false;

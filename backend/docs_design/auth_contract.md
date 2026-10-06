@@ -133,16 +133,32 @@ Google login passes the provider-issued ID credential through the same session
 endpoint. Native client IDs, callback schemes and backend audience configuration
 must match the deployed application; Flutter does not embed a provider secret.
 
+The web product shell has one sidebar, defined once in
+`web/src/lib/navigation.ts`. It is presentation over the session's
+permissions, never an authorization layer. Every member sees New chat, Inbox,
+Search and Knowledge. The Manage section lists only the items the caller may
+open: Overview (`tenant.read` and `tenant.manage`), Sources (`source.manage` or
+`ingestion.read`), People & access (`user.manage`, `role.manage`,
+`group.manage` or `access.manage`), Assistant setup (`tenant.manage`),
+Activity (`audit.read`) and Settings (`tenant.manage`). A caller with any
+`platform.*.read` grant in `platform_permissions` can open the Platform
+console, where the same sidebar lists Workspaces, Connectors, AI capabilities
+and Usage (`platform.tenant.read`), Users (`platform.user.read`), Audit log
+(`platform.audit.read`) and System health (`platform.health.read`). Items
+backed by an API that is still pending are hidden when that feature is turned
+off. An address the caller may not open renders a no-access page. Legacy
+`/app`, `/library` and `/workspace-control/*` addresses redirect permanently to
+their `/chat`, `/knowledge`, `/manage/*` and `/platform/*` successors.
+
 The app's Manage destination is presentation over the same permissions, never
 an authorization layer: it appears only when the session holds at least one
-management permission, and each section follows the web workspace-control
-codes (Overview `tenant.read`; Ingestion `ingestion.read`/`ingestion.run`/
-`source.manage`; Access `user.manage`/`group.manage`/`role.manage`/
-`access.manage`; Activity `audit.read`; Settings `tenant.manage`). Knowledge
-management on mobile needs `knowledge.manage` or `collection.share`, because
-reading knowledge is already the Library. The Platform switch needs any
-`platform.*.read` in `platform_permissions`. Every request is still authorized
-by the API.
+management permission, and each section follows these codes (Overview
+`tenant.read`; Ingestion `ingestion.read`/`ingestion.run`/`source.manage`;
+Access `user.manage`/`group.manage`/`role.manage`/`access.manage`; Activity
+`audit.read`; Settings `tenant.manage`). Knowledge management on mobile needs
+`knowledge.manage` or `collection.share`, because reading knowledge is already
+the Library. The Platform switch needs any `platform.*.read` in
+`platform_permissions`. Every request is still authorized by the API.
 
 ## Local full-access test accounts
 

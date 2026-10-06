@@ -37,14 +37,19 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   return <RouteLoading pathname={pathname} />;
 }
 
+const LOADING_LABELS: readonly [prefix: string, label: string][] = [
+  ["/chats", "Loading chats"],
+  ["/chat", "Loading chat"],
+  ["/knowledge", "Loading knowledge"],
+  ["/documents", "Loading document"],
+  ["/manage", "Loading workspace management"],
+  ["/platform", "Loading platform console"],
+  ["/workspaces", "Loading workspaces"],
+];
+
 function RouteLoading({ pathname }: { pathname: string }) {
-  if (pathname === "/app") return <LoadingPage label="Loading chat" />;
-  if (pathname === "/library") return <LoadingPage label="Loading library" />;
-  if (pathname === "/workspaces") return <LoadingPage label="Loading workspaces" />;
-  if (pathname === "/workspace-control" || pathname.startsWith("/workspace-control/")) {
-    return <LoadingPage label="Loading workspace control" />;
-  }
-  return <LoadingPage label="Checking session" centered />;
+  const label = LOADING_LABELS.find(([prefix]) => pathname === prefix || pathname.startsWith(`${prefix}/`))?.[1];
+  return label ? <LoadingPage label={label} /> : <LoadingPage label="Checking session" centered />;
 }
 
 /* Nothing is known yet — not even which shell will render — so this is the
