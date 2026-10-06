@@ -576,6 +576,422 @@ html[data-reduced-motion="true"] *::after {
   color: var(--text-tertiary);
 }
 
+/* Auth knowledge mesh. Compact screens keep the sign-in task focused by
+   omitting this decorative two-column illustration. */
+.auth-mesh {
+  isolation: isolate;
+}
+
+.auth-mesh::before {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--auth-mesh-blue) 5%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--auth-mesh-blue) 5%, transparent) 1px, transparent 1px);
+  background-size: 2rem 2rem;
+  content: "";
+  mask-image: linear-gradient(to bottom, var(--auth-art-text), transparent 88%);
+  pointer-events: none;
+}
+
+.auth-mesh::after {
+  position: absolute;
+  top: 22%;
+  left: -17.5rem;
+  width: 32.5rem;
+  height: 32.5rem;
+  border: 1px solid color-mix(in srgb, var(--auth-mesh-violet) 16%, transparent);
+  border-radius: var(--radius-full);
+  box-shadow:
+    0 0 0 4.25rem color-mix(in srgb, var(--auth-mesh-violet) 3.5%, transparent),
+    0 0 0 8.5rem color-mix(in srgb, var(--auth-mesh-cyan) 2.5%, transparent);
+  content: "";
+  pointer-events: none;
+}
+
+.auth-mesh > * {
+  position: relative;
+  z-index: 1;
+}
+
+.auth-mesh__brand {
+  color: var(--auth-art-text);
+  font-size: 1.0625rem;
+}
+
+.auth-mesh__body {
+  width: 100%;
+  max-width: 35rem;
+  margin-block: auto;
+}
+
+.auth-mesh__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  border: 1px solid color-mix(in srgb, var(--auth-mesh-violet) 24%, transparent);
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--auth-mesh-ink) 72%, transparent);
+  padding: 0.4375rem 0.625rem;
+  color: color-mix(in srgb, var(--auth-mesh-violet) 72%, var(--auth-art-text));
+  font-family: var(--font-mono);
+  font-size: 0.65625rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  text-transform: uppercase;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--auth-art-text) 6%, transparent);
+}
+
+.auth-mesh__eyebrow::before {
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: var(--radius-full);
+  background: var(--auth-mesh-cyan);
+  box-shadow: 0 0 0.75rem var(--auth-mesh-cyan);
+  content: "";
+}
+
+.auth-mesh__title {
+  max-width: 33.75rem;
+  margin: 1.125rem 0 0;
+  color: var(--auth-art-text);
+  font-size: clamp(2.125rem, 3.3vw, 3.25rem);
+  font-weight: 600;
+  letter-spacing: -0.045em;
+  line-height: 1.02;
+  text-wrap: balance;
+}
+
+.auth-mesh__title em {
+  background: linear-gradient(
+    105deg,
+    var(--auth-art-text) 6%,
+    color-mix(in srgb, var(--auth-mesh-violet) 58%, var(--auth-art-text)) 46%,
+    var(--auth-mesh-cyan) 100%
+  );
+  background-clip: text;
+  color: transparent;
+  font-style: normal;
+  -webkit-background-clip: text;
+}
+
+.auth-mesh__subtitle {
+  max-width: 31.25rem;
+  margin: 1.125rem 0 0;
+  color: color-mix(in srgb, var(--auth-art-text) 72%, transparent);
+  font-size: 0.96875rem;
+  line-height: 1.65;
+}
+
+.auth-mesh__stage {
+  position: relative;
+  height: 18.75rem;
+  max-width: 33.75rem;
+  margin: 1.625rem 0 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--auth-mesh-blue) 13%, transparent);
+  border-radius: 1.5rem;
+  background:
+    radial-gradient(circle at 50% 52%, color-mix(in srgb, var(--auth-mesh-violet) 24%, transparent), transparent 37%),
+    linear-gradient(145deg, color-mix(in srgb, var(--auth-art-text) 5.5%, transparent), color-mix(in srgb, var(--auth-art-text) 1.5%, transparent));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--auth-art-text) 7%, transparent),
+    0 1.875rem 5rem color-mix(in srgb, var(--auth-mesh-ink) 26%, transparent);
+}
+
+.auth-mesh__stage::before {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    circle at 50% 52%,
+    transparent 0 36%,
+    color-mix(in srgb, var(--auth-mesh-blue) 8%, transparent) 36.5%,
+    transparent 37.5%
+  );
+  content: "";
+  pointer-events: none;
+}
+
+.auth-mesh__links {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.auth-mesh__link {
+  fill: none;
+  stroke: color-mix(in srgb, var(--auth-mesh-blue) 30%, transparent);
+  stroke-width: 1.2;
+  stroke-dasharray: 5 7;
+  animation: auth-mesh-flow 8s linear infinite;
+}
+
+.auth-mesh__link--bright {
+  stroke: url("#auth-mesh-line");
+  stroke-width: 1.7;
+  stroke-dasharray: 7 9;
+  animation-duration: 6s;
+}
+
+.auth-mesh__link-dot {
+  fill: var(--auth-mesh-cyan);
+  filter: drop-shadow(0 0 0.3125rem color-mix(in srgb, var(--auth-mesh-cyan) 90%, transparent));
+}
+
+.auth-mesh__node {
+  position: absolute;
+  display: flex;
+  min-width: 8.875rem;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--auth-mesh-blue) 16%, transparent);
+  border-radius: var(--radius-sheet);
+  background: color-mix(in srgb, var(--auth-mesh-ink) 72%, transparent);
+  padding: 0.5625rem 0.6875rem;
+  box-shadow:
+    0 0.75rem 1.75rem color-mix(in srgb, var(--auth-mesh-ink) 22%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--auth-art-text) 4.5%, transparent);
+  backdrop-filter: blur(0.625rem);
+}
+
+.auth-mesh__node > svg {
+  width: 1.0625rem;
+  height: 1.0625rem;
+  flex: none;
+  color: color-mix(in srgb, var(--auth-mesh-violet) 82%, var(--auth-art-text));
+}
+
+.auth-mesh__node b {
+  display: block;
+  color: color-mix(in srgb, var(--auth-art-text) 96%, transparent);
+  font-size: 0.71875rem;
+  line-height: 1.25;
+}
+
+.auth-mesh__node small {
+  display: block;
+  margin-top: 0.125rem;
+  color: color-mix(in srgb, var(--auth-art-text) 52%, transparent);
+  font-size: 0.59375rem;
+  line-height: 1.35;
+}
+
+.auth-mesh__node--product { top: 2.125rem; left: 4%; }
+.auth-mesh__node--customer { top: 1.75rem; right: 4%; }
+.auth-mesh__node--security { bottom: 2.125rem; left: 6%; }
+.auth-mesh__node--engineering { right: 3%; bottom: 2.375rem; }
+
+.auth-mesh__core {
+  position: absolute;
+  top: 52%;
+  left: 50%;
+  width: 11rem;
+  transform: translate(-50%, -50%);
+  border: 1px solid color-mix(in srgb, var(--auth-mesh-violet) 38%, transparent);
+  border-radius: 1.125rem;
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--auth-mesh-violet) 48%, var(--auth-mesh-ink)),
+    color-mix(in srgb, var(--auth-mesh-blue) 18%, var(--auth-mesh-ink))
+  );
+  padding: 1.0625rem 0.875rem 0.875rem;
+  color: color-mix(in srgb, var(--auth-art-text) 78%, transparent);
+  font-size: 0.625rem;
+  line-height: 1.4;
+  text-align: center;
+  box-shadow:
+    0 0 0 0.5rem color-mix(in srgb, var(--auth-mesh-violet) 7%, transparent),
+    0 0 2.625rem color-mix(in srgb, var(--auth-mesh-violet) 34%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--auth-art-text) 16%, transparent);
+  animation: auth-mesh-pulse 4s ease-in-out infinite;
+}
+
+.auth-mesh__core-icon {
+  display: grid;
+  width: 2.125rem;
+  height: 2.125rem;
+  margin: 0 auto 0.5625rem;
+  place-items: center;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--auth-mesh-violet) 28%, transparent),
+    color-mix(in srgb, var(--auth-mesh-cyan) 16%, transparent)
+  );
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--auth-art-text) 12%, transparent);
+}
+
+.auth-mesh__core-icon svg {
+  width: 1.125rem;
+  height: 1.125rem;
+}
+
+.auth-mesh__core > b {
+  display: block;
+  color: var(--auth-art-text);
+  font-size: 0.8125rem;
+}
+
+.auth-mesh__core > span:not(.auth-mesh__core-icon, .auth-mesh__core-proof) {
+  display: block;
+  margin-top: 0.1875rem;
+}
+
+.auth-mesh__core-proof {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3125rem;
+  margin: 0.625rem -0.25rem -0.1875rem;
+  border-top: 1px solid color-mix(in srgb, var(--auth-art-text) 10%, transparent);
+  padding-top: 0.5625rem;
+  color: color-mix(in srgb, var(--auth-mesh-cyan) 74%, var(--auth-art-text));
+  font-family: var(--font-mono);
+  font-size: 0.5625rem;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.auth-mesh__core-proof svg {
+  width: 0.6875rem;
+  height: 0.6875rem;
+}
+
+.auth-mesh__permission {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  margin: 1rem 0 0;
+  color: color-mix(in srgb, var(--auth-art-text) 57%, transparent);
+  font-size: 0.71875rem;
+}
+
+.auth-mesh__permission svg {
+  width: 0.9375rem;
+  height: 0.9375rem;
+  flex: none;
+  color: color-mix(in srgb, var(--auth-mesh-cyan) 76%, var(--auth-art-text));
+}
+
+.auth-mesh__permission b {
+  color: color-mix(in srgb, var(--auth-art-text) 85%, transparent);
+  font-weight: 500;
+}
+
+.auth-mesh__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.125rem;
+  color: color-mix(in srgb, var(--auth-art-text) 46%, transparent);
+  font-size: 0.71875rem;
+}
+
+.auth-mesh__footer span {
+  display: flex;
+  align-items: center;
+  gap: 0.4375rem;
+}
+
+.auth-mesh__footer svg {
+  width: 0.875rem;
+  height: 0.875rem;
+  color: color-mix(in srgb, var(--auth-art-text) 58%, transparent);
+}
+
+@keyframes auth-mesh-flow {
+  to { stroke-dashoffset: -96; }
+}
+
+@keyframes auth-mesh-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 0.5rem color-mix(in srgb, var(--auth-mesh-violet) 7%, transparent),
+      0 0 2.625rem color-mix(in srgb, var(--auth-mesh-violet) 28%, transparent),
+      inset 0 1px 0 color-mix(in srgb, var(--auth-art-text) 16%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 0.75rem color-mix(in srgb, var(--auth-mesh-violet) 3.5%, transparent),
+      0 0 3.625rem color-mix(in srgb, var(--auth-mesh-cyan) 24%, transparent),
+      inset 0 1px 0 color-mix(in srgb, var(--auth-art-text) 16%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-mesh__link,
+  .auth-mesh__core {
+    animation: none;
+  }
+}
+
+html[data-reduced-motion="true"] .auth-mesh__link,
+html[data-reduced-motion="true"] .auth-mesh__core {
+  animation: none;
+}
+
+@media (min-width: 1100px) and (max-width: 1279px) {
+  .auth-mesh__node {
+    min-width: 8rem;
+    padding: 0.5rem 0.5625rem;
+  }
+
+  .auth-mesh__node b {
+    font-size: 0.6875rem;
+  }
+
+  .auth-mesh__node small {
+    font-size: 0.55rem;
+  }
+
+  .auth-mesh__core {
+    width: 10rem;
+    padding: 0.75rem 0.6875rem 0.625rem;
+  }
+
+  .auth-mesh__core-icon {
+    width: 1.75rem;
+    height: 1.75rem;
+    margin-bottom: 0.375rem;
+  }
+
+  .auth-mesh__core-proof {
+    margin-top: 0.4375rem;
+    padding-top: 0.4375rem;
+  }
+}
+
+@media (max-height: 760px) and (min-width: 1100px) {
+  .auth-mesh {
+    padding-block: 2.125rem;
+  }
+
+  .auth-mesh__subtitle {
+    margin-top: 0.75rem;
+  }
+
+  .auth-mesh__stage {
+    height: 15.625rem;
+    margin-top: 1.125rem;
+  }
+
+  .auth-mesh__node--product,
+  .auth-mesh__node--customer {
+    top: 1.375rem;
+  }
+
+  .auth-mesh__node--security,
+  .auth-mesh__node--engineering {
+    bottom: 1.5rem;
+  }
+}
+
 /* Welcome / sign-in — canonical Figma auth frame. */@media (max-width: 900px) {
 
   .welcome {

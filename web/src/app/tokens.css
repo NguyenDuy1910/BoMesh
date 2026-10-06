@@ -164,14 +164,19 @@
   --canvas-glow: none;
   --shadow-composer: 0 6px 20px -8px rgb(14 18 24 / 12%), var(--shadow-1);
   --shadow-composer-focus: 0 8px 28px -8px rgb(14 18 24 / 16%), var(--shadow-1);
-  /* The sign-in illustration panel: dark in both themes, tinted by the accent. */
+  /* The sign-in illustration panel stays dark in both themes. Its violet/cyan
+     graph palette represents linked knowledge, while the product accent remains
+     reserved for actions and focus. */
+  --auth-mesh-ink: #070916;
+  --auth-mesh-violet: #a78bfa;
+  --auth-mesh-blue: #818cf8;
+  --auth-mesh-cyan: #67e8f9;
   --auth-art-background:
-    radial-gradient(circle at 1px 1px, rgb(255 255 255 / 7%) 1px, transparent 1.3px) 0 0 / 22px 22px,
-    radial-gradient(620px 420px at 15% 35%, color-mix(in srgb, var(--accent-primary) 55%, transparent), transparent 70%),
-    radial-gradient(520px 420px at 95% 95%, rgb(240 196 64 / 14%), transparent 70%),
-    #0b0f1c;
+    radial-gradient(720px 520px at 18% 40%, color-mix(in srgb, var(--auth-mesh-violet) 38%, transparent), transparent 68%),
+    radial-gradient(520px 430px at 92% 18%, color-mix(in srgb, var(--auth-mesh-cyan) 16%, transparent), transparent 70%),
+    radial-gradient(460px 360px at 76% 92%, color-mix(in srgb, var(--auth-mesh-blue) 18%, transparent), transparent 72%),
+    var(--auth-mesh-ink);
   --auth-art-text: #ffffff;
-
   /* ── 3. Scale ─────────────────────────────────────────────────────────── */
   --radius-xs: 4px; /* checkboxes, sort buttons */
   --radius-sm: 6px; /* chips, small controls */
