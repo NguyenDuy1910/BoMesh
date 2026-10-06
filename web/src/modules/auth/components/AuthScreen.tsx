@@ -1,12 +1,8 @@
-import { MessageSquare } from "lucide-react";
+import { BookOpen, FileText, GitBranch, Link2, Lock, ShieldCheck, Sparkles, Users } from "lucide-react";
 
 import { ProductMark } from "@/components/ui/ProductMark";
 import { appBrand } from "@/lib/brand";
 import { cn } from "@/lib/cn";
-
-/** Text on the always-dark art panel, as a share of `--auth-art-text`. */
-const artMuted = "text-[color-mix(in_srgb,var(--auth-art-text)_64%,transparent)]";
-const artFaint = "text-[color-mix(in_srgb,var(--auth-art-text)_52%,transparent)]";
 
 /**
  * The signed-out frame: the product's promise on a dark panel beside the form
@@ -55,37 +51,102 @@ function AuthArt() {
   return (
     <aside
       aria-label={`About ${appBrand.productName}`}
-      className="relative hidden flex-col justify-between overflow-hidden p-12 text-(--auth-art-text) [background:var(--auth-art-background)] min-[1100px]:flex"
+      className="auth-mesh relative hidden flex-col justify-between overflow-hidden p-12 text-(--auth-art-text) [background:var(--auth-art-background)] min-[1100px]:flex"
     >
-      <BrandLine />
-      <div>
-        <p className="max-w-[460px] text-[1.875rem] font-semibold leading-[1.15] tracking-[-0.025em]">
-          Answers your company can stand behind.
+      <BrandLine className="auth-mesh__brand" />
+      <div className="auth-mesh__body">
+        <p className="auth-mesh__eyebrow">One trusted knowledge layer</p>
+        <p className="auth-mesh__title">
+          Your company’s knowledge, <em>alive and connected.</em>
         </p>
-        <p className={cn("mt-3 max-w-[420px] text-[0.9375rem] leading-relaxed", artMuted)}>
-          Every answer cites the documents it came from — and only the ones you’re allowed to see.
+        <p className="auth-mesh__subtitle">
+          {appBrand.productName} links every approved source into a living knowledge mesh—so every answer arrives with
+          context, lineage, and evidence.
         </p>
-        {/* An illustration of a cited answer, not an interactive citation. */}
+
         <figure
-          aria-hidden="true"
-          className="mt-8 max-w-[440px] rounded-2xl border border-[color-mix(in_srgb,var(--auth-art-text)_8%,transparent)] bg-[color-mix(in_srgb,var(--auth-art-text)_4%,transparent)] p-5 text-[0.90625rem] leading-[1.65] text-[color-mix(in_srgb,var(--auth-art-text)_86%,transparent)]"
+          aria-label="Product, customer, security, and engineering knowledge connected into one grounded answer"
+          className="auth-mesh__stage"
+          role="img"
         >
-          <div className={cn("mb-2.5 flex items-center gap-2 text-[0.8125rem]", artMuted)}>
-            <MessageSquare className="size-4" />
-            What’s the per diem for international travel?
+          <svg aria-hidden="true" className="auth-mesh__links" preserveAspectRatio="none" viewBox="0 0 540 300">
+            <defs>
+              <linearGradient id="auth-mesh-line" x1="0" x2="1" y1="0" y2="1">
+                <stop stopColor="var(--auth-mesh-violet)" />
+                <stop offset=".52" stopColor="var(--auth-mesh-blue)" />
+                <stop offset="1" stopColor="var(--auth-mesh-cyan)" />
+              </linearGradient>
+            </defs>
+            <path className="auth-mesh__link auth-mesh__link--bright" d="M98 70 C180 62 188 128 270 156" />
+            <path className="auth-mesh__link" d="M444 64 C356 70 350 119 270 156" />
+            <path className="auth-mesh__link" d="M104 238 C174 224 196 186 270 156" />
+            <path className="auth-mesh__link auth-mesh__link--bright" d="M438 232 C358 222 344 180 270 156" />
+            <path className="auth-mesh__link" d="M98 70 C188 8 352 8 444 64" />
+            <path className="auth-mesh__link" d="M104 238 C206 286 342 280 438 232" />
+            <circle className="auth-mesh__link-dot" cx="168" cy="87" r="2.4" />
+            <circle className="auth-mesh__link-dot" cx="370" cy="88" r="2.4" />
+            <circle className="auth-mesh__link-dot" cx="365" cy="209" r="2.4" />
+          </svg>
+
+          <div className="auth-mesh__node auth-mesh__node--product">
+            <FileText aria-hidden="true" />
+            <span>
+              <b>Product knowledge</b>
+              <small>Roadmaps &amp; specifications</small>
+            </span>
           </div>
-          The meal per diem is <b className="font-semibold text-(--auth-art-text)">USD 75 per day</b> and replaces
-          itemized meal receipts{" "}
-          <span className="inline-flex h-[18px] min-w-[19px] items-center justify-center rounded-[5px] bg-[color-mix(in_srgb,var(--evidence-line)_20%,transparent)] px-[5px] align-[2px] font-mono text-[11px] font-semibold leading-none text-[var(--evidence-line)] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--evidence-line)_50%,transparent)]">
-            1
-          </span>
-          <div className="mt-3.5 rounded-r-lg border-l-[3px] border-[var(--evidence-line)] bg-[color-mix(in_srgb,var(--evidence-line)_10%,transparent)] px-3 py-2.5 text-meta text-[color-mix(in_srgb,var(--auth-art-text)_88%,transparent)]">
-            <small className={cn("mb-1 block text-caption", artMuted)}>Travel &amp; Expense Policy · page 4</small>
-            Employees traveling internationally receive a meal per diem of USD 75 per calendar day.
+          <div className="auth-mesh__node auth-mesh__node--customer">
+            <Users aria-hidden="true" />
+            <span>
+              <b>Customer context</b>
+              <small>Research &amp; insights</small>
+            </span>
+          </div>
+          <div className="auth-mesh__node auth-mesh__node--security">
+            <ShieldCheck aria-hidden="true" />
+            <span>
+              <b>Security policies</b>
+              <small>Controls &amp; guidance</small>
+            </span>
+          </div>
+          <div className="auth-mesh__node auth-mesh__node--engineering">
+            <BookOpen aria-hidden="true" />
+            <span>
+              <b>Engineering memory</b>
+              <small>Decisions &amp; runbooks</small>
+            </span>
+          </div>
+
+          <div className="auth-mesh__core">
+            <span className="auth-mesh__core-icon">
+              <Sparkles aria-hidden="true" />
+            </span>
+            <b>Grounded answer</b>
+            <span>Connected across trusted sources</span>
+            <span className="auth-mesh__core-proof">
+              <Link2 aria-hidden="true" />
+              Evidence attached
+            </span>
           </div>
         </figure>
+
+        <p className="auth-mesh__permission">
+          <ShieldCheck aria-hidden="true" />
+          <span>
+            <b>Permission-aware by design.</b> People only discover knowledge they can access.
+          </span>
+        </p>
       </div>
-      <p className={cn("text-meta", artFaint)}>Permissions follow your sources. Nothing leaves your workspace.</p>
+      <div className="auth-mesh__footer">
+        <span>
+          <Lock aria-hidden="true" />
+          Private to your workspace
+        </span>
+        <span>
+          <GitBranch aria-hidden="true" />
+          Every answer stays traceable
+        </span>
+      </div>
     </aside>
   );
 }
