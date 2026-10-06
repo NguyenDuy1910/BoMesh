@@ -297,6 +297,7 @@ function ChangesTab({
             />
           </span>
         }
+        searchClassName="min-[861px]:w-auto"
       />
       {partial && (
         <Callout className="mb-3" tone="info">
@@ -467,6 +468,7 @@ function SignInsTab({
             />
           </span>
         }
+        searchClassName="min-[861px]:w-auto"
       />
       {partial && (
         <Callout className="mb-3" tone="info">Showing the latest {pluralize(all.length, "sign-in")}.</Callout>

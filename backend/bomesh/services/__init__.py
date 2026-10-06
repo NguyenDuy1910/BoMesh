@@ -336,7 +336,9 @@ COLLECTION_ROLE_CODES = (
 DEFAULT_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 DEFAULT_UPLOAD_URL_SECONDS = 600
 DEFAULT_PROCESSING_MAX_BYTES = 100 * 1024 * 1024
-PARSER_VERSION = "docling-2.121"
+#: Bumped when parsing output changes for the same file (r2: scanned PDF pages
+#: transcribed, spreadsheet banner rows lifted out of tables).
+PARSER_VERSION = "docling-2.121-r2"
 CHUNKER_VERSION = "docling-hybrid-line-v1"
 
 

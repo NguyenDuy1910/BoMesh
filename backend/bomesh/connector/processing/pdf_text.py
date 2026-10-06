@@ -7,7 +7,8 @@ lines are grouped into paragraphs and headings with their page and box,
 which is what chunking and citation highlighting need.
 
 What it does not read: scans, text inside pictures or screenshots, and table
-structure (a table's rows arrive as lines of text).
+structure (a table's rows arrive as lines of text). ``scanned_pages`` names
+the scanned pages so the caller can have them transcribed instead.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from pathlib import Path
 from statistics import median
 
 import pypdfium2 as pdfium
+import pypdfium2.raw as pdfium_c
 from docling_core.types.doc import (
     BoundingBox,
     CoordOrigin,
@@ -29,6 +31,10 @@ from docling_core.types.doc import (
 
 from . import DoclingProcessingError
 from .pdfium_lock import PDFIUM_LOCK
+
+#: A page with an image and fewer non-space characters than this is a scan: a
+#: printed page number or stamp on a scanned page is not its content.
+_SCAN_TEXT_CHARACTERS = 20
 
 #: Top and bottom bands of a page where running headers and footers sit.
 _MARGIN_BAND = 0.1
@@ -97,8 +103,10 @@ def pdf_text_document(
 ) -> DoclingDocument:
     """Paragraphs and headings of a PDF's text layer, with page and box provenance.
 
-    Raises ``DoclingProcessingError`` when the file cannot be read, has more
-    than ``max_pages`` pages, or has no text layer (a scan or images only).
+    Raises ``DoclingProcessingError`` when the file cannot be read or has more
+    than ``max_pages`` pages. A range without a text layer (a scan, images
+    only) yields its pages and no items; the caller decides whether that is
+    an error.
     """
 
     with PDFIUM_LOCK:
@@ -116,8 +124,6 @@ def pdf_text_document(
             pdf.close()
 
     lines = _without_furniture(lines, sizes)
-    if not lines:
-        raise DoclingProcessingError(f"No extractable content found in {name}")
     document = DoclingDocument(name=Path(name).stem or name)
     for page_no, size in sizes.items():
         document.add_page(page_no=page_no, size=size)
@@ -129,6 +135,52 @@ def pdf_text_document(
         else:
             document.add_text(label=DocItemLabel.TEXT, text=text, prov=provenance)
     return document
+
+
+def scanned_pages(
+    source: Path | bytes,
+    *,
+    name: str,
+    page_range: tuple[int, int],
+    max_pages: int,
+) -> tuple[range, frozenset[int]]:
+    """The 1-based pages of ``page_range`` in the file, and which of them are scans.
+
+    A scan is a page holding an image and (almost) no text layer. A blank
+    page is not a scan: there is nothing on it to transcribe.
+    """
+
+    with PDFIUM_LOCK:
+        try:
+            pdf = pdfium.PdfDocument(source if isinstance(source, bytes) else str(source))
+        except pdfium.PdfiumError as exc:
+            raise DoclingProcessingError(f"Docling could not read {name}") from exc
+        try:
+            if len(pdf) > max_pages:
+                raise DoclingProcessingError(f"{name} has more than {max_pages} pages")
+            first, last = page_range
+            pages = range(first, min(last, len(pdf)) + 1)
+            scans = frozenset(page_no for page_no in pages if _is_scan(pdf[page_no - 1]))
+        except pdfium.PdfiumError as exc:
+            raise DoclingProcessingError(f"Docling could not read {name}") from exc
+        finally:
+            pdf.close()
+    return pages, scans
+
+
+def _is_scan(page: pdfium.PdfPage) -> bool:
+    try:
+        text_page = page.get_textpage()
+        try:
+            characters = sum(1 for character in text_page.get_text_range() if not character.isspace())
+        finally:
+            text_page.close()
+        if characters >= _SCAN_TEXT_CHARACTERS:
+            return False
+        images = page.get_objects(filter=[pdfium_c.FPDF_PAGEOBJ_IMAGE])
+        return next(images, None) is not None
+    finally:
+        page.close()
 
 
 def _read_lines(
@@ -248,6 +300,8 @@ def _without_furniture(lines: list[_Line], sizes: dict[int, Size]) -> list[_Line
 
 
 def _blocks(lines: list[_Line]) -> list[_Block]:
+    if not lines:
+        return []
     body_height = median(line.height for line in lines) or 1.0
     blocks: list[_Block] = []
     for line in lines:
@@ -275,4 +329,4 @@ def _continues(previous: _Line, line: _Line) -> bool:
     return -tallest * 0.5 <= gap <= tallest * _PARAGRAPH_GAP
 
 
-__all__ = ["pdf_text_document"]
+__all__ = ["pdf_text_document", "scanned_pages"]

@@ -20,7 +20,11 @@ class UnsupportedFileTypeError(FileProcessingError):
 
 
 class FileNoTextError(FileProcessingError):
-    """Raised when a file holds no text to index (a scanned PDF, for one)."""
+    """Raised when a file holds no text to index (a scan without a vision model)."""
+
+
+class FileTranscriptionError(FileProcessingError):
+    """Raised when the vision model did not transcribe a scanned page."""
 
 
 class FileSizeLimitError(FileProcessingError):
@@ -70,6 +74,6 @@ __all__ = [
     "DEFAULT_MAX_ARCHIVE_BYTES", "DEFAULT_MAX_FILE_BYTES",
     "DEFAULT_MAX_TEXT_CHARACTERS", "FileProcessingError",
     "FileProcessor", "FileSizeLimitError", "FileTextLimitError",
-    "FileNoTextError", "FinxFileExtensions",
+    "FileNoTextError", "FileTranscriptionError", "FinxFileExtensions",
     "ProcessedFile", "UnsupportedFileTypeError",
 ]

@@ -76,12 +76,20 @@ retrieval reads one representation however the Document entered.
 
 Knowledge formats are text (`.txt .md .markdown .rst .csv .tsv .json .jsonl
 .xml .yaml .yml .html .htm .log .sql`), Office (`.docx .pptx .xlsx`) and PDF.
-Extraction uses no model: a PDF is read from its own text layer, so a scanned
-PDF (no text layer) fails processing with "the file has no text to index",
-and text inside pictures or screenshots is not indexed. PDFium is not
-thread-safe, so PDF text extraction and PDF preview rendering hold one
-process-wide lock; concurrent Activities in a worker parse other formats in
-parallel but PDFs one at a time.
+A typed PDF is read from its own text layer (no model). A scanned page (an
+image and fewer than 20 characters of text) is transcribed by Docling's VLM
+pipeline with the configured vision model (`BOMESH_DOCLING_MODEL` on
+OpenRouter, Markdown response parsed by Docling) and placed at its page
+number among the text-layer pages. Without that model a fully scanned PDF
+fails with "the file has no text to index"; a transcription the model did not
+finish fails with "the scanned pages could not be transcribed". Text inside
+pictures of typed pages is not indexed. Spreadsheets use Docling's xlsx
+backend; leading rows whose only text is one cell merged across columns (a
+title, a notes line) become text before the table, so the first real row is
+the column header chunks repeat. PDFium is not thread-safe: BoMesh and
+Docling share one process-wide lock (Docling's `pypdfium2_lock`) for every
+PDFium call; concurrent Activities in a worker parse other formats in
+parallel.
 The same parse also yields the document's whole-document rendition, read by
 the document viewer; see `document_viewer.md`.
 **Images are not knowledge in this phase.** An image (`.png .jpg .jpeg .gif

@@ -323,6 +323,8 @@ class ModelConfig:
     contextualization_enabled: bool = True
     contextualization_model: str | None = None
     reranker_model: str | None = None
+    #: Vision model that transcribes scanned PDF pages; unset leaves them unread.
+    docling_model: str | None = None
 
     def __post_init__(self) -> None:
         if self.agent_provider not in {"openai", "openrouter"}:
@@ -362,6 +364,7 @@ class ModelConfig:
             ),
             contextualization_model=optional_text("BOMESH_CONTEXTUALIZATION_MODEL"),
             reranker_model=optional_text("BOMESH_RERANKER_MODEL"),
+            docling_model=optional_text("BOMESH_DOCLING_MODEL"),
         )
 
 

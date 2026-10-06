@@ -28,6 +28,7 @@ from bomesh.agent.transports.openrouter_execution_capability import (
     OpenRouterExecutionCapabilityResolver,
 )
 from bomesh.connector.file import FileProcessor
+from bomesh.connector.processing import DoclingProcessor, PdfVision
 from bomesh.db.engine import LazySessionFactory, SessionFactory
 from bomesh.document_index import ItemIndex, SemanticContextualizer
 from bomesh.health import HealthService, HealthSettings
@@ -380,9 +381,26 @@ class AppRuntime:
 
         if self._stored_file_content is None:
             upload = self._config.upload
+            model = self._config.model
+            # Scanned PDF pages are transcribed only with the configured
+            # vision model (BOMESH_DOCLING_MODEL) on the OpenRouter endpoint.
+            vision = (
+                PdfVision(
+                    api_key=model.openrouter_api_key,
+                    base_url=model.openrouter_base_url,
+                    model=model.docling_model,
+                )
+                if model.docling_model and model.openrouter_api_key
+                else None
+            )
             self._stored_file_content = StoredFileContentService(
                 object_storage=self.object_storage(),
-                processor=FileProcessor(max_file_bytes=upload.processing_max_bytes),
+                processor=FileProcessor(
+                    max_file_bytes=upload.processing_max_bytes,
+                    docling=DoclingProcessor(
+                        max_file_bytes=upload.processing_max_bytes, vision=vision
+                    ),
+                ),
                 max_processing_bytes=upload.processing_max_bytes,
             )
         return self._stored_file_content

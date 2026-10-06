@@ -115,6 +115,9 @@ class DoclingChunker:
             ) from exc
 
         heading_paths = _heading_paths(document)
+        # Every chunk of a split table names the whole table; serialize each
+        # item once, not once per chunk (quadratic on large sheets).
+        item_texts: dict[str, str] = {}
         output: list[Chunk] = []
         for docling_chunk in docling_chunks:
             chunk_text = str(getattr(docling_chunk, "text", ""))
@@ -126,6 +129,7 @@ class DoclingChunker:
                 doc_items,
                 chunk_text=chunk_text,
                 source_parts=source_parts,
+                item_texts=item_texts,
             )
             section_path = _chunk_section_path(
                 docling_chunk,
@@ -319,6 +323,7 @@ def _citation_spans(
     *,
     chunk_text: str,
     source_parts: dict[str, AnyContentPart] | None,
+    item_texts: dict[str, str],
 ) -> tuple[list[CitationSpan], list[DocItem]]:
     spans: list[CitationSpan] = []
     included_items: list[DocItem] = []
@@ -328,11 +333,13 @@ def _citation_spans(
         )
         if source_parts is not None and source_part is None:
             continue
-        source_text = (
-            _canonical_part_text(source_part)
-            if source_part is not None
-            else _docling_item_text(document, doc_item)
-        )
+        if source_part is not None:
+            source_text = _canonical_part_text(source_part)
+        else:
+            source_text = item_texts.get(doc_item.self_ref)
+            if source_text is None:
+                source_text = _docling_item_text(document, doc_item)
+                item_texts[doc_item.self_ref] = source_text
         # Docling's chunk metadata is the authoritative item association.  A
         # local range is trustworthy only when the chunk is exactly the one
         # item's source serialization.  Split chunks, repeated table headers,
