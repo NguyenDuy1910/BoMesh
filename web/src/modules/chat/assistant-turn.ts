@@ -27,13 +27,6 @@ export type AssistantTurnItem =
       files: string[];
     };
 
-export type AssistantTurnRenderableItem = Exclude<AssistantTurnItem, { kind: "activity" }>
-  | {
-      kind: "activity_group";
-      id: string;
-      activities: RuntimeActivity[];
-    };
-
 /**
  * Function calls are model intent, not user-visible activity. An activity
  * appears only after the runtime says that call actually began executing.
@@ -111,36 +104,6 @@ export function assistantTurnItems(turn: TurnState | undefined): AssistantTurnIt
     }
   }
   return items;
-}
-
-/**
- * A turn owns one activity surface. Runtime actions can be interleaved with
- * commentary or later answer text, but rendering each contiguous run as a
- * separate card turns the conversation into an event log. The first observed
- * action fixes the surface's place in the transcript; subsequent actions
- * update that same surface in place.
- */
-export function groupAssistantTurnItems(
-  items: AssistantTurnItem[],
-): AssistantTurnRenderableItem[] {
-  const grouped: AssistantTurnRenderableItem[] = [];
-  const activities = items.flatMap((item) => item.kind === "activity" ? [item.activity] : []);
-  let insertedActivitySurface = false;
-
-  for (const item of items) {
-    if (item.kind === "activity") {
-      if (insertedActivitySurface) continue;
-      insertedActivitySurface = true;
-      grouped.push({
-        kind: "activity_group",
-        id: `activities:${item.id}`,
-        activities,
-      });
-      continue;
-    }
-    grouped.push(item);
-  }
-  return grouped;
 }
 
 /** One hosted shell run, as the chat presents it. */

@@ -1,60 +1,29 @@
-"use client";
-
-import type { StatusTone } from "@/components/ui/StatusPill";
-import type {
-  Connection,
-  ConnectionStatus,
-  Source,
-  SourceStatus,
-} from "@/modules/ingestion/integrations-api";
-import { RECONNECT_STATUSES } from "@/modules/ingestion/integrations-api";
-import { formatRelative } from "@/modules/workspace-control/format";
+import { accountStatusKey, sourceStatusKey, statusOf } from "@/lib/status";
+import { RECONNECT_STATUSES, type Connection, type Source, type SourceSync } from "@/modules/ingestion/integrations-api";
+import type { IngestionRun } from "@/modules/ingestion/runs-api";
 
 /**
- * How a connection's and a source's state are said out loud.
+ * A connection's and a source's standing, as `lib/status.ts` keys, and the
+ * one rule for which sources need someone.
  *
  * The API's vocabulary is precise and internal: `reauth_required` is the right
  * name for a grant that no longer authenticates, and the wrong thing to show a
- * person. Each state is translated once, here, so the sources list, the detail
- * page and the schedules cannot describe the same condition differently.
+ * person. Render `value` with `<StatusBadge kind="account" | "source">`.
  */
-
-export interface StateLabel {
-  label: string;
-  tone: StatusTone;
-  /** Shown only when something is wrong. A healthy connection needs no badge. */
+export interface StateKey {
+  value: string;
+  /** Anything but a healthy steady state. A healthy connection needs no badge. */
   attention: boolean;
 }
 
-const CONNECTION_STATES: Record<ConnectionStatus, StateLabel> = {
-  draft: { label: "Not verified", tone: "neutral", attention: true },
-  connected: { label: "Healthy", tone: "success", attention: false },
-  expired: { label: "Access expired", tone: "danger", attention: true },
-  reauth_required: { label: "Reconnect needed", tone: "danger", attention: true },
-  revoked: { label: "Access revoked", tone: "danger", attention: true },
-  error: { label: "Not reachable", tone: "warning", attention: true },
-  disconnected: { label: "Disconnected", tone: "neutral", attention: true },
-};
-
-const SOURCE_STATES: Record<SourceStatus, StateLabel> = {
-  ready: { label: "Ready", tone: "success", attention: false },
-  paused: { label: "Paused", tone: "neutral", attention: true },
-  failed: { label: "Last sync failed", tone: "danger", attention: true },
-  connection_required: { label: "Waiting on account", tone: "danger", attention: true },
-  disabled: { label: "Disabled", tone: "neutral", attention: true },
-};
-
-export function connectionState(connection: Connection): StateLabel {
-  return CONNECTION_STATES[connection.status] ?? CONNECTION_STATES.error;
+export function connectionState(connection: Connection): StateKey {
+  const value = accountStatusKey(connection.status);
+  return { value, attention: !statusOf("account", value).plain };
 }
 
-export function sourceState(source: Source): StateLabel {
-  return SOURCE_STATES[source.status] ?? SOURCE_STATES.failed;
-}
-
-/** Whether only a person completing the provider's flow can fix this. */
-export function needsReconnect(connection: Connection): boolean {
-  return RECONNECT_STATUSES.includes(connection.status);
+/** Whether only a person signing in again can fix this account. */
+export function needsReconnect(connection: Connection | null | undefined): boolean {
+  return Boolean(connection && RECONNECT_STATUSES.includes(connection.status));
 }
 
 /**
@@ -65,24 +34,86 @@ export function needsReconnect(connection: Connection): boolean {
  */
 export function accountLine(connection: Connection): string {
   const { label, resource_label: site } = connection.account;
-  return [label, site].filter(Boolean).join(" · ");
+  return [label, site].filter(Boolean).join(" · ") || connection.display_name;
 }
 
-/** Broken first, then working — the order an operator reads the list in. */
-export function byAttention(left: Connection, right: Connection): number {
-  const weight = (value: Connection) => (connectionState(value).attention ? 0 : 1);
-  return weight(left) - weight(right) || left.display_name.localeCompare(right.display_name);
+/** A source's name as people gave it. */
+export function sourceName(source: Source): string {
+  return source.display_name?.trim() || "Untitled source";
+}
+
+/** A run is processing this source's documents right now. */
+export function activeRunFor(source: Source, runs: readonly IngestionRun[]): IngestionRun | null {
+  return (
+    runs.find(
+      (run) => run.scope.source_id === source.id && (run.status === "queued" || run.status === "running"),
+    ) ?? null
+  );
 }
 
 /**
- * Where a source's latest sync stands, in one phrase: "Syncing…",
- * "Last synced 2h ago", "Sync failed". A sync only adds and updates
- * documents; whether they are processed is said by the pending count.
+ * The source's `source` status key. A sync is two things on the server —
+ * finding changes, then a run that makes them searchable — and either one in
+ * flight reads as "Syncing". A paused source stays paused whatever its account
+ * says; otherwise an account that needs signing in again outranks the rest.
  */
-export function syncLine(source: Source): string {
-  const sync = source.sync;
-  if (!sync) return "Not synced yet";
-  if (sync.status === "running") return "Syncing…";
-  if (sync.status === "failed") return "Sync failed";
-  return `Last synced ${formatRelative(sync.last_synced_at, "never")}`;
+export function sourceStatus(
+  source: Source,
+  connection: Connection | null | undefined,
+  activeRun: IngestionRun | null = null,
+): string {
+  const key = sourceStatusKey(source.status, source.sync?.status);
+  if (key === "syncing" || activeRun) return "syncing";
+  if (key === "paused") return "paused";
+  if (needsReconnect(connection)) return "reconnect";
+  return key;
+}
+
+export interface SourceAttention {
+  /** Stopped because their account must sign in again. */
+  reconnect: Source[];
+  /** Their last sync failed for another reason. */
+  failed: Source[];
+}
+
+/**
+ * Which sources need someone. The Sources page's call-outs, the sidebar badge
+ * and the overview read this one rule, so they always agree. Paused sources
+ * were stopped on purpose and are left out.
+ */
+export function sourceAttention(sources: readonly Source[], connections: readonly Connection[]): SourceAttention {
+  const byId = new Map(connections.map((connection) => [connection.id, connection]));
+  const result: SourceAttention = { reconnect: [], failed: [] };
+  for (const source of sources) {
+    const key = sourceStatus(source, byId.get(source.connection_id));
+    if (key === "reconnect") result.reconnect.push(source);
+    else if (key === "failed") result.failed.push(source);
+  }
+  return result;
+}
+
+/** `sourceAttention` as one list, reconnect first. */
+export function sourcesNeedingAttention(sources: readonly Source[], connections: readonly Connection[]): Source[] {
+  const { reconnect, failed } = sourceAttention(sources, connections);
+  return [...reconnect, ...failed];
+}
+
+/** How the latest finished sync went, for the "Last sync" column's icon. */
+export type SyncResult = "completed" | "partial" | "failed";
+
+export function lastSyncResult(sync: SourceSync | null | undefined): SyncResult | null {
+  if (!sync || sync.status === "running") return null;
+  if (sync.status === "failed") return "failed";
+  return sync.failed > 0 ? "partial" : "completed";
+}
+
+/** "3 added · 5 updated · 1 failed", or "No changes". */
+export function syncChangesText(sync: Pick<SourceSync, "added" | "updated" | "removed" | "failed">): string {
+  const parts = [
+    sync.added && `${sync.added.toLocaleString()} added`,
+    sync.updated && `${sync.updated.toLocaleString()} updated`,
+    sync.removed && `${sync.removed.toLocaleString()} removed`,
+    sync.failed && `${sync.failed.toLocaleString()} failed`,
+  ].filter(Boolean);
+  return parts.join(" · ") || "No changes";
 }

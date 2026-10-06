@@ -28,6 +28,7 @@ const theme = flags.theme ?? "light";
 
 const session = {
   access_token: "local-verification-token",
+  session_id: "00000000-0000-0000-0000-0000000000f1",
   token_type: "bearer",
   expires_at: new Date(Date.now() + 86_400_000).toISOString(),
   user_id: "00000000-0000-0000-0000-000000000002",
@@ -66,7 +67,7 @@ const context = await browser.newContext({ viewport: { width, height } });
 await context.addInitScript(
   ([s, t]) => {
     sessionStorage.setItem("bomesh.auth.session", s);
-    localStorage.setItem("bomesh-theme", t);
+    localStorage.setItem("bomesh.appearance", JSON.stringify({ theme: t }));
   },
   [JSON.stringify(session), theme],
 );

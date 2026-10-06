@@ -5,14 +5,14 @@ export type WorkspaceMarkSize = "sm" | "md" | "lg";
 
 const TONE: Record<WorkspaceMarkTone, string> = {
   accent: "bg-[var(--accent-primary)] text-[var(--text-on-accent)]",
-  neutral: "bg-[var(--status-neutral-solid)] text-[var(--text-on-accent)]",
+  neutral: "bg-[var(--status-neutral-text)] text-[var(--text-on-accent)]",
   soft: "bg-[var(--accent-soft)] text-[var(--text-accent)]",
 };
 
 const SIZE: Record<WorkspaceMarkSize, string> = {
-  sm: "h-6 w-6 rounded-[var(--radius-sm)] text-[length:var(--text-size-caption)]",
-  md: "h-8 w-8 rounded-[var(--radius-md)] text-[length:var(--text-size-ui)]",
-  lg: "h-10 w-10 rounded-[var(--radius-lg)] text-[length:var(--text-size-body)]",
+  sm: "h-6 w-6 rounded-[var(--radius-md)] text-[length:var(--text-size-caption)]",
+  md: "h-8 w-8 rounded-[var(--radius-lg)] text-[length:var(--text-size-body)]",
+  lg: "h-10 w-10 rounded-[var(--radius-sheet)] text-[length:var(--text-size-section)]",
 };
 
 /**

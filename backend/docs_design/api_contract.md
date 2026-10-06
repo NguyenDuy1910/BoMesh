@@ -535,6 +535,24 @@ Suspension (`PATCH /users/{user_id}` `status: suspended|active`) is a
 membership state of this workspace only. It never disables the account, its
 sign-in, or its other workspaces; account-wide disabling is a platform concern.
 
+Guard rules (all `409`, enforced in the identity services): a caller can never
+change their own workspace access — `PATCH /users/{own id}` with `role_ids`,
+`group_ids` or `status` is refused; the last active workspace administrator
+cannot be suspended or lose the administrator role; a caller cannot change the
+permissions of, or disable, a role they hold; and a custom role cannot be
+disabled while active members hold it (reassign them first). Granting a role
+(`POST /users`, `UserUpdate.role_ids`) or writing a role's permissions cannot
+exceed the caller's own permissions (`422`). There is no member removal or role
+deletion endpoint: suspension and role disabling are the reversible
+equivalents. The web console (Manage → People & access) mirrors these rules —
+your own row and roles you hold are shown read-only with the reason, abilities
+you lack cannot be switched on, and "Disable role" explains how many members
+still hold the role — and still relies on the server's answer.
+
+Approval decisions are final (`pending` is never re-entered), so the web
+console's Undo after Approve holds the `PATCH` for a few seconds and sends it
+only when the Undo window closes (or when the reviewer leaves the page).
+
 #### Workspace activity
 
 `GET /workspaces/{workspace_id}/activity` (`audit.read`) reports the caller's
@@ -633,3 +651,1151 @@ Before changing application code:
 4. Every frontend caller has a migration mapping.
 5. Then migrate routers, DTOs, services, authorization, clients, tests, and
    generated OpenAPI in one breaking-refactor pass.
+
+## Proposed — UI built, API pending
+
+Status: proposed, not implemented. Nothing in this section is in
+`openapi.yaml` or the endpoint map above, and no backend route serves it. The
+WebUI already ships these screens against typed client functions whose bodies
+call `pendingApi(<key>, …)` (`web/src/lib/api/pending.ts`); a local
+implementation in `web/src/lib/api/pending/<feature>.ts` answers with the
+shapes below, mirrors the permission rules below, keeps its state in the
+browser (`localStorage` namespaced `bomesh.pending.<key>.<account>.<workspace>`)
+and never writes to a real endpoint. Each subsection's anchor equals
+`PENDING_FEATURES[key].docsAnchor`. Builds choose which pending features they
+render with `NEXT_PUBLIC_BOMESH_PENDING_FEATURES=all|none|<comma list>`
+(unset means `all`, so production deployments set it explicitly) and the
+neutral Preview marker with `NEXT_PUBLIC_BOMESH_PENDING_MARKER=on|off`.
+
+All proposed endpoints follow the contract rules above: `/api/v1` base,
+bearer authentication unless marked public, `snake_case` JSON, the stable
+error body (`code`, `message`, `request_id`, `details`), identity from the
+access session (never from the body), and `404` for resources the caller
+cannot see.
+
+Swap procedure when a backend lands (docs/ux-refactor-plan.md §7): implement
+the endpoint with the shapes below, replace the client function body with the
+real request, delete the local implementation and its `PENDING_FEATURES`
+entry, remove the Preview marker, then move the contract from this section
+into the endpoint map (and `openapi.yaml`). Components and tests must not
+change; helpers marked "part of `<key>`" (local overlays) are deleted with the
+local implementation.
+
+### <a id="proposed-auth-password-reset"></a>Password reset — `auth.password_reset`
+
+Lets a person who forgot their password set a new one from an emailed link.
+This is the recovery lifecycle that "Authentication" above says is not built yet.
+
+| Method | Path | Auth |
+| --- | --- | --- |
+| POST | `/auth/password-resets` | public (`security: []`) |
+| POST | `/auth/password-resets/{token}/complete` | public (`security: []`) |
+
+Request `POST /auth/password-resets`:
+
+```json
+{ "email": "linh@example.com" }
+```
+
+Response `202` — identical whether or not an account uses the address, so the
+endpoint cannot be used to discover accounts. When an active account exists,
+the server emails a single-use link `/auth/password-reset/{token}`:
+
+```json
+{ "status": "accepted", "expires_in_minutes": 30 }
+```
+
+Request `POST /auth/password-resets/{token}/complete`:
+
+```json
+{ "password": "a-new-password" }
+```
+
+Response `200`:
+
+```json
+{ "status": "completed" }
+```
+
+Completing sets the password hash, consumes the token, and ends every active
+Session of the account (`access_sessions` → revoked); no new Session is
+returned, the person signs in with the new password.
+
+Errors: `422 VALIDATION_ERROR` (malformed email; password outside 8–128
+characters, as `AccountCreate`), `404 PASSWORD_RESET_INVALID` for an unknown,
+expired or already used token (one message for all three), `429
+TOO_MANY_ATTEMPTS` per email and per client.
+
+Screens: `/auth/login` ("Forgot password?"), `/auth/password-reset` (request
+and "check your email"), `/auth/password-reset/[token]` (set a new password).
+
+Local implementation: `lib/api/pending/password-reset.ts`. No email is sent;
+the link is written to the browser console (`[pending-api] auth.password_reset
+link: …`). Tokens live in a browser-wide store; no real password changes.
+
+Persistence (proposed): `password_reset_tokens` (see `design.dbml`).
+
+### <a id="proposed-artifact-manual-revision"></a>Edit an artifact by hand, restore a version — `artifact.manual_revision`
+
+Appends a revision written by a person (an edit in the file panel, or a
+restore of an earlier revision) instead of by the agent.
+
+| Method | Path | Auth | Permission |
+| --- | --- | --- | --- |
+| POST | `/artifacts/{artifact_id}/revisions` | bearer | artifact owner (the owner of its conversation) |
+| DELETE | `/artifacts/{artifact_id}/revisions/{revision}` | bearer | artifact owner |
+
+Request (`Idempotency-Key` required):
+
+```json
+{ "content": "# Plan\n\nEdited by hand", "summary": "Fixed the intro", "restored_from": null }
+```
+
+- `summary` is required (1–200 characters).
+- `content` is the full new text of a text artifact (Markdown, plain text,
+  CSV, JSON, other `text/*`). It may be omitted only when `restored_from` is
+  set; the server then copies that revision's stored object byte for byte
+  (this is how binary revisions are restored).
+- `restored_from` names an existing revision of the same artifact; it is kept
+  as provenance on the new revision.
+
+Response `201` — the new `ArtifactRevision` (as in `ArtifactDetail.revisions`,
+plus `restored_from`); the artifact's current revision becomes it:
+
+```json
+{ "revision": 4, "summary": "Restored version 2", "size_bytes": 1840, "created_at": "2026-10-05T09:12:00Z", "download_url": "https://…", "restored_from": 2 }
+```
+
+Errors: `404` artifact not visible or `restored_from` unknown, `403` readable
+but not owned, `415 UNSUPPORTED_MEDIA_TYPE` `content` sent for a binary
+artifact, `413` content above the artifact size limit, `422
+VALIDATION_ERROR` (summary missing/too long, neither `content` nor
+`restored_from`), `409 IDEMPOTENCY_KEY_REUSED`.
+
+`ArtifactRevision.restored_from` (nullable) and `ArtifactRevision.author`
+(`assistant` | `user`) are added to every revision read, so the version list
+can say "By the assistant", "Edited by you" or "Restored by you".
+
+`DELETE /artifacts/{artifact_id}/revisions/{revision}` is the Undo toast after
+an edit or restore: it removes the artifact's current revision when a person
+made it (`author: user`) less than 10 minutes ago, and the previous revision
+becomes current again. Response `204`. Errors: `404` not visible or unknown
+revision, `403` not owned, `409 CONFLICT` not the current revision, made by
+the agent, or older than 10 minutes (history is otherwise never rewritten).
+
+Screens: the chat file panel (`/chat/[conversationId]`): Edit → "Save as
+version N" (Undo), version list and old-version banner → Restore (Undo).
+Only text artifacts (Markdown, plain text) offer Edit; every kind offers
+Restore.
+
+Local implementation: `lib/api/pending/artifacts.ts`. Reads the real artifact
+to number the revision (next after the highest real or local one); keeps
+hand-made revisions with their content in the browser, keyed by artifact id.
+`applyLocalArtifactChanges(detail)` and `listLocalArtifactRevisions(id)` (part
+of this key, exported from `modules/chat/api.ts`) merge them into real reads;
+a local revision whose number the server later uses moves after the real ones.
+`deleteArtifactRevision(id, revision)` (same key) drops the newest local
+revision within the same 10-minute window. A local revision cannot be saved
+to knowledge: publishing still saves the server's newest revision, and the
+publish dialog says so.
+
+Persistence (proposed): `artifact_revisions.restored_from`; `author` is derived
+from the existing `request_id` / `created_by_user_id` (see `design.dbml`).
+
+### <a id="proposed-artifact-rename"></a>Rename an artifact — `artifact.rename`
+
+| Method | Path | Auth | Permission |
+| --- | --- | --- | --- |
+| PATCH | `/artifacts/{artifact_id}` | bearer | artifact owner |
+
+Request:
+
+```json
+{ "title": "Q3 plan" }
+```
+
+Response `200` — the full `ArtifactDetail` with the new `title` (`file_name`
+and revisions are unchanged; the title is a display name, not a new revision).
+
+Errors: `404` not visible, `403` not owned, `422 VALIDATION_ERROR` (empty
+after trimming, more than 200 characters).
+
+Screens: the chat file panel header and file card menu (Rename).
+
+Local implementation: `lib/api/pending/artifacts.ts`; requires a reachable API
+(it returns the real detail with the local title applied). Persistence: the
+artifact Item's existing `items.title`; no schema change.
+
+### <a id="proposed-artifact-export-formats"></a>Download an artifact in another format — `artifact.export_formats`
+
+| Method | Path | Auth | Permission |
+| --- | --- | --- | --- |
+| GET | `/artifacts/{artifact_id}/revisions/{revision}/export?format=csv\|pdf\|md` | bearer | read the artifact (as `GET /artifacts/{artifact_id}`) |
+
+Response `200` — the converted file as the body (`text/csv; charset=utf-8`
+with a byte-order mark, `application/pdf`, or `text/markdown; charset=utf-8`)
+and `Content-Disposition: attachment; filename="<title>.<ext>"`.
+
+- `csv`: a CSV revision as stored; otherwise the revision's tables (Markdown
+  tables, or every sheet of a spreadsheet) one after another, separated by a
+  blank row.
+- `md`: Markdown/plain text as stored; CSV as a Markdown table; other text in
+  a code fence; binary files from the revision's rendition (headings, text,
+  tables, links).
+- `pdf`: the server renders the original revision with its layout.
+
+Errors: `404` not visible or unknown revision, `415 UNSUPPORTED_MEDIA_TYPE`
+the revision cannot be converted to that format, `422 VALIDATION_ERROR`
+unknown `format` or no table to export as CSV.
+
+Screens: the chat file panel and file card download menu (Download as CSV /
+PDF / Markdown).
+
+Local implementation: `lib/api/pending/artifacts.ts` + `artifact-export.ts`
+convert in the browser from the revision content (or its preview rendition)
+and return a real file Blob. Honest limits of the local version: the PDF is a
+valid text-only PDF (Helvetica, A4) — letters outside Latin-1 lose their
+accents (Vietnamese "Hóa đơn" → "Hoa don") and layout/images are not kept;
+truncated previews are refused with `422` rather than exported partially.
+Persistence: derived files may be cached in `artifact_revisions.exports`; no
+schema change.
+
+### <a id="proposed-chat-share"></a>Share a conversation — `chat.share`
+
+Conversations are device-local (conversation_loop.md: "Device-local
+conversations … not cross-device"), so the server has no copy to share. A
+share therefore uploads a **snapshot** of the conversation that the server
+stores and serves read-only at `/s/{share_id}`.
+
+| Method | Path | Auth | Permission |
+| --- | --- | --- | --- |
+| POST | `/conversations/{conversation_id}/shares` | bearer | conversation owner (the creating account in the active workspace) |
+| GET | `/conversations/{conversation_id}/shares` | bearer | conversation owner — active links |
+| DELETE | `/conversations/{conversation_id}/shares/{share_id}` | bearer | conversation owner |
+| GET | `/conversation-shares/{share_id}` | bearer | workspace member (`workspace` audience) or a listed user (`people`) |
+
+Request `POST …/shares`:
+
+```json
+{
+  "audience": "people",
+  "emails": ["an.nguyen@northwind.com"],
+  "snapshot": {
+    "title": "Q3 travel policy",
+    "messages": [
+      { "role": "user", "content": "What is the per diem?" },
+      { "role": "assistant", "content": "It is 60 EUR a day [1].",
+        "sources": [{ "number": 1, "document_id": "4d2a…", "chunk_id": "4d2a…:12", "title": "Travel policy.pdf" }] }
+    ]
+  }
+}
+```
+
+- `audience`: `workspace` (any member of the conversation's workspace) or
+  `people` (`emails`, one or more members of that workspace; required). People
+  are named by email because member ids need the member directory
+  (`user.manage`), which most members don't hold; the server resolves each
+  address to a member and rejects addresses that aren't members.
+- `snapshot.messages`: 1–500 non-empty messages; `sources` are the Documents
+  each answer cites, one per `[n]` marker, with the passage to open at.
+
+Response `201` (`ConversationShare`; `GET …/shares` returns `{items}` of it):
+
+```json
+{
+  "id": "5eaf…", "conversation_id": "c1", "audience": "people", "emails": ["an.nguyen@northwind.com"],
+  "url": "/s/5eaf…", "message_count": 2, "created_at": "2026-10-05T09:12:00Z",
+  "created_by": { "id": "…", "display_name": "Linh Tran" }, "revoked_at": null
+}
+```
+
+`DELETE` → `204`, idempotent for an already revoked share.
+
+`GET /conversation-shares/{share_id}` → `200` `SharedConversation`:
+
+```json
+{
+  "id": "5eaf…", "title": "Q3 travel policy", "audience": "people",
+  "created_at": "2026-10-05T09:12:00Z", "created_by": { "id": "…", "display_name": "Linh Tran" },
+  "messages": [
+    { "role": "user", "content": "What is the per diem?", "sources": [] },
+    { "role": "assistant", "content": "It is 60 EUR a day [1].", "sources": [
+      { "number": 1, "available": true, "document_id": "4d2a…", "chunk_id": "4d2a…:12", "title": "Travel policy.pdf" }
+    ] }
+  ]
+}
+```
+
+Sources are **filtered per recipient**: a cited Document the recipient cannot
+read (`collection.read`) is returned as `{ "number": 1, "available": false }`,
+never its id, title or text. Revoked shares, unknown ids and callers outside
+the audience all get `404`, so ids can't be probed. The owner can always read
+their own share.
+
+Errors: `404` unknown share/conversation, `403` not the owner, `422
+VALIDATION_ERROR` (audience, empty or oversize snapshot, `people` without
+emails, an address that is not a member of the workspace).
+
+Screens: chat thread header and answer "More" menu → Share dialog
+(`/chat/[conversationId]`): who can open (everyone in the workspace / people
+by email), "Create and copy link", "Turn off link" (DELETE); creating a new
+link turns the previous one off, so one link is live per chat. Recipient view
+`/s/[shareId]`: the read-only snapshot with only the sources the reader can
+open, and "Continue in a new chat" (copies the snapshot into a chat of their
+own).
+
+Local implementation: `lib/api/pending/conversation-shares.ts`; shares and
+snapshots stay in the owner's browser store (the namespace is the ownership
+check), so a link opens only in that browser; the recipient read searches
+this browser's share stores, applies the audience rule and re-reads each
+cited Document as the caller.
+
+Persistence (proposed): `conversation_shares` (see `design.dbml`).
+
+### <a id="proposed-document-move"></a>Move documents to another knowledge base — `document.move`
+
+| Method | Path | Auth | Permission |
+| --- | --- | --- | --- |
+| POST | `/documents/move` | bearer | effective `collection.update` on each source Collection and on the target |
+
+Request:
+
+```json
+{ "document_ids": ["d1", "d2"], "collection_id": "c-target" }
+```
+
+Response `200` — per-document outcome; a partial move is a success:
+
+```json
+{ "moved": ["d1"], "failed": [{ "document_id": "d2", "reason": "forbidden" }] }
+```
+
+`reason` is `not_found` (not visible), `forbidden` (no `collection.update` on
+its Collection) or `already_in_collection`. A moved Document keeps its id,
+content, citations and processing state; its Item gets the new
+`parent_item_id`, and ACL inheritance follows the new Collection. Moving does
+not start an Ingestion Run; the search index is updated with the new
+Collection scope. Conversation attachments and archive children follow their
+own rules (attachments cannot be moved).
+
+Errors: `404` target not visible, `403` no `collection.update` on the target,
+`422 VALIDATION_ERROR` (empty list, more than 100 ids).
+
+Screens: `/knowledge/[collectionId]` document table, bulk bar → Move to.
+
+Local implementation: `lib/api/pending/documents.ts` reads the real target
+Collection, Documents and source Collections to decide each outcome, and
+keeps the moves in the browser; `listLocalDocumentMoves()` (part of this key,
+exported from `modules/knowledge/api.ts`) lets the lists apply them.
+Persistence: `items.parent_item_id`; no schema change.
+
+### <a id="proposed-document-restore"></a>Restore a deleted document — `document.restore`
+
+`DELETE /documents/{document_id}` tombstones the Item (`items.status =
+deleted`, `deleted_at` set). Restore reverses that tombstone.
+
+| Method | Path | Auth | Permission |
+| --- | --- | --- | --- |
+| POST | `/documents/{document_id}/restore` | bearer | effective `collection.update` on the Document's Collection |
+
+Request: no body. Response `200` — the `Document`, as `GET
+/documents/{document_id}` returns it, with its pre-deletion `status` and
+`processing`. Restoring a live Document is a no-op that returns it.
+
+Restore is allowed while the Collection is live and within the retention
+window (proposed 30 days; after it the tombstone is purged). Citations and
+index entries tombstoned with the Document are reactivated; when that cannot
+be done the Document reads back `processing.state = pending` for a new run.
+
+Errors: `404` unknown, purged, or its Collection deleted; `403` no
+`collection.update`; `409` the name is now taken by another live Document in
+the Collection.
+
+Screens: `/knowledge/[collectionId]` and `/documents/[documentId]` — the Undo
+in the toast after Archive.
+
+Local implementation: `lib/api/pending/documents.ts`. It cannot undo a delete
+the server already applied: it returns a Document that is still live and
+answers `404` otherwise. While this key is pending, the Undo must defer the
+real `DELETE` until its toast closes: the Knowledge document table hides the
+archived rows at once, holds the `DELETE` for the 8-second Undo window
+(`modules/knowledge/archive-queue.ts`), and sends any held delete when the
+page is hidden. When the key is disabled the `DELETE` is sent at once and no
+Undo is offered.
+
+Persistence (proposed): restore lifecycle on `items` (see `design.dbml`).
+
+### <a id="proposed-collection-general-access"></a>Open a knowledge base to the whole workspace — `collection.general_access`
+
+Collection ACL principals are only `user` and `group`, so "everyone in the
+workspace can view" has no grant today; a Collection is readable only by the
+people and groups it is shared with and by workspace roles that cover every
+Collection. This adds the workspace itself as a principal on the existing ACL
+routes.
+
+| Method | Path | Auth | Permission |
+| --- | --- | --- | --- |
+| PUT | `/collections/{collection_id}/access/workspace/{workspace_id}` | bearer | effective `collection.share` |
+| DELETE | `/collections/{collection_id}/access/workspace/{workspace_id}` | bearer | effective `collection.share` |
+
+- `principal_type` gains `workspace`; `principal_id` must be the caller's
+  active workspace id (`404` otherwise). PUT body `{ "role": "viewer" }` —
+  only `viewer` is accepted for the workspace principal (`422` otherwise), so
+  editing and sharing always stay with named people and groups.
+- Effect: every active member of the workspace has the `collection_viewer`
+  permissions on that Collection and its subtree (same inheritance as other
+  grants), including members who join later. Suspended members do not.
+- `GET /collections/{id}/access` lists the grant as `{ principal_type:
+  "workspace", principal_id, principal_name: "<workspace name>", role:
+  "viewer" }`.
+- `Collection` (every read, including `/knowledge/home`) gains read-only
+  `general_access: "workspace" | "restricted"`, so readers without
+  `collection.share` can see who else can open it.
+- A personal Collection ("My files", `system_kind` `personal_uploads` or
+  `conversation_artifacts`) cannot be opened to the workspace: `422`.
+
+Errors: `404` Collection or workspace not visible, `403` no
+`collection.share`, `422` personal Collection or a role other than `viewer`.
+
+Client function: `setCollectionGeneralAccess(collectionId, { general_access:
+"workspace" | "restricted" })` → `{ collection_id, general_access, updated_at }`
+(PUT for `workspace`, DELETE for `restricted`).
+
+Screens: `/knowledge` (access badge Everyone / Restricted / Only you, Access
+filter), Create knowledge base dialog ("Who can see it"),
+`/knowledge/[collectionId]` header access chip and Access tab "General access".
+
+Local implementation: `lib/api/pending/collections.ts` checks the real
+Collection's `collection.share` and refuses the caller's personal Collection;
+the setting is kept per workspace in this browser and changes nothing about
+who the server lets read the Collection. `localCollectionGeneralAccess()`
+(part of this key) supplies `general_access` until reads carry it; a
+Collection without a local entry reads as `restricted`, which is what the
+server holds today.
+
+Persistence (proposed): `role_assignments` row with the tenant as principal
+(see `design.dbml`); no new table.
+
+### <a id="proposed-collection-discovery"></a>Knowledge bases a member can ask to join — `collection.discovery`
+
+`GET /collections` and `/knowledge/home` list only readable Collections, so a
+member cannot see that a knowledge base exists to request access to it. This
+lists Collections the caller can see but not read: their name and who owns
+them, never their documents.
+
+| Method | Path | Auth | Permission |
+| --- | --- | --- | --- |
+| GET | `/collections?visibility=discoverable` | bearer | `knowledge.read` |
+
+Response `200`:
+
+```json
+{
+  "items": [
+    { "id": "c-legal", "title": "Legal Contracts", "description": "Executed customer and vendor agreements.",
+      "general_access": "restricted", "owner_label": "Owned by Legal" }
+  ],
+  "total": 1
+}
+```
+
+- Which Collections are discoverable is a server rule to settle with the
+  backend (proposed: non-personal top-level Collections of the workspace,
+  excluding ones the caller can already read; a Collection may later opt out).
+- `owner_label` names the owners in plain words ("Owned by Legal", "Owned by
+  Linh Tran and 2 more"); `null` when there is no owner grant.
+- Requesting access stays `POST /approval-requests` `{ request_type:
+  "resource_access", target_id, details: { role: "collection_viewer" |
+  "collection_editor" }, reason }`.
+
+Screens: `/knowledge` locked cards and list rows (Request access, or "Access
+requested" with the pending status), `/knowledge/[collectionId]` locked state.
+
+Local implementation: `lib/api/pending/collections.ts` never invents
+Collections. It lists only real Collection ids the caller has already met but
+cannot read: addresses that answered `404` on the knowledge base page
+(`rememberUnreadableCollection`, part of this key) and the targets of the
+caller's own `resource_access` requests that are pending or were denied.
+Titles are unknown locally, so they read "Restricted knowledge base"; ids that
+turn out not to exist (`404` on the access request) are forgotten.
+
+Persistence: none (a read projection).
+
+### <a id="proposed-workspace-assistant-settings"></a>Assistant settings — `workspace.assistant_settings`
+
+How the workspace's assistant answers and what people see on a new chat.
+The chat home reads the welcome message and starters through the same `GET`.
+
+| Method | Path | Auth | Permission |
+| --- | --- | --- | --- |
+| GET | `/workspaces/{workspace_id}/assistant-settings` | bearer | any active member (another workspace is `404`) |
+| PATCH | `/workspaces/{workspace_id}/assistant-settings` | bearer | `tenant.manage` |
+
+Response (`AssistantSettings`, both methods):
+
+```json
+{
+  "instructions": "You are Northwind’s internal assistant. …",
+  "answer_length": "balanced",
+  "capabilities": { "web_search": false, "file_work": true, "charts": true },
+  "knowledge_search_always_on": true,
+  "welcome_message": "What can I help you find?",
+  "starter_prompts": [{ "title": "Find a policy", "prompt": "What does our travel policy say about per diem?" }],
+  "updated_at": "2026-10-05T09:12:00Z",
+  "updated_by": { "id": "…", "display_name": "Linh Tran" }
+}
+```
+
+Defaults before the first save (`updated_at`/`updated_by` null): the
+instructions above addressed to the workspace name, `balanced`, file work and
+charts on, web search off, the welcome message above, and three starters
+(Find a policy, Summarize a document, Prepare for a customer).
+
+PATCH request: any subset of `instructions`, `answer_length`
+(`concise|balanced|detailed`), `capabilities` (partial booleans merge),
+`welcome_message`, `starter_prompts` (replaces the list). Strings are trimmed.
+
+Validation (`422 VALIDATION_ERROR`): `instructions` ≤ 2,000 characters;
+`welcome_message` 1–60; `starter_prompts` ≤ 3, each `title` 1–40 and `prompt`
+1–160; `knowledge_search_always_on` cannot be set to `false`. Other errors:
+`401`, `403` without `tenant.manage`, `404` not a member.
+
+The agent reads these settings at the start of each turn (instructions and
+answer length shape the system prompt; capabilities gate tools); model choice
+stays deployment configuration.
+
+Screens: `/manage/assistant` (Behavior and Home screen tabs, live preview);
+`/chat` home (welcome and starters).
+
+Local implementation: `lib/api/pending/assistant-settings.ts`, one
+workspace-wide store per workspace; limits exported as `ASSISTANT_LIMITS` from
+`modules/manage/assistant/api.ts`.
+
+Persistence (proposed): `workspace_assistant_settings` (see `design.dbml`).
+
+### <a id="proposed-workspace-archive"></a>Archive a workspace — `workspace.archive`
+
+| Method | Path | Auth | Permission |
+| --- | --- | --- | --- |
+| POST | `/workspaces/{workspace_id}/archive` | bearer | `tenant.manage` in that workspace |
+
+Request — the person types the workspace URL code to confirm:
+
+```json
+{ "confirm_code": "northwind" }
+```
+
+Response `200`:
+
+```json
+{ "workspace_id": "…", "status": "archived", "archived_at": "2026-10-05T09:12:00Z", "archived_by": { "id": "…", "display_name": "Linh Tran" } }
+```
+
+Archiving sets `tenants.status = archived`: members can no longer switch into
+it (`PATCH /auth/session` → `403`), its sources stop syncing and schedules are
+paused, and its data is retained. Reactivation is a platform action
+(`platform.workspace_admin`).
+
+Errors: `403` without `tenant.manage`, `404` not a member, `409` already
+archived, `422 VALIDATION_ERROR` `confirm_code` does not match the code.
+
+Reading the state: `GET /workspaces/{workspace_id}` returns `status:
+"archived"` with `archived_at` and `archived_by` while the archive is in
+effect (client `getWorkspaceArchive`, which returns the same
+`WorkspaceArchive` shape, or `null` for an active workspace).
+
+Screens: `/manage/settings` danger zone (typed-confirmation dialog; after the
+request the card says when and by whom it was requested).
+
+Local implementation: `lib/api/pending/workspace-settings.ts` records the
+archive in a workspace-wide browser store only; the real workspace stays
+active. The code to type is the workspace's current web address (including a
+pending `workspace.url_code` change). Persistence: `tenants.status` gains
+`archived`.
+
+### <a id="proposed-workspace-branding"></a>Workspace accent color — `workspace.branding`
+
+Stored in `Workspace.settings.branding`; no new route.
+
+| Method | Path | Auth | Permission |
+| --- | --- | --- | --- |
+| GET | `/workspaces/{workspace_id}` | bearer | active workspace context — reads `settings.branding` |
+| PATCH | `/workspaces/{workspace_id}` | bearer | `tenant.manage` |
+
+PATCH request:
+
+```json
+{ "settings": { "branding": { "accent": "teal" } } }
+```
+
+`settings.branding` in the `Workspace` response (the client functions return
+this object):
+
+```json
+{ "accent": "teal", "updated_at": "2026-10-05T09:12:00Z" }
+```
+
+`accent` is one of `indigo | teal | ocean | plum | graphite` (the WebUI's
+`html[data-accent]` palette); default `indigo` with `updated_at` null. Only
+the action colour changes; status and evidence colours never do. A person's
+own accent preference overrides it on their device.
+
+Errors: `403` without `tenant.manage`, `422 VALIDATION_ERROR` unknown accent.
+
+Screens: `/manage/settings` (Brand card with a live preview); the product
+shell applies it for every member whose accent preference is "Workspace
+brand" (the default). Clients re-read it after a save.
+
+Local implementation: `lib/api/pending/workspace-settings.ts`, a
+workspace-wide browser store. Persistence: `tenants.settings.branding`
+(see `design.dbml`).
+
+### <a id="proposed-workspace-url-code"></a>Change the workspace web address — `workspace.url_code`
+
+`WorkspaceUpdate` today accepts only `name` and `settings`; an unknown
+`code` field is rejected (`422`). This proposes making `code` writable on the
+same route; no new route.
+
+| Method | Path | Auth | Permission |
+| --- | --- | --- | --- |
+| GET | `/workspaces/{workspace_id}` | bearer | active workspace context — reads `code` |
+| PATCH | `/workspaces/{workspace_id}` | bearer | `tenant.manage` |
+
+PATCH request (may be combined with `name`):
+
+```json
+{ "code": "northwind-group" }
+```
+
+Response: the updated `Workspace`. The client functions
+(`getWorkspaceCode`, `updateWorkspaceCode`) return `{ "code": "…",
+"updated_at": "…" }`, `updated_at` null while the workspace keeps the address
+it was created with.
+
+Rules: the address rule of workspace creation (`platform.workspace_admin`):
+3–32 lowercase letters, numbers or hyphens, starting and ending with a letter
+or number, unique across every workspace. Sending the current code is a
+no-op. An address created before this rule stays valid until it is changed.
+Saved links that contain the old address stop resolving, so the screen warns
+before saving; the server keeps no redirect from the old address.
+
+Errors: `403` without `tenant.manage`, `404` not a member, `409` the address
+is used by another workspace, `422 VALIDATION_ERROR` malformed address.
+Writes an audit event `tenant.updated` with `changed_fields: ["code"]`.
+
+Screens: `/manage/settings` General card ("Web address", with the
+link-breakage warning and a Preview tag while pending). The workspace archive
+confirmation asks for this address.
+
+Local implementation: `lib/api/pending/workspace-settings.ts` keeps the new
+address in a workspace-wide browser store; the real workspace keeps its code,
+so only this browser's Settings and archive confirmation use it. Uniqueness is
+checked against the caller's own workspaces only. Persistence: the existing
+unique `tenants.code` column; no schema change.
+
+### <a id="proposed-account-notification-prefs"></a>Notification preferences — `account.notification_prefs`
+
+| Method | Path | Auth | Permission |
+| --- | --- | --- | --- |
+| GET | `/me/notification-preferences` | bearer | self |
+| PATCH | `/me/notification-preferences` | bearer | self |
+
+Response (`NotificationPreferences`):
+
+```json
+{
+  "email": { "source_sync_failures": true, "access_requests": true, "cited_document_changes": true, "weekly_summary": true },
+  "updated_at": null
+}
+```
+
+PATCH request — partial booleans merge:
+
+```json
+{ "email": { "weekly_summary": false } }
+```
+
+Preferences belong to the account and apply in every workspace. Emails are
+only sent where the person qualifies: `source_sync_failures` needs
+`source.manage`, `access_requests` needs to own or review the knowledge base
+(`access.manage` / `collection.share`); the WebUI shows those two toggles
+only to people who hold the permission.
+
+Errors: `401`, `422 VALIDATION_ERROR` (unknown key, non-boolean).
+
+Screens: account menu → Profile & preferences dialog (Email notifications).
+
+Local implementation: `lib/api/pending/notification-preferences.ts`, a
+per-account browser store. Persistence: `users.preferences.notifications`
+(see `design.dbml`).
+
+### <a id="proposed-analytics-knowledge-gaps"></a>Knowledge gaps — `analytics.knowledge_gaps`
+
+Frequent questions in the active workspace that knowledge could not answer
+well, so an administrator can add the missing documents or dismiss the gap.
+
+| Method | Path | Permission |
+| --- | --- | --- |
+| GET | `/workspaces/{workspace_id}/knowledge-gaps?window=7d\|30d&include_dismissed=` | `tenant.manage` |
+| PATCH | `/workspaces/{workspace_id}/knowledge-gaps/{gap_id}` | `tenant.manage` |
+
+Like overview, only the caller's active workspace answers; another
+workspace id is `404`. `window` defaults to `7d`; anything else is `422`.
+Dismissed gaps are omitted unless `include_dismissed=true`.
+
+```json
+{
+  "window": "7d",
+  "generated_at": "2026-10-05T09:00:00Z",
+  "items": [
+    {
+      "id": "uuid",
+      "question": "What is the notice period for contractors?",
+      "times_asked": 23,
+      "last_asked_at": "2026-10-05T06:00:00Z",
+      "reason": "not_covered",
+      "suggested_collection_id": "uuid",
+      "suggested_collection_title": "HR Policies",
+      "dismissed": false,
+      "dismissed_at": null
+    }
+  ]
+}
+```
+
+- `reason` is `not_covered | outdated | rated_unhelpful`; clients word it.
+- `times_asked` counts askings inside the window; items are ordered by it,
+  descending.
+- `suggested_collection_*` names a Collection the caller can read, or both
+  are `null`. The server never suggests a Collection the caller cannot see.
+- PATCH body `{ "dismissed": true|false }` returns the updated gap. A
+  dismissal is workspace-wide and reversible (Undo sends `false`).
+- Errors: `401`, `403` without `tenant.manage`, `404` unknown gap or
+  workspace, `422` invalid window or body.
+- Screens: Manage → Overview "Knowledge gaps" (Add documents opens the
+  suggested knowledge base; Dismiss with Undo).
+- Local implementation (`pending/knowledge-gaps.ts`): five fixed seed
+  questions (one only in `30d`); dismissals stored per account and
+  workspace; the suggestion is chosen among the caller's real Collections
+  (`GET /collections`) by topic words in the title, else `null`.
+
+### <a id="proposed-audit-export"></a>Export activity — `audit.export`
+
+The workspace's audit trail as a CSV file, filtered exactly like the
+Activity list.
+
+| Method | Path | Permission |
+| --- | --- | --- |
+| GET | `/audit-logs/export?format=csv&window=24h\|7d\|30d&actor=&area=&outcome=success\|failure&search=` | `audit.read` |
+
+- `window` is required. `actor` is a user id, or `system` for events with no
+  person behind them. `area` is one of `knowledge` (collection and document
+  actions), `files` (artifacts), `sources` (ingestion sources, connections
+  and connector requests), `people` (members, groups, roles, access
+  requests) or `settings` (workspace). `outcome=failure` is every outcome
+  other than `success`. `search` is the Activity list's free text: a
+  case-insensitive match on the person's name or email, the plain-language
+  action and the target, as the list shows them.
+- Response `200 text/csv; charset=utf-8` with
+  `Content-Disposition: attachment`, UTF-8 with a byte-order mark, CRLF line
+  ends, newest first. Columns: `Time` (ISO 8601), `Actor` (display name, else
+  email, else `BoMesh`), `Action` (the plain-language sentence the Activity
+  page shows), `Target` (resource type and, when recorded, its name or
+  email), `Outcome` (`Succeeded`/`Failed`), `IP address` (when recorded;
+  blank today because audit rows do not carry one).
+- Cells are RFC 4180 quoted; a value starting with `=`, `+`, `-`, `@`, tab or
+  CR gets a leading `'` so spreadsheet apps never run it as a formula.
+- At most 10,000 rows; the server may stream.
+- Errors: `401`, `403` without `audit.read`, `422` unknown format or window.
+- Screens: Manage → Activity, "Export CSV".
+- Local implementation (`pending/audit-export.ts`): pages through the real
+  `GET /audit-logs` (`page_size=100`, newest first) until the window start
+  with the Activity list's own reader (`modules/manage/activity/activity-log.ts`),
+  applies the list's filter (`auditEventMatches` in
+  `modules/manage/activity/audit-actions.ts`, the one action → sentence
+  translation) and returns the same file as a `Blob` named
+  `activity-<workspace code>-<YYYY-MM-DD>.csv` by the screen.
+
+### <a id="proposed-notifications-inbox"></a>Notifications — `notifications.inbox`
+
+The signed-in person's inbox in the active workspace: what changed that they
+should look at, each linked to where it is resolved.
+
+| Method | Path | Permission |
+| --- | --- | --- |
+| GET | `/notifications?unread_only=` | self |
+| PATCH | `/notifications/{notification_id}` | self (own notification) |
+| POST | `/notifications/read-all` | self |
+
+```json
+{
+  "items": [
+    {
+      "id": "uuid",
+      "kind": "source_failed",
+      "title": "Ops folder stopped syncing",
+      "body": "The account's access was revoked.",
+      "created_at": "2026-10-05T07:00:00Z",
+      "read": false,
+      "href": "/manage/sources?source=uuid"
+    }
+  ],
+  "unread_count": 4
+}
+```
+
+- `kind`: `product_notice | source_failed | connection_reconnect |
+  access_request | access_request_pending | access_request_approved |
+  access_request_denied`. Newest first. `unread_count` covers the whole
+  inbox whatever the filter.
+- A notification is only created for something its recipient may read:
+  source and account items go to holders of `source.manage`; `access_request`
+  to reviewers of that request type (`access.manage` for `resource_access`,
+  `source.manage` for `plugin_installation`); `access_request_*` to the
+  requester.
+- `href` is an app route: `/manage/sources?source={source_id}`,
+  `/manage/sources?tab=accounts&connection={connection_id}`,
+  `/manage/access?tab=requests`, `/knowledge/{collection_id}`,
+  `/manage/overview`.
+- PATCH body `{ "read": true|false }` returns the notification; read-all
+  returns `{ "updated": n }`.
+- Errors: `401`, `404` unknown or someone else's notification, `422`.
+- Screens: the sidebar Inbox drawer (All/Unread, Mark all read, deep links).
+- Local implementation (`pending/notifications.ts`): three seeded product
+  notices (one only for `tenant.manage`), plus items derived from real reads
+  the caller is already allowed: `GET /connections` and `GET /sources` (with
+  `source.manage`) and `GET /approval-requests`. A failed read is skipped.
+  Only read state is stored, per account and workspace.
+
+### <a id="proposed-platform-workspace-admin"></a>Create and suspend workspaces — `platform.workspace_admin`
+
+| Method | Path | Permission |
+| --- | --- | --- |
+| POST | `/platform/workspaces` | `platform.tenant.manage` (proposed) |
+| PATCH | `/platform/workspaces/{workspace_id}` | `platform.tenant.manage` (proposed) |
+
+Request bodies:
+
+```json
+{ "name": "Litware Labs", "code": "litware-labs", "owner_email": "sam@litware.com" }
+```
+
+```json
+{ "status": "suspended" }
+```
+
+- `code` is the web address: `^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$` (3–32
+  characters), unique across every workspace (`409` names the workspace that
+  holds it). `name` is 2–255 characters. `owner_email` becomes the first
+  admin (membership plus the workspace admin role); an email without an
+  account is accepted and the person is added when they sign up.
+- Both return `201`/`200` with the `WorkspaceHealth` row (`id, code, name,
+  status, settings, created_at, updated_at, owner, member_count,
+  connection_count`). Proposed addition: `GET /platform/workspaces` returns
+  the same row. Today the service computes `owner`, `member_count` and
+  `connection_count`, but the router maps rows through `workspace_payload`
+  (OpenAPI `Workspace`), so only `id, code, name, status, settings` reach
+  the client; the console shows `—` for what is missing.
+- `status` is `active | suspended`. Suspension blocks sign-in to that
+  workspace for every member; nothing is deleted.
+- New platform permission `platform.tenant.manage`, granted to the platform
+  admin role. Until a session holds it, the WebUI shows these actions to
+  holders of `platform.tenant.read`; the server must enforce the new code.
+- Errors: `401`, `403`, `404` unknown workspace, `409` code taken, `422`.
+- Screens: Platform → Workspaces (Create workspace dialog,
+  Suspend/Reactivate with confirm, drawer).
+- Local implementation (`pending/platform-workspaces.ts`): reads the real
+  `GET /platform/workspaces`; created workspaces live only in the browser and
+  carry `source: "local"`; status changes are stored as overrides keyed by
+  the real workspace id, merged by `listPlatformWorkspaces`, and flag the row
+  `changed_locally: true`. Both fields are client-side annotations of the
+  pending layer (not part of the proposed response); the console marks those
+  rows with the Preview tag and "Created/Changed in this browser". With the
+  feature turned off, `listPlatformWorkspaces` reads the real list only.
+
+### <a id="proposed-platform-user-admin"></a>Manage platform users — `platform.user_admin`
+
+| Method | Path | Permission |
+| --- | --- | --- |
+| PATCH | `/platform/users/{user_id}` | `platform.user.manage` (proposed) |
+
+```json
+{ "is_platform_admin": true, "status": "suspended" }
+```
+
+- Either field, or both. `is_platform_admin` grants or revokes the platform
+  admin role assignment; `status` (`active | suspended`) is account-wide
+  (`users.status`), unlike workspace membership suspension.
+- The caller can never change their own row: `403` "You can't change your own
+  platform role or account status."
+- Response: the `GET /platform/users` row plus `is_platform_admin: boolean`.
+  Proposed addition: `GET /platform/users` returns `is_platform_admin` on
+  every row. The service already reads each account's `platform_roles` and
+  workspace `memberships`, but the router maps rows through `user_payload`
+  (OpenAPI `User`), so the client receives `roles: []` and `groups: []`; the
+  console therefore shows neither workspace counts nor last activity.
+- New platform permission `platform.user.manage`; until a session holds it
+  the WebUI mirrors it with `platform.user.read`.
+- Errors: `401`, `403` (no permission, or self), `404`, `422`.
+- Screens: Platform → Users (row menu and drawer: Make/Remove platform admin,
+  Suspend/Reactivate account).
+- Local implementation (`pending/platform-users.ts`): reads the real
+  `GET /platform/users` and merges overrides keyed by user id;
+  `is_platform_admin` is `null` (unknown) for rows nobody changed here,
+  except the caller's own row, which the session answers. Overridden rows
+  carry the client-side flag `changed_locally: true`, shown as the Preview
+  tag and "Changed in this browser"; the console words `null` as "Not
+  reported yet" and offers both Make and Remove platform admin for it.
+
+### <a id="proposed-platform-connectors"></a>Connector availability — `platform.connectors`
+
+| Method | Path | Permission |
+| --- | --- | --- |
+| GET | `/platform/connectors` | `platform.tenant.read` |
+| PATCH | `/platform/connectors/{connector_key}` | `platform.connector.manage` (proposed) |
+
+```json
+[
+  {
+    "key": "google_drive",
+    "name": "Google Drive",
+    "description": "Files and shared drives",
+    "built_in": false,
+    "supported": true,
+    "available": true,
+    "authentication": "oauth",
+    "workspace_count": 5,
+    "request_count": 0,
+    "oauth_client": {
+      "client_id": "1234-abc.apps.googleusercontent.com",
+      "has_secret": true,
+      "deployment_configured": true,
+      "updated_at": "2026-09-01T10:00:00Z",
+      "updated_by": "Alex Rivera"
+    }
+  }
+]
+```
+
+PATCH body: `{ "available": false }` and/or
+`{ "oauth_client": { "client_id": "…", "client_secret": "…" } }`.
+
+- `supported` means the deployment's connector registry has an adapter;
+  unsupported connectors cannot be made available (`409`) and only collect
+  `plugin_installation` requests (`request_count`). The built-in file upload
+  is always available (`409` on change).
+- Turning a connector off stops new connections and syncs; existing
+  documents stay searchable.
+- `client_secret` is write-only: stored encrypted, never returned in any
+  response or log. Responses carry only `has_secret`. Omitting it keeps the
+  current secret. `deployment_configured` says the deployment's environment
+  already provides the client.
+- Errors: `401`, `403`, `404` unknown key, `409`, `422` (malformed client id,
+  secret shorter than 16 characters, OAuth settings on a non-OAuth
+  connector).
+- Screens: Platform → Connectors (cards, availability toggle with confirm,
+  Configure drawer).
+- Local implementation (`pending/platform-connectors.ts`): rows from the
+  connector catalogue plus file upload; `supported`, `authentication` and
+  `deployment_configured` from the real `GET /connections/providers` when
+  readable; counts seeded; the secret is validated and discarded, only
+  `has_secret` is stored.
+
+### <a id="proposed-platform-capabilities"></a>AI capabilities — `platform.capabilities`
+
+| Method | Path | Permission |
+| --- | --- | --- |
+| GET | `/platform/capabilities` | `platform.tenant.read` |
+
+```json
+[
+  {
+    "key": "chat",
+    "name": "Answers and reasoning",
+    "description": "Writes answers and decides when to search knowledge.",
+    "status": "operational",
+    "setting": "OPENROUTER_MODEL",
+    "model": "provider/model-name",
+    "checked_at": "2026-10-05T09:00:00Z"
+  }
+]
+```
+
+- Read-only. Keys: `chat` (`OPENROUTER_MODEL`), `embeddings`
+  (`EMBEDDING_MODEL`), `vision_parsing` (`BOMESH_DOCLING_MODEL`),
+  `contextualization` (`BOMESH_CONTEXTUALIZATION_MODEL`). `setting` is the
+  deployment variable name; models change only in deployment configuration.
+- `status`: `operational | degraded | down | not_configured | not_checked`.
+- Never returns secrets, keys, base URLs or any other configuration value;
+  `model` is the model identifier only, for platform callers.
+- Screens: Platform → AI capabilities (status rows, degraded call-out).
+- Local implementation (`pending/platform-capabilities.ts`): fixed rows;
+  `chat` and `embeddings` take status and model from the real
+  `GET /platform/health` services `openai_chat` and `openrouter_embeddings`
+  when the caller holds `platform.health.read`; the rest are `not_checked`.
+  The browser never reads deployment values.
+
+### <a id="proposed-platform-usage"></a>Platform usage — `platform.usage`
+
+| Method | Path | Permission |
+| --- | --- | --- |
+| GET | `/platform/usage?window=7d\|30d\|90d` | `platform.tenant.read` |
+
+```json
+{
+  "window": "30d",
+  "start": "2026-09-06",
+  "generated_at": "2026-10-05T09:00:00Z",
+  "totals": { "questions": 41230, "active_people": 610, "documents_processed": 1880 },
+  "previous": { "questions": 38900, "active_people": 590, "documents_processed": 1650 },
+  "daily": [{ "date": "2026-09-06", "questions": 1210 }],
+  "workspaces": [
+    { "workspace_id": "uuid", "name": "Northwind", "questions": 30410, "active_people": 350, "documents_processed": 900 }
+  ]
+}
+```
+
+- Aggregates only: no identities, no message content. `questions` counts
+  user messages, `active_people` distinct active users, `documents_processed`
+  documents that finished processing in the window. `daily` is oldest first
+  and zero-filled (UTC days); `previous` is the equally long span before
+  `start`. `workspaces` is ordered by questions, descending.
+- Errors: `401`, `403`, `422` unknown window.
+- Screens: Platform → Usage (window, three totals with change, chart,
+  sortable per-workspace table).
+- Local implementation (`pending/platform-usage.ts`): rows are the real
+  workspaces from `GET /platform/workspaces`; their numbers are seeded from
+  each workspace id and member count (suspended workspaces show none);
+  totals and the daily series are sums of the rows. If the workspace list
+  cannot be read, every figure is zero.
+
+### <a id="proposed-platform-health-history"></a>Health history — `platform.health_history`
+
+| Method | Path | Permission |
+| --- | --- | --- |
+| GET | `/platform/health/history?days=30` | `platform.health.read` |
+
+```json
+{
+  "days": 30,
+  "start": "2026-09-06",
+  "generated_at": "2026-10-05T09:00:00Z",
+  "services": [
+    {
+      "name": "openai_chat",
+      "checks": 2880,
+      "uptime_percent": 99.93,
+      "daily": [{ "date": "2026-09-06", "status": "healthy", "checks": 96 }]
+    }
+  ],
+  "incidents": [
+    {
+      "id": "uuid",
+      "service": "openai_chat",
+      "status": "unhealthy",
+      "error_category": "timeout",
+      "started_at": "2026-09-27T08:15:00Z",
+      "resolved_at": "2026-09-27T08:53:00Z"
+    }
+  ]
+}
+```
+
+- The server keeps the result of every periodic `GET /platform/health`
+  probe (service name, status, `error_category`, time); nothing else, and
+  never a raw error message. `days` is 1–90 (default 30); `daily` has one
+  entry per UTC day, oldest first, `status` `healthy | issues | no_data`
+  (`no_data`: no probe ran that day). `uptime_percent` is healthy probes over
+  probed ones (`not_configured` is a setting, not an outage, and is not
+  counted); `null` when the service was never probed in the window.
+- An incident is a run of failing probes for one service, opened by the
+  first `unhealthy`/`degraded` result and closed (`resolved_at`) by the next
+  healthy one; `resolved_at` is `null` while it lasts. `status` is the worst
+  seen. Newest first.
+- Errors: `401`, `403`, `422` out-of-range `days`.
+- Screens: Platform → System health ("Last 30 days" strip and Uptime
+  columns; Recent incidents).
+- Local implementation (`pending/platform-health-history.ts`): keeps the
+  REAL `GET /platform/health` reports this browser reads (each time System
+  health opens or refreshes; `getPlatformHealth` records them while the
+  feature is on), up to 90 days and 2,000 checks per account, and derives
+  the same response from them. Days nobody checked from this browser are
+  `no_data`; nothing is seeded.
+- Persistence: proposed table `platform_health_checks` (`design.dbml`).
+
+### <a id="proposed-platform-audit-export"></a>Export the platform audit log — `platform.audit_export`
+
+Every recorded event across workspaces and the platform as a CSV file,
+filtered exactly like Platform → Audit log.
+
+| Method | Path | Permission |
+| --- | --- | --- |
+| GET | `/platform/audit-logs/export?format=csv&window=24h\|7d\|30d\|90d&search=&workspace_id=&area=&outcome=success\|failure` | `platform.audit.read` |
+
+- `window` is required. `search` is the same server search as
+  `GET /platform/audit-logs` (action, resource id, person's name or email,
+  workspace name). `workspace_id` is a workspace id, or `platform` for
+  events that belong to no workspace. `area` and `outcome` mean what they
+  mean for `audit.export` (`outcome=failure` is every outcome other than
+  `success`).
+- Response `200 text/csv; charset=utf-8` with `Content-Disposition:
+  attachment`, the same file rules as `audit.export` (byte-order mark, CRLF,
+  RFC 4180 quoting, formula neutralising, newest first, at most 10,000 rows).
+  Columns: `Time`, `Workspace` (its name, `Platform` for platform events,
+  `Deleted workspace` when it no longer has a name), `Actor`, `Action`,
+  `Target`, `Outcome`, `IP address`.
+- Errors: `401`, `403` without `platform.audit.read`, `422` unknown format
+  or window.
+- Screens: Platform → Audit log, "Export CSV" (file
+  `platform-audit-<YYYY-MM-DD>.csv`).
+- Local implementation (`pending/platform-audit-export.ts`): pages through
+  the real `GET /platform/audit-logs` (`page_size=100`) until the window
+  start with the shared reader (`readSince`), applies the page's own filter
+  (`platformAuditMatches` in `modules/platform/audit-filter.ts`) and writes
+  rows with `audit.export`'s row and file helpers (`auditCsvRow`,
+  `csvBlob`), adding the Workspace column. Nothing is stored.
+
+### <a id="proposed-workspace-member-remove"></a>Remove a member from the workspace — `workspace.member_remove`
+
+| Method | Path | Auth | Permission |
+| --- | --- | --- | --- |
+| DELETE | `/users/{user_id}` | bearer | `user.manage` |
+
+Ends one person's membership of the active workspace. It is a lifecycle
+change, not a physical delete: the membership is tombstoned
+(`tenant_memberships.deleted_at` set, status `inactive`), its workspace role
+and group assignments end, and the account, its sign-in and its other
+workspaces are untouched. `POST /users` with the same email readmits the
+person with exactly the roles given (already implemented). Suspension
+(`PATCH /users/{id}` `status`) stays the reversible "pause".
+
+Response `200`:
+
+```json
+{
+  "user_id": "uuid",
+  "email": "minh.pham@northwind.com",
+  "display_name": "Minh Pham",
+  "removed_at": "2026-10-06T09:12:00Z",
+  "removed_by": "uuid"
+}
+```
+
+- Guard rules, as for `PATCH /users/{id}`: `409` when the caller removes
+  themselves ("an administrator cannot change their own workspace access")
+  and `409` when it would remove the last active workspace administrator.
+- Errors: `401`, `403` without `user.manage`, `404` when the person is not a
+  member (or was already removed), `409` as above.
+- Audit: `member.removed` with `{email}`.
+- Screens: Manage → People & access → member row menu "Remove from
+  workspace" and the member drawer's Remove (confirm dialog; disabled for
+  yourself), Undo in the result toast.
+- Local implementation (`pending/member-remove.ts`): reads the REAL
+  `/users` list, applies the guard rules (the last-admin check reads what
+  roles allow from `/roles` when the caller may), and records the removal in
+  this browser for the workspace (`bomesh.pending.workspace.member_remove.shared.<workspace>`).
+  Removed members are hidden from the members list only in this browser; a
+  Preview-tagged notice says they can still open the workspace, with Restore.
+  Undo/Restore clears the local record (the server equivalent is `POST /users`).
+- Persistence: none new — `tenant_memberships.deleted_at` and `status`
+  already exist.

@@ -79,15 +79,17 @@ export function beginAuthorization(request: AuthorizationRequest): PendingAuthor
   const popup = window.open("", "bomesh-authorize", POPUP_FEATURES);
   if (!popup) throw new PopupBlocked();
 
-  let settle: ((outcome: () => void) => void) | null = null;
+  let stopWatching: () => void = () => undefined;
+  let cancel: () => void = () => undefined;
   const completed = new Promise<AuthorizationResult>((resolve, reject) => {
     let done = false;
     const finish = (outcome: () => void) => {
       if (done) return;
       done = true;
+      stopWatching();
       outcome();
     };
-    settle = finish;
+    cancel = () => finish(() => reject(new AuthorizationCancelled()));
 
     void (async () => {
       let started: { authorization_url: string; nonce: string };
@@ -102,12 +104,13 @@ export function beginAuthorization(request: AuthorizationRequest): PendingAuthor
         finish(() => reject(cause));
         return;
       }
+      if (done) return;
       if (popup.closed) {
         finish(() => reject(new AuthorizationCancelled()));
         return;
       }
       popup.location.replace(started.authorization_url);
-      watch(popup, started.nonce, finish, resolve, reject);
+      stopWatching = watch(popup, started.nonce, finish, resolve, reject);
     })();
   });
 
@@ -118,26 +121,20 @@ export function beginAuthorization(request: AuthorizationRequest): PendingAuthor
     },
     cancel: () => {
       popup.close();
-      settle?.(() => {
-        /* the close poll rejects it */
-      });
+      cancel();
     },
   };
 }
 
+/** Listens for the provider's answer; returns the function that stops listening. */
 function watch(
   popup: Window,
   nonce: string,
   finish: (outcome: () => void) => void,
   resolve: (value: AuthorizationResult) => void,
   reject: (reason: Error) => void,
-) {
+): () => void {
   const origin = new URL(getApiUrl() ?? window.location.origin).origin;
-
-  const stop = () => {
-    window.removeEventListener("message", onMessage);
-    window.clearInterval(closeTimer);
-  };
 
   function onMessage(event: MessageEvent) {
     // Three checks, and all three are needed: the origin proves the API sent
@@ -152,35 +149,22 @@ function watch(
     if (payload.status === "connected" && typeof payload.connection_id === "string") {
       const connectionId = payload.connection_id;
       const connectorKey = String(payload.connector_key ?? "");
-      finish(() => {
-        stop();
-        resolve({ connectionId, connectorKey });
-      });
+      finish(() => resolve({ connectionId, connectorKey }));
       return;
     }
     const message = typeof payload.message === "string"
       ? payload.message
       : "The provider did not complete the authorization.";
-    finish(() => {
-      stop();
-      reject(new Error(message));
-    });
+    finish(() => reject(new Error(message)));
   }
 
   const closeTimer = window.setInterval(() => {
-    if (!popup.closed) return;
-    finish(() => {
-      stop();
-      reject(new AuthorizationCancelled());
-    });
+    if (popup.closed) finish(() => reject(new AuthorizationCancelled()));
   }, CLOSE_POLL_MS);
 
   window.addEventListener("message", onMessage);
-}
-
-/** Open the consent window and wait for it, for callers with nothing to show. */
-export async function authorizeConnection(
-  request: AuthorizationRequest,
-): Promise<AuthorizationResult> {
-  return beginAuthorization(request).completed;
+  return () => {
+    window.removeEventListener("message", onMessage);
+    window.clearInterval(closeTimer);
+  };
 }

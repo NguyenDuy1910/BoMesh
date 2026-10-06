@@ -306,6 +306,34 @@ Deletion API semantics may still use HTTP `DELETE`; persistence implementation r
 
 ---
 
+## LLM model usage
+
+Every LLM, embedding or vision call — whether made by application code, a
+script, a test, a probe or a command an agent runs — must use only the models
+configured in `.env`:
+
+```text
+OPENROUTER_MODEL                 chat / agent loop (OpenRouter)
+OPENAI_MODEL                     chat via OpenAI
+EMBEDDING_MODEL                  embeddings
+BOMESH_CONTEXTUALIZATION_MODEL   chunk contextualization
+BOMESH_DOCLING_MODEL             document vision parsing
+```
+
+Rules:
+
+* Read the model from the configured environment value; never hard-code,
+  substitute or "try" another model name in code, commands, scripts or tests.
+* Do not run ad-hoc calls (curl, Python, probes, benchmarks) against a model
+  that is not one of the configured values, even to diagnose a failure.
+* When the configured model fails (denied, unavailable, too slow), stop and
+  report the error; do not switch models. Changing a model is the user's
+  decision and is made only by editing `.env` at the user's request.
+* Tests that need a model use fakes or the configured value; they never pin a
+  different model.
+
+---
+
 ## Configuration and secrets
 
 Parse environment configuration at the application/composition boundary.

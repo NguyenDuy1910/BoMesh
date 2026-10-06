@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { assistantTurnItems, executionSummary, groupAssistantTurnItems } from "../src/modules/chat/assistant-turn.ts";
+import { assistantTurnItems, executionSummary } from "../src/modules/chat/assistant-turn.ts";
+import { turnWork } from "../src/modules/chat/work.ts";
 import type { TurnState } from "../src/modules/chat/types.ts";
 
 test("renders message items directly from semantic item state", () => {
@@ -78,55 +79,6 @@ test("presents a verified runtime activity at its function-call position", () =>
     kind: "activity", id: "call-1",
     activity: { callId: "call-1", toolName: "sql_query", state: "active", startedAt: 1 },
   }]);
-});
-
-test("groups every runtime activity into one surface while preserving commentary", () => {
-  const grouped = groupAssistantTurnItems([
-    {
-      kind: "message" as const,
-      id: "commentary-1",
-      phase: "commentary" as const,
-      text: "I found the current policy.",
-      state: "done" as const,
-    },
-    {
-      kind: "activity" as const,
-      id: "search-1",
-      activity: { callId: "search-1", toolName: "knowledge_search", state: "completed" as const, startedAt: 1, resultCount: 2 },
-    },
-    {
-      kind: "activity" as const,
-      id: "read-1",
-      activity: { callId: "read-1", toolName: "read_resource", state: "active" as const, startedAt: 2 },
-    },
-    {
-      kind: "message" as const,
-      id: "commentary-2",
-      phase: "commentary" as const,
-      text: "I am checking the related guidance.",
-      state: "done" as const,
-    },
-    {
-      kind: "activity" as const,
-      id: "inspect-1",
-      activity: { callId: "inspect-1", toolName: "inspect_resource", state: "active" as const, startedAt: 3 },
-    },
-    {
-      kind: "message" as const,
-      id: "answer-1",
-      phase: "final_answer" as const,
-      text: "The allowance is unchanged.",
-      state: "streaming" as const,
-    },
-  ]);
-
-  assert.deepEqual(grouped.map((item) => item.kind), [
-    "message",
-    "activity_group",
-    "message",
-    "message",
-  ]);
-  assert.equal(grouped[1]?.kind === "activity_group" && grouped[1].activities.length, 3);
 });
 
 test("presents hosted shell execution with its command and captured output", () => {
@@ -216,4 +168,71 @@ test("a shell run with a failing command names that command's own error", () => 
   });
 
   assert.deepEqual(summary, { label: "Ran 2 commands, 1 failed", detail: "bash: python: command not found" });
+});
+
+/** A finished turn that searched, then ran three commands of which one failed. */
+function fileWorkTurn(status: TurnState["status"] = "completed"): TurnState {
+  return {
+    id: "turn-work",
+    status,
+    startedAt: 1_000,
+    finishedAt: 27_000,
+    responseOrder: ["response-1", "response-2"],
+    workLog: [{ callId: "search-1", toolName: "knowledge_search", state: "completed", resultCount: 7 }],
+    responses: {
+      "response-1": {
+        id: "response-1", status: "completed", itemOrder: ["call-1"],
+        items: {
+          "call-1": {
+            type: "function_call", id: "call-1", call_id: "search-1", name: "knowledge_search",
+            arguments: JSON.stringify({ queries: ["vendor renewals"] }), status: "completed",
+          },
+        },
+      },
+      "response-2": {
+        id: "response-2", status: "completed", itemOrder: ["run-1"],
+        items: {
+          "run-1": {
+            type: "hosted_execution_result", id: "run-1", call_id: "shell-1", status: "completed",
+            commands: ["ls ~", "python3 totals.py", "cat out.csv"],
+            output: [
+              { stdout: "vendors.csv\n", stderr: "", exit_code: 0, timed_out: false },
+              { stdout: "", stderr: "Traceback (most recent call last):\nKeyError: 'Amount'\n", exit_code: 1, timed_out: false },
+              { stdout: "vendor,total\n", stderr: "", exit_code: 0, timed_out: false },
+            ],
+          },
+        },
+      },
+    },
+  };
+}
+
+test("the work line names the search, the failed command and how long it took", () => {
+  const work = turnWork(fileWorkTurn(), { scopeTitles: ["HR Policies"] });
+
+  assert.equal(work.summary, "Worked for 26s · Searched HR Policies · Ran 3 commands, 1 failed");
+  assert.deepEqual(work.steps.map((step) => [step.kind, step.state]), [["search", "ok"], ["code", "bad"]]);
+  assert.equal(work.steps[0]?.detail, "7 relevant passages");
+  assert.deepEqual(work.steps[0]?.queries, ["vendor renewals"]);
+  assert.equal(work.steps[1]?.detail, "KeyError: 'Amount'");
+  assert.deepEqual(work.steps[1]?.runs?.map((run) => run.failed), [false, true, false]);
+  assert.equal(work.usesShell, true);
+  assert.equal(work.fileWorkFailed, false);
+});
+
+test("file work that failed and saved nothing is the 'Nothing was saved' state", () => {
+  const work = turnWork(fileWorkTurn("failed"));
+
+  assert.equal(work.fileWorkFailed, true);
+  assert.equal(work.summary, "Worked for 26s · Searched your knowledge · Ran 3 commands, 1 failed");
+});
+
+test("while streaming, a model call is not a step until the runtime starts it", () => {
+  const turn: TurnState = { ...fileWorkTurn("streaming"), workLog: undefined, finishedAt: undefined, runtimeActivities: [] };
+  turn.responses["response-2"] = { id: "response-2", status: "in_progress", itemOrder: [], items: {} };
+
+  assert.deepEqual(turnWork(turn).steps, []);
+  turn.runtimeActivities = [{ callId: "search-1", toolName: "knowledge_search", state: "active", startedAt: 0 }];
+  const live = turnWork(turn, { scopeTitles: ["Finance", "Legal", "HR", "Sales"] });
+  assert.equal(live.liveLabel, "Searching Finance, Legal and 2 more…");
 });

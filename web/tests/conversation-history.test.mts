@@ -2,15 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  editTruncation,
   historyFromMessages,
   regenerationContext,
+  retryRequest,
 } from "../src/modules/chat/conversation-history.ts";
-import { conversationResources } from "../src/modules/chat/conversation-resources.ts";
-import {
-  ARTIFACT_ANNOTATION_TYPE,
-  DOCUMENT_CITATION_TYPE,
-  type ChatMessage,
-} from "../src/modules/chat/types.ts";
+import type { ChatMessage, TurnState } from "../src/modules/chat/types.ts";
+import { beginAttempt, selectVariant, settleAttempt, variantPosition } from "../src/modules/chat/variants.ts";
 
 function message(id: string, role: "user" | "assistant", text: string): ChatMessage {
   return {
@@ -94,75 +92,73 @@ test("oversized messages preserve both the subject and the latest details", () =
   assert.match(history[1]?.content ?? "", /Final fee: 1%$/);
 });
 
-test("lists only durable prior-turn resources for a follow-up", () => {
-  const resources = conversationResources([
-    {
-      id: "user-1",
-      role: "user",
-      parts: [{
-        type: "data-document",
-        data: {
-          id: "attachment-1",
-          fileName: "expense-policy.pdf",
-          contentType: "application/pdf",
-          sizeBytes: 1024,
-          mode: "direct",
-          status: "available",
-        },
-      }],
-    },
-    {
-      id: "assistant-1",
-      role: "assistant",
-      parts: [],
-      turn: {
-        id: "turn-1",
-        status: "completed",
-        responseOrder: ["response-1"],
-        responses: {
-          "response-1": {
-            id: "response-1",
-            status: "completed",
-            itemOrder: ["message-1"],
-            items: {
-              "message-1": {
-                id: "message-1",
-                type: "message",
-                role: "assistant",
-                status: "completed",
-                content: [{
-                  type: "output_text",
-                  text: "The policy is attached.",
-                  annotations: [
-                    {
-                      type: DOCUMENT_CITATION_TYPE,
-                      citation: { item_id: "source-1", chunk_id: "chunk-1", title: "Travel policy" },
-                    },
-                    {
-                      type: ARTIFACT_ANNOTATION_TYPE,
-                      artifact: {
-                        id: "artifact-1",
-                        title: "Expense summary",
-                        file_name: "expense-summary.docx",
-                        mime_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        revision: 1,
-                        size_bytes: 2048,
-                        updated_at: "2026-09-11T00:00:00Z",
-                      },
-                    },
-                  ],
-                }],
-              },
-            },
-          },
-        },
-      },
-    },
-  ]);
+test("a retry resends the question with its instruction and keeps the scope unless told to search everything", () => {
+  const scoped: ChatMessage = {
+    id: "user-1",
+    role: "user",
+    parts: [
+      { type: "text", text: "What is the per diem?", state: "done" },
+      { type: "data-collection", id: "c-hr", data: { id: "c-hr", title: "HR Policies" } },
+    ],
+  };
+  const messages = [scoped, message("assistant-1", "assistant", "USD 75.")];
 
-  assert.deepEqual(resources.map(({ kind, title, turn }) => ({ kind, title, turn })), [
-    { kind: "attachment", title: "expense-policy.pdf", turn: 1 },
-    { kind: "source", title: "Travel policy", turn: 1 },
-    { kind: "artifact", title: "expense-summary.docx", turn: 1 },
-  ]);
+  const again = retryRequest(messages, "assistant-1", "again", 4_000);
+  assert.equal(again?.requestText, "What is the per diem?");
+  assert.deepEqual(again?.collections, [{ id: "c-hr", title: "HR Policies" }]);
+  assert.deepEqual(again?.historyMessages, []);
+
+  const shorter = retryRequest(messages, "assistant-1", "shorter", 4_000);
+  assert.match(shorter?.requestText ?? "", /^What is the per diem\?\n\n.*briefly/);
+  // The visible question stays as the person wrote it.
+  assert.equal(shorter?.userText, "What is the per diem?");
+
+  assert.deepEqual(retryRequest(messages, "assistant-1", "all_knowledge", 4_000)?.collections, []);
+  // The instruction never pushes a request past the message limit.
+  const long = retryRequest([message("user-2", "user", "x".repeat(4_000)), message("a-2", "assistant", "ok")], "a-2", "detail", 4_000);
+  assert.equal(long?.requestText.length, 4_000);
+});
+
+test("editing a question replaces its answer and counts only the later messages it drops", () => {
+  const messages = [
+    message("user-1", "user", "First?"),
+    message("assistant-1", "assistant", "One."),
+    message("user-2", "user", "Second?"),
+    message("assistant-2", "assistant", "Two."),
+  ];
+
+  assert.deepEqual(editTruncation(messages, "user-2"), { kept: messages.slice(0, 2), user: messages[2], dropped: 0 });
+  assert.equal(editTruncation(messages, "user-1")?.dropped, 2);
+  // A question with no answer yet drops nothing but what follows it.
+  assert.equal(editTruncation(messages.slice(0, 3), "user-2")?.dropped, 0);
+  assert.equal(editTruncation(messages, "assistant-1"), null);
+});
+
+function turn(id: string): TurnState {
+  return { id, status: "completed", responses: {}, responseOrder: [] };
+}
+
+test("retrying keeps every earlier answer reachable through the pager, with its own feedback", () => {
+  let answer: ChatMessage = { id: "a-1", role: "assistant", parts: [], turn: turn("first"), feedback: "down" };
+  assert.equal(variantPosition(answer), null);
+
+  answer = beginAttempt(answer, turn("second"));
+  // While the retry streams there is no pager yet.
+  assert.equal(variantPosition(answer), null);
+  assert.equal(answer.feedback, undefined);
+  answer = settleAttempt(answer);
+  assert.deepEqual(variantPosition(answer), { index: 1, count: 2 });
+  assert.equal(answer.turn?.id, "second");
+
+  answer = { ...answer, feedback: "up" };
+  answer = selectVariant(answer, 0);
+  assert.equal(answer.turn?.id, "first");
+  assert.equal(answer.feedback, "down");
+  answer = selectVariant(answer, 5);
+  assert.equal(answer.turn?.id, "second");
+  assert.equal(answer.feedback, "up");
+
+  answer = settleAttempt(beginAttempt(answer, turn("third")));
+  assert.deepEqual(answer.variants?.map((variant) => variant.turn.id), ["first", "second", "third"]);
+  assert.deepEqual(variantPosition(answer), { index: 2, count: 3 });
 });

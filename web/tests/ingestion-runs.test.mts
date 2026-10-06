@@ -3,8 +3,10 @@ import test from "node:test";
 
 import {
   describeScope,
+  formatDuration,
+  retryableCount,
   runProgress,
-  runStatus,
+  runSteps,
   type ScopeNames,
 } from "../src/modules/ingestion/run-state.ts";
 import type { IngestionRunCounts, IngestionRunScope } from "../src/modules/ingestion/runs-api.ts";
@@ -49,7 +51,7 @@ test("an explicit selection and a retry outrank the selectors they carry", () =>
 });
 
 test("a collection or source no longer listed is still described", () => {
-  assert.equal(describeScope(scope({ collection_id: "gone" }), names), "Pending and outdated documents in a collection");
+  assert.equal(describeScope(scope({ collection_id: "gone" }), names), "Pending and outdated documents in a knowledge base");
   assert.equal(describeScope(scope({ source_id: "gone" }), names), "Pending and outdated documents from a source");
 });
 
@@ -63,12 +65,36 @@ test("progress counts every document that reached an outcome, failed included", 
   assert.deepEqual(runProgress({ counts: counts() }), { done: 0, total: 0, percent: 0 });
 });
 
-test("a completed run with failed documents reads differently from a clean one", () => {
-  assert.equal(runStatus({ status: "completed", counts: counts({ total: 3, succeeded: 3 }) }), "completed");
-  assert.equal(
-    runStatus({ status: "completed", counts: counts({ total: 3, succeeded: 2, failed: 1 }) }),
-    "completed_with_errors",
-  );
-  // A run that stopped is a failure of the run, whatever its items did.
-  assert.equal(runStatus({ status: "failed", counts: counts({ total: 3, failed: 1, skipped: 2 }) }), "failed");
+test("a sync's steps follow its counts, and a stopped sync says where it stopped", () => {
+  const states = (status: "queued" | "running" | "completed" | "failed" | "cancelled", c = counts(), error: string | null = null) =>
+    runSteps({ status, counts: c, error }).map((step) => `${step.state}: ${step.note}`);
+
+  assert.deepEqual(states("running", counts({ total: 28, succeeded: 18, failed: 2 })), [
+    "done: Found 28 documents to process",
+    "active: 20 of 28 read",
+    "active: 18 ready for questions",
+  ]);
+  assert.deepEqual(states("completed", counts({ total: 10, succeeded: 8, failed: 2 })), [
+    "done: Found 10 documents to process",
+    "done: 8 read · 2 couldn’t be read",
+    "done: 8 ready for questions",
+  ]);
+  assert.deepEqual(states("cancelled", counts({ total: 24, succeeded: 6, cancelled: 18 }))[1], "stopped: Stopped after 6 of 24");
+  // A run that never got going blames the first step, with the reason it was given.
+  assert.deepEqual(states("failed", counts(), "The model provider refused the key."), [
+    "failed: The model provider refused the key.",
+    "pending: Not started",
+    "pending: Not started",
+  ]);
+});
+
+test("a retry takes failed, skipped and cancelled documents, never processed ones", () => {
+  assert.equal(retryableCount({ counts: counts({ total: 30, succeeded: 20, failed: 4, skipped: 1, cancelled: 5 }) }), 10);
+  assert.equal(retryableCount({ counts: counts({ total: 3, succeeded: 3 }) }), 0);
+});
+
+test("durations read the way the history table shows them", () => {
+  assert.equal(formatDuration(4_200), "4s");
+  assert.equal(formatDuration(379_000), "6m 19s");
+  assert.equal(formatDuration(3_725_000), "1h 2m");
 });

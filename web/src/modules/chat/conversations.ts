@@ -1,18 +1,32 @@
 "use client";
 
 import type {
+  AnswerVariant,
   CachedChatMessage,
+  ChatConversation,
   ChatMessage,
   ChatMessagePart,
-  ChatConversation,
+  TurnState,
+  WorkLogEntry,
 } from "./types";
 import { finalTurnText } from "./message-stream.ts";
 
+/**
+ * The device-local conversation store (conversation_loop.md: conversations are
+ * not synchronized across devices). Storage is isolated by account and
+ * workspace; every write announces itself so lists in other surfaces and other
+ * tabs stay current.
+ */
 const CONVERSATIONS_KEY_BASE = "bomesh-conversations";
 const MESSAGE_PREFIX_BASE = "bomesh-messages:";
-const SELECTED_CONVERSATION_KEY_BASE = "bomesh-selected-conversation";
 const ANONYMOUS_USER_NAMESPACE = "anonymous";
-const DEFAULT_CONVERSATION_TITLE = "New conversation";
+const DEFAULT_CONVERSATION_TITLE = "New chat";
+const MAX_STORED_MESSAGES = 100;
+const PREVIEW_CHARACTERS = 160;
+
+/** Fired on `window` after any conversation or message write in this tab. */
+export const CONVERSATIONS_CHANGED_EVENT = "bomesh:conversations-changed";
+
 let memoryConversations: ChatConversation[] = [];
 const memoryMessages = new Map<string, CachedChatMessage[]>();
 let activeUserNamespace = ANONYMOUS_USER_NAMESPACE;
@@ -22,7 +36,7 @@ function normalizeUserNamespace(identity: string | null | undefined) {
   return value || ANONYMOUS_USER_NAMESPACE;
 }
 
-/** Keep browser-local drafts isolated by both signed-in user and active tenant. */
+/** Keep browser-local chats isolated by both signed-in user and active workspace. */
 export function setConversationUser(
   identity: string | null | undefined,
   tenantId?: string | null,
@@ -44,39 +58,30 @@ function messageKey(sessionId: string) {
   return `${MESSAGE_PREFIX_BASE}${activeUserNamespace}:${sessionId}`;
 }
 
-function selectedConversationKey() {
-  return `${SELECTED_CONVERSATION_KEY_BASE}:${activeUserNamespace}`;
-}
-
-/** A tab remembers whether it was showing a conversation or an empty draft. */
-export function readSelectedConversation(): string | null | undefined {
-  if (typeof window === "undefined") return undefined;
-  try {
-    const stored = window.sessionStorage.getItem(selectedConversationKey());
-    return stored === null ? undefined : stored || null;
-  } catch {
-    return undefined;
+/**
+ * Call `listener` after any write to the store, in this tab or another one.
+ * Returns the unsubscribe function.
+ */
+export function subscribeToConversations(listener: () => void): () => void {
+  if (typeof window === "undefined" || typeof window.addEventListener !== "function") {
+    return () => undefined;
   }
+  const onStorage = (event: StorageEvent) => {
+    if (!event.key || event.key.startsWith(CONVERSATIONS_KEY_BASE) || event.key.startsWith(MESSAGE_PREFIX_BASE)) {
+      listener();
+    }
+  };
+  window.addEventListener(CONVERSATIONS_CHANGED_EVENT, listener);
+  window.addEventListener("storage", onStorage);
+  return () => {
+    window.removeEventListener(CONVERSATIONS_CHANGED_EVENT, listener);
+    window.removeEventListener("storage", onStorage);
+  };
 }
 
-export function rememberSelectedConversation(id: string | null): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.sessionStorage.setItem(selectedConversationKey(), id ?? "");
-  } catch {
-    // Restricted storage should not prevent navigation within Chat.
-  }
-}
-
-/** An explicit empty draft must not silently reopen the newest conversation. */
-export function resolveSelectedConversation(
-  conversations: ChatConversation[],
-  requestedId: string | null | undefined,
-): string | null {
-  if (requestedId === null) return null;
-  return requestedId && conversations.some((item) => item.id === requestedId)
-    ? requestedId
-    : conversations[0]?.id ?? null;
+function announceChange() {
+  if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") return;
+  window.dispatchEvent(new Event(CONVERSATIONS_CHANGED_EVENT));
 }
 
 export interface ConversationAdapter {
@@ -86,12 +91,13 @@ export interface ConversationAdapter {
     sessionId?: string,
   ): Promise<ChatConversation>;
   listConversations(): Promise<ChatConversation[]>;
+  getConversation(id: string): Promise<ChatConversation | null>;
   getConversationMessages(id: string): Promise<CachedChatMessage[]>;
   saveConversationMessages(id: string, messages: CachedChatMessage[]): Promise<void>;
   updateConversation(
     id: string,
     patch: Partial<
-      Pick<ChatConversation, "title" | "titleSource" | "updatedAt">
+      Pick<ChatConversation, "title" | "titleSource" | "updatedAt" | "scope" | "preview">
     >
   ): Promise<ChatConversation | null>;
   deleteConversation(id: string): Promise<void>;
@@ -115,6 +121,7 @@ function writeConversations(conversations: ChatConversation[]) {
   } catch {
     // Keep local-only conversations usable when browser storage is unavailable.
   }
+  announceChange();
 }
 
 function readStoredMessages(id: string): CachedChatMessage[] {
@@ -189,17 +196,39 @@ export function getMessageText(message: ChatMessage): string {
     .join("");
 }
 
+/** A chat's first title: the opening question, cut at a word near 60 characters. */
 export function titleFromMessage(message: string) {
   const cleaned = message.replace(/\s+/g, " ").trim();
   if (!cleaned) return DEFAULT_CONVERSATION_TITLE;
-  return cleaned.length > 54 ? `${cleaned.slice(0, 51)}…` : cleaned;
+  if (cleaned.length <= 60) return cleaned;
+  const cut = cleaned.slice(0, 57);
+  const atWord = cut.replace(/\s+\S*$/, "");
+  return `${atWord.length > 30 ? atWord : cut}…`;
+}
+
+/**
+ * The line the chat list shows under a title: the first non-empty line of the
+ * newest answer, without Markdown emphasis, citation markers or table rows.
+ */
+export function conversationPreview(messages: readonly ChatMessage[]): string {
+  const answer = [...messages].reverse().find((message) => message.role === "assistant");
+  if (!answer) return "";
+  const text = getMessageText(answer)
+    .replace(/\*\*|__|\*|`/g, "")
+    .replace(/\s?\[\d{1,3}\]/g, "")
+    .replace(/^\s*\|.*$/gm, "")
+    .replace(/^\s*#{1,6}\s+/gm, "")
+    .replace(/^\s*[-*+]\s+/gm, "");
+  const line = text.split("\n").map((value) => value.trim()).find(Boolean) ?? "";
+  const clean = line.replace(/:\s*$/, "");
+  return clean.length > PREVIEW_CHARACTERS ? `${clean.slice(0, PREVIEW_CHARACTERS - 1)}…` : clean;
 }
 
 export function cachedToUIMessage(message: CachedChatMessage): ChatMessage {
   // An assistant reply's content lives entirely in ``turn`` — its own ``parts``
   // is always empty (see useBomeshChat.ts). Gating this branch on parts alone
   // dropped ``turn`` for every restored assistant message and rendered it as an
-  // empty bubble, since AssistantTurn reads only ``turn``.
+  // empty bubble, since the answer renderer reads only ``turn``.
   if (message.parts.length || message.turn) {
     return {
       id: message.id,
@@ -209,6 +238,9 @@ export function cachedToUIMessage(message: CachedChatMessage): ChatMessage {
         return normalized ? [normalized] : [];
       }),
       turn: message.turn,
+      ...(message.variants?.length ? { variants: message.variants } : {}),
+      ...(typeof message.variantIndex === "number" ? { variantIndex: message.variantIndex } : {}),
+      ...(message.feedback ? { feedback: message.feedback } : {}),
     };
   }
 
@@ -220,7 +252,11 @@ export function cachedToUIMessage(message: CachedChatMessage): ChatMessage {
 }
 
 export function uiToCachedMessage(message: ChatMessage): CachedChatMessage {
-  const turn = message.turn && withoutTransientTurnState(message.turn);
+  const turn = message.turn && storedTurn(message.turn);
+  const variants = message.variants?.map((variant): AnswerVariant => ({
+    ...variant,
+    turn: storedTurn(variant.turn),
+  }));
   return {
     id: message.id,
     role: message.role === "user" ? "user" : "assistant",
@@ -230,13 +266,28 @@ export function uiToCachedMessage(message: ChatMessage): CachedChatMessage {
       return normalized ? [normalized] : [];
     }),
     turn,
+    ...(variants?.length ? { variants } : {}),
+    ...(typeof message.variantIndex === "number" ? { variantIndex: message.variantIndex } : {}),
+    ...(message.feedback ? { feedback: message.feedback } : {}),
     createdAt: Date.now(),
   };
 }
 
-function withoutTransientTurnState(turn: NonNullable<ChatMessage["turn"]>) {
-  const { modelPending: _modelPending, runtimeActivities: _runtimeActivities, ...stored } = turn;
-  return stored;
+/**
+ * A turn as it is saved: live-only state is dropped, and the runtime facts of
+ * its tool calls are settled into `workLog` so a restored answer can still
+ * say what ran. A call still marked active when the turn ended did not finish.
+ */
+function storedTurn(turn: TurnState): TurnState {
+  const { modelPending: _modelPending, runtimeActivities, ...stored } = turn;
+  if (!runtimeActivities?.length) return stored;
+  const workLog: WorkLogEntry[] = runtimeActivities.map((activity) => ({
+    callId: activity.callId,
+    toolName: activity.toolName,
+    state: activity.state === "active" ? (turn.status === "completed" ? "completed" : "failed") : activity.state,
+    ...(typeof activity.resultCount === "number" ? { resultCount: activity.resultCount } : {}),
+  }));
+  return { ...stored, workLog };
 }
 
 export const conversationAdapter: ConversationAdapter = {
@@ -285,12 +336,18 @@ export const conversationAdapter: ConversationAdapter = {
       .sort((a, b) => b.updatedAt - a.updatedAt);
   },
 
+  async getConversation(id) {
+    return readConversations().find((conversation) => (
+      conversation.id === id && conversation.deletedAt === undefined
+    )) ?? null;
+  },
+
   async getConversationMessages(id) {
     return readStoredMessages(id);
   },
 
   async saveConversationMessages(id, messages) {
-    const nextMessages = normalizeCachedMessages(messages).slice(-100);
+    const nextMessages = normalizeCachedMessages(messages).slice(-MAX_STORED_MESSAGES);
     const sessionId = resolveSessionId(id);
     memoryMessages.set(sessionId, nextMessages);
     try {
@@ -301,6 +358,7 @@ export const conversationAdapter: ConversationAdapter = {
     } catch {
       // Keep the in-memory fallback alive for restricted browser contexts.
     }
+    announceChange();
   },
 
   async updateConversation(id, patch) {

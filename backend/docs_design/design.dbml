@@ -610,3 +610,175 @@ Ref: approval_requests.requested_role_id > roles.id
 Ref: audit_logs.tenant_id > tenants.id
 Ref: audit_logs.actor_user_id > users.id
 Ref: audit_logs.actor_session_id > access_sessions.id
+
+// ───────────────────────────────────────────────────────────────────────────
+// Proposed — UI built, API pending (api_contract.md, same-named section).
+// Commented out on purpose: not migrated, not in openapi.yaml. Uncomment and
+// migrate only when the matching endpoint is implemented.
+// ───────────────────────────────────────────────────────────────────────────
+//
+// auth.password_reset — single-use reset links; only a hash of the token is kept.
+// Table password_reset_tokens {
+//   id uuid [pk]
+//   user_id uuid [not null]
+//   token_hash varchar(128) [not null, unique, note: 'SHA-256 of the emailed token; the token itself is never stored']
+//   expires_at timestamptz [not null, note: 'created_at + 30 minutes']
+//   used_at timestamptz [note: 'Set once on completion; a used token is invalid']
+//   requested_ip inet
+//   created_at timestamptz [not null]
+//   indexes { (user_id, created_at) }
+//   Note: 'Completing a reset sets users.password_hash, sets used_at, and revokes every active access_session of the user.'
+// }
+// Ref: password_reset_tokens.user_id > users.id
+//
+// artifact.manual_revision — provenance of a revision made by restoring another.
+// artifact_revisions.restored_from int [note: 'revision_number of the same item_id this revision copied; null for agent or hand-edited revisions. Hand-made revisions set created_by_user_id and leave request_id null']
+// ArtifactRevision.author (API) is derived, not stored: 'assistant' when request_id is set, 'user' otherwise. Undo (DELETE …/revisions/{n}) removes only the current 'user' revision younger than 10 minutes.
+//
+// chat.share — conversations are device-local, so a share stores its own snapshot.
+// Table conversation_shares {
+//   id uuid [pk]
+//   tenant_id uuid [not null]
+//   conversation_id uuid [not null, note: 'Client conversation id; the conversation itself is not synced']
+//   owner_user_id uuid [not null]
+//   audience varchar(16) [not null, note: 'workspace | people']
+//   title varchar(512) [not null]
+//   snapshot jsonb [not null, note: '{messages: [{role, content, source_document_ids}]}; at most 500 messages. Sources are filtered per recipient on read']
+//   message_count int [not null]
+//   revoked_at timestamptz
+//   created_at timestamptz [not null]
+//   indexes {
+//     (tenant_id, owner_user_id, conversation_id)
+//   }
+// }
+// Table conversation_share_recipients {
+//   share_id uuid [not null]
+//   user_id uuid [not null, note: 'Member of the share tenant; only for audience = people']
+//   indexes { (share_id, user_id) [pk] }
+// }
+// Ref: conversation_shares.tenant_id > tenants.id
+// Ref: conversation_shares.owner_user_id > users.id
+// Ref: conversation_share_recipients.share_id > conversation_shares.id
+// Ref: conversation_share_recipients.user_id > users.id
+//
+// document.restore — restore reverses the Document tombstone on items.
+// items: restore sets status back to the value it had before deletion and clears
+// deleted_at, within a 30-day retention window after which the tombstone is purged.
+// Proposed column: items.status_before_delete varchar(16) [note: 'Raw status at deletion; null while live'].
+// Citations tombstoned with the Document are reactivated (citations.deleted_at cleared);
+// if the index cannot be restored, index_status is set to pending for a new run.
+//
+// collection.general_access — "everyone in the workspace can view" a Collection.
+// role_assignments gains the workspace as a principal: proposed column
+// role_assignments.all_members boolean [not null, default: false, note: 'With item_id set and user_id/group_id null: every active member of tenant_id holds role_id (collection_viewer only) on that Collection']
+// (the exactly-one-principal check becomes user_id | group_id | all_members). Collection reads expose it as general_access.
+// collection.discovery — a read projection; no storage.
+//
+// workspace.assistant_settings — one row per workspace.
+// Table workspace_assistant_settings {
+//   tenant_id uuid [pk]
+//   instructions text [not null, note: '<= 2000 characters']
+//   answer_length varchar(16) [not null, default: 'balanced', note: 'concise | balanced | detailed']
+//   capabilities jsonb [not null, default: `{"web_search": false, "file_work": true, "charts": true}`]
+//   welcome_message varchar(60) [not null]
+//   starter_prompts jsonb [not null, default: `[]`, note: '<= 3 {title <= 40, prompt <= 160}']
+//   updated_by_user_id uuid
+//   updated_at timestamptz [not null]
+//   Note: 'Knowledge search is always on and is not stored. No row = product defaults.'
+// }
+// Ref: workspace_assistant_settings.tenant_id - tenants.id
+// Ref: workspace_assistant_settings.updated_by_user_id > users.id
+//
+// workspace.branding — tenants.settings.branding = {accent: indigo|teal|ocean|plum|graphite, updated_at}.
+// workspace.archive — tenants.status gains 'archived' (with settings.archive = {archived_at, archived_by_user_id}).
+//
+// account.notification_prefs — users.preferences.notifications =
+//   {email: {source_sync_failures, access_requests, cited_document_changes, weekly_summary}, updated_at}
+//   (booleans, default true; account-wide, not per workspace).
+//
+// analytics.knowledge_gaps — gaps are computed from user messages and answer
+// feedback (no stored list); only an administrator's dismissal is persisted.
+// Table knowledge_gap_dismissals {
+//   tenant_id uuid [not null]
+//   gap_key varchar(128) [not null, note: 'Stable key of the normalized question cluster; also the public gap_id']
+//   dismissed_by_user_id uuid [not null]
+//   dismissed_at timestamptz [not null]
+//   indexes { (tenant_id, gap_key) [pk] }
+//   Note: 'Undo deletes the row. A dismissed gap stays hidden from GET unless include_dismissed=true.'
+// }
+// Ref: knowledge_gap_dismissals.tenant_id > tenants.id
+// Ref: knowledge_gap_dismissals.dismissed_by_user_id > users.id
+//
+// audit.export — no storage: the file is read from audit_logs with the list's filters.
+//
+// notifications.inbox — one row per recipient; created by the event that causes it
+// (failed sync, connection needing reauthorization, approval request created/decided)
+// and only for recipients allowed to read its subject.
+// Table notifications {
+//   id uuid [pk]
+//   tenant_id uuid [note: 'Null for product notices addressed across workspaces']
+//   recipient_user_id uuid [note: 'Null for a product notice shown to every member (with read state in notification_reads)']
+//   kind varchar(32) [not null, note: 'product_notice | source_failed | connection_reconnect | access_request | access_request_pending | access_request_approved | access_request_denied']
+//   subject_type varchar(32) [note: 'ingestion_source | integration_connection | approval_request | item']
+//   subject_id uuid
+//   title varchar(255) [not null]
+//   body text [not null]
+//   href varchar(512) [not null, note: 'App route, never an absolute URL']
+//   read_at timestamptz [note: 'Per-recipient rows only']
+//   created_at timestamptz [not null]
+//   indexes {
+//     (recipient_user_id, tenant_id, read_at, created_at)
+//     (subject_type, subject_id)
+//   }
+// }
+// Table notification_reads {
+//   notification_id uuid [not null]
+//   user_id uuid [not null]
+//   read_at timestamptz [not null]
+//   indexes { (notification_id, user_id) [pk] }
+//   Note: 'Read state of broadcast product notices (recipient_user_id null).'
+// }
+// Ref: notifications.tenant_id > tenants.id
+// Ref: notifications.recipient_user_id > users.id
+// Ref: notification_reads.notification_id > notifications.id
+// Ref: notification_reads.user_id > users.id
+//
+// platform.workspace_admin — no new table. POST creates tenants (code unique,
+// ^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$) plus the owner's tenant_membership and
+// workspace-admin role_assignment (or a pending invitation when the email has no
+// user yet). PATCH sets tenants.status active | suspended; access_sessions in a
+// suspended tenant stop authorizing. New permission code platform.tenant.manage.
+//
+// platform.user_admin — no new table. is_platform_admin is a role_assignment of the
+// platform admin role (roles.tenant_id null); account suspension is users.status
+// (false = suspended), which also revokes active access_sessions. Self-changes are
+// rejected. New permission code platform.user.manage.
+//
+// platform.connectors — deployment-wide connector settings; secrets encrypted and write-only.
+// Table platform_connector_settings {
+//   connector_key varchar(64) [pk, note: 'Registry key, e.g. google_drive']
+//   available boolean [not null, default: true, note: 'False stops new connections and syncs; documents stay searchable']
+//   oauth_client_id varchar(512)
+//   oauth_client_secret_encrypted bytea [note: 'Encrypted with the integration encryption key; never returned (responses expose has_secret only)']
+//   updated_by_user_id uuid
+//   updated_at timestamptz [not null]
+//   Note: 'No row = registry defaults and deployment environment configuration. New permission code platform.connector.manage.'
+// }
+// Ref: platform_connector_settings.updated_by_user_id > users.id
+//
+// platform.capabilities — no storage: read from deployment configuration and health probes.
+// platform.usage — no new table: aggregated from messages, access_sessions and ingestion_run_items.
+//
+// platform.health_history — one row per service per periodic /platform/health probe.
+// Table platform_health_checks {
+//   id uuid [pk]
+//   checked_at timestamptz [not null]
+//   service varchar(64) [not null, note: 'Health service name, e.g. openai_chat']
+//   status varchar(16) [not null, note: 'healthy | degraded | unhealthy | not_configured']
+//   error_category varchar(64) [note: 'Category only (timeout, connection_failed…); never a raw message']
+//   latency_ms integer
+//   indexes {
+//     (service, checked_at)
+//   }
+//   Note: 'Kept 90 days. Daily status, uptime and incidents are derived on read.'
+// }

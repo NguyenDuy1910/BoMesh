@@ -82,3 +82,71 @@ export function regenerationContext(
       .map((part) => part.data),
   };
 }
+
+/**
+ * Retry modes on an answer. A retry is a new request: the same question with
+ * an instruction appended, or with the knowledge scope cleared.
+ */
+export type RetryMode = "again" | "detail" | "shorter" | "all_knowledge";
+
+const RETRY_INSTRUCTIONS: Record<RetryMode, string | null> = {
+  again: null,
+  detail: "Answer again in more detail, with the specifics the sources support.",
+  shorter: "Answer again more briefly: only the key points.",
+  all_knowledge: null,
+};
+
+/** The text sent for a retry; the visible question stays as the person wrote it. */
+export function retryMessageText(userText: string, mode: RetryMode, maxCharacters: number): string {
+  const instruction = RETRY_INSTRUCTIONS[mode];
+  if (!instruction) return userText.slice(0, maxCharacters);
+  const suffix = `\n\n${instruction}`;
+  return `${userText.slice(0, Math.max(0, maxCharacters - suffix.length))}${suffix}`;
+}
+
+/**
+ * What a retry of one answer sends. The question, its files and its history
+ * are the ones that produced the answer; "Search all knowledge" sends no
+ * knowledge-base scope.
+ */
+export function retryRequest(
+  messages: ChatMessage[],
+  assistantId: string,
+  mode: RetryMode,
+  maxCharacters: number,
+): {
+  userText: string;
+  requestText: string;
+  historyMessages: ChatMessage[];
+  documents: ConversationDocument[];
+  collections: ConversationCollection[];
+} | null {
+  const context = regenerationContext(messages, assistantId);
+  if (!context) return null;
+  return {
+    userText: context.userText,
+    requestText: retryMessageText(context.userText, mode, maxCharacters),
+    historyMessages: context.historyMessages,
+    documents: context.documents,
+    collections: mode === "all_knowledge" ? [] : context.collections,
+  };
+}
+
+/**
+ * Editing a question replaces its answer and drops everything after it.
+ * `dropped` counts the later messages beyond that answer — the ones the
+ * person is asked to confirm losing.
+ */
+export function editTruncation(
+  messages: ChatMessage[],
+  userMessageId: string,
+): { kept: ChatMessage[]; user: ChatMessage; dropped: number } | null {
+  const index = messages.findIndex((message) => message.id === userMessageId && message.role === "user");
+  if (index < 0) return null;
+  const answerFollows = messages[index + 1]?.role === "assistant";
+  return {
+    kept: messages.slice(0, index),
+    user: messages[index]!,
+    dropped: Math.max(0, messages.length - index - 1 - (answerFollows ? 1 : 0)),
+  };
+}

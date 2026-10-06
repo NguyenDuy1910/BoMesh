@@ -107,7 +107,7 @@ export async function recentDocuments(): Promise<FoundDocument[]> {
   const home = await knowledgeApi.home();
   return home.recent_documents.map((document) => ({
     id: document.id,
-    name: document.title,
+    name: document.name,
     collectionId: document.collection_id,
     updatedAt: document.updated_at,
     status: document.processing.state,

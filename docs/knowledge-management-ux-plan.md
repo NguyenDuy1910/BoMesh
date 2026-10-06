@@ -32,53 +32,47 @@ Schedule ──runs a ingestion source──▶ Knowledge Base
 
 ## Information architecture
 
-- Knowledge
-  - Knowledge Bases
-  - All Items
-- Data
-  - Sources & Integrations
-  - Sync Activity
-- Automation
-  - Schedules
-  - Workflows
-- Administration
-  - People, Groups, Access Requests, Roles, and Access Policies
-  - Workspace Settings
-  - Audit Log
+One product shell and one sidebar; sections appear by permission
+(`web/src/lib/navigation.ts` is the single definition).
+
+- New chat (`/chat`), Search ⌘K (command palette), Inbox (drawer), Knowledge
+  (`/knowledge`, `/knowledge/<id>`, documents at `/documents/<id>`)
+- Manage: Overview, Sources (sources, sync history, accounts), People & access
+  (members, groups, roles, requests), Assistant setup, Activity, Settings
+  (`/manage/*`)
+- Recent chats (`/chats` for all), account menu
+- Platform console (`/platform/*`, platform permissions only): Workspaces,
+  Users, Connectors, AI capabilities, Usage, Audit log, System health
 
 ## Primary flows
 
 ### Create a Knowledge Base
 
-1. Open **Knowledge Bases**.
-2. Select **Create knowledge base**.
-3. Enter a required name and optional description.
+1. Open **Knowledge**.
+2. Select **Create knowledge base** (requires `knowledge.manage`).
+3. Enter a required name, an optional description and who can see it.
 4. Submit with the button or Enter.
 5. The server creates the collection and owner grant.
-6. A success toast is announced and the new collection opens on **Items**.
+6. A success toast is announced and the new knowledge base opens on **Documents**.
 7. The user can add content now, leave, or return later.
 
 ### Connect a source after creation
 
-1. Open **Ingestion → Sources**, either directly or from **Connect source** in
-   Knowledge. The latter carries the current collection as the destination.
-2. Connector types are visible on the page. Choose one directly; there is no
-   separate connector-picker dialog or second action on the connector tile.
-3. To reuse an authorized account, choose **Add source** on that account and
-   skip authorization. A new account authorizes or verifies credentials first.
-4. Choose the provider content and destination collection. Sync cadence starts
-   as manual; a schedule can be selected explicitly or configured later.
-5. Creating a source requests its first sync. Documents arrive Pending; a
-   separate Ingestion Run processes them for search and answers.
+1. Open **Manage → Sources** and choose **Connect a source**, or use
+   **Connect a source** on a knowledge base's Sources tab, which carries that
+   knowledge base as the destination (`/manage/sources?connect=1&collection=<id>`).
+2. The four-step wizard asks for the app (unavailable apps can be requested),
+   the account (reuse, reconnect or sign in), the content, then destination and
+   schedule with a review. Closing mid-way asks before discarding.
+3. Creating a source requests its first sync. Documents arrive Waiting; a
+   separate ingestion run processes them for search and answers.
 
-### Configure automation
+### Configure a schedule
 
-1. Open **Schedules** independently from collection creation.
-2. Choose an existing ingestion source. Its source and destination Knowledge Base
-   are shown together.
-3. Select daily, weekly, or a custom cron frequency and timezone.
-4. Create or edit the schedule, pause/resume it, or run the source now.
-5. Last run, next run, and current execution status remain visible in the list.
+Schedules live on each source (there is no separate Schedules destination):
+open the source drawer (`/manage/sources?source=<id>&edit=schedule`), pick
+manual, daily, weekly or hourly with a time and time zone, and save. The list
+shows the schedule as a sentence ("Daily at 02:00"), never a cron string.
 
 ## UI state model
 
@@ -128,3 +122,168 @@ Schedule ──runs a ingestion source──▶ Knowledge Base
   scope discovery remains dependent on connector discovery endpoints.
 - No tenant storage or ingestion quota model currently exists. Collection
   uploads enforce the configured per-file upload and processing limits.
+
+## Refactor to the approved prototype (`docs/ux-review.html`)
+
+The prototype is the design specification; `docs/ux-refactor-plan.md` is the
+execution brief. This section records the decisions taken while implementing
+it. Where it conflicts with the earlier sections above (rails, "Ingestion",
+separate Schedules destination), this section wins.
+
+### Phase 0 — inventory
+
+Baseline before any change: `npm run typecheck` green, `npm test` 104/104
+passing. "Before" screenshots: `/tmp/ux-before/`; prototype references:
+`/tmp/ux-ref/` (desktop 1440 and tablet 834, per persona).
+
+| Prototype page | Current implementation | Target route → component | Backend |
+| --- | --- | --- | --- |
+| Shell: sidebar, switcher, account, palette, inbox, tour | `WorkspaceRail`, `WorkspaceControlRail`, `PlatformControlRail`, `IdentityContextDock`, `ControlPlaneShell`/`Topbar`, `ControlPlaneCommandPalette`, `DocumentFinder`, `AccountDialog`, `Workspace/PlatformContextMenu` | `ProductShell` + `Sidebar` + `CommandPalette` + `InboxDrawer` + `AccountMenu` + `ProductTour` (`components/shell`) | Backed; inbox = `notifications.inbox` pending |
+| `signin` | `AuthForm` (`/auth/login`) | `/auth/login` | Backed |
+| `signup` | `AuthForm` (`/auth/signup`) | `/auth/signup` | Backed |
+| Forgot password (brief only) | — | `/auth/password-reset`, `/auth/password-reset/[token]` | `auth.password_reset` pending |
+| `workspaces` | `WorkspaceDiscovery` (`/workspaces`) | `/workspaces` → workspace picker | Backed |
+| `chatHome` | `ChatShell` (`/app`) | `/chat` | Backed; welcome/starters = `workspace.assistant_settings` pending |
+| `chatThread` + Round 3 file work | `ChatShell`, `AssistantTurn`, `RightActivityPanel`, `ArtifactCard`, `ArtifactPreview`, `AnswerSources` | `/chat/[conversationId]` | Backed; `artifact.*`, `chat.share` pending |
+| `chats` | `AppSidebar` recents, `ConversationActionsMenu` | `/chats` | Client store (not synced) |
+| `kbList` | `KnowledgeScreen` (`/workspace-control/knowledge`), `LibraryScreen` (`/library`), `CollectionCards` | `/knowledge` | Backed |
+| `kbDetail` | `KnowledgeScreen` detail, `DocumentsView`, `DocumentBulkBar`, `DocumentDetailsDrawer`, `CollectionAccess` | `/knowledge/[collectionId]?tab=documents|sources|access|settings` | Backed; `document.move`, `document.restore` pending |
+| `docViewer` | `DocumentViewer`, `DocumentRenditionView`, `KnowledgeDocumentPreview` | `/documents/[documentId]?chunk=` | Backed |
+| `overview` | `WorkspaceOverviewPage` | `/manage/overview` | Backed; gaps = `analytics.knowledge_gaps` pending |
+| `sources` | `IngestionScreen`, `SourcesView`, `RunsView`, `SchedulesView`, `ConnectSourceFlow`, `RunDetailView`, `ConnectionDetailView` | `/manage/sources?tab=sources|history|accounts` | Backed |
+| `access` | `AccessPage`, `GroupsPanel`, `RolesPanel` | `/manage/access?tab=members|groups|roles|requests` | Backed |
+| `assistant` | `AgentsPoliciesPage`, `ExperiencePage` (`NotBackedYet`) | `/manage/assistant?tab=behavior|home` | `workspace.assistant_settings` pending |
+| `activity` | `AuditPage`, `SessionLog` | `/manage/activity?tab=changes|signins` | Backed; export = `audit.export` pending |
+| `settings` | `SettingsPage` | `/manage/settings` | Backed; `workspace.branding`, `workspace.archive` pending |
+| `pWorkspaces` | `PlatformTenantsPage` | `/platform/workspaces` | Read backed; `platform.workspace_admin` pending |
+| `pUsers` | `PlatformUsersPage` | `/platform/users` | Read backed; `platform.user_admin` pending |
+| `pConnectors` | `PlatformIntegrationsPage` | `/platform/connectors` | `platform.connectors` pending |
+| `pModels` | `PlatformModelsPage` (`NotBackedYet`) | `/platform/capabilities` | `platform.capabilities` pending |
+| `pUsage` | `PlatformUsagePage` (`NotBackedYet`) | `/platform/usage` | `platform.usage` pending |
+| `pAudit` | `PlatformAuditPage` | `/platform/audit` | Backed |
+| `pHealth` | `SystemHealthPage` | `/platform/health` | Backed |
+| `design` | — | `/dev/design-system` (development only) | n/a |
+
+### Phase 1 — design tokens, primitives, pending-API layer
+
+- **One token file.** `web/src/app/tokens.css` holds every colour (prototype
+  values, light + dark, accents indigo/teal/ocean/plum/graphite). Existing
+  semantic names were kept (`--surface-base` is the prototype "sheet",
+  `--surface-inset` is "sunken"); duplicates (`--color-*`, `--action-primary-*`,
+  `--elevation-*`, …) were removed and every consumer migrated. Evidence
+  (`--evidence-*`) and status (`--status-*`) are deliberately not themeable.
+- **Contrast over fidelity.** Where a prototype pair failed 4.5:1 the token
+  moved, documented next to its value: dark teal/ocean/plum use ink text on the
+  accent; dark danger fill is `#c0312b`. `web/scripts/contrast.mjs` checks 670
+  pairs across themes and accents.
+- **Appearance is per device.** `@/lib/appearance` + `useAccountPreferences`
+  store theme, accent, background, density and reduced motion under
+  `bomesh.appearance`; a pre-paint boot script is the single writer of the
+  `html[data-*]` attributes.
+- **Primitives** live in `components/ui` (controls, overlays, data, feedback)
+  and `components/patterns` (citation chip, passage, evidence chip). Dropdown,
+  StatusPill, Toggle and SearchField were deleted in favour of Menu,
+  StatusBadge, Switch and SearchInput. Destructive confirmations use
+  `ConfirmDialog` with optional typed confirmation; layered UI shares one
+  modal-layer stack (Esc closes the top layer, focus returns to the trigger).
+- **One status vocabulary.** `web/src/lib/status.ts` (ported from the
+  prototype `STATUS`) is the only place a backend state becomes a label and
+  tone; healthy steady states render quietly.
+- **UI first, API pending.** `web/src/lib/api/pending.ts` registers the
+  pending features (`PENDING_FEATURES`), adds latency and a development
+  failure switch (`localStorage["bomesh.pending.fail"]`), and stores local state
+  per account and workspace. Client functions with the proposed signatures sit
+  in each owning module's `api.ts`; the proposed contracts are in
+  `backend/docs_design/api_contract.md` → "Proposed — UI built, API pending"
+  and `design.dbml` (commented). Configuration:
+  `NEXT_PUBLIC_BOMESH_PENDING_FEATURES=all|none|<keys>` and
+  `NEXT_PUBLIC_BOMESH_PENDING_MARKER=on|off`; surfaces backed by a pending
+  adapter show a neutral `Preview` tag.
+
+### Phases 2–8 — shell, entry, chat, knowledge, sources, manage, platform
+
+Product routes live under `web/src/app/(product)/` inside one `ProductShell`
+(sidebar on the canvas, content on a rounded sheet; 68px icon rail at
+≤1100px). Legacy addresses redirect permanently (`web/src/lib/legacy-redirects.ts`,
+tested in `tests/navigation.test.mts`). Decisions that shape later work:
+
+- **Navigation.** Sidebar order follows the prototype: New chat, Inbox, Search
+  ⌘K, Knowledge, Manage, Recent chats. Overview requires `tenant.read` and
+  `tenant.manage`; pending-backed destinations (Assistant setup, platform
+  Connectors, AI capabilities, Usage, Inbox) also require their pending
+  feature. Pages gate themselves with `RequirePermission`; a denied address
+  renders the shared no-access page.
+- **Appearance.** The accent defaults to "Workspace brand" (falls back to
+  indigo; the platform console is always indigo); a personal accent wins.
+- **Entry.** Sign-in is email + password or Google on one screen; error copy
+  comes from the HTTP status, never the API's operator `detail`. A new
+  account starts in its personal workspace (backend behaviour), so the copy
+  says an admin adds them to their team's workspace afterwards.
+- **Chat.** Chats stay in this browser (`conversation_loop.md`); copy never
+  implies cross-device history. Answers keep streaming across navigation.
+  Retries append an instruction and become variants; editing a middle question
+  drops later messages after confirmation. Partial access is re-checked per
+  cited document; an unreadable collection cannot be named (API returns 404),
+  so the full-hide call-out links to Knowledge. Deep links: `/chat?q=` (draft),
+  `&send=1`, `&scope=<collection ids>`, `&doc=<document id>`.
+- **Files.** Only Markdown and text files are edited by hand; other types are
+  changed by asking. Hand edits, restores and Undo (proposed `DELETE` of the
+  newest hand-made revision) run on `artifact.manual_revision`. Publishing
+  always saves the server's newest revision.
+- **Knowledge.** Collection ACL principals are users and groups only, so
+  "Everyone in the workspace" is pending (`collection.general_access`); real
+  collections read Restricted. Locked cards come only from real ids the caller
+  has met (`collection.discovery`) — nothing is invented. Document archive holds
+  the real `DELETE` for an 8 s Undo window. Knowledge-base archive has no
+  restore API, so it offers no Undo.
+- **Viewer.** `/documents/<id>?chunk=<a>&chunk=<b>` marks every cited passage
+  and focuses the first; text view comes first whenever a rendition exists.
+- **Sources.** One attention rule (`sourceAttention`) drives the page call-out,
+  the Overview list and the sidebar badge. A source's account and resource are
+  immutable in the API, so the drawer offers no "change what's synced". After a
+  manual sync the open page starts an ingestion run so changes become
+  searchable (backend only auto-processes scheduled syncs — open decision).
+- **People & access.** The API refuses any change to your own access and the
+  last admin's demotion, so your own row is locked with an explanation. Roles
+  are disabled, not deleted (lifecycle). Removing a member is pending
+  (`workspace.member_remove`). Approvals commit after a 6 s Undo window.
+- **Manage.** The workspace web address is pending (`workspace.url_code`;
+  `PATCH /workspaces/{id}` rejects `code`). Audit actions become sentences in
+  one module (`modules/manage/activity/audit-actions.ts`); codes appear only
+  under "Technical details". Activity filters run in the browser over 30 days
+  because the API filters only by search.
+- **Platform.** Read views use the real `/platform/*` endpoints; rows created
+  or changed in this browser carry a Preview tag. System health history is
+  derived only from real health reports this browser has read
+  (`platform.health_history`).
+
+### Phase 9 — cleanup
+
+The three rails, the control-plane shell, `ChatShell`, Library, the old
+ingestion and knowledge screens, `NotBackedYet` and `modules/workspace-control`
+are deleted; shared helpers moved to `web/src/lib` (`format.ts`,
+`api/upload.ts`, `hooks/useApiData.ts`). Global CSS shrank from seven files
+(~9,300 lines) to `tokens.css`, `globals.css` and `shell.css` (~1,700 lines).
+`npm run audit:pending` (`web/scripts/pending-api-audit.mjs`) fails when a
+pending key lacks a client function, local implementation, `Preview` marker,
+feature gate or proposed-contract anchor, or when a component imports a local
+implementation directly.
+
+### Open decisions (backend or product)
+
+- Sharing needs a server-side conversation snapshot; until `chat.share` is
+  implemented, `/s/<id>` opens only in the browser that created the link.
+- Assistant settings (instructions, capabilities) are not sent with chat
+  requests: `ChatRequest` has no such fields.
+- A manual sync does not process what it finds; the Sources page starts the
+  ingestion run while it is open. The backend should process after any sync.
+- Citations do not carry `collection_id`, and unreadable documents return 404,
+  so a partially hidden answer cannot request access to the exact knowledge
+  base.
+- The API refuses confirmed self-demotion; decide whether it should allow it.
+- `/platform/workspaces` and `/platform/users` drop owner, counts, roles and
+  memberships in their routers (documented drift in `api_contract.md`).
+- Name limits differ (UI 60 characters, API 255); choose one product rule.
+- The brief's backend matrix lists the workspace URL code as backed; it is
+  pending (`workspace.url_code`) because `PATCH /workspaces/{id}` rejects
+  `code`.

@@ -6,6 +6,10 @@ export interface ChatConversation {
   createdAt: number;
   updatedAt: number;
   deletedAt?: number;
+  /** The knowledge bases this chat searches; empty or absent searches all. */
+  scope?: ConversationCollection[];
+  /** The first line of the newest answer, for the chat list. */
+  preview?: string;
 }
 
 export interface ConversationDocument {
@@ -272,10 +276,26 @@ export interface TurnState {
    */
   currentResponseId?: string;
   error?: string;
+  /** When the client sent the request and when the turn settled (epoch ms). */
+  startedAt?: number;
+  finishedAt?: number;
+  /**
+   * The settled runtime facts of this turn's tool calls, kept when the turn
+   * is saved so the work line still says what ran after a reload.
+   */
+  workLog?: WorkLogEntry[];
   /** Live-only state. It is intentionally omitted from saved conversations. */
   modelPending?: boolean;
   /** Runtime facts, never model output. They only exist during this stream. */
   runtimeActivities?: RuntimeActivity[];
+}
+
+/** One settled tool call, as the work line remembers it. */
+export interface WorkLogEntry {
+  callId: string;
+  toolName: string;
+  state: Exclude<RuntimeActivity["state"], "active">;
+  resultCount?: number;
 }
 
 export interface RuntimeActivity {
@@ -403,11 +423,27 @@ export type ChatMessagePart =
   | { type: "data-document"; id?: string; data: ConversationDocument }
   | { type: "data-collection"; id?: string; data: ConversationCollection };
 
+export type AnswerFeedback = "up" | "down";
+
+/** One attempt at an answer; retries keep the earlier attempts. */
+export interface AnswerVariant {
+  turn: TurnState;
+  feedback?: AnswerFeedback;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   parts: ChatMessagePart[];
   turn?: TurnState;
+  /**
+   * Every attempt at this answer, oldest first, once it was retried; `turn`
+   * is always the one shown (`variants[variantIndex]`).
+   */
+  variants?: AnswerVariant[];
+  variantIndex?: number;
+  /** Kept on this device only; there is no feedback endpoint. */
+  feedback?: AnswerFeedback;
 }
 
 export interface CachedChatMessage {
@@ -417,6 +453,9 @@ export interface CachedChatMessage {
   parts: ChatMessagePart[];
   /** Retain semantic item ordering when a conversation is restored. */
   turn?: TurnState;
+  variants?: AnswerVariant[];
+  variantIndex?: number;
+  feedback?: AnswerFeedback;
   createdAt: number;
 }
 

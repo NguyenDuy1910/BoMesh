@@ -3,9 +3,7 @@ import test from "node:test";
 
 import {
   conversationAdapter,
-  readSelectedConversation,
-  rememberSelectedConversation,
-  resolveSelectedConversation,
+  conversationPreview,
   setConversationUser,
   uiToCachedMessage,
 } from "../src/modules/chat/conversations.ts";
@@ -111,36 +109,51 @@ test("retains collection context on a persisted user turn", async () => {
   assert.equal(restored[0]?.parts[1]?.type, "data-collection");
 });
 
-test("restores selection and conversation data only within the active workspace", async () => {
+test("conversations are kept per workspace", async () => {
   Object.defineProperty(globalThis, "window", {
     configurable: true,
-    value: { localStorage: new MemoryStorage(), sessionStorage: new MemoryStorage() },
+    value: { localStorage: new MemoryStorage() },
   });
   setConversationUser("chat-restore-test", "workspace-a");
-  assert.equal(readSelectedConversation(), undefined);
-
   await conversationAdapter.createConversation("Workspace A chat", "conversation-1");
-  rememberSelectedConversation("conversation-1");
-  assert.equal(readSelectedConversation(), "conversation-1");
 
   setConversationUser("chat-restore-test", "workspace-b");
-  assert.equal(readSelectedConversation(), undefined);
   assert.deepEqual(await conversationAdapter.listConversations(), []);
+  assert.equal(await conversationAdapter.getConversation("conversation-1"), null);
 
   setConversationUser("chat-restore-test", "workspace-a");
-  assert.deepEqual(
-    (await conversationAdapter.listConversations()).map(({ id }) => id),
-    ["conversation-1"],
-  );
-  assert.equal(readSelectedConversation(), "conversation-1");
-  rememberSelectedConversation(null);
-  assert.equal(readSelectedConversation(), null);
+  assert.deepEqual((await conversationAdapter.listConversations()).map(({ id }) => id), ["conversation-1"]);
 });
 
-test("an empty draft stays empty while a missing saved chat falls back to recents", () => {
-  const conversations = [{ id: "latest" }, { id: "older" }] as Awaited<ReturnType<typeof conversationAdapter.listConversations>>;
-  assert.equal(resolveSelectedConversation(conversations, null), null);
-  assert.equal(resolveSelectedConversation(conversations, "older"), "older");
-  assert.equal(resolveSelectedConversation(conversations, "missing"), "latest");
-  assert.equal(resolveSelectedConversation(conversations, undefined), "latest");
+test("a saved turn keeps what ran, settled, but never live-only state", () => {
+  const cached = uiToCachedMessage({
+    id: "assistant-2",
+    role: "assistant",
+    parts: [],
+    turn: {
+      id: "assistant-2",
+      status: "failed",
+      responses: {},
+      responseOrder: [],
+      runtimeActivities: [
+        { callId: "call-1", toolName: "knowledge_search", state: "completed", startedAt: 1, resultCount: 4 },
+        { callId: "call-2", toolName: "export_sandbox_file", state: "active", startedAt: 2 },
+      ],
+    },
+  });
+
+  assert.deepEqual(cached.turn?.workLog, [
+    { callId: "call-1", toolName: "knowledge_search", state: "completed", resultCount: 4 },
+    { callId: "call-2", toolName: "export_sandbox_file", state: "failed" },
+  ]);
+});
+
+test("the chat list preview is the answer's first line without Markdown or citation markers", () => {
+  const answer = {
+    id: "a-1",
+    role: "assistant" as const,
+    parts: [{ type: "text" as const, text: "## Per diem\n**USD 75** a day [1]:\n| a | b |", state: "done" as const }],
+  };
+  assert.equal(conversationPreview([answer]), "Per diem");
+  assert.equal(conversationPreview([{ ...answer, parts: [{ type: "text", text: "- **USD 75** a day [1]:", state: "done" }] }]), "USD 75 a day");
 });

@@ -20,6 +20,7 @@ interface GoogleIdentityApi {
       shape: "rectangular";
       logo_alignment: "left";
       width: number;
+      locale: string;
     },
   ): void;
 }
@@ -64,6 +65,8 @@ export async function renderGoogleSignInButton(
     shape: "rectangular",
     logo_alignment: "left",
     width: Math.min(400, Math.max(240, Math.floor(host.getBoundingClientRect().width))),
+    // The product is written in English; Google would otherwise follow the browser.
+    locale: document.documentElement.lang || "en",
   });
 }
 

@@ -1,69 +1,129 @@
 "use client";
 
-import { cn } from "@/lib/cn";
+import Link from "next/link";
 import { Loader2 } from "lucide-react";
-import { forwardRef } from "react";
+import { forwardRef, type ComponentProps, type ReactNode } from "react";
+
+import { ui } from "@/components/ui/design-system";
+import { cn } from "@/lib/cn";
 
 /**
  * One action hierarchy for the whole product.
  *
- * A solid fill is already the strongest thing on the row, so the filled
- * variants carry no shadow: the rim inside `--elevation-1` only darkens the
- * edge of a saturated colour.
- *
- * primary      one per screen — the action the page exists for
- * secondary    outlined; supporting actions of equal weight to each other
- * tertiary     soft fill; toolbar and inline actions that must not compete
- * ghost        chromeless; row actions, icon actions, dismissals
- * destructive  solid red; only inside a confirmation, never on a list row
- * danger       outlined red; the row-level entry point into a destructive flow
+ * primary       exactly one per view — the action the page exists for
+ * secondary     outlined; alternatives of equal weight to each other
+ * ghost         chromeless; toolbar, row and icon actions, dismissals
+ * danger        solid red; the confirming action inside a destructive flow
+ * danger-ghost  red text; the row- or menu-level entry into a destructive flow
+ * link          inline text action in the accent colour
  */
-export type ButtonVariant =
-  | "primary"
-  | "secondary"
-  | "tertiary"
-  | "ghost"
-  | "destructive"
-  | "danger";
-
+export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "danger-ghost" | "link";
 export type ButtonSize = "sm" | "md" | "lg";
 
 const variantClasses: Record<ButtonVariant, string> = {
   primary:
-    "bg-[var(--action-primary-bg)] text-[var(--text-on-action)] hover:bg-[var(--action-primary-hover)] active:bg-[var(--action-primary-pressed)]",
+    "bg-accent-primary text-text-on-accent shadow-(--shadow-button-primary) hover:bg-accent-hover active:bg-accent-pressed",
   secondary:
-    "bg-[var(--surface-base)] text-[var(--text-secondary)] shadow-[inset_0_0_0_1px_var(--border-default)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] hover:shadow-[inset_0_0_0_1px_var(--border-default)] active:bg-[var(--surface-selected)]",
-  tertiary:
-    "bg-[var(--surface-inset)] text-[var(--text-secondary)] shadow-[inset_0_0_0_1px_var(--border-subtle)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]",
+    "border-border-default bg-surface-base text-text-primary shadow-(--shadow-1) hover:border-border-strong hover:bg-surface-hover active:bg-surface-pressed",
   ghost:
-    "text-[var(--text-tertiary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] active:bg-[var(--surface-selected)]",
-  destructive:
-    "bg-[var(--status-danger-solid)] text-[var(--text-on-accent)] hover:brightness-95 active:brightness-90",
-  danger:
-    "bg-transparent text-[var(--status-danger-text)] shadow-[inset_0_0_0_1px_var(--status-danger-border)] hover:bg-[var(--status-danger-bg)]",
+    "text-text-secondary hover:bg-surface-hover hover:text-text-primary active:bg-surface-pressed aria-expanded:bg-surface-pressed aria-expanded:text-text-primary aria-pressed:bg-surface-pressed aria-pressed:text-text-primary",
+  danger: "bg-danger-solid text-text-on-danger hover:bg-danger-solid-hover active:bg-danger-solid-hover",
+  "danger-ghost": "text-status-danger hover:bg-status-danger-bg active:bg-status-danger-bg",
+  link: "h-auto! rounded-xs px-0! text-text-accent hover:underline",
+};
+
+/** Pressed/selected look for toggle-like buttons (`selected`), per variant. */
+const selectedClasses: Partial<Record<ButtonVariant, string>> = {
+  secondary: "border-border-strong bg-surface-pressed",
+  ghost: "bg-surface-pressed text-text-primary",
 };
 
 const sizeClasses: Record<ButtonSize, string> = {
-  sm: "h-8 gap-1.5 rounded-[var(--radius-sm)] px-2.5 text-[length:var(--text-size-ui)]",
-  md: "h-9 gap-1.5 rounded-[var(--radius-sm)] px-3 text-[length:var(--text-size-ui)]",
-  lg: "h-10 gap-2 rounded-[var(--radius-md)] px-4 text-sm",
+  sm: "h-(--control-sm) gap-1.5 rounded-sm px-2.5 text-[0.8125rem] [&_svg]:size-[15px]",
+  md: "h-(--control-md) gap-2 rounded-md px-3.5 text-body [&_svg]:size-4",
+  lg: "h-(--control-lg) gap-2 rounded-md px-4.5 text-[0.9375rem] [&_svg]:size-4",
 };
 
 const iconOnlySizeClasses: Record<ButtonSize, string> = {
-  sm: "h-8 w-8 rounded-[var(--radius-sm)] px-0",
-  md: "h-9 w-9 rounded-[var(--radius-sm)] px-0",
-  lg: "h-10 w-10 rounded-[var(--radius-md)] px-0",
+  sm: "w-(--control-sm) px-0",
+  md: "w-(--control-md) px-0",
+  lg: "w-(--control-lg) px-0",
 };
 
-interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+interface ButtonStyleOptions {
   variant?: ButtonVariant;
   size?: ButtonSize;
-  loading?: boolean;
-  icon?: React.ReactNode;
-  iconAfter?: React.ReactNode;
-  /** Renders a square control. Pass `aria-label` — the label is not visible. */
   iconOnly?: boolean;
   selected?: boolean;
+  block?: boolean;
+  className?: string;
+}
+
+/** The class list of a button, for elements that must look like one. */
+export function buttonClasses({
+  variant = "primary",
+  size = "md",
+  iconOnly = false,
+  selected = false,
+  block = false,
+  className,
+}: ButtonStyleOptions = {}) {
+  return cn(
+    "relative inline-flex shrink-0 select-none items-center justify-center whitespace-nowrap border border-transparent font-medium leading-none no-underline",
+    "[&_svg]:shrink-0",
+    ui.motion,
+    ui.focus,
+    "disabled:pointer-events-none disabled:opacity-45 disabled:shadow-none aria-disabled:pointer-events-none aria-disabled:opacity-45 aria-disabled:shadow-none",
+    sizeClasses[size],
+    iconOnly && iconOnlySizeClasses[size],
+    variantClasses[variant],
+    selected && selectedClasses[variant],
+    block && "w-full",
+    className,
+  );
+}
+
+interface ButtonOwnProps {
+  variant?: ButtonVariant;
+  size?: ButtonSize;
+  /** Keeps the width, swaps the content for a spinner, and blocks clicks. */
+  loading?: boolean;
+  icon?: ReactNode;
+  iconAfter?: ReactNode;
+  /** Pressed look for a toggle-like button; pair with `aria-pressed` when it toggles. */
+  selected?: boolean;
+  /** Full width. */
+  block?: boolean;
+}
+
+/** An icon-only button has no visible text, so it must be named. */
+type IconOnly =
+  | { iconOnly: true; "aria-label": string; "aria-labelledby"?: string }
+  | { iconOnly: true; "aria-label"?: string; "aria-labelledby": string };
+
+export type ButtonProps = Omit<ComponentProps<"button">, "ref"> &
+  ButtonOwnProps &
+  (IconOnly | { iconOnly?: false });
+
+function ButtonContent({
+  children,
+  icon,
+  iconAfter,
+  iconOnly,
+  loading,
+}: Pick<ButtonProps, "children" | "icon" | "iconAfter" | "iconOnly" | "loading">) {
+  return (
+    <>
+      <span className={cn("contents", loading && "invisible")}>
+        {icon}
+        {!iconOnly && children}
+        {!iconOnly && iconAfter}
+      </span>
+      {loading && (
+        <Loader2 aria-hidden="true" className="absolute inset-0 m-auto animate-spin motion-reduce:animate-none" />
+      )}
+    </>
+  );
 }
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
@@ -74,7 +134,8 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     icon,
     iconAfter,
     iconOnly = false,
-    selected,
+    selected = false,
+    block = false,
     children,
     className,
     disabled,
@@ -87,29 +148,48 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     <button
       ref={ref}
       aria-busy={loading || undefined}
-      className={cn(
-        "inline-flex shrink-0 items-center justify-center font-medium leading-none",
-        "transition-[background-color,color,box-shadow,opacity] duration-[var(--duration-fast)] ease-[var(--ease-out)]",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--surface-canvas)]",
-        "disabled:pointer-events-none disabled:opacity-45",
-        variantClasses[variant],
-        iconOnly ? iconOnlySizeClasses[size] : sizeClasses[size],
-        selected &&
-          variant !== "primary" &&
-          "bg-[var(--surface-selected)] text-[var(--text-accent)]",
-        className,
-      )}
+      // A loading button is busy, not unavailable: it keeps its full colour.
+      className={buttonClasses({ variant, size, iconOnly, selected, block, className: cn(loading && "disabled:opacity-100", className) })}
       disabled={disabled || loading}
       type={type}
       {...props}
     >
-      {loading ? (
-        <Loader2 aria-hidden="true" className="h-4 w-4 shrink-0 animate-spin" />
-      ) : (
-        icon
-      )}
-      {!iconOnly && children}
-      {!iconOnly && !loading && iconAfter}
+      <ButtonContent icon={icon} iconAfter={iconAfter} iconOnly={iconOnly} loading={loading}>
+        {children}
+      </ButtonContent>
     </button>
+  );
+});
+
+export type ButtonLinkProps = Omit<ComponentProps<typeof Link>, "ref"> &
+  Omit<ButtonOwnProps, "loading"> &
+  (IconOnly | { iconOnly?: false });
+
+/** A Next.js link that looks like a button. Navigation, not an action. */
+export const ButtonLink = forwardRef<HTMLAnchorElement, ButtonLinkProps>(function ButtonLink(
+  {
+    variant = "secondary",
+    size = "md",
+    icon,
+    iconAfter,
+    iconOnly = false,
+    selected = false,
+    block = false,
+    children,
+    className,
+    ...props
+  },
+  ref,
+) {
+  return (
+    <Link
+      ref={ref}
+      className={buttonClasses({ variant, size, iconOnly, selected, block, className })}
+      {...props}
+    >
+      <ButtonContent icon={icon} iconAfter={iconAfter} iconOnly={iconOnly}>
+        {children}
+      </ButtonContent>
+    </Link>
   );
 });

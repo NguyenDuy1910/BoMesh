@@ -1,49 +1,13 @@
-import type { StatusVocabulary } from "@/components/ui/StatusBadge";
-import type {
-  IngestionRun,
-  IngestionRunPhase,
-  IngestionRunScope,
-  IngestionRunTrigger,
-  RunSelectableState,
-} from "./runs-api.ts";
+import type { IngestionRun, IngestionRunScope, RunSelectableState } from "./runs-api.ts";
 
 /**
  * How a run is said out loud.
  *
  * The API speaks in run and item statuses; a person reads what was processed,
  * how far it got and whether anything needs them. Every screen that shows a
- * run takes its words from here, so the list, the detail and a toast cannot
- * describe the same run differently.
+ * run takes its words from here (its status from `lib/status.ts`), so the
+ * list, the detail and a toast cannot describe the same run differently.
  */
-
-/** Run statuses, in end-user words. */
-export const RUN_STATUS: StatusVocabulary = {
-  queued: { label: "Queued", tone: "info", moving: true },
-  running: { label: "Processing", tone: "info", moving: true },
-  completed: { label: "Completed", tone: "success" },
-  completed_with_errors: { label: "Completed with errors", tone: "warning" },
-  failed: { label: "Failed", tone: "danger" },
-  cancelled: { label: "Cancelled", tone: "neutral" },
-};
-
-/** A run item is a Document, so it reads in the Document's own states. */
-export const RUN_ITEM_STATUS: StatusVocabulary = {
-  queued: { label: "Waiting", tone: "neutral" },
-  running: { label: "Processing", tone: "info", moving: true },
-  succeeded: { label: "Ready", tone: "success" },
-  failed: { label: "Failed", tone: "danger" },
-  skipped: { label: "Skipped", tone: "neutral" },
-  cancelled: { label: "Cancelled", tone: "neutral" },
-};
-
-/**
- * The `RUN_STATUS` entry a run is shown with. A run that completed with some
- * Documents failed is normal, not a failure of the run, but it still needs
- * someone, so it reads differently from a clean one.
- */
-export function runStatus(run: Pick<IngestionRun, "status" | "counts">): string {
-  return run.status === "completed" && run.counts.failed > 0 ? "completed_with_errors" : run.status;
-}
 
 /** Progress is what has reached an outcome: processed or failed, of the total. */
 export function runProgress(run: Pick<IngestionRun, "counts">) {
@@ -92,19 +56,13 @@ export function describeScope(scope: IngestionRunScope, names: ScopeNames): stri
   }
   const what = describeStates(scope.states);
   if (scope.collection_id) {
-    return `${what} in ${names.collection(scope.collection_id) ?? "a collection"}`;
+    return `${what} in ${names.collection(scope.collection_id) ?? "a knowledge base"}`;
   }
   if (scope.source_id) {
     return `${what} from ${names.source(scope.source_id) ?? "a source"}`;
   }
   return `${what} in the workspace`;
 }
-
-export const TRIGGER_LABEL: Record<IngestionRunTrigger, string> = {
-  manual: "Started by a person",
-  scheduled: "Started by a schedule",
-  api: "Started through the API",
-};
 
 /** Who started it, in a word: their name, or the schedule that did. */
 export function runActor(run: Pick<IngestionRun, "created_by" | "trigger">): string {
@@ -113,15 +71,13 @@ export function runActor(run: Pick<IngestionRun, "created_by" | "trigger">): str
   return run.trigger === "scheduled" ? "Schedule" : run.trigger === "api" ? "API" : "Unknown";
 }
 
-/** A short span: "850 ms", "12.4 s", "3 min 5 s", "1 h 2 min". */
+/** A span as the history table reads it: "4s", "6m 19s", "1h 2m". */
 export function formatDuration(milliseconds: number): string {
-  const ms = Math.max(0, Math.round(milliseconds));
-  if (ms < 1000) return `${ms} ms`;
-  const seconds = ms / 1000;
-  if (seconds < 60) return `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)} s`;
+  const seconds = Math.max(0, Math.round(milliseconds / 1000));
+  if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes} min ${Math.round(seconds % 60)} s`;
-  return `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
 /** Time between two instants, or until `now` while it is still open. */
@@ -136,22 +92,69 @@ export function elapsed(
   return Number.isNaN(start) || Number.isNaN(end) ? null : Math.max(0, end - start);
 }
 
-const PHASE_LABEL: Record<IngestionRunPhase["phase"], string> = {
-  downloading: "Downloading",
-  expanding: "Expanding archive",
-  parsing: "Parsing",
-  contextualizing: "Contextualizing",
-  embedding: "Embedding",
-  storing: "Storing",
-};
+/** Documents a retry would take again: failed, skipped and cancelled. */
+export function retryableCount(run: Pick<IngestionRun, "counts">): number {
+  const { failed, skipped, cancelled } = run.counts;
+  return failed + skipped + cancelled;
+}
 
-/** One line per document: "Parsing 1.2 s · Embedding 3.4 s · Storing 220 ms". */
-export function describePhases(phases: readonly IngestionRunPhase[], now = Date.now()): string {
-  return phases
-    .map((phase) => {
-      const label = PHASE_LABEL[phase.phase] ?? phase.phase;
-      const span = elapsed(phase.started_at, phase.finished_at, now);
-      return span === null ? label : `${label} ${formatDuration(span)}`;
-    })
-    .join(" · ");
+export type RunStepState = "done" | "active" | "pending" | "failed" | "stopped";
+
+export interface RunStep {
+  label: string;
+  state: RunStepState;
+  note: string;
+}
+
+const documents = (count: number) => `${count.toLocaleString()} ${count === 1 ? "document" : "documents"}`;
+
+/**
+ * The three steps a person recognises in a sync — collect what changed, read
+ * it, make it searchable — derived from the run's counts. No step carries a
+ * duration: the API times documents, not steps, and a split would be invented.
+ */
+export function runSteps(run: Pick<IngestionRun, "status" | "counts" | "error">): RunStep[] {
+  const { total, succeeded, failed } = run.counts;
+  const reached = succeeded + failed;
+  const found = `Found ${documents(total)} to process`;
+  const ready = `${succeeded.toLocaleString()} ready for questions`;
+  const collect = (state: RunStepState, note = found): RunStep => ({ label: "Collect documents", state, note });
+  const read = (state: RunStepState, note: string): RunStep => ({ label: "Read documents", state, note });
+  const searchable = (state: RunStepState, note: string): RunStep => ({ label: "Make searchable", state, note });
+
+  switch (run.status) {
+    case "queued":
+      return [collect("active", "Waiting to start"), read("pending", "Not started"), searchable("pending", "Not started")];
+    case "running":
+      return [
+        collect("done"),
+        read("active", `${reached.toLocaleString()} of ${total.toLocaleString()} read`),
+        succeeded ? searchable("active", ready) : searchable("pending", "Waiting"),
+      ];
+    case "completed":
+      return [
+        collect("done"),
+        read("done", `${succeeded.toLocaleString()} read${failed ? ` · ${failed.toLocaleString()} couldn’t be read` : ""}`),
+        searchable("done", ready),
+      ];
+    case "cancelled":
+      return [
+        collect("done"),
+        read("stopped", `Stopped after ${reached.toLocaleString()} of ${total.toLocaleString()}`),
+        searchable("stopped", ready),
+      ];
+    default:
+      if (!total) {
+        return [
+          collect("failed", run.error || "Couldn’t start"),
+          read("pending", "Not started"),
+          searchable("pending", "Not started"),
+        ];
+      }
+      return [
+        collect("done"),
+        read("failed", `Stopped after ${reached.toLocaleString()} of ${total.toLocaleString()}`),
+        searchable(succeeded ? "stopped" : "pending", succeeded ? ready : "Not started"),
+      ];
+  }
 }

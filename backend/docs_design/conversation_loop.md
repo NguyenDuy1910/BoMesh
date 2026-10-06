@@ -75,9 +75,10 @@ part of a long file. The shell is the provider's hosted container (OpenRouter
   files) is looked up in the container before the export is refused.
 - **Clients see what ran.** `hosted_execution_result` items carry the
   commands and their stdout/stderr/exit status (never provider ids). The web
-  chat shows each run as one line — "Ran code", "Ran 3 commands, 1 failed"
-  or "Code hit an error", followed by the failing command's last error line —
-  that opens into the commands and their output.
+  chat folds a turn's work into one line above the answer — "Worked for 26s ·
+  Searched HR Policies · Ran 3 commands, 1 failed · Created 2 files" — that
+  opens into a timeline of searches, reads and shell runs; each command shows
+  its code on request, its output, and a failing command's last error line.
 - **File cards survive a reload.** The answer text that follows an export
   carries a `bomesh:artifact` annotation per saved revision (agent
   `ArtifactProjection`, beside `CitationProjection`), so web and mobile
@@ -109,6 +110,34 @@ and grounded citations.
   removed only when no saved conversation still references them.
 - Citation taps open the canonical document preview/focus endpoint. Generated
   artifacts use signed downloads and the canonical revision/publish API.
+
+## Web conversation client
+
+The web chat (`/chat`, `/chat/[conversationId]`, `/chats`) uses the same SSE
+stream and keeps conversations device-local, isolated by account and
+workspace; the UI says so and never implies cross-device history.
+
+- **An answer keeps streaming across pages.** The live answer belongs to the
+  client chat runtime, not to the page, so moving between chats or to the chat
+  list does not stop it. A turn saved while still streaming (the tab closed)
+  is restored as interrupted.
+- **Work line.** Built only from the turn's items and runtime facts: function
+  calls the runtime started, `hosted_execution_result` items, and the turn's
+  start/finish time. On save the live runtime activity is settled into a small
+  `workLog` (tool, outcome, result count) so a restored answer still says what
+  ran. "Show how answers were found" off hides it.
+- **Retry and variants.** Retry is a new request for the same question —
+  again, with "more detail" / "shorter" appended to the sent text, or with no
+  `collection_ids` ("Search all knowledge"). Earlier attempts stay on the
+  message as variants (‹ 1/2 ›); feedback is per attempt and kept locally.
+- **Editing a question** replaces its answer and drops every later message,
+  after a confirmation when later messages exist.
+- **Partial access.** Cited documents of saved answers are re-checked
+  (`GET /documents/{id}`); citations the reader can no longer open are
+  dropped with a lock hint, and an answer built only from such documents is
+  hidden behind a "you can't access this" call-out.
+- **Sharing** a chat is proposed (`chat.share`, api_contract.md): the link
+  carries a snapshot; recipients only see sources they can open.
 
 ## Citations in an answer
 

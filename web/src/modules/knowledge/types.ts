@@ -100,13 +100,11 @@ export interface KnowledgeItemViewer {
   focus?: ViewerFocus | null;
 }
 
+/** `GET /knowledge/documents/{document_id}/citations/{chunk_id}`: where one passage sits. */
 export interface KnowledgeCitationResponse {
-  item_id: string;
+  document_id: string;
   chunk_id: string;
   title: string;
   content_type: string;
-  document_url?: string | null;
-  external_url?: string | null;
-  preview?: KnowledgePreview | null;
   citation: ViewerCitation;
 }
