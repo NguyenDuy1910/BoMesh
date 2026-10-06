@@ -1,11 +1,11 @@
 <p align="center">
-  <img src="web/public/bothesis-logo.png" alt="BoThesis" width="88" />
+  <img src="web/public/bomesh-logo.png" alt="BoMesh" width="88" />
 </p>
 
-<h1 align="center">BoThesis</h1>
+<h1 align="center">BoMesh</h1>
 
 <p align="center">
-  <strong>A grounded enterprise knowledge assistant for trusted, permission-aware answers.</strong>
+  <strong>Business-only Knowledge Mesh — a grounded knowledge assistant for trusted, permission-aware answers.</strong>
 </p>
 
 <p align="center">
@@ -15,18 +15,21 @@
   <a href="#development">Development</a>
 </p>
 
-BoThesis connects company knowledge to conversations without losing the things
+BoMesh connects company knowledge to conversations without losing the things
 that make enterprise answers trustworthy: tenant isolation, access control,
 source lineage, and citations. It is an early-stage project designed around a
 simple rule: the model reasons over evidence; it does not invent a source of
 truth.
 
+The name: **BoMesh** is the **B**usiness-**o**nly Knowledge **Mesh** — and Bo is
+its author's name.
+
 ## What it provides
 
-| Capability | How BoThesis approaches it |
+| Capability | How BoMesh approaches it |
 | --- | --- |
 | Grounded answers | Retrieves tenant-scoped evidence and returns citations back to canonical source Items. |
-| Working documents | Starts an editable artifact from any indexed document (found via the same `knowledge_search`, e.g. a template or form) or from written content, revises it through the conversation, and exports it; every edit runs in a disposable Docker sandbox and is kept as a revision. |
+| Working files | Runs file work in a per-conversation OpenAI container through the native Code Interpreter and Shell tools: attached uploads and any indexed document the user asks for (`open_document`) are placed there, and every file the answer presents is stored as a downloadable revision. Conversation files are never written back into the knowledge base. |
 | Contextual hybrid retrieval | Uses contextual chunk text with dense embeddings and Qdrant BM25, fused for retrieval and filtered before evidence is exposed. |
 | Governed ingestion | Ingests managed files and Confluence content through connector-owned normalization, ACL mapping, checkpoints, and retry-safe replacement. |
 | Clear storage ownership | PostgreSQL holds business state; S3-compatible storage holds original bytes; Qdrant is a rebuildable retrieval projection. |
@@ -73,32 +76,6 @@ boundary.
 Read the full design in [Architecture](docs/architecture.md) and
 [Storage ownership and data model](docs/data.schema.md).
 
-## Repository guide
-
-```text
-backend/
-├── main.py                    FastAPI routes and HTTP dependencies
-└── bothesis/
-    ├── services/              Application use cases, transactions, and previews
-    ├── connector/             Confluence/file adapters, Docling, ingestion pipeline
-    ├── document_index/        Contextualization, embeddings, Qdrant projection
-    ├── knowledge/             Retrieval, ACL filtering, evidence, reranking
-    ├── agent/                 Conversation loop, tools, model transports
-    ├── sandbox/               Disposable Docker sandbox for document operations
-    ├── db/                    SQLAlchemy models and database engine
-    └── tui/                   Terminal chat client
-web/                           Next.js workspace for chat and administration
-app/bothesis/                  Flutter client scaffold
-deployment/                    Local PostgreSQL, Qdrant, and MinIO Compose stack
-                               plus the artifact sandbox image
-docs/                          Architecture, setup, operations, and reference docs
-tests/                         Backend and integration tests
-```
-
-Service-module convention: each `backend/bothesis/services/<name>.py` module
-defines only its primary service class. Shared contexts, DTOs, errors, and
-package constants belong in `backend/bothesis/services/__init__.py` and are
-imported through `bothesis.services`.
 
 ## Quick start
 
@@ -114,18 +91,17 @@ imported through `bothesis.services`.
 
 ```bash
 git clone <your-fork-or-repository-url>
-cd BoThesis
+cd BoMesh
 
 uv sync --project backend
 npm --prefix web ci
 make init
 ```
 
-`make init` creates missing local environment files, starts PostgreSQL, Qdrant,
+`make init` creates the missing root `.env`, starts PostgreSQL, Qdrant,
 MinIO, and Temporal, creates the raw-object bucket, rebuilds the local database
 schema, seeds a development administrator, recreates the derived Qdrant
-collection, registers Temporal Search Attributes, and builds the Docker sandbox
-image the assistant uses to draft and revise documents.
+collection, and registers Temporal Search Attributes.
 
 > **Local-development reset:** `make init` intentionally resets the application
 > schema, Temporal persistence, and Qdrant collection. Do not use it against an
@@ -133,7 +109,7 @@ image the assistant uses to draft and revise documents.
 
 ### 2. Configure model access
 
-Set the required provider keys in `backend/.env`:
+Set the required provider keys in the root `.env`:
 
 ```dotenv
 OPENAI_API_KEY=...
@@ -157,7 +133,7 @@ uv run python main.py
 In another:
 
 ```bash
-npm --prefix web run dev
+bun run web
 ```
 
 Open:
@@ -182,10 +158,12 @@ Open:
 | [Connectors and indexing](docs/connectors-and-indexing.md) | Connector scopes, Docling, contextual hybrid retrieval, ACL projection, and retries. |
 | [Operations and configuration](docs/operations.md) | Environment variables, health checks, object storage, observability, and troubleshooting. |
 | [Data schema](docs/data.schema.md) | Canonical `Item` model and durable storage ownership. |
+| [API contract](backend/docs_design/api_contract.md) | Versioned routes, DTO rules, auth/session semantics, errors, and lifecycle contract. |
 | [Agent architecture](docs/references/agent-loop.md) | OpenResponses stream, tools, response lifecycle, and citation projection. |
 
-The interactive API contract is generated by FastAPI at `/docs`; it is the
-authoritative reference for request and response schemas.
+The runtime request/response schema is generated by FastAPI at `/docs`; API
+design rules and route ownership live in
+[`backend/docs_design/api_contract.md`](backend/docs_design/api_contract.md).
 
 ## Development
 
@@ -200,7 +178,6 @@ make db-init     # reset only the local PostgreSQL schema
 make db-seed     # seed the development administrator
 make db-reset    # reset PostgreSQL and seed the development administrator
 make qdrant-init # recreate only the derived Qdrant collection
-make sandbox-image # build the artifact sandbox image
 ```
 
 Run the verification suite from the repository root:
@@ -216,14 +193,14 @@ The terminal client is available after the API is running:
 
 ```bash
 cd backend
-uv run python -m bothesis.tui
+uv run python -m bomesh.tui
 ```
 
 ## Security and deployment notes
 
 - Never commit `.env` files, provider credentials, encryption keys, or signed
   object URLs.
-- `BOTHESIS_ALLOW_INSECURE_DEV_IDENTITY=true` is strictly for local development.
+- `BOMESH_ALLOW_INSECURE_DEV_IDENTITY=true` is strictly for local development.
   Production must inject authenticated identity from trusted middleware.
 - Connector credentials are encrypted at rest; retrieval authorization is based
   on Item ACLs, not on the connector's provider credential.
@@ -235,7 +212,7 @@ For deployment and operational detail, start with
 
 ## Project status
 
-BoThesis is in active early development. The schema is initialized directly
+BoMesh is in active early development. The schema is initialized directly
 from the current ORM models and is intentionally optimized for the present
 architecture rather than backwards compatibility. Expect APIs and connectors to
 evolve; preserve the core invariants of tenant isolation, ACL enforcement,

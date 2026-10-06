@@ -1,0 +1,621 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   BoMesh — semantic design tokens
+   ---------------------------------------------------------------------------
+   The single source of colour, shape, density, motion and layout for every
+   surface in the product. Nothing else in the codebase may declare a colour.
+
+   Values are ported from the approved prototype (`docs/ux-review.html`,
+   `:root{`, `html[data-theme="dark"]` and the Round 2 theme block). Where this
+   file departs from the prototype the reason is written next to the value;
+   every departure is an accessibility fix (WCAG AA, checked by
+   `web/scripts/contrast.mjs`), never a restyle.
+
+   Layers, in order:
+     1. Semantics   what a colour means. Components use only these. The
+                    prototype declares its palette inline, so the palette layer
+                    lives here as literal values and is never referenced from
+                    outside this file.
+     2. Themes      html[data-theme] · html[data-accent] · html[data-bg] ·
+                    html[data-density]. Only semantics are redeclared.
+     3. Scale       radius, shadow, control height, type, motion, layout.
+     4. Tailwind    `@theme` exposes the semantics as utilities.
+
+   Root attributes (set before paint by the boot script in app/layout.tsx and
+   kept in sync by `useAccountPreferences`):
+     data-theme    light | dark
+     data-accent   indigo | teal | ocean | plum | graphite   (default indigo)
+     data-bg       plain | soft | mesh                       (default plain)
+     data-density  comfortable | compact                     (default comfortable)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  color-scheme: light;
+
+  /* ── 1. Semantics — light ───────────────────────────────────────────────
+     Surfaces stack canvas < base (the page sheet) < raised. Depth comes from
+     this ramp plus one hairline — never from stacked borders or shadows. */
+  --surface-canvas: #f1f2f4; /* app background; the sidebar sits on it */
+  --surface-base: #ffffff; /* prototype "sheet": page content, cards */
+  --surface-raised: #ffffff; /* menus, popovers, dialogs */
+  --surface-subtle: #f7f8fa; /* table heads, hovered rows, read-only fields */
+  --surface-inset: #eef0f3; /* prototype "sunken": wells, user messages, segmented tracks */
+  --surface-hover: #f2f3f6;
+  --surface-pressed: #e8eaee;
+  --surface-selected: var(--accent-soft);
+  --surface-inverse: #0e1217; /* toasts, bulk bar, tooltips */
+  --surface-inverse-hover: rgb(127 127 127 / 22%); /* ghost controls on the inverse surface */
+  --scrim: rgb(14 18 24 / 42%); /* modal backdrop */
+  --scrim-soft: rgb(14 18 24 / 18%); /* drawer backdrop: the page stays readable */
+
+  --text-primary: #0e1217;
+  --text-secondary: #434c58;
+  --text-tertiary: #646d79;
+  --text-disabled: #9aa1ab;
+  --text-inverse: #ffffff;
+  --text-accent: #312eaa; /* prototype "primary-text": links, selected labels */
+  --text-on-accent: #ffffff; /* prototype "on-primary" */
+
+  --border-subtle: #e4e7eb; /* prototype "border": hairlines, card edges */
+  --border-default: #d3d7dd; /* prototype "border-2": control outlines */
+  --border-strong: #b5bcc5; /* control hover, unchecked checkbox */
+  --border-focus: var(--accent-primary);
+
+  /* Primary: one action colour, used for the primary action, selection and
+     focus — never for decoration or status. Themeable via data-accent. */
+  --accent-primary: #3b38c4;
+  --accent-hover: #312eaa;
+  --accent-pressed: #28268f;
+  --accent-soft: #eeeefc;
+  --accent-soft-hover: #e1e1fa;
+  --focus-ring: var(--accent-primary);
+  --shadow-focus: 0 0 0 3px rgb(59 56 196 / 26%);
+  --shadow-focus-danger: 0 0 0 3px rgb(190 47 40 / 22%);
+  /* Fixed picker swatches: each accent's light primary, in every theme. */
+  --accent-swatch-indigo: #3b38c4;
+  --accent-swatch-teal: #0f766e;
+  --accent-swatch-ocean: #1d5fd6;
+  --accent-swatch-plum: #8a3b84;
+  --accent-swatch-graphite: #1f2328;
+
+  /* Destructive fill (danger button). Not in the prototype's token list: it
+     paints `--err` and relies on a brightness filter for hover. Named here so
+     the dark theme can keep white text at AA (see the dark block). */
+  --danger-solid: #be2f28;
+  --danger-solid-hover: #a82822;
+  --text-on-danger: #ffffff;
+
+  /* Evidence — the product signature. Amber is reserved for grounded evidence
+     (citation numerals, cited passages, source chips) and nothing else. Not
+     themeable: an accent change never touches it. */
+  --evidence-bg: #fff2c2;
+  --evidence-border: #e9bf45;
+  --evidence-text: #6a4d00;
+  --evidence-strong: #fbe18a; /* the highlighted span inside a passage */
+  --evidence-line: #d9a520; /* the rule beside a cited passage */
+
+  /* Status. `text` is also the dot and icon colour; `text` reads on `bg`;
+     `border` outlines `bg`. Not themeable. A status colour never drives an
+     action's default look. */
+  --status-success-text: #0d7548;
+  --status-success-bg: #e8f5ee;
+  --status-success-border: #bde2cd;
+  --status-warning-text: #965704;
+  --status-warning-bg: #fdf3e2;
+  --status-warning-border: #f1d5a0;
+  --status-danger-text: #be2f28;
+  --status-danger-bg: #fdeeec;
+  --status-danger-border: #f4c6c1;
+  --status-info-text: #2155bf;
+  --status-info-bg: #ebf1fd;
+  --status-info-border: #c5d6f6;
+  --status-neutral-text: #4f5865;
+  --status-neutral-bg: #f0f1f4;
+  --status-neutral-border: #dbdee3;
+
+  /* Status glyphs on `--surface-inverse` (toast and bulk-bar icons). */
+  --status-success-on-inverse: #5fd39b;
+  --status-danger-on-inverse: #ff9c93;
+  --status-info-on-inverse: #9eb8ff;
+
+  /* Identity hues: avatars, workspace marks, knowledge tiles. Same in both
+     themes; initials on them use `--text-on-accent`-white. */
+  --avatar-1: #3b38c4;
+  --avatar-2: #0e7c66;
+  --avatar-3: #b4467a;
+  --avatar-4: #b65c0e; /* prototype #c2620f is 4.2:1 under white initials; one step darker is 4.6:1 */
+  --avatar-5: #2f6fb5;
+  --avatar-6: #6b4fbf;
+  --avatar-7: #4e6b2e;
+  --avatar-8: #a23b3b;
+  --avatar-9: #1f7a8c;
+  --avatar-10: #7a5c1e;
+
+  /* File-type marks (prototype FILE_COLORS). White mono label on the fill;
+     the mark is decorative — the file name carries the meaning. */
+  --file-pdf: #b8322b;
+  --file-doc: #2a5dc4;
+  --file-sheet: #16703f;
+  --file-slides: #b94a17;
+  --file-archive: #6447bf;
+  --file-web: #9a4a12;
+  --file-image: #7a4fb0;
+  --file-text: #4f5865;
+  --file-label: #ffffff;
+
+  /* Selection and switch knobs stay white in every theme. */
+  --control-knob: #ffffff;
+
+  /* Code blocks sit on a dark surface in both themes, so their rules and
+     controls use translucent-on-dark values rather than the page's borders. */
+  --code-surface: #0e1217;
+  --code-text: #e4e7eb;
+  --code-muted: #8e96a1;
+  /* Failing stderr in command output; 8.6:1 on --code-surface. */
+  --code-danger: #ff9c93;
+  --code-border: rgb(255 255 255 / 8%);
+  --code-control-bg: rgb(255 255 255 / 6%);
+  --code-control-border: rgb(255 255 255 / 12%);
+  --code-control-hover: rgb(255 255 255 / 12%);
+
+  /* Canvas atmosphere (html[data-bg]). Plain by default; the sheet always
+     stays calm for reading. Consumers paint `background: var(--canvas-background)`
+     on the app frame and `background: var(--canvas-glow)` behind the chat home. */
+  --canvas-background: var(--surface-canvas);
+  --canvas-glow: none;
+  --shadow-composer: 0 6px 20px -8px rgb(14 18 24 / 12%), var(--shadow-1);
+  --shadow-composer-focus: 0 8px 28px -8px rgb(14 18 24 / 16%), var(--shadow-1);
+  /* The sign-in illustration panel stays dark in both themes. Its violet/cyan
+     graph palette represents linked knowledge, while the product accent remains
+     reserved for actions and focus. */
+  --auth-mesh-ink: #070916;
+  --auth-mesh-violet: #a78bfa;
+  --auth-mesh-blue: #818cf8;
+  --auth-mesh-cyan: #67e8f9;
+  --auth-art-background:
+    radial-gradient(720px 520px at 18% 40%, color-mix(in srgb, var(--auth-mesh-violet) 38%, transparent), transparent 68%),
+    radial-gradient(520px 430px at 92% 18%, color-mix(in srgb, var(--auth-mesh-cyan) 16%, transparent), transparent 70%),
+    radial-gradient(460px 360px at 76% 92%, color-mix(in srgb, var(--auth-mesh-blue) 18%, transparent), transparent 72%),
+    var(--auth-mesh-ink);
+  --auth-art-text: #ffffff;
+  /* ── 3. Scale ─────────────────────────────────────────────────────────── */
+  --radius-xs: 4px; /* checkboxes, sort buttons */
+  --radius-sm: 6px; /* chips, small controls */
+  --radius-md: 8px; /* controls: buttons, inputs, menus items */
+  --radius-lg: 10px; /* cards, lists, table shells */
+  --radius-sheet: 12px; /* the page sheet, toasts */
+  --radius-xl: 14px; /* popovers, large panels */
+  --radius-2xl: 16px; /* dialogs */
+  --radius-full: 999px;
+
+  --shadow-1: 0 1px 2px rgb(14 18 24 / 5%);
+  --shadow-2: 0 1px 3px rgb(14 18 24 / 6%), 0 1px 2px rgb(14 18 24 / 4%);
+  --shadow-sheet: 0 0 0 1px rgb(14 18 24 / 5%), 0 1px 3px rgb(14 18 24 / 5%);
+  --shadow-pop: 0 12px 32px -8px rgb(14 18 24 / 18%), 0 2px 6px rgb(14 18 24 / 6%),
+    0 0 0 1px rgb(14 18 24 / 5%);
+  --shadow-modal: 0 32px 72px -16px rgb(14 18 24 / 32%), 0 0 0 1px rgb(14 18 24 / 6%);
+  /* A filled primary button: a soft drop plus a top highlight (Round 2). */
+  --shadow-button-primary: 0 1px 2px rgb(14 18 24 / 18%), inset 0 1px 0 rgb(255 255 255 / 12%);
+  --shadow-knob: 0 1px 2px rgb(0 0 0 / 25%);
+
+  /* Density-dependent sizes. Every interactive control resolves to a control
+     height, so a toolbar never mixes a 32px select with a 36px button. */
+  --control-sm: 30px;
+  --control-md: 36px;
+  --control-lg: 42px;
+  --nav-item-height: 34px;
+  --table-head-height: 38px;
+  --table-row-height: 56px;
+  --table-cell-py: 10px;
+  --list-row-py: 12px;
+  --list-row-px: 16px;
+  --card-py: 16px;
+  --card-px: 18px;
+  --page-pt: 28px;
+
+  /* Spacing for gaps and padding (not layout widths, which are named below). */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+
+  /* Type. IBM Plex Sans for UI and reading, IBM Plex Mono for numbers, codes
+     and citation numerals; both are loaded by next/font in app/layout.tsx,
+     which defines --font-plex-sans / --font-plex-mono on <html>. */
+  --font-sans: var(--font-plex-sans, "IBM Plex Sans"), -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, sans-serif;
+  --font-mono: var(--font-plex-mono, "IBM Plex Mono"), ui-monospace, "SF Mono", Menlo,
+    monospace;
+
+  --text-size-display: 1.75rem; /* 28 / 600 — welcome, empty-home headline */
+  --text-lh-display: 2.25rem;
+  --text-size-title: 1.5rem; /* 24 / 600 — page title */
+  --text-lh-title: 2rem;
+  --text-size-section: 0.9375rem; /* 15 / 600 — section and card titles */
+  --text-lh-section: 1.375rem;
+  --text-size-body: 0.875rem; /* 14 — the interface body size */
+  --text-lh-body: 1.3125rem;
+  --text-size-reading: 0.96875rem; /* 15.5 — chat answers and documents */
+  --text-lh-reading: 1.7;
+  --text-size-meta: 0.78125rem; /* 12.5 — supporting row detail, hints */
+  --text-lh-meta: 1.125rem;
+  --text-size-caption: 0.75rem; /* 12 — the smallest text the product renders */
+  --text-lh-caption: 1rem;
+  --text-tracking-caption: 0.04em;
+
+  /* Motion */
+  --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
+  --duration-slow: 240ms;
+
+  /* Layout */
+  --sidebar-width: 252px;
+  --sidebar-rail: 68px;
+  --header-h: 3.25rem;
+  /* A row of page tabs: as tall as the header so tab labels share a centre
+     line with the controls beside them. */
+  --tab-bar-h: 3.25rem;
+  --section-gap: var(--space-6);
+  --page-gutter: clamp(1.25rem, 2.2vw, 2.25rem);
+  --page-max: 1240px;
+  --page-max-narrow: 880px;
+  --chat-max: 780px;
+
+  /* Breakpoints, named once. --bp-nav equals Tailwind's `lg` so the rail and
+     the button that opens it flip at the same width; --bp-inspector is `xl`. */
+  --bp-nav: 1024px;
+  --bp-inspector: 1280px;
+
+  --z-composer: 12;
+  --z-activity: 30;
+  --z-overlay: 35;
+  --z-sidebar: 40;
+  --z-popover: 50;
+}
+
+@media (max-width: 640px) {
+  :root {
+    --page-gutter: 1rem;
+  }
+}
+
+/* ── 2. Themes ─────────────────────────────────────────────────────────────
+   Dark redeclares semantics only; every scale token above is mode-independent.
+   A component that needs a dark rule of its own is a bug in this block, not a
+   reason for an `html[data-theme="dark"] .thing { … }` override. */
+html[data-theme="dark"] {
+  color-scheme: dark;
+
+  --surface-canvas: #0b0d10;
+  --surface-base: #13161a;
+  --surface-raised: #191c21;
+  --surface-subtle: #171a1f;
+  --surface-inset: #1e2228;
+  --surface-hover: #1e2228;
+  --surface-pressed: #262b32;
+  --surface-inverse: #eceef1;
+  --scrim: rgb(0 0 0 / 60%);
+  --scrim-soft: rgb(0 0 0 / 36%);
+
+  --text-primary: #eceef1;
+  --text-secondary: #b9bfc8;
+  --text-tertiary: #8e96a1;
+  --text-disabled: #5e6570;
+  --text-inverse: #0e1217;
+  --text-accent: #a9a7ff;
+  --text-on-accent: #ffffff;
+
+  --border-subtle: #252a31;
+  --border-default: #313740;
+  --border-strong: #46505b;
+
+  --accent-primary: #6461f0;
+  --accent-hover: #7471f5;
+  --accent-pressed: #5552dd;
+  --accent-soft: #1f1f3d;
+  --accent-soft-hover: #29294f;
+  --shadow-focus: 0 0 0 3px rgb(116 113 245 / 40%);
+  --shadow-focus-danger: 0 0 0 3px rgb(255 156 147 / 35%);
+
+  /* The prototype fills the dark danger button with `--err` (#ff9c93) under
+     white text: 2.0:1. This is the light theme's red family lifted one step,
+     5.65:1 with white. */
+  --danger-solid: #c0312b;
+  --danger-solid-hover: #a82822;
+
+  --evidence-bg: rgb(240 196 64 / 16%);
+  --evidence-border: rgb(240 196 64 / 50%);
+  --evidence-text: #f3d06a;
+  --evidence-strong: rgb(240 196 64 / 30%);
+  --evidence-line: #e0b43e;
+
+  --status-success-text: #5fd39b;
+  --status-success-bg: rgb(95 211 155 / 12%);
+  --status-success-border: rgb(95 211 155 / 30%);
+  --status-warning-text: #f2c46e;
+  --status-warning-bg: rgb(242 196 110 / 12%);
+  --status-warning-border: rgb(242 196 110 / 30%);
+  --status-danger-text: #ff9c93;
+  --status-danger-bg: rgb(255 156 147 / 12%);
+  --status-danger-border: rgb(255 156 147 / 30%);
+  --status-info-text: #93b4ff;
+  --status-info-bg: rgb(147 180 255 / 12%);
+  --status-info-border: rgb(147 180 255 / 30%);
+  --status-neutral-text: #b0b7c1;
+  --status-neutral-bg: #21252b;
+  --status-neutral-border: #323840;
+
+  /* The inverse surface is light in dark mode. The prototype keeps the light
+     theme's pastel glyphs (#5fd39b is 1.6:1 there); these are the light
+     theme's status text values, all ≥ 4.5:1 on #eceef1. */
+  --status-success-on-inverse: #0d7548;
+  --status-danger-on-inverse: #c0312b;
+  --status-info-on-inverse: #2155bf;
+
+  --code-surface: #0b0d10;
+  --code-text: #e4e7eb;
+  --code-muted: #8e96a1;
+  --code-danger: #ff9c93;
+
+  --shadow-sheet: 0 0 0 1px rgb(255 255 255 / 5%);
+  --shadow-pop: 0 16px 40px -8px rgb(0 0 0 / 60%), 0 0 0 1px rgb(255 255 255 / 7%);
+  --shadow-modal: 0 32px 72px -16px rgb(0 0 0 / 70%), 0 0 0 1px rgb(255 255 255 / 8%);
+  --shadow-composer: 0 6px 20px -8px rgb(0 0 0 / 50%), var(--shadow-1);
+  --shadow-composer-focus: 0 8px 28px -8px rgb(0 0 0 / 60%), var(--shadow-1);
+}
+
+/* Accent themes. Only the action/selection family changes; status and
+   evidence never do. Indigo is the :root default above. */
+html[data-accent="teal"] {
+  --accent-primary: #0f766e;
+  --accent-hover: #0b5f59;
+  --accent-pressed: #094c47;
+  --accent-soft: #e7f4f2;
+  --accent-soft-hover: #cbe8e4;
+  --text-accent: #0b5f59;
+  --shadow-focus: 0 0 0 3px rgb(15 118 110 / 26%);
+}
+html[data-accent="ocean"] {
+  --accent-primary: #1d5fd6;
+  --accent-hover: #174fb4;
+  --accent-pressed: #123f91;
+  --accent-soft: #ebf2fe;
+  --accent-soft-hover: #d3e2fa;
+  --text-accent: #174fb4;
+  --shadow-focus: 0 0 0 3px rgb(29 95 214 / 26%);
+}
+html[data-accent="plum"] {
+  --accent-primary: #8a3b84;
+  --accent-hover: #733070;
+  --accent-pressed: #5e265b;
+  --accent-soft: #f8edf7;
+  --accent-soft-hover: #eed6ec;
+  --text-accent: #733070;
+  --shadow-focus: 0 0 0 3px rgb(138 59 132 / 24%);
+}
+html[data-accent="graphite"] {
+  --accent-primary: #1f2328;
+  --accent-hover: #353b42;
+  --accent-pressed: #0e1116;
+  --accent-soft: #eef0f2;
+  --accent-soft-hover: #dde1e5;
+  --text-accent: #1f2328;
+  --shadow-focus: 0 0 0 3px rgb(31 35 40 / 22%);
+}
+/* In dark mode the prototype pairs teal (#12a594, 3.1:1), ocean (#3b7bea,
+   4.0:1) and plum (#b45cac, 4.1:1) with white labels. The fills are kept and
+   the label flips to ink, as the prototype already does for graphite:
+   6.1:1, 4.7:1 and 4.5:1. Hover lightens the fill, so it only gains. */
+html[data-theme="dark"][data-accent="teal"] {
+  --accent-primary: #12a594;
+  --accent-hover: #1bb8a6;
+  --accent-pressed: #0e8b7d;
+  --accent-soft: #0f2a28;
+  --accent-soft-hover: #15403b;
+  --text-accent: #5fd4c6;
+  --text-on-accent: #0e1217;
+  --shadow-focus: 0 0 0 3px rgb(27 184 166 / 38%);
+}
+html[data-theme="dark"][data-accent="ocean"] {
+  --accent-primary: #3b7bea;
+  --accent-hover: #5590f0;
+  --accent-pressed: #2f69d2;
+  --accent-soft: #14213a;
+  --accent-soft-hover: #1b2f55;
+  --text-accent: #93b4ff;
+  --text-on-accent: #0e1217;
+  --shadow-focus: 0 0 0 3px rgb(85 144 240 / 40%);
+}
+html[data-theme="dark"][data-accent="plum"] {
+  --accent-primary: #b45cac;
+  --accent-hover: #c46fbd;
+  --accent-pressed: #9c4c95;
+  --accent-soft: #2a1628;
+  --accent-soft-hover: #3b1f38;
+  --text-accent: #e5a9df;
+  --text-on-accent: #0e1217;
+  --shadow-focus: 0 0 0 3px rgb(196 111 189 / 38%);
+}
+html[data-theme="dark"][data-accent="graphite"] {
+  --accent-primary: #e4e7eb;
+  --accent-hover: #ffffff;
+  --accent-pressed: #c9ced4;
+  --accent-soft: #22262c;
+  --accent-soft-hover: #2e333a;
+  --text-accent: #e4e7eb;
+  --text-on-accent: #0e1217;
+  --shadow-focus: 0 0 0 3px rgb(228 231 235 / 30%);
+}
+
+/* Backgrounds: the canvas carries atmosphere; the sheet stays calm. */
+html[data-bg="soft"] {
+  --canvas-background:
+    radial-gradient(900px 520px at 0% -8%, color-mix(in srgb, var(--accent-primary) 10%, transparent), transparent 70%),
+    radial-gradient(760px 520px at 100% 108%, color-mix(in srgb, var(--accent-primary) 7%, transparent), transparent 70%),
+    var(--surface-canvas);
+}
+html[data-bg="mesh"] {
+  --canvas-background:
+    radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--text-primary) 11%, transparent) 1px, transparent 1.3px) 0 0 / 16px 16px,
+    radial-gradient(900px 520px at 0% -8%, color-mix(in srgb, var(--accent-primary) 9%, transparent), transparent 70%),
+    var(--surface-canvas);
+}
+html[data-bg="soft"],
+html[data-bg="mesh"] {
+  --canvas-glow: radial-gradient(760px 340px at 50% -60px, color-mix(in srgb, var(--accent-primary) 11%, transparent), transparent 72%);
+  --shadow-composer: 0 18px 44px -18px color-mix(in srgb, var(--accent-primary) 45%, transparent), var(--shadow-1);
+}
+
+/* Density: compact tightens controls, rows and padding; type never shrinks. */
+html[data-density="compact"] {
+  --control-sm: 28px;
+  --control-md: 32px;
+  --control-lg: 38px;
+  --nav-item-height: 30px;
+  --table-head-height: 34px;
+  --table-row-height: 44px;
+  --table-cell-py: 6px;
+  --list-row-py: 9px;
+  --list-row-px: 14px;
+  --card-py: 12px;
+  --card-px: 14px;
+  --page-pt: 20px;
+}
+
+/* ── 4. Tailwind ───────────────────────────────────────────────────────────
+   Colour utilities for every semantic colour, so a call site writes
+   `bg-surface-base`, `text-text-secondary`, `border-border-subtle`,
+   `bg-accent-primary`, `text-status-danger`, `bg-evidence-bg` instead of an
+   arbitrary value. Tailwind owns the `--radius-*`, `--shadow-*` and
+   `--font-*` namespaces: the :root values above override its defaults, so
+   `rounded-md` is 8px and `font-mono` is Plex Mono; reach tokens it has no
+   key for as `rounded-(--radius-sheet)` / `shadow-(--shadow-pop)`. */
+@theme inline {
+  --color-surface-canvas: var(--surface-canvas);
+  --color-surface-base: var(--surface-base);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-subtle: var(--surface-subtle);
+  --color-surface-inset: var(--surface-inset);
+  --color-surface-hover: var(--surface-hover);
+  --color-surface-pressed: var(--surface-pressed);
+  --color-surface-selected: var(--surface-selected);
+  --color-surface-inverse: var(--surface-inverse);
+  --color-surface-inverse-hover: var(--surface-inverse-hover);
+  --color-scrim: var(--scrim);
+  --color-scrim-soft: var(--scrim-soft);
+
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-tertiary: var(--text-tertiary);
+  --color-text-disabled: var(--text-disabled);
+  --color-text-inverse: var(--text-inverse);
+  --color-text-accent: var(--text-accent);
+  --color-text-on-accent: var(--text-on-accent);
+  --color-text-on-danger: var(--text-on-danger);
+
+  --color-border-subtle: var(--border-subtle);
+  --color-border-default: var(--border-default);
+  --color-border-strong: var(--border-strong);
+  --color-border-focus: var(--border-focus);
+
+  --color-accent-primary: var(--accent-primary);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-pressed: var(--accent-pressed);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-soft-hover: var(--accent-soft-hover);
+  --color-focus-ring: var(--focus-ring);
+  --color-danger-solid: var(--danger-solid);
+  --color-danger-solid-hover: var(--danger-solid-hover);
+  --color-control-knob: var(--control-knob);
+  --color-file-label: var(--file-label);
+
+  --color-evidence-bg: var(--evidence-bg);
+  --color-evidence-border: var(--evidence-border);
+  --color-evidence-text: var(--evidence-text);
+  --color-evidence-strong: var(--evidence-strong);
+  --color-evidence-line: var(--evidence-line);
+
+  --color-status-success: var(--status-success-text);
+  --color-status-success-bg: var(--status-success-bg);
+  --color-status-success-border: var(--status-success-border);
+  --color-status-success-on-inverse: var(--status-success-on-inverse);
+  --color-status-warning: var(--status-warning-text);
+  --color-status-warning-bg: var(--status-warning-bg);
+  --color-status-warning-border: var(--status-warning-border);
+  --color-status-danger: var(--status-danger-text);
+  --color-status-danger-bg: var(--status-danger-bg);
+  --color-status-danger-border: var(--status-danger-border);
+  --color-status-danger-on-inverse: var(--status-danger-on-inverse);
+  --color-status-info: var(--status-info-text);
+  --color-status-info-bg: var(--status-info-bg);
+  --color-status-info-border: var(--status-info-border);
+  --color-status-info-on-inverse: var(--status-info-on-inverse);
+  --color-status-neutral: var(--status-neutral-text);
+  --color-status-neutral-bg: var(--status-neutral-bg);
+  --color-status-neutral-border: var(--status-neutral-border);
+
+  --color-avatar-1: var(--avatar-1);
+  --color-avatar-2: var(--avatar-2);
+  --color-avatar-3: var(--avatar-3);
+  --color-avatar-4: var(--avatar-4);
+  --color-avatar-5: var(--avatar-5);
+  --color-avatar-6: var(--avatar-6);
+  --color-avatar-7: var(--avatar-7);
+  --color-avatar-8: var(--avatar-8);
+  --color-avatar-9: var(--avatar-9);
+  --color-avatar-10: var(--avatar-10);
+
+  --color-file-pdf: var(--file-pdf);
+  --color-file-doc: var(--file-doc);
+  --color-file-sheet: var(--file-sheet);
+  --color-file-slides: var(--file-slides);
+  --color-file-archive: var(--file-archive);
+  --color-file-web: var(--file-web);
+  --color-file-image: var(--file-image);
+  --color-file-text: var(--file-text);
+
+  /* Type scale as `text-display`, `text-title`, `text-section`, `text-body`,
+     `text-reading`, `text-meta`, `text-caption` (size + line height). */
+  --text-display: var(--text-size-display);
+  --text-display--line-height: var(--text-lh-display);
+  --text-title: var(--text-size-title);
+  --text-title--line-height: var(--text-lh-title);
+  --text-section: var(--text-size-section);
+  --text-section--line-height: var(--text-lh-section);
+  --text-body: var(--text-size-body);
+  --text-body--line-height: var(--text-lh-body);
+  --text-reading: var(--text-size-reading);
+  --text-reading--line-height: var(--text-lh-reading);
+  --text-meta: var(--text-size-meta);
+  --text-meta--line-height: var(--text-lh-meta);
+  --text-caption: var(--text-size-caption);
+  --text-caption--line-height: var(--text-lh-caption);
+}
+
+/* Motion utilities: `animate-ui-fade`, `animate-ui-pop`, `animate-ui-slide-in`,
+   `animate-ui-shimmer`. Reduced motion is handled globally in globals.css. */
+@theme {
+  --animate-ui-fade: ui-fade var(--duration-base) var(--ease-standard);
+  --animate-ui-pop: ui-pop var(--duration-base) var(--ease-standard);
+  --animate-ui-slide-in: ui-slide-in var(--duration-slow) var(--ease-standard);
+  --animate-ui-shimmer: ui-shimmer 1.4s linear infinite;
+
+  @keyframes ui-fade {
+    from { opacity: 0; }
+  }
+  @keyframes ui-pop {
+    from { opacity: 0; transform: translateY(6px) scale(0.985); }
+  }
+  @keyframes ui-slide-in {
+    from { opacity: 0; transform: translateX(24px); }
+  }
+  @keyframes ui-shimmer {
+    0% { background-position: 100% 0; }
+    100% { background-position: -100% 0; }
+  }
+}

@@ -1,332 +1,510 @@
 import 'dart:async';
-import 'dart:math';
 
 import 'package:flutter/material.dart';
 
-import '../../app/app_config.dart';
-import '../../app/app_theme.dart';
+import '../../app/account_sheet.dart';
+import '../../app/workspace_scope.dart';
+import '../../ui/ui.dart';
+import 'history_page.dart';
 import 'models/chat_models.dart';
 import 'services/chat_service.dart';
 import 'services/conversation_store.dart';
 import 'state/chat_controller.dart';
-import 'widgets/app_sidebar.dart';
 import 'widgets/chat_composer.dart';
+import 'widgets/chat_sheets.dart';
 import 'widgets/message_view.dart';
-import 'widgets/product_mark.dart';
-import 'widgets/welcome_view.dart';
 
+/// The Ask tab. With no messages it is the Ask home — the question, two
+/// suggestions and recent chats; once a question is sent the same screen
+/// becomes the conversation.
 class ChatPage extends StatefulWidget {
   const ChatPage({
     super.key,
-    required this.themeMode,
-    required this.onCycleTheme,
+    this.initialDocumentId,
+    this.initialDocumentTitle,
   });
 
-  final ThemeMode themeMode;
-  final VoidCallback onCycleTheme;
+  /// Starts a new chat with this document already attached.
+  final String? initialDocumentId;
+  final String? initialDocumentTitle;
 
   @override
   State<ChatPage> createState() => _ChatPageState();
 }
 
 class _ChatPageState extends State<ChatPage> {
-  final _scaffoldKey = GlobalKey<ScaffoldState>();
-  final _scrollController = ScrollController();
-  late final ChatController _controller;
-  var _sidebarCollapsed = false;
-  var _showJumpToLatest = false;
-  var _stickToLatest = true;
-  var _lastMessageCount = 0;
+  final _scroll = ScrollController();
+  ChatController? _current;
+
+  /// Follow new text only while the reader is at the bottom.
+  bool _pinned = true;
+  bool _showJump = false;
+  bool _followScheduled = false;
+  int _lastCount = 0;
+  String? _lastConversation;
+  bool _wasGenerating = false;
+
+  ChatController get _controller => _current!;
 
   @override
-  void initState() {
-    super.initState();
-    _controller = ChatController(
-      ChatService(),
-      ConversationStore(userNamespace: AppConfig.userId),
-    )..addListener(_onControllerChanged);
-    _scrollController.addListener(_onScroll);
-    unawaited(_controller.initialize());
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final scope = WorkspaceScope.of(context);
+    final current = _current;
+    if (current != null &&
+        current.api == scope.api &&
+        current.session.namespace == scope.session.namespace) {
+      return;
+    }
+    if (current != null) {
+      current.removeListener(_onChanged);
+      // Children still hold the old controller until the next frame.
+      WidgetsBinding.instance.addPostFrameCallback((_) => current.dispose());
+    }
+    _lastCount = 0;
+    _lastConversation = null;
+    _wasGenerating = false;
+    _current = ChatController(
+      ChatService(scope.api),
+      ConversationStore(namespace: scope.session.namespace),
+      scope.session,
+    )..addListener(_onChanged);
+    unawaited(
+      _controller.initialize(
+        documentId: widget.initialDocumentId,
+        documentTitle: widget.initialDocumentTitle,
+      ),
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant ChatPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final id = widget.initialDocumentId;
+    if (id != null && id != oldWidget.initialDocumentId) {
+      unawaited(
+        _controller.newChat().then((_) {
+          if (mounted) {
+            _controller.referenceDocument(
+              id,
+              widget.initialDocumentTitle ?? 'Document',
+            );
+          }
+        }),
+      );
+    }
   }
 
   @override
   void dispose() {
-    _controller
-      ..removeListener(_onControllerChanged)
+    _current
+      ?..removeListener(_onChanged)
       ..dispose();
-    _scrollController
-      ..removeListener(_onScroll)
-      ..dispose();
+    _scroll.dispose();
     super.dispose();
   }
 
-  void _onControllerChanged() {
-    final countChanged = _lastMessageCount != _controller.messages.length;
-    _lastMessageCount = _controller.messages.length;
-    if ((_stickToLatest && _controller.isGenerating) || countChanged) {
-      _scheduleScrollToLatest(animated: countChanged);
+  void _onChanged() {
+    final controller = _controller;
+    final count = controller.messages.length;
+    final conversation = controller.activeConversationId;
+    final generating = controller.isGenerating;
+    if (count != _lastCount) {
+      // A question just sent in this chat glides into view; an opened chat
+      // starts at its latest message.
+      final sent =
+          count > _lastCount &&
+          _lastCount > 0 &&
+          conversation == _lastConversation;
+      _pinned = true;
+      _follow(animated: sent);
+    } else if (_pinned && (generating || _wasGenerating)) {
+      // While answering, and once more as it settles (sources, actions or
+      // an error appear under the text).
+      _follow(animated: false);
     }
+    _lastCount = count;
+    _lastConversation = conversation;
+    _wasGenerating = generating;
   }
 
-  void _onScroll() {
-    if (!_scrollController.hasClients) return;
-    final distance =
-        _scrollController.position.maxScrollExtent -
-        _scrollController.position.pixels;
-    final show = distance > 140;
-    _stickToLatest = distance < 96;
-    if (show != _showJumpToLatest && mounted) {
-      setState(() => _showJumpToLatest = show);
-    }
-  }
-
-  void _scheduleScrollToLatest({required bool animated}) {
+  void _follow({required bool animated}) {
+    if (_followScheduled) return;
+    _followScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scrollController.hasClients) return;
-      final target = _scrollController.position.maxScrollExtent;
+      _followScheduled = false;
+      if (!mounted || !_scroll.hasClients) return;
+      final target = _scroll.position.maxScrollExtent;
       if (animated && !MediaQuery.disableAnimationsOf(context)) {
-        _scrollController.animateTo(
-          target,
-          duration: const Duration(milliseconds: 220),
-          curve: Curves.easeOutCubic,
+        unawaited(
+          _scroll.animateTo(
+            target,
+            duration: const Duration(milliseconds: 260),
+            curve: Curves.easeOutCubic,
+          ),
         );
       } else {
-        _scrollController.jumpTo(target);
+        _scroll.jumpTo(target);
       }
-      _stickToLatest = true;
     });
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, _) => LayoutBuilder(
-        builder: (context, constraints) {
-          final desktop = constraints.maxWidth >= 900;
-          final sidebarWidth = _sidebarCollapsed ? 64.0 : 268.0;
-          return Scaffold(
-            key: _scaffoldKey,
-            resizeToAvoidBottomInset: true,
-            drawer: desktop
-                ? null
-                : Drawer(
-                    width: min(constraints.maxWidth * 0.88, 330),
-                    shape: const RoundedRectangleBorder(),
-                    child: ChatSidebar(
-                      controller: _controller,
-                      collapsed: false,
-                      themeMode: widget.themeMode,
-                      onCycleTheme: widget.onCycleTheme,
-                      onClose: () => Navigator.of(context).pop(),
-                    ),
-                  ),
-            body: Row(
-              children: [
-                if (desktop)
-                  AnimatedContainer(
-                    duration: MediaQuery.disableAnimationsOf(context)
-                        ? Duration.zero
-                        : const Duration(milliseconds: 180),
-                    curve: Curves.easeOutCubic,
-                    width: sidebarWidth,
-                    decoration: BoxDecoration(
-                      border: Border(
-                        right: BorderSide(color: context.colors.border),
-                      ),
-                    ),
-                    child: ChatSidebar(
-                      controller: _controller,
-                      collapsed: _sidebarCollapsed,
-                      themeMode: widget.themeMode,
-                      onCycleTheme: widget.onCycleTheme,
-                      onToggleCollapsed: () => setState(
-                        () => _sidebarCollapsed = !_sidebarCollapsed,
-                      ),
-                    ),
-                  ),
-                Expanded(child: _buildConversation(desktop)),
-              ],
-            ),
-          );
-        },
-      ),
-    );
+  bool _onScroll(ScrollNotification notification) {
+    if (notification.depth != 0) return false;
+    final metrics = notification.metrics;
+    final distance = metrics.maxScrollExtent - metrics.pixels;
+    if ((notification is ScrollUpdateNotification &&
+            notification.dragDetails != null) ||
+        notification is ScrollEndNotification) {
+      _pinned = distance < 48;
+    }
+    final show = distance > 160;
+    if (show != _showJump) setState(() => _showJump = show);
+    return false;
   }
 
-  Widget _buildConversation(bool desktop) {
-    final colors = context.colors;
-    return ColoredBox(
-      color: colors.appBackground,
-      child: SafeArea(
-        left: false,
-        right: false,
-        bottom: false,
-        child: Column(
-          children: [
-            Container(
-              height: 56,
-              padding: EdgeInsets.symmetric(horizontal: desktop ? 20 : 8),
-              decoration: BoxDecoration(
-                color: colors.appBackground.withValues(alpha: 0.94),
-                border: Border(bottom: BorderSide(color: colors.border)),
-              ),
-              child: Row(
-                children: [
-                  if (!desktop)
+  void _jumpToLatest() {
+    _pinned = true;
+    _follow(animated: true);
+  }
+
+  Future<void> _openHistory() => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => HistoryPage(controller: _controller),
+    ),
+  );
+
+  void _newChat() {
+    unawaited(_controller.newChat());
+  }
+
+  /// The chat's saved title, or its first question until it is saved.
+  String get _title {
+    final controller = _controller;
+    final saved = controller.conversations
+        .where((value) => value.id == controller.activeConversationId)
+        .firstOrNull
+        ?.title;
+    return saved ??
+        controller.messages
+            .where((message) => message.role == ChatRole.user)
+            .firstOrNull
+            ?.text ??
+        'New chat';
+  }
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: _controller,
+    builder: (context, _) {
+      final controller = _controller;
+      final home = controller.messages.isEmpty;
+      final error = controller.error;
+      final pageError =
+          error != null &&
+          !controller.messages.any((message) => message.turn?.error == error);
+      // System back from a conversation returns to Ask home, like the
+      // header's back button; from Ask home it leaves the tab as usual.
+      return PopScope(
+        canPop: home,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) _newChat();
+        },
+        child: Scaffold(
+          appBar: home
+              ? AppHeader(
+                  leading: IconButton(
+                    tooltip: 'History',
+                    onPressed: _openHistory,
+                    icon: const Icon(Icons.notes_rounded),
+                  ),
+                  actions: [
                     IconButton(
-                      tooltip: 'Open conversation sidebar',
-                      onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-                      icon: const Icon(Icons.menu_rounded, size: 21),
+                      tooltip: 'New chat',
+                      onPressed: _newChat,
+                      icon: const Icon(Icons.edit_square, size: 21),
                     ),
-                  if (!desktop) ...[
-                    const ProductMark(size: 30),
-                    const SizedBox(width: 9),
+                    const AccountButton(),
                   ],
-                  Expanded(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (desktop)
-                          Text(
-                            'KNOWLEDGE ASSISTANT',
-                            style: Theme.of(context).textTheme.labelSmall
-                                ?.copyWith(
-                                  color: colors.textMuted,
-                                  letterSpacing: 0.65,
-                                  fontSize: 10,
-                                ),
-                          ),
-                        Text(
-                          _controller.conversationTitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                      ],
+                )
+              : AppHeader(
+                  title: _title,
+                  rule: true,
+                  leading: IconButton(
+                    tooltip: 'Back',
+                    onPressed: _newChat,
+                    icon: const Icon(
+                      Icons.arrow_back_ios_new_rounded,
+                      size: 20,
                     ),
                   ),
-                  if (_controller.isGenerating)
-                    Semantics(
-                      liveRegion: true,
-                      label: 'Assistant is working',
-                      child: const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
+                  actions: [
+                    IconButton(
+                      tooltip: 'New chat',
+                      onPressed: _newChat,
+                      icon: const Icon(Icons.edit_square, size: 21),
                     ),
-                ],
+                  ],
+                ),
+          body: Column(
+            children: [
+              Expanded(
+                child: controller.isLoading
+                    ? const LoadingView()
+                    : home
+                    ? _AskHome(controller: controller, onHistory: _openHistory)
+                    : _conversation(controller),
               ),
-            ),
-            Expanded(
-              child: Stack(
-                children: [
-                  if (_controller.isLoading)
-                    const Center(
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  else if (_controller.messages.isEmpty)
-                    WelcomeView(
-                      onSelect: (prompt) =>
-                          unawaited(_controller.sendMessage(prompt)),
-                    )
-                  else
-                    ListView.separated(
-                      controller: _scrollController,
-                      keyboardDismissBehavior:
-                          ScrollViewKeyboardDismissBehavior.onDrag,
-                      padding: EdgeInsets.fromLTRB(
-                        MediaQuery.sizeOf(context).width < 600 ? 14 : 24,
-                        24,
-                        MediaQuery.sizeOf(context).width < 600 ? 14 : 24,
-                        26,
-                      ),
-                      itemCount: _controller.messages.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 26),
-                      itemBuilder: (context, index) {
-                        final message = _controller.messages[index];
-                        final isLast = index == _controller.messages.length - 1;
-                        return Center(
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 864),
-                            child: ChatMessageView(
-                              key: ValueKey(message.id),
-                              message: message,
-                              controller: _controller,
-                              isStreaming:
-                                  isLast &&
-                                  message.role == ChatRole.assistant &&
-                                  _controller.isGenerating,
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  if (_showJumpToLatest && _controller.messages.isNotEmpty)
-                    Positioned(
-                      right: 20,
-                      bottom: 12,
-                      child: FloatingActionButton.small(
-                        tooltip: 'Jump to latest',
-                        onPressed: () =>
-                            _scheduleScrollToLatest(animated: true),
-                        backgroundColor: colors.surface,
-                        foregroundColor: colors.textSecondary,
-                        child: const Icon(
-                          Icons.arrow_downward_rounded,
-                          size: 18,
-                        ),
-                      ),
-                    ),
-                ],
+              if (pageError)
+                _Notice(
+                  child: InlineNotice(
+                    text: friendlyError(error),
+                    icon: Icons.error_outline_rounded,
+                    tone: StatusTone.danger,
+                    actionLabel: 'Dismiss',
+                    onAction: controller.clearError,
+                  ),
+                ),
+              if (!controller.isLoading && !controller.isConfigured)
+                const _Notice(
+                  child: InlineNotice(
+                    text: 'Your role in this workspace doesn’t include asking questions. Ask an administrator for access.',
+                    icon: Icons.lock_outline_rounded,
+                    tone: StatusTone.warning,
+                  ),
+                ),
+              ChatComposer(
+                controller: controller,
+                hint: home ? 'Ask anything…' : 'Ask a follow-up…',
+                showScope: home,
               ),
-            ),
-            if (_controller.error != null && !_controller.hasMessageError)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
-                child: _PageError(message: _controller.error!),
-              ),
-            if (!_controller.isConfigured)
-              const Padding(
-                padding: EdgeInsets.fromLTRB(14, 0, 14, 6),
-                child: _PageError(
-                  message: 'Chat is unavailable because workspace access has not been configured. Pass the API URL, tenant ID, and user ID when running the app.',
+            ],
+          ),
+        ),
+      );
+    },
+  );
+
+  Widget _conversation(ChatController controller) {
+    final messages = controller.messages;
+    return Stack(
+      children: [
+        NotificationListener<ScrollNotification>(
+          onNotification: _onScroll,
+          child: ListView.builder(
+            controller: _scroll,
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            itemCount: messages.length,
+            itemBuilder: (context, index) {
+              final message = messages[index];
+              final question = message.role == ChatRole.assistant
+                  ? messages
+                            .take(index)
+                            .where((value) => value.role == ChatRole.user)
+                            .lastOrNull
+                            ?.text ??
+                        ''
+                  : '';
+              return Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 720),
+                  child: ChatMessageView(
+                    key: ValueKey(message.id),
+                    message: message,
+                    controller: controller,
+                    question: question,
+                    isStreaming:
+                        index == messages.length - 1 &&
+                        message.role == ChatRole.assistant &&
+                        controller.isGenerating,
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        if (_showJump)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 10,
+            child: Center(
+              child: Material(
+                color: context.colors.canvas,
+                shape: CircleBorder(
+                  side: BorderSide(color: context.colors.line),
+                ),
+                elevation: 2,
+                shadowColor: context.colors.ink.withValues(alpha: 0.2),
+                child: IconButton(
+                  tooltip: 'Jump to latest',
+                  onPressed: _jumpToLatest,
+                  icon: Icon(
+                    Icons.arrow_downward_rounded,
+                    size: 20,
+                    color: context.colors.ink2,
+                  ),
                 ),
               ),
-            ChatComposer(controller: _controller),
-          ],
-        ),
-      ),
+            ),
+          ),
+      ],
     );
   }
 }
 
-class _PageError extends StatelessWidget {
-  const _PageError({required this.message});
+class _Notice extends StatelessWidget {
+  const _Notice({required this.child});
+  final Widget child;
 
-  final String message;
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+    child: Center(
+      heightFactor: 1,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 720),
+        child: child,
+      ),
+    ),
+  );
+}
+
+/// Ask without setup: what to ask, two ways to start, and recent chats.
+class _AskHome extends StatelessWidget {
+  const _AskHome({required this.controller, required this.onHistory});
+  final ChatController controller;
+  final VoidCallback onHistory;
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 864),
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-          decoration: BoxDecoration(
-            color: context.colors.dangerSoft,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: context.colors.danger.withValues(alpha: 0.35),
+    final colors = context.colors;
+    final enabled = controller.isConfigured;
+    final recent = [...controller.conversations]
+      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    return ListView(
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+      children: [
+        Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 720),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(4, 18, 4, 18),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const BrandMark(),
+                      const SizedBox(height: 16),
+                      Text(
+                        'What do you need to know?',
+                        style: Theme.of(context).textTheme.headlineSmall,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Answers come from documents you’re allowed to read, with their sources.',
+                        style: TextStyle(
+                          color: colors.ink2,
+                          fontSize: 15,
+                          height: 1.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                _Suggestion(
+                  tone: Tone.violet,
+                  icon: Icons.search_rounded,
+                  label: 'Find a document, form or announcement',
+                  onTap: enabled ? () => controller.setDraft('Find ') : null,
+                ),
+                const SizedBox(height: 8),
+                _Suggestion(
+                  tone: Tone.sheet,
+                  icon: Icons.table_chart_outlined,
+                  label: 'Analyse a spreadsheet',
+                  onTap: enabled
+                      ? () => openAttachSheet(context, controller)
+                      : null,
+                ),
+                if (recent.isNotEmpty) ...[
+                  SectionLabel(
+                    'Recent',
+                    actionLabel: 'See all',
+                    onAction: onHistory,
+                  ),
+                  ListGroup(
+                    inset: 14,
+                    children: [
+                      for (final conversation in recent.take(3))
+                        ListRow(
+                          title: conversation.title,
+                          subtitle: [
+                            chatDayLabel(conversation.updatedAt),
+                            if (conversation.fileCount > 0)
+                              countOf(conversation.fileCount, 'file'),
+                          ].join(' · '),
+                          onTap: () => unawaited(
+                            controller.selectConversation(conversation.id),
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ],
             ),
           ),
-          child: Text(
-            message,
-            style: Theme.of(context).textTheme.bodySmall
-                ?.copyWith(color: context.colors.danger),
+        ),
+      ],
+    );
+  }
+}
+
+class _Suggestion extends StatelessWidget {
+  const _Suggestion({
+    required this.tone,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+  final Tone tone;
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Material(
+      color: colors.subtle,
+      borderRadius: BorderRadius.circular(14),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 56),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              children: [
+                ToneTile(tone: tone, icon: icon, size: TileSize.small),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      color: onTap == null ? colors.ink3 : colors.ink,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),

@@ -1,13 +1,13 @@
-name: bothesis
+name: bomesh
 
 services:
   postgres:
     image: postgres:17-alpine
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-bothesis}
-      POSTGRES_USER: ${POSTGRES_USER:-bothesis}
+      POSTGRES_DB: ${POSTGRES_DB:-bomesh}
+      POSTGRES_USER: ${POSTGRES_USER:-bomesh}
       # Local development default. Override it in deployment/.env.
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bothesis}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bomesh}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
@@ -46,8 +46,8 @@ services:
     environment:
       DB: postgres12
       DB_PORT: 5432
-      POSTGRES_USER: ${POSTGRES_USER:-bothesis}
-      POSTGRES_PWD: ${POSTGRES_PASSWORD:-bothesis}
+      POSTGRES_USER: ${POSTGRES_USER:-bomesh}
+      POSTGRES_PWD: ${POSTGRES_PASSWORD:-bomesh}
       POSTGRES_SEEDS: postgres
       DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development-sql.yaml
       TEMPORAL_ADDRESS: temporal:7233
@@ -77,24 +77,13 @@ services:
       TEMPORAL_CLI_ADDRESS: temporal:7233
       TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
     entrypoint: ["/bin/sh", "-ec"]
+    # Readiness only: workflows use no custom Search Attributes; run state
+    # lives in PostgreSQL.
     command:
       - |
         until temporal operator cluster health >/dev/null 2>&1; do sleep 1; done
         until temporal operator namespace describe \
           --namespace "$$TEMPORAL_NAMESPACE" >/dev/null 2>&1; do sleep 1; done
-        until temporal operator search-attribute list \
-          --namespace "$$TEMPORAL_NAMESPACE" >/dev/null 2>&1; do sleep 1; done
-        for attribute in TenantId IngestionSourceId IntegrationConnectionId ConnectorKey WorkflowCategory TriggerType; do
-          output="$$(temporal operator search-attribute create \
-            --namespace "$$TEMPORAL_NAMESPACE" \
-            --name "$$attribute" \
-            --type Keyword 2>&1)" || {
-              echo "$$output" | grep -qi "already exists" || {
-                echo "$$output" >&2
-                exit 1
-              }
-            }
-        done
 
   temporal-ui:
     image: temporalio/ui:${TEMPORAL_UI_VERSION:-2.34.0}
@@ -111,8 +100,8 @@ services:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-bothesis}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-bothesis}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-bomesh}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-bomesh-local}
     ports:
       - "${MINIO_API_PORT:-9000}:9000"
       - "${MINIO_CONSOLE_PORT:-9001}:9001"
@@ -131,9 +120,9 @@ services:
       minio:
         condition: service_healthy
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-bothesis}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-bothesis}
-      MINIO_BUCKET: ${MINIO_BUCKET:-bothesis}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-bomesh}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-bomesh-local}
+      MINIO_BUCKET: ${MINIO_BUCKET:-bomesh}
     entrypoint: ["/bin/sh", "-c"]
     command:
       - >-

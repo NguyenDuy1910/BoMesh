@@ -2,8 +2,6 @@ enum ChatRole { user, assistant }
 
 enum ChatStatus { ready, submitted, streaming }
 
-enum ChatConnectorMode { auto, selected, off }
-
 class ChatConversation {
   const ChatConversation({
     required this.id,
@@ -12,6 +10,8 @@ class ChatConversation {
     required this.updatedAt,
     this.titleSource = 'generated',
     this.deletedAt,
+    this.pinned = false,
+    this.fileCount = 0,
   });
 
   final String id;
@@ -20,12 +20,18 @@ class ChatConversation {
   final DateTime createdAt;
   final DateTime updatedAt;
   final DateTime? deletedAt;
+  final bool pinned;
+
+  /// Files attached to or made in this conversation, for its meta line.
+  final int fileCount;
 
   ChatConversation copyWith({
     String? title,
     String? titleSource,
     DateTime? updatedAt,
     DateTime? deletedAt,
+    bool? pinned,
+    int? fileCount,
   }) {
     return ChatConversation(
       id: id,
@@ -34,6 +40,8 @@ class ChatConversation {
       createdAt: createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       deletedAt: deletedAt ?? this.deletedAt,
+      pinned: pinned ?? this.pinned,
+      fileCount: fileCount ?? this.fileCount,
     );
   }
 
@@ -42,6 +50,8 @@ class ChatConversation {
       id: json['id'] as String,
       title: json['title'] as String? ?? 'New conversation',
       titleSource: json['title_source'] as String? ?? 'generated',
+      pinned: json['pinned'] == true,
+      fileCount: json['file_count'] as int? ?? 0,
       createdAt: DateTime.fromMillisecondsSinceEpoch(
         json['created_at'] as int? ?? 0,
       ),
@@ -59,6 +69,8 @@ class ChatConversation {
     'id': id,
     'title': title,
     'title_source': titleSource,
+    'pinned': pinned,
+    'file_count': fileCount,
     'created_at': createdAt.millisecondsSinceEpoch,
     'updated_at': updatedAt.millisecondsSinceEpoch,
     if (deletedAt case final value?) 'deleted_at': value.millisecondsSinceEpoch,
@@ -73,6 +85,7 @@ class ConversationDocument {
     required this.sizeBytes,
     required this.mode,
     required this.status,
+    this.origin = 'reference',
   });
 
   final String id;
@@ -81,6 +94,8 @@ class ConversationDocument {
   final int sizeBytes;
   final String mode;
   final String status;
+  final String origin;
+  bool get isUpload => origin == 'upload';
 
   factory ConversationDocument.fromJson(Map<String, dynamic> json) {
     return ConversationDocument(
@@ -91,6 +106,7 @@ class ConversationDocument {
       sizeBytes: json['size_bytes'] as int? ?? 0,
       mode: json['mode'] as String? ?? 'indexed',
       status: json['status'] as String? ?? 'available',
+      origin: json['origin'] as String? ?? 'reference',
     );
   }
 
@@ -101,6 +117,7 @@ class ConversationDocument {
     'size_bytes': sizeBytes,
     'mode': mode,
     'status': status,
+    'origin': origin,
   };
 }
 
@@ -110,6 +127,7 @@ class ChatMessage {
     required this.role,
     this.text = '',
     this.documents = const <ConversationDocument>[],
+    this.collections = const <ChatCollection>[],
     this.turn,
     required this.createdAt,
   });
@@ -118,6 +136,7 @@ class ChatMessage {
   final ChatRole role;
   final String text;
   final List<ConversationDocument> documents;
+  final List<ChatCollection> collections;
   final ChatTurnState? turn;
   final DateTime createdAt;
 
@@ -141,6 +160,13 @@ class ChatMessage {
                 )
                 .toList()
           : const <ConversationDocument>[],
+      collections: (json['collections'] as List? ?? const [])
+          .whereType<Map>()
+          .map(
+            (value) =>
+                ChatCollection.fromJson(Map<String, dynamic>.from(value)),
+          )
+          .toList(),
       turn: turn is Map
           ? ChatTurnState.fromJson(Map<String, dynamic>.from(turn))
           : null,
@@ -155,34 +181,26 @@ class ChatMessage {
     'role': role.name,
     'text': text,
     'documents': documents.map((document) => document.toJson()).toList(),
+    'collections': collections
+        .map((collection) => collection.toJson())
+        .toList(),
     if (turn case final value?) 'turn': value.toJson(),
     'created_at': createdAt.millisecondsSinceEpoch,
   };
 }
 
-class ChatConnector {
-  const ChatConnector({
-    required this.id,
-    required this.provider,
-    required this.displayName,
-    this.capabilities = const <String>[],
-  });
+class ChatCollection {
+  const ChatCollection({required this.id, required this.title});
 
   final String id;
-  final String provider;
-  final String displayName;
-  final List<String> capabilities;
+  final String title;
 
-  factory ChatConnector.fromJson(Map<String, dynamic> json) {
-    return ChatConnector(
-      id: json['id'].toString(),
-      provider: json['provider'] as String? ?? 'knowledge',
-      displayName: json['display_name'] as String? ?? 'Knowledge source',
-      capabilities:
-          (json['capabilities'] as List?)?.whereType<String>().toList() ??
-          const <String>[],
-    );
-  }
+  factory ChatCollection.fromJson(Map<String, dynamic> json) => ChatCollection(
+    id: json['id'].toString(),
+    title: json['title'] as String? ?? 'Untitled collection',
+  );
+
+  Map<String, dynamic> toJson() => {'id': id, 'title': title};
 }
 
 class ChatOutputPart {
@@ -228,6 +246,7 @@ class ChatOutputItem {
     this.name,
     this.callId,
     this.arguments = '',
+    this.extension = const <String, dynamic>{},
   }) : content = content ?? <ChatOutputPart>[],
        summary = summary ?? <ChatOutputPart>[];
 
@@ -241,6 +260,7 @@ class ChatOutputItem {
   String? name;
   String? callId;
   String arguments;
+  final Map<String, dynamic> extension;
 
   String get messageText => content
       .where((part) => part.type == 'output_text' || part.type == 'refusal')
@@ -274,10 +294,27 @@ class ChatOutputItem {
       name: json['name'] as String?,
       callId: json['call_id'] as String?,
       arguments: json['arguments'] as String? ?? '',
+      extension: Map<String, dynamic>.from(json)
+        ..removeWhere(
+          (key, _) => const {
+            'id',
+            'type',
+            'status',
+            'role',
+            'phase',
+            'content',
+            'summary',
+            'name',
+            'call_id',
+            'arguments',
+            'encrypted_content',
+          }.contains(key),
+        ),
     );
   }
 
   Map<String, dynamic> toJson() => <String, dynamic>{
+    ...extension,
     'id': id,
     'type': type,
     'status': status,
@@ -353,8 +390,11 @@ class ChatTurnState {
     this.currentResponseId,
     this.error,
     this.lastSequenceNumber = 0,
+    this.modelPending = true,
+    List<RuntimeActivity>? runtimeActivities,
   }) : responses = responses ?? <String, ChatResponseState>{},
-       responseOrder = responseOrder ?? <String>[];
+       responseOrder = responseOrder ?? <String>[],
+       runtimeActivities = runtimeActivities ?? <RuntimeActivity>[];
 
   final String id;
   String status;
@@ -363,6 +403,8 @@ class ChatTurnState {
   String? currentResponseId;
   String? error;
   int lastSequenceNumber;
+  bool modelPending;
+  final List<RuntimeActivity> runtimeActivities;
 
   Iterable<OrderedTurnItem> get orderedItems sync* {
     for (
@@ -408,7 +450,6 @@ class ChatTurnState {
   }
 
   List<AssistantTurnItem> get presentationItems {
-    final newestResponseIndex = responseOrder.length - 1;
     final result = <AssistantTurnItem>[];
     for (final ordered in orderedItems) {
       final item = ordered.item;
@@ -419,48 +460,81 @@ class ChatTurnState {
             AssistantTurnItem.message(
               id: item.id,
               text: text,
+              phase: item.phase,
               state: item.status == 'completed' || status != 'streaming'
                   ? 'done'
                   : 'streaming',
             ),
           );
         }
-      } else if (item.type == 'function_call') {
-        final state =
-            status == 'failed' && ordered.responseIndex == newestResponseIndex
-            ? 'error'
-            : status == 'streaming' &&
-                  ordered.responseIndex == newestResponseIndex
-            ? 'active'
-            : 'completed';
-        result.add(
-          AssistantTurnItem.tool(
-            id: item.id,
-            name: item.name ?? 'tool',
-            state: state,
-          ),
-        );
       } else if (item.type == 'reasoning') {
-        final active =
-            status == 'streaming' &&
-            ordered.responseIndex == newestResponseIndex &&
-            item.status != 'completed';
-        if (item.summaryText.isNotEmpty || active) {
+        final summary = item.summaryText.isNotEmpty
+            ? item.summaryText
+            : item.content.map((part) => part.text).join();
+        if (summary.trim().isNotEmpty) {
           result.add(
             AssistantTurnItem.reasoning(
               id: item.id,
-              text: item.summaryText,
-              state: active ? 'active' : 'completed',
+              text: summary,
+              state: item.status,
             ),
           );
         }
+      } else if (item.type == 'function_call' ||
+          item.type == 'hosted_execution_call') {
+        final activity = runtimeActivities
+            .where((activity) => activity.callId == item.callId)
+            .firstOrNull;
+        final output = orderedItems
+            .map((entry) => entry.item)
+            .where(
+              (entry) =>
+                  entry.callId == item.callId &&
+                  (entry.type == 'function_call_output' ||
+                      entry.type == 'hosted_execution_result'),
+            )
+            .firstOrNull;
+        result.add(
+          AssistantTurnItem.tool(
+            id: item.callId ?? item.id,
+            name: activity?.toolName ?? item.name ?? 'hosted_execution',
+            commands: switch (item.extension['commands']) {
+              final List<dynamic> values => values.whereType<String>().toList(),
+              _ => const <String>[],
+            },
+            state:
+                activity?.state ??
+                (output != null
+                    ? 'completed'
+                    : status == 'streaming'
+                    ? 'active'
+                    : 'skipped'),
+            resultCount: activity?.resultCount,
+          ),
+        );
+      }
+    }
+    final visibleCalls = result
+        .where((item) => item.kind == AssistantTurnItemKind.tool)
+        .map((item) => item.id)
+        .toSet();
+    for (final activity in runtimeActivities) {
+      if (visibleCalls.add(activity.callId)) {
+        result.add(
+          AssistantTurnItem.tool(
+            id: activity.callId,
+            name: activity.toolName,
+            state: activity.state,
+            resultCount: activity.resultCount,
+          ),
+        );
       }
     }
     return result;
   }
 
   List<AnswerSource> get sources {
-    const citationType = 'bothesis:document_citation';
+    const citationType = 'bomesh:document_citation';
     final result = <String, AnswerSource>{};
     final order = <String>[];
     for (final ordered in orderedItems) {
@@ -481,6 +555,34 @@ class ChatTurnState {
       }
     }
     return order.map((id) => result[id]!).toList();
+  }
+
+  List<ChatArtifact> get artifacts {
+    final found = <String, ChatArtifact>{};
+    void add(Object? value) {
+      if (value is! Map || value['id'] is! String) return;
+      final artifact = ChatArtifact.fromJson(Map<String, dynamic>.from(value));
+      if (artifact.id.isEmpty) return;
+      final previous = found[artifact.id];
+      if (previous == null || artifact.revision >= previous.revision) {
+        found[artifact.id] = artifact;
+      }
+    }
+
+    for (final entry in orderedItems) {
+      if (entry.item.type != 'message') continue;
+      for (final part in entry.item.content) {
+        for (final annotation in part.annotations) {
+          if (annotation['type'] == 'bomesh:artifact') {
+            add(annotation['artifact']);
+          }
+        }
+      }
+    }
+    for (final activity in runtimeActivities) {
+      add(activity.progress['artifact']);
+    }
+    return found.values.toList();
   }
 
   factory ChatTurnState.fromJson(Map<String, dynamic> json) {
@@ -541,28 +643,37 @@ class AssistantTurnItem {
     required this.state,
     this.text = '',
     this.name = '',
+    this.resultCount,
+    this.phase,
+    this.commands = const <String>[],
   });
 
   factory AssistantTurnItem.message({
     required String id,
     required String text,
     required String state,
+    String? phase,
   }) => AssistantTurnItem._(
     kind: AssistantTurnItemKind.message,
     id: id,
     text: text,
     state: state,
+    phase: phase,
   );
 
   factory AssistantTurnItem.tool({
     required String id,
     required String name,
     required String state,
+    int? resultCount,
+    List<String> commands = const <String>[],
   }) => AssistantTurnItem._(
     kind: AssistantTurnItemKind.tool,
     id: id,
     name: name,
     state: state,
+    resultCount: resultCount,
+    commands: commands,
   );
 
   factory AssistantTurnItem.reasoning({
@@ -581,6 +692,27 @@ class AssistantTurnItem {
   final String state;
   final String text;
   final String name;
+  final int? resultCount;
+  final String? phase;
+
+  /// The commands a code step ran, shown on request — never its output.
+  final List<String> commands;
+}
+
+class RuntimeActivity {
+  RuntimeActivity({
+    required this.callId,
+    required this.toolName,
+    required this.state,
+    this.resultCount,
+    Map<String, dynamic>? progress,
+  }) : progress = progress ?? <String, dynamic>{};
+
+  final String callId;
+  String toolName;
+  String state;
+  int? resultCount;
+  Map<String, dynamic> progress;
 }
 
 class AnswerSource {
@@ -593,6 +725,7 @@ class AnswerSource {
     this.originalUrl,
     this.locator,
     this.origin,
+    this.number,
   });
 
   final String id;
@@ -603,8 +736,10 @@ class AnswerSource {
   final String? originalUrl;
   final String? locator;
   final String? origin;
+  final int? number;
 
   static AnswerSource? fromCitation(Map<String, dynamic> citation) {
+    final number = citation['number'] as int?;
     final itemId = (citation['item_id'] as String?)?.trim();
     final chunkId = (citation['chunk_id'] as String?)?.trim();
     if (itemId == null ||
@@ -634,6 +769,7 @@ class AnswerSource {
     final provider = (source['provider'] as String?)?.trim();
     final internal = (citation['internal_url'] as String?)?.trim();
     return AnswerSource(
+      number: number,
       id: (citation['id'] as String?)?.trim().isNotEmpty == true
           ? (citation['id'] as String).trim()
           : chunkId,
@@ -646,7 +782,7 @@ class AnswerSource {
       chunkId: chunkId,
       internalUrl: internal?.isNotEmpty == true
           ? internal!
-          : '/knowledge/items/${Uri.encodeComponent(itemId)}'
+          : '/knowledge/documents/${Uri.encodeComponent(itemId)}'
                 '?chunk=${Uri.encodeComponent(chunkId)}',
       originalUrl:
           (citation['original_url'] as String?)?.trim().isNotEmpty == true
@@ -656,4 +792,32 @@ class AnswerSource {
       origin: provider?.isEmpty == true ? null : provider,
     );
   }
+}
+
+class ChatArtifact {
+  const ChatArtifact({
+    required this.id,
+    required this.title,
+    required this.fileName,
+    required this.mimeType,
+    required this.revision,
+    required this.sizeBytes,
+  });
+
+  final String id;
+  final String title;
+  final String fileName;
+  final String mimeType;
+  final int revision;
+  final int sizeBytes;
+
+  factory ChatArtifact.fromJson(Map<String, dynamic> json) => ChatArtifact(
+    id: json['id'] as String? ?? '',
+    title:
+        json['title'] as String? ?? json['file_name'] as String? ?? 'Document',
+    fileName: json['file_name'] as String? ?? 'document',
+    mimeType: json['mime_type'] as String? ?? 'application/octet-stream',
+    revision: json['revision'] as int? ?? 1,
+    sizeBytes: json['size_bytes'] as int? ?? 0,
+  );
 }

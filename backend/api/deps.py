@@ -7,16 +7,18 @@ from typing import Annotated
 
 from fastapi import Depends, Request
 
-from bothesis.db.engine import session_scope
-from bothesis.health import HealthService
-from bothesis.runtime import AppRuntime
-from bothesis.services import AuthContext
-from bothesis.services.admin_console import AdminConsoleService
-from bothesis.services.artifact import ArtifactService
-from bothesis.services.chat import ChatService
-from bothesis.services.knowledge_query import KnowledgeQueryService
-from bothesis.services.knowledge_view import KnowledgeViewService
-from bothesis.services.workspace_documents import WorkspaceDocumentService
+from bomesh.db.engine import transaction_scope
+from bomesh.health import HealthService
+from bomesh.runtime import AppRuntime
+from bomesh.services import AuthenticationError, AuthContext, AuthorizationError, JwtClaims
+from bomesh.services.workspace_control_plane import WorkspaceControlPlaneService
+from bomesh.services.integration_lifecycle import IntegrationLifecycleService
+from bomesh.services.ingestion import IngestionRunService
+from bomesh.services.artifact import ArtifactService
+from bomesh.services.chat import ChatService
+from bomesh.services.knowledge_query import KnowledgeQueryService
+from bomesh.services.knowledge_view import KnowledgeViewService
+from bomesh.services.documents import DocumentService
 
 from api.identity import RequestIdentity, resolve_auth_context
 from api.routers import ChatRequest
@@ -34,8 +36,9 @@ def get_request_identity(request: Request) -> RequestIdentity:
 
     return RequestIdentity(
         auth_context=getattr(request.state, "auth_context", None),
-        user_id=request.headers.get("X-Bothesis-User-Id"),
-        tenant_id=request.headers.get("X-Bothesis-Tenant-Id"),
+        token_claims=getattr(request.state, "jwt_claims", None),
+        user_id=request.headers.get("X-Bomesh-User-Id"),
+        tenant_id=request.headers.get("X-Bomesh-Tenant-Id"),
     )
 
 
@@ -45,7 +48,7 @@ async def get_auth_context(
 ) -> AuthContext:
     """Resolve the trusted caller before any service sees the request."""
 
-    async with session_scope(runtime.sessions()) as session:
+    async with transaction_scope(runtime.sessions()) as session:
         return await resolve_auth_context(
             identity,
             session,
@@ -62,16 +65,39 @@ async def get_chat_auth_context(
 ) -> AuthContext:
     """Resolve the caller and reject a chat body that claims another tenant."""
 
-    async with session_scope(runtime.sessions()) as session:
+    async with transaction_scope(runtime.sessions()) as session:
         return await resolve_auth_context(
             identity,
             session,
-            claimed_user_id=body.user_id,
-            claimed_tenant_id=body.tenant_id,
             allow_insecure_development_identity=(
                 runtime.config.identity.allow_insecure_development_identity
             ),
         )
+
+
+def get_token_claims(request: Request) -> JwtClaims:
+    """Return the verified bearer claims required by token-only auth routes."""
+
+    claims = getattr(request.state, "jwt_claims", None)
+    if not isinstance(claims, JwtClaims):
+        raise AuthenticationError("a valid bearer access token is required")
+    return claims
+
+
+def require_permission(permission_code: str):
+    """Create a dependency that checks a signed active-tenant permission claim."""
+
+    async def check(
+        claims: Annotated[JwtClaims, Depends(get_token_claims)],
+        context: Annotated[AuthContext, Depends(get_auth_context)],
+    ) -> AuthContext:
+        if not claims.has_permission(permission_code) or not context.has_permissions(
+            permission_code
+        ):
+            raise AuthorizationError(f"missing required permissions: {permission_code}")
+        return context
+
+    return check
 
 
 def get_chat_service(
@@ -92,16 +118,28 @@ def get_knowledge_view_service(
     return runtime.knowledge_view_service()
 
 
-def get_workspace_document_service(
+def get_document_service(
     runtime: Annotated[AppRuntime, Depends(get_runtime)],
-) -> WorkspaceDocumentService:
-    return runtime.workspace_document_service()
+) -> DocumentService:
+    return runtime.document_service()
 
 
-def get_admin_console_service(
+def get_workspace_control_plane_service(
     runtime: Annotated[AppRuntime, Depends(get_runtime)],
-) -> AdminConsoleService:
-    return runtime.admin_console_service()
+) -> WorkspaceControlPlaneService:
+    return runtime.workspace_control_plane_service()
+
+
+def get_integration_lifecycle_service(
+    runtime: Annotated[AppRuntime, Depends(get_runtime)],
+) -> IntegrationLifecycleService:
+    return runtime.integration_lifecycle_service()
+
+
+def get_ingestion_run_service(
+    runtime: Annotated[AppRuntime, Depends(get_runtime)],
+) -> IngestionRunService:
+    return runtime.ingestion_run_service()
 
 
 def get_artifact_service(
@@ -117,32 +155,41 @@ def get_health_service(
 
 
 Runtime = Annotated[AppRuntime, Depends(get_runtime)]
+TokenClaims = Annotated[JwtClaims, Depends(get_token_claims)]
 Caller = Annotated[AuthContext, Depends(get_auth_context)]
 ChatCaller = Annotated[AuthContext, Depends(get_chat_auth_context)]
 Chat = Annotated[ChatService, Depends(get_chat_service)]
 KnowledgeQuery = Annotated[KnowledgeQueryService, Depends(get_knowledge_query_service)]
 KnowledgeView = Annotated[KnowledgeViewService, Depends(get_knowledge_view_service)]
-Documents = Annotated[
-    WorkspaceDocumentService, Depends(get_workspace_document_service)
+Documents = Annotated[DocumentService, Depends(get_document_service)]
+WorkspaceControlPlane = Annotated[WorkspaceControlPlaneService, Depends(get_workspace_control_plane_service)]
+ConnectionLifecycle = Annotated[
+    IntegrationLifecycleService, Depends(get_integration_lifecycle_service)
 ]
-AdminConsole = Annotated[AdminConsoleService, Depends(get_admin_console_service)]
+IngestionRuns = Annotated[IngestionRunService, Depends(get_ingestion_run_service)]
 Artifacts = Annotated[ArtifactService, Depends(get_artifact_service)]
 Health = Annotated[HealthService, Depends(get_health_service)]
 
 __all__ = [
-    "AdminConsole",
+    "WorkspaceControlPlane",
     "Artifacts",
     "Caller",
     "Chat",
     "ChatCaller",
     "Documents",
     "Health",
+    "ConnectionLifecycle",
+    "IngestionRuns",
     "KnowledgeQuery",
     "KnowledgeView",
     "Runtime",
+    "TokenClaims",
     "get_artifact_service",
     "get_auth_context",
     "get_chat_auth_context",
+    "get_integration_lifecycle_service",
     "get_request_identity",
     "get_runtime",
+    "get_token_claims",
+    "require_permission",
 ]

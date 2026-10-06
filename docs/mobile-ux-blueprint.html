@@ -1,0 +1,1301 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BoMesh Mobile — Full Flow Blueprint</title>
+  <style>
+    /* ── Review board ─────────────────────────────────────────────────────── */
+    :root {
+      color-scheme: light;
+      --board: #efede9;
+      --board-panel: #f9f8f5;
+      --board-line: #dedad3;
+      --board-ink: #17161c;
+      --board-ink-2: #4b4753;
+      --board-ink-3: #7a7582;
+      --board-brand: #5b4cdb;
+      --ease: cubic-bezier(.32, .72, 0, 1);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", Roboto, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-width: 320px; background: var(--board); color: var(--board-ink); }
+    button, input, select { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+    svg { display: block; }
+    h1, h2, h3, p { margin: 0; }
+    :focus-visible { outline: 3px solid color-mix(in srgb, var(--board-brand) 45%, transparent); outline-offset: 2px; }
+
+    .review-header {
+      position: sticky; top: 0; z-index: 30;
+      display: flex; align-items: center; justify-content: space-between; gap: 16px;
+      min-height: 68px; padding: 14px clamp(16px, 3vw, 40px);
+      border-bottom: 1px solid var(--board-line);
+      background: rgb(249 248 245 / 86%); backdrop-filter: blur(18px);
+    }
+    .review-brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .review-brand strong { display: block; font-size: 15px; letter-spacing: -.2px; }
+    .review-brand span { display: block; margin-top: 2px; color: var(--board-ink-3); font-size: 12px; }
+    .brand-mark { width: 36px; height: 36px; flex: none; border-radius: 11px; background: var(--board-brand); color: #fff; display: grid; place-items: center; }
+    .review-controls { display: flex; gap: 8px; }
+    .board-button {
+      min-height: 38px; padding: 0 12px; border: 1px solid var(--board-line); border-radius: 10px;
+      background: #fff; display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 650;
+    }
+    .board-button[aria-pressed="true"] { background: var(--board-ink); border-color: var(--board-ink); color: #fff; }
+
+    .board { width: min(1520px, 100%); margin: 0 auto; padding: 24px clamp(14px, 3vw, 40px) 64px; display: grid; gap: 22px; }
+    /* The sticky inspector is contained by this row, so it never slides over
+       the sections below it. */
+    .board-top { display: grid; grid-template-columns: minmax(250px, .8fr) minmax(440px, 1.25fr) minmax(270px, .9fr); gap: 22px; align-items: start; }
+    .board > *, .board-top > * { min-width: 0; }
+    .panel { border: 1px solid var(--board-line); border-radius: 20px; background: var(--board-panel); }
+    .panel-pad { padding: 20px; }
+    .eyebrow { margin-bottom: 6px; color: var(--board-ink-3); font-size: 11px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+    .panel h1 { font-size: clamp(22px, 2.2vw, 30px); line-height: 1.12; letter-spacing: -1px; }
+    .panel-intro { margin: 10px 0 18px; color: var(--board-ink-2); font-size: 13.5px; line-height: 1.55; }
+    .principle { display: grid; grid-template-columns: 22px 1fr; gap: 10px; padding: 11px 0; border-top: 1px solid var(--board-line); }
+    .principle b { width: 22px; height: 22px; border-radius: 50%; background: var(--board-ink); color: #fff; display: grid; place-items: center; font-size: 11px; }
+    .principle strong { display: block; font-size: 13px; }
+    .principle span { display: block; margin-top: 3px; color: var(--board-ink-3); font-size: 12px; line-height: 1.45; }
+
+    .flow-nav { margin-top: 18px; }
+    .flow-group + .flow-group { margin-top: 14px; }
+    .flow-group p { margin: 0 0 6px 6px; color: var(--board-ink-3); font-size: 10.5px; font-weight: 750; letter-spacing: .07em; text-transform: uppercase; }
+    .flow-link {
+      width: 100%; min-height: 40px; padding: 7px 8px; border: 0; border-radius: 10px; background: transparent;
+      display: flex; align-items: center; gap: 10px; text-align: left; font-size: 13px; font-weight: 600;
+      transition: background 140ms var(--ease);
+    }
+    .flow-link:hover { background: #ebe8e3; }
+    .flow-link[aria-current="true"] { background: var(--board-ink); color: #fff; }
+    .flow-link i { width: 8px; height: 8px; flex: none; border-radius: 3px; background: var(--dot, #b9b3ab); }
+    .flow-link small { margin-left: auto; color: var(--board-ink-3); font-size: 10.5px; font-weight: 600; }
+    .flow-link[aria-current="true"] small { color: #c9c4cf; }
+
+    .device-panel { padding: 14px; }
+    .device-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 2px 4px 12px; }
+    .device-toolbar strong { display: block; font-size: 14px; }
+    .device-toolbar span { display: block; margin-top: 2px; color: var(--board-ink-3); font-size: 12px; }
+    .stage {
+      padding: 22px 10px; border-radius: 16px; display: grid; place-items: center; overflow: auto;
+      background: radial-gradient(circle at 50% 0%, rgb(91 76 219 / 12%), transparent 42%), linear-gradient(160deg, #e7e3dc, #f6f4f0);
+    }
+
+    .inspector { position: sticky; top: 88px; }
+    .inspector h2 { font-size: 19px; letter-spacing: -.4px; }
+    .inspector-summary { margin: 7px 0 14px; color: var(--board-ink-2); font-size: 13px; line-height: 1.55; }
+    .tier { padding: 11px 0; border-top: 1px solid var(--board-line); }
+    .tier dt { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 750; text-transform: uppercase; letter-spacing: .05em; color: var(--board-ink-3); }
+    .tier dd { margin: 5px 0 0; font-size: 13px; line-height: 1.45; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; }
+    .dot.primary { background: var(--board-brand); }
+    .dot.secondary { border: 2px solid var(--board-brand); }
+    .dot.overflow { background: #a39d96; }
+    .dot.absent { border: 1.5px dashed #a39d96; }
+    .rules { margin: 14px 0 0; padding: 0; list-style: none; }
+    .rules li { position: relative; padding: 9px 0 9px 22px; border-top: 1px solid var(--board-line); color: var(--board-ink-2); font-size: 12.5px; line-height: 1.45; }
+    .rules li::before { content: ""; position: absolute; left: 3px; top: 13px; width: 10px; height: 6px; border-left: 2px solid #23794a; border-bottom: 2px solid #23794a; transform: rotate(-45deg); }
+
+    .wide { grid-column: 1 / -1; }
+    .section-head { padding: 22px 22px 6px; display: flex; align-items: end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+    .section-head h2 { font-size: 20px; letter-spacing: -.5px; }
+    .section-head p { margin-top: 5px; color: var(--board-ink-3); font-size: 13px; }
+    .journeys { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 12px; padding: 14px 22px 22px; }
+    .journey { padding: 14px; border: 1px solid var(--board-line); border-radius: 14px; background: #fff; }
+    .journey strong { display: block; font-size: 13.5px; }
+    .journey span { display: block; margin-top: 3px; color: var(--board-ink-3); font-size: 12px; }
+    .steps { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 11px; }
+    .steps button { min-height: 30px; padding: 0 9px; border: 1px solid var(--board-line); border-radius: 999px; background: var(--board-panel); font-size: 11.5px; font-weight: 650; }
+    .steps button:hover { border-color: var(--board-brand); color: var(--board-brand); }
+    .steps em { color: #b2aca4; font-style: normal; font-size: 12px; }
+    .table-wrap { overflow-x: auto; padding: 0 0 6px; }
+    table { width: 100%; min-width: 880px; border-collapse: collapse; }
+    th, td { padding: 12px 18px; border-top: 1px solid var(--board-line); text-align: left; vertical-align: top; font-size: 12.5px; line-height: 1.45; }
+    th { color: var(--board-ink-3); font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; background: #f2efea; }
+    td strong { display: block; }
+    td span { color: var(--board-ink-3); }
+    .tokens { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; padding: 14px 22px 22px; }
+    .token { border: 1px solid var(--board-line); border-radius: 12px; overflow: hidden; background: #fff; }
+    .token i { display: block; height: 46px; }
+    .token div { padding: 8px 10px; }
+    .token strong { display: block; font-size: 12px; }
+    .token span { display: block; margin-top: 2px; color: var(--board-ink-3); font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    /* ── Phone ────────────────────────────────────────────────────────────── */
+    .phone {
+      --w: 390px;
+      /* Light theme tokens: warm paper, ink text, one violet accent. Colour
+         is reserved for meaning: the accent marks the primary action and
+         the current place; tones identify collections and file types;
+         status colours appear only beside a status word. */
+      --canvas: #ffffff;
+      --paper: #f7f6f3;
+      --subtle: #f2f0ec;
+      --press: #ebe8e3;
+      --line: #ece8e2;
+      --line-strong: #d9d4cc;
+      --ink: #17161c;
+      --ink-2: #4b4753;
+      --ink-3: #78737f;
+      --brand: #5b4cdb;
+      --brand-press: #4a3bc6;
+      --brand-soft: #efedfe;
+      --brand-ink: #4536b8;
+      --on-brand: #ffffff;
+      --success: #1f7a48; --success-soft: #e7f5ed;
+      --warning: #985a05; --warning-soft: #fdf2dc;
+      --danger: #b4372b;  --danger-soft: #fcebe8;
+      --info: #2e5cc7;    --info-soft: #e9f0fe;
+      --shadow-sm: 0 1px 2px rgb(23 22 28 / 6%);
+      --shadow-lg: 0 24px 60px -24px rgb(23 22 28 / 38%), 0 6px 16px -10px rgb(23 22 28 / 18%);
+      --t-violet: #6c56e0; --t-indigo: #4f63d9; --t-sky: #1f86c9; --t-cyan: #0e8a9a; --t-magenta: #c0449b; --t-slate: #5b6b84;
+      --f-pdf: #d94343; --f-sheet: #2e9b62; --f-doc: #4d72c9; --f-slide: #d97728; --f-text: #6171d8; --f-zip: #7a7582;
+      --tint: 13%;
+
+      width: var(--w); height: 812px; flex: none; position: relative; overflow: hidden;
+      border: 8px solid #141318; border-radius: 46px; background: var(--canvas); color: var(--ink);
+      box-shadow: 0 40px 90px -40px rgb(20 19 24 / 55%), 0 10px 30px -18px rgb(20 19 24 / 35%);
+      transition: width 260ms var(--ease);
+      font-size: 15px; line-height: 1.4;
+    }
+    .phone[data-size="large"] { --w: 430px; height: 880px; }
+    .phone.dark {
+      color-scheme: dark;
+      --canvas: #121117;
+      --paper: #0d0c11;
+      --subtle: #1c1b23;
+      --press: #25232e;
+      --line: #25232d;
+      --line-strong: #383542;
+      --ink: #f3f2f7;
+      --ink-2: #cbc7d4;
+      --ink-3: #9a95a6;
+      --brand: #9b8cff;
+      --brand-press: #b2a6ff;
+      --brand-soft: #262143;
+      --brand-ink: #c3baff;
+      --on-brand: #14121c;
+      --success: #5fd39b; --success-soft: #15302a;
+      --warning: #f2be63; --warning-soft: #352a14;
+      --danger: #ff8f84;  --danger-soft: #3a1d1b;
+      --info: #8fb0ff;    --info-soft: #1c2742;
+      --shadow-sm: 0 1px 2px rgb(0 0 0 / 40%);
+      --shadow-lg: 0 24px 60px -20px rgb(0 0 0 / 70%);
+      --tint: 30%;
+    }
+    .status-bar { height: 44px; padding: 14px 26px 0; display: flex; justify-content: space-between; font-size: 13px; font-weight: 650; position: relative; z-index: 10; background: var(--bar-bg, var(--canvas)); }
+    .island { position: absolute; top: 9px; left: 50%; width: 112px; height: 30px; transform: translateX(-50%); border-radius: 999px; background: #050507; }
+    .sys { display: flex; align-items: center; gap: 6px; }
+    .battery { width: 24px; height: 11px; border: 1.5px solid currentColor; border-radius: 3.5px; position: relative; opacity: .9; }
+    .battery::before { content: ""; position: absolute; inset: 1.5px 5px 1.5px 1.5px; border-radius: 1.5px; background: currentColor; }
+
+    .app { position: absolute; inset: 44px 0 0; display: flex; flex-direction: column; background: var(--canvas); }
+    .view { position: relative; flex: 1; min-height: 0; }
+    .screen { position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--canvas); animation: screen-in 260ms var(--ease); }
+    .screen.paper { background: var(--paper); }
+    @keyframes screen-in { from { opacity: .3; transform: translateX(14px); } to { opacity: 1; transform: none; } }
+    .screen.tab-in { animation-name: tab-in; }
+    @keyframes tab-in { from { opacity: .3; } to { opacity: 1; } }
+
+    /* App bar: back, title, at most two quiet actions. */
+    .appbar { min-height: 52px; padding: 2px 8px 2px 16px; display: flex; align-items: center; gap: 4px; flex: none; background: var(--canvas); }
+    .screen.paper .appbar { background: var(--paper); }
+    .appbar.has-back { padding-left: 4px; }
+    .appbar.rule { border-bottom: 1px solid var(--line); }
+    .appbar .title { min-width: 0; flex: 1; }
+    .appbar .title strong { display: block; font-size: 17px; font-weight: 680; letter-spacing: -.3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .appbar .title span { display: block; color: var(--ink-3); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .large-title { padding: 4px 20px 10px; font-size: 30px; font-weight: 750; letter-spacing: -1px; line-height: 1.1; flex: none; }
+    .large-title small { display: block; margin-top: 4px; color: var(--ink-3); font-size: 13px; font-weight: 500; letter-spacing: 0; }
+    .icon-btn { width: 44px; height: 44px; flex: none; border: 0; border-radius: 12px; background: transparent; display: grid; place-items: center; color: var(--ink-2); }
+    .icon-btn:active { background: var(--press); }
+    .avatar { width: 32px; height: 32px; flex: none; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 750; color: #fff; background: var(--av, #6c56e0); }
+    .avatar.lg { width: 56px; height: 56px; font-size: 20px; }
+    .avatar.md { width: 38px; height: 38px; font-size: 13px; }
+
+    .scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
+    .scroll::-webkit-scrollbar { display: none; }
+    .pad { padding: 4px 16px 28px; }
+    .pad.fab-space { padding-bottom: 96px; }
+
+    /* Shared parts */
+    .search { height: 44px; margin: 4px 0 12px; padding: 0 12px; border-radius: 12px; background: var(--subtle); display: flex; align-items: center; gap: 8px; color: var(--ink-3); font-size: 15px; }
+    .search span { flex: 1; }
+    .seg { padding: 3px; border-radius: 11px; background: var(--subtle); display: grid; grid-template-columns: repeat(var(--n, 2), 1fr); gap: 2px; }
+    .seg button { min-height: 34px; border: 0; border-radius: 9px; background: transparent; color: var(--ink-3); font-size: 13px; font-weight: 650; }
+    .seg button.on { background: var(--canvas); color: var(--ink); box-shadow: var(--shadow-sm), 0 0 0 .5px var(--line-strong); }
+    .tabs { display: flex; gap: 22px; padding: 0 20px; border-bottom: 1px solid var(--line); flex: none; }
+    .tabs button { position: relative; min-height: 42px; padding: 0; border: 0; background: transparent; color: var(--ink-3); font-size: 14px; font-weight: 650; }
+    .tabs button.on { color: var(--ink); }
+    .tabs button.on::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2.5px; border-radius: 2px; background: var(--brand); }
+    .badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin-left: 4px; padding: 0 5px; border-radius: 999px; background: var(--danger); color: #fff; font-size: 11px; font-weight: 750; vertical-align: 1px; }
+
+    .sec { margin: 22px 0 8px; display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+    .sec:first-child { margin-top: 8px; }
+    .sec h3 { font-size: 13px; font-weight: 700; color: var(--ink-3); letter-spacing: .02em; text-transform: uppercase; }
+    .sec a, .sec span { color: var(--ink-3); font-size: 13px; text-decoration: none; }
+    .sec a { color: var(--brand-ink); font-weight: 600; cursor: pointer; }
+
+    .list { border-radius: 16px; background: var(--canvas); overflow: hidden; }
+    .screen.paper .list { box-shadow: 0 0 0 1px var(--line); }
+    .row { min-height: 62px; padding: 10px 14px; display: flex; align-items: center; gap: 12px; position: relative; }
+    .row + .row::before { content: ""; position: absolute; top: 0; right: 0; left: 62px; border-top: 1px solid var(--line); }
+    .row.plain + .row.plain::before { left: 14px; }
+    .row[data-go], .row[data-sheet] { cursor: pointer; }
+    .row:active { background: var(--subtle); }
+    .row .copy { min-width: 0; flex: 1; }
+    .row .copy strong { display: block; font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .row .copy > span { display: block; margin-top: 2px; color: var(--ink-3); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .row .copy span .quiet { color: var(--warning); }
+    .row .chev { color: var(--line-strong); flex: none; }
+    .row .trail { color: var(--ink-3); font-size: 13px; flex: none; }
+
+    /* Tone tiles: one colour per collection or file type, the same as web. */
+    .tile { width: 38px; height: 38px; flex: none; border-radius: 11px; display: grid; place-items: center; color: var(--c); background: color-mix(in oklab, var(--c) var(--tint), var(--canvas)); }
+    .tile.sm { width: 32px; height: 32px; border-radius: 9px; }
+    .tile.lg { width: 56px; height: 56px; border-radius: 16px; }
+    .tile.violet { --c: var(--t-violet); } .tile.indigo { --c: var(--t-indigo); } .tile.sky { --c: var(--t-sky); }
+    .tile.cyan { --c: var(--t-cyan); } .tile.magenta { --c: var(--t-magenta); } .tile.slate { --c: var(--t-slate); }
+    .tile.ft-pdf { --c: var(--f-pdf); } .tile.ft-sheet { --c: var(--f-sheet); } .tile.ft-doc { --c: var(--f-doc); }
+    .tile.ft-slide { --c: var(--f-slide); } .tile.ft-text { --c: var(--f-text); } .tile.ft-zip { --c: var(--f-zip); }
+    .tile.warning { --c: var(--warning); } .tile.info { --c: var(--info); } .tile.danger { --c: var(--danger); } .tile.success { --c: var(--success); }
+
+    .status { display: inline-flex; align-items: center; gap: 5px; flex: none; padding: 3px 8px; border-radius: 999px; font-size: 12px; font-weight: 650; white-space: nowrap; }
+    .status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    .status.success { color: var(--success); background: var(--success-soft); }
+    .status.warning { color: var(--warning); background: var(--warning-soft); }
+    .status.danger { color: var(--danger); background: var(--danger-soft); }
+    .status.info { color: var(--info); background: var(--info-soft); }
+    .status.neutral { color: var(--ink-3); background: var(--subtle); }
+
+    .chips { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding: 2px 0; }
+    .chips::-webkit-scrollbar { display: none; }
+    .chip { min-height: 34px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--canvas); display: inline-flex; align-items: center; gap: 6px; flex: none; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+    .chip.on { border-color: var(--ink); background: var(--ink); color: var(--canvas); }
+
+    .btn { min-height: 48px; padding: 0 18px; border: 0; border-radius: 14px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; font-size: 15px; font-weight: 650; white-space: nowrap; }
+    .btn.primary { background: var(--brand); color: var(--on-brand); }
+    .btn.primary:active { background: var(--brand-press); }
+    .btn.secondary { background: var(--subtle); color: var(--ink); }
+    .btn.ghost { background: transparent; color: var(--brand-ink); }
+    .btn.danger { background: transparent; color: var(--danger); }
+    .btn.block { width: 100%; }
+    .btn.sm { min-height: 38px; padding: 0 14px; border-radius: 11px; font-size: 14px; }
+    .btn[disabled] { opacity: .45; }
+
+    .fab { position: absolute; right: 16px; bottom: 16px; z-index: 6; min-height: 54px; padding: 0 20px 0 16px; border: 0; border-radius: 18px; background: var(--brand); color: var(--on-brand); display: inline-flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 700; box-shadow: 0 14px 30px -12px color-mix(in srgb, var(--brand) 70%, transparent); }
+
+    .card { padding: 14px; border-radius: 16px; background: var(--canvas); }
+    .screen.paper .card { box-shadow: 0 0 0 1px var(--line); }
+    .screen:not(.paper) .card { box-shadow: 0 0 0 1px var(--line); }
+
+    /* Ask */
+    .hello { padding: 18px 4px 18px; }
+    .hello .mark { width: 44px; height: 44px; border-radius: 14px; margin-bottom: 16px; display: grid; place-items: center; color: #fff; background: linear-gradient(140deg, #7b68f0, #4a3bc6); box-shadow: 0 10px 24px -12px #5b4cdb; }
+    .hello h2 { font-size: 26px; font-weight: 750; letter-spacing: -.8px; line-height: 1.15; }
+    .hello p { margin-top: 8px; color: var(--ink-2); font-size: 15px; line-height: 1.5; }
+    .suggest { width: 100%; min-height: 56px; padding: 10px 12px; border: 0; border-radius: 14px; background: var(--subtle); display: flex; align-items: center; gap: 12px; text-align: left; font-size: 15px; font-weight: 550; }
+    .suggest + .suggest { margin-top: 8px; }
+    .suggest .tile { width: 32px; height: 32px; border-radius: 9px; }
+    .composer-wrap { flex: none; padding: 8px 12px 10px; background: var(--canvas); }
+    .scope { display: flex; gap: 6px; margin: 0 2px 8px; }
+    .scope .chip { min-height: 30px; padding: 0 10px; font-size: 12.5px; border-color: var(--line); background: var(--subtle); }
+    .composer { min-height: 52px; padding: 4px 4px 4px 4px; border: 1px solid var(--line-strong); border-radius: 26px; background: var(--canvas); display: flex; align-items: center; gap: 4px; box-shadow: var(--shadow-sm); }
+    .composer .field { flex: 1; color: var(--ink-3); font-size: 16px; padding: 0 4px; }
+    .composer .add { width: 42px; height: 42px; border: 0; border-radius: 50%; background: var(--subtle); display: grid; place-items: center; color: var(--ink-2); }
+    .composer .send { width: 42px; height: 42px; border: 0; border-radius: 50%; background: var(--brand); color: var(--on-brand); display: grid; place-items: center; }
+    .composer .send.idle { background: var(--subtle); color: var(--ink-3); }
+    .composer-note { margin-top: 6px; text-align: center; color: var(--ink-3); font-size: 11.5px; }
+
+    .bubble-row { display: flex; justify-content: flex-end; margin: 10px 0 18px; }
+    .bubble { max-width: 82%; padding: 10px 14px; border-radius: 20px 20px 6px 20px; background: var(--subtle); font-size: 15.5px; line-height: 1.45; }
+    .attach { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 8px; padding: 6px 10px 6px 6px; border-radius: 12px; background: var(--canvas); box-shadow: 0 0 0 1px var(--line); font-size: 13px; font-weight: 600; max-width: 100%; }
+    .attach .tile { width: 26px; height: 26px; border-radius: 7px; }
+    .attach span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .answer { font-size: 15.5px; line-height: 1.6; color: var(--ink); }
+    .answer p + p { margin-top: 10px; }
+    .cite { display: inline-grid; place-items: center; min-width: 19px; height: 19px; padding: 0 5px; margin: 0 1px; border-radius: 6px; background: var(--brand-soft); color: var(--brand-ink); font-size: 11.5px; font-weight: 750; vertical-align: 1px; cursor: pointer; }
+    .work { display: flex; align-items: center; gap: 8px; margin: 2px 0 10px; color: var(--ink-3); font-size: 13.5px; }
+    .work .ok { color: var(--success); }
+    .work code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink-3); }
+    .work + .work { margin-top: -4px; }
+    .sources { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; margin: 12px 0 6px; }
+    .sources::-webkit-scrollbar { display: none; }
+    .source { flex: none; max-width: 200px; display: flex; align-items: center; gap: 8px; padding: 6px 10px 6px 6px; border-radius: 12px; background: var(--subtle); font-size: 13px; font-weight: 600; cursor: pointer; }
+    .source span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .source b { min-width: 18px; height: 18px; border-radius: 6px; display: grid; place-items: center; background: var(--canvas); color: var(--brand-ink); font-size: 11px; }
+    .turn-actions { display: flex; gap: 2px; margin: 4px 0 18px -10px; }
+    .turn-actions .icon-btn { width: 38px; height: 38px; color: var(--ink-3); }
+    .file-card { margin: 10px 0 6px; padding: 12px; border-radius: 16px; box-shadow: 0 0 0 1px var(--line); display: grid; gap: 12px; background: var(--canvas); }
+    .file-card .head { display: flex; align-items: center; gap: 12px; }
+    .file-card .head strong { display: block; font-size: 15px; }
+    .file-card .head span { display: block; margin-top: 2px; color: var(--ink-3); font-size: 13px; }
+    .file-card .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+    /* Library / documents */
+    .doc-hero { padding: 6px 4px 16px; display: flex; gap: 14px; align-items: center; }
+    .doc-hero > div { min-width: 0; }
+    .doc-hero strong { display: block; font-size: 19px; font-weight: 720; letter-spacing: -.4px; line-height: 1.25; overflow-wrap: anywhere; }
+    .doc-hero > div > span { display: block; margin-top: 4px; color: var(--ink-3); font-size: 13px; }
+    .notice { display: flex; gap: 10px; align-items: center; padding: 12px; border-radius: 14px; background: var(--subtle); color: var(--ink-2); font-size: 13.5px; line-height: 1.4; }
+    .notice .grow { flex: 1; }
+    .notice a { color: var(--brand-ink); font-weight: 650; white-space: nowrap; cursor: pointer; }
+    .notice.warning { background: var(--warning-soft); color: color-mix(in srgb, var(--warning) 75%, var(--ink)); }
+    .sheet-table { border-radius: 14px; overflow: hidden; box-shadow: 0 0 0 1px var(--line); font-size: 13.5px; }
+    .sheet-table div { display: grid; grid-template-columns: 30px 1fr 1.2fr; }
+    .sheet-table div + div { border-top: 1px solid var(--line); }
+    .sheet-table span { padding: 9px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sheet-table span:first-child { color: var(--ink-3); text-align: center; background: var(--subtle); }
+    .sheet-table .head span { font-weight: 700; background: var(--subtle); }
+
+    .collection-card { display: flex; gap: 12px; padding: 14px; border-radius: 16px; background: var(--canvas); box-shadow: 0 0 0 1px var(--line); cursor: pointer; }
+    .collection-card + .collection-card { margin-top: 10px; }
+    .collection-card strong { display: block; font-size: 15.5px; font-weight: 680; }
+    .collection-card p { margin-top: 3px; color: var(--ink-2); font-size: 13.5px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .facts { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 8px; color: var(--ink-3); font-size: 12.5px; }
+    .facts span { display: inline-flex; align-items: center; gap: 4px; }
+
+    .crumbs { display: flex; align-items: center; gap: 4px; color: var(--ink-3); font-size: 13px; padding: 0 20px; flex: none; }
+    .collection-hero { padding: 12px 20px 14px; display: grid; gap: 12px; }
+    .collection-hero .top { display: flex; gap: 14px; align-items: center; }
+    .collection-hero h2 { font-size: 22px; font-weight: 750; letter-spacing: -.6px; }
+    .collection-hero p { color: var(--ink-2); font-size: 14.5px; line-height: 1.5; }
+    .people { display: flex; align-items: center; }
+    .people .avatar { width: 26px; height: 26px; font-size: 10px; box-shadow: 0 0 0 2px var(--canvas); }
+    .people .avatar + .avatar { margin-left: -7px; }
+
+    /* Manage */
+    .attention { display: flex; align-items: center; gap: 12px; padding: 13px 14px; border-radius: 16px; cursor: pointer; }
+    .attention + .attention { margin-top: 8px; }
+    .attention.warning { background: var(--warning-soft); }
+    .attention.info { background: var(--info-soft); }
+    .attention.danger { background: var(--danger-soft); }
+    .attention .copy { flex: 1; min-width: 0; }
+    .attention strong { display: block; font-size: 15px; font-weight: 650; }
+    .attention span { display: block; margin-top: 2px; color: var(--ink-2); font-size: 13px; }
+    .attention .count { font-size: 22px; font-weight: 750; letter-spacing: -.5px; }
+    .attention.warning .count { color: var(--warning); }
+    .attention.info .count { color: var(--info); }
+    .attention.danger .count { color: var(--danger); }
+    .metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .metric { padding: 12px 14px; border-radius: 16px; background: var(--canvas); box-shadow: 0 0 0 1px var(--line); }
+    .metric span { display: block; color: var(--ink-3); font-size: 13px; }
+    .metric strong { display: block; margin-top: 6px; font-size: 24px; font-weight: 750; letter-spacing: -.8px; }
+    .metric small { display: block; margin-top: 2px; color: var(--ink-3); font-size: 12px; }
+    .metric small.up { color: var(--success); font-weight: 650; }
+    .all-clear { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 16px; background: var(--success-soft); color: var(--success); font-size: 14px; font-weight: 650; }
+
+    .run { padding: 14px; border-radius: 16px; background: var(--canvas); box-shadow: 0 0 0 1px var(--line); cursor: pointer; }
+    .run + .run { margin-top: 10px; }
+    .run .top { display: flex; align-items: center; gap: 10px; }
+    .run .top strong { flex: 1; font-size: 15px; font-weight: 650; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .run p { margin-top: 4px; color: var(--ink-3); font-size: 13px; }
+    .bar { height: 6px; margin-top: 12px; border-radius: 999px; background: var(--subtle); overflow: hidden; display: flex; }
+    .bar i { display: block; height: 100%; background: var(--brand); }
+    .bar i.fail { background: var(--danger); }
+    .bar-meta { margin-top: 6px; display: flex; justify-content: space-between; color: var(--ink-3); font-size: 12px; }
+    .stat3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 14px; }
+    .stat3 div { padding: 10px 12px; border-radius: 14px; background: var(--subtle); }
+    .stat3 span { display: block; color: var(--ink-3); font-size: 12px; }
+    .stat3 strong { display: block; margin-top: 2px; font-size: 20px; font-weight: 750; }
+    .stat3 .bad strong { color: var(--danger); }
+    .error-text { color: var(--danger); }
+
+    .request { padding: 14px; border-radius: 16px; background: var(--canvas); box-shadow: 0 0 0 1px var(--line); }
+    .request + .request { margin-top: 10px; }
+    .request .top { display: flex; gap: 12px; align-items: center; }
+    .request .top strong { display: block; font-size: 15px; font-weight: 650; }
+    .request .top span { display: block; margin-top: 2px; color: var(--ink-3); font-size: 13px; }
+    .request blockquote { margin: 10px 0 12px; padding: 9px 12px; border-radius: 12px; background: var(--subtle); color: var(--ink-2); font-size: 14px; line-height: 1.45; }
+    .request .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+    .chart { width: 100%; height: 120px; }
+    .chart rect { fill: color-mix(in oklab, var(--brand) 22%, var(--canvas)); }
+    .chart rect.today { fill: var(--brand); }
+    .chart text { fill: var(--ink-3); font-size: 10px; }
+
+    .form-group { margin-top: 18px; }
+    .form-group label { display: block; margin: 0 4px 6px; color: var(--ink-3); font-size: 13px; font-weight: 600; }
+    .input { width: 100%; min-height: 48px; padding: 12px 14px; border: 1px solid var(--line-strong); border-radius: 13px; background: var(--canvas); color: var(--ink); font-size: 16px; }
+    .input.ro { background: var(--subtle); border-color: var(--line); color: var(--ink-2); }
+    .helper { margin: 6px 4px 0; color: var(--ink-3); font-size: 12.5px; line-height: 1.4; }
+    .sticky { flex: none; padding: 10px 16px 12px; background: var(--canvas); border-top: 1px solid var(--line); display: flex; align-items: center; gap: 12px; }
+    .sticky span { flex: 1; color: var(--ink-3); font-size: 13px; }
+
+    .health { padding: 14px; border-radius: 16px; background: var(--success-soft); }
+    .health .top { display: flex; align-items: center; gap: 10px; }
+    .health .top strong { flex: 1; font-size: 15px; font-weight: 650; }
+    .health .top span { color: var(--success); font-weight: 700; font-size: 13px; }
+    .services { margin-top: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .services div { padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, var(--canvas) 70%, transparent); display: flex; align-items: center; gap: 7px; font-size: 13px; }
+    .services i { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+    .services b { margin-left: auto; color: var(--ink-3); font-weight: 500; font-size: 12px; }
+
+    .profile { display: grid; justify-items: center; gap: 6px; padding: 10px 16px 18px; text-align: center; }
+    .profile strong { font-size: 19px; font-weight: 720; }
+    .profile span { color: var(--ink-3); font-size: 13.5px; }
+
+    .signin { position: absolute; inset: 0; display: flex; flex-direction: column; padding: 28px 24px 24px; background: var(--canvas); animation: tab-in 260ms var(--ease); }
+    .signin .mark { width: 56px; height: 56px; border-radius: 18px; display: grid; place-items: center; color: #fff; background: linear-gradient(140deg, #7b68f0, #4a3bc6); box-shadow: 0 16px 32px -16px #5b4cdb; }
+    .signin h2 { margin-top: 26px; font-size: 30px; font-weight: 760; letter-spacing: -1px; line-height: 1.12; }
+    .signin p { margin-top: 10px; color: var(--ink-2); font-size: 15px; line-height: 1.5; }
+    .signin .grow { flex: 1; }
+    .google { width: 100%; min-height: 52px; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--canvas); display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 15.5px; font-weight: 650; }
+    .divider { display: flex; align-items: center; gap: 10px; margin: 16px 0; color: var(--ink-3); font-size: 13px; }
+    .divider::before, .divider::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
+
+    /* Bottom navigation: three destinations, never commands. */
+    .tabbar { flex: none; height: 82px; padding: 6px 18px 26px; display: grid; grid-template-columns: repeat(var(--tabs, 3), 1fr); border-top: 1px solid var(--line); background: color-mix(in srgb, var(--canvas) 92%, transparent); backdrop-filter: blur(20px); position: relative; z-index: 7; }
+    .tabbar button { border: 0; background: transparent; display: grid; justify-items: center; align-content: center; gap: 2px; color: var(--ink-3); font-size: 11px; font-weight: 650; position: relative; }
+    .tabbar button .glyph { width: 52px; height: 30px; border-radius: 999px; display: grid; place-items: center; transition: background 160ms var(--ease); }
+    .tabbar button.on { color: var(--brand-ink); }
+    .tabbar button.on .glyph { background: var(--brand-soft); }
+    .tabbar .dotbadge { position: absolute; top: 2px; left: calc(50% + 10px); width: 8px; height: 8px; border-radius: 50%; background: var(--danger); box-shadow: 0 0 0 2px var(--canvas); }
+    .home-indicator { position: absolute; left: 50%; bottom: 8px; width: 134px; height: 5px; border-radius: 999px; background: var(--ink); transform: translateX(-50%); opacity: .85; z-index: 20; }
+
+    /* Sheets */
+    .scrim { position: absolute; inset: 0; z-index: 30; background: rgb(8 7 12 / 40%); animation: fade 200ms var(--ease); }
+    @keyframes fade { from { opacity: 0; } }
+    .sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 31; max-height: 88%; display: flex; flex-direction: column; padding: 8px 16px 30px; border-radius: 26px 26px 0 0; background: var(--canvas); box-shadow: var(--shadow-lg); animation: sheet-up 300ms var(--ease); }
+    @keyframes sheet-up { from { transform: translateY(40%); opacity: .4; } }
+    .grabber { width: 38px; height: 5px; margin: 0 auto 12px; border-radius: 999px; background: var(--line-strong); flex: none; }
+    .sheet-head { padding: 0 4px 12px; flex: none; }
+    .sheet-head strong { display: block; font-size: 18px; font-weight: 720; letter-spacing: -.3px; }
+    .sheet-head span { display: block; margin-top: 3px; color: var(--ink-3); font-size: 13.5px; line-height: 1.4; }
+    .sheet-body { overflow-y: auto; scrollbar-width: none; min-height: 0; }
+    .sheet-body::-webkit-scrollbar { display: none; }
+    .option { width: 100%; min-height: 60px; padding: 9px 10px; border: 0; border-radius: 14px; background: transparent; display: flex; align-items: center; gap: 12px; text-align: left; }
+    .option:active { background: var(--subtle); }
+    .option > span:not(.tile):not(.radio) { min-width: 0; flex: 1; }
+    .option strong { display: block; font-size: 15px; font-weight: 620; color: var(--ink); }
+    .option strong + span { display: block; margin-top: 2px; color: var(--ink-3); font-size: 13px; }
+    .option.danger strong { color: var(--danger); }
+    .radio { width: 22px; height: 22px; flex: none; margin-left: auto; border-radius: 50%; border: 2px solid var(--line-strong); }
+    .radio.on { border: 7px solid var(--brand); }
+    .sheet-foot { flex: none; padding-top: 12px; display: grid; gap: 8px; }
+    .select-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px; background: var(--subtle); }
+    .select-row .copy { flex: 1; min-width: 0; }
+    .select-row span { display: block; color: var(--ink-3); font-size: 12.5px; }
+    .select-row strong { display: block; font-size: 15px; font-weight: 620; }
+    .toggle { width: 46px; height: 28px; flex: none; border-radius: 999px; background: var(--brand); position: relative; }
+    .toggle::after { content: ""; position: absolute; top: 3px; right: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgb(0 0 0 / 25%); }
+    .passage { margin-top: 4px; padding: 12px 14px; border-left: 3px solid var(--brand); border-radius: 4px 14px 14px 4px; background: var(--brand-soft); font-size: 14.5px; line-height: 1.55; }
+    .passage mark { background: color-mix(in oklab, var(--brand) 26%, transparent); color: inherit; border-radius: 3px; padding: 0 2px; }
+
+    .icon { width: 20px; height: 20px; stroke: currentColor; stroke-width: 1.8; fill: none; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+    .icon.sm { width: 16px; height: 16px; }
+    .icon.xs { width: 13px; height: 13px; }
+    .icon.lg { width: 24px; height: 24px; }
+
+    /* Marks keep their own box and colour wherever they sit; container rules
+       such as ".attention span" style text, never a tile or an avatar. */
+    .phone span.tile.tile { display: grid; margin: 0; color: var(--c); }
+    .phone span.avatar.avatar { display: grid; margin-top: 0; color: #fff; }
+
+    @media (max-width: 1220px) {
+      .board-top { grid-template-columns: minmax(240px, .8fr) minmax(440px, 1.3fr); }
+      .inspector { position: static; grid-column: 1 / -1; }
+    }
+    @media (max-width: 860px) {
+      .board { padding-inline: 10px; }
+      .board-top { grid-template-columns: 1fr; }
+      .device-panel { grid-row: 1; }
+      .stage { padding: 12px 0; }
+    }
+    @media (max-width: 460px) {
+      .review-brand span, .board-button span { display: none; }
+      .device-panel { padding: 6px; }
+      .stage { background: transparent; padding: 0; }
+      .phone, .phone[data-size="large"] { --w: 100%; height: calc(100dvh - 100px); min-height: 640px; border-width: 0; border-radius: 22px; }
+      .status-bar, .island { display: none; }
+      .app { inset: 0; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <svg aria-hidden="true" style="display:none">
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M20 12a8 8 0 0 1-11.6 7.1L4 20l1-4.1A8 8 0 1 1 20 12Z"/></symbol>
+    <symbol id="i-library" viewBox="0 0 24 24"><path d="M4 19.5V5a2 2 0 0 1 2-2h12v15H6a2 2 0 0 0-2 2Zm0 0A2 2 0 0 0 6 21.5h12"/><path d="M8 7h6"/></symbol>
+    <symbol id="i-manage" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4 4"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+    <symbol id="i-history" viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h7"/></symbol>
+    <symbol id="i-compose" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></symbol>
+    <symbol id="i-sheet" viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 9h16M4 15h16M10 3v18"/></symbol>
+    <symbol id="i-pdf" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/><path d="M8.5 16.5c2-1 4.5-4.5 4-6.5-.4-1.6-2-.6-1.5 1.5.6 2.4 3 4.5 5 4.6"/></symbol>
+    <symbol id="i-zip" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M11 3v2M11 7v2M11 11v2M10 15h2v3h-2z"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M3 5.5A1.5 1.5 0 0 1 4.5 4H9a3 3 0 0 1 3 3v13a2.5 2.5 0 0 0-2.5-2.5h-5A1.5 1.5 0 0 1 3 16Z"/><path d="M21 5.5A1.5 1.5 0 0 0 19.5 4H15a3 3 0 0 0-3 3v13a2.5 2.5 0 0 1 2.5-2.5h5A1.5 1.5 0 0 0 21 16Z"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.4" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 15V4M7.5 8.5 12 4l4.5 4.5"/><path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5"/><path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></symbol>
+    <symbol id="i-folder-plus" viewBox="0 0 24 24"><path d="M3.5 7A2.5 2.5 0 0 1 6 4.5h3.5l2 2H18A2.5 2.5 0 0 1 20.5 9v8.5A2.5 2.5 0 0 1 18 20H6a2.5 2.5 0 0 1-2.5-2.5Z"/><path d="M12 10.5v6M9 13.5h6"/></symbol>
+    <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 3v4M15 3v4M6.5 7h11v3.5a5.5 5.5 0 0 1-11 0Z"/><path d="M12 16v5"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5Z"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.5-4.5L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.5 4.5L20 16"/><path d="M20 20v-4h-4"/></symbol>
+    <symbol id="i-people" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M16 4.8a3.2 3.2 0 0 1 0 6.2M17.5 14.2A6 6 0 0 1 21 20"/></symbol>
+    <symbol id="i-user-plus" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 20a6 6 0 0 1 12 0M19 8v6M16 11h6"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 19.5 6v5.5c0 4.6-3.2 8.2-7.5 9.5-4.3-1.3-7.5-4.9-7.5-9.5V6Z"/><path d="m9 12 2.2 2.2L15.5 10"/></symbol>
+    <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M3 12h4l2.5-6 5 12 2.5-6h4"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.4M12 18.8v2.4M4.9 4.9l1.7 1.7M17.4 17.4l1.7 1.7M2.8 12h2.4M18.8 12h2.4M4.9 19.1l1.7-1.7M17.4 6.6l1.7-1.7"/></symbol>
+    <symbol id="i-import" viewBox="0 0 24 24"><path d="M12 3v11M7.5 9.5 12 14l4.5-4.5"/><path d="M3.5 15.5 5 20h14l1.5-4.5"/></symbol>
+    <symbol id="i-building" viewBox="0 0 24 24"><path d="M4 21V5.5L12 3l8 2.5V21M2.5 21h19M9 8h1M14 8h1M9 12h1M14 12h1M10.5 21v-4h3v4"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7"/></symbol>
+    <symbol id="i-check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12.5 2.8 2.8L16 10"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3.5 2.5 20h19Z"/><path d="M12 10v4M12 17h.01"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7 10 3 2.5L7 15M12.5 15H17"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="2.8"/></symbol>
+    <symbol id="i-share" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M17 8.5v6M14 11.5h6"/></symbol>
+    <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M12 3.5 13.8 9 19.5 10.8 13.8 12.6 12 18.5l-1.8-5.9-5.7-1.8L10.2 9Z"/></symbol>
+    <symbol id="i-logo" viewBox="0 0 24 24"><circle cx="6" cy="7" r="2.2"/><circle cx="18" cy="6" r="2.2"/><circle cx="12" cy="17.5" r="2.2"/><path d="m7.9 8.3 2.7 7.4M16.4 7.6l-2.9 8M8.2 7l7.6-.8"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11Z"/></symbol>
+    <symbol id="i-phone" viewBox="0 0 24 24"><rect x="6.5" y="2.5" width="11" height="19" rx="2.5"/><path d="M10.5 5.5h3"/></symbol>
+    <symbol id="i-swap" viewBox="0 0 24 24"><path d="M4 8h13l-3.5-3.5M20 16H7l3.5 3.5"/></symbol>
+    <symbol id="i-logout" viewBox="0 0 24 24"><path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M10 16l-4-4 4-4M6 12h10"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+    <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="M9 3h6l-1 6 3.5 3.5h-11L10 9Z"/><path d="M12 12.5V21"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12.5a1.5 1.5 0 0 0 1.5 1.5h7a1.5 1.5 0 0 0 1.5-1.5L18 7M9 7V4.5h6V7"/></symbol>
+    <symbol id="i-google" viewBox="0 0 24 24"><path d="M21 12.2c0-.7-.1-1.3-.2-1.9H12v3.6h5.1a4.4 4.4 0 0 1-1.9 2.9v2.4h3.1c1.7-1.6 2.7-4 2.7-7Z" fill="#4285F4" stroke="none"/><path d="M12 21.5c2.6 0 4.7-.9 6.3-2.3l-3.1-2.4c-.9.6-2 .9-3.2.9-2.5 0-4.6-1.7-5.4-3.9H3.4v2.5A9.5 9.5 0 0 0 12 21.5Z" fill="#34A853" stroke="none"/><path d="M6.6 13.8a5.7 5.7 0 0 1 0-3.6V7.7H3.4a9.5 9.5 0 0 0 0 8.6Z" fill="#FBBC05" stroke="none"/><path d="M12 6.3c1.4 0 2.7.5 3.7 1.4l2.7-2.7A9.5 9.5 0 0 0 3.4 7.7l3.2 2.5C7.4 8 9.5 6.3 12 6.3Z" fill="#EA4335" stroke="none"/></symbol>
+  </svg>
+
+  <header class="review-header">
+    <div class="review-brand">
+      <div class="brand-mark" aria-hidden="true"><svg class="icon"><use href="#i-logo"/></svg></div>
+      <div><strong>BoMesh Mobile — Full Flow</strong><span>Interactive blueprint · v2 for review, before implementation</span></div>
+    </div>
+    <div class="review-controls">
+      <button class="board-button" id="size-control" aria-pressed="false" title="Phone size"><svg class="icon sm"><use href="#i-phone"/></svg><span>390 / 430</span></button>
+      <button class="board-button" id="theme-control" aria-pressed="false" title="Dark theme"><svg class="icon sm"><use href="#i-moon"/></svg><span>Dark</span></button>
+    </div>
+  </header>
+
+  <main class="board">
+    <div class="board-top">
+    <aside class="panel">
+      <div class="panel-pad">
+        <p class="eyebrow">Direction</p>
+        <h1>Calm, colourful where it means something, one tap to the next step.</h1>
+        <p class="panel-intro">Three destinations — Ask, Library, Manage. Every screen has one obvious primary action in the brand violet; everything else is quieter, in a sheet, or one level deeper.</p>
+        <div class="principle"><b>1</b><div><strong>One primary action per screen</strong><span>The violet button, FAB or send arrow is always the next step. Secondary actions are grey; rare and destructive ones live in “···”.</span></div></div>
+        <div class="principle"><b>2</b><div><strong>Colour carries meaning</strong><span>Violet = action and current place. Tone tiles identify a collection or file type, the same colours as web. Green/amber/red only beside a status word.</span></div></div>
+        <div class="principle"><b>3</b><div><strong>Thumb-first</strong><span>Primary actions sit at the bottom (composer, FAB, sticky bar, sheet buttons). 44pt targets, sheets instead of dialogs, no hidden gestures required.</span></div></div>
+
+        <nav class="flow-nav" aria-label="Screens" id="flow-nav"></nav>
+      </div>
+    </aside>
+
+    <section class="panel device-panel" aria-label="Interactive phone prototype">
+      <div class="device-toolbar">
+        <div><strong id="preview-title">Ask</strong><span id="preview-path">Tap anything inside the phone — it navigates.</span></div>
+      </div>
+      <div class="stage">
+        <div class="phone" id="phone" data-size="small">
+          <div class="status-bar"><span>9:41</span><span class="island" aria-hidden="true"></span><span class="sys"><svg class="icon xs" viewBox="0 0 24 24"><path d="M2 20h3v-4H2zM7.5 20h3v-8h-3zM13 20h3V8h-3zM18.5 20h3V4h-3z" fill="currentColor" stroke="none"/></svg><span class="battery"></span></span></div>
+          <div class="app" id="app">
+            <div class="view" id="view"></div>
+            <nav class="tabbar" id="tabbar" aria-label="Primary"></nav>
+          </div>
+          <div class="home-indicator" aria-hidden="true"></div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="panel inspector">
+      <div class="panel-pad">
+        <p class="eyebrow">This screen</p>
+        <h2 id="ins-title"></h2>
+        <p class="inspector-summary" id="ins-summary"></p>
+        <dl>
+          <div class="tier"><dt><span class="dot primary"></span>Primary</dt><dd id="ins-primary"></dd></div>
+          <div class="tier"><dt><span class="dot secondary"></span>Secondary</dt><dd id="ins-secondary"></dd></div>
+          <div class="tier"><dt><span class="dot overflow"></span>In “···” or detail</dt><dd id="ins-overflow"></dd></div>
+          <div class="tier"><dt><span class="dot absent"></span>Deliberately absent</dt><dd id="ins-absent"></dd></div>
+        </dl>
+        <ul class="rules">
+          <li>Bottom bar holds destinations only; Manage appears only with a management permission.</li>
+          <li>Back keeps scroll position, filters, tab and unfinished input.</li>
+          <li>A status is always a word plus a colour, never colour alone.</li>
+          <li>Processing never decorates Library or Knowledge; a document only says “Not searchable yet” when it is.</li>
+          <li>Anything web cannot do yet is absent, never a disabled fake.</li>
+        </ul>
+      </div>
+    </aside>
+    </div>
+
+    <section class="panel wide">
+      <div class="section-head"><div><p class="eyebrow">Flows</p><h2>Key journeys, step by step</h2><p>Each chip opens that step in the phone. Every journey ends in at most four taps.</p></div></div>
+      <div class="journeys" id="journeys"></div>
+    </section>
+
+    <section class="panel wide">
+      <div class="section-head"><div><p class="eyebrow">Theme</p><h2>Colour tokens</h2><p>Light shown; dark mirrors every token (toggle “Dark” above). The same tone hues as the web Knowledge page.</p></div></div>
+      <div class="tokens" id="tokens"></div>
+    </section>
+
+    <section class="panel wide">
+      <div class="section-head"><div><p class="eyebrow">Coverage</p><h2>Every web destination has a mobile home</h2><p>Grounded in the current API; nothing here needs a new backend capability.</p></div></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Area</th><th>Web destination</th><th>Mobile place</th><th>Primary action</th><th>API</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Ask</strong><span>Everyone</span></td><td>Chat · Search · History</td><td>Ask tab · History screen · Source sheet</td><td>Send</td><td><span>POST /agent/chat · /knowledge/documents/{id}/citations/{chunk}</span></td></tr>
+            <tr><td><strong>Files the assistant made</strong><span>Everyone</span></td><td>Artifact card · Preview</td><td>File card in the answer → full-screen preview</td><td>Preview</td><td><span>GET /artifacts/{id} · /revisions/{n}/content</span></td></tr>
+            <tr><td><strong>Library</strong><span>Everyone</span></td><td>Library</td><td>Library tab: My files / Workspace · Document</td><td>Upload · Ask about this</td><td><span>/knowledge/home · /documents · /collections/{id}/documents</span></td></tr>
+            <tr><td><strong>Overview</strong><span>tenant.read</span></td><td>Workspace control → Overview</td><td>Manage → Workspace</td><td>Open what needs attention</td><td><span>/workspaces/{id}/overview</span></td></tr>
+            <tr><td><strong>Knowledge</strong><span>knowledge.read · collection.*</span></td><td>Knowledge (Explore, collection, share)</td><td>Manage → Knowledge → Collection → Share sheet</td><td>Add · Upload</td><td><span>/collections* · /collections/{id}/access*</span></td></tr>
+            <tr><td><strong>Ingestion</strong><span>ingestion.* · source.manage</span></td><td>Runs · Sources · Schedules</td><td>Manage → Ingestion → Run detail · New run sheet</td><td>New run · Retry failed</td><td><span>/ingestion-runs* · /sources* · /sources/{id}/syncs</span></td></tr>
+            <tr><td><strong>Access</strong><span>user/group/role/access.manage</span></td><td>Members · Groups · Roles · Requests</td><td>Manage → Access → Member · Requests</td><td>Add member · Approve</td><td><span>/users* · /groups* · /roles* · /approval-requests*</span></td></tr>
+            <tr><td><strong>Activity</strong><span>audit.read</span></td><td>Activity</td><td>Manage → Activity</td><td>— (read-only)</td><td><span>/workspaces/{id}/activity · /audit-logs · /access-sessions</span></td></tr>
+            <tr><td><strong>Settings</strong><span>tenant.manage</span></td><td>Settings</td><td>Manage → Settings</td><td>Save (only when edited)</td><td><span>PATCH /workspaces/{id}</span></td></tr>
+            <tr><td><strong>Platform</strong><span>platform.*.read</span></td><td>Tenants · Users · Audit · System</td><td>Manage → Platform switch</td><td>— (read-only)</td><td><span>/platform/*</span></td></tr>
+            <tr><td><strong>Account</strong><span>Everyone</span></td><td>Workspace switcher · Sign out</td><td>Avatar → Account sheet</td><td>Switch workspace</td><td><span>PATCH /auth/session · DELETE /auth/session</span></td></tr>
+            <tr><td><strong>Not on mobile</strong><span>By design</span></td><td>Connect a source (OAuth) · Edit role capabilities · Agent · Experience</td><td>Absent; rows say “Set up on the web” where people would look</td><td>—</td><td><span>Long multi-step forms; done once, on a computer</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    /* ── Building blocks ───────────────────────────────────────────────── */
+    const ic = (name, cls = '') => `<svg class="icon ${cls}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+    const tile = (tone, name, cls = '') => `<span class="tile ${tone} ${cls}">${ic(name, cls === 'lg' ? 'lg' : cls === 'sm' ? 'sm' : '')}</span>`;
+    const fileTile = (kind, cls = '') => tile(`ft-${kind}`, { pdf: 'pdf', sheet: 'sheet', doc: 'file', slide: 'file', text: 'file', zip: 'zip' }[kind], cls);
+    const status = (label, tone) => `<span class="status ${tone}">${label}</span>`;
+    const avatar = (initials, color = '#6c56e0', cls = '') => `<span class="avatar ${cls}" style="--av:${color}">${initials}</span>`;
+    const me = `<button class="icon-btn" data-sheet="account" aria-label="Account">${avatar('SA')}</button>`;
+    const bar = ({ title = '', sub = '', back = false, lead = '', actions = '', rule = false }) => `
+      <header class="appbar ${back || lead ? 'has-back' : ''} ${rule ? 'rule' : ''}">
+        ${back ? `<button class="icon-btn" data-back aria-label="Back">${ic('back')}</button>` : ''}${lead}
+        <div class="title">${title ? `<strong>${title}</strong>` : ''}${sub ? `<span>${sub}</span>` : ''}</div>
+        ${actions}
+      </header>`;
+    const row = ({ lead, title, sub = '', trail = '', go, sheet, cls = '' }) =>
+      `<div class="row ${cls}" ${go ? `data-go="${go}"` : ''} ${sheet ? `data-sheet="${sheet}"` : ''}>${lead || ''}<div class="copy"><strong>${title}</strong>${sub ? `<span>${sub}</span>` : ''}</div>${trail}${go ? `<span class="chev">${ic('chev', 'sm')}</span>` : ''}</div>`;
+    const sec = (title, aside = '') => `<div class="sec"><h3>${title}</h3>${aside}</div>`;
+    const composer = (placeholder = 'Ask anything…', scope = true) => `
+      <div class="composer-wrap">
+        ${scope ? `<div class="scope"><button class="chip">${ic('book', 'xs')} All knowledge ${ic('down', 'xs')}</button></div>` : ''}
+        <div class="composer"><button class="add" data-sheet="attach" aria-label="Add a file">${ic('plus')}</button><span class="field">${placeholder}</span><button class="send" data-go="answer" aria-label="Send">${ic('up')}</button></div>
+      </div>`;
+
+    /* ── Screens ───────────────────────────────────────────────────────── */
+    const screens = {
+      signin: {
+        group: 'none', label: 'Sign in', section: 'Start',
+        info: ['First run: one decision', 'The company account is the default way in; email and password are there for local accounts without competing with it.', 'Continue with Google', 'Sign in with email and password', 'Create an account (local deployments only)', 'Workspace choice — it follows the account; switching is in the account sheet'],
+        render: () => `<div class="signin">
+          <span class="mark">${ic('logo', 'lg')}</span>
+          <h2>Your workspace’s knowledge, in your pocket.</h2>
+          <p>Ask questions, open documents and get answers with their sources.</p>
+          <div class="grow"></div>
+          <button class="google" data-go="ask">${ic('google', 'lg')}Continue with Google</button>
+          <div class="divider">or</div>
+          <input class="input" placeholder="Email" style="margin-bottom:8px">
+          <input class="input" placeholder="Password" type="password" style="margin-bottom:10px">
+          <button class="btn secondary block" data-go="ask">Sign in</button>
+        </div>`
+      },
+      ask: {
+        group: 'ask', label: 'Ask', section: 'Ask',
+        info: ['Ask without setup', 'The composer is the screen. Two suggestions start common work; recent chats continue it. Nothing else competes with the question.', 'Send (violet arrow)', 'Attach a file (+) · scope chip · a suggestion · History · New chat', 'Rename, pin, delete chats — History', 'Admin, processing and document lists'],
+        render: () => `<div class="screen">
+          ${bar({ lead: `<button class="icon-btn" data-go="history" aria-label="History">${ic('history')}</button>`, actions: `<button class="icon-btn" aria-label="New chat">${ic('compose')}</button>${me}` })}
+          <div class="scroll"><div class="pad">
+            <div class="hello"><span class="mark">${ic('sparkle', 'lg')}</span><h2>What do you need to know?</h2><p>Answers come from documents you’re allowed to read, with their sources.</p></div>
+            <button class="suggest" data-go="answer">${tile('violet', 'search', 'sm')}Find a student, form or announcement</button>
+            <button class="suggest" data-sheet="attach">${tile('ft-sheet', 'sheet', 'sm')}Analyse a spreadsheet</button>
+            ${sec('Recent', '<a data-go="history">See all</a>')}
+            <div class="list">
+              ${row({ cls: 'plain', title: 'Mã 12142004 là sinh viên nào?', sub: 'Today · 1 file', go: 'answer' })}
+              ${row({ cls: 'plain', title: 'Quy trình xin chuyển điểm', sub: 'Yesterday', go: 'answer' })}
+            </div>
+          </div></div>
+          ${composer()}
+        </div>`
+      },
+      answer: {
+        group: 'ask', label: 'Answer', section: 'Ask',
+        info: ['An answer you can check', 'Work the assistant did shows as one quiet line each; citations are tappable chips; a produced file is a card with its two real actions.', 'Send a follow-up', 'Tap a citation or source · Preview / Download a file', 'Copy, regenerate; the commands that ran (tap “Ran code”)', 'Raw tool payloads, stack traces, internal IDs'],
+        render: () => `<div class="screen">
+          ${bar({ title: 'Mã 12142004 là sinh viên nào?', back: true, rule: true, actions: `<button class="icon-btn" aria-label="New chat">${ic('compose')}</button>` })}
+          <div class="scroll"><div class="pad">
+            <div class="bubble-row"><div class="bubble"><div class="attach">${fileTile('sheet')}<span>DSDuKienTNChuaDangKy_07Sep2017.xlsx</span></div><div>Mã 12142004 là sinh viên nào?</div></div></div>
+            <div class="work">${ic('check', 'sm ok')}Searched 6 sources</div>
+            <div class="work">${ic('terminal', 'sm')}Ran code <code>grep 12142004 …csv</code></div>
+            <div class="answer"><p>Mã <b>12142004</b> là <b>Lê Hùng Anh</b>, ngành Công nghệ kỹ thuật điện – điện tử, lớp 12142, khoá 2012 <span class="cite" data-sheet="source">1</span>.</p><p>Điểm TB tích luỹ <b>7,01 (Khá)</b>, hiện <b>chưa đăng ký</b> xét tốt nghiệp <span class="cite" data-sheet="source">1</span>.</p></div>
+            <div class="sources"><div class="source" data-sheet="source"><b>1</b>${fileTile('sheet', 'sm')}<span>DSDuKienTN…07Sep2017.xlsx</span></div><div class="source" data-sheet="source"><b>2</b>${fileTile('pdf', 'sm')}<span>Thông báo xét TN đợt 1</span></div></div>
+            <div class="turn-actions"><button class="icon-btn" aria-label="Copy">${ic('copy', 'sm')}</button><button class="icon-btn" aria-label="Regenerate">${ic('refresh', 'sm')}</button></div>
+            <div class="bubble-row"><div class="bubble">Xuất danh sách khoa Điện – Điện tử ra file</div></div>
+            <div class="work">${ic('check', 'sm ok')}Ran code · 1 file</div>
+            <div class="answer"><p>Có <b>10 sinh viên</b> thuộc khoa Điện – Điện tử. File đã sẵn sàng:</p></div>
+            <div class="file-card"><div class="head">${fileTile('sheet')}<div><strong>sinh_vien_khoa_dien.csv</strong><span>CSV · 2.1 KB · Revision 1</span></div></div><div class="actions"><button class="btn primary sm" data-go="artifact">${ic('eye', 'sm')}Preview</button><button class="btn secondary sm">${ic('download', 'sm')}Download</button></div></div>
+          </div></div>
+          ${composer('Ask a follow-up…', false)}
+        </div>`
+      },
+      artifact: {
+        group: 'ask', label: 'File preview', section: 'Ask',
+        info: ['See the file, then act on it', 'The same document view as Knowledge: a spreadsheet is a table, a Word file is formatted text. Actions are at the bottom where the thumb is.', 'Download', 'Save to knowledge · switch revision', 'Continue editing (asks in the chat)', 'Raw CSV text or “binary document” placeholders'],
+        render: () => `<div class="screen">
+          ${bar({ title: 'sinh_vien_khoa_dien.csv', sub: 'Revision 1 · made in this chat', back: true, rule: true, actions: `<button class="icon-btn" data-sheet="file-more" aria-label="More">${ic('more')}</button>` })}
+          <div class="scroll"><div class="pad" style="padding-top:14px">
+            <div class="sheet-table">
+              <div class="head"><span></span><span>Mã SV</span><span>Họ tên</span></div>
+              <div><span>1</span><span>08102402</span><span>Đinh Như Chiến</span></div>
+              <div><span>2</span><span>11142012</span><span>Nguyễn Văn Hùng</span></div>
+              <div><span>3</span><span>12141587</span><span>Phan Văn Luận</span></div>
+              <div><span>4</span><span>12142004</span><span>Lê Hùng Anh</span></div>
+              <div><span>5</span><span>12142129</span><span>Nguyễn Hoàng Lâm</span></div>
+              <div><span>6</span><span>12742214</span><span>Trần Minh Khoa</span></div>
+              <div><span>7</span><span>13141360</span><span>Võ Thị Hạnh</span></div>
+              <div><span>8</span><span>13151019</span><span>Lâm Quốc Bảo</span></div>
+            </div>
+          </div></div>
+          <div class="sticky"><button class="btn secondary">Save to knowledge</button><button class="btn primary" style="flex:1">${ic('download', 'sm')}Download</button></div>
+        </div>`
+      },
+      history: {
+        group: 'ask', label: 'History', section: 'Ask',
+        info: ['Find a conversation', 'Search first, then pinned and recent. Row actions are a long-press or “···”, never a row of buttons.', 'Open a conversation', 'Search · New chat', 'Rename, pin, delete', 'Bulk edit mode'],
+        render: () => `<div class="screen">
+          ${bar({ title: 'Chats', back: true, actions: `<button class="icon-btn" aria-label="New chat">${ic('compose')}</button>` })}
+          <div class="scroll"><div class="pad">
+            <div class="search">${ic('search', 'sm')}<span>Search chats</span></div>
+            ${sec('Pinned')}
+            <div class="list">${row({ cls: 'plain', title: 'Quy trình xin chuyển điểm', sub: 'Yesterday', trail: `<span class="trail">${ic('pin', 'sm')}</span>`, go: 'answer' })}</div>
+            ${sec('Today')}
+            <div class="list">
+              ${row({ cls: 'plain', title: 'Mã 12142004 là sinh viên nào?', sub: '2 files · 9:12', trail: `<button class="icon-btn" data-sheet="chat-more" aria-label="Chat actions">${ic('more', 'sm')}</button>`, go: 'answer' })}
+              ${row({ cls: 'plain', title: 'Lịch xét tốt nghiệp đợt 2', sub: '8:40', trail: `<button class="icon-btn" data-sheet="chat-more" aria-label="Chat actions">${ic('more', 'sm')}</button>`, go: 'answer' })}
+            </div>
+            ${sec('This week')}
+            <div class="list">
+              ${row({ cls: 'plain', title: 'Tóm tắt thông báo học phí', sub: 'Monday', go: 'answer' })}
+              ${row({ cls: 'plain', title: 'Mẫu đơn xin chuyển điểm', sub: 'Sunday · 1 file', go: 'answer' })}
+            </div>
+          </div></div>
+        </div>`
+      },
+      library: {
+        group: 'library', label: 'Library', section: 'Library',
+        info: ['Your files, without processing noise', 'Search and the My files / Workspace switch lead. Each file wears its type colour; only a file that can’t be searched yet says so, in quiet text.', 'Upload (FAB)', 'Search · My files / Workspace', 'Delete, download, make searchable — on the document', 'Status pills on every row, bulk select'],
+        render: () => `<div class="screen">
+          ${bar({ title: 'Library', actions: me })}
+          <div class="scroll"><div class="pad fab-space">
+            <div class="search">${ic('search', 'sm')}<span>Search your files</span></div>
+            <div class="seg"><button class="on">My files</button><button data-go="library-workspace">Workspace</button></div>
+            ${sec('Recent', '<span>12 files</span>')}
+            <div class="list">
+              ${row({ lead: fileTile('sheet'), title: 'DSDuKienTNChuaDangKy_07Sep2017.xlsx', sub: 'XLSX · 15 KB · today', go: 'document' })}
+              ${row({ lead: fileTile('pdf'), title: 'Thông báo xét tốt nghiệp đợt 1.pdf', sub: 'PDF · 268 KB · yesterday', go: 'document' })}
+              ${row({ lead: fileTile('doc'), title: 'Mẫu đơn xin chuyển điểm.docx', sub: 'DOCX · 25 KB · <span class="quiet">Not searchable yet</span>', go: 'document' })}
+              ${row({ lead: fileTile('zip'), title: 'Hồ sơ học vụ 2023.zip', sub: 'ZIP · 4.2 MB · 3 days ago', go: 'document' })}
+            </div>
+          </div></div>
+          <button class="fab" data-sheet="upload">${ic('upload')}Upload</button>
+        </div>`
+      },
+      'library-workspace': {
+        group: 'library', label: 'Workspace collections', section: 'Library',
+        info: ['Shared knowledge as shelves', 'Collections are cards with their own colour and description. Opening one shows its files; creating and sharing collections is in Manage.', 'Open a collection', 'Search · switch back to My files', 'Ask about a collection (from its page)', 'Create, share or delete collections — those are management'],
+        render: () => `<div class="screen">
+          ${bar({ title: 'Library', actions: me })}
+          <div class="scroll"><div class="pad">
+            <div class="search">${ic('search', 'sm')}<span>Search the workspace</span></div>
+            <div class="seg"><button data-go="library">My files</button><button class="on">Workspace</button></div>
+            ${sec('Collections', '<span>3</span>')}
+            ${collections()}
+          </div></div>
+        </div>`
+      },
+      document: {
+        group: 'library', label: 'Document', section: 'Library',
+        info: ['Read it, then ask about it', 'The document’s own preview first; one big action to ask about it. A file that isn’t searchable yet says so once, with the one fix.', 'Ask about this document', 'Make searchable (only when it isn’t) · Download', 'Delete, move, details', 'Chunk counts, processing stages, run IDs'],
+        render: () => `<div class="screen">
+          ${bar({ back: true, actions: `<button class="icon-btn" data-sheet="doc-more" aria-label="More">${ic('more')}</button>` })}
+          <div class="scroll"><div class="pad">
+            <div class="doc-hero">${fileTile('sheet', 'lg')}<div><strong>DSDuKienTNChuaDangKy_07Sep2017.xlsx</strong><span>XLSX · 15 KB · UTE Knowledge · today</span></div></div>
+            <div class="sheet-table">
+              <div class="head"><span></span><span>Mã SV</span><span>Họ tên</span></div>
+              <div><span>1</span><span>08102402</span><span>Đinh Như Chiến</span></div>
+              <div><span>2</span><span>09113051</span><span>Vũ Đình Trung</span></div>
+              <div><span>3</span><span>11109056</span><span>Nguyễn Thị Nguyên</span></div>
+              <div><span>4</span><span>12124076</span><span>Hà Minh Tấn</span></div>
+              <div><span>5</span><span>12141587</span><span>Phan Văn Luận</span></div>
+              <div><span>6</span><span>12142004</span><span>Lê Hùng Anh</span></div>
+            </div>
+            <p class="helper" style="margin-top:8px">Sheet 1 of 1 · 47 rows</p>
+          </div></div>
+          <div class="sticky"><button class="btn primary block" data-go="answer">${ic('sparkle', 'sm')}Ask about this document</button></div>
+        </div>`
+      },
+      overview: {
+        group: 'manage', label: 'Manage', section: 'Manage · Workspace',
+        info: ['Operate by exception', 'What needs a decision comes first, in colour; the workspace at a glance second; the sections last. Each section only appears with its permission.', 'Open what needs attention', 'Workspace / Platform switch · a metric · a section', 'Section actions stay inside their section', 'Charts on this screen, command palettes'],
+        render: () => `<div class="screen paper">
+          ${bar({ title: 'Manage', sub: 'BoMesh Local', actions: me })}
+          <div style="padding:2px 16px 6px"><div class="seg"><button class="on">Workspace</button><button data-go="platform">Platform</button></div></div>
+          <div class="scroll"><div class="pad">
+            ${sec('Needs attention')}
+            <div class="attention warning" data-go="requests">${tile('warning', 'shield')}<div class="copy"><strong>Access requests</strong><span>Waiting for your decision</span></div><span class="count">2</span>${ic('chev', 'sm')}</div>
+            <div class="attention danger" data-go="run">${tile('danger', 'alert')}<div class="copy"><strong>3 documents failed</strong><span>In the last run of UTE Knowledge</span></div><span class="count">3</span>${ic('chev', 'sm')}</div>
+            ${sec('At a glance', '<span>Last 7 days</span>')}
+            <div class="metrics">
+              <div class="metric"><span>Documents</span><strong>285</strong><small>4 collections</small></div>
+              <div class="metric"><span>Questions</span><strong>1,284</strong><small class="up">+14%</small></div>
+              <div class="metric"><span>Members</span><strong>6</strong><small>1 group · 3 roles</small></div>
+              <div class="metric"><span>Active people</span><strong>5</strong><small class="up">+1</small></div>
+            </div>
+            ${sec('Workspace')}
+            <div class="list">
+              ${row({ lead: tile('violet', 'book', 'sm'), title: 'Knowledge', sub: 'Collections, documents, sharing', go: 'knowledge' })}
+              ${row({ lead: tile('cyan', 'import', 'sm'), title: 'Ingestion', sub: 'Make documents searchable', go: 'ingestion' })}
+              ${row({ lead: tile('indigo', 'shield', 'sm'), title: 'Access', sub: 'Members, groups, roles', go: 'access', trail: '<span class="badge">2</span>' })}
+              ${row({ lead: tile('sky', 'pulse', 'sm'), title: 'Activity', sub: 'Usage, sign-ins, audit', go: 'activity' })}
+              ${row({ lead: tile('slate', 'gear', 'sm'), title: 'Settings', sub: 'Workspace name', go: 'settings' })}
+            </div>
+          </div></div>
+        </div>`
+      },
+      knowledge: {
+        group: 'manage', label: 'Knowledge', section: 'Manage · Workspace',
+        info: ['Knowledge as a library', 'Collections only — no document wall, no processing dashboard. One Add button holds every way to add.', 'Add → Upload files / New collection', 'Search · open a collection', 'Share, rename, delete — on the collection', 'Ready/Pending/Failed counts, chunk stats, a list of every document'],
+        render: () => `<div class="screen paper">
+          ${bar({ title: 'Knowledge', sub: '4 collections · 285 items', back: true })}
+          <div class="scroll"><div class="pad fab-space">
+            <div class="search">${ic('search', 'sm')}<span>Search knowledge…</span></div>
+            ${collections()}
+            <div class="collection-card">${tile('slate', 'book')}<div><strong>My uploads</strong><p>Files you added from the app.</p><div class="facts"><span>${ic('file', 'xs')} 12 items</span><span>${ic('upload', 'xs')} Uploads</span></div></div></div>
+          </div></div>
+          <button class="fab" data-sheet="add-knowledge">${ic('plus')}Add</button>
+        </div>`
+      },
+      collection: {
+        group: 'manage', label: 'Collection', section: 'Manage · Workspace',
+        info: ['A folder you can share', 'Where it sits, what it is for, who can open it, then its contents. Upload is the one big action; Share is right beside the people who already have access.', 'Upload to this collection', 'Share · open a sub-collection · open a document', 'Rename, move, delete collection', 'Processing filters and sort menus'],
+        render: () => `<div class="screen">
+          ${bar({ back: true, actions: `<button class="icon-btn" data-sheet="collection-more" aria-label="More">${ic('more')}</button>` })}
+          <div class="crumbs">Knowledge ${ic('chev', 'xs')} <b style="color:var(--ink)">UTE Knowledge</b></div>
+          <div class="scroll"><div class="collection-hero">
+            <div class="top">${tile('indigo', 'book', 'lg')}<div><h2>UTE Knowledge</h2><div class="facts" style="margin-top:4px"><span>${ic('file', 'xs')} 271 items</span><span>${ic('upload', 'xs')} Uploads</span></div></div></div>
+            <p>Thông báo, quy định và danh sách sinh viên từ website HCMUTE.</p>
+            <div style="display:flex;align-items:center;gap:10px"><div class="people">${avatar('A', '#4f63d9')}${avatar('S', '#c0449b')}${avatar('L', '#0e8a9a')}</div><span style="flex:1;color:var(--ink-3);font-size:13px">Shared with 3</span><button class="btn secondary sm" data-sheet="share">${ic('share', 'sm')}Share</button></div>
+          </div>
+          <div class="pad fab-space">
+            ${sec('Inside', '<span>1 collection</span>')}
+            <div class="chips"><button class="chip">${ic('book', 'xs')} Tốt nghiệp</button></div>
+            ${sec('Items', '<span>271</span>')}
+            <div class="list">
+              ${row({ lead: fileTile('pdf'), title: 'Thông báo xét tốt nghiệp đợt 1.pdf', sub: 'PDF · 268 KB · 6h ago', go: 'document' })}
+              ${row({ lead: fileTile('sheet'), title: 'DSDat_21Dec2017_upweb.xlsx', sub: 'XLSX · 61 KB · <span class="quiet">Not searchable yet</span>', go: 'document' })}
+              ${row({ lead: fileTile('doc'), title: 'Thông báo nộp lệ phí bằng TN.docx', sub: 'DOCX · 26 KB · 6h ago', go: 'document' })}
+              ${row({ lead: fileTile('pdf'), title: 'TB_LePhatBangTN_T6_2017.pdf', sub: 'PDF · 364 KB · 6h ago', go: 'document' })}
+            </div>
+          </div></div>
+          <button class="fab" data-sheet="upload">${ic('upload')}Upload</button>
+        </div>`
+      },
+      ingestion: {
+        group: 'manage', label: 'Ingestion', section: 'Manage · Workspace',
+        info: ['Processing, readable at a glance', 'A running run shows its progress without opening it; a finished run states its outcome in one line. The tab decides the one action.', 'New run (Runs) · Sync now (Sources)', 'Runs / Sources / Schedules · open a run', 'Cancel, retry, pause schedule — in detail', 'Connecting a new source (OAuth) — set up on the web'],
+        render: () => `<div class="screen paper">
+          ${bar({ title: 'Ingestion', back: true })}
+          <div class="tabs" style="background:var(--paper)"><button class="on">Runs</button><button data-go="sources">Sources</button></div>
+          <div class="scroll"><div class="pad fab-space">
+            ${sec('Running')}
+            <div class="run" data-go="run"><div class="top">${tile('indigo', 'book', 'sm')}<strong>UTE Knowledge</strong>${status('Running', 'info')}</div><p>Started by you · 4 min ago</p><div class="bar"><i style="width:62%"></i></div><div class="bar-meta"><span>168 of 271</span><span>~3 min left</span></div></div>
+            ${sec('Recent')}
+            <div class="run" data-go="run"><div class="top">${tile('violet', 'book', 'sm')}<strong>BoDemo · retry</strong>${status('3 failed', 'danger')}</div><p>22 searchable · yesterday</p></div>
+            <div class="run" data-go="run"><div class="top">${tile('slate', 'book', 'sm')}<strong>My uploads</strong>${status('Done', 'success')}</div><p>12 searchable · 2 days ago</p></div>
+          </div></div>
+          <button class="fab" data-sheet="new-run">${ic('play')}New run</button>
+        </div>`
+      },
+      sources: {
+        group: 'manage', label: 'Sources', section: 'Manage · Workspace',
+        info: ['Connected places, and when they sync', 'Each source says where it syncs into and when it last did. Its schedule is a switch on the row’s detail.', 'Sync now (per source)', 'Open a source · pause its schedule', 'Remove source, change target collection', 'New OAuth connections — “Set up on the web” row'],
+        render: () => `<div class="screen paper">
+          ${bar({ title: 'Ingestion', back: true })}
+          <div class="tabs" style="background:var(--paper)"><button data-go="ingestion">Runs</button><button class="on">Sources</button></div>
+          <div class="scroll"><div class="pad">
+            ${sec('Connected', '<span>2</span>')}
+            <div class="list">
+              ${row({ lead: tile('sky', 'plug', 'sm'), title: 'Confluence · Phòng đào tạo', sub: 'Into UTE Knowledge · synced 2h ago · daily', trail: `<button class="icon-btn" aria-label="Sync now">${ic('refresh')}</button>` })}
+              ${row({ lead: tile('cyan', 'plug', 'sm'), title: 'Google Drive · Biểu mẫu', sub: 'Into BoDemo · synced yesterday · paused', trail: `<button class="icon-btn" aria-label="Sync now">${ic('refresh')}</button>` })}
+            </div>
+            <div class="notice" style="margin-top:14px">${ic('plug', 'sm')}<span class="grow">Connecting a new source signs in to Google or Atlassian.</span><a>Set up on the web</a></div>
+          </div></div>
+        </div>`
+      },
+      run: {
+        group: 'manage', label: 'Run detail', section: 'Manage · Workspace',
+        info: ['What happened, and the one fix', 'Outcome first in three numbers; failures listed with their plain reason. The fix is one sticky button.', 'Retry 3 failed', 'Open a failed document', 'Cancel a running run, see who started it', 'Worker logs, batch numbers, stage timings'],
+        render: () => `<div class="screen">
+          ${bar({ title: 'BoDemo · retry', sub: 'Finished yesterday 16:20', back: true, rule: true, actions: `<button class="icon-btn" aria-label="More">${ic('more')}</button>` })}
+          <div class="scroll"><div class="pad">
+            <div class="bar" style="margin-top:14px;height:8px"><i style="width:88%"></i><i class="fail" style="width:12%"></i></div>
+            <div class="stat3"><div><span>Searchable</span><strong>22</strong></div><div class="bad"><span>Failed</span><strong>3</strong></div><div><span>Skipped</span><strong>0</strong></div></div>
+            ${sec('Failed', '<span>3</span>')}
+            <div class="list">
+              ${row({ lead: fileTile('pdf'), title: 'Scan hồ sơ 2016.pdf', sub: '<span class="error-text">No text — scanned image</span>', go: 'document' })}
+              ${row({ lead: fileTile('doc'), title: 'Biên bản họp.docx', sub: '<span class="error-text">File is damaged</span>', go: 'document' })}
+              ${row({ lead: fileTile('zip'), title: 'Archive_2015.zip', sub: '<span class="error-text">Too large (over 100 MB)</span>', go: 'document' })}
+            </div>
+          </div></div>
+          <div class="sticky"><span>Retrying keeps the 22 that worked.</span><button class="btn primary">${ic('refresh', 'sm')}Retry 3 failed</button></div>
+        </div>`
+      },
+      access: {
+        group: 'manage', label: 'Access', section: 'Manage · Workspace',
+        info: ['Decisions before directory work', 'Pending requests sit on top in colour because they block people. Members, groups and roles are tabs with one contextual action.', 'Add member', 'Requests · search · Members / Groups / Roles · open a member', 'Change role, groups, suspend — on the member', 'Approve/deny on every list row; role capability editing (web)'],
+        render: () => `<div class="screen paper">
+          ${bar({ title: 'Access', back: true })}
+          <div class="tabs" style="background:var(--paper)"><button class="on">Members</button><button>Groups</button><button>Roles</button></div>
+          <div class="scroll"><div class="pad fab-space">
+            <div class="attention warning" data-go="requests" style="margin-top:12px">${tile('warning', 'shield')}<div class="copy"><strong>2 access requests</strong><span>Oldest waiting 1 day</span></div>${ic('chev', 'sm')}</div>
+            <div class="search" style="margin-top:12px">${ic('search', 'sm')}<span>Search members</span></div>
+            <div class="list">
+              ${row({ lead: avatar('SA', '#6c56e0', 'md'), title: 'Sample Admin 1', sub: 'Workspace admin', go: 'member' })}
+              ${row({ lead: avatar('LT', '#0e8a9a', 'md'), title: 'Trần Thị Lan', sub: 'Editor · Academic staff', go: 'member' })}
+              ${row({ lead: avatar('DN', '#c0449b', 'md'), title: 'Duy Nguyễn', sub: 'Viewer', go: 'member' })}
+              ${row({ lead: avatar('QA', '#5b6b84', 'md'), title: 'Flutter QA', sub: 'Viewer', trail: status('Suspended', 'neutral'), go: 'member' })}
+            </div>
+          </div></div>
+          <button class="fab" data-sheet="add-member">${ic('user-plus')}Add member</button>
+        </div>`
+      },
+      member: {
+        group: 'manage', label: 'Member', section: 'Manage · Workspace',
+        info: ['One person, three settings', 'Role and groups are rows that open a picker; saving happens on choosing. Suspending is set apart at the bottom, in red, with a confirmation.', 'Change role', 'Groups · see what they shared', 'Suspend member', 'Password resets, impersonation'],
+        render: () => `<div class="screen paper">
+          ${bar({ back: true })}
+          <div class="scroll"><div class="pad">
+            <div class="profile">${avatar('LT', '#0e8a9a', 'lg')}<strong>Trần Thị Lan</strong><span>lan.tran@example.com · Active</span></div>
+            <div class="list">
+              ${row({ lead: tile('indigo', 'shield', 'sm'), title: 'Role', sub: 'Editor — can add and edit documents', sheet: 'role', trail: `<span class="chev">${ic('chev', 'sm')}</span>` })}
+              ${row({ lead: tile('violet', 'people', 'sm'), title: 'Groups', sub: 'Academic staff', sheet: 'role', trail: `<span class="chev">${ic('chev', 'sm')}</span>` })}
+            </div>
+            <p class="helper" style="margin-top:10px">Changes apply the next time they open BoMesh.</p>
+            <div style="margin-top:28px"><button class="btn danger block" style="background:var(--danger-soft)">Suspend member</button></div>
+          </div></div>
+        </div>`
+      },
+      requests: {
+        group: 'manage', label: 'Access requests', section: 'Manage · Workspace',
+        info: ['Decide in one tap', 'This is the one place approve and deny sit side by side, because deciding is the whole job of the screen. Each card states who, what, and why.', 'Approve', 'Deny (asks for an optional note)', 'History of decided requests (bottom)', 'Bulk approve'],
+        render: () => `<div class="screen paper">
+          ${bar({ title: 'Access requests', sub: '2 waiting', back: true })}
+          <div class="scroll"><div class="pad">
+            <div class="request" style="margin-top:8px"><div class="top">${avatar('DN', '#c0449b', 'md')}<div><strong>Duy Nguyễn</strong><span>Viewer → <b>UTE Knowledge</b> · 1 day ago</span></div></div><blockquote>Em cần tra cứu danh sách sinh viên dự kiến tốt nghiệp.</blockquote><div class="actions"><button class="btn secondary sm">Deny</button><button class="btn primary sm">${ic('check', 'sm')}Approve</button></div></div>
+            <div class="request"><div class="top">${avatar('QA', '#5b6b84', 'md')}<div><strong>Flutter QA</strong><span>Editor → <b>BoDemo</b> · 3h ago</span></div></div><blockquote>Upload test files for the demo.</blockquote><div class="actions"><button class="btn secondary sm">Deny</button><button class="btn primary sm">${ic('check', 'sm')}Approve</button></div></div>
+            ${sec('Decided')}
+            <div class="list">${row({ lead: avatar('LT', '#0e8a9a', 'md'), title: 'Trần Thị Lan → BoDemo', sub: 'Approved by you · last week', trail: status('Approved', 'success') })}</div>
+          </div></div>
+        </div>`
+      },
+      activity: {
+        group: 'manage', label: 'Activity', section: 'Manage · Workspace',
+        info: ['Summarise, then list', 'Two numbers that matter, one readable chart, then records you can switch between. Filters are a sheet, not a toolbar.', 'Open a record', 'Period · Sign-ins / Audit · filter', 'Export (web)', 'Multi-column tables, dashboards that scroll sideways'],
+        render: () => `<div class="screen paper">
+          ${bar({ title: 'Activity', back: true, actions: `<button class="chip" style="min-height:32px;margin-right:6px">${ic('calendar', 'xs')} 7 days ${ic('down', 'xs')}</button>` })}
+          <div class="scroll"><div class="pad">
+            <div class="metrics" style="margin-top:6px"><div class="metric"><span>Questions</span><strong>1,284</strong><small class="up">+14%</small></div><div class="metric"><span>Active people</span><strong>5</strong><small class="up">+1</small></div></div>
+            <div class="card" style="margin-top:8px"><div style="display:flex;justify-content:space-between;font-size:13px"><b>Questions per day</b><span style="color:var(--ink-3)">Today 236</span></div>
+              <svg class="chart" viewBox="0 0 320 120" role="img" aria-label="Questions per day rising over the week"><rect x="6" y="62" width="34" height="42" rx="6"/><rect x="51" y="54" width="34" height="50" rx="6"/><rect x="96" y="58" width="34" height="46" rx="6"/><rect x="141" y="40" width="34" height="64" rx="6"/><rect x="186" y="46" width="34" height="58" rx="6"/><rect x="231" y="28" width="34" height="76" rx="6"/><rect class="today" x="276" y="14" width="34" height="90" rx="6"/><text x="16" y="118">M</text><text x="62" y="118">T</text><text x="106" y="118">W</text><text x="153" y="118">T</text><text x="199" y="118">F</text><text x="243" y="118">S</text><text x="288" y="118">S</text></svg>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;margin:18px 0 8px"><div class="seg" style="flex:1"><button class="on">Sign-ins</button><button>Audit log</button></div><button class="icon-btn" aria-label="Filter">${ic('sliders')}</button></div>
+            <div class="list">
+              ${row({ lead: avatar('SA', '#6c56e0', 'md'), title: 'Sample Admin 1', sub: 'Password · 8 min ago', trail: status('OK', 'success') })}
+              ${row({ lead: avatar('LT', '#0e8a9a', 'md'), title: 'Trần Thị Lan', sub: 'Google · 1h ago', trail: status('OK', 'success') })}
+              ${row({ lead: avatar('??', '#78737f', 'md'), title: 'unknown@student.edu.vn', sub: 'Password · 2h ago', trail: status('Failed', 'danger') })}
+            </div>
+          </div></div>
+        </div>`
+      },
+      settings: {
+        group: 'manage', label: 'Settings', section: 'Manage · Workspace',
+        info: ['Save only when needed', 'Only what the workspace contract supports. The save bar appears after an edit; read-only facts look read-only.', 'Save changes (after an edit)', 'Edit the name', 'Nothing', 'Delete workspace, status switch (platform-owned)'],
+        render: () => `<div class="screen paper">
+          ${bar({ title: 'Settings', back: true })}
+          <div class="scroll"><div class="pad">
+            <div class="form-group"><label>Workspace name</label><input class="input" value="BoMesh Local"><p class="helper">Shown in the workspace switcher and to members.</p></div>
+            <div class="form-group"><label>Code</label><input class="input ro" value="local" readonly><p class="helper">Set when the workspace was created.</p></div>
+            <div class="form-group"><label>Status</label><div class="input ro" style="display:flex;justify-content:space-between;align-items:center">Available ${status('Active', 'success')}</div><p class="helper">Managed by the platform team.</p></div>
+          </div></div>
+          <div class="sticky"><span>Edited · not saved</span><button class="btn primary">Save</button></div>
+        </div>`
+      },
+      platform: {
+        group: 'manage', label: 'Platform', section: 'Manage · Platform',
+        info: ['A different scope, said out loud', 'The switch changes what “Manage” means: everything here is across all tenants and read-only on mobile. Health leads because it is the reason to open it.', 'Open a tenant, user or audit record', 'Workspace / Platform switch', 'Filters on each list', 'Creating or suspending tenants (not in the API)'],
+        render: () => `<div class="screen paper">
+          ${bar({ title: 'Manage', sub: 'Platform · all tenants', actions: me })}
+          <div style="padding:2px 16px 6px"><div class="seg"><button data-go="overview">Workspace</button><button class="on">Platform</button></div></div>
+          <div class="scroll"><div class="pad">
+            <div class="health" style="margin-top:8px"><div class="top">${tile('success', 'pulse', 'sm')}<strong>System health</strong><span>All good</span></div><div class="services"><div><i></i>API<b>42 ms</b></div><div><i></i>Database<b>18 ms</b></div><div><i></i>Search<b>64 ms</b></div><div><i></i>Storage<b>51 ms</b></div></div></div>
+            ${sec('Platform')}
+            <div class="list">
+              ${row({ lead: tile('indigo', 'building', 'sm'), title: 'Tenants', sub: '3 active', go: 'tenants' })}
+              ${row({ lead: tile('violet', 'people', 'sm'), title: 'Users', sub: '11 accounts', go: 'tenants' })}
+              ${row({ lead: tile('sky', 'pulse', 'sm'), title: 'Audit log', sub: 'Every tenant', go: 'tenants' })}
+            </div>
+          </div></div>
+        </div>`
+      },
+      tenants: {
+        group: 'manage', label: 'Tenants', section: 'Manage · Platform',
+        info: ['Read-first lists', 'Platform lists share one shape: search, a row per record with its status word, detail on tap. Users and Audit use the same pattern.', 'Open a tenant', 'Search · filter by status', 'Nothing', 'Create/suspend tenant (not in the API)'],
+        render: () => `<div class="screen paper">
+          ${bar({ title: 'Tenants', sub: 'Platform', back: true })}
+          <div class="scroll"><div class="pad">
+            <div class="search">${ic('search', 'sm')}<span>Search tenants</span></div>
+            <div class="list">
+              ${row({ lead: tile('violet', 'building', 'sm'), title: 'BoMesh Local', sub: 'local · 6 members · 285 items', trail: status('Active', 'success') })}
+              ${row({ lead: tile('cyan', 'building', 'sm'), title: 'HCMUTE Đào tạo', sub: 'hcmute · 42 members · 1,842 items', trail: status('Active', 'success') })}
+              ${row({ lead: tile('slate', 'building', 'sm'), title: 'FinxWorkspace', sub: 'finx · no administrator', trail: status('Needs admin', 'warning') })}
+            </div>
+          </div></div>
+        </div>`
+      }
+    };
+
+    function collections() {
+      return `
+        <div class="collection-card" data-go="collection">${tile('indigo', 'book')}<div><strong>UTE Knowledge</strong><p>Thông báo, quy định và danh sách sinh viên từ website HCMUTE.</p><div class="facts"><span>${ic('file', 'xs')} 271 items</span><span>${ic('upload', 'xs')} Uploads</span></div></div></div>
+        <div class="collection-card" data-go="collection">${tile('magenta', 'book')}<div><strong>BoDemo</strong><p>Tài liệu demo cho phòng ban.</p><div class="facts"><span>${ic('file', 'xs')} 25 items</span><span>${ic('library', 'xs')} 1 collection</span><span>${ic('refresh', 'xs')} Synced</span></div></div></div>
+        <div class="collection-card" data-go="collection">${tile('cyan', 'book')}<div><strong>Biểu mẫu</strong><p>Mẫu đơn và biểu mẫu sinh viên thường dùng.</p><div class="facts"><span>${ic('file', 'xs')} 18 items</span><span>${ic('refresh', 'xs')} Synced from Google Drive</span></div></div></div>`;
+    }
+
+    /* ── Sheets ────────────────────────────────────────────────────────── */
+    const option = (lead, title, sub = '', cls = '', go = '') => `<button class="option ${cls}" ${go ? `data-go="${go}"` : 'data-close'}>${lead}<span><strong>${title}</strong>${sub ? `<span>${sub}</span>` : ''}</span></button>`;
+    const sheets = {
+      account: () => `
+        <div class="profile" style="padding-top:0">${avatar('SA', '#6c56e0', 'lg')}<strong>Sample Admin 1</strong><span>admin1@gamil.com</span></div>
+        <div class="select-row" style="margin-bottom:8px">${tile('violet', 'building', 'sm')}<div class="copy"><span>Workspace</span><strong>BoMesh Local</strong></div><button class="btn secondary sm">${ic('swap', 'sm')}Switch</button></div>
+        <div class="select-row" style="margin-bottom:8px;display:grid;gap:10px"><div style="display:flex;align-items:center;gap:12px">${tile('slate', 'moon', 'sm')}<div class="copy"><span>Appearance</span><strong>Match the phone</strong></div></div><div class="seg" style="--n:3"><button class="on" data-theme="light">Auto</button><button data-theme="light">Light</button><button data-theme="dark">Dark</button></div></div>
+        ${option(tile('danger', 'logout', 'sm'), 'Sign out', 'Chats stay on this phone', 'danger', 'signin')}`,
+      attach: () => `
+        <div class="sheet-head"><strong>Add to this question</strong><span>The assistant reads it only for this chat.</span></div>
+        ${option(tile('violet', 'upload', 'sm'), 'Upload a file', 'PDF, Office, CSV, text, ZIP')}
+        ${option(tile('indigo', 'library', 'sm'), 'Choose from Library', 'Your files and shared collections', '', 'library')}
+        ${option(tile('sky', 'book', 'sm'), 'Limit to a collection', 'Search only one collection')}`,
+      upload: () => `
+        <div class="sheet-head"><strong>Upload files</strong><span>Up to 20 files, 100 MB each.</span></div>
+        <div class="select-row">${tile('indigo', 'book', 'sm')}<div class="copy"><span>Add to</span><strong>UTE Knowledge</strong></div>${ic('down', 'sm')}</div>
+        <div class="select-row" style="margin-top:8px">${tile('violet', 'sparkle', 'sm')}<div class="copy"><strong>Make searchable right away</strong><span>Starts a run after the upload</span></div><span class="toggle" aria-label="On"></span></div>
+        <div class="sheet-foot"><button class="btn primary block" data-close>${ic('upload', 'sm')}Choose files</button></div>`,
+      'add-knowledge': () => `
+        <div class="sheet-head"><strong>Add knowledge</strong><span>Choose one way to add to the workspace.</span></div>
+        ${option(tile('violet', 'upload', 'sm'), 'Upload files', 'Into a collection you choose')}
+        ${option(tile('indigo', 'folder-plus', 'sm'), 'New collection', 'Name it and describe what it holds')}
+        ${option(tile('sky', 'plug', 'sm'), 'Connect a source', 'Google Drive, Confluence — set up on the web')}`,
+      share: () => `
+        <div class="sheet-head"><strong>Share “UTE Knowledge”</strong><span>Access also reaches the collections inside it.</span></div>
+        <div style="display:flex;gap:8px"><div class="select-row" style="flex:1;padding:10px 12px"><div class="copy"><strong style="color:var(--ink-3);font-weight:500">Add a person or group</strong></div>${ic('down', 'sm')}</div><div class="select-row" style="padding:10px 12px"><strong>Viewer</strong>${ic('down', 'sm')}</div></div>
+        <div class="sec" style="margin-top:16px"><h3>People with access</h3></div>
+        <div class="sheet-body">
+          ${row({ cls: '', lead: avatar('AS', '#4f63d9', 'md'), title: 'Academic staff', sub: 'Group · Viewer', trail: `<button class="btn secondary sm">Viewer ${ic('down', 'xs')}</button>` })}
+          ${row({ cls: '', lead: avatar('SA', '#c0449b', 'md'), title: 'Sample Admin 1', sub: 'You · Owner', trail: `<button class="btn secondary sm">Owner ${ic('down', 'xs')}</button>` })}
+          ${row({ cls: '', lead: avatar('LT', '#0e8a9a', 'md'), title: 'Trần Thị Lan', sub: 'Person · Editor', trail: `<button class="btn secondary sm">Editor ${ic('down', 'xs')}</button>` })}
+        </div>
+        <div class="sheet-foot"><button class="btn primary block" data-close>Done</button></div>`,
+      'new-run': () => `
+        <div class="sheet-head"><strong>Make documents searchable</strong><span>One run processes them in the background.</span></div>
+        <div class="select-row">${tile('indigo', 'book', 'sm')}<div class="copy"><span>Collection</span><strong>UTE Knowledge</strong></div>${ic('down', 'sm')}</div>
+        <button class="option" style="margin-top:8px">${tile('violet', 'sparkle', 'sm')}<span><strong>Not searchable yet</strong><span>18 documents — new or changed</span></span><span class="radio on"></span></button>
+        <button class="option">${tile('slate', 'refresh', 'sm')}<span><strong>Everything</strong><span>271 documents — rebuild the whole collection</span></span><span class="radio"></span></button>
+        <div class="sheet-foot"><button class="btn primary block" data-go="ingestion">${ic('play', 'sm')}Start run</button></div>`,
+      'add-member': () => `
+        <div class="sheet-head"><strong>Add a member</strong><span>They sign in with this email and land in this workspace.</span></div>
+        <input class="input" placeholder="name@company.com">
+        <div class="select-row" style="margin-top:8px">${tile('indigo', 'shield', 'sm')}<div class="copy"><span>Role</span><strong>Viewer — can ask and read</strong></div>${ic('down', 'sm')}</div>
+        <div class="sheet-foot"><button class="btn primary block" data-close>${ic('user-plus', 'sm')}Add member</button></div>`,
+      role: () => `
+        <div class="sheet-head"><strong>Role for Trần Thị Lan</strong><span>Saved as soon as you choose.</span></div>
+        <button class="option" data-close>${tile('slate', 'eye', 'sm')}<span><strong>Viewer</strong><span>Ask questions and read</span></span><span class="radio"></span></button>
+        <button class="option" data-close>${tile('indigo', 'file', 'sm')}<span><strong>Editor</strong><span>Also add and edit documents</span></span><span class="radio on"></span></button>
+        <button class="option" data-close>${tile('violet', 'shield', 'sm')}<span><strong>Workspace admin</strong><span>Everything, including members</span></span><span class="radio"></span></button>`,
+      source: () => `
+        <div class="sheet-head"><strong>Source 1</strong><span>DSDuKienTNChuaDangKy_07Sep2017.xlsx · sheet 1</span></div>
+        <div class="passage">16 · <mark>12142004</mark> · Lê Hùng · Anh · 27/10/1994 · TPHCM · 12142 · Công nghệ kỹ thuật điện – điện tử · Khóa 2012 · 7.01 · Khá · Chưa đăng ký</div>
+        <div class="sheet-foot"><button class="btn primary block" data-go="document">Open document</button><button class="btn secondary block" data-close>Ask about this source</button></div>`,
+      'doc-more': () => `
+        ${option(tile('violet', 'sparkle', 'sm'), 'Make searchable', 'Only shown when it isn’t yet')}
+        ${option(tile('slate', 'download', 'sm'), 'Download')}
+        ${option(tile('danger', 'trash', 'sm'), 'Delete', 'Stops appearing in answers', 'danger')}`,
+      'file-more': () => `
+        ${option(tile('violet', 'compose', 'sm'), 'Continue editing', 'Ask for changes in the chat', '', 'answer')}
+        ${option(tile('slate', 'clock', 'sm'), 'Other revisions', '1 revision')}`,
+      'collection-more': () => `
+        ${option(tile('slate', 'compose', 'sm'), 'Rename and describe')}
+        ${option(tile('danger', 'trash', 'sm'), 'Delete collection', '271 items stop appearing in answers', 'danger')}`,
+      'chat-more': () => `
+        ${option(tile('slate', 'compose', 'sm'), 'Rename')}
+        ${option(tile('slate', 'pin', 'sm'), 'Pin')}
+        ${option(tile('danger', 'trash', 'sm'), 'Delete', 'Files you referenced stay in the Library', 'danger')}`
+    };
+
+    /* ── Navigation ────────────────────────────────────────────────────── */
+    const tabs = [
+      { id: 'ask', label: 'Ask', icon: 'chat' },
+      { id: 'library', label: 'Library', icon: 'library' },
+      { id: 'overview', label: 'Manage', icon: 'manage', group: 'manage', badge: true }
+    ];
+    const view = document.getElementById('view');
+    const tabbar = document.getElementById('tabbar');
+    const phone = document.getElementById('phone');
+    let stack = ['ask'];
+
+    tabbar.innerHTML = tabs.map(tab => `<button data-tab="${tab.id}">${tab.badge ? '<i class="dotbadge"></i>' : ''}<span class="glyph">${ic(tab.icon)}</span>${tab.label}</button>`).join('');
+
+    function current() { return stack[stack.length - 1]; }
+
+    function render(asTab = false) {
+      const name = current();
+      const model = screens[name];
+      view.innerHTML = model.render();
+      if (asTab) view.firstElementChild?.classList.add('tab-in');
+      // The status bar sits on the same surface as the screen below it.
+      phone.style.setProperty('--bar-bg', view.querySelector('.screen.paper') ? 'var(--paper)' : 'var(--canvas)');
+      const group = model.group;
+      tabbar.style.display = group === 'none' ? 'none' : '';
+      tabbar.querySelectorAll('button').forEach(button => {
+        const tab = tabs.find(item => item.id === button.dataset.tab);
+        button.classList.toggle('on', (tab.group || tab.id) === group);
+      });
+      document.getElementById('preview-title').textContent = model.label;
+      document.getElementById('preview-path').textContent = model.section;
+      const [title, summary, primary, secondary, overflow, absent] = model.info;
+      document.getElementById('ins-title').textContent = title;
+      document.getElementById('ins-summary').textContent = summary;
+      document.getElementById('ins-primary').textContent = primary;
+      document.getElementById('ins-secondary').textContent = secondary;
+      document.getElementById('ins-overflow').textContent = overflow;
+      document.getElementById('ins-absent').textContent = absent;
+      document.querySelectorAll('.flow-link').forEach(link => link.setAttribute('aria-current', String(link.dataset.screen === name)));
+    }
+
+    function go(name, { reset = false } = {}) {
+      if (!screens[name]) return;
+      closeSheet();
+      if (reset) stack = [name];
+      else if (current() !== name) stack.push(name);
+      render(reset);
+    }
+
+    function back() {
+      closeSheet();
+      if (stack.length > 1) stack.pop();
+      render();
+    }
+
+    function openSheet(kind) {
+      closeSheet();
+      const app = document.getElementById('app');
+      app.insertAdjacentHTML('beforeend', `<div class="scrim" data-close></div><section class="sheet" role="dialog" aria-modal="true"><div class="grabber"></div>${sheets[kind]()}</section>`);
+      app.querySelector('.sheet button')?.focus({ preventScroll: true });
+    }
+
+    function closeSheet() {
+      document.querySelectorAll('#app .scrim, #app .sheet').forEach(node => node.remove());
+    }
+
+    function setTheme(dark) {
+      phone.classList.toggle('dark', dark);
+      document.getElementById('theme-control').setAttribute('aria-pressed', String(dark));
+    }
+
+    // One delegated handler: markup stays declarative (data-go, data-sheet, data-back).
+    document.getElementById('phone').addEventListener('click', event => {
+      const target = event.target.closest('[data-go],[data-sheet],[data-back],[data-close],[data-tab],[data-theme]');
+      if (!target) return;
+      if (target.dataset.theme) { setTheme(target.dataset.theme === 'dark'); closeSheet(); return; }
+      if (target.dataset.tab) { go(target.dataset.tab, { reset: true }); return; }
+      if (target.hasAttribute('data-back')) { back(); return; }
+      if (target.dataset.sheet) { event.stopPropagation(); openSheet(target.dataset.sheet); return; }
+      if (target.dataset.go) {
+        // Leaving sign-in, or signing out, starts a fresh history.
+        go(target.dataset.go, { reset: target.dataset.go === 'signin' || screens[current()].group === 'none' });
+        return;
+      }
+      if (target.hasAttribute('data-close')) closeSheet();
+    });
+    document.addEventListener('keydown', event => { if (event.key === 'Escape') closeSheet(); });
+
+    /* ── Board: screen index, journeys, tokens ─────────────────────────── */
+    const nav = document.getElementById('flow-nav');
+    const groups = {};
+    for (const [id, model] of Object.entries(screens)) (groups[model.section] ||= []).push([id, model]);
+    const dots = { 'Start': '#7a7582', 'Ask': '#5b4cdb', 'Library': '#2e9b62', 'Manage · Workspace': '#1f86c9', 'Manage · Platform': '#5b6b84' };
+    nav.innerHTML = Object.entries(groups).map(([name, items]) => `
+      <div class="flow-group"><p>${name}</p>${items.map(([id, model]) => `<button class="flow-link" data-screen="${id}" style="--dot:${dots[name]}"><i></i>${model.label}</button>`).join('')}</div>`).join('');
+    nav.addEventListener('click', event => {
+      const link = event.target.closest('.flow-link');
+      if (!link) return;
+      const target = link.dataset.screen;
+      const root = { ask: 'ask', library: 'library', manage: 'overview', none: 'signin' }[screens[target].group];
+      stack = root === target ? [target] : [root, target];
+      if (screens[target].section === 'Manage · Platform' && target !== 'platform') stack = ['platform', target];
+      closeSheet();
+      render(true);
+    });
+
+    const journeys = [
+      ['Answer a question from a file', 'Library → document → ask → check the source', [['library', 'Library'], ['document', 'Document'], ['answer', 'Answer'], ['answer', 'Source', 'source']]],
+      ['Get a file from the assistant', 'Ask → answer with a file card → preview → download', [['ask', 'Ask'], ['answer', 'File card'], ['artifact', 'Preview']]],
+      ['Add knowledge and make it searchable', 'Manage → Knowledge → collection → upload with “searchable right away”', [['overview', 'Manage'], ['knowledge', 'Knowledge'], ['collection', 'Collection'], ['collection', 'Upload', 'upload']]],
+      ['Unblock someone', 'The attention card goes straight to the decision', [['overview', 'Manage'], ['requests', 'Requests'], ['requests', 'Approve']]],
+      ['Fix failed processing', 'Attention card → run detail → retry only what failed', [['overview', 'Manage'], ['run', 'Run detail'], ['run', 'Retry failed']]],
+      ['Share a collection', 'Collection → Share → choose person and role', [['knowledge', 'Knowledge'], ['collection', 'Collection'], ['collection', 'Share', 'share']]],
+      ['Change someone’s role', 'Access → member → role picker saves on choose', [['access', 'Access'], ['member', 'Member'], ['member', 'Role', 'role']]],
+      ['Check the platform', 'Manage → Platform switch → health first', [['overview', 'Manage'], ['platform', 'Platform'], ['tenants', 'Tenants']]]
+    ];
+    const jroot = document.getElementById('journeys');
+    jroot.innerHTML = journeys.map(([title, sub, steps]) => `<div class="journey"><strong>${title}</strong><span>${sub}</span><div class="steps">${steps.map(([screen, label, sheet], index) => `${index ? '<em>›</em>' : ''}<button data-screen="${screen}" ${sheet ? `data-open="${sheet}"` : ''}>${label}</button>`).join('')}</div></div>`).join('');
+    jroot.addEventListener('click', event => {
+      const step = event.target.closest('button[data-screen]');
+      if (!step) return;
+      const target = step.dataset.screen;
+      const root = { ask: 'ask', library: 'library', manage: 'overview' }[screens[target].group];
+      stack = root === target ? [target] : [root, target];
+      if (screens[target].section === 'Manage · Platform' && target !== 'platform') stack = ['overview', 'platform', target];
+      render(true);
+      if (step.dataset.open) openSheet(step.dataset.open);
+      document.querySelector('.device-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+
+    const tokens = [
+      ['Paper', '#f7f6f3', 'Manage backgrounds'], ['Canvas', '#ffffff', 'Screens, cards'], ['Ink', '#17161c', 'Text'], ['Ink 3', '#78737f', 'Secondary text'],
+      ['Brand violet', '#5b4cdb', 'Primary action, current tab'], ['Brand soft', '#efedfe', 'Citations, selected'],
+      ['Success', '#1f7a48', 'Done, healthy'], ['Warning', '#985a05', 'Needs attention'], ['Danger', '#b4372b', 'Failed, destructive'], ['Info', '#2e5cc7', 'Running'],
+      ['Tone · indigo', '#4f63d9', 'Collection'], ['Tone · magenta', '#c0449b', 'Collection'], ['Tone · cyan', '#0e8a9a', 'Collection'],
+      ['File · PDF', '#d94343', 'File type'], ['File · Sheet', '#2e9b62', 'File type'], ['File · Doc', '#4d72c9', 'File type']
+    ];
+    document.getElementById('tokens').innerHTML = tokens.map(([name, hex, use]) => `<div class="token"><i style="background:${hex};${hex === '#ffffff' ? 'border-bottom:1px solid #eee' : ''}"></i><div><strong>${name}</strong><span>${hex}</span><span style="font-family:inherit">${use}</span></div></div>`).join('');
+
+    document.getElementById('theme-control').addEventListener('click', () => setTheme(!phone.classList.contains('dark')));
+    document.getElementById('size-control').addEventListener('click', event => {
+      const large = phone.dataset.size === 'large';
+      phone.dataset.size = large ? 'small' : 'large';
+      event.currentTarget.setAttribute('aria-pressed', String(!large));
+    });
+
+    render();
+  </script>
+</body>
+</html>

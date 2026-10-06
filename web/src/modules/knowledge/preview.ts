@@ -167,3 +167,42 @@ function isSameRegion(left: ViewerBoundingBox, right: ViewerBoundingBox): boolea
 function percentage(value: number): number {
   return Math.min(100, Math.max(0, value * 100));
 }
+
+/**
+ * The document viewer's address. Each cited chunk is one `chunk` parameter,
+ * in citation order: the viewer opens at the first and steps through the rest.
+ */
+export function documentHref(documentId: string, chunkIds: readonly string[] = []): string {
+  const query = new URLSearchParams(chunkIds.filter(Boolean).map((chunkId) => ["chunk", chunkId]));
+  return `/documents/${encodeURIComponent(documentId)}${query.size ? `?${query}` : ""}`;
+}
+
+/** A quoted selection longer than this is cut, so the question stays readable. */
+const QUOTE_LIMIT = 240;
+
+export interface AskTarget {
+  documentId: string;
+  name: string;
+  /** The document's Collection: the new chat searches it. */
+  collectionId: string;
+}
+
+/**
+ * "Ask about this document": a new chat scoped to the document's knowledge
+ * base, the document attached, and the question started for the person to
+ * finish (`/chat` reads `q` as a draft, never sending it).
+ */
+export function askAboutDocumentHref(target: AskTarget): string {
+  return `/chat?${new URLSearchParams({ q: `About “${target.name}”: `, scope: target.collectionId, doc: target.documentId })}`;
+}
+
+/** "Ask about this" on a selection: the passage quoted in the draft. */
+export function askAboutPassageHref(target: AskTarget, selection: string): string {
+  const text = selection.trim().replaceAll(/\s+/g, " ");
+  const quote = text.length > QUOTE_LIMIT ? `${text.slice(0, QUOTE_LIMIT).trimEnd()}…` : text;
+  return `/chat?${new URLSearchParams({
+    q: `About this passage from “${target.name}”:\n“${quote}”\n\n`,
+    scope: target.collectionId,
+    doc: target.documentId,
+  })}`;
+}

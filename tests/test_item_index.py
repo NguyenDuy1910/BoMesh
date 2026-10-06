@@ -10,9 +10,9 @@ from qdrant_client import models as qmodels
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
-import bothesis.document_index._qdrant as qdrant_module
-from bothesis.document_index import INDEX_SCHEMA_VERSION, ItemIndex
-from bothesis.document_index._qdrant import _QdrantBackend
+import bomesh.document_index._qdrant as qdrant_module
+from bomesh.document_index import INDEX_SCHEMA_VERSION, ItemIndex
+from bomesh.document_index._qdrant import _QdrantBackend
 
 
 class RecordingClient:
@@ -117,8 +117,7 @@ async def test_hybrid_search_uses_scoped_dense_bm25_and_rrf() -> None:
     backend = _QdrantBackend(client=client, collection_name="chunks")
 
     results = await backend.search_item_points(
-        query_vector=[0.1, 0.2],
-        query_text="doanh thu quý II",
+        queries=[("doanh thu quý II", [0.1, 0.2]), ("lợi nhuận", [0.3, 0.4])],
         tenant_id="tenant-1",
         collection_item_ids=("collection-1",),
         limit=3,
@@ -126,9 +125,19 @@ async def test_hybrid_search_uses_scoped_dense_bm25_and_rrf() -> None:
     )
 
     assert results == ["point-1"]
+    # One request: a dense and a BM25 candidate list per query, fused by RRF.
+    assert len(client.query_points_calls) == 1
     request = client.query_points_calls[0]
-    assert len(request["prefetch"]) == 2
     assert request["query"] == qmodels.FusionQuery(fusion=qmodels.Fusion.RRF)
-    dense, sparse = request["prefetch"]
-    assert dense.filter is request["query_filter"]
-    assert sparse.filter is request["query_filter"]
+    prefetches = request["prefetch"]
+    assert [prefetch.using for prefetch in prefetches] == [
+        "content",
+        "content_bm25",
+        "content",
+        "content_bm25",
+    ]
+    assert [prefetch.query.text for prefetch in prefetches[1::2]] == [
+        "doanh thu quý II",
+        "lợi nhuận",
+    ]
+    assert all(prefetch.filter is request["query_filter"] for prefetch in prefetches)

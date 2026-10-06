@@ -1,8 +1,8 @@
-# Anti-Fabrication Flow Enhancement for BoThesis Agent
+# Anti-Fabrication Flow Enhancement for BoMesh
 
 ## Overview
 
-The BoThesis agent has been enhanced with strict anti-fabrication rules to ensure that:
+The BoMesh has been enhanced with strict anti-fabrication rules to ensure that:
 1. Agent never makes up or guesses enterprise-related information
 2. All enterprise questions must be grounded in the knowledge base
 3. Vague questions trigger clarification, not hallucination
@@ -125,11 +125,11 @@ Please provide more details so I can assist you better.
 ## Implementation Details
 
 ### Files Modified
-1. **backend/bothesis/agent/prompts/agent_base.md**
+1. **backend/bomesh/agent/prompts/agent_base.md**
    - Enhanced with 6 new sections covering anti-fabrication rules
    - Total of 8 new clear rules/sections
 
-2. **backend/bothesis/agent/tools/knowledge_search.py**
+2. **backend/bomesh/agent/tools/knowledge_search.py**
    - Updated tool description with explicit anti-fabrication guidance
    - Enhanced query schema documentation to warn against vague terms
 

@@ -19,7 +19,7 @@ test("collects a citation once when it arrives in annotation and final content",
   assert.equal(sources.length, 1);
   assert.equal(sources[0]?.title, "Access Policy");
   assert.equal(sources[0]?.originalUrl, "https://kb/e1");
-  assert.equal(sources[0]?.internalUrl, "/knowledge/items/item-1?chunk=chunk-1");
+  assert.equal(sources[0]?.internalUrl, "/documents/item-1?chunk=chunk-1");
 });
 
 test("keeps citations in content order", () => {
@@ -28,7 +28,7 @@ test("keeps citations in content order", () => {
     annotation({ id: "second", item_id: "item-2", chunk_id: "second", title: "Background" }),
   ]));
 
-  assert.deepEqual(sources.map((source) => source.id), ["first", "second"]);
+  assert.deepEqual(sources.map((source) => source.itemId), ["item-1", "item-2"]);
 });
 
 test("an internal citation always links to the exact viewer target", () => {
@@ -36,7 +36,7 @@ test("an internal citation always links to the exact viewer target", () => {
     annotation({ id: "secret", item_id: "item-3", chunk_id: "secret", title: "Board Pack" }),
   ]));
 
-  assert.equal(source?.internalUrl, "/knowledge/items/item-3?chunk=secret");
+  assert.equal(source?.internalUrl, "/documents/item-3?chunk=secret");
 });
 
 test("page and section become one locator", () => {
@@ -107,7 +107,20 @@ test("citation markers are numbered once, in the order they were first cited", (
   const sources = answerSources(turnWithAnnotations([first, second, first]));
 
   assert.deepEqual(sources.map((source) => source.index), [1, 2]);
-  assert.deepEqual(sources.map((source) => source.id), ["source-1111", "source-2222"]);
+  assert.deepEqual(sources.map((source) => source.itemId), ["item-1", "item-2"]);
+});
+
+test("passages of one document are one source, keeping each passage", () => {
+  const sources = answerSources(turnWithAnnotations([
+    annotation({ id: "ref_1", number: 1, item_id: "sheet", chunk_id: "sheet:1", title: "DSBTH.xlsx" }),
+    annotation({ id: "ref_3", number: 2, item_id: "memo", chunk_id: "memo:4", title: "Memo.pdf" }),
+    annotation({ id: "ref_2", number: 1, item_id: "sheet", chunk_id: "sheet:7", title: "DSBTH.xlsx" }),
+    annotation({ id: "ref_1", number: 1, item_id: "sheet", chunk_id: "sheet:1", title: "DSBTH.xlsx" }),
+  ]));
+
+  assert.deepEqual(sources.map((source) => [source.title, source.index]), [["DSBTH.xlsx", 1], ["Memo.pdf", 2]]);
+  assert.deepEqual(sources[0]?.passages.map((passage) => passage.chunkId), ["sheet:1", "sheet:7"]);
+  assert.equal(sources[0]?.chunkId, "sheet:1");
 });
 
 test("a cited page is read from the chunk page range when spans carry no geometry", () => {
@@ -156,9 +169,9 @@ test("the backend number drives the chip and the summary list alike", () => {
 
   // A repeated citation is one entry, keeping its number.
   assert.equal(sources.length, 2);
-  assert.deepEqual(sources.map((source) => [source.id, source.index]), [
-    ["ref_2", 1],
-    ["ref_1", 2],
+  assert.deepEqual(sources.map((source) => [source.itemId, source.index]), [
+    ["i2", 1],
+    ["i1", 2],
   ]);
 });
 

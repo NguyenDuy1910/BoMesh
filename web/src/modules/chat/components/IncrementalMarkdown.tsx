@@ -33,6 +33,7 @@ import {
   rehypeCitationMarkers,
 } from "../citation-markers";
 export { citationRenderingSources } from "../citation-markers";
+import { CitationChip } from "@/components/patterns/CitationChip";
 import type { AnswerSource } from "../sources";
 
 const MARKDOWN_REMARK_PLUGINS = [remarkGfm, remarkMath];
@@ -43,20 +44,32 @@ const MARKDOWN_REHYPE_PLUGINS = [rehypeKatex, rehypeCitationMarkers];
 // text instead of minting a placeholder href the reader could click.
 const TAIL_REMEND_OPTIONS: RemendOptions = { linkMode: "text-only" };
 
-const MERMAID_THEME_VARIABLES = {
-  fontFamily: "Hanken Grotesk, Arial, sans-serif",
-  primaryColor: "#ffffff",
-  primaryTextColor: "#374151",
-  primaryBorderColor: "#e5e7eb",
-  lineColor: "#9ca3af",
-  secondaryColor: "#f9fafb",
-  tertiaryColor: "#f3f4f6",
-  background: "#ffffff",
-  mainBkg: "#ffffff",
-  secondBkg: "#f9fafb",
-  tertiaryBkg: "#f3f4f6",
-  textColor: "#374151",
-};
+// Mermaid derives shades from its theme colours, so it needs resolved values
+// rather than `var()` references. They are read from the design tokens when a
+// diagram renders, so a diagram follows the active theme. Only tokens declared
+// as hex in tokens.css are read: Mermaid cannot parse slash-alpha `rgb()`.
+function mermaidThemeVariables() {
+  const style = getComputedStyle(document.documentElement);
+  const token = (name: string) => style.getPropertyValue(name).trim();
+  const surface = token("--surface-base");
+  const subtle = token("--surface-subtle");
+  const inset = token("--surface-inset");
+  const text = token("--text-secondary");
+  return {
+    fontFamily: token("--font-sans"),
+    primaryColor: surface,
+    primaryTextColor: text,
+    primaryBorderColor: token("--border-subtle"),
+    lineColor: token("--border-strong"),
+    secondaryColor: subtle,
+    tertiaryColor: inset,
+    background: surface,
+    mainBkg: surface,
+    secondBkg: subtle,
+    tertiaryBkg: inset,
+    textColor: text,
+  };
+}
 
 // ONE components object for every render — the finished prefix, the arriving
 // tail, and the completed answer. Element types stay identical across the whole
@@ -78,12 +91,14 @@ const MARKDOWN_COMPONENTS: Components = {
  * The citations an answer is allowed to render inline.
  *
  * Only numbers this answer actually cited resolve to a chip; anything else the
- * model happened to write as `[n]` stays literal text. Nothing about the
- * document is carried here — the panel re-resolves it per click.
+ * model happened to write as `[n]` stays literal text. Numbers in `dropped`
+ * cite documents the reader can no longer open: they render nothing. Nothing
+ * about the document is carried here — the panel re-resolves it per click.
  */
 interface CitationRendering {
   sources: ReadonlyMap<number, AnswerSource>;
-  activeCitationId?: string;
+  dropped?: ReadonlySet<number>;
+  activeSourceId?: string;
   onOpenSource?: (source: AnswerSource) => void;
 }
 
@@ -109,25 +124,19 @@ function MarkdownCitation({ children, ...properties }: HTMLAttributes<HTMLElemen
   const rendering = useContext(CitationRenderingContext);
   const raw = (properties as Record<string, unknown>)[CITATION_NUMBER_PROP];
   const number = typeof raw === "string" ? Number(raw) : Number.NaN;
+  if (rendering.dropped?.has(number)) return null;
   const source = Number.isFinite(number) ? rendering.sources.get(number) : undefined;
   // An unresolved number was never a citation: keep the reader's text intact
   // rather than offering a chip that cannot open anything.
   if (!source) return <>{children}</>;
 
   return (
-    <button
-      aria-label={`Show source ${source.index}: ${source.title}`}
-      aria-pressed={rendering.activeCitationId === source.id}
-      className={clsx(
-        "answer-citation-chip",
-        rendering.activeCitationId === source.id && "answer-citation-chip--active",
-      )}
+    <CitationChip
+      active={rendering.activeSourceId === source.id}
+      n={source.index}
       onClick={() => rendering.onOpenSource?.(source)}
-      title={[source.title, source.locator].filter(Boolean).join(" · ")}
-      type="button"
-    >
-      {source.index}
-    </button>
+      title={[source.title, source.locator].filter(Boolean).join(" · ") || "Source"}
+    />
   );
 }
 
@@ -323,11 +332,22 @@ function MarkdownHeading3({
   return <h3 {...props}>{children}</h3>;
 }
 
+/**
+ * A link to a file inside the assistant's execution workspace.
+ *
+ * The model writes these when it names a file it produced, and the path is
+ * meaningless outside that workspace — the file itself is offered as a card
+ * under the answer. So the label is kept and the link is dropped, rather than
+ * showing a reader a path they cannot open.
+ */
+const WORKSPACE_LINK = /^(sandbox|file|attachment):/i;
+
 function MarkdownLink({
   children,
   href,
   ...props
 }: AnchorHTMLAttributes<HTMLAnchorElement> & { children?: ReactNode }) {
+  if (href && WORKSPACE_LINK.test(href)) return <>{children}</>;
   const isExternal = Boolean(href && /^https?:\/\//i.test(href));
 
   return (
@@ -424,7 +444,7 @@ function CopyCodeButton({ text }: { text: string }) {
       title={copied ? "Copied" : "Copy code"}
       type="button"
     >
-      {copied ? <Check aria-hidden="true" size={13} /> : <Copy aria-hidden="true" size={13} />}
+      {copied ? <Check aria-hidden="true" size={14} /> : <Copy aria-hidden="true" size={14} />}
       <span>{copied ? "Copied" : "Copy"}</span>
     </button>
   );
@@ -503,7 +523,7 @@ function MermaidDiagramBlock({ source }: { source: string }) {
           startOnLoad: false,
           securityLevel: "strict",
           theme: "base",
-          themeVariables: MERMAID_THEME_VARIABLES,
+          themeVariables: mermaidThemeVariables(),
         });
         return mermaid
           .parse(diagramSource, { suppressErrors: true })

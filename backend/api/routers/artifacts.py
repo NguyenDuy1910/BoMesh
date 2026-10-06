@@ -1,4 +1,4 @@
-"""Artifact routes: inspect, preview, export, and publish conversation documents."""
+"""Artifact routes: inspect, preview, and publish conversation documents."""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ from api.deps import Artifacts, Caller
 from api.routers import (
     ArtifactContent,
     ArtifactDetail,
-    ArtifactExportRequest,
     ArtifactPublishRequest,
     ArtifactPublishResponse,
 )
@@ -26,25 +25,14 @@ async def get_artifact(
 
 
 @router.get(
-    "/{artifact_id}/revisions/{revision}/content", response_model=ArtifactContent
+    "/{artifact_id}/revisions/{revision}/content", response_model=ArtifactContent,
+    operation_id="getArtifactRevisionContent",
 )
 async def get_artifact_content(
     artifact_id: UUID, revision: int, caller: Caller, artifacts: Artifacts
 ) -> ArtifactContent:
     return ArtifactContent.model_validate(
         await artifacts.content(caller, artifact_id, revision=revision)
-    )
-
-
-@router.post("/{artifact_id}/export", response_model=ArtifactDetail)
-async def export_artifact(
-    artifact_id: UUID,
-    body: ArtifactExportRequest,
-    caller: Caller,
-    artifacts: Artifacts,
-) -> ArtifactDetail:
-    return ArtifactDetail.model_validate(
-        await artifacts.export(caller, artifact_id, format=body.format)
     )
 
 

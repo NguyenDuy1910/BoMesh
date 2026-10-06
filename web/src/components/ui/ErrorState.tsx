@@ -1,67 +1,74 @@
 "use client";
 
-import { AlertTriangle, RotateCw } from "lucide-react";
+import { AlertCircle, RotateCw } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
-import { cn } from "@/lib/cn";
+import { Callout } from "@/components/ui/Callout";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 interface ErrorStateProps {
+  /** Defaults to "This didn’t load". */
   title?: string;
-  description: string;
-  actionLabel?: string;
+  /** What went wrong and what to do. Defaults to the reassuring generic line. */
+  description?: string;
+  /** The recovery action; usually a refetch. Without it no button is shown. */
   onAction?: () => void;
-  /** `block` fills the content area; `inline` sits inside a form or card. */
+  /** Defaults to "Try again". */
+  actionLabel?: string;
+  /** `block` replaces a list or page region; `inline` sits inside a form, dialog or card. */
   layout?: "block" | "inline";
+  /** Block layout only: the dashed outline. Defaults to `true`. */
+  boxed?: boolean;
   className?: string;
 }
 
+/**
+ * A region that failed to load or an action that failed, with one way to
+ * recover. Never shows a raw error code on its own.
+ */
 export function ErrorState({
-  title = "Something went wrong",
+  title,
   description,
-  actionLabel,
   onAction,
+  actionLabel = "Try again",
   layout = "block",
+  boxed = true,
   className,
 }: ErrorStateProps) {
   if (layout === "inline") {
     return (
-      <div
-        className={cn(
-          "flex gap-2.5 rounded-[var(--adm-r-sm)] bg-[var(--danger-soft)] px-3 py-2.5",
-          "text-[0.8125rem] text-[var(--danger-text)] shadow-[inset_0_0_0_1px_var(--danger-border)]",
-          className,
-        )}
-        role="alert"
+      <Callout
+        actions={
+          onAction && (
+            <Button onClick={onAction} size="sm" variant="secondary">
+              {actionLabel}
+            </Button>
+          )
+        }
+        className={className}
+        title={title}
+        tone="err"
       >
-        <AlertTriangle aria-hidden="true" className="mt-px h-4 w-4 shrink-0" />
-        <p className="min-w-0 leading-5">{description}</p>
-      </div>
+        {description ?? "Something went wrong. Try again."}
+      </Callout>
     );
   }
 
   return (
-    <div className={cn("adm-card", className)} role="alert">
-      <div className="adm-empty">
-        <span
-          aria-hidden="true"
-          className="adm-empty__icon bg-[var(--danger-soft)] text-[var(--danger)]"
-        >
-          <AlertTriangle className="h-5 w-5" />
-        </span>
-        <h3 className="adm-empty__title">{title}</h3>
-        <p className="adm-empty__desc">{description}</p>
-        {actionLabel && onAction && (
-          <div className="adm-empty__actions">
-            <Button
-              icon={<RotateCw aria-hidden="true" className="h-4 w-4" />}
-              onClick={onAction}
-              variant="secondary"
-            >
-              {actionLabel}
-            </Button>
-          </div>
-        )}
-      </div>
-    </div>
+    <EmptyState
+      action={
+        onAction && (
+          <Button icon={<RotateCw aria-hidden="true" className="h-4 w-4" />} onClick={onAction} variant="secondary">
+            {actionLabel}
+          </Button>
+        )
+      }
+      boxed={boxed}
+      className={className}
+      description={description ?? "Check your connection and try again. Nothing was lost."}
+      icon={<AlertCircle />}
+      title={title ?? "This didn’t load"}
+      tone="err"
+    />
   );
 }

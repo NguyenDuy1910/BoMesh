@@ -1,324 +1,306 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
-import '../../../app/app_config.dart';
+import '../../../core/api_client.dart';
+import '../../../core/uploads.dart';
 import '../models/chat_models.dart';
 import '../models/chat_stream.dart';
 
 class ChatService {
-  ChatService({http.Client? client})
-    : _client = client ?? http.Client(),
-      _ownsClient = client == null;
+  ChatService(this.api) : _sessionToken = api.accessToken;
 
-  final http.Client _client;
-  final bool _ownsClient;
+  final ApiClient api;
+  final String? _sessionToken;
+  final Set<ChatStreamHandle> _streams = {};
+  bool _closed = false;
+
+  bool get isCurrentSession => !_closed && api.accessToken == _sessionToken;
+
+  void _checkSession() {
+    if (!isCurrentSession) {
+      throw const ChatRequestException(
+        'Your session changed. Reopen Chat to continue.',
+      );
+    }
+  }
 
   ChatStreamHandle streamMessage({
     required String message,
     required String conversationId,
     required List<Map<String, String>> history,
-    required List<String> documentIds,
-    required ChatConnectorMode connectorMode,
-    required List<String> connectorIds,
+    required List<String> attachmentIds,
+    required List<String> collectionIds,
   }) {
+    _checkSession();
     final requestClient = http.Client();
     final controller = StreamController<ChatStreamEvent>();
     var cancelled = false;
+    late final ChatStreamHandle handle;
+    void cancel() {
+      if (cancelled) return;
+      cancelled = true;
+      requestClient.close();
+      if (!controller.isClosed) unawaited(controller.close());
+      _streams.remove(handle);
+    }
 
+    handle = ChatStreamHandle(events: controller.stream, cancel: cancel);
+    _streams.add(handle);
+    controller.onCancel = cancel;
+    final request = http.Request('POST', api.uri('/agent/chat'))
+      ..headers.addAll({
+        ...api.headers,
+        'Accept': 'text/event-stream',
+        'Content-Type': 'application/json',
+      })
+      ..body = jsonEncode({
+        'message': message,
+        'conversation_id': conversationId,
+        'history': history,
+        'attachment_ids': attachmentIds,
+        'collection_ids': collectionIds,
+      });
     Future<void>(() async {
       try {
-        final request = http.Request('POST', _uri('/api/v1/agent/chat'))
-          ..headers.addAll(<String, String>{
-            ..._identityHeaders,
-            'Accept': 'text/event-stream',
-            'Content-Type': 'application/json',
-          })
-          ..body = jsonEncode(<String, dynamic>{
-            'message': message,
-            'conversation_id': conversationId,
-            'history': history,
-            'document_ids': documentIds,
-            'connector_mode': connectorMode.name,
-            'connector_ids': connectorMode == ChatConnectorMode.selected
-                ? connectorIds
-                      .map<Object>((id) => int.tryParse(id) ?? id)
-                      .toList()
-                : <Object>[],
-          });
+        if (cancelled) return;
         final response = await requestClient.send(request);
+        if (cancelled || !isCurrentSession) return;
         if (response.statusCode < 200 || response.statusCode >= 300) {
-          final detail = await response.stream.bytesToString();
-          throw ChatRequestException(
-            detail.trim().isEmpty
-                ? 'Chat request failed (${response.statusCode}).'
-                : _errorDetail(detail),
-          );
+          await api.decodeResponse(await http.Response.fromStream(response));
+          throw const ChatRequestException('Chat request failed.');
         }
-        final contentType = response.headers['content-type'] ?? '';
-        if (!contentType.toLowerCase().contains('text/event-stream')) {
+        if (!(response.headers['content-type'] ?? '').contains(
+          'text/event-stream',
+        )) {
           throw const ChatProtocolException(
             'Chat endpoint did not return an event stream.',
           );
         }
-        await for (final line
-            in response.stream
-                .transform(utf8.decoder)
-                .transform(const LineSplitter())) {
-          if (cancelled) break;
-          final trimmed = line.trim();
-          if (!trimmed.startsWith('data:')) continue;
-          final data = trimmed.substring(5).trim();
-          if (data.isEmpty) continue;
+        final data = <String>[];
+        void dispatch() {
+          if (data.isEmpty || cancelled || !isCurrentSession) return;
+          final value = data.join('\n');
+          data.clear();
+          if (value.trim() == '[DONE]') return;
           try {
-            controller.add(ChatStreamEvent.decode(data));
+            controller.add(ChatStreamEvent.decode(value));
           } on FormatException {
             throw const ChatProtocolException(
               'Received an invalid agent stream event.',
             );
           }
         }
-      } catch (error, stackTrace) {
-        if (!cancelled && !controller.isClosed) {
-          controller.addError(_connectionError(error), stackTrace);
+
+        await for (final line
+            in response.stream
+                .transform(utf8.decoder)
+                .transform(const LineSplitter())) {
+          if (cancelled || !isCurrentSession) break;
+          if (line.isEmpty) {
+            dispatch();
+          } else if (line.startsWith('data:')) {
+            final value = line.substring(5);
+            data.add(value.startsWith(' ') ? value.substring(1) : value);
+          }
+        }
+        dispatch();
+      } catch (cause, trace) {
+        if (!cancelled && !controller.isClosed && isCurrentSession) {
+          controller.addError(
+            cause is http.ClientException
+                ? const ChatRequestException(
+                    'Connection interrupted. Check your network and retry the response.',
+                  )
+                : cause,
+            trace,
+          );
         }
       } finally {
         requestClient.close();
+        _streams.remove(handle);
         if (!controller.isClosed) await controller.close();
       }
     });
+    return handle;
+  }
 
-    return ChatStreamHandle(
-      events: controller.stream,
-      cancel: () {
-        cancelled = true;
-        requestClient.close();
+  /// Active collections the person can read; with [writable], only those
+  /// they may add documents to.
+  Future<List<ChatCollection>> listCollections({bool writable = false}) async {
+    _checkSession();
+    final items = await readAllPages(api, '/collections');
+    _checkSession();
+    return items
+        .where((value) => value['status'] != 'archived')
+        .where(
+          (value) =>
+              !writable ||
+              (value['permissions'] is List &&
+                  (value['permissions'] as List).contains('collection.update')),
+        )
+        .map(ChatCollection.fromJson)
+        .toList();
+  }
+
+  /// One page of the documents the person can read, newest first, for
+  /// choosing one to ask about. Files attached only to a chat are left out.
+  Future<({List<JsonMap> items, int total})> listDocuments({
+    String search = '',
+    int page = 1,
+    int pageSize = 40,
+  }) async {
+    _checkSession();
+    final payload = await api.get(
+      '/documents',
+      query: {
+        'page': page,
+        'page_size': pageSize,
+        'status': 'available',
+        if (search.trim().isNotEmpty) 'search': search.trim(),
       },
+    );
+    _checkSession();
+    return (
+      items: objectList(payload['items'])
+          .where((value) => value['purpose'] != 'conversation_attachment')
+          .toList(),
+      total: intOf(payload['total']),
     );
   }
 
-  Future<List<ChatConnector>> getAvailableConnectors() async {
-    final response = await _client.get(
-      _uri('/api/v1/agent/connectors'),
-      headers: _identityHeaders,
+  /// The cited passage, read through the permission-checked viewer.
+  Future<String> citationPassage(String documentId, String chunkId) async {
+    _checkSession();
+    final payload = await api.get(
+      '/knowledge/documents/${Uri.encodeComponent(documentId)}',
+      query: {'chunk': chunkId},
     );
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw ChatRequestException(
-        _errorDetail(
-          response.body,
-          fallback: 'Could not load permitted connectors.',
-        ),
-      );
-    }
-    final payload = jsonDecode(response.body);
-    if (payload is! Map || payload['items'] is! List) return <ChatConnector>[];
-    return (payload['items'] as List)
-        .whereType<Map>()
-        .map((item) => ChatConnector.fromJson(Map<String, dynamic>.from(item)))
-        .toList();
+    _checkSession();
+    return textOf(objectOf(payload['focus'])['chunk_text']).trim();
   }
 
   Future<ConversationDocument> uploadDocument(
     UploadFile file, {
     required void Function(UploadProgress progress) onProgress,
   }) async {
+    _checkSession();
     onProgress(UploadProgress.starting);
-    final start = await _client.post(
-      _uri('/api/v1/documents/uploads'),
-      headers: <String, String>{
-        ..._identityHeaders,
-        'Content-Type': 'application/json',
-        'Idempotency-Key': file.idempotencyKey,
-      },
-      body: jsonEncode(<String, dynamic>{
-        'file_name': file.fileName,
-        'content_type': file.contentType,
-        'size_bytes': file.bytes.length,
-      }),
-    );
-    if (start.statusCode < 200 || start.statusCode >= 300) {
-      throw ChatRequestException(
-        _errorDetail(start.body, fallback: 'Could not start document upload.'),
-      );
-    }
-    final started = _jsonObject(start.body);
-    final rawDocument = started['document'];
-    if (rawDocument is! Map) {
+    final personal = await api.put('/collections/personal');
+    _checkSession();
+    final id = textOf(personal['id']);
+    if (id.isEmpty) {
       throw const ChatProtocolException(
-        'Document upload did not return document metadata.',
+        'Could not prepare your personal collection.',
       );
     }
-    if (started['upload_required'] != true) {
-      return _documentFromResponse(Map<String, dynamic>.from(rawDocument));
-    }
-    final target = started['target'];
-    if (target is! Map) {
-      throw const ChatProtocolException(
-        'Document upload did not return a storage destination.',
-      );
-    }
-
     onProgress(UploadProgress.uploading);
-    final targetMap = Map<String, dynamic>.from(target);
-    final uploadRequest = http.Request(
-      targetMap['method'] as String? ?? 'PUT',
-      Uri.parse(targetMap['url'] as String),
-    )..bodyBytes = file.bytes;
-    final targetHeaders = targetMap['headers'];
-    if (targetHeaders is Map) {
-      uploadRequest.headers.addAll(
-        targetHeaders.map(
-          (key, value) => MapEntry(key.toString(), value.toString()),
-        ),
-      );
-    }
-    final upload = await _client.send(uploadRequest);
-    if (upload.statusCode < 200 || upload.statusCode >= 300) {
-      final detail = await upload.stream.bytesToString();
-      throw ChatRequestException(
-        _errorDetail(detail, fallback: 'Document storage rejected the upload.'),
-      );
-    }
-
-    onProgress(UploadProgress.validating);
-    final documentId = (rawDocument['id'] as String?) ?? '';
-    final complete = await _client.post(
-      _uri('/api/v1/documents/${Uri.encodeComponent(documentId)}/complete'),
-      headers: _identityHeaders,
+    final result = await api.upload(
+      '/collections/${Uri.encodeComponent(id)}/documents',
+      file: file.source,
+      fields: const {'purpose': 'conversation_attachment'},
+      idempotencyKey: file.idempotencyKey,
     );
-    if (complete.statusCode < 200 || complete.statusCode >= 300) {
-      throw ChatRequestException(
-        _errorDetail(
-          complete.body,
-          fallback: 'Could not validate the uploaded document.',
-        ),
+    _checkSession();
+    onProgress(UploadProgress.validating);
+    final document = objectOf(result['document']);
+    if (textOf(document['id']).isEmpty || document['status'] != 'available') {
+      throw const ChatProtocolException(
+        'The uploaded document is not available. Try uploading it again.',
       );
     }
-    return _documentFromResponse(_jsonObject(complete.body));
+    return ConversationDocument(
+      id: textOf(document['id']),
+      fileName: textOf(document['name'], file.source.fileName),
+      contentType: textOf(document['content_type'], file.source.contentType),
+      sizeBytes:
+          (document['size_bytes'] as num?)?.toInt() ?? file.source.length,
+      mode: 'indexed',
+      status: 'available',
+      origin: 'upload',
+    );
   }
 
   Future<void> releaseDocument(String documentId) async {
-    final response = await _client.delete(
-      _uri('/api/v1/documents/${Uri.encodeComponent(documentId)}'),
-      headers: _identityHeaders,
-    );
-    if (response.statusCode != 404 &&
-        (response.statusCode < 200 || response.statusCode >= 300)) {
-      throw ChatRequestException(
-        _errorDetail(response.body, fallback: 'Could not remove the document.'),
-      );
+    _checkSession();
+    try {
+      await api.delete('/documents/${Uri.encodeComponent(documentId)}');
+    } on ApiException catch (cause) {
+      if (cause.status != 404) rethrow;
     }
   }
 
-  Uri resolveSourceUrl(String value) {
-    final uri = Uri.tryParse(value);
-    if (uri != null && uri.hasScheme) return uri;
-    return _uri(value.startsWith('/') ? value : '/$value');
+  Future<JsonMap> artifact(String id) {
+    _checkSession();
+    return api.get('/artifacts/${Uri.encodeComponent(id)}');
+  }
+
+  Future<JsonMap> artifactContent(String id, int revision) {
+    _checkSession();
+    return api.get(
+      '/artifacts/${Uri.encodeComponent(id)}/revisions/$revision/content',
+    );
+  }
+
+  /// A fresh signed link to one revision's file. Links are short-lived, so
+  /// the detail is read again at the moment of download.
+  Future<Uri> artifactDownload(String id, int revision) async {
+    final detail = await artifact(id);
+    _checkSession();
+    final match = objectList(detail['revisions'])
+        .where((value) => intOf(value['revision']) == revision)
+        .firstOrNull;
+    final url = textOf(
+      match?['download_url'],
+      intOf(detail['revision']) == revision
+          ? textOf(detail['download_url'])
+          : '',
+    );
+    final uri = Uri.tryParse(url);
+    if (uri == null || !const ['https', 'http'].contains(uri.scheme)) {
+      throw const ChatRequestException(
+        'A download link is not available for this revision.',
+      );
+    }
+    return uri;
+  }
+
+  /// Copies the artifact's latest revision into [collectionId].
+  Future<JsonMap> publishArtifact(String id, String collectionId) {
+    _checkSession();
+    return api.post(
+      '/artifacts/${Uri.encodeComponent(id)}/publish',
+      body: {'collection_id': collectionId},
+    );
   }
 
   void close() {
-    if (_ownsClient) _client.close();
-  }
-
-  Uri _uri(String path) {
-    final base = AppConfig.apiBaseUri;
-    final basePath = base.path.endsWith('/')
-        ? base.path.substring(0, base.path.length - 1)
-        : base.path;
-    return base.replace(path: '$basePath$path');
-  }
-
-  Map<String, String> get _identityHeaders => <String, String>{
-    'X-Bothesis-User-Id': AppConfig.userId,
-    'X-Bothesis-Tenant-Id': AppConfig.tenantId,
-  };
-
-  static Map<String, dynamic> _jsonObject(String value) {
-    final decoded = jsonDecode(value);
-    if (decoded is! Map) {
-      throw const ChatProtocolException('Expected a JSON object from the API.');
+    _closed = true;
+    for (final stream in _streams.toList()) {
+      stream.cancel();
     }
-    return Map<String, dynamic>.from(decoded);
-  }
-
-  static Object _connectionError(Object error) {
-    if (error is http.ClientException) {
-      return ChatRequestException(
-        'Could not reach the BoThesis API at ${AppConfig.apiBaseUrl}. '
-        'Check that the backend is running and this device is on the same network.',
-      );
-    }
-    return error;
-  }
-
-  static String _errorDetail(String value, {String? fallback}) {
-    try {
-      final decoded = jsonDecode(value);
-      if (decoded is Map && decoded['detail'] is String) {
-        return decoded['detail'] as String;
-      }
-    } on FormatException {
-      if (value.trim().isNotEmpty) return value.trim();
-    }
-    return fallback ?? value.trim();
-  }
-
-  static ConversationDocument _documentFromResponse(
-    Map<String, dynamic> value,
-  ) {
-    const directTypes = <String>{
-      'application/pdf',
-      'image/png',
-      'image/jpeg',
-      'image/webp',
-      'image/gif',
-    };
-    final size = value['size_bytes'] as int? ?? 0;
-    final contentType =
-        value['content_type'] as String? ?? 'application/octet-stream';
-    return ConversationDocument(
-      id: value['id'] as String,
-      fileName: value['file_name'] as String? ?? 'Document',
-      contentType: contentType,
-      sizeBytes: size,
-      mode: size <= 20 * 1024 * 1024 && directTypes.contains(contentType)
-          ? 'direct'
-          : 'indexed',
-      status: value['upload_status'] == 'available' ? 'available' : 'failed',
-    );
   }
 }
 
 class ChatStreamHandle {
   const ChatStreamHandle({required this.events, required this.cancel});
-
   final Stream<ChatStreamEvent> events;
   final void Function() cancel;
 }
 
 enum UploadProgress { starting, uploading, validating, ready, failed }
 
+/// One attachment and the key that makes its upload safe to repeat.
 class UploadFile {
-  const UploadFile({
-    required this.fileName,
-    required this.contentType,
-    required this.bytes,
-    required this.idempotencyKey,
-  });
-
-  final String fileName;
-  final String contentType;
-  final Uint8List bytes;
+  const UploadFile({required this.source, required this.idempotencyKey});
+  final UploadSource source;
   final String idempotencyKey;
 }
 
 class ChatRequestException implements Exception {
   const ChatRequestException(this.message);
-
   final String message;
-
   @override
   String toString() => message;
 }

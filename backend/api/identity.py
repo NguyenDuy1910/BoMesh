@@ -7,10 +7,12 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bothesis.services.identity_store import IdentityStoreService
-from bothesis.services import (
+from bomesh.services.identity_access.access_session import AccessSessionService
+from bomesh.services.identity_access.identity_store import IdentityStoreService
+from bomesh.services import (
     AuthContext,
     AuthorizationError,
+    JwtClaims,
 )
 
 
@@ -19,6 +21,7 @@ class RequestIdentity:
     """Trusted identity inputs received at the HTTP boundary."""
 
     auth_context: AuthContext | None = None
+    token_claims: JwtClaims | None = None
     user_id: str | UUID | None = None
     tenant_id: str | UUID | None = None
 
@@ -39,6 +42,11 @@ async def resolve_auth_context(
             raise AuthorizationError("request auth context has an invalid type")
         _validate_tenant_claim(injected, claimed_tenant_id)
         return injected
+
+    token_claims = identity.token_claims
+    if token_claims is not None:
+        _validate_tenant_claim(token_claims, claimed_tenant_id)
+        return await AccessSessionService(session).resolve(token_claims)
 
     if not allow_insecure_development_identity:
         raise AuthorizationError("authenticated request context is required")
@@ -62,13 +70,20 @@ async def resolve_auth_context(
             )
         except (TypeError, ValueError) as exc:
             raise AuthorizationError("tenant ID must be a UUID") from exc
-    context = await IdentityStoreService(session).get_context(user_id, tenant_id=tenant_id)
+    identities = IdentityStoreService(session)
+    user = await identities.get_user(user_id)
+    durable_context = await identities.get_context(user_id, tenant_id=tenant_id)
+    if durable_context.tenant_id is None:
+        raise AuthorizationError("development identity requires an active tenant")
+    context = await AccessSessionService(session).internal_user(
+        user=user, tenant_id=durable_context.tenant_id
+    )
     _validate_tenant_claim(context, raw_tenant_id)
     return context
 
 
 def _validate_tenant_claim(
-    context: AuthContext,
+    context: AuthContext | JwtClaims,
     claimed_tenant_id: str | UUID | None,
 ) -> None:
     if claimed_tenant_id is None:
@@ -81,7 +96,12 @@ def _validate_tenant_claim(
         )
     except (TypeError, ValueError) as exc:
         raise AuthorizationError("tenant ID must be a UUID") from exc
-    if context.tenant_id != tenant_id:
+    active_tenant_id = (
+        context.tenant_id
+        if isinstance(context, AuthContext)
+        else context.active_tenant_id
+    )
+    if active_tenant_id != tenant_id:
         raise AuthorizationError("tenant claim does not match database membership")
 
 

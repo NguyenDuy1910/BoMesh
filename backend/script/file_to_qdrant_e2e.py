@@ -16,24 +16,24 @@ from dotenv import load_dotenv
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
-load_dotenv(BACKEND_ROOT / ".env", override=False)
+load_dotenv(BACKEND_ROOT.parent / ".env", override=False)
 
-from bothesis.agent.transports.openrouter import OpenRouterTransport
-from bothesis.connector.file import FileProcessor
-from bothesis.connector.protocol import (
+from bomesh.agent.transports.openrouter import OpenRouterTransport
+from bomesh.connector.file import FileProcessor
+from bomesh.connector.protocol import (
     AccessPolicy,
     Hierarchy,
     SourceIdentity,
     SourceProvider,
 )
-from bothesis.document_index import (
+from bomesh.document_index import (
     IndexingContext,
     ItemIndex,
 )
 
 
 def _parse_args() -> argparse.Namespace:
-    configured_collection = os.getenv("QDRANT_COLLECTION", "").strip() or "bothesis"
+    configured_collection = os.getenv("QDRANT_COLLECTION", "").strip() or "bomesh"
     parser = argparse.ArgumentParser(
         description=(
             "Process one file with the production Docling/chunking pipeline, "
@@ -76,7 +76,7 @@ def _parse_args() -> argparse.Namespace:
 def _required_environment(name: str) -> str:
     value = os.getenv(name, "").strip()
     if not value:
-        raise ValueError(f"{name} is required (backend/.env is loaded automatically)")
+        raise ValueError(f"{name} is required (root .env is loaded automatically)")
     return value
 
 
@@ -206,7 +206,7 @@ async def _run(args: argparse.Namespace) -> None:
             if not query:
                 raise ValueError("--query must not be blank")
             results = await index.search_item_content(
-                query,
+                (query,),
                 limit=min(5, chunk_count),
                 tenant_id=tenant_id,
                 collection_item_ids=(collection_item_id,),

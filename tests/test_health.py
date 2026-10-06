@@ -12,12 +12,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
 import api.app as api_app
 import api.deps as api_deps
-from bothesis.health import HealthService, HealthSettings
+from bomesh.health import HealthService, HealthSettings
 
 SETTINGS = HealthSettings(
     qdrant_url="https://qdrant.example",
     qdrant_api_key="qdrant-secret",
-    qdrant_collection="bothesis",
+    qdrant_collection="bomesh",
     openai_base_url="https://api.openai.example/v1",
     openai_api_key="openai-secret",
     openrouter_base_url="https://openrouter.example/api/v1",
@@ -104,7 +104,7 @@ def test_health_reports_all_configured_services_as_healthy() -> None:
         next(service for service in payload["services"] if service["name"] == "qdrant")[
             "collection"
         ]
-        == "bothesis"
+        == "bomesh"
     )
     assert openrouter_paths == {
         "/api/v1/embeddings/models",

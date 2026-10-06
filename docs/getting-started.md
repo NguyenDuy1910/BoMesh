@@ -1,6 +1,6 @@
 # Getting started
 
-This guide prepares a local BoThesis environment for backend, WebUI, and
+This guide prepares a local BoMesh environment for backend, WebUI, and
 connector development.
 
 ## Prerequisites
@@ -9,9 +9,10 @@ connector development.
 - [uv](https://docs.astral.sh/uv/)
 - Docker and Docker Compose
 - Node.js 20 or newer with npm
+- [Bun](https://bun.sh/) to run the WebUI
 - An OpenAI API key for chat and an OpenRouter API key for document vision and embeddings
 
-The Flutter app under `app/bothesis/` is optional. It needs a current Flutter
+The Flutter app under `app/bomesh/` is optional. It needs a current Flutter
 SDK only when you are working on the mobile client.
 
 ## Initialize the local stack
@@ -26,14 +27,13 @@ make init
 
 `make init` performs the complete local bootstrap:
 
-1. Creates `backend/.env` and `web/.env.local` when missing.
-2. Writes local dependency endpoints and the development identity.
+1. Creates the root `.env` when missing.
+2. Writes local dependency endpoints and enables the backend's local development identity.
 3. Starts PostgreSQL, Qdrant, MinIO, Temporal, and the Temporal UI.
 4. Creates the configured MinIO bucket.
 5. Rebuilds PostgreSQL from the current SQLAlchemy models.
 6. Seeds a deterministic local administrator and membership.
 7. Recreates the derived Qdrant collection with dense and BM25 vectors.
-8. Registers the Temporal Search Attributes used by ingestion visibility.
 
 The command is deliberately destructive to local derived and database state.
 It drops the PostgreSQL `public` schema, clears Temporal persistence, and
@@ -41,7 +41,7 @@ replaces the Qdrant collection. Never run it against retained data.
 
 ## Configure providers
 
-Add provider credentials to `backend/.env` before running a chat or embedding
+Add provider credentials to the root `.env` before running a chat or embedding
 workflow:
 
 ```dotenv
@@ -54,22 +54,31 @@ or a non-local object store, use [Operations and configuration](operations.md).
 
 ## Run the applications
 
-Start the API:
+Start the local stack, API, and Temporal ingestion worker with one command:
 
 ```bash
 cd backend
-uv run python main.py
+uv run main.py
 ```
+
+This runs `make services` first (which updates the root `.env` with local
+endpoints), then supervises the API and worker. Stopping the command stops the
+worker, but leaves the shared Compose containers running. Run `make init` once
+to initialize the database, seed accounts, and create the Qdrant collection;
+starting the API does not reset or create those schemas. For deployments with
+externally managed dependencies, run the API and worker separately instead of
+using this local entrypoint.
 
 Start the WebUI in a separate terminal:
 
 ```bash
-npm --prefix web run dev
+bun run web
 ```
 
-The local WebUI uses the seeded identity from `web/.env.local`. The API accepts
-it only while `BOTHESIS_ALLOW_INSECURE_DEV_IDENTITY=true`; it is not an
-authentication mechanism for deployment.
+The WebUI loads its public configuration from the same root `.env`. The API
+accepts the development identity only while
+`BOMESH_ALLOW_INSECURE_DEV_IDENTITY=true`; it is not an authentication
+mechanism for deployment.
 
 ## Local service endpoints
 

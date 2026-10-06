@@ -1,6 +1,6 @@
 # Architecture
 
-BoThesis is organized around explicit ownership boundaries. The goal is to
+BoMesh is organized around explicit ownership boundaries. The goal is to
 keep HTTP handling thin, make business flow testable in services, and prevent
 connector or storage concerns from leaking into chat and retrieval behavior.
 
@@ -18,6 +18,13 @@ repository / infrastructure adapter
 PostgreSQL, S3-compatible storage, Qdrant, model provider, or connector API
 ```
 
+Authentication resolves every request to an `access_sessions` row owned by an
+authenticated User; there is no anonymous caller. A User reaches a
+workspace (tenant) only through an active `tenant_memberships` row plus
+`role_assignments` in that workspace, and platform permissions remain a
+separate scope. Workspaces have no public visibility. Token rotation and
+workspace switches are session transitions, not mutations of `users`.
+
 `backend/main.py` is the FastAPI boundary. It defines routes, validates HTTP
 input, resolves simple request identity, calls a service, and returns an HTTP
 response. It does not own SQLAlchemy sessions, transactions, connector
@@ -32,8 +39,7 @@ orchestration, document transformation, or application decisions.
 | `document_index` | Contextual chunk construction, embedding, payload projection, and Qdrant writes. |
 | `preview` | Derived knowledge-asset rendering, versioned preview manifests, and short-lived preview URLs. |
 | `knowledge` | Tenant and ACL filtering, retrieval, reranking, and evidence construction. |
-| `agent` | Conversation orchestration, model transports, tool execution, streaming, and cited answers. |
-| `sandbox` | Disposable, isolated execution of the fixed document operations the agent may request; never the source of truth. |
+| `agent` | Conversation orchestration, model transports, tool execution, streaming, and cited answers. Execution of file work is the provider's native Code Interpreter and Shell, in a container the conversation owns; the container is never the source of truth. |
 | `db` | SQLAlchemy schema and database engine composition. |
 | `tui` | A terminal API client; it does not bypass the HTTP boundary. |
 
@@ -58,23 +64,31 @@ Full storage and schema detail lives in [Data schema](data.schema.md).
 ## Ingestion and retrieval
 
 ```text
-Connector or upload
+Upload or Source sync (adds data; never processes)
     ↓
-Item metadata + raw bytes in object storage
+Item metadata + raw bytes in object storage, processing state pending
     ↓
-├─ Preview → derived WebP assets + versioned manifest
-└─ Docling → canonical Chunk[]
+├─ direct, access-checked resource reads / model file materialization
+└─ Ingestion Run (explicit: manual, API, schedule; one workflow per run)
+      ↓
+   Docling → canonical Chunk[] (+ Preview → WebP assets, rendition)
     ↓
 ContextualChunk → embedding + BM25 payload → Qdrant
     ↓
-tenant / tombstone / ACL filter → rerank → Evidence
+tenant / tombstone / Collection filter → fused multi-query candidates → relevance rerank → Evidence
     ↓
 agent response with citations
 ```
 
-The connector advances a scope checkpoint only after a successful complete
-run. Chunk identifiers are deterministic and Qdrant replaces one Item's index
-on update, so retries can be safe without a generation-based index model.
+Knowledge (what exists: Collections, Documents, access) and Ingestion
+(sources, sync, runs, schedules) are separate. The agent reads knowledge by
+Collection and never cares whether a Document came from an upload or a
+connector. The connector advances a scope checkpoint only after a successful
+complete sync. Chunk identifiers are deterministic and Qdrant replaces one
+Item's index when it is re-processed, so retries are safe without a
+generation-based index model. `Item.status` records raw-resource readiness and
+the document-only `Item.index_status` records processing state, so a file can
+be attached to chat and read directly while it is pending or failed.
 Preview failures do not replace or mutate the original object and do not enter
 chunking or Qdrant. Preview page numbers align with citation pages; existing
 normalized citation bounding boxes provide the region mapping used by viewers.

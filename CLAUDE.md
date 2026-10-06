@@ -1,6 +1,6 @@
-# BoThesis Claude Instructions
+# BoMesh Claude Instructions
 
-BoThesis is an enterprise knowledge and BI assistant.
+BoMesh is an enterprise knowledge and BI assistant.
 
 ## Default behavior
 - Keep changes simple and local.

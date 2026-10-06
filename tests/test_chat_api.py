@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,6 +14,7 @@ import httpx
 import pytest
 from openai import PermissionDeniedError
 from fastapi.testclient import TestClient
+from sqlalchemy.orm.exc import DetachedInstanceError
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
@@ -22,14 +23,20 @@ import native_responses as native
 
 import api.app as api_app
 import api.deps as api_deps
-import bothesis.runtime as runtime_module
-import bothesis.services.workspace_documents as workspace_documents_module
-from bothesis.agent import Agent, AgentConfig
-from bothesis.agent.models import AgentContext
-from bothesis.agent.tools import ToolRegistry
-from bothesis.agent.tools.artifact_create import ArtifactCreate
-from bothesis.agent.tools.knowledge_search import KnowledgeSearch
-from bothesis.connector.protocol import (
+import bomesh.runtime as runtime_module
+from bomesh.agent import Agent, SessionConfiguration
+from bomesh.agent.models import AgentContext
+from bomesh.agent.protocol import (
+    ExecutionEnvironmentRef,
+    ExecutionOutput,
+    HostedExecutionResultItem,
+    ProviderResourceRef,
+    ResponseOutputItemDoneEvent,
+)
+from bomesh.agent.tools import ToolExecutor, ToolRegistry, ToolSpec
+from bomesh.agent.tools.knowledge_search import KnowledgeSearch
+from bomesh.services.chat import ChatService, _public_event
+from bomesh.connector.protocol import (
     CitationInfo,
     CitationSpan,
     EffectiveAccess,
@@ -37,16 +44,17 @@ from bothesis.connector.protocol import (
     SourceIdentity,
     SourceProvider,
 )
-from bothesis.document_index import ContextualChunk
-from bothesis.knowledge import Evidence, ItemKnowledgeRetriever
+from bomesh.document_index import ContextualChunk
+from bomesh.knowledge import Evidence, ItemKnowledgeRetriever
 from api.routers import ChatRequest
-from bothesis.services import AuthContext
-from bothesis.services.document_presentation import (
+from bomesh.services import AuthContext
+from bomesh.services.document_presentation import (
     DocumentPresenter,
     payload_citation,
     viewer_elements,
 )
-from bothesis.services.workspace_documents import WorkspaceDocumentService
+from bomesh.services.item import ItemService
+from config import AppConfig, ModelConfig
 
 
 def search_call(output_index: int = 0) -> list[Any]:
@@ -89,14 +97,128 @@ class ScriptedTransport(native.ScriptedResponsesTransport):
         return [request["input"] for request in self.requests]
 
 
-def test_default_agent_composes_the_openrouter_transport(
+class ExposedChatTool(ToolExecutor):
+    def __init__(self, name: str = "exposed_chat_tool") -> None:
+        self._name = name
+
+    def spec(self) -> ToolSpec:
+        return ToolSpec(
+            name=self._name,
+            description="A registered chat tool.",
+            input_schema={"type": "object", "properties": {}, "required": []},
+        )
+
+
+def test_chat_exposes_all_registered_tools() -> None:
+    registry = ToolRegistry()
+    registry.register(ExposedChatTool())
+    registry.register(ExposedChatTool("knowledge_search"))
+    service = ChatService(
+        session_factory=object(),  # type: ignore[arg-type]
+        agent=Agent(model=object(), tools=registry),
+        conversations=object(),  # type: ignore[arg-type]
+    )
+
+    assert service._available_tool_names() == (
+        "exposed_chat_tool",
+        "knowledge_search",
+    )
+
+
+@pytest.mark.asyncio
+async def test_finalized_document_loads_server_timestamp_before_presentation() -> None:
+    now = datetime.now(UTC)
+
+    class ExpiringDocument:
+        def __init__(self) -> None:
+            self.id = uuid4()
+            self.parent_item_id = uuid4()
+            self.title = "policy.txt"
+            self.mime_type = "text/plain"
+            self.size_bytes = 15
+            self.status = "pending"
+            self.index_status = "pending"
+            self.metadata_ = {"file_name": "policy.txt", "purpose": "knowledge"}
+            self.upload = SimpleNamespace(status="pending", error_code="old")
+            self.created_at = now
+            self._updated_at: datetime | None = None
+
+        @property
+        def updated_at(self) -> datetime:
+            if self._updated_at is None:
+                raise DetachedInstanceError("updated_at is expired")
+            return self._updated_at
+
+    class RefreshingSession:
+        async def flush(self) -> None:
+            return None
+
+        async def refresh(
+            self, item: ExpiringDocument, *, attribute_names: list[str]
+        ) -> None:
+            assert attribute_names == ["updated_at"]
+            item._updated_at = now
+
+    class DocumentItems(ItemService):
+        async def get_owned_upload(self, *_: Any, **__: Any) -> ExpiringDocument:
+            return document
+
+    document = ExpiringDocument()
+    items = DocumentItems(RefreshingSession())  # type: ignore[arg-type]
+    finalized = await items.mark_upload_available(
+        document.id,
+        uuid4(),
+        uuid4(),
+        processable=True,
+        storage_metadata={"etag": "etag-finalized"},
+    )
+    result = DocumentPresenter(
+        object_storage=lambda: None,
+        preview=SimpleNamespace(resolve=lambda *_, **__: None),
+        citation_url_seconds=300,
+        preview_url_seconds=300,
+        processing_version=None,
+    ).contract_document(finalized, latest_run=None)
+
+    assert finalized.status == "ready"
+    assert finalized.upload.status == "available"
+    assert result["status"] == "available"
+    assert result["processing"]["state"] == "pending"
+    assert result["updated_at"] == now
+
+def test_public_chat_events_strip_provider_workspace_bindings() -> None:
+    event = ResponseOutputItemDoneEvent(
+        output_index=0,
+        item=HostedExecutionResultItem(
+            call_id="shell-1",
+            output=(ExecutionOutput(stdout="done", exit_code=0),),
+            environment=ExecutionEnvironmentRef(provider="openrouter", id="container_1"),
+            files=(
+                ProviderResourceRef(
+                    provider="openrouter", id="cfile_1", name="report.csv"
+                ),
+            ),
+            workspace_files=("report.csv",),
+        ),
+    )
+
+    payload = _public_event(event).model_dump_json()
+
+    assert "container_1" not in payload
+    assert "cfile_1" not in payload
+    assert "openrouter" not in payload
+    assert "report.csv" in payload
+
+
+def test_default_agent_composes_the_openai_transport(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from bothesis.agent.transports import openrouter as openrouter_transport
+    """The agent speaks OpenAI: its execution tools are native OpenAI ones."""
 
-    class TestOpenRouterTransport:
-        DEFAULT_BASE_URL = "https://openrouter.test/v1"
-        provider = "openrouter"
+    from bomesh.agent.transports import openai as openai_transport
+
+    class TestOpenAITransport:
+        provider = "openai"
         model = "gpt-test"
 
         def __init__(self, **_: Any) -> None:
@@ -110,18 +232,80 @@ def test_default_agent_composes_the_openrouter_transport(
             if False:
                 yield None
 
-    monkeypatch.setattr(openrouter_transport, "OpenRouterTransport", TestOpenRouterTransport)
+    class TestOpenRouterTransport:
+        DEFAULT_BASE_URL = "https://openrouter.test/v1"
+        provider = "openrouter"
+        model = "gpt-test"
+
+        def __init__(self, **_: Any) -> None:
+            pass
+
+    monkeypatch.setattr(openai_transport, "OpenAITransport", TestOpenAITransport)
+    monkeypatch.setattr(runtime_module, "OpenAITransport", TestOpenAITransport)
     monkeypatch.setattr(runtime_module, "OpenRouterTransport", TestOpenRouterTransport)
     monkeypatch.setattr(api_deps.get_runtime(), "_agent", None)
+    monkeypatch.setattr(api_deps.get_runtime(), "_agent_transport", None)
 
     agent = api_deps.get_runtime().agent()
 
-    assert isinstance(agent.model, TestOpenRouterTransport)
+    assert isinstance(agent.model, TestOpenAITransport)
     assert agent.tools.has("knowledge_search")
-    # Document tools ride the same registry; none of them touches Docker,
-    # storage, or the database until a call is actually executed.
-    for name in ("artifact_create", "artifact_edit", "artifact_export"):
-        assert agent.tools.has(name), name
+    assert [spec.name for spec in agent.tools.specs()] == [
+        "knowledge_search",
+        "inspect_resource",
+        "read_resource",
+        "materialize_resource",
+    ]
+
+
+def test_agent_uses_openrouter_only_when_the_model_provider_selects_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class TestOpenRouterTransport:
+        provider = "openrouter"
+        model = "openrouter/test-model"
+
+        def __init__(self, **_: Any) -> None:
+            pass
+
+    runtime = api_deps.get_runtime()
+    monkeypatch.setattr(runtime_module, "OpenRouterTransport", TestOpenRouterTransport)
+    monkeypatch.setattr(
+        runtime,
+        "_config",
+        AppConfig(
+            model=ModelConfig(
+                agent_provider="openrouter",
+                chat_model="openrouter/test-model",
+            ),
+        ),
+    )
+    monkeypatch.setattr(runtime, "_agent", None)
+    monkeypatch.setattr(runtime, "_agent_transport", None)
+
+    agent = runtime.agent()
+
+    assert isinstance(agent.model, TestOpenRouterTransport)
+
+
+def test_model_configuration_auto_selects_a_configured_openrouter_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for key in (
+        "BOMESH_AGENT_MODEL_PROVIDER",
+        "OPENROUTER_API_KEY",
+        "OPENROUTER_MODEL",
+        "OPENAI_MODEL",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "router-key")
+    monkeypatch.setenv("OPENROUTER_MODEL", "openai/gpt-5.6-luna")
+    monkeypatch.setenv("OPENAI_MODEL", "gpt-5.6-luna")
+
+    model = ModelConfig.from_environment()
+
+    assert model.agent_provider == "openrouter"
+    assert model.chat_model == "openai/gpt-5.6-luna"
 
 
 class PermissionDeniedTransport:
@@ -263,6 +447,12 @@ class ReasoningTransport(native.ScriptedResponsesTransport):
 
 
 class _SessionContext:
+    """Stands in for the session factory; ``begin()`` is what transaction_scope opens."""
+
+    @classmethod
+    def begin(cls) -> _SessionContext:
+        return cls()
+
     async def __aenter__(self) -> _SessionContext:
         return self
 
@@ -300,10 +490,9 @@ def _install_access(monkeypatch: Any) -> tuple[UUID, UUID]:
             email="person@example.test",
             display_name="Person",
             tenant_id=tenant_id,
-            role_id=uuid4(),
-            role_code="analyst",
-            permission_codes=("admin", "knowledge.read"),
+            permission_codes=("collection.read", "collection.update", "knowledge.read"),
             group_ids=(),
+            role_codes=("analyst",),
         )
 
     _override_caller(monkeypatch, resolve_access)
@@ -322,7 +511,10 @@ def _install_access(monkeypatch: Any) -> tuple[UUID, UUID]:
             self.finished.append((_, __))
             return None
 
-        async def referenced_documents(self, *_: Any, **__: Any) -> tuple[Any, ...]:
+        async def referenced_resources(self, *_: Any, **__: Any) -> tuple[Any, ...]:
+            return ()
+
+        async def resources(self, *_: Any, **__: Any) -> tuple[Any, ...]:
             return ()
 
     monkeypatch.setattr(api_deps.get_runtime(), "_conversations", ConversationRecorder())
@@ -338,7 +530,7 @@ def _install_access(monkeypatch: Any) -> tuple[UUID, UUID]:
         return (UUID(int=12), UUID(int=14))
 
     monkeypatch.setattr(
-        "bothesis.services.collection_access.CollectionAccessService"
+        "bomesh.services.identity_access.authorization.AuthorizationService"
         ".allowed_collection_ids",
         allowed_collections,
     )
@@ -358,16 +550,15 @@ def test_collection_upload_route_accepts_multipart_without_a_connector(
         email="editor@example.test",
         display_name="Editor",
         tenant_id=tenant_id,
-        role_id=uuid4(),
-        role_code="editor",
-        permission_codes=("admin", "knowledge.read"),
+        permission_codes=("collection.read", "collection.update", "knowledge.read"),
         group_ids=(),
+        role_codes=("editor",),
     )
 
     async def resolve_access(*_: Any, **__: Any) -> AuthContext:
         return access
 
-    async def upload_to_collection(
+    async def create_document(
         caller: AuthContext,
         requested_collection_id: UUID,
         **values: Any,
@@ -375,128 +566,47 @@ def test_collection_upload_route_accepts_multipart_without_a_connector(
         assert caller is access
         assert requested_collection_id == collection_id
         assert values["idempotency_key"] == "upload-contract-1"
-        assert values["file_name"] == "policy.txt"
+        assert values["name"] == "policy.txt"
         assert values["content_type"] == "text/plain"
         assert await values["content"].read() == b"governed policy"
         return {
             "document": {
                 "id": str(uuid4()),
-                "parent_item_id": str(collection_id),
-                "file_name": "policy.txt",
+                "collection_id": str(collection_id),
+                "name": "policy.txt",
                 "content_type": "text/plain",
                 "size_bytes": 15,
-                "status": "ready",
-                "indexed": True,
-                "upload_status": "available",
+                "purpose": "knowledge",
+                "status": "available",
+                "processing": {"state": "pending", "error": None, "run_id": None},
                 "created_at": now,
-                "uploaded_at": now,
+                "updated_at": now,
             },
-            "ingestion_status": "ready",
             "created": True,
         }
 
     _override_caller(monkeypatch, resolve_access)
     monkeypatch.setitem(
         api_app.app.dependency_overrides,
-        api_deps.get_workspace_document_service,
-        lambda: SimpleNamespace(upload_to_collection=upload_to_collection),
+        api_deps.get_document_service,
+        lambda: SimpleNamespace(create_document=create_document),
     )
     with TestClient(api_app.app) as client:
         response = client.post(
-            f"/api/v1/collections/{collection_id}/documents/upload",
+            f"/api/v1/collections/{collection_id}/documents",
             headers={
                 "Idempotency-Key": "upload-contract-1",
-                "X-Bothesis-Tenant-Id": str(tenant_id),
-                "X-Bothesis-User-Id": str(user_id),
+                "X-Bomesh-Tenant-Id": str(tenant_id),
+                "X-Bomesh-User-Id": str(user_id),
             },
             files={"file": ("policy.txt", b"governed policy", "text/plain")},
         )
 
-    assert response.status_code == 201
-    assert response.json()["document"]["parent_item_id"] == str(collection_id)
-    assert response.json()["ingestion_status"] == "ready"
+    assert response.status_code == 201, response.text
+    assert response.json()["document"]["collection_id"] == str(collection_id)
+    assert response.json()["document"]["status"] == "available"
+    assert response.json()["document"]["processing"]["state"] == "pending"
 
-
-@pytest.mark.asyncio
-async def test_collection_upload_reports_ingestion_dispatch_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    user_id = uuid4()
-    tenant_id = uuid4()
-    collection_id = uuid4()
-    now = datetime.now(UTC)
-    upload_record = SimpleNamespace(status="available", uploaded_at=now)
-    document = SimpleNamespace(
-        id=uuid4(),
-        parent_item_id=collection_id,
-        title="policy.txt",
-        mime_type="text/plain",
-        size_bytes=15,
-        status="ready",
-        metadata_={"file_name": "policy.txt"},
-        upload=upload_record,
-        created_at=now,
-    )
-    access = AuthContext(
-        user_id=user_id,
-        email="editor@example.test",
-        display_name="Editor",
-        tenant_id=tenant_id,
-        role_id=uuid4(),
-        role_code="editor",
-        permission_codes=(),
-        group_ids=(),
-    )
-
-    class Uploads:
-        attempts = 0
-
-        async def upload_to_collection(self, *_: Any, **__: Any) -> Any:
-            self.attempts += 1
-            document.status = "failed"
-            return SimpleNamespace(item=document, created=True)
-
-        async def retry_indexing(self, *_: Any, **__: Any) -> Any:
-            self.attempts += 1
-            document.status = "ready"
-            document.metadata_["processing"] = {"index_schema_version": "test"}
-            return document
-
-    async def record_audit(*_: Any, **__: Any) -> None:
-        return None
-
-    monkeypatch.setattr(workspace_documents_module.AuditService, "record", record_audit)
-    service = WorkspaceDocumentService(
-        _SessionContext,
-        uploads=Uploads(),
-        presenter=DocumentPresenter(
-            object_storage=lambda: None,
-            preview=SimpleNamespace(resolve=lambda *_, **__: None),
-            citation_url_seconds=300,
-            preview_url_seconds=300,
-        ),
-    )
-
-    result = await service.upload_to_collection(
-        access,
-        collection_id,
-        idempotency_key="dispatch-failure",
-        file_name="policy.txt",
-        content_type="text/plain",
-        content=SimpleNamespace(read=lambda *_: b""),
-    )
-
-    assert result["created"] is True
-    assert result["ingestion_status"] == "failed"
-    assert result["document"]["status"] == "failed"
-    assert result["document"]["parent_item_id"] == str(collection_id)
-
-    retried = await service.retry_indexing(access, document.id)
-
-    assert retried["created"] is False
-    assert retried["ingestion_status"] == "ready"
-    assert retried["document"]["status"] == "ready"
-    assert retried["document"]["indexed"] is True
 
 
 def test_qdrant_citation_does_not_synthesize_element_ranges() -> None:
@@ -557,7 +667,7 @@ def test_chat_api_streams_agent_retrieval_and_sources(monkeypatch) -> None:
     agent = Agent(
         transport,
         registry,
-        config=AgentConfig(
+        configuration=SessionConfiguration(
             max_model_turns=3,
             max_tool_rounds=2,
             recent_history_messages=2,
@@ -580,8 +690,7 @@ def test_chat_api_streams_agent_retrieval_and_sources(monkeypatch) -> None:
                     {"role": "user", "content": "Recent scope question"},
                     {"role": "assistant", "content": "Recent scope answer"},
                 ],
-                "knowledge_mode": "selected",
-                "collection_item_ids": [str(UUID(int=12))],
+                "collection_ids": [str(UUID(int=12))],
             },
         )
 
@@ -612,7 +721,7 @@ def test_chat_api_streams_agent_retrieval_and_sources(monkeypatch) -> None:
         for event in events
         if event["type"] == "response.output_text.annotation.added"
     )
-    assert annotation["type"] == "bothesis:document_citation"
+    assert annotation["type"] == "bomesh:document_citation"
     assert annotation["citation"]["item_id"] == "doc-1"
     assert annotation["citation"]["chunk_id"] == "chunk-1"
     assert annotation["citation"]["reference"] == "ref_1"
@@ -638,7 +747,7 @@ def test_chat_api_streams_agent_retrieval_and_sources(monkeypatch) -> None:
         {
             "type": "message",
             "role": "user",
-            "content": "<user_message>What is the leave policy?</user_message>",
+            "content": "What is the leave policy?",
         },
     ]
 
@@ -651,7 +760,7 @@ class IndexedChunkIndex:
 
     async def search_item_content(
         self,
-        query: str,
+        queries: Sequence[str],
         *,
         limit: int,
         tenant_id: str,
@@ -697,8 +806,8 @@ def test_chat_api_resolves_a_cited_source_reference_to_canonical_metadata(
     captured_context: list[str] = []
 
     class ContextCapturingSearch(KnowledgeSearch):
-        async def execute(self, arguments, ctx):  # type: ignore[no-untyped-def]
-            output = await super().execute(arguments, ctx)
+        async def handle(self, invocation):  # type: ignore[no-untyped-def]
+            output = await super().handle(invocation)
             captured_context.append(output.content)
             return output
 
@@ -724,7 +833,7 @@ def test_chat_api_resolves_a_cited_source_reference_to_canonical_metadata(
     agent = Agent(
         transport,
         registry,
-        config=AgentConfig(max_model_turns=3, max_tool_rounds=2),
+        configuration=SessionConfiguration(max_model_turns=3, max_tool_rounds=2),
     )
     monkeypatch.setattr(api_deps.get_runtime(), "_agent", agent)
     user_id, tenant_id = _install_access(monkeypatch)
@@ -736,8 +845,7 @@ def test_chat_api_resolves_a_cited_source_reference_to_canonical_metadata(
                 "message": "How much annual leave is there?",
                 "tenant_id": str(tenant_id),
                 "user_id": str(user_id),
-                "knowledge_mode": "selected",
-                "collection_item_ids": [str(UUID(int=12))],
+                "collection_ids": [str(UUID(int=12))],
             },
         )
 
@@ -749,7 +857,7 @@ def test_chat_api_resolves_a_cited_source_reference_to_canonical_metadata(
     ]
 
     # The model context offers the citation reference and the canonical
-    # Document ID (provenance for artifact_create), but withholds the raw
+    # Document ID for provenance, but withholds the raw
     # chunk identifier — only the compact reference may ever be cited.
     assert f"Source reference: {reference}" in captured_context[0]
     assert f"Document ID: {chunk.item_id}" in captured_context[0]
@@ -772,7 +880,7 @@ def test_chat_api_resolves_a_cited_source_reference_to_canonical_metadata(
         if event["type"] == "response.output_text.annotation.added"
     )
     citation = annotation["citation"]
-    assert annotation["type"] == "bothesis:document_citation"
+    assert annotation["type"] == "bomesh:document_citation"
     # The index range brackets the marker, so position survives serialization.
     assert answer[annotation["start_index"] : annotation["end_index"]] == "[1]"
     assert citation["number"] == 1
@@ -783,7 +891,7 @@ def test_chat_api_resolves_a_cited_source_reference_to_canonical_metadata(
     assert citation["title"] == "Leave policy"
     assert citation["page_start"] == 7
     assert citation["internal_url"] == (
-        f"/knowledge/items/{chunk.item_id}?chunk={quote(chunk.id, safe='')}"
+        f"/knowledge/documents/{chunk.item_id}?chunk={quote(chunk.id, safe='')}"
     )
     # No infrastructure detail reaches the client.
     assert not {"collection_name", "point_id", "storage_key", "vector"} & set(citation)
@@ -797,7 +905,7 @@ class TwoChunkIndex:
 
     async def search_item_content(
         self,
-        query: str,
+        queries: Sequence[str],
         *,
         limit: int,
         tenant_id: str,
@@ -852,7 +960,7 @@ def test_chat_api_places_repeated_and_multiple_citations_inline(monkeypatch) -> 
         Agent(
             transport,
             registry,
-            config=AgentConfig(max_model_turns=3, max_tool_rounds=2),
+            configuration=SessionConfiguration(max_model_turns=3, max_tool_rounds=2),
         ),
     )
     user_id, tenant_id = _install_access(monkeypatch)
@@ -864,8 +972,7 @@ def test_chat_api_places_repeated_and_multiple_citations_inline(monkeypatch) -> 
                 "message": "How many VPC endpoints do I need?",
                 "tenant_id": str(tenant_id),
                 "user_id": str(user_id),
-                "knowledge_mode": "selected",
-                "collection_item_ids": [str(UUID(int=12))],
+                "collection_ids": [str(UUID(int=12))],
             },
         )
 
@@ -964,22 +1071,22 @@ def test_document_search_api_uses_authorized_retrieval_scope(monkeypatch) -> Non
         response = client.post(
             "/api/v1/documents/search",
             headers={
-                "X-Bothesis-Tenant-Id": str(tenant_id),
-                "X-Bothesis-User-Id": str(user_id),
+                "X-Bomesh-Tenant-Id": str(tenant_id),
+                "X-Bomesh-User-Id": str(user_id),
             },
             json={
                 "query": "annual leave",
                 "top_k": 4,
-                "collection_item_ids": [str(collection_id)],
+                "collection_ids": [str(collection_id)],
             },
         )
 
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["total"] == 1
-    assert payload["results"][0]["id"] == str(item_id)
-    assert payload["results"][0]["metadata"]["chunk_id"] == "chunk-1"
-    assert payload["results"][0]["metadata"]["citation"]["page_start"] == 2
+    assert payload["items"][0]["document_id"] == str(item_id)
+    assert payload["items"][0]["metadata"]["chunk_id"] == "chunk-1"
+    assert payload["items"][0]["metadata"]["citation"]["page_start"] == 2
     assert retriever.contexts[0].tenant_id == str(tenant_id)
     assert retriever.contexts[0].collection_item_ids == (str(collection_id),)
 
@@ -1060,12 +1167,15 @@ async def test_a_reasoning_item_replays_as_a_canonical_input_item() -> None:
     assert "private raw reasoning" not in json.dumps(replayed)
 
 
-# Incremental delta forwarding, citation-boundary buffering and literal-bracket
-# handling are covered by tests/bothesis/agent/test_conversation_loop.py, which
-# exercises the same paths without going through the HTTP layer.
+# Incremental delta forwarding, citation-boundary buffering, and literal-bracket
+# handling are covered by tests/bomesh/agent/test_turn_runtime.py.
 
 
-def test_chat_api_rejects_unbounded_history() -> None:
+def test_chat_api_rejects_unbounded_history(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Request validation is the whole subject: no runtime is composed.
+    monkeypatch.setitem(
+        api_app.app.dependency_overrides, api_deps.get_chat_service, lambda: None
+    )
     with TestClient(api_app.app) as client:
         response = client.post(
             "/api/v1/agent/chat",
@@ -1083,7 +1193,11 @@ def test_chat_api_rejects_unbounded_history() -> None:
     assert response.status_code == 422
 
 
-def test_chat_api_rejects_history_message_over_context_budget() -> None:
+def test_chat_api_rejects_history_message_over_context_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Request validation is the whole subject: no runtime is composed.
+    monkeypatch.setitem(
+        api_app.app.dependency_overrides, api_deps.get_chat_service, lambda: None
+    )
     with TestClient(api_app.app) as client:
         response = client.post(
             "/api/v1/agent/chat",
@@ -1099,161 +1213,19 @@ def test_chat_api_rejects_history_message_over_context_budget() -> None:
     assert response.status_code == 422
 
 
-def test_chat_request_requires_a_bounded_explicit_collection_selection() -> None:
-    with pytest.raises(ValueError, match="requires at least one Collection"):
-        ChatRequest(message="hello", knowledge_mode="selected")
-
+def test_chat_request_accepts_an_optional_bounded_collection_selection() -> None:
     request = ChatRequest(
         message="hello",
-        knowledge_mode="selected",
-        collection_item_ids=[UUID(int=12), UUID(int=14)],
+        collection_ids=[UUID(int=12), UUID(int=14)],
     )
 
-    assert request.collection_item_ids == [UUID(int=12), UUID(int=14)]
-
-
-class StubArtifactService:
-    """Stand in for ArtifactService: no sandbox, storage, or database."""
-
-    def __init__(self, artifact_id: UUID) -> None:
-        self.artifact_id = artifact_id
-        self.created: list[dict[str, Any]] = []
-
-    async def resolve_access(self, scope: Any) -> AuthContext:
-        return AuthContext(
-            user_id=UUID(scope.user_id),
-            email="person@example.test",
-            display_name="Person",
-            tenant_id=UUID(scope.tenant_id),
-            role_id=None,
-            role_code="analyst",
-            permission_codes=("knowledge.read",),
-            group_ids=(),
-        )
-
-    async def create_from_content(self, access: AuthContext, **values: Any) -> dict[str, Any]:
-        self.created.append(values)
-        return {
-            "id": str(self.artifact_id),
-            "title": values["title"],
-            "file_name": "memo.md",
-            "mime_type": "text/markdown",
-            "size_bytes": 24,
-            "revision": 1,
-            "revision_count": 1,
-            "conversation_id": str(values["conversation_id"]),
-            "source_document_id": None,
-            "created_at": "2026-09-06T00:00:00+00:00",
-            "updated_at": "2026-09-06T00:00:00+00:00",
-            "download_url": None,
-            "exports": {},
-            "revisions": [],
-        }
-
-
-class ArtifactTurnTransport(native.ScriptedResponsesTransport):
-    """Create a document, then present it."""
-
-    def __init__(self) -> None:
-        super().__init__(
-            [
-                [
-                    *native.created("resp_a"),
-                    *native.message(
-                        item_id="msg_1",
-                        output_index=0,
-                        deltas=["Drafting the memo now."],
-                        phase="commentary",
-                    ),
-                    *native.function_call(
-                        item_id="fc_1",
-                        output_index=1,
-                        call_id="create-1",
-                        name="artifact_create",
-                        argument_deltas=[
-                            '{"title":"Q3 memo","source_document_id":null,'
-                            '"content":"# Q3 memo\\n\\nDraft."}'
-                        ],
-                    ),
-                    *native.completed("resp_a"),
-                ],
-                [
-                    *native.created("resp_b"),
-                    *native.message(
-                        item_id="msg_2",
-                        output_index=0,
-                        deltas=["The memo is ready."],
-                        phase="final_answer",
-                    ),
-                    *native.completed("resp_b"),
-                ],
-            ]
-        )
-
-
-def test_chat_api_presents_a_created_artifact_on_the_answer(monkeypatch) -> None:
-    artifact_id = uuid4()
-    artifacts = StubArtifactService(artifact_id)
-    registry = ToolRegistry()
-    registry.register(ArtifactCreate(artifacts))  # type: ignore[arg-type]
-    agent = Agent(
-        ArtifactTurnTransport(),
-        registry,
-        config=AgentConfig(max_model_turns=3, max_tool_rounds=2),
-    )
-    monkeypatch.setattr(api_deps.get_runtime(), "_agent", agent)
-    user_id, tenant_id = _install_access(monkeypatch)
-    conversation_id = uuid4()
-
-    with TestClient(api_app.app) as client:
-        response = client.post(
-            "/api/v1/agent/chat",
-            json={
-                "message": "Draft a Q3 memo",
-                "tenant_id": str(tenant_id),
-                "user_id": str(user_id),
-                "conversation_id": str(conversation_id),
-                "history": [],
-                "knowledge_mode": "off",
-                "collection_item_ids": [],
-            },
-        )
-
-    assert response.status_code == 200, response.text
-    events = [
-        json.loads(line.removeprefix("data: "))
-        for line in response.text.splitlines()
-        if line.startswith("data: ")
-    ]
-    # The tool ran under the authenticated caller and the conversation identity.
-    assert artifacts.created[0]["conversation_id"] == conversation_id
-    assert artifacts.created[0]["title"] == "Q3 memo"
-    # The artifact is presented as an annotation on the answer text, exactly
-    # the way citations are: no new event type, no second vocabulary.
-    annotations = [
-        event for event in events if event["type"] == "response.output_text.annotation.added"
-    ]
-    assert len(annotations) == 1
-    annotation = annotations[0]["annotation"]
-    assert annotation["type"] == "bothesis:artifact"
-    assert annotation["artifact"]["id"] == str(artifact_id)
-    assert annotation["artifact"]["revision"] == 1
-    assert annotation["start_index"] == annotation["end_index"] == len("The memo is ready.")
-    assert "content" not in annotation["artifact"]
-    # The commentary that preceded the tool call is not annotated: the
-    # document did not exist yet when that response settled.
-    settled = [event["response"] for event in events if event["type"] == "response.completed"]
-    assert settled[0]["output"][0]["content"][0]["annotations"] == []
-    assert settled[1]["output"][0]["content"][0]["annotations"][0]["type"] == "bothesis:artifact"
-    # The assistant message is linked to the document as its output.
-    conversations = api_deps.get_runtime()._conversations
-    assert conversations.finished[0][1]["artifact_ids"] == (artifact_id,)
+    assert request.collection_ids == [UUID(int=12), UUID(int=14)]
 
 
 def test_artifact_routes_delegate_to_the_service_and_map_missing_documents(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from bothesis.services import DocumentNotFoundError
+    from bomesh.services import DocumentNotFoundError
 
     artifact_id = uuid4()
     access = AuthContext(
@@ -1261,10 +1233,9 @@ def test_artifact_routes_delegate_to_the_service_and_map_missing_documents(
         email="person@example.test",
         display_name="Person",
         tenant_id=uuid4(),
-        role_id=None,
-        role_code="analyst",
         permission_codes=("knowledge.read",),
         group_ids=(),
+        role_codes=("analyst",),
     )
     detail = {
         "id": str(artifact_id),
@@ -1279,10 +1250,9 @@ def test_artifact_routes_delegate_to_the_service_and_map_missing_documents(
         "created_at": "2026-09-06T00:00:00+00:00",
         "updated_at": "2026-09-06T00:01:00+00:00",
         "download_url": "https://storage.example/memo.md",
-        "exports": {"pdf": {"file_name": "Q3-memo.pdf", "size_bytes": 2030, "download_url": "https://storage.example/memo.pdf"}},
         "revisions": [
-            {"revision": 1, "summary": "Created from the conversation", "size_bytes": 20, "created_at": "2026-09-06T00:00:00+00:00", "download_url": None, "exports": {}},
-            {"revision": 2, "summary": "Changed the date", "size_bytes": 24, "created_at": "2026-09-06T00:01:00+00:00", "download_url": None, "exports": {}},
+            {"revision": 1, "summary": "Produced Q3-memo.md", "size_bytes": 20, "created_at": "2026-09-06T00:00:00+00:00", "download_url": None},
+            {"revision": 2, "summary": "Produced Q3-memo.md", "size_bytes": 24, "created_at": "2026-09-06T00:01:00+00:00", "download_url": None},
         ],
     }
 
@@ -1290,16 +1260,10 @@ def test_artifact_routes_delegate_to_the_service_and_map_missing_documents(
         return access
 
     class Artifacts:
-        exported: list[tuple[UUID, str]] = []
-
         async def get(self, caller: AuthContext, requested: UUID) -> dict[str, Any]:
             assert caller is access
             if requested != artifact_id:
                 raise DocumentNotFoundError("artifact not found")
-            return detail
-
-        async def export(self, caller: AuthContext, requested: UUID, *, format: str) -> dict[str, Any]:
-            self.exported.append((requested, format))
             return detail
 
         async def content(self, caller: AuthContext, requested: UUID, *, revision: int | None) -> dict[str, Any]:
@@ -1307,17 +1271,14 @@ def test_artifact_routes_delegate_to_the_service_and_map_missing_documents(
 
     _override_caller(monkeypatch, resolve_access)
     monkeypatch.setitem(api_app.app.dependency_overrides, api_deps.get_artifact_service, Artifacts)
-    headers = {"X-Bothesis-Tenant-Id": str(access.tenant_id), "X-Bothesis-User-Id": str(access.user_id)}
+    headers = {"X-Bomesh-Tenant-Id": str(access.tenant_id), "X-Bomesh-User-Id": str(access.user_id)}
     with TestClient(api_app.app) as client:
         found = client.get(f"/api/v1/artifacts/{artifact_id}", headers=headers)
         missing = client.get(f"/api/v1/artifacts/{uuid4()}", headers=headers)
-        exported = client.post(f"/api/v1/artifacts/{artifact_id}/export", json={"format": "pdf"}, headers=headers)
         content = client.get(f"/api/v1/artifacts/{artifact_id}/revisions/2/content", headers=headers)
 
     assert found.status_code == 200, found.text
     assert found.json()["revision"] == 2
-    assert found.json()["exports"]["pdf"]["download_url"] == "https://storage.example/memo.pdf"
     assert [row["revision"] for row in found.json()["revisions"]] == [1, 2]
     assert missing.status_code == 404
-    assert exported.status_code == 200 and Artifacts.exported == [(artifact_id, "pdf")]
     assert content.status_code == 200 and content.json()["content"] == "# Q3 memo"

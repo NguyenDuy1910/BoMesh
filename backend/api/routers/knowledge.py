@@ -1,37 +1,90 @@
-"""Knowledge routes: resolve a citation or open a document viewer."""
+"""Permission-filtered knowledge projections."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+from typing import Any
+from uuid import UUID
+
+from fastapi import APIRouter
+from pydantic import BaseModel
 
 from api.deps import Caller, KnowledgeView
-from api.routers import KnowledgeCitationResponse, KnowledgeItemViewer
+from api.routers import Collection, Document, DocumentStatus, KnowledgeHomeResponse
+from bomesh.services.document_presentation import public_document_status
+
+
+class KnowledgeDocumentViewer(BaseModel):
+    document_id: UUID
+    title: str
+    content_type: str
+    status: DocumentStatus
+    document_url: str | None = None
+    external_url: str | None = None
+    #: Rendered pages or the original behind short-lived signed URLs.
+    preview: dict[str, Any] | None = None
+    elements: list[dict[str, Any]]
+    #: The requested passage (`?chunk=`) and its citation, to open the viewer at.
+    focus: dict[str, Any] | None = None
+
+
+class KnowledgeDocumentCitation(BaseModel):
+    document_id: UUID
+    chunk_id: str
+    title: str
+    content_type: str
+    citation: dict[str, Any]
+
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
 
+@router.get("/home", response_model=KnowledgeHomeResponse)
+async def get_knowledge_home(
+    caller: Caller, knowledge: KnowledgeView
+) -> KnowledgeHomeResponse:
+    value = await knowledge.get_workspace_home(caller)
+    return KnowledgeHomeResponse(
+        collections=[
+            Collection.model_validate(item) for item in value.get("items", [])
+        ],
+        recent_documents=[
+            Document.model_validate(item)
+            for item in value.get("recent_documents", [])
+        ],
+        personal_collection_id=value.get("personal_collection_id"),
+    )
+
+
+@router.get("/documents/{document_id}", response_model=KnowledgeDocumentViewer)
+async def get_knowledge_document(
+    document_id: UUID,
+    caller: Caller,
+    knowledge: KnowledgeView,
+    chunk: str | None = None,
+) -> KnowledgeDocumentViewer:
+    value = await knowledge.get_item(
+        caller, item_id=str(document_id), chunk_id=chunk
+    )
+    value["document_id"] = value.pop("item_id")
+    value["status"] = public_document_status(value.get("status"))
+    return KnowledgeDocumentViewer.model_validate(value)
+
+
 @router.get(
-    "/items/{item_id:path}/citations/{chunk_id:path}",
-    response_model=KnowledgeCitationResponse,
+    "/documents/{document_id}/citations/{chunk_id}",
+    response_model=KnowledgeDocumentCitation,
 )
-async def get_knowledge_citation(
-    item_id: str,
+async def get_knowledge_document_citation(
+    document_id: UUID,
     chunk_id: str,
     caller: Caller,
     knowledge: KnowledgeView,
-) -> KnowledgeCitationResponse:
-    return KnowledgeCitationResponse.model_validate(
-        await knowledge.get_citation(caller, item_id=item_id, chunk_id=chunk_id)
+) -> KnowledgeDocumentCitation:
+    value = await knowledge.get_citation(
+        caller, item_id=str(document_id), chunk_id=chunk_id
     )
+    value["document_id"] = value.pop("item_id")
+    return KnowledgeDocumentCitation.model_validate(value)
 
 
-@router.get("/items/{item_id:path}", response_model=KnowledgeItemViewer)
-async def get_knowledge_item_viewer(
-    item_id: str,
-    caller: Caller,
-    knowledge: KnowledgeView,
-    chunk: str | None = Query(default=None, min_length=1, max_length=512),
-) -> KnowledgeItemViewer:
-    return KnowledgeItemViewer.model_validate(
-        await knowledge.get_item(caller, item_id=item_id, chunk_id=chunk)
-    )
+__all__ = ["router"]

@@ -6,142 +6,206 @@ import '../models/chat_models.dart';
 
 class ConversationStore {
   ConversationStore({
-    required String userNamespace,
+    required String namespace,
     SharedPreferencesAsync? preferences,
-  }) : _userNamespace = userNamespace.trim().toLowerCase().isEmpty
-           ? 'anonymous'
-           : userNamespace.trim().toLowerCase(),
-       _preferences = preferences ?? SharedPreferencesAsync();
+  }) : _namespace = Uri.encodeComponent(namespace),
+       _preferences = preferences ?? SharedPreferencesAsync() {
+    if (namespace.isEmpty) throw ArgumentError.value(namespace, 'namespace');
+  }
 
-  final String _userNamespace;
+  final String _namespace;
   final SharedPreferencesAsync _preferences;
+  static final Map<String, Future<void>> _pendingWrites = {};
+  Future<void> get _writes =>
+      _pendingWrites[_namespace] ?? Future<void>.value();
+  set _writes(Future<void> value) => _pendingWrites[_namespace] = value;
 
-  String get _conversationKey => 'bothesis-conversations:$_userNamespace';
-  String _messageKey(String id) => 'bothesis-messages:$_userNamespace:$id';
+  // Unscoped legacy caches are deliberately not imported into authenticated sessions.
+  String get _conversationKey => 'bomesh-chat-v2:$_namespace:conversations';
+  String _messageKey(String id) => 'bomesh-chat-v2:$_namespace:messages:$id';
+  String get _selectionKey => 'bomesh-chat-v2:$_namespace:selected';
+
+  Future<String?> selectedConversation() async {
+    await _writes;
+    return _preferences.getString(_selectionKey);
+  }
+
+  Future<void> selectConversation(String? id) =>
+      _enqueue(() => _preferences.setString(_selectionKey, id ?? ''));
+
+  Future<void> _enqueue(Future<void> Function() action) {
+    final result = _writes.then((_) => action());
+    _writes = result.catchError((Object _) {});
+    return result;
+  }
 
   Future<List<ChatConversation>> listConversations() async {
-    final conversations = await _readConversations();
-    return conversations
-        .where((conversation) => conversation.deletedAt == null)
-        .toList()
-      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-  }
-
-  Future<ChatConversation> createConversation({
-    required String id,
-    required String title,
-  }) async {
-    final conversations = await _readConversations();
-    final existingIndex = conversations.indexWhere(
-      (conversation) => conversation.id == id,
+    await _writes;
+    final values = await _readConversations();
+    values.sort(
+      (a, b) => a.pinned == b.pinned
+          ? b.updatedAt.compareTo(a.updatedAt)
+          : a.pinned
+          ? -1
+          : 1,
     );
-    final now = DateTime.now();
-    if (existingIndex >= 0) {
-      final restored = ChatConversation(
-        id: id,
-        title: title,
-        titleSource: conversations[existingIndex].titleSource,
-        createdAt: conversations[existingIndex].createdAt,
-        updatedAt: now,
-      );
-      conversations[existingIndex] = restored;
-      await _writeConversations(conversations);
-      return restored;
-    }
-    final created = ChatConversation(
-      id: id,
-      title: title,
-      createdAt: now,
-      updatedAt: now,
-    );
-    await _writeConversations(<ChatConversation>[created, ...conversations]);
-    return created;
-  }
-
-  Future<void> saveMessages(String id, List<ChatMessage> messages) async {
-    final bounded = messages.length > 100
-        ? messages.sublist(messages.length - 100)
-        : messages;
-    await _preferences.setString(
-      _messageKey(id),
-      jsonEncode(bounded.map((message) => message.toJson()).toList()),
-    );
+    return values;
   }
 
   Future<List<ChatMessage>> getMessages(String id) async {
+    await _writes;
     final raw = await _preferences.getString(_messageKey(id));
-    if (raw == null) return <ChatMessage>[];
-    try {
-      final decoded = jsonDecode(raw);
-      if (decoded is! List) return <ChatMessage>[];
-      return decoded
-          .whereType<Map>()
-          .map(
-            (message) =>
-                ChatMessage.fromJson(Map<String, dynamic>.from(message)),
-          )
-          .toList();
-    } on FormatException {
-      return <ChatMessage>[];
+    if (raw == null) return [];
+    final values = jsonDecode(raw);
+    if (values is! List) {
+      throw const FormatException('Saved conversation is invalid.');
     }
+    return values.whereType<Map>().map((value) {
+      final message = ChatMessage.fromJson(Map<String, dynamic>.from(value));
+      if (message.turn?.status == 'streaming') {
+        message.turn!
+          ..status = 'failed'
+          ..modelPending = false
+          ..error = 'This response was interrupted. Retry to continue.';
+      }
+      return message;
+    }).toList();
   }
 
-  Future<void> updateConversation(
-    String id, {
-    required String title,
-    required String titleSource,
-  }) async {
-    final conversations = await _readConversations();
-    final index = conversations.indexWhere(
-      (conversation) => conversation.id == id && conversation.deletedAt == null,
+  Future<void> saveConversation(
+    String id,
+    String title,
+    List<ChatMessage> messages,
+  ) {
+    final encoded = jsonEncode(
+      messages.map((message) => message.toJson()).toList(),
     );
-    if (index < 0) return;
-    conversations[index] = conversations[index].copyWith(
-      title: title,
-      titleSource: titleSource,
-      updatedAt: DateTime.now(),
-    );
-    await _writeConversations(conversations);
+    final now = DateTime.now();
+    final files = {
+      for (final message in messages) ...[
+        ...message.documents.map((document) => 'document:${document.id}'),
+        ...?message.turn?.artifacts.map(
+          (artifact) => 'artifact:${artifact.id}',
+        ),
+      ],
+    }.length;
+    return _enqueue(() async {
+      final values = await _readConversations();
+      final index = values.indexWhere((value) => value.id == id);
+      if (index < 0) {
+        values.add(
+          ChatConversation(
+            id: id,
+            title: title,
+            createdAt: now,
+            updatedAt: now,
+            fileCount: files,
+          ),
+        );
+      } else {
+        values[index] = values[index].copyWith(
+          updatedAt: now,
+          fileCount: files,
+        );
+      }
+      await _preferences.setString(_messageKey(id), encoded);
+      await _writeConversations(values);
+    });
   }
 
-  Future<void> hideConversation(String id) async {
-    final conversations = await _readConversations();
-    final index = conversations.indexWhere(
-      (conversation) => conversation.id == id && conversation.deletedAt == null,
-    );
+  Future<void> renameConversation(String id, String title) =>
+      _enqueue(() async {
+        final values = await _readConversations();
+        final index = values.indexWhere((value) => value.id == id);
+        if (index < 0) return;
+        values[index] = values[index].copyWith(
+          title: title,
+          titleSource: 'custom',
+        );
+        await _writeConversations(values);
+      });
+
+  Future<void> pinConversation(String id, bool pinned) => _enqueue(() async {
+    final values = await _readConversations();
+    final index = values.indexWhere((value) => value.id == id);
     if (index < 0) return;
-    conversations[index] = conversations[index].copyWith(
-      updatedAt: DateTime.now(),
-      deletedAt: DateTime.now(),
-    );
-    await _writeConversations(conversations);
+    values[index] = values[index].copyWith(pinned: pinned);
+    await _writeConversations(values);
+  });
+
+  Future<void> deleteConversation(String id) => _enqueue(() async {
+    final values = await _readConversations();
+    values.removeWhere((value) => value.id == id);
+    await _writeConversations(values);
+    await _preferences.remove(_messageKey(id));
+    if (await _preferences.getString(_selectionKey) == id) {
+      await _preferences.setString(_selectionKey, '');
+    }
+  });
+
+  Future<Set<String>> referencedDocumentIds({String? excluding}) async {
+    final result = <String>{};
+    for (final conversation in await listConversations()) {
+      if (conversation.id == excluding) continue;
+      final messages = await getMessages(conversation.id);
+      result.addAll(
+        messages
+            .expand((message) => message.documents)
+            .map((document) => document.id),
+      );
+      result.addAll(
+        messages
+            .expand(
+              (message) => message.turn?.sources ?? const <AnswerSource>[],
+            )
+            .map((source) => source.itemId),
+      );
+    }
+    return result;
+  }
+
+  Future<Set<String>> search(String query) async {
+    final needle = query.toLowerCase().trim();
+    final found = <String>{};
+    for (final conversation in await listConversations()) {
+      if (conversation.title.toLowerCase().contains(needle)) {
+        found.add(conversation.id);
+      } else {
+        final messages = await getMessages(conversation.id);
+        if (messages.any(
+          (message) =>
+              message.displayText.toLowerCase().contains(needle) ||
+              message.documents.any(
+                (document) => document.fileName.toLowerCase().contains(needle),
+              ),
+        )) {
+          found.add(conversation.id);
+        }
+      }
+    }
+    return found;
   }
 
   Future<List<ChatConversation>> _readConversations() async {
     final raw = await _preferences.getString(_conversationKey);
-    if (raw == null) return <ChatConversation>[];
-    try {
-      final decoded = jsonDecode(raw);
-      if (decoded is! List) return <ChatConversation>[];
-      return decoded
-          .whereType<Map>()
-          .map(
-            (conversation) => ChatConversation.fromJson(
-              Map<String, dynamic>.from(conversation),
-            ),
-          )
-          .toList();
-    } on FormatException {
-      return <ChatConversation>[];
+    if (raw == null) return [];
+    final values = jsonDecode(raw);
+    if (values is! List) {
+      throw const FormatException('Saved conversation history is invalid.');
     }
+    return values
+        .whereType<Map>()
+        .map(
+          (value) =>
+              ChatConversation.fromJson(Map<String, dynamic>.from(value)),
+        )
+        .where((conversation) => conversation.deletedAt == null)
+        .toList();
   }
 
-  Future<void> _writeConversations(List<ChatConversation> conversations) async {
-    await _preferences.setString(
-      _conversationKey,
-      jsonEncode(
-        conversations.map((conversation) => conversation.toJson()).toList(),
-      ),
-    );
-  }
+  Future<void> _writeConversations(List<ChatConversation> values) =>
+      _preferences.setString(
+        _conversationKey,
+        jsonEncode(values.map((value) => value.toJson()).toList()),
+      );
 }

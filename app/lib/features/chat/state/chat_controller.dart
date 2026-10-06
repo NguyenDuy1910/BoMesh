@@ -1,287 +1,461 @@
 import 'dart:async';
-import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 
-import '../../../app/app_config.dart';
+import '../../../core/api_client.dart';
+import '../../../core/uploads.dart';
+import '../../auth/session.dart';
 import '../models/chat_models.dart';
 import '../models/chat_stream.dart';
 import '../services/chat_service.dart';
 import '../services/conversation_store.dart';
 
 class ChatController extends ChangeNotifier {
-  ChatController(this._service, this._store) : _draftId = _newUuid();
+  ChatController(this.service, this._store, this.session)
+    : _draftId = newRequestId();
 
-  final ChatService _service;
+  final ChatService service;
   final ConversationStore _store;
+  final AuthSession session;
+  ApiClient get api => service.api;
 
-  List<ChatConversation> conversations = <ChatConversation>[];
-  List<ChatMessage> messages = <ChatMessage>[];
-  List<ChatConnector> connectors = <ChatConnector>[];
-  List<ComposerAttachment> attachments = <ComposerAttachment>[];
-  Set<String> selectedConnectorIds = <String>{};
-  ChatConnectorMode connectorMode = ChatConnectorMode.auto;
+  List<ChatConversation> conversations = [];
+  List<ChatMessage> messages = [];
+  List<ChatCollection> collections = [];
+  List<ComposerAttachment> attachments = [];
+  Set<String> selectedCollectionIds = {};
   ChatStatus status = ChatStatus.ready;
   String? activeConversationId;
   String? error;
-  String? connectorsError;
+  String? collectionsError;
   bool isLoading = true;
-  bool connectorsLoading = false;
+  bool collectionsLoading = false;
+  String draftText = '';
+  int draftRevision = 0;
 
   String _draftId;
   ChatStreamHandle? _activeHandle;
-  String? _activeAssistantId;
+  ChatTurnState? _activeTurn;
   int _runToken = 0;
+  int _viewToken = 0;
   bool _disposed = false;
+  Timer? _saveTimer;
+  final Set<String> _deletingConversations = {};
 
-  bool get isConfigured => AppConfig.isConfigured;
+  bool get isConfigured =>
+      service.isCurrentSession && session.can('knowledge.read');
   bool get isGenerating => status != ChatStatus.ready;
   bool get isUploading => attachments.any(
-    (attachment) => switch (attachment.progress) {
-      UploadProgress.starting ||
-      UploadProgress.uploading ||
-      UploadProgress.validating => true,
-      _ => false,
-    },
+    (value) =>
+        value.progress != UploadProgress.ready &&
+        value.progress != UploadProgress.failed,
   );
   String get conversationId => activeConversationId ?? _draftId;
-  String get conversationTitle =>
-      conversations
-          .where((conversation) => conversation.id == activeConversationId)
-          .map((conversation) => conversation.title)
-          .firstOrNull ??
-      'New conversation';
-  bool get hasMessageError =>
-      messages.any((message) => message.turn?.status == 'failed');
-  List<ChatConnector> get selectedConnectors => connectors
-      .where((connector) => selectedConnectorIds.contains(connector.id))
+  List<ChatCollection> get selectedCollections => collections
+      .where((value) => selectedCollectionIds.contains(value.id))
       .toList();
+  bool get hasUnavailableScope =>
+      !collectionsLoading &&
+      selectedCollectionIds.isNotEmpty &&
+      selectedCollections.length != selectedCollectionIds.length;
 
-  String? get activityConnectorLabel {
-    if (connectorMode == ChatConnectorMode.selected) {
-      if (selectedConnectors.length == 1) {
-        return selectedConnectors.first.displayName;
-      }
-      if (selectedConnectors.length > 1) return 'selected sources';
-    }
-    return connectorMode == ChatConnectorMode.auto
-        ? 'permitted knowledge'
-        : null;
-  }
-
-  Uri sourceUri(AnswerSource source) =>
-      _service.resolveSourceUrl(source.originalUrl ?? source.internalUrl);
-
-  Future<void> initialize() async {
+  Future<void> initialize({String? documentId, String? documentTitle}) async {
+    final view = ++_viewToken;
     try {
-      conversations = await _store.listConversations();
-      activeConversationId = conversations.firstOrNull?.id;
-      messages = activeConversationId == null
-          ? <ChatMessage>[]
-          : await _store.getMessages(activeConversationId!);
+      final saved = await _store.listConversations();
+      if (_disposed || view != _viewToken) return;
+      conversations = saved;
+      if (documentId == null) {
+        final selected = await _store.selectedConversation();
+        if (_disposed || view != _viewToken) return;
+        // Only a conversation someone had open is reopened; otherwise Ask
+        // starts on its home, with recent chats one tap away.
+        activeConversationId = selected == null || selected.isEmpty
+            ? null
+            : saved.where((value) => value.id == selected).firstOrNull?.id;
+        final restored = activeConversationId == null
+            ? <ChatMessage>[]
+            : await _store.getMessages(activeConversationId!);
+        if (_disposed || view != _viewToken) return;
+        messages = restored;
+        _restoreCollections();
+      } else {
+        referenceDocument(documentId, documentTitle ?? 'Document');
+      }
     } catch (cause) {
-      error = _messageFrom(cause, 'Could not load local conversations.');
+      if (!_disposed && view == _viewToken) error = cause.toString();
     } finally {
-      isLoading = false;
-      _notify();
+      if (!_disposed && view == _viewToken) {
+        isLoading = false;
+        _notify();
+      }
     }
-    if (isConfigured) unawaited(loadConnectors());
+    if (isConfigured) unawaited(loadCollections());
   }
 
-  Future<void> loadConnectors() async {
-    connectorsLoading = true;
-    connectorsError = null;
+  Future<void> loadCollections() async {
+    if (_disposed || collectionsLoading) return;
+    collectionsLoading = true;
+    collectionsError = null;
     _notify();
     try {
-      connectors = await _service.getAvailableConnectors();
-      selectedConnectorIds = selectedConnectorIds
-          .where((id) => connectors.any((connector) => connector.id == id))
-          .toSet();
+      final values = await service.listCollections();
+      if (_disposed) return;
+      collections = values;
     } catch (cause) {
-      connectorsError = _messageFrom(
-        cause,
-        'Could not load permitted connectors.',
-      );
+      if (!_disposed) collectionsError = cause.toString();
     } finally {
-      connectorsLoading = false;
-      _notify();
+      if (!_disposed) {
+        collectionsLoading = false;
+        _notify();
+      }
     }
   }
 
   Future<void> newChat() async {
-    _cancelActive(markStopped: false);
+    _cancelActive();
+    ++_viewToken;
+    _discardAttachments();
     activeConversationId = null;
-    _draftId = _newUuid();
-    messages = <ChatMessage>[];
+    _draftId = newRequestId();
+    messages = [];
+    selectedCollectionIds = {};
     error = null;
-    attachments = <ComposerAttachment>[];
-    _notify();
+    isLoading = false;
+    setDraft('');
+    _rememberSelection(null);
   }
 
   Future<void> selectConversation(String id) async {
-    if (id == activeConversationId) return;
-    _cancelActive(markStopped: false);
+    if (id == activeConversationId || _disposed) return;
+    _cancelActive();
+    _discardAttachments();
+    final view = ++_viewToken;
     activeConversationId = id;
-    messages = await _store.getMessages(id);
-    attachments = <ComposerAttachment>[];
+    _rememberSelection(id);
+    messages = [];
     error = null;
-    _notify();
+    isLoading = true;
+    setDraft('');
+    try {
+      final restored = await _store.getMessages(id);
+      if (_disposed || view != _viewToken) return;
+      messages = restored;
+      _restoreCollections();
+    } catch (cause) {
+      if (!_disposed && view == _viewToken) error = cause.toString();
+    } finally {
+      if (!_disposed && view == _viewToken) {
+        isLoading = false;
+        _notify();
+      }
+    }
+  }
+
+  void _restoreCollections() {
+    selectedCollectionIds =
+        messages
+            .where((message) => message.role == ChatRole.user)
+            .lastOrNull
+            ?.collections
+            .map((collection) => collection.id)
+            .toSet() ??
+        {};
   }
 
   Future<void> renameConversation(String id, String title) async {
     final cleaned = title.replaceAll(RegExp(r'\s+'), ' ').trim();
-    if (cleaned.isEmpty) return;
-    await _store.updateConversation(id, title: cleaned, titleSource: 'custom');
-    conversations = await _store.listConversations();
-    _notify();
+    if (cleaned.isEmpty || _disposed) return;
+    await _localAction(() => _store.renameConversation(id, cleaned));
   }
 
-  Future<void> hideConversation(String id) async {
-    final hiddenMessages = await _store.getMessages(id);
-    await _store.hideConversation(id);
-    for (final documentId
-        in hiddenMessages
-            .expand((message) => message.documents)
-            .map((document) => document.id)
-            .toSet()) {
-      unawaited(_service.releaseDocument(documentId).catchError((_) {}));
-    }
-    conversations = await _store.listConversations();
-    if (activeConversationId == id) {
-      _cancelActive(markStopped: false);
-      activeConversationId = conversations.firstOrNull?.id;
-      messages = activeConversationId == null
-          ? <ChatMessage>[]
-          : await _store.getMessages(activeConversationId!);
-      if (activeConversationId == null) _draftId = _newUuid();
+  Future<void> pinConversation(ChatConversation conversation) => _localAction(
+    () => _store.pinConversation(conversation.id, !conversation.pinned),
+  );
+
+  Future<void> _localAction(Future<void> Function() action) async {
+    try {
+      await action();
+      final values = await _store.listConversations();
+      if (_disposed) return;
+      conversations = values;
+    } catch (cause) {
+      if (!_disposed) error = cause.toString();
     }
     _notify();
   }
 
-  void setConnectorMode(ChatConnectorMode mode) {
-    connectorMode = mode;
-    _notify();
-  }
+  Future<Set<String>> searchConversations(String query) => _store.search(query);
 
-  void toggleConnector(String id) {
-    if (selectedConnectorIds.contains(id)) {
-      selectedConnectorIds.remove(id);
-    } else {
-      selectedConnectorIds.add(id);
-    }
-    _notify();
-  }
-
-  bool canSend(String input) {
-    final hasReadyDocument = attachments.any(
-      (attachment) => attachment.progress == UploadProgress.ready,
-    );
-    return isConfigured &&
-        !isGenerating &&
-        !isUploading &&
-        (input.trim().isNotEmpty || hasReadyDocument) &&
-        (connectorMode != ChatConnectorMode.selected ||
-            selectedConnectorIds.isNotEmpty);
-  }
-
-  Future<void> addAttachment({
-    required String fileName,
-    required Uint8List bytes,
-  }) async {
-    if (attachments.length >= 12) return;
-    final key = _newUuid();
-    final attachment = ComposerAttachment(
-      key: key,
-      fileName: fileName,
-      sizeBytes: bytes.length,
-      progress: UploadProgress.starting,
-    );
-    attachments = <ComposerAttachment>[...attachments, attachment];
+  Future<void> deleteConversation(String id) async {
+    if (_disposed || !_deletingConversations.add(id)) return;
+    if (activeConversationId == id) _cancelActive();
     _notify();
     try {
-      final document = await _service.uploadDocument(
-        UploadFile(
-          fileName: fileName,
-          contentType: _contentType(fileName),
-          bytes: bytes,
-          idempotencyKey: key,
+      final removed = await _store.getMessages(id);
+      final retainedIds = await _store.referencedDocumentIds(excluding: id);
+      retainedIds.addAll(
+        attachments
+            .map((attachment) => attachment.document?.id)
+            .whereType<String>(),
+      );
+      retainedIds.addAll(
+        messages
+            .where((message) => activeConversationId != id)
+            .expand((message) => message.documents)
+            .map((document) => document.id),
+      );
+      await _store.deleteConversation(id);
+      final values = await _store.listConversations();
+      if (_disposed) return;
+      conversations = values;
+      if (activeConversationId == id) await newChat();
+      final owned = removed
+          .expand((message) => message.documents)
+          .where(
+            (document) =>
+                document.isUpload && !retainedIds.contains(document.id),
+          )
+          .map((document) => document.id)
+          .toSet();
+      for (final documentId in owned) {
+        if (!service.isCurrentSession || _disposed) break;
+        await service.releaseDocument(documentId);
+      }
+    } catch (cause) {
+      if (!_disposed) {
+        error = 'Could not finish deleting this conversation: $cause';
+      }
+    } finally {
+      _deletingConversations.remove(id);
+    }
+    _notify();
+  }
+
+  void toggleCollection(String id) {
+    if (isGenerating || _disposed) return;
+    if (!selectedCollectionIds.remove(id)) {
+      if (selectedCollectionIds.length >= 20) {
+        error = 'Choose up to 20 collections for each question.';
+      } else {
+        selectedCollectionIds.add(id);
+      }
+    }
+    _notify();
+  }
+
+  void clearCollections() {
+    if (_disposed || isGenerating) return;
+    selectedCollectionIds = {};
+    _notify();
+  }
+
+  bool canSend(String input) =>
+      !_disposed &&
+      !isLoading &&
+      isConfigured &&
+      !isGenerating &&
+      !isUploading &&
+      input.trim().length <= 4000 &&
+      !_deletingConversations.contains(conversationId) &&
+      (selectedCollectionIds.isEmpty ||
+          (!collectionsLoading &&
+              collectionsError == null &&
+              selectedCollections.length == selectedCollectionIds.length)) &&
+      !attachments.any(
+        (attachment) => attachment.progress == UploadProgress.failed,
+      ) &&
+      (input.trim().isNotEmpty ||
+          attachments.any((value) => value.document != null));
+
+  void setDraft(String value) {
+    draftText = value;
+    draftRevision += 1;
+    _notify();
+  }
+
+  void clearError() {
+    if (error == null || _disposed) return;
+    error = null;
+    _notify();
+  }
+
+  void editArtifact(ChatArtifact artifact) =>
+      setDraft('Update "${artifact.title}": ');
+
+  void referenceDocument(String id, String title) {
+    if (_disposed ||
+        isGenerating ||
+        attachments.any((value) => value.document?.id == id)) {
+      return;
+    }
+    if (attachments.length >= 10) {
+      error = 'Attach up to 10 documents to a question.';
+      _notify();
+      return;
+    }
+    attachments = [
+      ...attachments,
+      ComposerAttachment(
+        key: 'reference:$id',
+        fileName: title,
+        sizeBytes: 0,
+        progress: UploadProgress.ready,
+        document: ConversationDocument(
+          id: id,
+          fileName: title,
+          contentType: '',
+          sizeBytes: 0,
+          mode: 'indexed',
+          status: 'available',
+          origin: 'reference',
         ),
+      ),
+    ];
+    _notify();
+  }
+
+  Future<void> addAttachment(UploadSource source) async {
+    if (_disposed || isGenerating || attachments.length >= 10) return;
+    final file = UploadFile(source: source, idempotencyKey: newRequestId());
+    attachments = [
+      ...attachments,
+      ComposerAttachment(
+        key: file.idempotencyKey,
+        fileName: source.fileName,
+        sizeBytes: source.length,
+        progress: UploadProgress.starting,
+        upload: file,
+      ),
+    ];
+    _notify();
+    await _upload(file);
+  }
+
+  Future<void> retryAttachment(String key) async {
+    final value = attachments.where((item) => item.key == key).firstOrNull;
+    if (value?.upload == null ||
+        value?.progress != UploadProgress.failed ||
+        _disposed) {
+      return;
+    }
+    _updateAttachment(key, progress: UploadProgress.starting);
+    await _upload(value!.upload!);
+  }
+
+  Future<void> _upload(UploadFile file) async {
+    try {
+      final document = await service.uploadDocument(
+        file,
         onProgress: (progress) {
-          _updateAttachment(key, progress: progress);
+          if (!_disposed) {
+            _updateAttachment(file.idempotencyKey, progress: progress);
+          }
         },
       );
-      if (!attachments.any((item) => item.key == key)) {
-        unawaited(_service.releaseDocument(document.id).catchError((_) {}));
+      if (_disposed) return;
+      if (!attachments.any((item) => item.key == file.idempotencyKey)) {
+        await _releaseUnused(document);
         return;
       }
       _updateAttachment(
-        key,
+        file.idempotencyKey,
         progress: UploadProgress.ready,
         document: document,
       );
     } catch (cause) {
-      _updateAttachment(
-        key,
-        progress: UploadProgress.failed,
-        error: _messageFrom(cause, 'Document upload failed.'),
-      );
+      if (!_disposed) {
+        _updateAttachment(
+          file.idempotencyKey,
+          progress: UploadProgress.failed,
+          error: cause.toString(),
+        );
+      }
     }
   }
 
   void removeAttachment(String key) {
-    final match = attachments.where((item) => item.key == key).firstOrNull;
-    attachments = attachments.where((item) => item.key != key).toList();
-    if (match?.document case final document?) {
-      unawaited(_service.releaseDocument(document.id).catchError((_) {}));
-    }
+    final document = attachments
+        .where((value) => value.key == key)
+        .firstOrNull
+        ?.document;
+    attachments = attachments.where((value) => value.key != key).toList();
+    if (document != null) unawaited(_releaseUnused(document));
     _notify();
+  }
+
+  void _discardAttachments() {
+    final previous = attachments;
+    attachments = [];
+    for (final value in previous) {
+      if (value.document != null) unawaited(_releaseUnused(value.document!));
+    }
+  }
+
+  Future<void> _releaseUnused(ConversationDocument document) async {
+    if (!document.isUpload || !service.isCurrentSession || _disposed) return;
+    try {
+      final referenced = await _store.referencedDocumentIds();
+      if (!referenced.contains(document.id) &&
+          !_disposed &&
+          service.isCurrentSession) {
+        await service.releaseDocument(document.id);
+      }
+    } catch (cause) {
+      if (!_disposed) {
+        error =
+            'The attachment was removed from the question, but could not be deleted: $cause';
+        _notify();
+      }
+    }
   }
 
   Future<void> sendMessage(String value) async {
     if (!canSend(value)) return;
     final documents = attachments
-        .map((attachment) => attachment.document)
+        .map((value) => value.document)
         .whereType<ConversationDocument>()
         .toList();
-    final text = value.trim().isNotEmpty
-        ? value.trim()
-        : 'Please analyze the attached file.';
-    attachments = <ComposerAttachment>[];
+    final text = value.trim().isEmpty
+        ? 'Please analyze the attached document.'
+        : value.trim();
+    attachments = [];
     await _run(
       text: text,
       includeUserMessage: true,
-      historyMessages: List<ChatMessage>.from(messages),
-      displayMessages: List<ChatMessage>.from(messages),
+      historyMessages: List.of(messages),
+      displayMessages: List.of(messages),
       documents: documents,
+      scope: selectedCollections,
     );
   }
 
-  Future<void> regenerate(String assistantMessageId) async {
-    if (isGenerating || !isConfigured) return;
-    final target = messages.indexWhere(
-      (message) => message.id == assistantMessageId,
-    );
-    if (target < 0) return;
-    ChatMessage? user;
-    var userIndex = target - 1;
-    while (userIndex >= 0) {
-      if (messages[userIndex].role == ChatRole.user) {
-        user = messages[userIndex];
-        break;
-      }
+  Future<void> regenerate(String assistantId) async {
+    if (isGenerating ||
+        !isConfigured ||
+        _disposed ||
+        _deletingConversations.contains(conversationId)) {
+      return;
+    }
+    final index = messages.indexWhere((message) => message.id == assistantId);
+    if (index < 0) return;
+    var userIndex = index - 1;
+    while (userIndex >= 0 && messages[userIndex].role != ChatRole.user) {
       userIndex -= 1;
     }
-    if (user == null || user.text.trim().isEmpty) return;
+    if (userIndex < 0) return;
+    final user = messages[userIndex];
     await _run(
-      text: user.text.trim(),
+      text: user.text,
       includeUserMessage: false,
       historyMessages: messages.sublist(0, userIndex),
       displayMessages: messages.sublist(0, userIndex + 1),
       documents: user.documents,
+      scope: user.collections,
     );
   }
 
-  void stop() => _cancelActive(markStopped: true);
+  void stop() => _cancelActive();
 
   Future<void> _run({
     required String text,
@@ -289,118 +463,137 @@ class ChatController extends ChangeNotifier {
     required List<ChatMessage> historyMessages,
     required List<ChatMessage> displayMessages,
     required List<ConversationDocument> documents,
+    required List<ChatCollection> scope,
   }) async {
-    if (_activeHandle != null) return;
+    if (_activeHandle != null || _disposed) return;
+    final token = ++_runToken;
+    final id = conversationId;
+    activeConversationId = id;
     error = null;
     status = ChatStatus.submitted;
-    final assistantId = _newUuid();
-    final assistant = ChatMessage(
-      id: assistantId,
-      role: ChatRole.assistant,
-      turn: ChatTurnState(id: assistantId),
-      createdAt: DateTime.now(),
-    );
-    final next = List<ChatMessage>.from(displayMessages);
-    if (includeUserMessage) {
-      next.add(
+    final turn = ChatTurnState(id: newRequestId());
+    _activeTurn = turn;
+    messages = [
+      ...displayMessages,
+      if (includeUserMessage)
         ChatMessage(
-          id: _newUuid(),
+          id: newRequestId(),
           role: ChatRole.user,
           text: text,
           documents: documents,
+          collections: scope,
           createdAt: DateTime.now(),
         ),
-      );
-    }
-    next.add(assistant);
-    messages = next;
-    _activeAssistantId = assistantId;
-    final token = ++_runToken;
-    final handle = _service.streamMessage(
-      message: text,
-      conversationId: conversationId,
-      history: _historyFromMessages(historyMessages),
-      documentIds: documents.map((document) => document.id).toList(),
-      connectorMode: connectorMode,
-      connectorIds: selectedConnectorIds.toList(),
-    );
-    _activeHandle = handle;
+      ChatMessage(
+        id: turn.id,
+        role: ChatRole.assistant,
+        turn: turn,
+        createdAt: DateTime.now(),
+      ),
+    ];
+    _persist();
     _notify();
-
     try {
+      final handle = service.streamMessage(
+        message: text,
+        conversationId: id,
+        history: _historyFromMessages(historyMessages),
+        attachmentIds: documents.map((value) => value.id).toSet().toList(),
+        collectionIds: scope.map((value) => value.id).toSet().toList(),
+      );
+      _activeHandle = handle;
       await for (final event in handle.events) {
-        if (token != _runToken) return;
+        if (_disposed || token != _runToken) return;
         status = ChatStatus.streaming;
-        ChatStreamReducer.apply(assistant.turn!, event);
-        if (assistant.turn!.status == 'failed') {
-          error = assistant.turn!.error;
-        }
+        ChatStreamReducer.apply(turn, event);
+        if (turn.status == 'failed') error = turn.error;
+        _saveTimer ??= Timer(const Duration(milliseconds: 700), () {
+          _saveTimer = null;
+          if (!_disposed && token == _runToken) _persist();
+        });
         _notify();
       }
-      if (token == _runToken) await _saveMessages();
+      if (_disposed || token != _runToken) return;
+      if (turn.status == 'streaming') {
+        turn
+          ..status = 'failed'
+          ..modelPending = false
+          ..error = 'The connection ended before the response finished. Retry to continue.';
+        error = turn.error;
+      }
     } catch (cause) {
-      if (token != _runToken) return;
-      final message = _messageFrom(cause, 'Chat request failed.');
-      assistant.turn!
+      if (_disposed || token != _runToken) return;
+      turn
         ..status = 'failed'
-        ..error = message;
-      error = message;
-      _notify();
-      await _saveMessages();
+        ..modelPending = false
+        ..error = cause.toString();
+      error = turn.error;
     } finally {
-      if (token == _runToken) {
+      if (!_disposed && token == _runToken) {
+        _saveTimer?.cancel();
+        _saveTimer = null;
         _activeHandle = null;
-        _activeAssistantId = null;
+        _activeTurn = null;
         status = ChatStatus.ready;
+        _persist();
         _notify();
       }
     }
   }
 
-  void _cancelActive({required bool markStopped}) {
-    final activeAssistantId = _activeAssistantId;
+  void _cancelActive() {
     _runToken += 1;
+    _saveTimer?.cancel();
+    _saveTimer = null;
     _activeHandle?.cancel();
     _activeHandle = null;
-    _activeAssistantId = null;
-    if (markStopped && activeAssistantId != null) {
-      final assistant = messages
-          .where((message) => message.id == activeAssistantId)
-          .firstOrNull;
-      assistant?.turn
-        ?..status = 'failed'
-        ..error = 'Response stopped.';
+    if (_activeTurn != null) {
+      _activeTurn!
+        ..status = 'failed'
+        ..modelPending = false
+        ..error = 'Response stopped. Retry to continue.';
+      _activeTurn = null;
+      _persist();
     }
     status = ChatStatus.ready;
     _notify();
   }
 
-  Future<void> _saveMessages() async {
-    final firstUser = messages
-        .where((message) => message.role == ChatRole.user)
+  void _rememberSelection(String? id) {
+    unawaited(
+      _store.selectConversation(id).catchError((Object cause) {
+        if (!_disposed) {
+          error = 'Could not remember the selected conversation: $cause';
+          _notify();
+        }
+      }),
+    );
+  }
+
+  void _persist() {
+    final first = messages
+        .where((value) => value.role == ChatRole.user)
         .firstOrNull;
-    if (firstUser == null) return;
+    if (first == null) return;
     final id = conversationId;
-    final existing = conversations
-        .where((conversation) => conversation.id == id)
-        .firstOrNull;
-    if (existing == null) {
-      await _store.createConversation(
-        id: id,
-        title: _titleFromMessage(firstUser.text),
-      );
-    }
-    await _store.saveMessages(id, messages);
-    if (existing?.titleSource != 'custom') {
-      await _store.updateConversation(
-        id,
-        title: _titleFromMessage(firstUser.text),
-        titleSource: 'generated',
-      );
-    }
-    activeConversationId = id;
-    conversations = await _store.listConversations();
-    _notify();
+    final title = _titleFromMessage(first.text);
+    _rememberSelection(id);
+    unawaited(
+      _store
+          .saveConversation(id, title, messages)
+          .then((_) async {
+            final saved = await _store.listConversations();
+            if (_disposed) return;
+            conversations = saved;
+            _notify();
+          })
+          .catchError((Object cause) {
+            if (!_disposed) {
+              error = 'Could not save this conversation on your device: $cause';
+              _notify();
+            }
+          }),
+    );
   }
 
   void _updateAttachment(
@@ -409,15 +602,22 @@ class ChatController extends ChangeNotifier {
     ConversationDocument? document,
     String? error,
   }) {
+    if (_disposed) return;
     attachments = attachments
         .map(
-          (attachment) => attachment.key == key
-              ? attachment.copyWith(
+          (value) => value.key != key
+              ? value
+              : ComposerAttachment(
+                  key: key,
+                  fileName: value.fileName,
+                  sizeBytes: value.sizeBytes,
                   progress: progress,
-                  document: document,
+                  document: document ?? value.document,
                   error: error,
-                )
-              : attachment,
+                  upload: progress == UploadProgress.ready
+                      ? null
+                      : value.upload,
+                ),
         )
         .toList();
     _notify();
@@ -430,8 +630,8 @@ class ChatController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
-    _activeHandle?.cancel();
-    _service.close();
+    _cancelActive();
+    service.close();
     super.dispose();
   }
 }
@@ -444,42 +644,25 @@ class ComposerAttachment {
     required this.progress,
     this.document,
     this.error,
+    this.upload,
   });
-
   final String key;
   final String fileName;
   final int sizeBytes;
   final UploadProgress progress;
   final ConversationDocument? document;
   final String? error;
-
-  ComposerAttachment copyWith({
-    UploadProgress? progress,
-    ConversationDocument? document,
-    String? error,
-  }) => ComposerAttachment(
-    key: key,
-    fileName: fileName,
-    sizeBytes: sizeBytes,
-    progress: progress ?? this.progress,
-    document: document ?? this.document,
-    error: error ?? this.error,
-  );
+  final UploadFile? upload;
 }
 
 List<Map<String, String>> _historyFromMessages(List<ChatMessage> messages) {
-  const maxMessages = 24;
-  const maxCharacters = 24000;
-  var remaining = maxCharacters;
+  var remaining = 24000;
   final selected = <Map<String, String>>[];
   for (final message in messages.reversed) {
     final content = _clipHistory(message.displayText.trim());
     if (content.isEmpty) continue;
-    if (selected.length == maxMessages || content.length > remaining) break;
-    selected.add(<String, String>{
-      'role': message.role.name,
-      'content': content,
-    });
+    if (selected.length == 24 || content.length > remaining) break;
+    selected.add({'role': message.role.name, 'content': content});
     remaining -= content.length;
   }
   final result = selected.reversed.toList();
@@ -495,51 +678,11 @@ String _clipHistory(String value) {
   if (value.length <= max) return value;
   final available = max - marker.length;
   final leading = (available * 0.6).ceil();
-  return '${value.substring(0, leading)}$marker'
-      '${value.substring(value.length - (available - leading))}';
+  return '${value.substring(0, leading)}$marker${value.substring(value.length - (available - leading))}';
 }
 
 String _titleFromMessage(String value) {
   final cleaned = value.replaceAll(RegExp(r'\s+'), ' ').trim();
   if (cleaned.isEmpty) return 'New conversation';
   return cleaned.length > 54 ? '${cleaned.substring(0, 51)}…' : cleaned;
-}
-
-String _messageFrom(Object cause, String fallback) {
-  if (cause is ChatRequestException) return cause.message;
-  final value = cause.toString().trim();
-  return value.isEmpty ? fallback : value;
-}
-
-String _contentType(String fileName) {
-  final extension = fileName.split('.').last.toLowerCase();
-  return switch (extension) {
-    'pdf' => 'application/pdf',
-    'png' => 'image/png',
-    'jpg' || 'jpeg' => 'image/jpeg',
-    'gif' => 'image/gif',
-    'webp' => 'image/webp',
-    'csv' => 'text/csv',
-    'json' || 'jsonl' => 'application/json',
-    'html' || 'htm' => 'text/html',
-    'md' || 'markdown' => 'text/markdown',
-    'txt' || 'log' || 'sql' || 'yaml' || 'yml' || 'xml' => 'text/plain',
-    'docx' =>
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    'pptx' => 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-    'xlsx' =>
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    _ => 'application/octet-stream',
-  };
-}
-
-String _newUuid() {
-  final bytes = List<int>.generate(16, (_) => Random.secure().nextInt(256));
-  bytes[6] = (bytes[6] & 0x0f) | 0x40;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-  String hex(int value) => value.toRadixString(16).padLeft(2, '0');
-  final value = bytes.map(hex).join();
-  return '${value.substring(0, 8)}-${value.substring(8, 12)}-'
-      '${value.substring(12, 16)}-${value.substring(16, 20)}-'
-      '${value.substring(20)}';
 }

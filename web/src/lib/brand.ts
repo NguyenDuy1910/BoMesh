@@ -1,17 +1,21 @@
-export type AppBrandKey = "bothesis";
+export type AppBrandKey = "bomesh";
 
-export const appBrandKey: AppBrandKey = "bothesis";
+export const appBrandKey: AppBrandKey = "bomesh";
+export const PRODUCT_NAME = "BoMesh";
+export const PLATFORM_NAME = "BoMesh";
 
 export const appBrand = {
   key: appBrandKey,
-  shortName: "BoThesis",
-  productName: "BoThesis",
-  adminName: "Admin Console",
-  adminSubtitle: "Control plane",
-  workspaceSubtitle: "Enterprise knowledge workspace",
+  shortName: PRODUCT_NAME,
+  productName: PRODUCT_NAME,
+  platformName: PLATFORM_NAME,
+  controlPlaneName: "Control Plane",
+  controlPlaneSubtitle: "Control plane",
+  /** BoMesh: Business-only Knowledge Mesh. */
+  workspaceSubtitle: "Business-only Knowledge Mesh",
   logo: {
-    src: "/bothesis-logo.png",
-    alt: "BoThesis logo",
+    src: "/bomesh-logo.png",
+    alt: `${PRODUCT_NAME} logo`,
     imageClassName: "object-contain",
   },
 } as const;

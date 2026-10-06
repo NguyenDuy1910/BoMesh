@@ -1,48 +1,212 @@
-"""BoThesis HTTP application: assemble routers, errors, and the runtime."""
+"""BoMesh HTTP application: assemble routers, errors, and the runtime."""
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
+import asyncio
+import logging
+from contextlib import asynccontextmanager, suppress
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.deps import get_runtime
 from api.errors import register_error_handlers
-from api.routers import admin, agent, artifacts, documents, health, knowledge
-from api.routers.planned import PLANNED_ROUTERS
+from api.authentication import JwtAuthenticationMiddleware
+from api.routers import (
+    agent,
+    auth,
+    artifacts,
+    collections,
+    connections,
+    documents,
+    governance,
+    health,
+    iam,
+    ingestion_runs,
+    knowledge,
+    platform,
+    sources,
+    workspaces,
+)
 
 API_PREFIX = "/api/v1"
+
+_CONTRACT_METADATA: dict[tuple[str, str], dict[str, Any]] = {
+    ("post", "/api/v1/agent/chat"): {"x-required-permissions": ["knowledge.read"]},
+    ("get", "/api/v1/knowledge/home"): {"x-required-permissions": ["knowledge.read"]},
+    ("get", "/api/v1/collections"): {"x-required-collection-permission": "collection.read"},
+    ("post", "/api/v1/collections"): {
+        "x-required-permissions": ["knowledge.manage"],
+        "x-authorization-rule": "A child also requires collection.update on its parent Collection.",
+    },
+    ("get", "/api/v1/collections/{collection_id}"): {"x-required-collection-permission": "collection.read"},
+    ("patch", "/api/v1/collections/{collection_id}"): {"x-required-collection-permission": "collection.update"},
+    ("delete", "/api/v1/collections/{collection_id}"): {"x-required-collection-permission": "collection.delete"},
+    ("put", "/api/v1/collections/personal"): {
+        "x-required-permissions": ["knowledge.read"],
+        "x-authorization-rule": "Signed-in user; the Collection is owned by the caller.",
+    },
+    ("get", "/api/v1/collections/{collection_id}/access"): {"x-required-collection-permission": "collection.share"},
+    ("put", "/api/v1/collections/{collection_id}/access/{principal_type}/{principal_id}"): {"x-required-collection-permission": "collection.share"},
+    ("delete", "/api/v1/collections/{collection_id}/access/{principal_type}/{principal_id}"): {"x-required-collection-permission": "collection.share"},
+    ("post", "/api/v1/collections/{collection_id}/documents"): {
+        "tags": ["documents"],
+        "x-required-collection-permission": "collection.update",
+        "x-required-collection-role": "editor",
+    },
+    ("get", "/api/v1/documents"): {
+        "x-required-collection-permission": "collection.read",
+        "x-required-collection-role": "viewer",
+    },
+    ("post", "/api/v1/documents/search"): {
+        "x-required-permissions": ["knowledge.read"],
+        "x-required-collection-permission": "collection.read",
+        "x-required-collection-role": "viewer",
+    },
+    ("get", "/api/v1/documents/{document_id}"): {
+        "x-required-collection-permission": "collection.read",
+        "x-required-collection-role": "viewer",
+    },
+    ("delete", "/api/v1/documents/{document_id}"): {
+        "x-required-collection-permission": "collection.update",
+        "x-authorization-rule": "Signed-in user; conversation_attachment deletion also requires upload ownership.",
+        "x-required-collection-role": "editor",
+    },
+    ("put", "/api/v1/documents/{document_id}/content"): {
+        "x-required-collection-permission": "collection.update",
+        "x-required-collection-role": "editor",
+    },
+    ("post", "/api/v1/connections"): {
+        "x-authorization-rule": "Personal connections belong to the caller; workspace-owned connections require source.manage.",
+    },
+    ("post", "/api/v1/connections/{connection_id}/sources"): {"tags": ["sources"]},
+    ("post", "/api/v1/sources/{source_id}/syncs"): {
+        "x-authorization-rule": "Same rule as other Source changes: source.manage for workspace connections; the owner for a personal connection. 409 while a sync is running.",
+    },
+    ("post", "/api/v1/ingestion-runs"): {
+        "x-required-collection-permission": "ingestion.run",
+        "x-authorization-rule": "ingestion.run on the Collection of every selected Document; a Document the caller cannot read is 404. 409 when nothing is left to process.",
+    },
+    ("get", "/api/v1/ingestion-runs"): {
+        "x-authorization-rule": "ingestion.read lists every workspace run; otherwise only the runs the caller created.",
+    },
+    ("get", "/api/v1/ingestion-runs/{ingestion_run_id}"): {
+        "x-authorization-rule": "ingestion.read, or the caller created the run; any other run is 404.",
+    },
+    ("get", "/api/v1/ingestion-runs/{ingestion_run_id}/items"): {
+        "x-authorization-rule": "Same visibility as the run; Documents in Collections the caller cannot collection.read are omitted.",
+    },
+    ("post", "/api/v1/ingestion-runs/{ingestion_run_id}/cancel"): {
+        "x-authorization-rule": "The run's creator, or ingestion.manage. 409 when the run already finished.",
+    },
+    ("post", "/api/v1/ingestion-runs/{ingestion_run_id}/retry"): {
+        "x-required-collection-permission": "ingestion.run",
+        "x-authorization-rule": "Same visibility as the run; ingestion.run on the Collection of every retried Document. 409 when nothing failed, was cancelled or was skipped.",
+    },
+    ("patch", "/api/v1/workspaces/{workspace_id}"): {"x-required-permissions": ["tenant.manage"]},
+    ("get", "/api/v1/workspaces/{workspace_id}/overview"): {
+        "x-required-permissions": ["tenant.read"],
+        "x-authorization-rule": "recent_activity is empty without audit.read; knowledge and usage are aggregate counts only.",
+    },
+    ("get", "/api/v1/workspaces/{workspace_id}/activity"): {"x-required-permissions": ["audit.read"]},
+    ("get", "/api/v1/users"): {"x-required-permissions": ["user.manage"]},
+    ("post", "/api/v1/users"): {"x-required-permissions": ["user.manage"]},
+    ("get", "/api/v1/accounts"): {"x-required-permissions": ["user.manage"]},
+    ("get", "/api/v1/users/{user_id}"): {"x-required-permissions": ["user.manage"]},
+    ("patch", "/api/v1/users/{user_id}"): {"x-required-permissions": ["user.manage"]},
+    ("get", "/api/v1/roles"): {"x-required-permissions": ["role.manage"]},
+    ("post", "/api/v1/roles"): {"x-required-permissions": ["role.manage"]},
+    ("get", "/api/v1/roles/{role_id}"): {"x-required-permissions": ["role.manage"]},
+    ("patch", "/api/v1/roles/{role_id}"): {"x-required-permissions": ["role.manage"]},
+    ("get", "/api/v1/groups"): {"x-required-permissions": ["group.manage"]},
+    ("post", "/api/v1/groups"): {"x-required-permissions": ["group.manage"]},
+    ("get", "/api/v1/groups/{group_id}"): {"x-required-permissions": ["group.manage"]},
+    ("patch", "/api/v1/groups/{group_id}"): {"x-required-permissions": ["group.manage"]},
+    ("delete", "/api/v1/groups/{group_id}"): {"x-required-permissions": ["group.manage"]},
+    ("put", "/api/v1/groups/{group_id}/members"): {"x-required-permissions": ["group.manage"]},
+    ("get", "/api/v1/permissions"): {"x-required-permissions": ["role.manage"]},
+    ("post", "/api/v1/approval-requests"): {
+        "x-authorization-rule": "Own resource_access request; plugin_installation creation requires source.manage.",
+    },
+    ("get", "/api/v1/approval-requests"): {
+        "x-authorization-rule": "Own requests, or reviewable types: access.manage for resource_access, source.manage for plugin_installation.",
+    },
+    ("get", "/api/v1/approval-requests/{approval_request_id}"): {
+        "x-authorization-rule": "Own request, or reviewer permission: access.manage for resource_access, source.manage for plugin_installation.",
+    },
+    ("patch", "/api/v1/approval-requests/{approval_request_id}"): {
+        "x-authorization-rule": "Pending only. Requester may cancel; approve/deny requires access.manage for resource_access or source.manage for plugin_installation. Reviewers may also cancel.",
+    },
+    ("get", "/api/v1/audit-logs"): {"x-required-permissions": ["audit.read"]},
+    ("get", "/api/v1/access-sessions"): {"x-required-permissions": ["audit.read"]},
+    ("get", "/api/v1/platform/overview"): {"x-required-permissions": ["platform.tenant.read"]},
+    ("get", "/api/v1/platform/workspaces"): {"x-required-permissions": ["platform.tenant.read"]},
+    ("get", "/api/v1/platform/users"): {"x-required-permissions": ["platform.user.read"]},
+    ("get", "/api/v1/platform/audit-logs"): {"x-required-permissions": ["platform.audit.read"]},
+    ("get", "/api/v1/platform/health"): {"x-required-permissions": ["platform.health.read"]},
+}
+
+
+def _operation_id(route) -> str:
+    """Use contract operation names instead of FastAPI's path-derived IDs."""
+    name = route.name.removesuffix("_contract")
+    if name == "health":
+        return "getHealth"
+    parts = name.split("_")
+    return parts[0] + "".join(part.title() for part in parts[1:])
 
 _ROUTERS = (
     agent.router,
     knowledge.router,
+    collections.router,
     documents.collections_router,
     documents.router,
     artifacts.router,
-    admin.router,
-    *PLANNED_ROUTERS,
+    connections.router,
+    sources.router,
+    ingestion_runs.router,
+    workspaces.router,
+    iam.router,
+    governance.router,
+    platform.router,
 )
+
+
+log = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    """Close every client the runtime opened when the process shuts down."""
+    """Repair state lost workflows left behind; close every client at shutdown."""
 
+    reconciling = asyncio.create_task(_reconcile_ingestion())
     try:
         yield
     finally:
+        reconciling.cancel()
+        with suppress(asyncio.CancelledError):
+            await reconciling
         await get_runtime().aclose()
+
+
+async def _reconcile_ingestion() -> None:
+    # Startup must not wait for, or fail on, the database or Temporal.
+    try:
+        await get_runtime().ingestion_run_service().reconcile()
+    except Exception:  # noqa: BLE001 - best effort; a run's next read repairs it too
+        log.warning("ingestion runs could not be reconciled", exc_info=True)
 
 
 def create_app() -> FastAPI:
     """Build the application; one call per process, or one per test."""
 
     app = FastAPI(
-        title="BoThesis API",
+        title="BoMesh API",
         version="0.1.0",
         description="Enterprise knowledge and BI assistant.",
         lifespan=lifespan,
+        generate_unique_id_function=_operation_id,
     )
     app.state.allow_insecure_development_identity = (
         get_runtime().config.identity.allow_insecure_development_identity
@@ -55,10 +219,48 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(
+        JwtAuthenticationMiddleware,
+        tokens=get_runtime().jwt_token_service(),
+    )
     for router in _ROUTERS:
         app.include_router(router, prefix=API_PREFIX)
+    app.include_router(auth.router, prefix=API_PREFIX)
     app.include_router(health.router)
+    _apply_contract_security(app)
     return app
+
+
+def _apply_contract_security(app: FastAPI) -> None:
+    """Add contract-level bearer metadata without changing middleware behavior."""
+
+    original_openapi = app.openapi
+
+    def openapi() -> dict[str, Any]:
+        if app.openapi_schema:
+            return app.openapi_schema
+        schema = original_openapi()
+        schema.setdefault("components", {}).setdefault("securitySchemes", {})[
+            "bearerAuth"
+        ] = {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+        }
+        schema["security"] = [{"bearerAuth": []}]
+        paths = schema["paths"]
+        for path in ("/api/v1/auth/accounts", "/api/v1/auth/sessions", "/health"):
+            for operation in paths.get(path, {}).values():
+                if isinstance(operation, dict) and "operationId" in operation:
+                    operation["security"] = []
+        for (method, path), metadata in _CONTRACT_METADATA.items():
+            operation = paths.get(path, {}).get(method)
+            if operation is not None:
+                operation.update(metadata)
+        app.openapi_schema = schema
+        return schema
+
+    app.openapi = openapi
 
 
 app = create_app()

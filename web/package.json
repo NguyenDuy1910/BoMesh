@@ -1,5 +1,5 @@
 {
-  "name": "bothesis-web",
+  "name": "bomesh-web",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -8,6 +8,7 @@
     "start": "next start",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/*.test.mts ../tests/*.test.mts",
     "typecheck": "tsc --noEmit",
+    "audit:pending": "node scripts/pending-api-audit.mjs",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
@@ -30,6 +31,7 @@
     "@types/node": "^24.12.2",
     "@types/react": "^19.2.10",
     "@types/react-dom": "^19.2.3",
+    "playwright": "^1.63.0",
     "tailwindcss": "^4.1.0",
     "typescript": "^5.9.3"
   }

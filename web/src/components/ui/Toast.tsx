@@ -1,120 +1,203 @@
 "use client";
 
-import { AlertTriangle, CheckCircle2, Info, X, XCircle } from "lucide-react";
-import { createContext, useCallback, useContext, useState } from "react";
+import { CheckCircle2, Info, X, XCircle } from "lucide-react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
-import { ui } from "@/components/ui/design-system";
 import { cn } from "@/lib/cn";
 
-type ToastVariant = "success" | "error" | "warning" | "info";
+export type ToastTone = "ok" | "err" | "info" | "neutral";
 
-interface ToastItem {
-  id: string;
-  title: string;
+export interface ToastOptions {
+  /** Repeat the verb of the button that caused it: "Workspace archived". */
+  message: string;
+  /** An optional quiet second line. */
   description?: string;
-  variant: ToastVariant;
+  /** Defaults to `ok`. */
+  tone?: ToastTone;
+  /** One follow-up, e.g. Undo or "View run". Running it dismisses the toast. */
   action?: { label: string; onClick: () => void };
-}
-
-interface ToastOptions {
-  title: string;
-  description?: string;
-  variant?: ToastVariant;
+  /** Milliseconds on screen. Defaults to 4 s, 6.5 s with an action, 8 s for errors. */
   duration?: number;
-  /** One follow-up, e.g. "View collection" after a create. */
-  action?: { label: string; onClick: () => void };
 }
 
-const ToastContext = createContext<{ toast: (options: ToastOptions) => void } | null>(
-  null,
-);
+interface ToastItem extends ToastOptions {
+  id: string;
+  tone: ToastTone;
+}
 
-export function useToast() {
+interface ToastApi {
+  /** Shows a toast and returns its id. */
+  show: (options: ToastOptions) => string;
+  dismiss: (id: string) => void;
+}
+
+const ToastContext = createContext<ToastApi | null>(null);
+
+export function useToast(): ToastApi {
   const context = useContext(ToastContext);
   if (!context) throw new Error("useToast must be used within ToastProvider");
   return context;
 }
 
-const variantIcon: Record<ToastVariant, React.ReactNode> = {
-  success: (
-    <CheckCircle2 aria-hidden="true" className="h-4 w-4 text-[var(--success)]" />
-  ),
-  error: <XCircle aria-hidden="true" className="h-4 w-4 text-[var(--danger)]" />,
-  warning: (
-    <AlertTriangle aria-hidden="true" className="h-4 w-4 text-[var(--warning)]" />
-  ),
-  info: <Info aria-hidden="true" className="h-4 w-4 text-[var(--info)]" />,
+/** At most this many toasts are on screen; older ones give way. */
+const MAX_VISIBLE = 3;
+
+const toneIcon: Record<ToastTone, React.ReactNode> = {
+  ok: <CheckCircle2 aria-hidden="true" className="h-[17px] w-[17px] shrink-0 text-[var(--status-success-on-inverse)]" />,
+  err: <XCircle aria-hidden="true" className="h-[17px] w-[17px] shrink-0 text-[var(--status-danger-on-inverse)]" />,
+  info: <Info aria-hidden="true" className="h-[17px] w-[17px] shrink-0 text-[var(--status-info-on-inverse)]" />,
+  neutral: null,
 };
 
+function lifetime({ duration, action, tone }: ToastItem) {
+  return duration ?? (tone === "err" ? 8000 : action ? 6500 : 4000);
+}
+
+interface Timer {
+  handle: number;
+  remaining: number;
+  startedAt: number;
+}
+
+/**
+ * Brief confirmations at the bottom centre of the screen, announced through a
+ * polite live region. Hovering or focusing the stack pauses every timer, so a
+ * person reaching for Undo never loses it. The region sits outside the app
+ * root so a dialog making the page inert does not swallow it.
+ */
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [mounted, setMounted] = useState(false);
+  const timers = useRef(new Map<string, Timer>());
+  const paused = useRef(false);
+  const counter = useRef(0);
+
+  useEffect(() => setMounted(true), []);
 
   const dismiss = useCallback((id: string) => {
+    const timer = timers.current.get(id);
+    if (timer) window.clearTimeout(timer.handle);
+    timers.current.delete(id);
     setToasts((current) => current.filter((entry) => entry.id !== id));
   }, []);
 
-  const toast = useCallback(
-    ({ title, description, variant = "info", duration, action }: ToastOptions) => {
-      const id = Math.random().toString(36).slice(2);
-      setToasts((current) => [...current, { id, title, description, variant, action }]);
-      // Failures stay until dismissed: an admin who missed the toast has no
-      // other way to find out what went wrong.
-      const life = duration ?? (variant === "error" ? 10_000 : 4500);
-      setTimeout(() => dismiss(id), life);
+  const schedule = useCallback(
+    (id: string, remaining: number) => {
+      const handle = paused.current ? 0 : window.setTimeout(() => dismiss(id), remaining);
+      timers.current.set(id, { handle, remaining, startedAt: Date.now() });
     },
     [dismiss],
   );
 
+  const show = useCallback(
+    (options: ToastOptions) => {
+      counter.current += 1;
+      const item: ToastItem = { ...options, tone: options.tone ?? "ok", id: `toast-${counter.current}` };
+      setToasts((current) => {
+        const kept = current.slice(-(MAX_VISIBLE - 1));
+        for (const dropped of current.slice(0, current.length - kept.length)) {
+          window.clearTimeout(timers.current.get(dropped.id)?.handle);
+          timers.current.delete(dropped.id);
+        }
+        return [...kept, item];
+      });
+      schedule(item.id, lifetime(item));
+      return item.id;
+    },
+    [schedule],
+  );
+
+  const pause = useCallback(() => {
+    if (paused.current) return;
+    paused.current = true;
+    const now = Date.now();
+    for (const timer of timers.current.values()) {
+      window.clearTimeout(timer.handle);
+      timer.remaining = Math.max(0, timer.remaining - (now - timer.startedAt));
+    }
+  }, []);
+
+  const resume = useCallback(() => {
+    if (!paused.current) return;
+    paused.current = false;
+    for (const [id, timer] of timers.current) schedule(id, Math.max(timer.remaining, 1500));
+  }, [schedule]);
+
+  useEffect(() => {
+    const active = timers.current;
+    return () => {
+      for (const timer of active.values()) window.clearTimeout(timer.handle);
+    };
+  }, []);
+
+  const api = useMemo(() => ({ show, dismiss }), [show, dismiss]);
+
   return (
-    <ToastContext.Provider value={{ toast }}>
+    <ToastContext.Provider value={api}>
       {children}
-      <div
-        aria-label="Notifications"
-        className="pointer-events-none fixed bottom-4 right-4 z-[100] flex w-[22rem] max-w-[calc(100vw-2rem)] flex-col gap-2"
-      >
-        {toasts.map((entry) => (
+      {mounted &&
+        createPortal(
           <div
-            className={cn(
-              "pointer-events-auto flex items-start gap-2.5 rounded-[var(--adm-r-md)] bg-[var(--adm-raised)] p-3",
-              "shadow-[var(--adm-e3)] motion-safe:animate-[adm-pop_var(--adm-base)_var(--adm-ease)_both]",
-            )}
-            key={entry.id}
-            role={entry.variant === "error" ? "alert" : "status"}
+            aria-label="Notifications"
+            aria-live="polite"
+            className="pointer-events-none fixed bottom-5 left-1/2 z-[90] flex w-max max-w-[calc(100vw-24px)] -translate-x-1/2 flex-col items-center gap-2"
+            data-layer-persistent=""
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) resume();
+            }}
+            onFocus={pause}
+            onPointerEnter={pause}
+            onPointerLeave={resume}
+            role="status"
           >
-            <span className="mt-px shrink-0">{variantIcon[entry.variant]}</span>
-            <div className="min-w-0 flex-1">
-              <p className="text-[0.8125rem] font-semibold text-[var(--text)]">
-                {entry.title}
-              </p>
-              {entry.description && (
-                <p className="mt-0.5 text-[0.75rem] leading-4 text-[var(--text-muted)]">
-                  {entry.description}
-                </p>
-              )}
-              {entry.action && (
+            {toasts.map((entry) => (
+              <div
+                className={cn(
+                  "pointer-events-auto flex w-full min-w-[min(280px,calc(100vw-24px))] max-w-[480px] items-center gap-2.5 py-2.5 pl-3.5 pr-2.5",
+                  "rounded-[var(--radius-sheet)] bg-[var(--surface-inverse)] text-[length:var(--text-size-body)] text-[var(--text-inverse)] shadow-[var(--shadow-pop)]",
+                  "motion-safe:animate-ui-pop",
+                )}
+                key={entry.id}
+              >
+                {toneIcon[entry.tone]}
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium">{entry.message}</p>
+                  {entry.description && (
+                    <p className="mt-0.5 text-[length:var(--text-size-meta)] opacity-80">{entry.description}</p>
+                  )}
+                </div>
+                {entry.action && (
+                  <button
+                    className={toastButton}
+                    onClick={() => {
+                      entry.action?.onClick();
+                      dismiss(entry.id);
+                    }}
+                    type="button"
+                  >
+                    {entry.action.label}
+                  </button>
+                )}
                 <button
-                  className="mt-1.5 text-[0.75rem] font-semibold text-[var(--brand-accent)] underline-offset-4 hover:underline"
-                  onClick={() => {
-                    entry.action?.onClick();
-                    dismiss(entry.id);
-                  }}
+                  aria-label="Dismiss notification"
+                  className={cn(toastButton, "px-1.5")}
+                  onClick={() => dismiss(entry.id)}
                   type="button"
                 >
-                  {entry.action.label}
+                  <X aria-hidden="true" className="h-3.5 w-3.5" />
                 </button>
-              )}
-            </div>
-            <button
-              aria-label={`Dismiss ${entry.title}`}
-              className={cn(ui.iconButton, "h-6 w-6 shrink-0")}
-              onClick={() => dismiss(entry.id)}
-              type="button"
-            >
-              <X aria-hidden="true" className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        ))}
-      </div>
+              </div>
+            ))}
+          </div>,
+          document.body,
+        )}
     </ToastContext.Provider>
   );
 }
+
+const toastButton = cn(
+  "shrink-0 rounded-[var(--radius-sm)] px-2 py-1 font-semibold text-inherit opacity-90",
+  "transition-[background-color,opacity] duration-[var(--duration-fast)] hover:bg-[var(--surface-inverse-hover)] hover:opacity-100",
+  "focus-visible:outline-none focus-visible:shadow-[var(--shadow-focus)] focus-visible:opacity-100",
+);
