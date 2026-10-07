@@ -95,7 +95,7 @@ class _HistoryPageState extends State<HistoryPage> {
           SheetOption(
             icon: Icons.delete_outline_rounded,
             title: 'Delete',
-            subtitle: 'Files you referenced stay in the Library',
+            subtitle: 'Files you referenced stay in Knowledge',
             danger: true,
             onTap: () => Navigator.pop(sheet, _ChatAction.delete),
           ),
@@ -122,7 +122,7 @@ class _HistoryPageState extends State<HistoryPage> {
           context,
           title: 'Delete this chat?',
           message:
-              '“${conversation.title}” is removed from this phone. Files uploaded only for it are deleted; files you referenced stay in the Library.',
+              '“${conversation.title}” is removed from this device. Files uploaded only for it are deleted; files you referenced stay in Knowledge.',
           confirmLabel: 'Delete chat',
           destructive: true,
         );
@@ -182,6 +182,7 @@ class _HistoryPageState extends State<HistoryPage> {
       return Scaffold(
         appBar: AppHeader(
           title: 'Chats',
+          subtitle: 'Saved on this device',
           actions: [
             IconButton(
               tooltip: 'New chat',
@@ -268,6 +269,9 @@ List<(String, List<ChatConversation>)> _sections(
         ? 'This week'
         : 'Earlier';
     groups[key]!.add(value);
+  }
+  for (final group in groups.values) {
+    group.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
   }
   return [
     for (final entry in groups.entries)

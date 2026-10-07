@@ -150,15 +150,29 @@ off. An address the caller may not open renders a no-access page. Legacy
 `/app`, `/library` and `/workspace-control/*` addresses redirect permanently to
 their `/chat`, `/knowledge`, `/manage/*` and `/platform/*` successors.
 
-The app's Manage destination is presentation over the same permissions, never
-an authorization layer: it appears only when the session holds at least one
-management permission, and each section follows these codes (Overview
-`tenant.read`; Ingestion `ingestion.read`/`ingestion.run`/`source.manage`;
-Access `user.manage`/`group.manage`/`role.manage`/`access.manage`; Activity
-`audit.read`; Settings `tenant.manage`). Knowledge management on mobile needs
-`knowledge.manage` or `collection.share`, because reading knowledge is already
-the Library. The Platform switch needs any `platform.*.read` in
-`platform_permissions`. Every request is still authorized by the API.
+The Flutter app follows `docs/mobile-ux-blueprint.html`: Chat, Knowledge and
+Inbox are always present, and Manage appears only when the session holds a
+workspace management permission. All are presentation over the session's
+permissions, never an authorization layer. Manage sections follow these codes:
+Overview (`tenant.read` and `tenant.manage`); Sources
+(`ingestion.read`/`ingestion.run`/`source.manage`); People & access
+(`user.manage`/`group.manage`/`role.manage`/`access.manage`, plus request
+review with `source.manage`); Activity (`audit.read`); Settings
+(`tenant.manage`). Knowledge management is in place on each knowledge base and
+uses the Collection's effective `permissions` (workspace and resource grants
+already combined by the server); it does not add a Manage entry. The Platform
+console is a separate scope opened from the account sheet and requires any
+`platform.*.read` in `platform_permissions`. After sign-in, a person with more
+than one membership chooses a workspace (`PATCH /auth/session`) before
+workspace resources mount; one membership enters directly. Every request is
+still authorized by the API.
+
+Inbox on mobile is a projection over existing authorized reads, not the
+proposed `notifications.inbox` API: own and reviewable `GET
+/approval-requests`, and, with `source.manage`, failing `GET /sources` and
+`GET /connections`. Each item opens the place where it is resolved. Read
+markers are stored on the device, scoped by API origin, account and
+workspace; there is no push, email or cross-device read state.
 
 ## Local full-access test accounts
 

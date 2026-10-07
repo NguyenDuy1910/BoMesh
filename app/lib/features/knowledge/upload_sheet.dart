@@ -18,6 +18,7 @@ import 'knowledge_models.dart';
 Future<bool> showUploadSheet(
   BuildContext context, {
   KnowledgeCollection? into,
+  void Function(String runId)? onQueued,
 }) async {
   final scope = WorkspaceScope.of(context);
   final outcome = _Outcome();
@@ -30,6 +31,7 @@ Future<bool> showUploadSheet(
       session: scope.session,
       into: into,
       outcome: outcome,
+      onQueued: onQueued,
     ),
   );
   return outcome.added;
@@ -57,11 +59,13 @@ class _UploadSheet extends StatefulWidget {
     required this.session,
     required this.into,
     required this.outcome,
+    required this.onQueued,
   });
   final ApiClient api;
   final AuthSession session;
   final KnowledgeCollection? into;
   final _Outcome outcome;
+  final void Function(String runId)? onQueued;
 
   @override
   State<_UploadSheet> createState() => _UploadSheetState();
@@ -253,7 +257,8 @@ class _UploadSheetState extends State<_UploadSheet> {
     var runFailed = false;
     if (searchable && ids.isNotEmpty) {
       try {
-        await startProcessing(widget.api, documentIds: ids);
+        final runId = await startProcessing(widget.api, documentIds: ids);
+        widget.onQueued?.call(runId);
         _runFor.addAll(ids);
       } catch (error) {
         // A 409 explains itself, e.g. they are already being made searchable.

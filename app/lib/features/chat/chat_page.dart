@@ -14,19 +14,25 @@ import 'widgets/chat_composer.dart';
 import 'widgets/chat_sheets.dart';
 import 'widgets/message_view.dart';
 
-/// The Ask tab. With no messages it is the Ask home — the question, two
-/// suggestions and recent chats; once a question is sent the same screen
-/// becomes the conversation.
+/// Chat home and the current conversation share one composer.
 class ChatPage extends StatefulWidget {
   const ChatPage({
     super.key,
     this.initialDocumentId,
     this.initialDocumentTitle,
+    this.initialCollectionId,
+    this.initialCollectionTitle,
+    this.initialPrompt,
+    this.initialConversationId,
   });
 
   /// Starts a new chat with this document already attached.
   final String? initialDocumentId;
   final String? initialDocumentTitle;
+  final String? initialCollectionId;
+  final String? initialCollectionTitle;
+  final String? initialPrompt;
+  final String? initialConversationId;
 
   @override
   State<ChatPage> createState() => _ChatPageState();
@@ -73,6 +79,10 @@ class _ChatPageState extends State<ChatPage> {
       _controller.initialize(
         documentId: widget.initialDocumentId,
         documentTitle: widget.initialDocumentTitle,
+        collectionId: widget.initialCollectionId,
+        collectionTitle: widget.initialCollectionTitle,
+        prompt: widget.initialPrompt,
+        conversationId: widget.initialConversationId,
       ),
     );
   }
@@ -80,14 +90,29 @@ class _ChatPageState extends State<ChatPage> {
   @override
   void didUpdateWidget(covariant ChatPage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    final conversationId = widget.initialConversationId;
+    if (conversationId != null &&
+        conversationId != oldWidget.initialConversationId) {
+      unawaited(_controller.selectConversation(conversationId));
+      return;
+    }
     final id = widget.initialDocumentId;
-    if (id != null && id != oldWidget.initialDocumentId) {
+    if (id != oldWidget.initialDocumentId ||
+        widget.initialCollectionId != oldWidget.initialCollectionId ||
+        widget.initialPrompt != oldWidget.initialPrompt) {
       unawaited(
         _controller.newChat().then((_) {
-          if (mounted) {
+          if (mounted && id != null) {
             _controller.referenceDocument(
               id,
               widget.initialDocumentTitle ?? 'Document',
+            );
+          }
+          if (mounted) {
+            _controller.applyInitialDraft(
+              collectionId: widget.initialCollectionId,
+              collectionTitle: widget.initialCollectionTitle,
+              prompt: widget.initialPrompt,
             );
           }
         }),
@@ -213,6 +238,8 @@ class _ChatPageState extends State<ChatPage> {
         child: Scaffold(
           appBar: home
               ? AppHeader(
+                  title: controller.session.workspaceName,
+                  onTitleTap: () => showAccountSheet(context),
                   leading: IconButton(
                     tooltip: 'History',
                     onPressed: _openHistory,
@@ -220,9 +247,9 @@ class _ChatPageState extends State<ChatPage> {
                   ),
                   actions: [
                     IconButton(
-                      tooltip: 'New chat',
-                      onPressed: _newChat,
-                      icon: const Icon(Icons.edit_square, size: 21),
+                      tooltip: 'Search',
+                      onPressed: WorkspaceScope.of(context).openSearch,
+                      icon: const Icon(Icons.search_rounded),
                     ),
                     const AccountButton(),
                   ],
@@ -276,7 +303,7 @@ class _ChatPageState extends State<ChatPage> {
               ChatComposer(
                 controller: controller,
                 hint: home ? 'Ask anything…' : 'Ask a follow-up…',
-                showScope: home,
+                showScope: true,
               ),
             ],
           ),
@@ -371,7 +398,7 @@ class _Notice extends StatelessWidget {
   );
 }
 
-/// Ask without setup: what to ask, two ways to start, and recent chats.
+/// Three honest ways to start, followed by device-local recent chats.
 class _AskHome extends StatelessWidget {
   const _AskHome({required this.controller, required this.onHistory});
   final ChatController controller;
@@ -398,10 +425,13 @@ class _AskHome extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const BrandMark(),
-                      const SizedBox(height: 16),
                       Text(
-                        'What do you need to know?',
+                        'Hello, ${accountName(controller.session).split(' ').first}',
+                        style: TextStyle(color: colors.ink3, fontSize: 13),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'What can I help you find?',
                         style: Theme.of(context).textTheme.headlineSmall,
                       ),
                       const SizedBox(height: 8),
@@ -429,6 +459,17 @@ class _AskHome extends StatelessWidget {
                   label: 'Analyse a spreadsheet',
                   onTap: enabled
                       ? () => openAttachSheet(context, controller)
+                      : null,
+                ),
+                const SizedBox(height: 8),
+                _Suggestion(
+                  tone: Tone.sky,
+                  icon: Icons.description_outlined,
+                  label: 'Draft a brief from your knowledge',
+                  onTap: enabled
+                      ? () => controller.setDraft(
+                          'Draft a brief about … using the sources you can find.',
+                        )
                       : null,
                 ),
                 if (recent.isNotEmpty) ...[

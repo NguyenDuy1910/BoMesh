@@ -14,10 +14,17 @@ import 'knowledge_widgets.dart';
 /// screen is still queued or running, the feed re-reads what is on screen
 /// every few seconds so rows update in place.
 class DocumentFeed extends ChangeNotifier {
-  DocumentFeed(this.api, {this.collectionId, this.search = ''});
+  DocumentFeed(this.api, {
+    this.collectionId,
+    this.search = '',
+    this.processingFilter = '',
+  });
   final ApiClient api;
   final String? collectionId;
   final String search;
+  /// Processing filters are local because GET /documents has no such filter.
+  /// All pages are read before filtering so failures are never hidden by paging.
+  final String processingFilter;
 
   static const pageSize = 30;
 
@@ -113,6 +120,34 @@ class DocumentFeed extends ChangeNotifier {
     required int page,
     required int size,
   }) async {
+    if (processingFilter.isNotEmpty) {
+      final matches = <KnowledgeDocument>[];
+      var readCount = 0;
+      for (var number = 1; ; number++) {
+        final result = await api.get('/documents', query: {
+          'collection_id': collectionId,
+          'search': search,
+          'page': number,
+          'page_size': 100,
+        });
+        if (_disposed) return (const <KnowledgeDocument>[], 0);
+        final batch = objectList(result['items']);
+        readCount += batch.length;
+        for (final value in batch) {
+          final document = KnowledgeDocument.fromJson(value);
+          final include = switch (processingFilter) {
+            'attention' => document.processing.notSearchable ||
+                document.processing.isProcessing,
+            'failed' => document.processing.isFailed,
+            'processing' => document.processing.isProcessing,
+            _ => true,
+          };
+          if (include) matches.add(document);
+        }
+        if (batch.isEmpty || readCount >= intOf(result['total'])) break;
+      }
+      return (matches, matches.length);
+    }
     final value = await api.get(
       '/documents',
       query: {
@@ -152,9 +187,17 @@ class DocumentFeed extends ChangeNotifier {
 
 /// A feed's rows: loading, failure, nothing, or the rows with Show more.
 class DocumentFeedView extends StatelessWidget {
-  const DocumentFeedView({super.key, required this.feed, required this.empty});
+  const DocumentFeedView({
+    super.key,
+    required this.feed,
+    required this.empty,
+    this.onRetryDocument,
+    this.retrying = const {},
+  });
   final DocumentFeed feed;
   final Widget empty;
+  final Future<void> Function(KnowledgeDocument document)? onRetryDocument;
+  final Set<String> retrying;
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -179,6 +222,10 @@ class DocumentFeedView extends StatelessWidget {
                   key: ValueKey(document.id),
                   document: document,
                   onReturn: () => feed.load(quiet: true),
+                  onRetry: onRetryDocument != null && document.needsRun
+                      ? () => onRetryDocument!(document)
+                      : null,
+                  retrying: retrying.contains(document.id),
                 ),
             ],
           ),

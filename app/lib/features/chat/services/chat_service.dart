@@ -267,11 +267,14 @@ class ChatService {
   }
 
   /// Copies the artifact's latest revision into [collectionId].
-  Future<JsonMap> publishArtifact(String id, String collectionId) {
+  Future<JsonMap> publishArtifact(String id, String collectionId, {String? title}) {
     _checkSession();
     return api.post(
       '/artifacts/${Uri.encodeComponent(id)}/publish',
-      body: {'collection_id': collectionId},
+      body: {
+        'collection_id': collectionId,
+        if (title != null && title.isNotEmpty) 'title': title,
+      },
     );
   }
 

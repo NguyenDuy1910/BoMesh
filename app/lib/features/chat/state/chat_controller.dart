@@ -59,14 +59,21 @@ class ChatController extends ChangeNotifier {
       selectedCollectionIds.isNotEmpty &&
       selectedCollections.length != selectedCollectionIds.length;
 
-  Future<void> initialize({String? documentId, String? documentTitle}) async {
+  Future<void> initialize({
+    String? documentId,
+    String? documentTitle,
+    String? collectionId,
+    String? collectionTitle,
+    String? prompt,
+    String? conversationId,
+  }) async {
     final view = ++_viewToken;
     try {
       final saved = await _store.listConversations();
       if (_disposed || view != _viewToken) return;
       conversations = saved;
-      if (documentId == null) {
-        final selected = await _store.selectedConversation();
+      if (documentId == null && collectionId == null && prompt == null) {
+        final selected = conversationId ?? await _store.selectedConversation();
         if (_disposed || view != _viewToken) return;
         // Only a conversation someone had open is reopened; otherwise Ask
         // starts on its home, with recent chats one tap away.
@@ -80,7 +87,14 @@ class ChatController extends ChangeNotifier {
         messages = restored;
         _restoreCollections();
       } else {
-        referenceDocument(documentId, documentTitle ?? 'Document');
+        if (documentId != null) {
+          referenceDocument(documentId, documentTitle ?? 'Document');
+        }
+        applyInitialDraft(
+          collectionId: collectionId,
+          collectionTitle: collectionTitle,
+          prompt: prompt,
+        );
       }
     } catch (cause) {
       if (!_disposed && view == _viewToken) error = cause.toString();
@@ -91,6 +105,22 @@ class ChatController extends ChangeNotifier {
       }
     }
     if (isConfigured) unawaited(loadCollections());
+  }
+
+  void applyInitialDraft({
+    String? collectionId,
+    String? collectionTitle,
+    String? prompt,
+  }) {
+    if (_disposed) return;
+    if (collectionId != null) {
+      selectedCollectionIds = {collectionId};
+    }
+    if (prompt != null) setDraft(prompt);
+    if (collectionId != null && isConfigured) {
+      unawaited(loadCollections());
+    }
+    _notify();
   }
 
   Future<void> loadCollections() async {
@@ -247,6 +277,21 @@ class ChatController extends ChangeNotifier {
   void clearCollections() {
     if (_disposed || isGenerating) return;
     selectedCollectionIds = {};
+    _notify();
+  }
+
+  void rateAnswer(String id, bool helpful) {
+    if (_disposed || isGenerating) return;
+    messages = messages.map((message) {
+      if (message.id != id || message.role != ChatRole.assistant) return message;
+      return ChatMessage(
+        id: message.id, role: message.role, text: message.text,
+        documents: message.documents, collections: message.collections,
+        turn: message.turn, createdAt: message.createdAt,
+        rating: message.rating == helpful ? null : helpful,
+      );
+    }).toList();
+    _persist();
     _notify();
   }
 

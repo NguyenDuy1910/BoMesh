@@ -7,8 +7,7 @@ import '../services/chat_service.dart';
 import '../state/chat_controller.dart';
 import 'chat_sheets.dart';
 
-/// The question being written: what it searches (on a new chat), the files
-/// it carries, and the one primary action — send, or stop while answering.
+/// Search scope, attachments and send/stop remain visible on every turn.
 class ChatComposer extends StatefulWidget {
   const ChatComposer({
     super.key,
@@ -19,7 +18,7 @@ class ChatComposer extends StatefulWidget {
   final ChatController controller;
   final String hint;
 
-  /// The "All knowledge ▾" chip; a follow-up keeps the chat's scope.
+  /// The separate search scope chip, including on follow-up questions.
   final bool showScope;
 
   @override
@@ -309,7 +308,7 @@ class _ScopeChip extends StatelessWidget {
             ? null
             : () => openScopeSheet(context, controller),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 30, maxWidth: 280),
+          constraints: const BoxConstraints(minHeight: 40, maxWidth: 280),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 10),
             child: Row(
@@ -369,7 +368,7 @@ class _AttachmentChip extends StatelessWidget {
       UploadProgress.ready =>
         document?.isUpload ?? false
             ? readableBytes(document!.sizeBytes)
-            : 'From Library',
+            : 'From Knowledge',
     };
     final chip = Container(
       padding: const EdgeInsets.fromLTRB(6, 6, 2, 6),
@@ -417,6 +416,7 @@ class _AttachmentChip extends StatelessWidget {
                     color: colors.ink,
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
+                    height: 1.25,
                   ),
                 ),
                 Text(
@@ -426,6 +426,7 @@ class _AttachmentChip extends StatelessWidget {
                   style: TextStyle(
                     color: failed ? colors.danger : colors.ink3,
                     fontSize: 11.5,
+                    height: 1.25,
                   ),
                 ),
               ],

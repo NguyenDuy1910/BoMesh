@@ -6,7 +6,7 @@ import '../../core/api_client.dart';
 import '../../ui/ui.dart';
 import 'state/chat_controller.dart';
 
-/// "Choose from Library": every document the person can read, newest
+/// "Choose from Knowledge": every document the person can read, newest
 /// first; tapping one adds it to the question.
 class LibraryPickerPage extends StatefulWidget {
   const LibraryPickerPage({super.key, required this.controller});
@@ -159,7 +159,7 @@ class _LibraryPickerPageState extends State<LibraryPickerPage> {
     }
     return Scaffold(
       appBar: const AppHeader(
-        title: 'Choose from Library',
+        title: 'Choose from Knowledge',
         subtitle: 'Add a document to this question',
       ),
       body: Column(

@@ -120,20 +120,11 @@ class _MemberPageState extends State<MemberPage> {
       }
     }
     if (!mounted) return;
-    final current = _currentRoles.length == 1
-        ? textOf(_currentRoles.first['id'])
-        : null;
-    final chosen = await pickRole(
-      context,
-      title: 'Role for $_name',
-      subtitle: 'Saved as soon as you choose.',
-      roles: assignableRoles(roles),
-      selectedId: current,
-    );
-    if (chosen == null || chosen.id == current || !mounted) return;
-    await _save({
-      'role_ids': [chosen.id],
-    }, '$_name is now ${chosen.name}');
+    final current = {for (final role in _currentRoles) textOf(role['id'])};
+    final chosen = await pickRoles(context, roles: roles, selected: current);
+    if (chosen == null || !mounted) return;
+    if (chosen.length == current.length && chosen.containsAll(current)) return;
+    await _save({'role_ids': chosen.toList()}, 'Workspace roles saved');
   }
 
   Future<void> _changeGroups() async {

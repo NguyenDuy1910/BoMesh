@@ -150,11 +150,17 @@ class _DocumentPageState extends State<DocumentPage> {
       }
     } catch (error) {
       if (!mounted || request != _request) return;
-      if (quiet && _viewer != null) return;
+      final denied = error is ApiException && const [403, 404].contains(error.status);
+      if (quiet && _viewer != null && !denied) {
+        showError(context, error);
+        return;
+      }
       setState(() {
         _loading = false;
         _viewer = null;
         _document = null;
+        _rendition = null;
+        _renditionVersion = null;
         _restricted =
             error is ApiException && const [403, 404].contains(error.status);
         _error = error;
@@ -276,6 +282,29 @@ class _DocumentPageState extends State<DocumentPage> {
     }
   }
 
+  Future<void> _details() => showAppSheet<void>(
+    context,
+    title: 'Document details',
+    builder: (_) {
+      final document = _document!;
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(document.name, style: const TextStyle(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 12),
+          if (_collection != null) Text('Knowledge base: ${_collection!.title}'),
+          Text('Type: ${FileKind.typeWord(contentType: document.contentType, name: document.name)}'),
+          if (document.size > 0) Text('Size: ${readableBytes(document.size)}'),
+          if (_viewer!.pageCount > 0) Text('Pages: ${_viewer!.pageCount}'),
+          Text('Processing: ${sentenceCase(document.processing.state)}'),
+          if (document.updatedAt.isNotEmpty) Text('Updated: ${relativeTime(document.updatedAt)}'),
+          if (document.processing.error.isNotEmpty) Text(document.processing.error),
+        ],
+      );
+    },
+  );
+
   Future<void> _more() async {
     final viewer = _viewer!;
     final action = await showAppSheet<String>(
@@ -284,6 +313,11 @@ class _DocumentPageState extends State<DocumentPage> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          SheetOption(
+            icon: Icons.info_outline_rounded,
+            title: 'Details',
+            onTap: () => Navigator.pop(sheetContext, 'details'),
+          ),
           if (_canMakeSearchable)
             SheetOption(
               icon: Icons.auto_awesome_rounded,
@@ -318,6 +352,8 @@ class _DocumentPageState extends State<DocumentPage> {
     );
     if (!mounted) return;
     switch (action) {
+      case 'details':
+        await _details();
       case 'searchable':
         await _makeSearchable();
       case 'download':
@@ -332,10 +368,7 @@ class _DocumentPageState extends State<DocumentPage> {
   bool get _hasMore {
     final viewer = _viewer;
     if (viewer == null || _document == null) return false;
-    return _canMakeSearchable ||
-        viewer.originalUrl.isNotEmpty ||
-        viewer.externalUrl.isNotEmpty ||
-        _allowed('collection.update');
+    return true;
   }
 
   @override
@@ -349,6 +382,12 @@ class _DocumentPageState extends State<DocumentPage> {
     return Scaffold(
       appBar: AppHeader(
         actions: [
+          if (viewer != null && viewer.originalUrl.isNotEmpty)
+            IconButton(
+              tooltip: 'Download',
+              onPressed: _openOriginal,
+              icon: const Icon(Icons.download_rounded),
+            ),
           if (_hasMore)
             IconButton(
               tooltip: 'More',
@@ -421,6 +460,25 @@ class _DocumentPageState extends State<DocumentPage> {
     final pages = viewer.assets.isNotEmpty;
     final text = viewer.renditionUrl.isNotEmpty || viewer.elements.isNotEmpty;
     return [
+      if (widget.chunkId?.isNotEmpty ?? false) ...[
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: colors.evidenceSoft,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(children: [
+            Icon(Icons.format_quote_rounded, color: colors.evidence),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('The passage cited in your answer')),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Back'),
+            ),
+          ]),
+        ),
+        const SizedBox(height: 12),
+      ],
       Padding(
         padding: const EdgeInsets.fromLTRB(4, 6, 4, 16),
         child: Row(
@@ -459,6 +517,14 @@ class _DocumentPageState extends State<DocumentPage> {
       if (notice != null) ...[notice, const SizedBox(height: 12)],
       if (viewer.quote.isNotEmpty) ...[
         CitedPassage(text: viewer.quote, section: viewer.section),
+        if (widget.offerAsk && WorkspaceScope.of(context).askQuestion != null)
+          TextButton.icon(
+            onPressed: () => WorkspaceScope.of(context).askQuestion?.call(
+              'Explain this passage from “${viewer.title}”: ${viewer.quote}',
+            ),
+            icon: const Icon(Icons.auto_awesome_outlined, size: 18),
+            label: const Text('Ask about this passage'),
+          ),
         const SizedBox(height: 12),
       ] else if (widget.chunkId?.isNotEmpty ?? false) ...[
         const InlineNotice(text: 'The exact passage isn’t available any more.'),

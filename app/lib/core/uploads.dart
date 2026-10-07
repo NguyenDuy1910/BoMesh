@@ -63,7 +63,7 @@ Future<PickedUploads> pickUploads({
     } else if (extension == null || !extensions.contains(extension)) {
       rejected.add(
         imageExtensions.contains(extension)
-            ? '${file.name}: images can be attached in a chat, not added to the library'
+            ? '${file.name}: images can be attached in a chat, not added to Knowledge'
             : '${file.name}: this file type is not supported',
       );
     } else if (length == 0) {

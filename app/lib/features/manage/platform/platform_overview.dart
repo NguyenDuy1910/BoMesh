@@ -13,10 +13,8 @@ const _userRead = 'platform.user.read';
 const _auditRead = 'platform.audit.read';
 const _healthRead = 'platform.health.read';
 
-/// Manage → Platform: everything across all tenants, read-only. Health leads
-/// because it is the reason to open it; the lists follow.
-///
-/// A scrollable body shown under the Manage tab's Workspace/Platform switch.
+/// Read-only platform body, hosted in the account route's separate scope.
+/// The parent route owns the always-visible Return to workspace control.
 class PlatformOverview extends StatefulWidget {
   const PlatformOverview({super.key});
 
@@ -115,7 +113,7 @@ class _PlatformOverviewState extends State<PlatformOverview> {
               icon: Icons.apartment_rounded,
               size: TileSize.small,
             ),
-            title: 'Tenants',
+            title: 'Workspaces',
             subtitle: summary.activeTenants == null
                 ? null
                 : '${groupedNumber(summary.activeTenants!)} active',
@@ -142,7 +140,7 @@ class _PlatformOverviewState extends State<PlatformOverview> {
               size: TileSize.small,
             ),
             title: 'Audit log',
-            subtitle: 'Every tenant',
+            subtitle: 'Every workspace',
             onTap: () => _open(PlatformListKind.audit),
           ),
       ];

@@ -1,11 +1,12 @@
 # BoMesh Flutter application
 
-Flutter client for the existing `/api/v1` API. Three destinations, following
-`docs/mobile-ux-blueprint.html`: **Ask** (the assistant), **Library** (your
-files and the workspace's collections) and **Manage** (workspace and platform
-operations, shown only to people holding a management permission).
-Permissions and collection ACLs are enforced by the backend; the app uses the
-returned permissions to decide which sections and actions to show.
+Flutter client for the existing `/api/v1` API, following
+`docs/mobile-ux-blueprint.html`. Destinations: **Chat**, **Knowledge**,
+**Inbox**, and **Manage** (only for people holding a workspace management
+permission). Search and the account sheet sit in the header; the Platform
+console is a separate scope opened from the account sheet. Permissions and
+collection ACLs are enforced by the backend; the app uses the returned session
+and effective collection permissions only to decide what to show.
 
 ## Run
 
@@ -78,50 +79,55 @@ Google login is enabled when `BOMESH_GOOGLE_CLIENT_ID` is supplied:
 
 ## Structure
 
-- `lib/ui/` — the design system: theme tokens (light and dark, warm paper and
-  ink with one violet accent), tone tiles, file tiles, avatars, status pills,
-  app header, list groups and rows, search field, segmented switch, attention
-  and metric cards, FAB, sticky action bar, sheets (options, pickers,
-  confirmations, text prompts), loading/empty/error states and formatting.
-  Screens compose these; they do not style Material widgets themselves.
-- `lib/app/` — app root, appearance (Auto/Light/Dark, remembered per device),
-  the three-tab shell (each tab keeps its own navigation stack), the account
-  sheet, and `WorkspaceScope` (the workspace API client, the session, which
-  Manage sections are open, and app-wide actions).
-- `lib/features/` — `auth`, `chat` (Ask), `knowledge` (Library, documents,
-  collections, sharing, uploads) and `manage` (overview, ingestion, access,
-  activity, settings, platform).
+- `lib/ui/` — the design system: blueprint tokens (cool neutrals, indigo by
+  default, amber reserved for evidence), bundled IBM Plex Sans/Mono, tone
+  tiles, file tiles, avatars, status pills, app header, list groups and rows,
+  search field, segmented switch, attention and metric cards, FAB, sticky
+  action bar, sheets, loading/empty/error states and formatting.
+- `lib/app/` — app root, appearance (Auto/Light/Dark plus accent, remembered
+  per device), the tab shell (each tab keeps its own navigation stack), the
+  first-run tour, the account sheet, and `WorkspaceScope` (workspace API
+  client, session, Manage sections, cross-tab actions such as "ask about this
+  knowledge base" and opening Search).
+- `lib/features/` — `auth` (sign-in, create account, choose workspace), `chat`,
+  `knowledge`, `inbox`, `search` and `manage` (overview, sources, people &
+  access, activity, settings, platform).
 
 ## Workflows
 
-- Ask: the composer is the screen. History, new chat and account sit in the
-  header; "+" adds a file, a Library document or limits the search to
-  collections. Answers stream in place with one quiet line per piece of work
-  ("Searched 6 sources", "Ran code"), tappable citations that open the source
-  passage, and file cards (Preview / Download) for files the assistant made.
-  History lives on its own screen (search, pinned, by day; rename, pin, delete
-  from a row's "···").
-- Library: search, then "My files" or "Workspace" collections. Rows show the
-  file type, size and date; a document says "Not searchable yet" only when it
-  is. A document opens its preview with one action, "Ask about this document".
-  Upload opens a sheet: choose where, optionally "Make searchable right away"
-  (one ingestion run for exactly the uploaded files), then pick files. Files
-  are streamed from disk and checked by extension in the app.
-- Manage → Workspace: what needs a decision first (access requests, failed
-  documents), the workspace at a glance, then the sections the person may open:
-  Knowledge (collections, sharing, adding knowledge), Ingestion (runs with
-  progress, run detail with "Retry failed", sources with "Sync now"), Access
-  (members, groups, roles, access requests), Activity (usage chart, sign-ins,
-  audit) and Settings (workspace name). Manage → Platform (platform
-  permissions only): system health, tenants, users and audit, read-only.
-- Account sheet (avatar): workspace switch, appearance, sign out.
-- On the web only: connecting a new source (OAuth), editing what a role can do,
-  Agent and Experience settings.
-
-Unavailable indexed text, expired signed previews, failed streams, empty lists,
-permission errors and pending external operations are shown explicitly rather
-than replaced with fabricated results. Processing requires the configured
-worker, and grounded answers require the configured LLM/search providers.
+- Sign in: password or Google. Several memberships → choose a workspace
+  first; one → straight to Chat. Creating an account also creates the
+  person's own workspace (current backend behavior); an admin adds them to a
+  team workspace.
+- Chat: greeting, three starters and recent chats; the composer has "+"
+  (upload or choose from Knowledge) and a separate scope chip. Answers stream
+  with one work-summary line, amber citations open a source sheet that pages
+  through passages and opens the document at the passage. Generated files
+  open Preview / Changes / History, download, save to Knowledge and "ask for
+  changes". History: search, pinned, by day; rename, pin, delete.
+- Knowledge: My files first, then readable knowledge bases, filtered by name
+  and by effective access (All / Can edit / View only / Only you). Create
+  (`knowledge.manage`) opens the new base on Documents. A base shows
+  Documents (search, Needs attention / Failed / Processing, retry or process
+  in place, Add or Ask) and, by permission, Sources, Access and Settings.
+  Documents open the shared viewer (download, details, ask about it or a
+  cited passage).
+- Inbox: access requests (own and reviewable) and, with `source.manage`,
+  failing sources and connected accounts, each opening where it is fixed.
+  Read state is kept on this device; there are no push/email notifications.
+- Search: knowledge bases, document names, chats saved on this device,
+  people (`user.manage`) and Manage pages; "Search inside documents" uses
+  `POST /documents/search` and opens the passage; the last row asks Chat.
+- Manage: what needs a decision first, then Sources (sources, sync history,
+  accounts, connect a source end to end), People & access (members, groups,
+  roles with permission editing, requests), Activity, Settings, and the
+  workspace at a glance.
+- Account sheet: workspace switch, appearance and accent, tour, Platform
+  console (`platform.*.read`), sign out.
+- Not offered because the API does not exist yet (see "Proposed" in
+  `backend/docs_design/api_contract.md`): chat sharing, assistant settings,
+  knowledge gaps, server notifications, discovery of knowledge bases you
+  cannot read, workspace-wide general access, archive/restore.
 
 ## Verification
 

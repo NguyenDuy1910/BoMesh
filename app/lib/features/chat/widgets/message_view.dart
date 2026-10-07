@@ -80,16 +80,17 @@ MarkdownStyleSheet chatMarkdownStyle(
       borderRadius: const BorderRadius.horizontal(right: Radius.circular(12)),
     ),
     code: TextStyle(
-      color: colors.codeText,
-      backgroundColor: colors.codeSurface,
-      fontFamily: 'monospace',
+      color: colors.ink,
+      backgroundColor: colors.subtle,
+      fontFamily: 'IBM Plex Mono',
       fontSize: 13,
       height: 1.5,
     ),
     codeblockPadding: const EdgeInsets.all(14),
     codeblockDecoration: BoxDecoration(
-      color: colors.codeSurface,
+      color: colors.subtle,
       borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: colors.line),
     ),
     tableHead: body.copyWith(fontSize: 13.5, fontWeight: FontWeight.w700),
     tableBody: body.copyWith(fontSize: 13.5, height: 1.4),
@@ -121,21 +122,24 @@ Future<void> _openSource(
   ChatController controller,
   AnswerSource source,
   String question,
+  List<AnswerSource> sources,
 ) async {
   final action = await showSourceSheet(
     context,
     service: controller.service,
     source: source,
+    sources: sources,
     question: question,
   );
   if (!context.mounted || action == null) return;
-  switch (action) {
+  final selected = action.source;
+  switch (action.action) {
     case SourceAction.open:
       await Navigator.of(context).push(
         MaterialPageRoute<void>(
           builder: (_) => DocumentPage(
-            documentId: source.itemId,
-            chunkId: source.chunkId,
+            documentId: selected.itemId,
+            chunkId: selected.chunkId,
             offerAsk: false,
           ),
         ),
@@ -144,7 +148,7 @@ Future<void> _openSource(
       if (controller.isGenerating) {
         showToast(context, 'Wait for this answer to finish, then ask again.');
       } else {
-        controller.referenceDocument(source.itemId, source.title);
+        controller.referenceDocument(selected.itemId, selected.title);
       }
   }
 }
@@ -334,32 +338,31 @@ class _AssistantTurn extends StatelessWidget {
   Widget build(BuildContext context) {
     final turn = message.turn;
     final items = turn?.presentationItems ?? const <AssistantTurnItem>[];
+    final work = items.where((item) => item.kind != AssistantTurnItemKind.message).toList();
     final sources = turn?.sources ?? const <AnswerSource>[];
     final artifacts = turn?.artifacts ?? const <ChatArtifact>[];
     final text = message.displayText;
     final error = turn?.error;
     final settled = !isStreaming;
     void openSource(AnswerSource source) =>
-        _openSource(context, controller, source, question);
+        _openSource(context, controller, source, question, sources);
     return Padding(
       padding: const EdgeInsets.only(bottom: 18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          for (final item in items)
-            switch (item.kind) {
-              AssistantTurnItemKind.message => Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: _Answer(
-                  text: item.text,
-                  muted: item.phase == 'commentary',
-                  sources: sources,
-                  onCite: openSource,
-                ),
+          if (work.isNotEmpty)
+            _WorkSummary(items: work, streaming: isStreaming, files: artifacts.length),
+          for (final item in items.where((item) => item.kind == AssistantTurnItemKind.message))
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: _Answer(
+                text: item.text,
+                muted: item.phase == 'commentary',
+                sources: sources,
+                onCite: openSource,
               ),
-              AssistantTurnItemKind.tool || AssistantTurnItemKind.reasoning =>
-                _WorkLine(item: item, streaming: isStreaming),
-            },
+            ),
           if (isStreaming && (turn?.modelPending ?? true)) const _Pending(),
           if (error != null)
             Padding(
@@ -379,6 +382,9 @@ class _AssistantTurn extends StatelessWidget {
           if (settled && text.isNotEmpty)
             _TurnActions(
               text: text,
+              rating: message.rating,
+              onRate: controller.isGenerating ? null
+                  : (helpful) => controller.rateAnswer(message.id, helpful),
               onRegenerate: controller.isGenerating || error != null
                   ? null
                   : () => unawaited(controller.regenerate(message.id)),
@@ -479,7 +485,7 @@ class _CitationChip extends StatelessWidget {
             constraints: const BoxConstraints(minWidth: 19),
             padding: const EdgeInsets.symmetric(horizontal: 5),
             decoration: BoxDecoration(
-              color: colors.brandSoft,
+              color: colors.evidenceSoft,
               borderRadius: BorderRadius.circular(6),
             ),
             child: Center(
@@ -487,7 +493,7 @@ class _CitationChip extends StatelessWidget {
               child: Text(
                 '$number',
                 style: TextStyle(
-                  color: colors.brandInk,
+                  color: colors.evidence,
                   fontSize: 11.5,
                   height: 1.2,
                   fontWeight: FontWeight.w800,
@@ -503,6 +509,37 @@ class _CitationChip extends StatelessWidget {
 
 /// One quiet line for one thing the assistant did. A code step shows its
 /// command and opens the full commands; a reasoning step opens its summary.
+class _WorkSummary extends StatelessWidget {
+  const _WorkSummary({required this.items, required this.streaming, required this.files});
+  final List<AssistantTurnItem> items;
+  final bool streaming;
+  final int files;
+
+  @override
+  Widget build(BuildContext context) {
+    final tools = items.where((item) => item.kind == AssistantTurnItemKind.tool).toList();
+    final commands = tools.fold<int>(0, (count, item) => count + item.commands.length);
+    final failed = tools.where((item) => item.state == 'failed' || item.state == 'timeout').length;
+    return ExpansionTile(
+      tilePadding: EdgeInsets.zero,
+      childrenPadding: const EdgeInsets.only(bottom: 8),
+      title: Text([
+        streaming ? 'Working…' : 'Work summary',
+        if (tools.isNotEmpty) countOf(tools.length, 'step'),
+        if (commands > 0) 'Ran ${countOf(commands, 'command')}',
+        if (failed > 0) '$failed failed',
+        if (files > 0) 'Created ${countOf(files, 'file')}',
+      ].join(' · '), style: TextStyle(
+        color: failed > 0 ? context.colors.danger : context.colors.ink3,
+        fontSize: 13,
+      )),
+      children: [
+        for (final item in items) _WorkLine(item: item, streaming: streaming),
+      ],
+    );
+  }
+}
+
 class _WorkLine extends StatelessWidget {
   const _WorkLine({required this.item, required this.streaming});
   final AssistantTurnItem item;
@@ -548,7 +585,7 @@ class _WorkLine extends StatelessWidget {
     }
     final details = reasoning
         ? item.text.trim().isNotEmpty
-        : item.commands.isNotEmpty;
+        : item.commands.isNotEmpty || item.text.isNotEmpty;
     final line = Padding(
       padding: const EdgeInsets.only(top: 3, bottom: 7),
       child: Row(
@@ -587,7 +624,7 @@ class _WorkLine extends StatelessWidget {
               borderRadius: BorderRadius.circular(8),
               onTap: () => reasoning
                   ? _showReasoning(context, item.text)
-                  : _showCommands(context, item.commands),
+                  : _showCommands(context, item.commands, item.text),
               child: line,
             )
           : line,
@@ -595,7 +632,7 @@ class _WorkLine extends StatelessWidget {
   }
 }
 
-Future<void> _showCommands(BuildContext context, List<String> commands) {
+Future<void> _showCommands(BuildContext context, List<String> commands, String output) {
   final colors = context.colors;
   return showAppSheet<void>(
     context,
@@ -624,6 +661,7 @@ Future<void> _showCommands(BuildContext context, List<String> commands) {
               ),
             ),
           ),
+        if (output.isNotEmpty) SelectableText(output),
       ],
     ),
   );
@@ -882,18 +920,23 @@ class _SourcesRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final documents = <String, AnswerSource>{};
+    for (final source in sources) {
+      documents.putIfAbsent(source.itemId, () => source);
+    }
+    final grouped = documents.values.toList();
     return Padding(
       padding: const EdgeInsets.only(top: 12, bottom: 6),
       child: SizedBox(
         height: 44,
         child: ListView.separated(
           scrollDirection: Axis.horizontal,
-          itemCount: sources.length,
+          itemCount: grouped.length,
           separatorBuilder: (_, _) => const SizedBox(width: 8),
           itemBuilder: (context, index) {
-            final source = sources[index];
+            final source = grouped[index];
             return Material(
-              color: colors.subtle,
+              color: colors.evidenceSoft,
               borderRadius: BorderRadius.circular(12),
               clipBehavior: Clip.antiAlias,
               child: InkWell(
@@ -917,7 +960,7 @@ class _SourcesRow extends StatelessWidget {
                             child: Text(
                               '${source.number}',
                               style: TextStyle(
-                                color: colors.brandInk,
+                                color: colors.evidence,
                                 fontSize: 11,
                                 fontWeight: FontWeight.w800,
                               ),
@@ -954,9 +997,14 @@ class _SourcesRow extends StatelessWidget {
 }
 
 class _TurnActions extends StatelessWidget {
-  const _TurnActions({required this.text, required this.onRegenerate});
+  const _TurnActions({
+    required this.text, required this.onRegenerate,
+    required this.rating, required this.onRate,
+  });
   final String text;
   final VoidCallback? onRegenerate;
+  final bool? rating;
+  final ValueChanged<bool>? onRate;
 
   @override
   Widget build(BuildContext context) {
@@ -979,6 +1027,18 @@ class _TurnActions extends StatelessWidget {
                 if (context.mounted) showToast(context, 'Copied');
               },
               icon: const Icon(Icons.copy_rounded, size: 18),
+            ),
+            IconButton(
+              tooltip: 'Helpful · saved on this device',
+              style: style,
+              onPressed: onRate == null ? null : () => onRate!(true),
+              icon: Icon(rating == true ? Icons.thumb_up : Icons.thumb_up_outlined, size: 18),
+            ),
+            IconButton(
+              tooltip: 'Not helpful · saved on this device',
+              style: style,
+              onPressed: onRate == null ? null : () => onRate!(false),
+              icon: Icon(rating == false ? Icons.thumb_down : Icons.thumb_down_outlined, size: 18),
             ),
             if (onRegenerate != null)
               IconButton(

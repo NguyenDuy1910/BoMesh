@@ -30,8 +30,7 @@ enum _Window {
 
 enum _Records { signIns, audit }
 
-/// Manage → Activity: two numbers, one chart, then records you can switch
-/// between. Filters live in a sheet.
+/// Readable changes and sign-ins first; usage remains available in a sheet.
 class ActivityPage extends StatefulWidget {
   const ActivityPage({super.key});
 
@@ -48,7 +47,7 @@ class _ActivityPageState extends State<ActivityPage> {
   JsonMap? _activity;
   Object? _activityError;
 
-  _Records _records = _Records.signIns;
+  _Records _records = _Records.audit;
   String _search = '';
   String? _sessionStatus; // null = all, 'active', 'ended'
   List<JsonMap>? _rows;
@@ -194,6 +193,17 @@ class _ActivityPageState extends State<ActivityPage> {
     _loadRows();
   }
 
+  void _showUsage() => showAppSheet<void>(
+    context,
+    title: 'Workspace usage · ${_window.label}',
+    scrollable: true,
+    builder: (_) => Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: _summary(),
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
@@ -202,7 +212,9 @@ class _ActivityPageState extends State<ActivityPage> {
       appBar: AppHeader(
         title: 'Activity',
         paper: true,
-        actions: [_PeriodChip(label: _window.label, onTap: _pickWindow)],
+        actions: [
+          IconButton(tooltip: 'Usage summary', onPressed: _showUsage, icon: const Icon(Icons.bar_chart_rounded)),
+        ],
       ),
       body: RefreshIndicator(
         onRefresh: _refresh,
@@ -211,15 +223,13 @@ class _ActivityPageState extends State<ActivityPage> {
           padding: kPagePadding,
           children: [
             const SizedBox(height: 6),
-            ..._summary(),
-            const SizedBox(height: 18),
             Row(
               children: [
                 Expanded(
                   child: Segmented<_Records>(
                     segments: const {
+                      _Records.audit: 'Changes',
                       _Records.signIns: 'Sign-ins',
-                      _Records.audit: 'Audit log',
                     },
                     selected: _records,
                     onChanged: _switchRecords,
@@ -242,6 +252,11 @@ class _ActivityPageState extends State<ActivityPage> {
             ),
             const SizedBox(height: 8),
             ..._recordList(),
+            const SizedBox(height: 16),
+            Row(children: [
+              const Expanded(child: Text('Usage summary period')),
+              _PeriodChip(label: _window.label, onTap: _pickWindow),
+            ]),
           ],
         ),
       ),

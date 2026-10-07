@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../features/auth/session.dart';
+import '../features/manage/platform/platform_overview.dart';
 import '../ui/ui.dart';
 import 'workspace_scope.dart';
+import 'app_tour.dart';
+import 'appearance.dart';
 
 String accountName(AuthSession session) =>
     session.displayName?.trim().isNotEmpty == true
@@ -35,6 +38,7 @@ Future<void> showAccountSheet(BuildContext context) async {
   final session = scope.session;
   final action = await showAppSheet<String>(
     context,
+    scrollable: true,
     builder: (sheetContext) {
       final colors = sheetContext.colors;
       return Column(
@@ -81,6 +85,22 @@ Future<void> showAccountSheet(BuildContext context) async {
           _AppearanceRow(scope: scope),
           const SizedBox(height: 8),
           SheetOption(
+            icon: Icons.route_outlined,
+            title: 'Take the tour again',
+            subtitle: 'Five tips for finding and using knowledge',
+            onTap: () => Navigator.pop(sheetContext, 'tour'),
+          ),
+          if (scope.manage.platform) ...[
+            const SizedBox(height: 8),
+            SheetOption(
+              icon: Icons.dns_outlined,
+              title: 'Platform console',
+              subtitle: 'Cross-workspace operations',
+              onTap: () => Navigator.pop(sheetContext, 'platform'),
+            ),
+          ],
+          const SizedBox(height: 8),
+          SheetOption(
             icon: Icons.logout_rounded,
             title: 'Sign out',
             subtitle: 'Chats stay on this phone',
@@ -95,6 +115,25 @@ Future<void> showAccountSheet(BuildContext context) async {
   switch (action) {
     case 'workspace':
       await _switchWorkspace(context, scope);
+    case 'tour':
+      await showAppTour(context);
+    case 'platform':
+      await Navigator.of(context, rootNavigator: true).push(
+        MaterialPageRoute<void>(
+          builder: (_) => scope.wrap(
+            context,
+            Scaffold(
+              backgroundColor: Theme.of(context).extension<AppColors>()!.paper,
+              appBar: const AppHeader(
+                title: 'Platform',
+                subtitle: 'Cross-workspace operations',
+                paper: true,
+              ),
+              body: const PlatformOverview(),
+            ),
+          ),
+        ),
+      );
     case 'sign-out':
       final confirmed = await confirmAction(
         context,
@@ -115,7 +154,7 @@ Future<void> _switchWorkspace(
   final selected = await showAppSheet<String>(
     context,
     title: 'Switch workspace',
-    subtitle: 'Ask, Library and Manage follow the workspace you choose.',
+    subtitle: 'Chat, Knowledge and Inbox follow the workspace you choose.',
     scrollable: true,
     builder: (sheetContext) => Column(
       mainAxisSize: MainAxisSize.min,
@@ -197,6 +236,21 @@ class _AppearanceRow extends StatelessWidget {
               },
               selected: scope.appearance.mode,
               onChanged: scope.appearance.select,
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final accent in AppAccent.values)
+                  ChoiceChip(
+                    label: Text(accent.label),
+                    avatar: Icon(Icons.circle, size: 14,
+                      color: colors.dark ? accent.dark : accent.light),
+                    selected: scope.appearance.accent == accent,
+                    onSelected: (_) => scope.appearance.selectAccent(accent),
+                  ),
+              ],
             ),
           ],
         ),

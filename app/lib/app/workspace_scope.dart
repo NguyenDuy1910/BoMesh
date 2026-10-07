@@ -11,12 +11,8 @@ class ManageAccess {
   const ManageAccess(this.session);
   final AuthSession session;
 
-  bool get overview => session.can('tenant.read');
+  bool get overview => session.can('tenant.read') && session.can('tenant.manage');
 
-  /// Library covers reading; Manage → Knowledge is for people who organise
-  /// collections or share them.
-  bool get knowledge =>
-      session.canAny(const ['knowledge.manage', 'collection.share']);
   bool get ingestion => session.canAny(const [
     'ingestion.read',
     'ingestion.run',
@@ -43,14 +39,13 @@ class ManageAccess {
 
   bool get workspace =>
       overview ||
-      knowledge ||
       ingestion ||
       access ||
       requests ||
       activity ||
       settings;
 
-  bool get any => workspace || platform;
+  bool get any => workspace;
 }
 
 /// What every signed-in screen needs: the workspace's API, who is signed in,
@@ -66,6 +61,11 @@ class WorkspaceScope extends InheritedTheme {
     required this.auth,
     required this.appearance,
     required this.askAboutDocument,
+    this.askAboutCollection,
+    this.askQuestion,
+    this.openSearch,
+    this.openKnowledge,
+    this.openConversation,
     required this.waitingRequests,
     required this.refreshWaitingRequests,
     required super.child,
@@ -76,8 +76,13 @@ class WorkspaceScope extends InheritedTheme {
   final SessionController auth;
   final AppearanceController appearance;
 
-  /// Opens Ask with a new chat about one document.
+  /// Opens Chat with a new conversation about one document.
   final void Function(String documentId, String title) askAboutDocument;
+  final void Function(String collectionId, String title)? askAboutCollection;
+  final void Function(String prompt)? askQuestion;
+  final void Function(String conversationId)? openConversation;
+  final VoidCallback? openSearch;
+  final VoidCallback? openKnowledge;
 
   /// Access requests waiting for this person's decision (the Manage badge).
   final int waitingRequests;
@@ -98,6 +103,11 @@ class WorkspaceScope extends InheritedTheme {
     auth: auth,
     appearance: appearance,
     askAboutDocument: askAboutDocument,
+    askAboutCollection: askAboutCollection,
+    askQuestion: askQuestion,
+    openSearch: openSearch,
+    openKnowledge: openKnowledge,
+    openConversation: openConversation,
     waitingRequests: waitingRequests,
     refreshWaitingRequests: refreshWaitingRequests,
     child: child,

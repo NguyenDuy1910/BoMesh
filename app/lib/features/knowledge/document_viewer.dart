@@ -59,9 +59,9 @@ class CitedPassage extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 6, 6, 14),
       decoration: BoxDecoration(
-        color: colors.brandSoft,
+        color: colors.evidenceSoft,
         borderRadius: BorderRadius.circular(14),
-        border: Border(left: BorderSide(color: colors.brand, width: 3)),
+        border: Border(left: BorderSide(color: colors.evidence, width: 3)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -74,7 +74,7 @@ class CitedPassage extends StatelessWidget {
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    color: colors.brandInk,
+                    color: colors.evidence,
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
                   ),
@@ -323,7 +323,7 @@ class _Block extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: colors.brandSoft,
+        color: colors.evidenceSoft,
         borderRadius: BorderRadius.circular(10),
       ),
       child: child,
@@ -502,7 +502,7 @@ class _TableBlockViewState extends State<TableBlockView> {
                               ),
                           ],
                           background: widget.citedRows.contains(index)
-                              ? colors.brandSoft
+                              ? colors.evidenceSoft
                               : null,
                         ),
                       ],
@@ -575,7 +575,7 @@ class ElementsSliver extends StatelessWidget {
               : EdgeInsets.zero,
           decoration: highlighted
               ? BoxDecoration(
-                  color: colors.brandSoft,
+                  color: colors.evidenceSoft,
                   borderRadius: BorderRadius.circular(10),
                 )
               : null,
@@ -700,7 +700,7 @@ class _PageViewerState extends State<PageViewer> {
                             height: region.height * constraints.maxHeight,
                             child: IgnorePointer(
                               child: ColoredBox(
-                                color: colors.brand.withValues(alpha: .2),
+                                color: colors.evidence.withValues(alpha: .2),
                               ),
                             ),
                           ),

@@ -129,6 +129,7 @@ class ChatMessage {
     this.documents = const <ConversationDocument>[],
     this.collections = const <ChatCollection>[],
     this.turn,
+    this.rating,
     required this.createdAt,
   });
 
@@ -139,6 +140,8 @@ class ChatMessage {
   final List<ChatCollection> collections;
   final ChatTurnState? turn;
   final DateTime createdAt;
+  /// Device-local helpfulness, never submitted as server feedback.
+  final bool? rating;
 
   String get displayText =>
       role == ChatRole.assistant ? (turn?.finalAnswerText ?? text) : text;
@@ -170,6 +173,7 @@ class ChatMessage {
       turn: turn is Map
           ? ChatTurnState.fromJson(Map<String, dynamic>.from(turn))
           : null,
+      rating: json['rating'] as bool?,
       createdAt: DateTime.fromMillisecondsSinceEpoch(
         json['created_at'] as int? ?? 0,
       ),
@@ -185,6 +189,7 @@ class ChatMessage {
         .map((collection) => collection.toJson())
         .toList(),
     if (turn case final value?) 'turn': value.toJson(),
+    if (rating != null) 'rating': rating,
     'created_at': createdAt.millisecondsSinceEpoch,
   };
 }
@@ -468,9 +473,7 @@ class ChatTurnState {
           );
         }
       } else if (item.type == 'reasoning') {
-        final summary = item.summaryText.isNotEmpty
-            ? item.summaryText
-            : item.content.map((part) => part.text).join();
+        final summary = item.summaryText;
         if (summary.trim().isNotEmpty) {
           result.add(
             AssistantTurnItem.reasoning(
@@ -498,17 +501,18 @@ class ChatTurnState {
           AssistantTurnItem.tool(
             id: item.callId ?? item.id,
             name: activity?.toolName ?? item.name ?? 'hosted_execution',
+            text: output?.type == 'hosted_execution_result'
+                ? _executionText(output!.extension['output']) : '',
             commands: switch (item.extension['commands']) {
               final List<dynamic> values => values.whereType<String>().toList(),
               _ => const <String>[],
             },
-            state:
-                activity?.state ??
-                (output != null
-                    ? 'completed'
-                    : status == 'streaming'
-                    ? 'active'
-                    : 'skipped'),
+            state: output?.type == 'hosted_execution_result' &&
+                    _executionFailed(output!.extension['output'])
+                ? 'failed'
+                : activity?.state ??
+                    (output != null ? 'completed'
+                        : status == 'streaming' ? 'active' : 'skipped'),
             resultCount: activity?.resultCount,
           ),
         );
@@ -667,6 +671,7 @@ class AssistantTurnItem {
     required String state,
     int? resultCount,
     List<String> commands = const <String>[],
+    String text = '',
   }) => AssistantTurnItem._(
     kind: AssistantTurnItemKind.tool,
     id: id,
@@ -674,6 +679,7 @@ class AssistantTurnItem {
     state: state,
     resultCount: resultCount,
     commands: commands,
+    text: text,
   );
 
   factory AssistantTurnItem.reasoning({
@@ -695,8 +701,24 @@ class AssistantTurnItem {
   final int? resultCount;
   final String? phase;
 
-  /// The commands a code step ran, shown on request — never its output.
+  /// Commands are shown on request alongside their explicit shell result.
   final List<String> commands;
+}
+
+bool _executionFailed(Object? value) => value is List && value.whereType<Map>().any(
+  (entry) => entry['timed_out'] == true ||
+      (entry['exit_code'] is int && entry['exit_code'] != 0),
+);
+
+String _executionText(Object? value) {
+  if (value is! List) return '';
+  return value.whereType<Map>().map((entry) => [
+    entry['timed_out'] == true ? 'Timed out' : 'Exit status: ${entry['exit_code']}',
+    if (entry['stdout'] is String && (entry['stdout'] as String).isNotEmpty)
+      'Output:\n${entry['stdout']}',
+    if (entry['stderr'] is String && (entry['stderr'] as String).isNotEmpty)
+      'Error output:\n${entry['stderr']}',
+  ].join('\n')).join('\n\n');
 }
 
 class RuntimeActivity {

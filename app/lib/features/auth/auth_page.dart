@@ -113,12 +113,14 @@ class _AuthPageState extends State<AuthPage> {
         const BrandMark(size: 56, icon: Icons.hub_outlined),
         const SizedBox(height: 26),
         Text(
-          'Your workspace’s knowledge, in your pocket.',
+          _register ? 'Create your account.' : 'Your company knowledge, with sources.',
           style: text.headlineMedium?.copyWith(height: 1.12),
         ),
         const SizedBox(height: 10),
         Text(
-          'Ask questions, open documents and get answers with their sources.',
+          _register
+              ? 'Your account starts with a personal workspace. Ask an admin to add your email to your team’s workspace.'
+              : 'Use your work account to ask questions and trace every answer back to its sources.',
           style: text.bodyMedium?.copyWith(
             color: context.colors.ink2,
             height: 1.5,

@@ -104,12 +104,21 @@ and grounded citations.
   interrupted rather than still running.
 - Device-local conversations support search, title changes, pins and deletion.
   Storage is isolated by account and workspace; it is not cross-device
-  conversation synchronization.
+  conversation synchronization. Helpful/not-helpful ratings are also
+  device-local.
+- The composer keeps search scope (`collection_ids`) as its own visible chip,
+  separate from attachments. Starting a chat from a knowledge base, document,
+  passage or search result pre-fills scope, attachment or draft and never sends
+  automatically.
 - Existing documents are references, not disposable uploads. Removing a chat
-  never deletes a referenced library document. Owned conversation uploads are
+  never deletes a referenced Knowledge document. Owned conversation uploads are
   removed only when no saved conversation still references them.
-- Citation taps open the canonical document preview/focus endpoint. Generated
-  artifacts use signed downloads and the canonical revision/publish API.
+- Citations use evidence amber, are grouped by document, and open a source
+  sheet that pages through cited passages; "Open at passage" uses the canonical
+  document focus endpoint. Generated artifacts open Preview / Changes / History
+  over real revisions: Changes compares full text, or original previews for
+  binary files (no generated binary diff). Download is signed per request;
+  saving to Knowledge publishes the latest revision.
 
 ## Web conversation client
 

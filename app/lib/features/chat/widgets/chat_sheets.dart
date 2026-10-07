@@ -9,20 +9,18 @@ import '../models/chat_models.dart';
 import '../services/chat_service.dart';
 import '../state/chat_controller.dart';
 
-enum _AttachChoice { upload, library, scope }
+enum _AttachChoice { upload, library }
 
-/// "Add to this question": a file from the phone, a file from the Library,
-/// or the collections the answer may come from.
+/// Attachments and search scope are separate composer controls.
 Future<void> openAttachSheet(
   BuildContext context,
   ChatController controller,
 ) async {
   final full = controller.attachments.length >= 10;
-  final scope = controller.selectedCollections;
   final choice = await showAppSheet<_AttachChoice>(
     context,
     title: 'Add to this question',
-    subtitle: 'The assistant reads it only for this chat.',
+    subtitle: 'Attach a file for the assistant to read.',
     builder: (sheet) => Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -38,22 +36,13 @@ Future<void> openAttachSheet(
         SheetOption(
           icon: Icons.local_library_outlined,
           tone: Tone.indigo,
-          title: 'Choose from Library',
+          title: 'Choose from Knowledge',
           subtitle: full
               ? 'Up to 10 files per question'
               : 'Your files and shared collections',
           onTap: full
               ? null
               : () => Navigator.pop(sheet, _AttachChoice.library),
-        ),
-        SheetOption(
-          icon: Icons.menu_book_outlined,
-          tone: Tone.sky,
-          title: 'Limit to a collection',
-          subtitle: scope.isEmpty
-              ? 'Search only the collections you choose'
-              : 'Now: ${scopeLabel(scope)}',
-          onTap: () => Navigator.pop(sheet, _AttachChoice.scope),
         ),
       ],
     ),
@@ -68,8 +57,6 @@ Future<void> openAttachSheet(
           builder: (_) => LibraryPickerPage(controller: controller),
         ),
       );
-    case _AttachChoice.scope:
-      await openScopeSheet(context, controller);
   }
 }
 
@@ -240,40 +227,77 @@ class _Check extends StatelessWidget {
 
 enum SourceAction { open, ask }
 
-/// One cited source: where it is, the passage the answer used, and the two
-/// ways on — the whole document, or a question about it.
-Future<SourceAction?> showSourceSheet(
+/// Browse every cited passage without losing the selected document focus.
+Future<({SourceAction action, AnswerSource source})?> showSourceSheet(
   BuildContext context, {
   required ChatService service,
   required AnswerSource source,
+  List<AnswerSource> sources = const [],
   String question = '',
-}) => showAppSheet<SourceAction>(
-  context,
-  title: source.number == null ? 'Source' : 'Source ${source.number}',
-  subtitle: [source.title, ?source.locator].join(' · '),
-  scrollable: true,
-  builder: (sheet) => Column(
-    mainAxisSize: MainAxisSize.min,
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      _Passage(service: service, source: source, question: question),
-      const SizedBox(height: 16),
-      FilledButton(
-        onPressed: () => Navigator.pop(sheet, SourceAction.open),
-        child: const Text('Open document'),
-      ),
-      const SizedBox(height: 8),
-      FilledButton(
-        style: secondaryButtonStyle(sheet),
-        onPressed: () => Navigator.pop(sheet, SourceAction.ask),
-        child: const Text('Ask about this source'),
-      ),
-    ],
-  ),
-);
+}) {
+  final passages = sources.isEmpty ? [source] : sources;
+  var index = passages.indexWhere((value) =>
+      value.itemId == source.itemId && value.chunkId == source.chunkId);
+  if (index < 0) index = 0;
+  return showAppSheet<({SourceAction action, AnswerSource source})>(
+    context,
+    title: 'Sources',
+    scrollable: true,
+    builder: (sheet) => StatefulBuilder(
+      builder: (context, update) {
+        final selected = passages[index];
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(selected.title, style: Theme.of(context).textTheme.titleMedium),
+            if (selected.locator != null) Text(selected.locator!),
+            Row(
+              children: [
+                IconButton(
+                  tooltip: 'Previous passage',
+                  onPressed: index == 0 ? null : () => update(() => index--),
+                  icon: const Icon(Icons.chevron_left_rounded),
+                ),
+                Expanded(child: Text(
+                  'Passage ${index + 1} of ${passages.length}',
+                  textAlign: TextAlign.center,
+                )),
+                IconButton(
+                  tooltip: 'Next passage',
+                  onPressed: index + 1 == passages.length
+                      ? null : () => update(() => index++),
+                  icon: const Icon(Icons.chevron_right_rounded),
+                ),
+              ],
+            ),
+            _Passage(
+              key: ValueKey('${selected.itemId}:${selected.chunkId}'),
+              service: service, source: selected, question: question,
+            ),
+            const SizedBox(height: 16),
+            FilledButton(
+              onPressed: () => Navigator.pop(sheet,
+                  (action: SourceAction.open, source: selected)),
+              child: const Text('Open at passage'),
+            ),
+            const SizedBox(height: 8),
+            FilledButton(
+              style: secondaryButtonStyle(sheet),
+              onPressed: () => Navigator.pop(sheet,
+                  (action: SourceAction.ask, source: selected)),
+              child: const Text('Ask about this source'),
+            ),
+          ],
+        );
+      },
+    ),
+  );
+}
 
 class _Passage extends StatefulWidget {
   const _Passage({
+    super.key,
     required this.service,
     required this.source,
     required this.question,
@@ -324,8 +348,8 @@ class _PassageState extends State<_Passage> {
       return Container(
         padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
         decoration: BoxDecoration(
-          color: colors.brandSoft,
-          border: Border(left: BorderSide(color: colors.brand, width: 3)),
+          color: colors.evidenceSoft,
+          border: Border(left: BorderSide(color: colors.evidence, width: 3)),
           borderRadius: const BorderRadius.only(
             topLeft: Radius.circular(4),
             bottomLeft: Radius.circular(4),
@@ -339,7 +363,7 @@ class _PassageState extends State<_Passage> {
             children: _highlight(
               text,
               widget.question,
-              colors.brand.withValues(alpha: 0.26),
+              colors.evidence.withValues(alpha: 0.26),
             ),
           ),
         ),

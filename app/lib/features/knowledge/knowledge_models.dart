@@ -22,26 +22,13 @@ class KnowledgeCollection {
   bool can(String permission) => permissions.contains(permission);
 }
 
-/// Whether [session] may do [permission] on [collection]: granted on the
-/// collection itself, or across the whole workspace.
+/// Collection metadata already combines workspace and direct/inherited grants.
 bool allowedOn(
   AuthSession session,
   KnowledgeCollection? collection,
   String permission,
-) => session.can(permission) || (collection?.can(permission) ?? false);
+) => collection?.can(permission) ?? session.can(permission);
 
-/// The collections that start a tree: no parent, or a parent this person
-/// cannot read (a sub-collection shared on its own).
-List<KnowledgeCollection> topLevelOf(List<KnowledgeCollection> collections) {
-  final readable = {for (final collection in collections) collection.id};
-  return collections
-      .where(
-        (collection) =>
-            collection.parentId.isEmpty ||
-            !readable.contains(collection.parentId),
-      )
-      .toList();
-}
 
 /// Lower case without accents, so "thong bao" finds "Thông báo".
 String foldText(String value) {
