@@ -1,5 +1,4 @@
 import type {
-  AgentHistoryMessage,
   ChatMessage,
   ChatMessagePart,
   ConversationCollection,
@@ -7,42 +6,17 @@ import type {
 } from "./types";
 import { getMessageText } from "./conversations.ts";
 
-export const MAX_HISTORY_MESSAGES = 24;
-export const MAX_HISTORY_CHARACTERS = 24_000;
-export const MAX_HISTORY_MESSAGE_CHARACTERS = 8_000;
-const CLIP_MARKER = "\n…\n";
-
 export function conversationMessageText(message: ChatMessage) {
   return getMessageText(message).trim();
 }
 
-export function historyFromMessages(messages: ChatMessage[]): AgentHistoryMessage[] {
-  let remainingCharacters = MAX_HISTORY_CHARACTERS;
-  const selected: AgentHistoryMessage[] = [];
-
-  for (const message of [...messages].reverse()) {
-    const content = clipHistoryMessage(conversationMessageText(message));
-    if (!content) continue;
-    if (selected.length === MAX_HISTORY_MESSAGES || content.length > remainingCharacters) {
-      break;
-    }
-    selected.push({ role: message.role, content });
-    remainingCharacters -= content.length;
-  }
-
-  selected.reverse();
-  // Never send an assistant answer after dropping the user request that
-  // introduced it at a history budget boundary.
-  while (selected[0]?.role === "assistant") selected.shift();
-  return selected;
-}
-
-function clipHistoryMessage(content: string) {
-  if (content.length <= MAX_HISTORY_MESSAGE_CHARACTERS) return content;
-  const available = MAX_HISTORY_MESSAGE_CHARACTERS - CLIP_MARKER.length;
-  const leadingCharacters = Math.ceil(available * 0.6);
-  const trailingCharacters = available - leadingCharacters;
-  return `${content.slice(0, leadingCharacters)}${CLIP_MARKER}${content.slice(-trailingCharacters)}`;
+/**
+ * The server's zero-based turn index of the user message at `userIndex`: the
+ * number of user messages before it. Sent as `replace_from_turn` when a
+ * request replaces that question (retry, edit, or answering it now).
+ */
+export function userTurnIndex(messages: ChatMessage[], userIndex: number): number {
+  return messages.slice(0, userIndex).filter((message) => message.role === "user").length;
 }
 
 export function regenerationContext(
@@ -50,7 +24,7 @@ export function regenerationContext(
   targetId?: string,
 ): {
   userText: string;
-  historyMessages: ChatMessage[];
+  replaceFromTurn: number;
   displayMessages: ChatMessage[];
   documents: ConversationDocument[];
   collections: ConversationCollection[];
@@ -68,7 +42,7 @@ export function regenerationContext(
   if (!userText) return null;
   return {
     userText,
-    historyMessages: messages.slice(0, userIndex),
+    replaceFromTurn: userTurnIndex(messages, userIndex),
     displayMessages: messages.slice(0, userIndex + 1),
     documents: user.parts
       .filter((part): part is Extract<ChatMessagePart, { type: "data-document" }> => (
@@ -105,7 +79,7 @@ export function retryMessageText(userText: string, mode: RetryMode, maxCharacter
 }
 
 /**
- * What a retry of one answer sends. The question, its files and its history
+ * What a retry of one answer sends. The question and its files
  * are the ones that produced the answer; "Search all knowledge" sends no
  * knowledge-base scope.
  */
@@ -117,7 +91,7 @@ export function retryRequest(
 ): {
   userText: string;
   requestText: string;
-  historyMessages: ChatMessage[];
+  replaceFromTurn: number;
   documents: ConversationDocument[];
   collections: ConversationCollection[];
 } | null {
@@ -126,7 +100,7 @@ export function retryRequest(
   return {
     userText: context.userText,
     requestText: retryMessageText(context.userText, mode, maxCharacters),
-    historyMessages: context.historyMessages,
+    replaceFromTurn: context.replaceFromTurn,
     documents: context.documents,
     collections: mode === "all_knowledge" ? [] : context.collections,
   };
@@ -140,13 +114,14 @@ export function retryRequest(
 export function editTruncation(
   messages: ChatMessage[],
   userMessageId: string,
-): { kept: ChatMessage[]; user: ChatMessage; dropped: number } | null {
+): { kept: ChatMessage[]; user: ChatMessage; dropped: number; replaceFromTurn: number } | null {
   const index = messages.findIndex((message) => message.id === userMessageId && message.role === "user");
   if (index < 0) return null;
   const answerFollows = messages[index + 1]?.role === "assistant";
   return {
     kept: messages.slice(0, index),
     user: messages[index]!,
+    replaceFromTurn: userTurnIndex(messages, index),
     dropped: Math.max(0, messages.length - index - 1 - (answerFollows ? 1 : 0)),
   };
 }

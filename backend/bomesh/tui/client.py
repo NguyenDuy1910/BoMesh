@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -67,7 +67,6 @@ class BomeshChatClient:
         *,
         message: str,
         conversation_id: str,
-        history: Sequence[Mapping[str, str]],
     ) -> AsyncIterator[ReceivedStreamEvent]:
         """Yield API events in the exact order their SSE frames arrive."""
 
@@ -85,7 +84,6 @@ class BomeshChatClient:
         payload = {
             "message": message,
             "conversation_id": conversation_id,
-            "history": [dict(entry) for entry in history],
         }
         timeout = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
         async with httpx.AsyncClient(

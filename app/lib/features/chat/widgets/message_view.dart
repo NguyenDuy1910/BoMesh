@@ -558,7 +558,7 @@ class _WorkLine extends StatelessWidget {
         ? (reasoning ? 'completed' : 'skipped')
         : item.state;
     final failed = state == 'failed' || state == 'timeout';
-    final code = item.name == 'hosted_execution';
+    final code = item.name == 'run_shell';
     final label = reasoning
         ? (active ? 'Thinking…' : 'Thought it through')
         : _toolLabel(item.name, state, item.resultCount);
@@ -718,7 +718,7 @@ String _toolLabel(String name, String state, int? resultCount) {
       'Made a file',
       'Couldn’t make the file',
     ),
-    'hosted_execution' => ('Running code…', 'Ran code', 'Code didn’t finish'),
+    'run_shell' => ('Running code…', 'Ran code', 'Code didn’t finish'),
     _ => ('Working…', 'Finished a step', 'A step didn’t finish'),
   };
   return switch (state) {

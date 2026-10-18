@@ -4,6 +4,7 @@ import 'package:bomesh/app/workspace_scope.dart';
 import 'package:bomesh/core/api_client.dart';
 import 'package:bomesh/features/auth/session.dart';
 import 'package:bomesh/features/chat/chat_page.dart';
+import 'package:bomesh/features/manage/platform/platform_overview.dart';
 import 'package:bomesh/features/chat/models/chat_models.dart';
 import 'package:bomesh/features/chat/services/conversation_store.dart';
 import 'package:flutter/material.dart';
@@ -13,17 +14,21 @@ import 'package:http/testing.dart';
 import 'package:shared_preferences_platform_interface/in_memory_shared_preferences_async.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_async_platform_interface.dart';
 
-AuthSession session() => AuthSession.fromJson({
-  'access_token': 'token',
-  'session_id': 'session',
-  'user_id': 'user',
-  'active_workspace_id': 'workspace',
-  'expires_at': DateTime.now().add(const Duration(hours: 1)).toIso8601String(),
-  'permissions': ['knowledge.read', 'knowledge.manage'],
-  'workspaces': [
-    {'id': 'workspace', 'name': 'Workspace', 'code': 'workspace'},
-  ],
-});
+AuthSession session({List<String> platformPermissions = const []}) =>
+    AuthSession.fromJson({
+      'access_token': 'token',
+      'session_id': 'session',
+      'user_id': 'user',
+      'active_workspace_id': 'workspace',
+      'expires_at': DateTime.now()
+          .add(const Duration(hours: 1))
+          .toIso8601String(),
+      'permissions': ['knowledge.read', 'knowledge.manage'],
+      'platform_permissions': platformPermissions,
+      'workspaces': [
+        {'id': 'workspace', 'name': 'Workspace', 'code': 'workspace'},
+      ],
+    });
 
 void main() {
   setUp(
@@ -85,6 +90,52 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Renamed title'), findsOneWidget);
       expect((await store.listConversations()).single.title, 'Renamed title');
+      await tester.pumpWidget(const SizedBox.shrink());
+      api.close();
+    },
+  );
+
+  testWidgets(
+    'platform lists keep the workspace dependencies of the platform route',
+    (tester) async {
+      final api = ApiClient(
+        client: MockClient((request) async {
+          return switch (request.url.path) {
+            '/api/v1/platform/workspaces' => http.Response(
+              '{"items":[],"page":1,"page_size":20,"total":0}',
+              200,
+            ),
+            '/api/v1/platform/overview' => http.Response(
+              '{"workspace_health":[]}',
+              200,
+            ),
+            _ => http.Response('{"detail":"unexpected request"}', 404),
+          };
+        }),
+      )..accessToken = 'token';
+      final identity = session(
+        platformPermissions: const ['platform.tenant.read'],
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light,
+          home: WorkspaceScope(
+            api: api,
+            session: identity,
+            auth: SessionController(api),
+            appearance: AppearanceController(),
+            askAboutDocument: (_, _) {},
+            waitingRequests: 0,
+            refreshWaitingRequests: () async {},
+            child: const Scaffold(body: PlatformOverview()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Workspaces'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.text('No workspaces yet'), findsOneWidget);
       await tester.pumpWidget(const SizedBox.shrink());
       api.close();
     },

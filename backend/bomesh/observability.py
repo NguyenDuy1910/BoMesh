@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 if TYPE_CHECKING:
     from bomesh.agent import StepContext, TurnContext
     from bomesh.agent.models import AgentContext, ToolResult
-    from bomesh.agent.protocol import Prompt, Response
+    from bomesh.agent.protocol import Prompt, Response, ResponseUsage
 
 log = logging.getLogger(__name__)
 
@@ -47,6 +47,10 @@ class TraceSpan(Protocol):
     def set_attribute(self, name: str, value: object) -> None: ...
 
     def mark_first_token(self) -> None: ...
+
+    def set_usage(self, usage: ResponseUsage) -> None:
+        """Record one model response's token usage, cached tokens included."""
+        ...
 
 
 class Tracer(Protocol):
@@ -310,9 +314,7 @@ class TraceSerializer:
             "turn_id": getattr(step_context, "turn_id", None),
             "step_index": getattr(step_context, "step_index", None),
             "settings": _model_value(getattr(step_context, "settings", None)),
-            "execution_capability": _execution_capability(
-                getattr(step_context, "execution_capability", None)
-            ),
+            "sandbox": getattr(step_context, "sandbox_guidance", None) is not None,
             "resources": [
                 cls.resource_input(resource)
                 for resource in getattr(step_context, "resources", ())
@@ -427,7 +429,7 @@ class TraceSerializer:
 
     @staticmethod
     def _items(items: Sequence[object]) -> list[object]:
-        return [_public_execution_item(item) for item in items]
+        return [_model_value(item) for item in items]
 
     @staticmethod
     def _tools(tools: Sequence[object]) -> list[object]:
@@ -607,6 +609,22 @@ class _LangfuseSpan:
     def mark_first_token(self) -> None:
         _safe_update(self._observation, completion_start_time=datetime.now(UTC))
 
+    def set_usage(self, usage: ResponseUsage) -> None:
+        # Langfuse's OpenAI usage shape: cached and reasoning tokens are
+        # their own buckets, not double counted in input and output.
+        cached = usage.input_tokens_details.cached_tokens
+        reasoning = usage.output_tokens_details.reasoning_tokens
+        _safe_update(
+            self._observation,
+            usage_details={
+                "input": max(usage.input_tokens - cached, 0),
+                "input_cached_tokens": cached,
+                "output": max(usage.output_tokens - reasoning, 0),
+                "output_reasoning_tokens": reasoning,
+                "total": usage.total_tokens,
+            },
+        )
+
     def _record_error(self, error: BaseException) -> None:
         if isinstance(error, (GeneratorExit, asyncio.CancelledError)):
             _safe_update(self._observation, output={"status": "cancelled"}, level="WARNING")
@@ -628,6 +646,9 @@ class _NoopSpan:
 
     def mark_first_token(self) -> None:
         return None
+
+    def set_usage(self, usage: ResponseUsage) -> None:
+        del usage
 
 
 @contextmanager
@@ -674,42 +695,6 @@ def _value_length(value: object) -> int:
     if isinstance(value, (str, bytes, bytearray, Sequence, Mapping)):
         return len(value)
     return 0
-
-
-def _execution_capability(value: object) -> dict[str, object] | None:
-    """Trace public capability flags without retaining provider bindings."""
-
-    if value is None:
-        return None
-    return {
-        "provider": getattr(value, "provider", None),
-        "model": getattr(value, "model", None),
-        "hosted_shell": bool(getattr(value, "hosted_shell", False)),
-        "provider_files": bool(getattr(value, "provider_files", False)),
-        "persistent_environments": bool(
-            getattr(value, "persistent_environments", False)
-        ),
-        "workspace_attached": bool(
-            getattr(value, "environment_id", None)
-            or getattr(value, "workspace_file_ids", ())
-        ),
-    }
-
-
-def _public_execution_item(value: object) -> object:
-    """Keep command observations useful without retaining provider bindings."""
-
-    item = _model_value(value)
-    if not isinstance(item, Mapping):
-        return item
-    kind = item.get("type")
-    if kind not in {"hosted_execution_call", "hosted_execution_result"}:
-        return item
-    result = dict(item)
-    result.pop("environment", None)
-    if kind == "hosted_execution_result":
-        result.pop("files", None)
-    return result
 
 
 def _item_character_estimate(item: object) -> int:

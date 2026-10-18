@@ -22,11 +22,9 @@ from bomesh.agent.tools.materialize_resource import MaterializeResource
 from bomesh.agent.tools.materialize_sandbox_resource import MaterializeSandboxResource
 from bomesh.agent.tools.read_resource import ReadResource
 from bomesh.agent.tools.export_sandbox_file import ExportSandboxFile
+from bomesh.agent.tools.run_shell import RunShell
 from bomesh.agent.transports.openai import OpenAITransport
 from bomesh.agent.transports.openrouter import OpenRouterTransport
-from bomesh.agent.transports.openrouter_execution_capability import (
-    OpenRouterExecutionCapabilityResolver,
-)
 from bomesh.connector.file import FileProcessor
 from bomesh.connector.processing import DoclingProcessor, PdfVision
 from bomesh.db.engine import LazySessionFactory, SessionFactory
@@ -57,6 +55,7 @@ from bomesh.services.knowledge_query import KnowledgeQueryService
 from bomesh.services.knowledge_view import KnowledgeViewService
 from bomesh.services.preview import KnowledgePreview
 from bomesh.services.agent_runtime.item_resource_resolver import ItemResourceResolver
+from bomesh.services.agent_runtime.docker_sandbox import DockerSandbox
 from bomesh.services.agent_runtime.sandbox_workspace import SandboxWorkspace
 from bomesh.services.sandbox_session import SandboxSessionService
 from bomesh.services.stored_file_content import StoredFileContentService
@@ -86,6 +85,7 @@ class AppRuntime:
         self._agent: Agent | None = None
         self._stored_file_content: StoredFileContentService | None = None
         self._sandbox_sessions: SandboxSessionService | None = None
+        self._sandbox: DockerSandbox | None = None
         self._retriever: ItemKnowledgeRetriever | None = None
         self._model_transport: OpenRouterTransport | None = None
         self._agent_transport: OpenAITransport | OpenRouterTransport | None = None
@@ -346,6 +346,9 @@ class AppRuntime:
                 embedding_batch_size=index.embedding_batch_size,
                 semantic_contextualizer=contextualizer,
                 candidate_limit=self._config.retrieval.hybrid_candidate_limit,
+                query_embedding_cache_size=(
+                    self._config.retrieval.query_embedding_cache_size
+                ),
             )
         return self._index
 
@@ -417,9 +420,8 @@ class AppRuntime:
     def agent_transport(self) -> OpenAITransport | OpenRouterTransport:
         """The transport the conversation agent runs on.
 
-        The selected provider owns any native model capabilities. The agent
-        loop stays provider-neutral; OpenRouter's hosted shell is enabled only
-        when both its provider selection and the execution policy allow it.
+        The agent loop stays provider-neutral; shell work runs in BoMesh's own
+        Docker sandbox through the ``run_shell`` function tool on any provider.
         """
 
         if self._agent_transport is None:
@@ -456,6 +458,7 @@ class AppRuntime:
                 reranker=reranker,
                 candidate_count=retrieval.hybrid_candidate_limit,
                 reranking_enabled=retrieval.reranking_enabled,
+                rerank_timeout_seconds=retrieval.rerank_timeout_seconds,
             )
         return self._retriever
 
@@ -481,46 +484,69 @@ class AppRuntime:
                 ReadResource(max_characters=agent.max_resource_read_characters)
             )
             registry.register(MaterializeResource())
-            if isinstance(self.agent_transport(), OpenRouterTransport):
+            configuration = SessionConfiguration(
+                max_model_turns=agent.max_model_turns,
+                max_tool_rounds=agent.max_tool_rounds,
+                max_tool_calls=agent.max_tool_calls,
+                max_history_messages=agent.max_history_messages,
+                max_history_characters=agent.max_history_characters,
+                max_tool_context_characters=agent.max_tool_context_characters,
+                reasoning_effort=agent.reasoning_effort,
+                tool_timeout_seconds=agent.tool_timeout_seconds,
+            )
+            if self._config.sandbox.enabled:
+                # Offered per request only while the Docker sandbox is up.
+                registry.register(
+                    RunShell(
+                        max_timeout_seconds=self._config.sandbox.command_timeout_seconds,
+                        max_result_characters=configuration.max_tool_result_characters,
+                    )
+                )
                 registry.register(MaterializeSandboxResource())
                 registry.register(ExportSandboxFile())
             self._agent = Agent(
                 model=self.agent_transport(),
                 tools=registry,
-                configuration=SessionConfiguration(
-                    max_model_turns=agent.max_model_turns,
-                    max_tool_rounds=agent.max_tool_rounds,
-                    max_tool_calls=agent.max_tool_calls,
-                    max_history_messages=agent.max_history_messages,
-                    max_history_characters=agent.max_history_characters,
-                    recent_history_messages=agent.recent_history_messages,
-                    tool_timeout_seconds=agent.tool_timeout_seconds,
-                ),
+                configuration=configuration,
                 tracer=tracer,
-                execution_capability_resolver=OpenRouterExecutionCapabilityResolver(),
             )
         return self._agent
+
+    def sandbox(self) -> DockerSandbox:
+        if self._sandbox is None:
+            self._sandbox = DockerSandbox(
+                self._config.sandbox, sessions=self.sandbox_session_service()
+            )
+        return self._sandbox
+
+    async def start(self) -> None:
+        """Start background resources that must be ready before the first request."""
+
+        await self.sandbox().start()
 
     def _sandbox_workspace(
         self, access: AuthContext, conversation_id: UUID, request_id: str
     ) -> SandboxWorkspace | None:
-        """Build a request-scoped workspace only for the selected provider."""
+        """Build a request-scoped workspace only while the sandbox is available."""
 
-        transport = self.agent().model
-        if not isinstance(transport, OpenRouterTransport):
+        sandbox = self.sandbox()
+        if not sandbox.available:
             return None
         return SandboxWorkspace(
             access=access,
             conversation_id=conversation_id,
             request_id=request_id,
-            provider=transport,
+            sandbox=sandbox,
             sessions=self.sandbox_session_service(),
             artifacts=self.artifact_service(),
+            max_export_bytes=self._config.artifact.max_content_bytes,
         )
 
     async def aclose(self) -> None:
         """Release every client this runtime opened."""
 
+        if self._sandbox is not None:
+            await self._sandbox.aclose()
         if self._index is not None:
             await self._index.aclose()
         for transport in (

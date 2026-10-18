@@ -600,19 +600,15 @@ class SandboxManifestResource:
 
 
 @dataclass(frozen=True, slots=True)
-class SandboxProviderFile:
-    """A provider file reference retained only inside sandbox runtime state."""
+class SandboxMaterializedFile:
+    """A home-relative sandbox file copied from one durable resource."""
 
-    id: str
-    name: str
-    resource_id: str | None = None
-    # False until a shell step has copied the file into the running workspace;
-    # files added to a live workspace ride on the next shell request.
-    delivered: bool = True
+    path: str
+    resource_id: str
 
     def __post_init__(self) -> None:
-        if not self.id.strip() or not self.name.strip():
-            raise ValueError("sandbox provider file fields must not be blank")
+        if not self.path.strip() or not self.resource_id.strip():
+            raise ValueError("sandbox materialized file fields must not be blank")
 
 
 @dataclass(frozen=True, slots=True)
@@ -623,17 +619,17 @@ class SandboxSessionState:
     provider: str
     status: SandboxSessionStatus
     manifest: tuple[SandboxManifestResource, ...] = ()
-    environment_id: str | None = None
-    materialized_files: tuple[SandboxProviderFile, ...] = ()
-    observed_files: tuple[SandboxProviderFile, ...] = ()
+    # The sandbox container bound to this session; opaque to clients and model.
+    container_id: str | None = None
+    materialized_files: tuple[SandboxMaterializedFile, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.provider.strip():
             raise ValueError("sandbox provider must not be blank")
         if self.status not in {"active", "expired", "closed"}:
             raise ValueError("sandbox session status is invalid")
-        if self.environment_id is not None and not self.environment_id.strip():
-            raise ValueError("sandbox environment id must not be blank")
+        if self.container_id is not None and not self.container_id.strip():
+            raise ValueError("sandbox container id must not be blank")
 
 
 @dataclass(frozen=True, slots=True)

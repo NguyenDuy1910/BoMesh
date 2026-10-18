@@ -6,7 +6,7 @@ follows `api_contract.md` and names current owning services.
 
 | Method | Current path | Resource/purpose | Main callers | Service/use-case | Auth | Decision | Final path |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| POST | `/agent/chat` | Grounded chat stream | chat shell | `ChatService.stream_turn` | caller context | keep, rename request fields | `/agent/chat` |
+| POST | `/agent/chat` | Grounded chat stream; server-owned history (`replace_from_turn`, no client `history`) | chat shell | `ChatService.stream_turn` (+ `ConversationService.history`/`start_turn`) | caller context; conversation owner | keep, rename request fields | `/agent/chat` |
 | GET | `/agent/collections` | Chat collection picker | chat/artifact clients | `WorkspaceControlPlaneService.list_collections` | collection filtering | merge | `/collections` |
 | GET/POST | `/knowledge/collections` | mixed home + collection create | knowledge UI | `KnowledgeViewService`, `WorkspaceControlPlaneService` | workspace/ACL | split | GET `/knowledge/home`; GET/POST `/collections` |
 | PUT | `/knowledge/collections/personal` | ensure personal collection | upload/chat UI | `DocumentService.ensure_personal_collection` | authenticated user | move | `/collections/personal` |

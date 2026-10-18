@@ -130,8 +130,11 @@ clears local credentials even when the server cannot be reached; offline
 revocation failure is reported, not represented as confirmed server revocation.
 
 Google login passes the provider-issued ID credential through the same session
-endpoint. Native client IDs, callback schemes and backend audience configuration
-must match the deployed application; Flutter does not embed a provider secret.
+endpoint. The web client initializes the page-global Google Identity client
+once and uses Google's rendered popup button without opting into the optional
+FedCM button flow. Native client IDs, authorized web origins, callback schemes
+and backend audience configuration must match the deployed application;
+Flutter does not embed a provider secret.
 
 The web product shell has one sidebar, defined once in
 `web/src/lib/navigation.ts`. It is presentation over the session's

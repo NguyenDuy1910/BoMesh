@@ -11,7 +11,6 @@ from bomesh.agent import (
     AgentStreamEvent,
     AgentExecutionError,
     ContextManager,
-    ExecutionCapabilityResolver,
     ResolvedStepSettings,
     Session,
     SessionConfiguration,
@@ -47,14 +46,12 @@ class Agent:
         configuration: SessionConfiguration | None = None,
         tracer: Tracer | None = None,
         resource_resolver: ResourceResolver | None = None,
-        execution_capability_resolver: ExecutionCapabilityResolver | None = None,
     ) -> None:
         self._model = model
         self._tools = tools
         self.configuration = configuration or SessionConfiguration()
         self._tracer = tracer or NoopTracer()
         self._resource_resolver = resource_resolver
-        self._execution_capability_resolver = execution_capability_resolver
 
     @property
     def model(self) -> object:
@@ -79,7 +76,6 @@ class Agent:
                 model=self._model,
                 tool_registry=self._tools,
                 resource_resolver=resource_resolver,
-                execution_capability_resolver=self._execution_capability_resolver,
                 sandbox_runtime=sandbox_runtime,
                 tracer=self._tracer,
             ),
@@ -127,6 +123,8 @@ class Agent:
             temperature=self.configuration.temperature,
             max_output_tokens=self.configuration.max_tokens,
             parallel_tool_calls=True,
+            reasoning_effort=self.configuration.reasoning_effort,
+            prompt_cache_key=ctx.conversation_id or None,
             provider_options=dict(ctx.model_extra_body or {}),
         )
         turn = TurnContext(

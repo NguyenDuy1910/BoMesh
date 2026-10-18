@@ -75,7 +75,7 @@ Item metadata + raw bytes in object storage, processing state pending
     ↓
 ContextualChunk → embedding + BM25 payload → Qdrant
     ↓
-tenant / tombstone / Collection filter → fused multi-query candidates → relevance rerank → Evidence
+tenant / tombstone / Collection filter → fused multi-query candidates → (optional relevance rerank) → Evidence
     ↓
 agent response with citations
 ```

@@ -180,7 +180,7 @@ use it.
 | Forgot password | API pending | `auth.password_reset` → `POST /auth/password-resets`, `POST /auth/password-resets/{token}/complete`. Build the request + check-your-email + set-new-password screens |
 | Chat streaming, knowledge-first search, citations, sources panel, stop/retry/edit | Backed | `POST /agent/chat` SSE, citation annotations |
 | Attachments (upload) and referencing existing documents | Backed | `attachment_ids`, `collection_ids`, conversation uploads |
-| Secure-workspace timeline (commands, output, failed runs) | Backed | `hosted_execution_result` items |
+| Secure-workspace timeline (commands, output, failed runs) | Backed | `run_shell` `function_call` / `function_call_output` items |
 | File cards, revisions list, preview, download (original format), Save to knowledge | Backed | `/artifacts/{id}`, `/revisions/{n}/content`, `/publish` |
 | Ask for changes to a file (agent makes a new revision) | Backed | Normal chat turn addressed to the artifact (current `editArtifact` pattern) |
 | Edit a file by hand, restore a version | API pending | `artifact.manual_revision` → `POST /artifacts/{id}/revisions` `{ content, summary, restored_from? }` |
@@ -348,7 +348,7 @@ Follow `P.chatHome`, `P.chatThread`, `P.chats` and the Round-3 file-work block.
 - Answer:
   1. A collapsed work line (“Worked for 26s · Searched … · Ran 3 commands, 1
      failed · Created 2 files”) that expands into a timeline. Command blocks
-     show code and output from `hosted_execution_result`, with failures shown.
+     show code and output from the `run_shell` call and its output, with failures shown.
   2. Streamed markdown with amber citation chips.
   3. File cards.
   4. Source chips.
@@ -376,7 +376,7 @@ Follow `P.chatHome`, `P.chatThread`, `P.chats` and the Round-3 file-work block.
 **Verify:**
 - Extend the existing tests in `web/tests/`: `assistant-turn`, `artifacts`,
   `citation-*`, `message-stream`, `conversation-history`. Add fixtures for
-  `hosted_execution_result` with a failed command and for multi-revision
+  a failed `run_shell` command and for multi-revision
   artifacts.
 - Playwright against a mocked SSE stream: stop, retry, edit, citation → panel →
   document, artifact preview/diff/publish.

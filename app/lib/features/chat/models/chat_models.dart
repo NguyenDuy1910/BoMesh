@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 enum ChatRole { user, assistant }
 
 enum ChatStatus { ready, submitted, streaming }
@@ -483,8 +485,7 @@ class ChatTurnState {
             ),
           );
         }
-      } else if (item.type == 'function_call' ||
-          item.type == 'hosted_execution_call') {
+      } else if (item.type == 'function_call') {
         final activity = runtimeActivities
             .where((activity) => activity.callId == item.callId)
             .firstOrNull;
@@ -493,22 +494,27 @@ class ChatTurnState {
             .where(
               (entry) =>
                   entry.callId == item.callId &&
-                  (entry.type == 'function_call_output' ||
-                      entry.type == 'hosted_execution_result'),
+                  entry.type == 'function_call_output',
             )
             .firstOrNull;
+        // run_shell's output is the canonical shell record; anything else
+        // (a tool error) is shown as it is.
+        final shell = item.name == 'run_shell';
+        final rawOutput = output?.extension['output'];
+        final results = shell ? _shellResults(rawOutput) : null;
         result.add(
           AssistantTurnItem.tool(
             id: item.callId ?? item.id,
-            name: activity?.toolName ?? item.name ?? 'hosted_execution',
-            text: output?.type == 'hosted_execution_result'
-                ? _executionText(output!.extension['output']) : '',
-            commands: switch (item.extension['commands']) {
-              final List<dynamic> values => values.whereType<String>().toList(),
-              _ => const <String>[],
-            },
-            state: output?.type == 'hosted_execution_result' &&
-                    _executionFailed(output!.extension['output'])
+            name: activity?.toolName ?? item.name ?? 'tool',
+            text: !shell || output == null
+                ? ''
+                : results != null
+                ? _executionText(results)
+                : '${rawOutput ?? ''}',
+            commands: shell ? _shellCommands(item.arguments) : const <String>[],
+            state: shell &&
+                    output != null &&
+                    (results == null || _executionFailed(results))
                 ? 'failed'
                 : activity?.state ??
                     (output != null ? 'completed'
@@ -703,6 +709,29 @@ class AssistantTurnItem {
 
   /// Commands are shown on request alongside their explicit shell result.
   final List<String> commands;
+}
+
+/// The commands of a `run_shell` call, from its JSON arguments.
+List<String> _shellCommands(String arguments) {
+  try {
+    final decoded = jsonDecode(arguments);
+    final commands = decoded is Map ? decoded['commands'] : null;
+    return commands is List ? commands.whereType<String>().toList() : const <String>[];
+  } on FormatException {
+    return const <String>[];
+  }
+}
+
+/// The per-command results of a `run_shell` output, aligned with its commands.
+List<dynamic>? _shellResults(Object? output) {
+  if (output is! String) return null;
+  try {
+    final decoded = jsonDecode(output);
+    final results = decoded is Map ? decoded['results'] : null;
+    return results is List ? results : null;
+  } on FormatException {
+    return null;
+  }
 }
 
 bool _executionFailed(Object? value) => value is List && value.whereType<Map>().any(

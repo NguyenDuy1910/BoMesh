@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Sequence
-from typing import Any, Callable, cast
+from typing import Any, cast
 
 from openai.types.responses import Response as NativeResponse
 
@@ -84,17 +84,13 @@ class ResponsesStream:
         """Yield one canonical event per native event, without buffering."""
 
         request = render_request(prompt)
-        if prompt.execution_capability is not None:
-            request["execution_capability"] = prompt.execution_capability
         stream = await self._transport.stream_response(
             input=cast(Any, request.pop("input")),
             model=cast(str | None, request.pop("model")),
             **request,
         )
-        normalize_item = getattr(self._transport, "normalize_output_item", None)
-        item_normalizer = normalize_item if callable(normalize_item) else None
         async for native in stream:
-            for event in _project(native, prompt, item_normalizer=item_normalizer):
+            for event in _project(native, prompt):
                 yield event
 
 
@@ -143,6 +139,10 @@ def _native_params(prompt: Prompt) -> dict[str, Any]:
         params["max_output_tokens"] = prompt.max_output_tokens
     if prompt.max_tool_calls is not None:
         params["max_tool_calls"] = prompt.max_tool_calls
+    if prompt.reasoning is not None:
+        params["reasoning"] = prompt.reasoning.model_dump(mode="json")
+    if prompt.prompt_cache_key is not None:
+        params["prompt_cache_key"] = prompt.prompt_cache_key
     if prompt.store is not None:
         params["store"] = prompt.store
     if prompt.metadata:
@@ -235,8 +235,6 @@ def _input_item(item: Item) -> dict[str, Any] | None:
         if item.id is not None:
             block["id"] = item.id
         return block
-    if item.type in {"hosted_execution_call", "hosted_execution_result"}:
-        return item.model_dump(mode="json", exclude_none=True)
     if isinstance(item, ExtensionItem):
         return item.model_dump(mode="json", exclude_none=True)
     return None
@@ -270,70 +268,44 @@ def _input_content(item: MessageItem) -> str | list[dict[str, Any]]:
     return blocks
 
 
-def _project(
-    native: Any,
-    prompt: Prompt,
-    *,
-    item_normalizer: Callable[[Any], Item | None] | None = None,
-) -> tuple[ResponseStreamEvent, ...]:
+def _project(native: Any, prompt: Prompt) -> tuple[ResponseStreamEvent, ...]:
     """Map one native event onto zero or one canonical events."""
 
     kind = getattr(native, "type", None)
     if kind == "response.created":
         return (
             ResponseCreatedEvent(
-                response=_response(
-                    native.response,
-                    prompt,
-                    status="in_progress",
-                    item_normalizer=item_normalizer,
-                )
+                response=_response(native.response, prompt, status="in_progress")
             ),
         )
     if kind == "response.queued":
         return (
             ResponseQueuedEvent(
-                response=_response(
-                    native.response,
-                    prompt,
-                    status="queued",
-                    item_normalizer=item_normalizer,
-                )
+                response=_response(native.response, prompt, status="queued")
             ),
         )
     if kind == "response.in_progress":
         return (
             ResponseInProgressEvent(
-                response=_response(
-                    native.response,
-                    prompt,
-                    status="in_progress",
-                    item_normalizer=item_normalizer,
-                )
+                response=_response(native.response, prompt, status="in_progress")
             ),
         )
     if kind == "response.completed":
         return (
             ResponseCompletedEvent(
-                response=_response(
-                    native.response, prompt, item_normalizer=item_normalizer
-                )
+                response=_response(native.response, prompt)
             ),
         )
     if kind == "response.incomplete":
         return (
             ResponseIncompleteEvent(
-                response=_response(
-                    native.response, prompt, item_normalizer=item_normalizer
-                )
+                response=_response(native.response, prompt)
             ),
         )
     if kind == "response.failed":
         return (
             ResponseFailedEvent(
-                response=_response(
-                    native.response, prompt, item_normalizer=item_normalizer
-                )
+                response=_response(native.response, prompt)
             ),
         )
     if kind == "error":
@@ -347,7 +319,7 @@ def _project(
             ),
         )
     if kind == "response.output_item.added":
-        item = _item(native.item, item_normalizer=item_normalizer)
+        item = _item(native.item)
         return (
             (
                 ResponseOutputItemAddedEvent(
@@ -358,7 +330,7 @@ def _project(
             else ()
         )
     if kind == "response.output_item.done":
-        item = _item(native.item, item_normalizer=item_normalizer)
+        item = _item(native.item)
         return (
             (ResponseOutputItemDoneEvent(output_index=native.output_index, item=item),)
             if item is not None
@@ -517,7 +489,6 @@ def _response(
     prompt: Prompt,
     *,
     status: ResponseStatus | None = None,
-    item_normalizer: Callable[[Any], Item | None] | None = None,
 ) -> Response:
     return Response(
         id=native.id,
@@ -527,11 +498,7 @@ def _response(
         model=native.model,
         previous_response_id=prompt.previous_response_id,
         output=tuple(
-            item
-            for item in (
-                _item(entry, item_normalizer=item_normalizer) for entry in native.output
-            )
-            if item is not None
+            item for item in (_item(entry) for entry in native.output) if item is not None
         ),
         usage=_usage(native),
         error=_error(native),
@@ -580,17 +547,9 @@ def _usage(native: NativeResponse) -> ResponseUsage | None:
     )
 
 
-def _item(
-    native: Any,
-    *,
-    item_normalizer: Callable[[Any], Item | None] | None = None,
-) -> Item | None:
+def _item(native: Any) -> Item | None:
     """Map one native output item, discriminated by ``type`` as specified."""
 
-    if item_normalizer is not None:
-        normalized = item_normalizer(native)
-        if normalized is not None:
-            return normalized
     kind = getattr(native, "type", None)
     if kind == "message":
         return MessageItem(

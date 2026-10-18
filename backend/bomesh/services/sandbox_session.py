@@ -1,13 +1,12 @@
-"""Persist recovery metadata for provider-backed conversation sandboxes."""
+"""Persist recovery metadata for conversation sandboxes."""
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
-from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from bomesh.db.engine import transaction_scope
@@ -16,7 +15,7 @@ from bomesh.services import (
     AuthContext,
     DocumentNotFoundError,
     SandboxManifestResource,
-    SandboxProviderFile,
+    SandboxMaterializedFile,
     SandboxSessionState,
     conversation_access_filter,
     require_user_identity,
@@ -24,12 +23,12 @@ from bomesh.services import (
 
 
 class SandboxSessionService:
-    """Own durable sandbox identity, recovery manifest, and opaque bindings.
+    """Own durable sandbox identity, recovery manifest, and container binding.
 
-    This service deliberately does not create a provider container or transfer
-    file bytes. Those are request-scoped adapter operations. It records only
-    enough metadata to resume a provider workspace or rebuild it from durable
-    Item resources after the provider environment has expired.
+    This service deliberately does not create a container or transfer file
+    bytes. Those are sandbox-provider operations. It records only enough
+    metadata to reuse the conversation's container or rebuild a new one from
+    durable Item resources after the old container has gone.
     """
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
@@ -42,7 +41,7 @@ class SandboxSessionService:
         conversation_id: UUID,
         provider: str,
     ) -> SandboxSessionState | None:
-        """Return the caller's current provider binding, without creating one."""
+        """Return the caller's current sandbox binding, without creating one."""
 
         user_id = require_user_identity(access)
         tenant_id = _tenant_id(access)
@@ -125,7 +124,7 @@ class SandboxSessionService:
                     user_id=user_id,
                     provider=normalized_provider,
                     manifest={"resources": []},
-                    provider_state={"materialized_files": [], "observed_files": []},
+                    provider_state={"materialized_files": []},
                     last_used_at=datetime.now(UTC),
                 )
                 session.add(row)
@@ -135,35 +134,71 @@ class SandboxSessionService:
                 await session.flush()
             return _state(row)
 
+    async def bind_container(
+        self,
+        access: AuthContext,
+        *,
+        session_id: UUID,
+        container_id: str,
+        replaces: str | None,
+    ) -> SandboxSessionState:
+        """Bind a freshly claimed, empty container to the session.
+
+        The bind only succeeds while the session is still bound to
+        ``replaces``; a concurrent request that bound another container first
+        wins, and the caller sees that binding in the returned state. A new
+        container starts empty, so the materialized-file list is reset.
+        """
+
+        normalized_container = _identifier(container_id, "sandbox container")
+        async with transaction_scope(self._sessions) as session:
+            row = await _active_session(session, access, session_id)
+            current = _state(row)
+            if current.container_id == replaces:
+                row.provider_state = _provider_state(
+                    container_id=normalized_container, materialized_files=()
+                )
+                row.last_used_at = datetime.now(UTC)
+                await session.flush()
+            return _state(row)
+
     async def record_materialization(
         self,
         access: AuthContext,
         *,
         session_id: UUID,
+        container_id: str,
         resource: SandboxManifestResource,
-        provider_files: Sequence[SandboxProviderFile],
+        files: Sequence[SandboxMaterializedFile],
     ) -> SandboxSessionState:
-        """Record a successfully uploaded durable resource for workspace rebuild.
+        """Record a resource copied into the bound container for workspace rebuild.
 
-        One resource may arrive as several provider files: the original and
-        any shell-friendly renditions of it (a spreadsheet's sheets as CSV).
+        One resource may arrive as several files: the original and any
+        shell-friendly renditions of it (a spreadsheet's sheets as CSV). The
+        file list is only recorded while ``container_id`` is still bound.
         """
 
-        if not provider_files:
-            raise ValueError("a materialized resource needs at least one provider file")
+        if not files:
+            raise ValueError("a materialized resource needs at least one file")
         async with transaction_scope(self._sessions) as session:
             row = await _active_session(session, access, session_id)
             resources = list(_manifest_resources(row.manifest))
             if not any(item.resource_id == resource.resource_id for item in resources):
                 resources.append(resource)
-            files = list(_provider_files(row.provider_state, "materialized_files"))
-            files = [item for item in files if item.resource_id != resource.resource_id]
-            files.extend(provider_files)
-            row.manifest = {"resources": [_resource_payload(item) for item in resources]}
-            row.provider_state = _provider_state(
-                row.provider_state,
-                materialized_files=files,
-            )
+                row.manifest = {
+                    "resources": [_resource_payload(item) for item in resources]
+                }
+            current = _state(row)
+            if current.container_id == container_id:
+                kept = [
+                    item
+                    for item in current.materialized_files
+                    if item.resource_id != resource.resource_id
+                ]
+                row.provider_state = _provider_state(
+                    container_id=container_id,
+                    materialized_files=(*kept, *files),
+                )
             row.last_used_at = datetime.now(UTC)
             await session.flush()
             return _state(row)
@@ -175,7 +210,7 @@ class SandboxSessionService:
         session_id: UUID,
         resource: SandboxManifestResource,
     ) -> SandboxSessionState:
-        """Add a durable resource to the rebuild manifest without a provider call."""
+        """Add a durable resource to the rebuild manifest without a container call."""
 
         async with transaction_scope(self._sessions) as session:
             row = await _active_session(session, access, session_id)
@@ -189,52 +224,70 @@ class SandboxSessionService:
             await session.flush()
             return _state(row)
 
-    async def record_execution(
-        self,
-        access: AuthContext,
-        *,
-        session_id: UUID,
-        environment_id: str,
-        files: Iterable[SandboxProviderFile],
-        delivered_file_ids: Iterable[str] = (),
-    ) -> SandboxSessionState:
-        """Persist the latest provider environment and observable workspace files.
-
-        ``delivered_file_ids`` are the materialized files that shell step
-        attached; they are inside the workspace now and are not sent again.
-        """
-
-        normalized_environment = _identifier(environment_id, "sandbox environment")
-        observed = _unique_files(files)
-        delivered = set(delivered_file_ids)
-        async with transaction_scope(self._sessions) as session:
-            row = await _active_session(session, access, session_id)
-            materialized = tuple(
-                replace(item, delivered=True) if item.id in delivered else item
-                for item in _provider_files(row.provider_state, "materialized_files")
-            )
-            row.provider_state = _provider_state(
-                row.provider_state,
-                environment_id=normalized_environment,
-                materialized_files=materialized,
-                observed_files=observed,
-            )
-            row.last_used_at = datetime.now(UTC)
-            await session.flush()
-            return _state(row)
-
     async def expire(
         self,
         access: AuthContext,
         *,
         session_id: UUID,
     ) -> None:
-        """Tombstone a provider binding that can no longer be resumed."""
+        """Tombstone a sandbox binding that can no longer be resumed."""
 
         async with transaction_scope(self._sessions) as session:
             row = await _active_session(session, access, session_id)
             row.status = "expired"
             row.last_used_at = datetime.now(UTC)
+
+    # -- Sandbox maintenance (no caller identity; never exposed by the API) --
+
+    async def expire_idle(
+        self, *, provider: str, idle_before: datetime
+    ) -> tuple[str, ...]:
+        """Expire active sessions unused since ``idle_before``; return their containers.
+
+        Their manifests stay recoverable: the conversation's next sandbox use
+        rebuilds a new container from them.
+        """
+
+        normalized_provider = _provider(provider)
+        async with transaction_scope(self._sessions) as session:
+            rows = (
+                await session.scalars(
+                    update(SandboxSession)
+                    .where(
+                        SandboxSession.provider == normalized_provider,
+                        SandboxSession.status == "active",
+                        SandboxSession.deleted_at.is_(None),
+                        SandboxSession.last_used_at < idle_before,
+                    )
+                    .values(status="expired")
+                    .returning(SandboxSession.provider_state)
+                )
+            ).all()
+        return tuple(
+            container
+            for container in (_container_id(state) for state in rows)
+            if container is not None
+        )
+
+    async def active_container_ids(self, *, provider: str) -> frozenset[str]:
+        """Every container currently bound to an active session."""
+
+        normalized_provider = _provider(provider)
+        async with transaction_scope(self._sessions) as session:
+            rows = (
+                await session.scalars(
+                    select(SandboxSession.provider_state).where(
+                        SandboxSession.provider == normalized_provider,
+                        SandboxSession.status == "active",
+                        SandboxSession.deleted_at.is_(None),
+                    )
+                )
+            ).all()
+        return frozenset(
+            container
+            for container in (_container_id(state) for state in rows)
+            if container is not None
+        )
 
 
 def _tenant_id(access: AuthContext) -> UUID:
@@ -293,16 +346,19 @@ async def _active_session(
 
 
 def _state(row: SandboxSession) -> SandboxSessionState:
-    provider_state = row.provider_state if isinstance(row.provider_state, dict) else {}
     return SandboxSessionState(
         id=row.id,
         provider=row.provider,
         status=row.status,  # type: ignore[arg-type]
         manifest=_manifest_resources(row.manifest),
-        environment_id=_optional_identifier(provider_state.get("environment_id")),
-        materialized_files=_provider_files(provider_state, "materialized_files"),
-        observed_files=_provider_files(provider_state, "observed_files"),
+        container_id=_container_id(row.provider_state),
+        materialized_files=_materialized_files(row.provider_state),
     )
+
+
+def _container_id(provider_state: object) -> str | None:
+    payload = provider_state if isinstance(provider_state, dict) else {}
+    return _optional_identifier(payload.get("container_id"))
 
 
 def _manifest_resources(value: object) -> tuple[SandboxManifestResource, ...]:
@@ -328,75 +384,37 @@ def _manifest_resources(value: object) -> tuple[SandboxManifestResource, ...]:
     return tuple(resources)
 
 
-def _provider_files(value: object, key: str) -> tuple[SandboxProviderFile, ...]:
-    payload = value if isinstance(value, dict) else {}
-    raw_files = payload.get(key)
+def _materialized_files(provider_state: object) -> tuple[SandboxMaterializedFile, ...]:
+    payload = provider_state if isinstance(provider_state, dict) else {}
+    raw_files = payload.get("materialized_files")
     if not isinstance(raw_files, list):
         return ()
-    files: list[SandboxProviderFile] = []
+    files: list[SandboxMaterializedFile] = []
     for item in raw_files:
         if not isinstance(item, dict):
             continue
         try:
-            file = SandboxProviderFile(
-                id=_identifier(item.get("id"), "provider file"),
-                name=_identifier(item.get("name"), "provider file name"),
-                resource_id=_optional_identifier(item.get("resource_id")),
-                # Files recorded before delivery tracking were attached when
-                # their workspace started.
-                delivered=item.get("delivered", True) is not False,
+            file = SandboxMaterializedFile(
+                path=_identifier(item.get("path"), "sandbox file path"),
+                resource_id=_identifier(item.get("resource_id"), "resource"),
             )
         except ValueError:
             continue
-        if not any(existing.id == file.id for existing in files):
+        if not any(existing.path == file.path for existing in files):
             files.append(file)
     return tuple(files)
 
 
 def _provider_state(
-    current: object,
-    *,
-    environment_id: str | None = None,
-    materialized_files: Iterable[SandboxProviderFile] | None = None,
-    observed_files: Iterable[SandboxProviderFile] | None = None,
+    *, container_id: str, materialized_files: Iterable[SandboxMaterializedFile]
 ) -> dict[str, object]:
-    previous = current if isinstance(current, dict) else {}
-    state: dict[str, object] = {
+    return {
+        "container_id": container_id,
         "materialized_files": [
-            _file_payload(item)
-            for item in (
-                _unique_files(materialized_files)
-                if materialized_files is not None
-                else _provider_files(previous, "materialized_files")
-            )
-        ],
-        "observed_files": [
-            _file_payload(item)
-            for item in (
-                _unique_files(observed_files)
-                if observed_files is not None
-                else _provider_files(previous, "observed_files")
-            )
+            {"path": item.path, "resource_id": item.resource_id}
+            for item in materialized_files
         ],
     }
-    selected_environment = (
-        environment_id
-        if environment_id is not None
-        else _optional_identifier(previous.get("environment_id"))
-    )
-    if selected_environment is not None:
-        state["environment_id"] = selected_environment
-    return state
-
-
-def _unique_files(files: Iterable[SandboxProviderFile]) -> tuple[SandboxProviderFile, ...]:
-    result: list[SandboxProviderFile] = []
-    seen: set[str] = set()
-    for item in files:
-        if item.id not in seen:
-            seen.add(item.id)
-            result.append(item)
-    return tuple(result)
 
 
 def _resource_payload(resource: SandboxManifestResource) -> dict[str, object]:
@@ -405,15 +423,6 @@ def _resource_payload(resource: SandboxManifestResource) -> dict[str, object]:
         "name": resource.name,
         "mime_type": resource.mime_type,
         "size_bytes": resource.size_bytes,
-    }
-
-
-def _file_payload(file: SandboxProviderFile) -> dict[str, object]:
-    return {
-        "id": file.id,
-        "name": file.name,
-        "resource_id": file.resource_id,
-        "delivered": file.delivered,
     }
 
 

@@ -204,9 +204,9 @@ sequenceDiagram
 
 ### Retrieval policy
 
-A knowledge search accepts one to three normalized queries. Qdrant performs dense and BM25 retrieval with reciprocal-rank fusion. Tenant, Collection, tombstone, and schema filters are applied before candidates are returned. Visibility is checked again before reranking.
+A knowledge search accepts one to three normalized queries. Qdrant performs dense and BM25 retrieval with reciprocal-rank fusion. Tenant, Collection, tombstone, and schema filters are applied before candidates are returned. Visibility is checked again before ranking.
 
-The reranker acts as a relevance gate. A valid empty selection means no relevant evidence was found. If reranking infrastructure fails, the system falls back to the fused retrieval order instead of exposing unauthorized or fabricated content.
+By default the top fused candidates become evidence directly. An optional reranker (`BOMESH_RERANKING_ENABLED`) acts as a relevance gate: a valid empty selection means no relevant evidence was found. If reranking fails or exceeds its own deadline, the system falls back to the fused retrieval order instead of exposing unauthorized or fabricated content.
 
 ### Agent policy
 

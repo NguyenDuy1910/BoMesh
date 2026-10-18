@@ -65,7 +65,7 @@ from bomesh.services import (
     UploadValidationError,
     VerifiedGoogleIdentity,
     SandboxManifestResource,
-    SandboxProviderFile,
+    SandboxMaterializedFile,
 )
 from bomesh.services.approval_request import ApprovalRequestService
 from bomesh.services.dashboard.activity import ActivityService
@@ -1107,53 +1107,61 @@ async def test_sandbox_recovery_state_is_private_to_its_conversation_owner(
 
     sandboxes = SandboxSessionService(session_factory)
     created = await sandboxes.ensure(
-        owner_access, conversation_id=conversation_id, provider="openrouter"
+        owner_access, conversation_id=conversation_id, provider="docker"
+    )
+    bound = await sandboxes.bind_container(
+        owner_access, session_id=created.id, container_id="container_1", replaces=None
     )
     recorded = await sandboxes.record_materialization(
         owner_access,
         session_id=created.id,
+        container_id="container_1",
         resource=SandboxManifestResource(
             resource_id=str(UUID(int=19)),
             name="revenue.csv",
             mime_type="text/csv",
             size_bytes=12,
         ),
-        provider_files=(
-            SandboxProviderFile(
-                id="or_file_1",
-                name="revenue.csv",
-                resource_id=str(UUID(int=19)),
-                delivered=False,
-            ),
+        files=(
+            SandboxMaterializedFile(path="revenue.csv", resource_id=str(UUID(int=19))),
         ),
     )
-
-    assert recorded.manifest[0].resource_id == str(UUID(int=19))
-    assert [file.delivered for file in recorded.materialized_files] == [False]
-    # A shell step that attached the file delivers it for good.
-    executed = await sandboxes.record_execution(
-        owner_access,
-        session_id=created.id,
-        environment_id="container_1",
-        files=(),
-        delivered_file_ids=("or_file_1",),
+    # A concurrent binder that still believes the session is unbound loses.
+    raced = await sandboxes.bind_container(
+        owner_access, session_id=created.id, container_id="container_2", replaces=None
     )
-    assert [file.delivered for file in executed.materialized_files] == [True]
+
+    assert bound.container_id == "container_1"
+    assert recorded.manifest[0].resource_id == str(UUID(int=19))
+    assert raced.container_id == "container_1"
+    assert raced.materialized_files == recorded.materialized_files
     async with session_factory() as session:
         row = await session.get(SandboxSession, created.id)
         assert row is not None
-        assert row.provider_state["materialized_files"] == [
-            {
-                "id": "or_file_1",
-                "name": "revenue.csv",
-                "resource_id": str(UUID(int=19)),
-                "delivered": True,
-            }
-        ]
+        assert row.provider_state == {
+            "container_id": "container_1",
+            "materialized_files": [
+                {"path": "revenue.csv", "resource_id": str(UUID(int=19))}
+            ],
+        }
     with pytest.raises(DocumentNotFoundError):
         await sandboxes.active(
-            other_access, conversation_id=conversation_id, provider="openrouter"
+            other_access, conversation_id=conversation_id, provider="docker"
         )
+
+    assert await sandboxes.active_container_ids(provider="docker") >= {"container_1"}
+    expired = await sandboxes.expire_idle(
+        provider="docker", idle_before=datetime.now(UTC) + timedelta(seconds=1)
+    )
+    assert "container_1" in expired
+    assert await sandboxes.active(
+        owner_access, conversation_id=conversation_id, provider="docker"
+    ) is None
+    recoverable = await sandboxes.recoverable(
+        owner_access, conversation_id=conversation_id, provider="docker"
+    )
+    assert recoverable is not None
+    assert recoverable.manifest == recorded.manifest
 
 
 @pytest.mark.asyncio
@@ -1280,6 +1288,120 @@ async def test_referenced_resources_resolve_prior_turns_under_current_access(
         await conversations.referenced_resources(conversation_id, access=other_actor)
         == ()
     )
+
+
+@pytest.mark.asyncio
+async def test_conversation_history_is_server_owned_and_excludes_replaced_turns(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """The agent reads answered, active turns; retries and edits supersede."""
+
+    async with session_factory.begin() as session:
+        auth = IdentityStoreService(session)
+        tenant = await auth.create_tenant("history", "History")
+        owner = await auth.create_user("history-owner@example.com")
+        other = await auth.create_user("history-other@example.com")
+        for member in (owner, other):
+            await join_tenant(
+                session, member, tenant.id, permission_codes=("knowledge.read",)
+            )
+        actor = await AccessSessionService(session).internal_user(
+            user=owner, tenant_id=tenant.id
+        )
+        other_actor = await auth.get_context(other.id, tenant_id=tenant.id)
+
+    conversations = ConversationService(session_factory)
+    conversation_id = uuid4()
+
+    async def ask(
+        question: str, answer: str | None = None, *, replace_from_turn: int | None = None
+    ) -> Message:
+        message = await conversations.start_turn(
+            conversation_id,
+            access=actor,
+            content=question,
+            attachment_ids=(),
+            request_id=question,
+            replace_from_turn=replace_from_turn,
+        )
+        if answer is not None:
+            await conversations.finish_turn(
+                conversation_id,
+                access=actor,
+                question_id=message.id,
+                content=answer,
+                referenced_document_ids=(),
+                request_id=question,
+            )
+        return message
+
+    async def history(**options: Any) -> list[tuple[str, str]]:
+        messages = await conversations.history(
+            conversation_id, access=actor, limit_messages=24, **options
+        )
+        return [(message.role, message.content) for message in messages]
+
+    # A conversation id the server has never seen is a new conversation.
+    assert await history() == []
+
+    await ask("q0", "a0")
+    await ask("q1")  # stopped before an answer: a turn, but not history
+    await ask("q2", "a2")
+    assert await history() == [
+        ("user", "q0"), ("assistant", "a0"), ("user", "q2"), ("assistant", "a2"),
+    ]
+    # Turn indexes count every accepted user turn, so q2 is turn 2.
+    assert await history(before_turn=2) == [("user", "q0"), ("assistant", "a0")]
+
+    # A retry of q2 replaces it and its answer.
+    await ask("q2 again", "a2 again", replace_from_turn=2)
+    assert await history() == [
+        ("user", "q0"), ("assistant", "a0"),
+        ("user", "q2 again"), ("assistant", "a2 again"),
+    ]
+    # Editing the first question drops every later message.
+    await ask("q0 edited", "a0 edited", replace_from_turn=0)
+    assert await history() == [("user", "q0 edited"), ("assistant", "a0 edited")]
+
+    # Nothing is deleted: replaced messages are superseded, with a timestamp.
+    async with session_factory.begin() as session:
+        rows = (
+            await session.execute(
+                select(Message.content, Message.status, Message.superseded_at)
+                .where(Message.conversation_id == conversation_id)
+                .order_by(Message.sequence_number)
+            )
+        ).all()
+    assert [(content, status) for content, status, _ in rows] == [
+        ("q0", "superseded"), ("a0", "superseded"), ("q1", "superseded"),
+        ("q2", "superseded"), ("a2", "superseded"),
+        ("q2 again", "superseded"), ("a2 again", "superseded"),
+        ("q0 edited", "active"), ("a0 edited", "active"),
+    ]
+    assert all((status == "superseded") == (at is not None) for _, status, at in rows)
+
+    # One active turn: index 1 appends, anything beyond it is rejected.
+    with pytest.raises(ValueError, match="beyond"):
+        await ask("too far", replace_from_turn=2)
+    stale = await ask("q1")
+    # A retry lands while the first attempt is still streaming: its late
+    # answer is kept superseded and never enters history.
+    await ask("q1 retried", replace_from_turn=1)
+    await conversations.finish_turn(
+        conversation_id,
+        access=actor,
+        question_id=stale.id,
+        content="late answer",
+        referenced_document_ids=(),
+        request_id="q1",
+    )
+    assert await history() == [("user", "q0 edited"), ("assistant", "a0 edited")]
+
+    # A conversation is private to its owner.
+    with pytest.raises(DocumentNotFoundError):
+        await conversations.history(
+            conversation_id, access=other_actor, limit_messages=24
+        )
 
 
 @pytest.mark.asyncio

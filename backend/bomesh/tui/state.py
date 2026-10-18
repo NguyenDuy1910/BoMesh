@@ -3,20 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal, Mapping
+from typing import Any, Mapping
 from uuid import UUID, uuid4
-
-
-HistoryRole = Literal["user", "assistant"]
-MAX_HISTORY_MESSAGES = 24
-MAX_HISTORY_CHARACTERS = 24_000
-MAX_HISTORY_MESSAGE_CHARACTERS = 8_000
-
-
-@dataclass(frozen=True, slots=True)
-class HistoryMessage:
-    role: HistoryRole
-    content: str
 
 
 @dataclass(slots=True)
@@ -80,7 +68,7 @@ class TurnState:
 
     @property
     def final_text(self) -> str:
-        """The final no-tool assistant message suitable for next-turn history."""
+        """The final no-tool assistant message of the turn."""
 
         for response_id in reversed(self.response_order):
             response = self.responses[response_id]
@@ -104,7 +92,6 @@ class ChatState:
     """A deterministic reducer for public response lifecycle events."""
 
     conversation_id: str = field(default_factory=lambda: str(uuid4()))
-    history: list[HistoryMessage] = field(default_factory=list)
     turn: TurnState | None = None
     raw_sse_lines: list[str] = field(default_factory=list)
 
@@ -114,26 +101,9 @@ class ChatState:
         except ValueError as exc:
             raise ValueError("conversation_id must be a UUID") from exc
 
-    def begin_turn(self, message: str) -> TurnState:
-        self.history.append(HistoryMessage(role="user", content=message))
+    def begin_turn(self) -> TurnState:
         self.turn = TurnState()
         return self.turn
-
-    def request_history(self) -> list[HistoryMessage]:
-        remaining_characters = MAX_HISTORY_CHARACTERS
-        selected: list[HistoryMessage] = []
-        for entry in reversed(self.history):
-            content = _clip_history(entry.content)
-            if not content:
-                continue
-            if len(selected) == MAX_HISTORY_MESSAGES or len(content) > remaining_characters:
-                break
-            selected.append(HistoryMessage(role=entry.role, content=content))
-            remaining_characters -= len(content)
-        selected.reverse()
-        while selected and selected[0].role == "assistant":
-            selected.pop(0)
-        return selected
 
     def apply_event(self, event: Mapping[str, Any], *, raw_sse_line: str) -> TurnState:
         if self.turn is None:
@@ -212,16 +182,8 @@ class ChatState:
                         self.turn.status = "completed"
         return self.turn
 
-    def complete_turn(self) -> None:
-        if self.turn is None or self.turn.status != "completed":
-            return
-        answer = self.turn.final_text.strip()
-        if answer:
-            self.history.append(HistoryMessage(role="assistant", content=answer))
-
     def reset(self) -> None:
         self.conversation_id = str(uuid4())
-        self.history.clear()
         self.turn = None
         self.raw_sse_lines.clear()
 
@@ -283,15 +245,6 @@ class ChatState:
         return item.content[index]
 
 
-def _clip_history(content: str) -> str:
-    if len(content) <= MAX_HISTORY_MESSAGE_CHARACTERS:
-        return content
-    marker = "\n…\n"
-    available = MAX_HISTORY_MESSAGE_CHARACTERS - len(marker)
-    leading = (available + 1) // 2
-    return f"{content[:leading]}{marker}{content[-(available - leading):]}"
-
-
 def _integer(value: object) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
@@ -302,7 +255,6 @@ def _string(value: object) -> str:
 
 __all__ = [
     "ChatState",
-    "HistoryMessage",
     "OutputItemState",
     "ResponseState",
     "TurnState",

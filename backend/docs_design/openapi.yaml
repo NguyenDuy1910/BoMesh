@@ -119,6 +119,8 @@ paths:
               schema: {type: string}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/ValidationError'}
   /api/v1/knowledge/home:
     get:
       tags: [knowledge]
@@ -1330,19 +1332,30 @@ components:
         permissions: {type: array, items: {type: string}}
         platform_permissions: {type: array, items: {type: string}}
         workspaces: {type: array, items: {$ref: '#/components/schemas/WorkspaceMembership'}}
-    ChatMessage:
-      type: object
-      required: [role, content]
-      properties:
-        role: {type: string, enum: [user, assistant]}
-        content: {type: string, minLength: 1, maxLength: 8000}
     ChatRequest:
       type: object
       required: [message]
+      description: >-
+        One chat turn. The server owns conversation history: it loads the
+        conversation's active, answered turns from storage and never accepts
+        history from the client. Every lifecycle event that carries a
+        `response` snapshot (first `response.created`) reports the conversation
+        as `response.metadata.conversation_id`.
       properties:
         message: {type: string, minLength: 1, maxLength: 4000}
-        conversation_id: {type: [string, 'null'], format: uuid}
-        history: {type: array, maxItems: 24, items: {$ref: '#/components/schemas/ChatMessage'}}
+        conversation_id:
+          type: [string, 'null']
+          format: uuid
+          description: Client-generated conversation identity; a new id starts a conversation. Omitted -> the server generates one.
+        replace_from_turn:
+          type: [integer, 'null']
+          minimum: 0
+          description: >-
+            Zero-based index of an earlier user turn this request replaces
+            (retry, edit, or re-answering an interrupted question). That turn
+            and every later message become superseded and leave model context.
+            Omitted appends a new turn. Requires conversation_id; a value above
+            the number of active user turns is 422.
         collection_ids: {type: array, maxItems: 20, uniqueItems: true, items: {type: string, format: uuid}}
         attachment_ids: {type: array, maxItems: 10, uniqueItems: true, items: {type: string, format: uuid}}
     CollectionStatus: {type: string, enum: [active, archived]}

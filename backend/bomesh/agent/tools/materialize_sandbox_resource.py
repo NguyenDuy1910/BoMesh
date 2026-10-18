@@ -1,4 +1,4 @@
-"""Make one authorized resource available to a hosted sandbox shell."""
+"""Make one authorized resource available to the sandbox shell."""
 
 from __future__ import annotations
 
@@ -8,16 +8,16 @@ from bomesh.services import ArtifactValidationError
 
 
 class MaterializeSandboxResource(Tool):
-    """Explicitly copy an accessible Item into the provider-managed workspace."""
+    """Explicitly copy an accessible Item into the conversation's sandbox."""
 
     def spec(self) -> ToolSpec:
         return ToolSpec(
             name="materialize_sandbox_resource",
             description=(
-                "Make an available file accessible to the hosted shell, including "
-                "while a shell workspace is already running. Use this before shell "
-                "work that needs the file, then use the exact path it returns. It "
-                "does not read the file into the chat."
+                "Copy an available file into the sandbox home directory (~) so "
+                "run_shell commands can use it. Call it before shell work that "
+                "needs the file, then use the exact path it returns. It does not "
+                "read the file into the chat."
             ),
             input_schema={
                 "type": "object",
@@ -42,7 +42,7 @@ class MaterializeSandboxResource(Tool):
         if sandbox is None:
             return ToolResult(
                 content="",
-                error="Hosted workspace is unavailable.",
+                error="The sandbox is unavailable.",
                 metadata={"outcome": "unavailable", "result_count": 0},
             )
         try:
@@ -53,17 +53,8 @@ class MaterializeSandboxResource(Tool):
                 error=str(exc),
                 metadata={"outcome": "invalid_input", "result_count": 0},
             )
-        paths = materialized.paths
-        if not paths:
-            return ToolResult(
-                content=f"{materialized.resource.name} is prepared for the hosted shell.",
-                metadata={"outcome": "success", "result_count": 1},
-            )
-        original, *copies = paths
-        lines = [
-            f"{materialized.resource.name} is available to the hosted shell from its "
-            f"next command at: {original}",
-        ]
+        original, *copies = materialized.paths
+        lines = [f"{materialized.resource.name} is in the sandbox at: {original}"]
         if copies:
             lines.append(
                 "Each sheet is also available as CSV (all cells, header rows "

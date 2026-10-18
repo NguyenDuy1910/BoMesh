@@ -521,9 +521,9 @@ class Conversation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 
 class SandboxSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """Durable recovery metadata for a provider-backed conversation workspace.
+    """Durable recovery metadata for a conversation's sandbox container.
 
-    The provider container and files are opaque values in ``provider_state``;
+    ``provider_state`` binds the Docker container and its materialized files;
     durable BoMesh Item identities stay in the provider-neutral ``manifest``.
     Neither field contains workspace output bytes.
     """
@@ -566,7 +566,16 @@ class SandboxSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 class Message(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     __tablename__ = "messages"
-    __table_args__ = (UniqueConstraint("conversation_id", "sequence_number"),)
+    __table_args__ = (
+        UniqueConstraint("conversation_id", "sequence_number"),
+        # Model context reads only active messages, newest turns first.
+        Index(None, "conversation_id", "status", "sequence_number"),
+        CheckConstraint(
+            "(status = 'active' AND superseded_at IS NULL)"
+            " OR (status = 'superseded' AND superseded_at IS NOT NULL)",
+            name="message_status_is_valid",
+        ),
+    )
 
     conversation_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("conversations.id"), nullable=False
@@ -581,6 +590,12 @@ class Message(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
         server_default=text("'{}'::jsonb"),
     )
     sequence_number: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # A retry or edit supersedes the replaced turn and everything after it;
+    # superseded messages are kept for lineage but never reach model context.
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="active", server_default="active"
+    )
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
     sourced_memories: Mapped[list[Memory]] = relationship(back_populates="source_message")

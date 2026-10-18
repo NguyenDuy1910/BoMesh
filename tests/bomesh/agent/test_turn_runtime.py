@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from dataclasses import fields, replace
+from dataclasses import fields
 from pathlib import Path
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import pytest
 
@@ -20,8 +20,6 @@ from native_responses import ScriptedResponsesTransport, completed, created, fun
 from bomesh.agent import (
     ContextManager,
     ConversationState,
-    ExecutionCapability,
-    ExecutionCapabilityResolver,
     AttachmentInput,
     AttachmentRef,
     ImageInput,
@@ -40,12 +38,8 @@ from bomesh.agent.models import AgentContext, ConversationMessage, ToolOutput
 from bomesh.agent.protocol import (
     FunctionCallItem,
     FunctionCallOutputItem,
-    ExecutionOutput,
-    HostedExecutionCallItem,
-    HostedExecutionResultItem,
     InputImage,
     InputText,
-    ProviderResourceRef,
     ReasoningItem,
 )
 from bomesh.agent.tools import (
@@ -56,18 +50,8 @@ from bomesh.agent.tools import (
     ToolSpec,
 )
 from bomesh.agent.tools.read_resource import ReadResource
-from bomesh.agent.transports.openrouter_execution_capability import (
-    OpenRouterExecutionCapabilityResolver,
-)
+from bomesh.agent.tools.run_shell import RunShell
 from bomesh.agent.turn import run_turn
-from bomesh.services import (
-    AuthContext,
-    SandboxManifestResource,
-    SandboxProviderFile,
-    SandboxSessionState,
-)
-from bomesh.services.agent_runtime.sandbox_workspace import SandboxWorkspace
-from bomesh.services.artifact import WorkspaceSource
 
 
 class Lookup(ToolExecutor):
@@ -141,7 +125,6 @@ def _session(
     transport: ScriptedResponsesTransport,
     registry: ToolRegistry,
     resource_resolver: RecordingResourceResolver | None = None,
-    execution_capability_resolver: ExecutionCapabilityResolver | None = None,
 ) -> RecordingSession:
     configuration = SessionConfiguration(max_model_turns=3, max_tool_rounds=2)
     return RecordingSession(
@@ -150,7 +133,6 @@ def _session(
             model=transport,
             tool_registry=registry,
             resource_resolver=resource_resolver,
-            execution_capability_resolver=execution_capability_resolver,
         ),
         ContextManager(configuration=configuration),
     )
@@ -220,37 +202,39 @@ async def test_image_input_materializes_as_native_model_content() -> None:
 
 
 @pytest.mark.asyncio
-async def test_context_manager_retains_only_relevant_older_conversation() -> None:
-    configuration = SessionConfiguration(max_history_messages=8, recent_history_messages=2)
+async def test_context_manager_replays_a_plain_recency_window_in_order() -> None:
+    """No relevance filter: a follow-up keeps what "it" refers to."""
+
+    configuration = SessionConfiguration(max_history_messages=5)
     manager = ContextManager(configuration=configuration)
     context = AgentContext(
         user_id="user",
         tenant_id="tenant",
         roles=[],
         history=(
+            ConversationMessage(role="user", content="Oldest question."),
+            ConversationMessage(role="assistant", content="Oldest answer."),
+            ConversationMessage(role="user", content="Chính sách nghỉ phép là gì?"),
+            ConversationMessage(role="assistant", content="Nhân viên có 20 ngày phép."),
             ConversationMessage(role="user", content="Discuss the office party."),
             ConversationMessage(role="assistant", content="The party is on Friday."),
-            ConversationMessage(role="user", content="What is the leave policy?"),
-            ConversationMessage(role="assistant", content="I can check the leave policy."),
-            ConversationMessage(role="user", content="Thanks."),
-            ConversationMessage(role="assistant", content="You're welcome."),
         ),
     )
 
-    turn = _turn(
-        context, UserTurn(inputs=(TextInput(text="Explain the leave policy"),))
-    )
+    turn = _turn(context, UserTurn(inputs=(TextInput(text="Can it carry over?"),)))
     conversation = ConversationState()
     await manager.start_turn(conversation, turn, RecordingResourceResolver())
 
-    history_text = "\n".join(
-        part.text
-        for item in conversation.items[:-1]
-        for part in item.content
-        if isinstance(part, InputText)
-    )
-    assert "office party" not in history_text
-    assert "leave policy" in history_text
+    assert [
+        (item.role, item.content[0].text) for item in conversation.items
+    ] == [
+        # The window starts at a user message; the orphaned answer is dropped.
+        ("user", "Chính sách nghỉ phép là gì?"),
+        ("assistant", "Nhân viên có 20 ngày phép."),
+        ("user", "Discuss the office party."),
+        ("assistant", "The party is on Friday."),
+        ("user", "Can it carry over?"),
+    ]
 
 
 @pytest.mark.asyncio
@@ -293,8 +277,11 @@ async def test_generic_resource_is_read_only_after_the_model_calls_a_tool() -> N
     events = [event async for event in run_turn(session, turn)]
 
     assert resolver.read_resources == [file]
-    assert "<resource_id>file-1</resource_id>" in transport.requests[0]["instructions"]
-    assert "<current_turn_goal>" not in transport.requests[0]["instructions"]
+    # Resources are per-turn context: a developer message right before the
+    # user's message, never part of the static instructions.
+    assert "<resource_id>" not in transport.requests[0]["instructions"]
+    assert transport.requests[0]["input"][-2]["role"] == "developer"
+    assert "<resource_id>file-1</resource_id>" in transport.requests[0]["input"][-2]["content"]
     output = next(
         event.item
         for event in events
@@ -397,21 +384,23 @@ async def test_step_context_is_immutable_and_model_input_is_materialized_per_ste
         "turn_id",
         "step_index",
         "settings",
-        "execution_capability",
+        "sandbox_guidance",
         "resources",
         "tool_names",
+        "tools_enabled",
     )
     assert first.turn_id == turn.id
     assert first.step_index == 1
     assert first.resources == (file,)
     assert first.tool_names == ("read_resource",)
-    assert first.execution_capability.available is False
-    assert first.execution_capability.provider == transport.provider
-    assert first.execution_capability.model == transport.model
+    assert first.sandbox_guidance is None
+    assert first.tools_enabled is True
     first_input, second_input = session.model_inputs
     assert first_input.input_items[-1].role == "user"
-    assert "<resource_id>file-1</resource_id>" in first_input.instructions
-    assert "<current_turn_goal>" not in first_input.instructions
+    assert first_input.input_items[-2].role == "developer"
+    assert "<resource_id>file-1</resource_id>" in first_input.input_items[-2].content[0].text
+    assert first_input.instructions == second_input.instructions
+    assert "<resource_id>" not in first_input.instructions
     assert len(second_input.input_items) > len(first_input.input_items)
     assert second_input.input_items[-1].type == "function_call_output"
 
@@ -454,8 +443,10 @@ async def test_step_selects_only_explicit_or_user_relevant_resources() -> None:
     step = await session.capture_step_context(turn)
 
     model_input = session.build_model_input(step)
-    assert "<resource_id>leave-policy</resource_id>" in model_input.instructions
-    assert "<resource_id>travel-policy</resource_id>" not in model_input.instructions
+    resource_context = model_input.input_items[-2].content[0].text
+    assert "<resource_id>leave-policy</resource_id>" in resource_context
+    assert "<resource_id>travel-policy</resource_id>" not in resource_context
+    assert "<resource_id>" not in model_input.instructions
     assert step.resources == (relevant,)
 
 
@@ -480,289 +471,46 @@ async def test_model_input_keeps_reasoning_required_by_a_retained_function_call(
     assert model_input.input_items[-3:] == (reasoning, call, output)
 
 
-@pytest.mark.asyncio
-async def test_model_input_keeps_reasoning_required_by_hosted_execution_replay() -> None:
-    session = _session(ScriptedResponsesTransport([]), ToolRegistry())
-    turn = _turn(_context())
-    await session.capture_step_context(turn)
-    reasoning = ReasoningItem(id="rs_1", encrypted_content="x" * 20_000)
-    call = HostedExecutionCallItem(
-        id="execution_1",
-        call_id="call_1",
-        commands=("python --version",),
-    )
-    output = HostedExecutionResultItem(
-        id="result_1",
-        call_id="call_1",
-        output=(ExecutionOutput(stdout="Python 3.12\\n", exit_code=0),),
-    )
-    session.record((reasoning, call, output))
-
-    step = await session.capture_step_context(turn)
-    model_input = session.build_model_input(step)
-
-    assert model_input.input_items[-3:] == (reasoning, call, output)
-
-
-def test_openrouter_execution_capabilities_are_provider_and_model_gated() -> None:
-    resolver = OpenRouterExecutionCapabilityResolver()
-
-    available = resolver.resolve(provider="openrouter", model="model-with-tools")
-    unavailable = resolver.resolve(provider="openai", model="model-with-tools")
-    unconfigured = resolver.resolve(provider="openrouter", model=None)
-
-    assert available.available is True
-    assert available.hosted_shell is True
-    assert available.provider_files is True
-    assert available.persistent_environments is True
-    assert unavailable.available is False
-    assert unconfigured.available is False
-
-
-@pytest.mark.asyncio
-async def test_step_captures_execution_capability_without_exposing_a_shell_tool() -> None:
-    registry = ToolRegistry()
-    registry.register(Lookup())
-    session = _session(
-        ScriptedResponsesTransport([]),
-        registry,
-        execution_capability_resolver=OpenRouterExecutionCapabilityResolver(),
-    )
-
-    step = await session.capture_step_context(_turn(_context()))
-
-    assert step.execution_capability.hosted_shell is True
-    assert step.tool_names == ("knowledge_search",)
-
-
-@pytest.mark.asyncio
-async def test_hosted_shell_capability_reaches_the_provider_prompt_without_a_local_tool() -> None:
-    session = _session(
-        ScriptedResponsesTransport([]),
-        ToolRegistry(),
-        execution_capability_resolver=OpenRouterExecutionCapabilityResolver(),
-    )
-
-    step = await session.capture_step_context(_turn(_context()))
-    prompt = session.build_model_input(step).prompt(previous_response_id=None)
-
-    assert prompt.tools == ()
-    assert prompt.execution_capability == step.execution_capability
-    assert prompt.tool_choice == "auto"
-    # The model is told what the shell can do before its first command.
-    assert "<hosted_shell>" in prompt.instructions
-    assert "python3" in prompt.instructions
-
-
-def _workbook(rows: list[list[object]]) -> bytes:
-    from io import BytesIO
-
-    from openpyxl import Workbook
-
-    book = Workbook()
-    sheet = book.active
-    for row in rows:
-        sheet.append(row)
-    buffer = BytesIO()
-    book.save(buffer)
-    return buffer.getvalue()
-
-
-class _SandboxProvider:
-    provider = "openrouter"
-
-    def __init__(self) -> None:
-        self.uploads: list[tuple[str, bytes]] = []
-        self.downloads: list[tuple[str, str]] = []
-        self.saved: dict[str, str] = {}
-
-    async def upload_file(self, *, file_name: str, mime_type: str, data: bytes):
-        self.uploads.append((file_name, data))
-        return ProviderResourceRef(
-            provider="openrouter", id=f"or_file_{len(self.uploads):08d}", name=file_name
-        )
-
-    async def download_file(self, *, environment_id: str, file_id: str) -> bytes:
-        self.downloads.append((environment_id, file_id))
-        return b"month,total\nJan,10\n"
-
-    def workspace_path(self, *, file_id: str, file_name: str) -> str:
-        return f"~/{file_id[-8:]}-{file_name}"
-
-    async def find_file(self, *, environment_id: str, path: str):
-        file_id = self.saved.get(path)
-        return ProviderResourceRef(provider="openrouter", id=file_id, name=path) if file_id else None
-
-
-class _SandboxSessions:
-    def __init__(self) -> None:
-        self.state: SandboxSessionState | None = None
-
-    async def active(self, *_: Any, **__: Any) -> SandboxSessionState | None:
-        return self.state
-
-    async def recoverable(self, *_: Any, **__: Any) -> SandboxSessionState | None:
-        return None
-
-    async def ensure(self, *_: Any, **__: Any) -> SandboxSessionState:
-        if self.state is None:
-            self.state = SandboxSessionState(id=uuid4(), provider="openrouter", status="active")
-        return self.state
-
-    async def record_materialization(
-        self, _: AuthContext, *, resource: SandboxManifestResource,
-        provider_files: tuple[SandboxProviderFile, ...], **__: Any
-    ) -> SandboxSessionState:
-        assert self.state is not None
-        self.state = replace(
-            self.state,
-            manifest=(*self.state.manifest, resource),
-            materialized_files=(*self.state.materialized_files, *provider_files),
-        )
-        return self.state
-
-    async def record_execution(
-        self, _: AuthContext, *, environment_id: str,
-        files: tuple[SandboxProviderFile, ...], delivered_file_ids: tuple[str, ...] = (),
-        **__: Any
-    ) -> SandboxSessionState:
-        assert self.state is not None
-        self.state = replace(
-            self.state,
-            environment_id=environment_id,
-            observed_files=files,
-            materialized_files=tuple(
-                replace(file, delivered=True) if file.id in delivered_file_ids else file
-                for file in self.state.materialized_files
-            ),
-        )
-        return self.state
-
-    async def record_resource(
-        self, _: AuthContext, *, resource: SandboxManifestResource, **__: Any
-    ) -> SandboxSessionState:
-        assert self.state is not None
-        self.state = replace(self.state, manifest=(*self.state.manifest, resource))
-        return self.state
-
-    async def expire(self, *_: Any, **__: Any) -> None:
-        raise AssertionError("the provider did not expire")
-
-
-class _SandboxArtifacts:
-    def __init__(self, sources: dict[str, WorkspaceSource]) -> None:
-        self.sources = sources
-
-    async def source_file(self, _: AuthContext, document_id):  # type: ignore[no-untyped-def]
-        return self.sources[str(document_id)]
-
-    async def record_generated(self, _: AuthContext, **fields: Any) -> dict[str, object]:
-        return {
-            "id": str(UUID(int=44)),
-            "title": "Analysis",
-            "file_name": fields["file_name"],
-            "mime_type": "text/csv",
-            "size_bytes": 19,
-            "revision": 1,
-            "updated_at": "2026-09-10T00:00:00Z",
-        }
-
-
-def _sandbox_access() -> AuthContext:
-    return AuthContext(
-        user_id=uuid4(),
-        email="owner@example.com",
-        display_name=None,
-        tenant_id=uuid4(),
-        permission_codes=("knowledge.read",),
-        group_ids=(),
-        role_codes=("member",),
-    )
-
-
-def _shell_ran(*files: ProviderResourceRef) -> tuple[HostedExecutionResultItem, ...]:
-    return (
-        HostedExecutionResultItem(
-            call_id="call_1",
-            output=(ExecutionOutput(stdout="", exit_code=0),),
-            environment={"provider": "openrouter", "id": "container_1"},
-            files=files,
-        ),
-    )
-
-
-@pytest.mark.asyncio
-async def test_sandbox_workspace_names_paths_adds_files_to_a_running_shell_and_exports() -> None:
-    revenue_id, roster_id = str(UUID(int=33)), str(UUID(int=34))
-    provider = _SandboxProvider()
-    workspace = SandboxWorkspace(
-        access=_sandbox_access(),
-        conversation_id=uuid4(),
-        request_id="a" * 32,
-        provider=provider,
-        sessions=_SandboxSessions(),  # type: ignore[arg-type]
-        artifacts=_SandboxArtifacts({  # type: ignore[arg-type]
-            revenue_id: WorkspaceSource(
-                document_id=revenue_id, title="Revenue", file_name="revenue.csv",
-                mime_type="text/csv", data=b"month,total\nJan,10\n",
-            ),
-            roster_id: WorkspaceSource(
-                document_id=roster_id, title="Roster", file_name="roster.xlsx",
-                mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                data=_workbook([["Student roster"], [], ["Id", "Name"], ["12142004", "Lan"]]),
-            ),
-        }),
-    )
-    capability = ExecutionCapability(provider="openrouter", model="model", hosted_shell=True)
-
-    revenue = await workspace.materialize_resource(
-        ResourceRef(id=revenue_id, name="revenue.csv", mime_type="text/csv")
-    )
-    first = await workspace.configure_execution(capability)
-    await workspace.observe_execution(
-        _shell_ran(ProviderResourceRef(provider="openrouter", id="cfile_1", name="analysis.csv"))
-    )
-
-    # The shell is running now; a file prepared later still reaches it, once.
-    roster = await workspace.materialize_resource(
-        ResourceRef(id=roster_id, name="roster.xlsx", mime_type="application/octet-stream")
-    )
-    second = await workspace.configure_execution(capability)
-    await workspace.observe_execution(_shell_ran())
-    third = await workspace.configure_execution(capability)
-
-    assert revenue.paths == ("~/00000001-revenue.csv",)
-    assert roster.paths == ("~/00000002-roster.xlsx", "~/00000003-roster.csv")
-    assert provider.uploads[2] == ("roster.csv", b"Student roster\n\nId,Name\n12142004,Lan\n")
-    assert first.environment_id is None
-    assert first.workspace_file_ids == ("or_file_00000001",)
-    assert second.environment_id == "container_1"
-    assert second.workspace_file_ids == ("or_file_00000002", "or_file_00000003")
-    assert third.workspace_file_ids == ()
-
-    # Export accepts the path as the model wrote it, and finds files the
-    # shell no longer reports.
-    provider.saved["out/summary.csv"] = "cfile_2"
-    reported = await workspace.promote_file("~/analysis.csv", summary="Saved analysis")
-    unreported = await workspace.promote_file("out/summary.csv", summary="Saved summary")
-
-    assert provider.downloads == [("container_1", "cfile_1"), ("container_1", "cfile_2")]
-    assert (reported.name, unreported.name) == ("analysis.csv", "out/summary.csv")
-    # One card per document: a later export of the same document replaces it.
-    assert workspace.artifacts == (unreported,)
-
-
 class _ExportedFiles:
     """A request workspace that already exported one file in this turn."""
+
+    guidance = "Commands run in /home/sandbox."
 
     def __init__(self, *artifacts: SandboxArtifact) -> None:
         self.artifacts = artifacts
 
-    async def configure_execution(self, capability: ExecutionCapability) -> ExecutionCapability:
-        return capability
 
-    async def observe_execution(self, items: tuple[Any, ...]) -> None:
-        return None
+@pytest.mark.asyncio
+async def test_sandbox_guidance_is_static_and_run_shell_needs_a_sandbox() -> None:
+    registry = ToolRegistry()
+    registry.register(Lookup())
+    registry.register(RunShell(max_timeout_seconds=60, max_result_characters=12_000))
+    context = _context(allowed=None)
+    without = _session(ScriptedResponsesTransport([]), registry)
+    configuration = SessionConfiguration(max_model_turns=3, max_tool_rounds=2)
+    with_sandbox = RecordingSession(
+        configuration,
+        SessionServices(
+            model=ScriptedResponsesTransport([]),
+            tool_registry=registry,
+            sandbox_runtime=_ExportedFiles(),
+        ),
+        ContextManager(configuration=configuration),
+    )
+
+    plain = await without.capture_step_context(_turn(context))
+    turn = _turn(context)
+    first = await with_sandbox.capture_step_context(turn)
+    second = await with_sandbox.capture_step_context(turn)
+
+    assert plain.tool_names == ("knowledge_search",)
+    assert plain.sandbox_guidance is None
+    assert "<sandbox>" not in without.build_model_input(plain).instructions
+    assert set(first.tool_names) == {"knowledge_search", "run_shell"}
+    instructions = with_sandbox.build_model_input(first).instructions
+    assert "<sandbox>Commands run in /home/sandbox.</sandbox>" in instructions
+    # A cache-stable prefix: the same instructions on every step.
+    assert with_sandbox.build_model_input(second).instructions == instructions
 
 
 @pytest.mark.asyncio

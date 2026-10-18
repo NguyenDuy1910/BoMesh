@@ -26,12 +26,15 @@ class ChatService {
     }
   }
 
+  /// Sends one question; the server keeps the conversation's history.
+  /// [replaceFromTurn] is the zero-based index of an earlier user turn this
+  /// question replaces (retry); null appends a new turn.
   ChatStreamHandle streamMessage({
     required String message,
     required String conversationId,
-    required List<Map<String, String>> history,
     required List<String> attachmentIds,
     required List<String> collectionIds,
+    int? replaceFromTurn,
   }) {
     _checkSession();
     final requestClient = http.Client();
@@ -58,7 +61,7 @@ class ChatService {
       ..body = jsonEncode({
         'message': message,
         'conversation_id': conversationId,
-        'history': history,
+        'replace_from_turn': ?replaceFromTurn,
         'attachment_ids': attachmentIds,
         'collection_ids': collectionIds,
       });

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from bomesh.agent import (
     ConversationState,
     ContextManager,
-    ExecutionCapability,
     ModelInput,
     SessionConfiguration,
     SessionServices,
@@ -76,11 +77,9 @@ class Session:
         resources = self.context_manager.relevant_resources(turn)
         settings = turn.current_settings
         if settings.model is None:
-            settings = settings.__class__(
+            settings = replace(
+                settings,
                 model=self.model.model,
-                temperature=settings.temperature,
-                max_output_tokens=settings.max_output_tokens,
-                parallel_tool_calls=settings.parallel_tool_calls,
                 provider_options=dict(settings.provider_options),
             )
         # Trace start: capture all runtime state considered for this snapshot.
@@ -99,8 +98,11 @@ class Session:
             step_context = self.context_manager.capture_step_context(
                 turn,
                 settings=settings,
-                execution_capability=await self.execution_capability(settings),
+                sandbox_guidance=(
+                    self.sandbox.guidance if self.sandbox is not None else None
+                ),
                 tools=router.model_visible_specs,
+                tools_enabled=self._tools_enabled(turn),
                 resources=resources,
             )
             trace.set_output(
@@ -115,30 +117,22 @@ class Session:
             # Trace end: record the exact StepContext before returning it to the loop.
             return step_context
 
-    async def execution_capability(
-        self, settings: ResolvedStepSettings
-    ) -> ExecutionCapability:
-        """Resolve provider-managed execution before fixing a step's tool surface."""
-
-        provider = self.model.provider
-        model = settings.model or self.model.model
-        resolver = self.services.execution_capability_resolver
-        capability = (
-            ExecutionCapability(provider=provider, model=model)
-            if resolver is None
-            else resolver.resolve(provider=provider, model=model)
-        )
-        if self.sandbox is not None:
-            return await self.sandbox.configure_execution(capability)
-        return capability
-
     def build_model_input(self, step_context: StepContext) -> ModelInput:
-        """Materialize the exact request from one immutable runtime snapshot."""
+        """Materialize the exact request from one immutable runtime snapshot.
+
+        The declared tools are the step's full surface even once the turn's
+        tool limits are reached; ``tools_enabled`` then sends
+        ``tool_choice: "none"`` so the request prefix stays byte-identical.
+        """
 
         return self.context_manager.build_model_input(
             self.conversation,
             step_context,
-            tools=self.tool_router(step_context).model_visible_specs,
+            tools=ToolRouter(
+                self.tool_registry,
+                allowed_names=step_context.tool_names,
+                sandbox_available=self.sandbox is not None,
+            ).model_visible_specs,
         )
 
     def record(self, items: tuple[Item, ...]) -> None:
@@ -147,29 +141,29 @@ class Session:
         self.context_manager.record(self.conversation, items)
 
     def tool_router(self, step_context: StepContext) -> ToolRouter:
-        """Recreate the execution router from the immutable exposed tool names."""
+        """Recreate the execution router; it executes nothing past the limits."""
 
         return ToolRouter(
             self.tool_registry,
-            allowed_names=step_context.tool_names,
+            allowed_names=(
+                step_context.tool_names if step_context.tools_enabled else ()
+            ),
             sandbox_available=self.sandbox is not None,
         )
 
     def _tool_router(self, turn: TurnContext) -> ToolRouter:
-        context = turn.environment.agent_context
-        tools_allowed = (
-            turn.tool_round < self.configuration.max_tool_rounds
-            and turn.tool_call_count < self.configuration.max_tool_calls
-            and (
-                context.allowed_tool_names is None
-                or bool(context.allowed_tool_names)
-            )
-        )
-        allowed_names = context.allowed_tool_names if tools_allowed else ()
+        """The conversation's tool surface, independent of the turn's limits."""
+
         return ToolRouter(
             self.tool_registry,
-            allowed_names=allowed_names,
+            allowed_names=turn.environment.agent_context.allowed_tool_names,
             sandbox_available=self.sandbox is not None,
+        )
+
+    def _tools_enabled(self, turn: TurnContext) -> bool:
+        return (
+            turn.tool_round < self.configuration.max_tool_rounds
+            and turn.tool_call_count < self.configuration.max_tool_calls
         )
 
 

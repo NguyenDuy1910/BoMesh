@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import OrderedDict
 from collections.abc import Sequence
 from typing import Any
 
@@ -39,11 +40,14 @@ class ItemIndex:
         semantic_contextualizer: ChunkContextGenerator | None = None,
         embedding_batch_size: int = 32,
         candidate_limit: int = DEFAULT_HYBRID_CANDIDATE_LIMIT,
+        query_embedding_cache_size: int = 512,
     ) -> None:
         if embedding_batch_size < 1:
             raise ValueError("embedding_batch_size must be at least one")
         if candidate_limit < 1:
             raise ValueError("candidate_limit must be at least one")
+        if query_embedding_cache_size < 0:
+            raise ValueError("query_embedding_cache_size must not be negative")
         self._backend = backend or _QdrantBackend(
             collection_name=collection_name,
             url=url,
@@ -55,6 +59,13 @@ class ItemIndex:
         self._semantic_contextualizer = semantic_contextualizer
         self._embedding_batch_size = embedding_batch_size
         self._candidate_limit = candidate_limit
+        # Query-time vectors only, keyed by embedding model and normalized text:
+        # a follow-up or retried search skips the embedding round trip.
+        # Ingestion never reads or fills it.
+        self._query_embedding_cache_size = query_embedding_cache_size
+        self._query_embeddings: OrderedDict[tuple[str, str], list[float]] = (
+            OrderedDict()
+        )
 
     async def index_item_content(
         self,
@@ -109,7 +120,7 @@ class ItemIndex:
     ) -> list[ContextualChunk]:
         """Return the fused candidates of every query, within the access scope."""
 
-        normalized_queries = [query.strip() for query in queries]
+        normalized_queries = [" ".join(query.split()) for query in queries]
         if not normalized_queries or not all(normalized_queries):
             raise ValueError("queries must be non-empty")
         if limit < 1:
@@ -120,9 +131,8 @@ class ItemIndex:
         if not collection_item_ids:
             return []
 
-        embedder = self._require_embedder()
         vectors = await asyncio.gather(
-            *(embedder.embed_query(query) for query in normalized_queries)
+            *(self._embed_query(query) for query in normalized_queries)
         )
         points = await self._backend.search_item_points(
             queries=list(zip(normalized_queries, vectors, strict=True)),
@@ -204,6 +214,23 @@ class ItemIndex:
         if self._embedder is None:
             raise RuntimeError("Item content embedding is not configured")
         return self._embedder
+
+    async def _embed_query(self, query: str) -> list[float]:
+        """Embed one normalized search query through the bounded LRU cache."""
+
+        embedder = self._require_embedder()
+        if self._query_embedding_cache_size == 0:
+            return await embedder.embed_query(query)
+        key = (embedder.embedding_model, query)
+        cached = self._query_embeddings.get(key)
+        if cached is not None:
+            self._query_embeddings.move_to_end(key)
+            return cached
+        vector = await embedder.embed_query(query)
+        self._query_embeddings[key] = vector
+        if len(self._query_embeddings) > self._query_embedding_cache_size:
+            self._query_embeddings.popitem(last=False)
+        return vector
 
 
 def _normalise_points(points: Sequence[object]) -> list[ContextualChunk]:

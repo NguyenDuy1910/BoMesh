@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -15,7 +16,7 @@ from bomesh.tui.client import BomeshChatClient, ChatClientConfig
 
 
 @pytest.mark.asyncio
-async def test_tui_renders_a_streamed_answer_and_keeps_turn_history() -> None:
+async def test_tui_renders_a_streamed_answer_and_sends_no_client_history() -> None:
     stream = "\n".join([
         'data: {"type":"response.created","sequence_number":1,"response_id":"resp-1","response":{"id":"resp-1","status":"in_progress"}}',
         'data: {"type":"response.output_item.added","sequence_number":2,"response_id":"resp-1","output_index":0,"item":{"type":"message","id":"message-1","role":"assistant","content":[]}}',
@@ -24,16 +25,20 @@ async def test_tui_renders_a_streamed_answer_and_keeps_turn_history() -> None:
         'data: {"type":"response.output_item.done","sequence_number":5,"response_id":"resp-1","output_index":0,"item":{"type":"message","id":"message-1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Grounded **answer**"}]}}',
         'data: {"type":"response.completed","sequence_number":6,"response":{"id":"resp-1","status":"completed"}}',
     ]) + "\n\n"
+    bodies: list[dict[str, object]] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=stream,
+        )
+
     app = BomeshTui(ChatClientConfig())
     app._client = BomeshChatClient(
         ChatClientConfig(api_url="http://test"),
-        transport=httpx.MockTransport(
-            lambda request: httpx.Response(
-                200,
-                headers={"content-type": "text/event-stream"},
-                content=stream,
-            )
-        ),
+        transport=httpx.MockTransport(respond),
     )
 
     async with app.run_test() as pilot:
@@ -41,10 +46,12 @@ async def test_tui_renders_a_streamed_answer_and_keeps_turn_history() -> None:
         app.action_send()
         await pilot.pause(0.2)
 
-    assert [entry.content for entry in app._state.history] == [
-        "What is the answer?",
-        "Grounded **answer**",
+    # The server owns history: the request names the conversation, nothing more.
+    assert bodies == [
+        {"message": "What is the answer?", "conversation_id": app._state.conversation_id}
     ]
+    assert app._state.turn is not None
+    assert app._state.turn.final_text == "Grounded **answer**"
     assert app._state.raw_sse_lines[-1] == 'data: {"type":"response.completed","sequence_number":6,"response":{"id":"resp-1","status":"completed"}}'
 
 

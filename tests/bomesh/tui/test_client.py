@@ -15,7 +15,7 @@ from bomesh.tui.client import (
     ChatClientConfig,
     ChatRequestError,
 )
-from bomesh.tui.state import ChatState, HistoryMessage
+from bomesh.tui.state import ChatState
 
 
 @pytest.mark.asyncio
@@ -50,7 +50,6 @@ async def test_client_posts_current_chat_contract_and_preserves_sse_order() -> N
         async for event in client.stream_turn(
             message="Explain the documents.",
             conversation_id="f8383f55-174a-4d7e-a28a-68d767dcaeb5",
-            history=[{"role": "user", "content": "Earlier question"}],
         )
     ]
 
@@ -62,7 +61,6 @@ async def test_client_posts_current_chat_contract_and_preserves_sse_order() -> N
     assert json.loads(request.content) == {
         "message": "Explain the documents.",
         "conversation_id": "f8383f55-174a-4d7e-a28a-68d767dcaeb5",
-        "history": [{"role": "user", "content": "Earlier question"}],
     }
     assert [event.event["type"] for event in received] == [
         "response.created",
@@ -87,14 +85,13 @@ async def test_client_surfaces_http_rejection_detail() -> None:
         async for _ in client.stream_turn(
             message="hello",
             conversation_id="f8383f55-174a-4d7e-a28a-68d767dcaeb5",
-            history=[],
         ):
             pass
 
 
 def test_state_materializes_response_items_and_deduplicates_sequences() -> None:
     state = ChatState(conversation_id="f8383f55-174a-4d7e-a28a-68d767dcaeb5")
-    state.begin_turn("Explain the documents.")
+    state.begin_turn()
     events = [
         {"type": "response.created", "sequence_number": 1, "response_id": "resp-1", "response": {"id": "resp-1", "status": "in_progress"}},
         {"type": "response.output_item.added", "sequence_number": 2, "response_id": "resp-1", "output_index": 0, "item": {"type": "message", "id": "message-1", "role": "assistant", "content": []}},
@@ -108,29 +105,8 @@ def test_state_materializes_response_items_and_deduplicates_sequences() -> None:
     ]
     for event in events:
         state.apply_event(event, raw_sse_line=json.dumps(event))
-    state.complete_turn()
 
     assert state.turn is not None
     assert state.turn.final_text == "Grounded answer."
     assert state.turn.responses["resp-1"].items["message-1"].content[0]["annotations"][0]["citation"]["id"] == "ev-1"
     assert state.turn.last_sequence_number == 8
-    assert state.history == [
-        type(state.history[0])("user", "Explain the documents."),
-        type(state.history[0])("assistant", "Grounded answer."),
-    ]
-
-
-def test_state_clips_and_bounds_history_for_the_chat_api() -> None:
-    state = ChatState(conversation_id="f8383f55-174a-4d7e-a28a-68d767dcaeb5")
-    for index in range(13):
-        state.history.extend([
-            HistoryMessage("user", f"question-{index}"),
-            HistoryMessage("assistant", "A" * 9_000),
-        ])
-
-    history = state.request_history()
-
-    assert len(history) <= 24
-    assert sum(len(entry.content) for entry in history) <= 24_000
-    assert all(len(entry.content) <= 8_000 for entry in history)
-    assert history[0].role == "user"

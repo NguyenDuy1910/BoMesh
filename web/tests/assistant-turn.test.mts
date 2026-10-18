@@ -81,22 +81,36 @@ test("presents a verified runtime activity at its function-call position", () =>
   }]);
 });
 
-test("presents hosted shell execution with its command and captured output", () => {
+test("presents a run_shell call and its output as one shell run", () => {
   const turn: TurnState = {
     id: "turn-1",
     status: "streaming",
     responseOrder: ["response-1"],
+    runtimeActivities: [{ callId: "shell-2", toolName: "run_shell", state: "active", startedAt: 1 }],
     responses: {
       "response-1": {
-        id: "response-1", status: "in_progress", itemOrder: ["run-1", "run-2"],
+        id: "response-1", status: "in_progress", itemOrder: ["call-1", "output-1", "call-2", "call-3"],
         items: {
-          "run-1": {
-            type: "hosted_execution_result", id: "run-1", call_id: "shell-1",
-            status: "completed", commands: ["printf verified"],
-            output: [{ stdout: "verified", stderr: "", exit_code: 0, timed_out: false }],
-            workspace_files: ["analysis.csv"],
+          "call-1": {
+            type: "function_call", id: "call-1", call_id: "shell-1", name: "run_shell", status: "completed",
+            arguments: JSON.stringify({ commands: ["printf verified"], timeout_seconds: null }),
           },
-          "run-2": { type: "hosted_execution_call", id: "run-2", call_id: "shell-2", status: "in_progress", commands: ["date"] },
+          "output-1": {
+            type: "function_call_output", id: "output-1", call_id: "shell-1", status: "completed",
+            output: JSON.stringify({
+              results: [{ exit_code: 0, timed_out: false, stdout: "verified", stderr: "" }],
+              changed_files: ["analysis.csv"],
+            }),
+          },
+          "call-2": {
+            type: "function_call", id: "call-2", call_id: "shell-2", name: "run_shell", status: "completed",
+            arguments: JSON.stringify({ commands: ["date"], timeout_seconds: null }),
+          },
+          // Not started by the runtime yet: model intent only.
+          "call-3": {
+            type: "function_call", id: "call-3", call_id: "shell-3", name: "run_shell", status: "completed",
+            arguments: JSON.stringify({ commands: ["ls"], timeout_seconds: null }),
+          },
         },
       },
     },
@@ -104,16 +118,46 @@ test("presents hosted shell execution with its command and captured output", () 
 
   assert.deepEqual(assistantTurnItems(turn), [
     {
-      kind: "execution", id: "run-1", callId: "shell-1", state: "completed",
+      kind: "execution", id: "call-1", callId: "shell-1", state: "completed",
       commands: ["printf verified"],
       output: [{ stdout: "verified", stderr: "", exit_code: 0, timed_out: false }],
       files: ["analysis.csv"],
     },
     {
-      kind: "execution", id: "run-2", callId: "shell-2", state: "running",
+      kind: "execution", id: "call-2", callId: "shell-2", state: "running",
       commands: ["date"], output: [], files: [],
     },
   ]);
+});
+
+test("a run_shell tool error reads as the failed run's own message", () => {
+  const turn: TurnState = {
+    id: "turn-1",
+    status: "completed",
+    responseOrder: ["response-1"],
+    responses: {
+      "response-1": {
+        id: "response-1", status: "completed", itemOrder: ["call-1", "output-1"],
+        items: {
+          "call-1": {
+            type: "function_call", id: "call-1", call_id: "shell-1", name: "run_shell", status: "completed",
+            arguments: JSON.stringify({ commands: ["python3 x.py"], timeout_seconds: null }),
+          },
+          "output-1": {
+            type: "function_call_output", id: "output-1", call_id: "shell-1", status: "completed",
+            output: "Tool error: Tool execution failed.",
+          },
+        },
+      },
+    },
+  };
+
+  const [execution] = assistantTurnItems(turn);
+  assert.equal(execution?.kind, "execution");
+  assert.deepEqual(
+    executionSummary(execution as Parameters<typeof executionSummary>[0]),
+    { label: "Code hit an error", detail: "Tool error: Tool execution failed." },
+  );
 });
 
 test("does not render provider reasoning as user-facing commentary", () => {
@@ -190,16 +234,22 @@ function fileWorkTurn(status: TurnState["status"] = "completed"): TurnState {
         },
       },
       "response-2": {
-        id: "response-2", status: "completed", itemOrder: ["run-1"],
+        id: "response-2", status: "completed", itemOrder: ["call-2", "output-2"],
         items: {
-          "run-1": {
-            type: "hosted_execution_result", id: "run-1", call_id: "shell-1", status: "completed",
-            commands: ["ls ~", "python3 totals.py", "cat out.csv"],
-            output: [
-              { stdout: "vendors.csv\n", stderr: "", exit_code: 0, timed_out: false },
-              { stdout: "", stderr: "Traceback (most recent call last):\nKeyError: 'Amount'\n", exit_code: 1, timed_out: false },
-              { stdout: "vendor,total\n", stderr: "", exit_code: 0, timed_out: false },
-            ],
+          "call-2": {
+            type: "function_call", id: "call-2", call_id: "shell-1", name: "run_shell", status: "completed",
+            arguments: JSON.stringify({ commands: ["ls ~", "python3 totals.py", "cat out.csv"], timeout_seconds: null }),
+          },
+          "output-2": {
+            type: "function_call_output", id: "output-2", call_id: "shell-1", status: "completed",
+            output: JSON.stringify({
+              results: [
+                { stdout: "vendors.csv\n", stderr: "", exit_code: 0, timed_out: false },
+                { stdout: "", stderr: "Traceback (most recent call last):\nKeyError: 'Amount'\n", exit_code: 1, timed_out: false },
+                { stdout: "vendor,total\n", stderr: "", exit_code: 0, timed_out: false },
+              ],
+              changed_files: [],
+            }),
           },
         },
       },

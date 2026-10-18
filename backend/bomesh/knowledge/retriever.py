@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
 from collections.abc import Sequence
@@ -22,14 +23,20 @@ class ItemKnowledgeRetriever:
         *,
         reranker: Reranker | None = None,
         candidate_count: int = 20,
-        reranking_enabled: bool = True,
+        reranking_enabled: bool = False,
+        rerank_timeout_seconds: float = 8.0,
     ) -> None:
         if candidate_count < 1:
             raise ValueError("candidate_count must be at least one")
+        if rerank_timeout_seconds <= 0:
+            raise ValueError("rerank_timeout_seconds must be greater than zero")
         self._index = index
         self._reranker = reranker
         self._candidate_count = candidate_count
         self._reranking_enabled = reranking_enabled
+        # Shorter than the tool budget, so a slow reranker falls back to the
+        # fused order instead of timing out the whole search.
+        self._rerank_timeout_seconds = rerank_timeout_seconds
 
     async def search(
         self,
@@ -67,9 +74,10 @@ class ItemKnowledgeRetriever:
         if not self._reranking_enabled or self._reranker is None:
             return _score_order(chunks, limit=limit)
         try:
-            result = self._reranker.rerank(chunks, queries=queries, limit=limit)
-            if inspect.isawaitable(result):
-                result = await result
+            async with asyncio.timeout(self._rerank_timeout_seconds):
+                result = self._reranker.rerank(chunks, queries=queries, limit=limit)
+                if inspect.isawaitable(result):
+                    result = await result
             ranked = list(result)
             if any(not isinstance(chunk, ContextualChunk) for chunk in ranked):
                 raise ValueError("reranker returned invalid candidates")

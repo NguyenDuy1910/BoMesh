@@ -151,11 +151,7 @@ class BomeshTui(App[None]):
     @work(exclusive=True)
     async def _stream_message(self, message: str) -> None:
         transcript = self.query_one("#transcript", VerticalScroll)
-        history = [
-            {"role": entry.role, "content": entry.content}
-            for entry in self._state.request_history()
-        ]
-        turn = self._state.begin_turn(message)
+        turn = self._state.begin_turn()
         await transcript.mount(UserMessage(message))
         assistant = AssistantTurn(turn)
         await transcript.mount(assistant)
@@ -165,7 +161,6 @@ class BomeshTui(App[None]):
             async for received in self._client.stream_turn(
                 message=message,
                 conversation_id=self._state.conversation_id,
-                history=history,
             ):
                 turn = self._state.apply_event(
                     received.event,
@@ -177,7 +172,6 @@ class BomeshTui(App[None]):
                     )
                 await assistant.render_turn(turn)
                 transcript.scroll_end(animate=False)
-            self._state.complete_turn()
         except ChatClientError as error:
             turn.error = str(error)
             turn.status = "failed"

@@ -92,9 +92,14 @@ class _PlatformOverviewState extends State<PlatformOverview> {
     await next;
   }
 
-  void _open(PlatformListKind kind) => Navigator.of(
-    context,
-  ).push(MaterialPageRoute<void>(builder: (_) => PlatformListPage(kind: kind)));
+  void _open(PlatformListKind kind) {
+    final scope = WorkspaceScope.of(context);
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => scope.wrap(context, PlatformListPage(kind: kind)),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) => FutureBuilder<_PlatformSummary>(

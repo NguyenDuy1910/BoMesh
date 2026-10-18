@@ -11,8 +11,9 @@ import json
 import os
 from dataclasses import dataclass, field
 from functools import lru_cache
-from typing import Literal
+from typing import Literal, cast, get_args
 
+from bomesh.agent.protocol import ReasoningEffort
 from bomesh.services import (
     DEFAULT_MAX_UPLOAD_BYTES,
     DEFAULT_PREVIEW_MAX_DIMENSION,
@@ -335,9 +336,8 @@ class ModelConfig:
         configured_provider = optional_text("BOMESH_AGENT_MODEL_PROVIDER")
         openrouter_api_key = optional_text("OPENROUTER_API_KEY")
         openrouter_model = optional_text("OPENROUTER_MODEL")
-        # A fully configured OpenRouter agent is the only provider that offers
-        # hosted shell execution. Prefer it automatically, while retaining an
-        # explicit provider setting as an intentional deployment override.
+        # A fully configured OpenRouter agent is preferred automatically, while
+        # an explicit provider setting stays an intentional deployment override.
         agent_provider = configured_provider or (
             "openrouter" if openrouter_api_key and openrouter_model else "openai"
         )
@@ -375,7 +375,12 @@ class RetrievalConfig:
     hybrid_candidate_limit: int = 20
     final_top_k: int = 6
     context_characters: int = 8_000
-    reranking_enabled: bool = True
+    #: Off by default: the fused RRF order is used. The LLM reranker stays an
+    #: optional relevance gate with its own deadline inside the retriever.
+    reranking_enabled: bool = False
+    rerank_timeout_seconds: float = 8.0
+    #: Bounded in-process LRU of query-time embeddings; 0 disables it.
+    query_embedding_cache_size: int = 512
 
     def __post_init__(self) -> None:
         if (
@@ -387,6 +392,10 @@ class RetrievalConfig:
             < 1
         ):
             raise ValueError("retrieval limits must be at least one")
+        if self.rerank_timeout_seconds <= 0:
+            raise ValueError("rerank timeout must be greater than zero")
+        if self.query_embedding_cache_size < 0:
+            raise ValueError("query embedding cache size must not be negative")
 
     @classmethod
     def from_environment(cls) -> RetrievalConfig:
@@ -400,7 +409,13 @@ class RetrievalConfig:
             context_characters=integer(
                 "BOMESH_RETRIEVAL_CONTEXT_CHARACTERS", default=8_000
             ),
-            reranking_enabled=boolean("BOMESH_RERANKING_ENABLED", default=True),
+            reranking_enabled=boolean("BOMESH_RERANKING_ENABLED", default=False),
+            rerank_timeout_seconds=number(
+                "BOMESH_RERANK_TIMEOUT_SECONDS", default=8.0
+            ),
+            query_embedding_cache_size=integer(
+                "BOMESH_QUERY_EMBEDDING_CACHE_SIZE", default=512
+            ),
         )
 
 
@@ -418,9 +433,23 @@ class AgentRuntimeConfig:
     max_tool_calls: int = 6
     max_history_messages: int = 24
     max_history_characters: int = 24_000
-    recent_history_messages: int = 6
     tool_timeout_seconds: float = 30.0
     max_resource_read_characters: int = 12_000
+    #: Tool observations kept in one turn's model input before older ones are
+    #: evicted; large enough that several searches stay visible and the
+    #: request prefix stays append-only within a turn.
+    max_tool_context_characters: int = 60_000
+    #: ``reasoning.effort`` sent on every agent request; ``None`` omits it.
+    reasoning_effort: ReasoningEffort | None = "none"
+
+    def __post_init__(self) -> None:
+        if (
+            self.reasoning_effort is not None
+            and self.reasoning_effort not in REASONING_EFFORTS
+        ):
+            raise ValueError(
+                "reasoning effort must be one of " + ", ".join(REASONING_EFFORTS)
+            )
 
     @classmethod
     def from_environment(cls) -> AgentRuntimeConfig:
@@ -432,16 +461,36 @@ class AgentRuntimeConfig:
             max_history_characters=integer(
                 "BOMESH_MAX_HISTORY_CHARACTERS", default=24_000
             ),
-            recent_history_messages=integer(
-                "BOMESH_RECENT_HISTORY_MESSAGES", default=6
-            ),
             tool_timeout_seconds=number(
                 "BOMESH_TOOL_TIMEOUT_SECONDS", default=30.0
             ),
             max_resource_read_characters=integer(
                 "BOMESH_MAX_RESOURCE_READ_CHARACTERS", default=12_000
             ),
+            max_tool_context_characters=integer(
+                "BOMESH_AGENT_MAX_TOOL_CONTEXT_CHARACTERS", default=60_000
+            ),
+            reasoning_effort=_reasoning_effort("BOMESH_AGENT_REASONING_EFFORT"),
         )
+
+
+REASONING_EFFORTS: tuple[str, ...] = get_args(ReasoningEffort)
+
+
+def _reasoning_effort(name: str) -> ReasoningEffort | None:
+    """Unset means ``none`` (reasoning off); an explicit empty value omits it."""
+
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return "none"
+    value = raw_value.strip().lower()
+    if not value:
+        return None
+    if value not in REASONING_EFFORTS:
+        raise RuntimeError(
+            f"{name} must be one of " + ", ".join(REASONING_EFFORTS)
+        )
+    return cast(ReasoningEffort, value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -479,6 +528,59 @@ class ArtifactConfig:
             ),
             download_url_seconds=integer(
                 "BOMESH_ARTIFACT_DOWNLOAD_URL_SECONDS", default=300
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class SandboxConfig:
+    """The BoMesh-owned Docker sandbox behind the agent's ``run_shell`` tool."""
+
+    enabled: bool = True
+    image: str = "bomesh-sandbox:latest"
+    #: Pristine, never-claimed containers kept running so a first shell call
+    #: does not wait for a container start.
+    warm_pool_size: int = 2
+    #: A conversation's container is removed after this long without use.
+    idle_ttl_seconds: int = 1800
+    memory: str = "1g"
+    cpus: float = 1.0
+    pids_limit: int = 256
+    #: Default and upper bound for one command's wall-clock time.
+    command_timeout_seconds: int = 60
+    #: Budget for one ``run_shell`` observation (stdout and stderr of every
+    #: command together); it stays below the agent's per-tool result cap.
+    max_output_characters: int = 8_000
+
+    def __post_init__(self) -> None:
+        if not self.image.strip() or not self.memory.strip():
+            raise RuntimeError("sandbox image and memory limit must not be blank")
+        if self.warm_pool_size < 0:
+            raise RuntimeError("sandbox warm pool size must not be negative")
+        if self.idle_ttl_seconds < 60:
+            raise RuntimeError("sandbox idle TTL must be at least 60 seconds")
+        if self.cpus <= 0 or self.pids_limit < 16:
+            raise RuntimeError("sandbox cpu and pids limits are invalid")
+        if not 1 <= self.command_timeout_seconds <= 600:
+            raise RuntimeError("sandbox command timeout must be 1-600 seconds")
+        if self.max_output_characters < 1_000:
+            raise RuntimeError("sandbox output budget must be at least 1000 characters")
+
+    @classmethod
+    def from_environment(cls) -> SandboxConfig:
+        return cls(
+            enabled=boolean("BOMESH_SANDBOX_ENABLED", default=True),
+            image=text("BOMESH_SANDBOX_IMAGE", "bomesh-sandbox:latest"),
+            warm_pool_size=integer("BOMESH_SANDBOX_WARM_POOL_SIZE", default=2),
+            idle_ttl_seconds=integer("BOMESH_SANDBOX_IDLE_TTL_SECONDS", default=1800),
+            memory=text("BOMESH_SANDBOX_MEMORY", "1g"),
+            cpus=number("BOMESH_SANDBOX_CPUS", default=1.0),
+            pids_limit=integer("BOMESH_SANDBOX_PIDS_LIMIT", default=256),
+            command_timeout_seconds=integer(
+                "BOMESH_SANDBOX_COMMAND_TIMEOUT_SECONDS", default=60
+            ),
+            max_output_characters=integer(
+                "BOMESH_SANDBOX_MAX_OUTPUT_CHARACTERS", default=8_000
             ),
         )
 
@@ -710,6 +812,7 @@ class AppConfig:
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     agent: AgentRuntimeConfig = field(default_factory=AgentRuntimeConfig)
     artifact: ArtifactConfig = field(default_factory=ArtifactConfig)
+    sandbox: SandboxConfig = field(default_factory=SandboxConfig)
     upload: UploadConfig = field(default_factory=UploadConfig)
     preview: PreviewConfig = field(default_factory=PreviewConfig)
     integration: IntegrationConfig = field(default_factory=IntegrationConfig)
@@ -730,6 +833,7 @@ class AppConfig:
             retrieval=RetrievalConfig.from_environment(),
             agent=AgentRuntimeConfig.from_environment(),
             artifact=ArtifactConfig.from_environment(),
+            sandbox=SandboxConfig.from_environment(),
             upload=UploadConfig.from_environment(),
             preview=PreviewConfig.from_environment(),
             integration=IntegrationConfig.from_environment(),
@@ -771,6 +875,7 @@ __all__ = [
     "ObservabilityConfig",
     "PreviewConfig",
     "RetrievalConfig",
+    "SandboxConfig",
     "ServerConfig",
     "UploadConfig",
     "VectorIndexConfig",
