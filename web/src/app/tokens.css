@@ -4,7 +4,7 @@
    The single source of colour, shape, density, motion and layout for every
    surface in the product. Nothing else in the codebase may declare a colour.
 
-   Values are ported from the approved prototype (`docs/ux-review.html`,
+   Values are ported from the approved prototype (`ui_preview/ux-review.html`,
    `:root{`, `html[data-theme="dark"]` and the Round 2 theme block). Where this
    file departs from the prototype the reason is written next to the value;
    every departure is an accessibility fix (WCAG AA, checked by

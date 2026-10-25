@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>BoMesh — UX/UI review prototype</title>
+<title>BoMesh — Product design system</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
@@ -15,60 +15,62 @@
    evidence (citations, cited passages, source lineage) and nothing else.
    ═════════════════════════════════════════════════════════════════════════ */
 :root{
+  /* Primitive scale: restrained neutrals, one indigo action family, 4px rhythm. */
   --font:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
   --mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-5:20px;
+  --space-6:24px; --space-8:32px; --space-10:40px; --space-12:48px;
 
-  /* Surfaces: canvas < sheet < raised. Depth = ramp + one hairline. */
-  --canvas:#F1F2F4; --sheet:#FFFFFF; --raised:#FFFFFF; --subtle:#F7F8FA; --sunken:#EEF0F3;
-  --hover:#F2F3F6; --pressed:#E8EAEE; --scrim:rgba(14,18,24,.42);
+  /* Semantic surfaces: atmosphere belongs to the canvas; reading surfaces stay quiet. */
+  --canvas:#F5F5FA; --sheet:#FFFFFF; --raised:#FFFFFF; --subtle:#F8F8FB; --sunken:#F0F1F6;
+  --hover:#F3F3F8; --pressed:#EAEAF2; --scrim:rgba(12,13,20,.48);
+  --text:#12131A; --text-2:#454854; --text-3:#6A6E7C; --text-dis:#A2A5AF; --text-inv:#FFFFFF;
+  --border:#E7E8EF; --border-2:#D8DAE4; --border-strong:#B9BDC9;
 
-  --text:#0E1217; --text-2:#434C58; --text-3:#646D79; --text-dis:#9AA1AB; --text-inv:#FFFFFF;
+  /* One action family. Indigo never communicates health, risk, or evidence. */
+  --primary:#5847E8; --primary-hover:#4938D5; --primary-press:#3C2EBC;
+  --primary-soft:#F0EEFF; --primary-soft-2:#E3DFFF; --primary-text:#4637C8; --on-primary:#FFFFFF;
+  --focus:0 0 0 3px rgba(88,71,232,.24);
+  --focus-err:0 0 0 3px rgba(190,47,40,.2);
 
-  --border:#E4E7EB; --border-2:#D3D7DD; --border-strong:#B5BCC5;
+  /* Evidence is BoMesh's signature: amber appears only where a claim is grounded. */
+  --ev-bg:#FFF3C6; --ev-bd:#E8C24F; --ev-text:#684C00; --ev-strong:#FBE493; --ev-line:#D4A91F;
 
-  /* Primary: one action colour. Never used for decoration or status. */
-  --primary:#3B38C4; --primary-hover:#312EAA; --primary-press:#28268F;
-  --primary-soft:#EEEEFC; --primary-soft-2:#E1E1FA; --primary-text:#312EAA; --on-primary:#FFFFFF;
-  --focus:0 0 0 3px rgba(59,56,196,.26);
-  --focus-err:0 0 0 3px rgba(190,47,40,.22);
+  /* Status semantics. Text/icon always accompanies color. */
+  --ok:#087647; --ok-bg:#E9F6EF; --ok-bd:#B9E1CB;
+  --warn:#8F5707; --warn-bg:#FDF4E5; --warn-bd:#EFD39D;
+  --err:#B92E2A; --err-bg:#FDEDEC; --err-bd:#F1C2BF;
+  --info:#2455B8; --info-bg:#EDF2FC; --info-bd:#C8D7F3;
+  --neu:#505562; --neu-bg:#F0F1F5; --neu-bd:#DBDDE5;
 
-  /* Evidence — the product signature. */
-  --ev-bg:#FFF2C2; --ev-bd:#E9BF45; --ev-text:#6A4D00; --ev-strong:#FBE18A; --ev-line:#D9A520;
-
-  /* Status */
-  --ok:#0D7548; --ok-bg:#E8F5EE; --ok-bd:#BDE2CD;
-  --warn:#965704; --warn-bg:#FDF3E2; --warn-bd:#F1D5A0;
-  --err:#BE2F28; --err-bg:#FDEEEC; --err-bd:#F4C6C1;
-  --info:#2155BF; --info-bg:#EBF1FD; --info-bd:#C5D6F6;
-  --neu:#4F5865; --neu-bg:#F0F1F4; --neu-bd:#DBDEE3;
-
-  --r-xs:4px; --r-sm:6px; --r-md:8px; --r-lg:10px; --r-xl:14px; --r-full:999px;
-  --sh-1:0 1px 2px rgba(14,18,24,.05);
-  --sh-2:0 1px 3px rgba(14,18,24,.06),0 1px 2px rgba(14,18,24,.04);
-  --sh-sheet:0 0 0 1px rgba(14,18,24,.05),0 1px 3px rgba(14,18,24,.05);
-  --sh-pop:0 12px 32px -8px rgba(14,18,24,.18),0 2px 6px rgba(14,18,24,.06),0 0 0 1px rgba(14,18,24,.05);
-  --sh-modal:0 32px 72px -16px rgba(14,18,24,.32),0 0 0 1px rgba(14,18,24,.06);
-
-  --side-w:252px; --ease:cubic-bezier(.2,.8,.2,1);
+  /* Component geometry: modest radii, hairline borders, elevation only when floating. */
+  --r-xs:4px; --r-sm:6px; --r-md:9px; --r-lg:12px; --r-xl:16px; --r-full:999px;
+  --sh-1:0 1px 2px rgba(18,19,26,.04);
+  --sh-2:0 2px 8px -3px rgba(18,19,26,.12),0 1px 2px rgba(18,19,26,.04);
+  --sh-sheet:0 0 0 1px rgba(18,19,26,.035),0 8px 28px -22px rgba(18,19,26,.2);
+  --sh-pop:0 18px 48px -18px rgba(18,19,26,.28),0 4px 12px -6px rgba(18,19,26,.12),0 0 0 1px rgba(18,19,26,.05);
+  --sh-modal:0 36px 88px -24px rgba(18,19,26,.42),0 0 0 1px rgba(18,19,26,.06);
+  --side-w:248px; --header-h:52px; --page-max:1240px; --page-reading:780px;
+  --duration-fast:150ms; --duration-ui:220ms; --ease:cubic-bezier(.2,.8,.2,1);
   color-scheme:light;
 }
 html[data-theme="dark"]{
-  --canvas:#0B0D10; --sheet:#13161A; --raised:#191C21; --subtle:#171A1F; --sunken:#1E2228;
-  --hover:#1E2228; --pressed:#262B32; --scrim:rgba(0,0,0,.6);
-  --text:#ECEEF1; --text-2:#B9BFC8; --text-3:#8E96A1; --text-dis:#5E6570; --text-inv:#0E1217;
-  --border:#252A31; --border-2:#313740; --border-strong:#46505B;
-  --primary:#6461F0; --primary-hover:#7471F5; --primary-press:#5552DD;
-  --primary-soft:#1F1F3D; --primary-soft-2:#29294F; --primary-text:#A9A7FF; --on-primary:#FFFFFF;
-  --focus:0 0 0 3px rgba(116,113,245,.4);
-  --ev-bg:rgba(240,196,64,.16); --ev-bd:rgba(240,196,64,.5); --ev-text:#F3D06A; --ev-strong:rgba(240,196,64,.3); --ev-line:#E0B43E;
-  --ok:#5FD39B; --ok-bg:rgba(95,211,155,.12); --ok-bd:rgba(95,211,155,.3);
-  --warn:#F2C46E; --warn-bg:rgba(242,196,110,.12); --warn-bd:rgba(242,196,110,.3);
-  --err:#FF9C93; --err-bg:rgba(255,156,147,.12); --err-bd:rgba(255,156,147,.3);
-  --info:#93B4FF; --info-bg:rgba(147,180,255,.12); --info-bd:rgba(147,180,255,.3);
-  --neu:#B0B7C1; --neu-bg:#21252B; --neu-bd:#323840;
-  --sh-sheet:0 0 0 1px rgba(255,255,255,.05);
-  --sh-pop:0 16px 40px -8px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.07);
-  --sh-modal:0 32px 72px -16px rgba(0,0,0,.7),0 0 0 1px rgba(255,255,255,.08);
+  --canvas:#090A0F; --sheet:#111219; --raised:#171820; --subtle:#15161D; --sunken:#1D1F28;
+  --hover:#1C1E27; --pressed:#252833; --scrim:rgba(0,0,0,.68);
+  --text:#F1F1F5; --text-2:#C4C5CE; --text-3:#9295A2; --text-dis:#616470; --text-inv:#111219;
+  --border:#252731; --border-2:#343641; --border-strong:#505461;
+  --primary:#6657D9; --primary-hover:#7668E9; --primary-press:#594BC7;
+  --primary-soft:#211E3A; --primary-soft-2:#302A55; --primary-text:#BDB6FF; --on-primary:#FFFFFF;
+  --focus:0 0 0 3px rgba(139,124,255,.38);
+  --ev-bg:rgba(238,192,58,.15); --ev-bd:rgba(238,192,58,.48); --ev-text:#F2D06C; --ev-strong:rgba(238,192,58,.28); --ev-line:#DDB53E;
+  --ok:#65D39F; --ok-bg:rgba(101,211,159,.11); --ok-bd:rgba(101,211,159,.28);
+  --warn:#F0C674; --warn-bg:rgba(240,198,116,.11); --warn-bd:rgba(240,198,116,.28);
+  --err:#FF9D96; --err-bg:rgba(255,157,150,.11); --err-bd:rgba(255,157,150,.28);
+  --info:#9AB8FF; --info-bg:rgba(154,184,255,.11); --info-bd:rgba(154,184,255,.28);
+  --neu:#B5B8C2; --neu-bg:#21232B; --neu-bd:#353842;
+  --sh-sheet:0 0 0 1px rgba(255,255,255,.045),0 12px 32px -24px rgba(0,0,0,.8);
+  --sh-pop:0 20px 52px -18px rgba(0,0,0,.72),0 0 0 1px rgba(255,255,255,.07);
+  --sh-modal:0 40px 90px -20px rgba(0,0,0,.8),0 0 0 1px rgba(255,255,255,.08);
   color-scheme:dark;
 }
 
@@ -1577,7 +1579,7 @@ Object.assign(NOTES, {
   access: { purpose: 'Control who is in the workspace and what they can do.', primary: 'Add member', changes: ['Members, groups, roles and access requests in one place.', 'Permissions are written as sentences (“Approve or deny access requests”), codes hidden.', 'Built-in roles are read-only and say so.', 'Adding a member validates the email against existing accounts, matching the backend.'], states: ['Try adding “someone@unknown.com”.', 'Approve a request on the Requests tab.'] },
   assistant: { purpose: 'Decide how the assistant behaves and what people see first.', primary: 'Save changes', changes: ['Agent and Experience pages merged — both were placeholders and both describe the assistant.', 'A live preview shows the home screen members will see.', 'Unsaved changes are held in a sticky bar with Discard and Save.'] },
   activity: { purpose: 'Answer “who did what, when” for this workspace.', primary: 'Filter to the event you care about', changes: ['Changes and sign-ins as two tabs of one page.', 'Plain-language actions (“Changed role to Auditor”) instead of action codes.', 'Row opens a detail drawer with the full record.'] },
-  settings: { purpose: 'Rename the workspace or archive it.', primary: 'Save changes', changes: ['Only settings that exist. Archive needs the workspace name typed to confirm.'] },
+  settings: { purpose: 'Manage the workspace identity, shared brand and archive lifecycle.', primary: 'Review one settings section and save only its changes', changes: ['General, Brand and Archive are deep-linked sections in one focused settings shell.', 'URL changes show the current and proposed addresses before save because old links stop resolving.', 'Brand preview separates workspace-wide action color from personal appearance overrides and fixed evidence/status colors.', 'Archive uses the current URL code for typed confirmation and shows the resulting request state.'] },
   pWorkspaces: { purpose: 'Operate every workspace on this deployment.', primary: 'Create workspace', changes: ['“Tenants” renamed Workspaces everywhere so operators and members use one word.', 'The console shares the same shell and switches via the workspace menu, not a separate product.'] },
   pUsers: { purpose: 'Find any account across workspaces.', primary: 'Search for a user', changes: ['Platform admin is a clear flag, not a role buried in a list.'] },
   pConnectors: { purpose: 'Choose which apps workspaces can connect.', primary: 'Enable or configure a connector', changes: ['Shows demand for unavailable connectors (requests) so operators can prioritise.'] },
@@ -4137,6 +4139,96 @@ window.addEventListener('click', e => {
 .adm-danger{border-color:var(--err-bd);margin-top:20px}
 .adm-danger .card-head{border-bottom-color:var(--err-bd)}
 .adm-danger .section-title{color:var(--err)}
+/* Workspace settings: one calm shell, one decision surface at a time. */
+.wsset-page{max-width:1120px}
+.wsset-context{display:flex;align-items:center;gap:12px;padding:14px 16px;margin-bottom:20px;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--sheet);box-shadow:var(--sh-1)}
+.wsset-context-main{min-width:0;flex:1}
+.wsset-context-name{display:flex;align-items:center;gap:8px;font-weight:600;min-width:0}
+.wsset-context-url{display:flex;align-items:center;gap:4px;margin-top:2px;color:var(--text-3);font:12.5px/1.4 var(--mono)}
+.wsset-context-url span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wsset-layout{display:grid;grid-template-columns:208px minmax(0,760px);gap:28px;align-items:start}
+.wsset-nav{position:sticky;top:16px;display:grid;gap:4px}
+.wsset-nav a{min-height:44px;padding:9px 10px;border:1px solid transparent;border-radius:var(--r-md);display:grid;grid-template-columns:28px minmax(0,1fr);gap:9px;align-items:start;color:var(--text-2);text-decoration:none;transition:background-color var(--duration-fast),border-color var(--duration-fast),color var(--duration-fast)}
+.wsset-nav a:hover{background:var(--hover);color:var(--text);text-decoration:none}
+.wsset-nav a[aria-current="page"]{border-color:var(--border);background:var(--sheet);color:var(--text);box-shadow:var(--sh-1)}
+.wsset-nav .i{width:17px;height:17px;margin:2px auto 0}
+.wsset-nav b{display:block;font-size:13.5px;font-weight:600}
+.wsset-nav small{display:block;margin-top:1px;color:var(--text-3);font-size:11.5px;line-height:1.35}
+.wsset-main{min-width:0}
+.wsset-panel{overflow:hidden}
+.wsset-panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:18px 20px;border-bottom:1px solid var(--border)}
+.wsset-panel-head h2{font-size:17px;line-height:1.3;letter-spacing:-.015em}
+.wsset-panel-head p{max-width:560px;margin-top:3px;color:var(--text-3);font-size:13.5px}
+.wsset-panel-body{padding:22px 20px}
+.wsset-form{max-width:620px}
+.wsset-savebar{min-height:58px;align-items:center}
+.wsset-savebar .wsset-save-note{margin-right:auto;color:var(--text-3);font-size:12.5px}
+.wsset-url-impact{margin-top:16px;padding:14px;border:1px solid var(--warn-bd);border-radius:var(--r-md);background:var(--warn-bg)}
+.wsset-url-impact>strong{display:flex;align-items:center;gap:7px;color:var(--warn);font-size:13.5px}
+.wsset-url-pair{display:grid;grid-template-columns:minmax(0,1fr) 20px minmax(0,1fr);gap:8px;align-items:center;margin-top:11px}
+.wsset-url-value{min-width:0;padding:8px 10px;border:1px solid color-mix(in srgb,var(--warn-bd) 75%,var(--border));border-radius:var(--r-sm);background:var(--sheet)}
+.wsset-url-value span{display:block;color:var(--text-3);font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase}
+.wsset-url-value code{display:block;margin-top:2px;overflow:hidden;color:var(--text);font:12px/1.4 var(--mono);text-overflow:ellipsis;white-space:nowrap}
+.wsset-url-arrow{color:var(--warn);display:grid;place-items:center}
+.wsset-brand-grid{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:24px;align-items:start}
+.wsset-palette{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:12px}
+.wsset-color{position:relative;min-height:54px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-md);display:flex;align-items:center;gap:10px;background:var(--sheet);cursor:pointer;transition:background-color var(--duration-fast),border-color var(--duration-fast),box-shadow var(--duration-fast)}
+.wsset-color:hover{border-color:var(--border-strong);background:var(--hover)}
+.wsset-color.is-on{border-color:var(--text);box-shadow:0 0 0 1px var(--text)}
+.wsset-color:has(input:focus-visible){box-shadow:var(--focus)}
+.wsset-color input{position:absolute;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none}
+.wsset-color-dot{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;flex:none;box-shadow:inset 0 0 0 1px rgba(0,0,0,.1)}
+.wsset-color-dot .i{width:14px;height:14px;color:#fff}
+.wsset-color-copy b{display:block;font-size:13px}
+.wsset-color-copy small{display:block;color:var(--text-3);font-size:11.5px}
+.wsset-brand-preview{--wsset-preview:var(--primary);padding:14px;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--subtle)}
+.wsset-brand-preview>span{display:block;margin-bottom:9px;color:var(--text-3);font-size:11.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase}
+.wsset-preview-window{overflow:hidden;border:1px solid var(--border-2);border-radius:var(--r-md);background:var(--sheet);box-shadow:var(--sh-2)}
+.wsset-preview-top{height:44px;padding:0 11px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;font-size:12.5px}
+.wsset-preview-body{display:grid;grid-template-columns:82px minmax(0,1fr);min-height:148px}
+.wsset-preview-side{padding:10px 7px;border-right:1px solid var(--border);background:var(--subtle)}
+.wsset-preview-nav{height:24px;padding:0 7px;border-radius:6px;display:flex;align-items:center;gap:5px;color:var(--text-3);font-size:10.5px}
+.wsset-preview-nav.is-on{color:var(--wsset-preview);background:color-mix(in srgb,var(--wsset-preview) 11%,transparent)}
+.wsset-preview-nav .i{width:11px;height:11px;color:currentColor}
+.wsset-preview-content{padding:14px 12px}
+.wsset-preview-content b{display:block;font-size:13px}
+.wsset-preview-button{display:inline-flex;align-items:center;height:27px;margin-top:10px;padding:0 9px;border-radius:6px;background:var(--wsset-preview);color:#fff;font-size:10.5px;font-weight:600}
+.wsset-preview-evidence{display:flex;align-items:center;gap:6px;margin-top:12px;padding:6px 7px;border:1px solid var(--ev-bd);border-radius:6px;background:var(--ev-bg);color:var(--ev-text);font-size:10.5px}
+.wsset-preview-evidence b{width:16px;height:16px;border-radius:50%;display:grid;place-items:center;background:var(--ev-strong);font-size:9px}
+.wsset-preview-note{margin-top:9px;color:var(--text-3);font-size:11.5px;line-height:1.45}
+.wsset-impact{display:grid;gap:0;margin:18px 0;border:1px solid var(--border);border-radius:var(--r-md);overflow:hidden}
+.wsset-impact-row{display:grid;grid-template-columns:30px minmax(0,1fr);gap:10px;padding:12px 14px;background:var(--sheet)}
+.wsset-impact-row+.wsset-impact-row{border-top:1px solid var(--border)}
+.wsset-impact-ic{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;background:var(--sunken);color:var(--text-2)}
+.wsset-impact-ic .i{width:15px;height:15px}
+.wsset-impact-row b{display:block;font-size:13.5px}
+.wsset-impact-row p{margin-top:2px;color:var(--text-3);font-size:12.5px}
+.wsset-confirm-code{display:inline-flex;margin-top:3px;padding:2px 6px;border:1px solid var(--border);border-radius:var(--r-xs);background:var(--sunken);font:12px/1.4 var(--mono)}
+.wsset-request-meta{margin-top:14px;padding-top:14px;border-top:1px solid var(--border)}
+.wsset-loading{display:grid;grid-template-columns:208px minmax(0,760px);gap:28px}
+.wsset-loading-nav{display:grid;gap:8px}
+.wsset-loading-nav .sk{height:44px}
+@container app (max-width:900px){
+  .wsset-layout,.wsset-loading{grid-template-columns:176px minmax(0,1fr);gap:20px}
+  .wsset-nav small{display:none}
+  .wsset-brand-grid{grid-template-columns:minmax(0,1fr)}
+  .wsset-brand-preview{max-width:420px}
+}
+@container app (max-width:640px){
+  .wsset-context{margin-bottom:14px}
+  .wsset-layout,.wsset-loading{grid-template-columns:minmax(0,1fr);gap:14px}
+  .wsset-nav{position:static;display:flex;gap:4px;padding:3px;border:1px solid var(--border);border-radius:var(--r-md);overflow-x:auto;background:var(--sunken)}
+  .wsset-nav a{min-width:max-content;min-height:40px;padding:8px 11px;grid-template-columns:18px auto;align-items:center}
+  .wsset-nav a[aria-current="page"]{border-color:var(--border-2)}
+  .wsset-nav .i{margin:0}
+  .wsset-nav small,.wsset-loading-nav{display:none}
+  .wsset-panel-head,.wsset-panel-body{padding-left:16px;padding-right:16px}
+  .wsset-url-pair{grid-template-columns:minmax(0,1fr)}
+  .wsset-url-arrow{transform:rotate(90deg)}
+  .wsset-palette{grid-template-columns:minmax(0,1fr)}
+  .wsset-savebar{padding-left:12px;padding-right:12px;flex-wrap:wrap}
+  .wsset-savebar .wsset-save-note{width:100%;margin:0 0 2px}
+}
 @container app (max-width:1100px){
   .adm-asst{grid-template-columns:minmax(0,1fr)}
   .adm-asst-prev{display:none}
@@ -4995,7 +5087,12 @@ A['adm-ev-related'] = el => {
 };
 
 /* ═══════════════════════════ Workspace settings ═══════════════════════════ */
-const ADM_CODE_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const ADM_CODE_RE = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])$/;
+const ADM_SETTINGS_TABS = [
+  ['general', 'settings', 'General', 'Name and web address'],
+  ['brand', 'palette', 'Brand', 'Shared action color'],
+  ['archive', 'archive', 'Archive', 'Access and retention'],
+];
 function admWsForm() {
   const ws = curWs(); let f = S.ui.admWs;
   if (!f || f.wsId !== ws.id) f = S.ui.admWs = { wsId: ws.id, name: ws.name, code: ws.code, touched: {}, tried: false, busy: false };
@@ -5003,34 +5100,93 @@ function admWsForm() {
 }
 function admWsErrors(f, ws) {
   const e = {}; const name = f.name.trim(); const code = f.code.trim();
-  if (!name) e.name = 'Enter a workspace name.'; else if (name.length > 60) e.name = 'Keep the name to 60 characters.';
-  if (!code) e.code = 'Enter a workspace URL.';
-  else if (!ADM_CODE_RE.test(code)) e.code = 'Use lowercase letters, numbers and single hyphens only.';
-  else if (D.pWorkspaces.some(w => w.id !== ws.id && w.code === code)) e.code = `bomesh.app/${code} is already taken.`;
+  if (!name) e.name = 'Enter a workspace name.';
+  else if (name.length > 60) e.name = 'Keep the name to 60 characters.';
+  if (!code) e.code = 'Enter a workspace web address.';
+  else if (code !== ws.code) {
+    if (code.length < 3 || code.length > 32) e.code = 'Use 3–32 characters.';
+    else if (!ADM_CODE_RE.test(code)) e.code = 'Use lowercase letters, numbers and hyphens, starting and ending with a letter or number.';
+    else if (D.pWorkspaces.some(w => w.id !== ws.id && w.code === code)) e.code = `bomesh.app/${code} is already used by another workspace.`;
+  }
   return e;
 }
-P.settings = () => {
-  const ws = curWs(); const f = admWsForm(); const errs = admWsErrors(f, ws);
+function admWsDirty() {
+  const ws = curWs(), f = S.ui.admWs;
+  return !!f && f.wsId === ws.id && (f.name.trim() !== ws.name || f.code.trim() !== ws.code);
+}
+function admBrandDirty() {
+  const ws = curWs(), b = S.ui['polBrand:' + ws.id];
+  return !!b && b.v !== (ws.accent || 'indigo');
+}
+function admSettingsTab(query = {}) { return ADM_SETTINGS_TABS.some(([id]) => id === query.tab) ? query.tab : 'general'; }
+function admSettingsContext(ws) {
+  const url = `https://bomesh.app/${ws.code}`;
+  return `<div class="wsset-context">${wsMark(ws, 38)}<div class="wsset-context-main"><div class="wsset-context-name"><span class="ellipsis">${esc(ws.name)}</span>${status('ws', ws.status || 'active')}</div><div class="wsset-context-url"><span>${esc(url.replace('https://', ''))}</span>${iconBtn('copy', 'Copy workspace URL', { size: 'sm', act: 'copy', data: { text: url, msg: 'Copied workspace URL' } })}</div></div><span class="faint" style="font-size:12px">Workspace-wide</span></div>`;
+}
+function admSettingsNav(active) {
+  return `<nav class="wsset-nav" aria-label="Workspace settings sections">${ADM_SETTINGS_TABS.map(([id, icon, label, sub]) => `<a href="#/settings?tab=${id}" data-act="adm-ws-nav" data-tab="${id}" aria-current="${id === active ? 'page' : 'false'}">${ic(icon)}<span><b>${label}</b><small>${sub}</small></span></a>`).join('')}</nav>`;
+}
+function admSettingsPanelHead(title, sub, dirty = false, danger = false) {
+  return `<div class="wsset-panel-head"><div><h2${danger ? ' style="color:var(--err)"' : ''}>${esc(title)}</h2><p>${esc(sub)}</p></div>${dirty ? badge('warn', 'Unsaved') : ''}</div>`;
+}
+function admWsGeneralHtml() {
+  const ws = curWs(), f = admWsForm(), errs = admWsErrors(f, ws);
   const show = k => ((f.tried || f.touched[k]) && errs[k]) || '';
-  const dirty = f.name.trim() !== ws.name || f.code.trim() !== ws.code;
-  const codeChanged = f.code.trim() !== ws.code && !errs.code;
-  const head = pageHead({ title: 'Workspace settings', sub: 'Name and address of this workspace.' });
+  const nameErr = show('name'), codeErr = show('code');
+  const dirty = admWsDirty(), codeChanged = f.code.trim() !== ws.code && !errs.code;
+  const urlImpact = codeChanged ? `<div class="wsset-url-impact" role="status"><strong>${ic('alert', 'i-sm')}Saved links will stop working</strong><div class="muted" style="font-size:12.5px;margin-top:3px">BoMesh does not redirect the old address. Share the new address after saving.</div><div class="wsset-url-pair"><div class="wsset-url-value"><span>Current</span><code>bomesh.app/${esc(ws.code)}</code></div><div class="wsset-url-arrow">${ic('arrow-right', 'i-sm')}</div><div class="wsset-url-value"><span>After save</span><code>bomesh.app/${esc(f.code.trim())}</code></div></div></div>` : '';
+  return `<section class="card wsset-panel">${admSettingsPanelHead('General', 'Control how this workspace is named and reached.', dirty)}
+    <div class="wsset-panel-body"><div class="wsset-form">
+      ${field({ id: 'ws-name', label: 'Workspace name', required: true, error: nameErr, hint: 'Shown in navigation, workspace invitations and system emails.', counter: `<span class="counter ${f.name.length > 60 ? 'is-over' : ''}">${f.name.length}/60</span>`, control: input({ id: 'ws-name', bind: 'admWs.name', value: f.name, attrs: `name="workspace-name" data-live maxlength="60" data-field="name" ${nameErr ? 'aria-invalid="true" aria-describedby="ws-name-err"' : 'aria-describedby="ws-name-hint"'}`, blur: 'adm-ws-touch', onEnter: 'adm-ws-save' }) })}
+      ${field({ id: 'ws-code', label: 'Web address', required: true, error: codeErr, hint: '3–32 lowercase letters, numbers or hyphens.', control: `<div class="input-prefix"><span>bomesh.app/</span>${input({ id: 'ws-code', bind: 'admWs.code', value: f.code, attrs: `name="workspace-code" data-live spellcheck="false" maxlength="32" data-field="code" ${codeErr ? 'aria-invalid="true" aria-describedby="ws-code-err"' : 'aria-describedby="ws-code-hint"'}`, blur: 'adm-ws-touch', onEnter: 'adm-ws-save' })}</div>` })}
+      ${urlImpact}
+    </div></div>
+    <div class="adm-card-foot wsset-savebar"><span class="wsset-save-note">${dirty ? 'Changes apply to everyone in this workspace.' : 'No unsaved changes.'}</span>${dirty ? btn('Discard', { v: 'ghost', act: 'adm-ws-discard', disabled: f.busy }) : ''}${btn('Save changes', { v: 'primary', act: 'adm-ws-save', disabled: !dirty, loading: f.busy })}</div>
+  </section>`;
+}
+function admWsArchiveHtml() {
+  const ws = curWs(), req = ws.archiveRequest;
+  const impact = `<div class="wsset-impact">
+    <div class="wsset-impact-row"><span class="wsset-impact-ic">${ic('users')}</span><div><b>Members lose access</b><p>People can no longer switch into this workspace, including you.</p></div></div>
+    <div class="wsset-impact-row"><span class="wsset-impact-ic">${ic('pause')}</span><div><b>Source schedules pause</b><p>Connected sources stop syncing while the workspace is archived.</p></div></div>
+    <div class="wsset-impact-row"><span class="wsset-impact-ic">${ic('archive')}</span><div><b>Data stays retained</b><p>Platform admins can restore the workspace for 30 days.</p></div></div>
+  </div>`;
+  if (req) return `<section class="card wsset-panel adm-danger">${admSettingsPanelHead('Archive', 'Review the active archive request and what happens next.', false, true)}<div class="wsset-panel-body">
+    ${callout('warn', 'Archive requested', `${esc(req.actor)} requested this ${rel(req.at).toLowerCase()}. Platform admins will finish archiving within 24 hours.`)}
+    <div class="wsset-request-meta"><div class="label">Confirmation code used</div><span class="wsset-confirm-code">${esc(ws.code)}</span></div>${impact}
+    <div class="hint">Reactivation is managed from the Platform console after archiving completes.</div>
+  </div></section>`;
+  return `<section class="card wsset-panel adm-danger">${admSettingsPanelHead('Archive', 'Remove this workspace from member access without deleting its retained data.', false, true)}<div class="wsset-panel-body">
+    ${callout('warn', 'This affects everyone', 'Archiving is workspace-wide. Review each effect before continuing.')}
+    ${impact}
+    <div class="row between gap-16 wrap"><div style="min-width:220px;max-width:470px"><div class="adm-t">Archive ${esc(ws.name)}</div><div class="muted" style="font-size:13px;margin-top:3px">You’ll confirm with the current workspace code <span class="wsset-confirm-code">${esc(ws.code)}</span>.</div></div>${btn('Archive workspace', { v: 'danger-ghost', icon: 'archive', act: 'adm-ws-archive' })}</div>
+  </div></section>`;
+}
+function admSettingsLoading() {
+  return `<div class="wsset-loading" aria-busy="true" aria-label="Loading workspace settings"><div class="wsset-loading-nav"><span class="sk"></span><span class="sk"></span><span class="sk"></span></div><div class="card card-pad stack gap-16"><span class="sk sk-line" style="width:28%"></span><span class="sk sk-line" style="width:58%;height:10px"></span><span class="sk" style="height:38px"></span><span class="sk sk-line" style="width:24%"></span><span class="sk" style="height:38px"></span></div></div>`;
+}
+P.settings = ({ query = {} } = {}) => {
+  const ws = curWs(), active = admSettingsTab(query);
+  const head = pageHead({ title: 'Workspace settings', sub: 'Manage the identity, shared brand and lifecycle of this workspace.' });
   const body = gate({
-    loading: () => `<div class="card card-pad stack gap-16" aria-busy="true"><span class="sk sk-line" style="width:30%"></span><span class="sk" style="height:36px"></span><span class="sk sk-line" style="width:24%"></span><span class="sk" style="height:36px"></span></div>`,
-    error: () => errorState({ title: 'Settings didn’t load' }),
-    ok: () => `<section class="card"><div class="card-head"><h2 class="section-title">General</h2></div><div class="card-pad">
-        ${field({ id: 'ws-name', label: 'Workspace name', required: true, error: show('name'), hint: 'Shown in the sidebar and in emails people get from BoMesh.', control: input({ id: 'ws-name', bind: 'admWs.name', value: f.name, attrs: 'data-live maxlength="80" data-field="name"', blur: 'adm-ws-touch', onEnter: 'adm-ws-save' }) })}
-        ${field({ id: 'ws-code', label: 'Workspace URL', required: true, error: show('code'), hint: codeChanged ? `<span class="adm-warn">${ic('alert', 'i-xs')}Changing the URL breaks saved links.</span>` : 'Lowercase letters, numbers and hyphens.', control: `<div class="input-prefix"><span>bomesh.app/</span>${input({ id: 'ws-code', bind: 'admWs.code', value: f.code, attrs: 'data-live spellcheck="false" maxlength="40" data-field="code"', blur: 'adm-ws-touch', onEnter: 'adm-ws-save' })}</div>` })}
-      </div><div class="adm-card-foot">${dirty ? btn('Discard', { v: 'ghost', act: 'adm-ws-discard', disabled: f.busy }) : ''}${btn('Save changes', { v: 'primary', act: 'adm-ws-save', disabled: !dirty, loading: f.busy })}</div></section>
-      <section class="card adm-danger"><div class="card-head"><h2 class="section-title">Danger zone</h2></div><div class="card-pad row gap-16 wrap"><div class="grow" style="min-width:240px"><div class="adm-t">Archive workspace</div><div class="muted" style="font-size:13.5px;margin-top:2px">Everyone loses access, including you. Platform admins can restore it for 30 days.</div></div>${btn('Archive workspace', { v: 'danger-ghost', icon: 'archive', act: 'adm-ws-archive' })}</div></section>`,
+    loading: admSettingsLoading,
+    error: () => errorState({ title: 'Settings didn’t load', body: 'Try again. Your existing workspace settings have not changed.' }),
+    ok: () => `${admSettingsContext(ws)}<div class="wsset-layout">${admSettingsNav(active)}<div class="wsset-main" id="settings-section">${active === 'brand' ? polBrandHtml() : active === 'archive' ? admWsArchiveHtml() : admWsGeneralHtml()}</div></div>`,
   });
-  return `<div class="page narrow">${head}${body}</div>`;
+  return `<div class="page wsset-page">${head}${body}</div>`;
 };
 A['adm-ws-touch'] = (el, e) => { const f = S.ui.admWs; const k = el.dataset.field; if (!el.isConnected || !f || !k || f.touched[k]) return; f.touched[k] = true; if (!admBlurToButton(e)) refresh(); };
 A['adm-ws-discard'] = () => { S.ui.admWs = null; refresh(); };
+A['adm-ws-nav'] = el => {
+  const next = el.dataset.tab, current = admSettingsTab(S.cur.query); if (next === current) return;
+  const dirty = current === 'general' ? admWsDirty() : current === 'brand' ? admBrandDirty() : false;
+  const leave = () => { go('/settings?tab=' + next); setTimeout(() => { const h = $('#settings-section h2'); if (h) { h.tabIndex = -1; h.focus({ preventScroll: false }); } }, 60); };
+  if (!dirty) return leave();
+  confirmAction({ title: 'Discard unsaved changes?', body: `Changes in ${current === 'brand' ? 'Brand' : 'General'} have not been saved.`, confirm: 'Discard changes', danger: true, onConfirm: () => { if (current === 'brand') A['pol-brand-discard'](); else S.ui.admWs = null; leave(); } });
+};
 A['adm-ws-save'] = async () => {
-  const ws = curWs(); const f = admWsForm(); if (f.busy) return;
-  const dirty = f.name.trim() !== ws.name || f.code.trim() !== ws.code; if (!dirty) return;
+  const ws = curWs(), f = admWsForm(); if (f.busy) return;
+  const dirty = admWsDirty(); if (!dirty) return;
   f.tried = true; const errs = admWsErrors(f, ws);
   if (Object.keys(errs).length) { refresh(); $(errs.name ? '#ws-name' : '#ws-code')?.focus(); return; }
   f.busy = true; refresh(); await sleep(850);
@@ -5042,7 +5198,7 @@ A['adm-ws-save'] = async () => {
 };
 A['adm-ws-archive'] = () => {
   const ws = curWs();
-  confirmAction({ title: `Archive ${ws.name}?`, body: `Everyone loses access right away, including you. Platform admins finish archiving within 24 hours and can restore it for 30 days.`, confirm: 'Archive workspace', danger: true, typeText: ws.name, onConfirm: () => { admLog('Requested workspace archive', 'Settings', ws.name); toast('Archive requested. Platform admins will finish it within 24 hours.'); } });
+  confirmAction({ title: `Archive ${ws.name}?`, body: `Everyone loses access, source schedules pause and retained data can be restored for 30 days. Type the current workspace code to confirm.`, confirm: 'Archive workspace', danger: true, typeText: ws.code, onConfirm: () => { ws.archiveRequest = { at: Date.now(), actor: me().name }; admLog('Requested workspace archive', 'Settings', ws.name); refresh(); toast('Archive requested', { tone: 'info' }); } });
 };
 </script>
 <style>
@@ -5656,7 +5812,7 @@ const POL_ACCENTS = [
   ['indigo', 'Indigo', '#3B38C4'], ['teal', 'Teal', '#0F766E'], ['ocean', 'Ocean', '#1D5FD6'], ['plum', 'Plum', '#8A3B84'], ['graphite', 'Graphite', '#1F2328'],
 ];
 const POL_BGS = [['plain', 'Plain'], ['soft', 'Soft glow'], ['mesh', 'Mesh']];
-S.appearance = Object.assign({ mode: 'light', accent: 'workspace', bg: 'soft', density: 'comfortable' }, (() => { try { return JSON.parse(localStorage.getItem('bomesh-appearance') || '{}'); } catch (_) { return {}; } })());
+S.appearance = Object.assign({ mode: 'light', accent: 'workspace', bg: 'plain', density: 'comfortable' }, (() => { try { return JSON.parse(localStorage.getItem('bomesh-appearance') || '{}'); } catch (_) { return {}; } })());
 D.workspaces.forEach(w => (w.accent ??= w.id === 'ws-nwfin' ? 'teal' : 'indigo'));
 const polAccentHex = id => (POL_ACCENTS.find(a => a[0] === id) || POL_ACCENTS[0])[2];
 function polEffectiveAccent() { return S.appearance.accent === 'workspace' ? (S.cur?.r.mode === 'platform' ? 'indigo' : (curWs().accent || 'indigo')) : S.appearance.accent; }
@@ -5783,18 +5939,24 @@ A['pol-gap-dismiss'] = el => { const g = D.gaps.find(x => x.id === el.dataset.id
 
 /* ═══════════════════════════ Workspace brand (settings) ═══════════════════════════ */
 function polBrandHtml() {
-  const ws = curWs(); const b = ui('polBrand:' + ws.id, { v: ws.accent || 'indigo', busy: false }); const dirty = b.v !== (ws.accent || 'indigo');
-  const hex = polAccentHex(b.v);
-  return `<section class="card" style="margin:16px 0"><div class="card-head"><h2 class="section-title">Brand</h2></div><div class="card-pad">
-    <div class="row gap-16 wrap" style="align-items:flex-start"><div class="grow" style="min-width:240px"><div class="label">Brand color</div><div class="hint" style="margin:2px 0 12px">Used for buttons, selection and the workspace mark for everyone. People can still pick their own.</div>${polSwatches(b.v, 'pol-brand-pick', false)}</div>
-    <div class="card" style="padding:14px;width:240px;background:var(--subtle)"><div class="faint" style="font-size:12px;margin-bottom:10px">Preview</div><div class="row gap-10" style="gap:10px">${wsMark({ name: ws.name, color: hex }, 32)}<b>${esc(ws.name)}</b></div><div class="row gap-8" style="margin-top:12px"><span class="btn btn-sm" style="background:${hex};color:#fff;pointer-events:none">Primary action</span><span class="badge" style="background:color-mix(in srgb,${hex} 12%,transparent);color:${hex}">Selected</span></div></div></div></div>
-    <div class="adm-card-foot" style="display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid var(--border)">${dirty ? btn('Discard', { v: 'ghost', act: 'pol-brand-discard' }) : ''}${btn('Save brand', { v: 'primary', act: 'pol-brand-save', disabled: !dirty, loading: b.busy })}</div></section>`;
+  const ws = curWs(), b = ui('polBrand:' + ws.id, { v: ws.accent || 'indigo', busy: false });
+  const dirty = admBrandDirty(), hex = polAccentHex(b.v);
+  const choices = POL_ACCENTS.map(([id, label, color]) => `<label class="wsset-color ${b.v === id ? 'is-on' : ''}"><input type="radio" name="workspace-accent" value="${id}" data-change="pol-brand-pick" data-value="${id}" ${b.v === id ? 'checked' : ''} ${b.busy ? 'disabled' : ''}><span class="wsset-color-dot" style="background:${color}">${b.v === id ? ic('check') : ''}</span><span class="wsset-color-copy"><b>${esc(label)}</b><small>${id === 'indigo' ? 'Default' : 'Workspace accent'}</small></span></label>`).join('');
+  return `<section class="card wsset-panel">${admSettingsPanelHead('Brand', 'Choose the shared action color for people who follow the workspace brand.', dirty)}
+    <div class="wsset-panel-body"><div class="wsset-brand-grid"><div>
+      <div class="label" id="workspace-brand-label">Brand color</div><div class="hint" style="margin-top:3px">Changes buttons, selected navigation and the workspace mark. Status and evidence colors keep their meaning.</div>
+      <div class="wsset-palette" role="radiogroup" aria-labelledby="workspace-brand-label">${choices}</div>
+      <div style="margin-top:16px">${callout('neu', 'Personal preferences still win', 'Members who chose their own accent keep it. They can select Workspace brand in Profile & preferences at any time.')}</div>
+    </div><aside class="wsset-brand-preview" aria-label="Workspace brand preview" style="--wsset-preview:${hex}"><span>Live preview</span><div class="wsset-preview-window">
+      <div class="wsset-preview-top">${wsMark({ name: ws.name, color: hex }, 26)}<b class="ellipsis">${esc(ws.name)}</b></div>
+      <div class="wsset-preview-body"><div class="wsset-preview-side"><div class="wsset-preview-nav is-on">${ic('book')}Knowledge</div><div class="wsset-preview-nav">${ic('users')}Access</div><div class="wsset-preview-nav">${ic('settings')}Settings</div></div><div class="wsset-preview-content"><b>Workspace action</b><span class="wsset-preview-button">Primary action</span><span class="wsset-preview-evidence"><b>1</b>Evidence stays amber</span></div></div>
+    </div><div class="wsset-preview-note">Action color follows the selected brand. Evidence and status colors never change.</div></aside></div></div>
+    <div class="adm-card-foot wsset-savebar"><span class="wsset-save-note">${dirty ? 'Previewing an unsaved brand color.' : 'This is the saved workspace brand.'}</span>${dirty ? btn('Discard', { v: 'ghost', act: 'pol-brand-discard', disabled: b.busy }) : ''}${btn('Save brand', { v: 'primary', act: 'pol-brand-save', disabled: !dirty, loading: b.busy })}</div>
+  </section>`;
 }
-const pol_settings0 = P.settings;
-P.settings = a => { const h = pol_settings0(a); const i = h.indexOf('<section class="card adm-danger">'); return i < 0 ? h : h.slice(0, i) + polBrandHtml() + h.slice(i); };
 A['pol-brand-pick'] = el => { ui('polBrand:' + curWs().id).v = el.dataset.value; refresh(); };
 A['pol-brand-discard'] = () => { const ws = curWs(); ui('polBrand:' + ws.id).v = ws.accent || 'indigo'; refresh(); };
-A['pol-brand-save'] = async () => { const ws = curWs(); const b = ui('polBrand:' + ws.id); b.busy = true; refresh(); await sleep(700); ws.accent = b.v; ws.color = polAccentHex(b.v); b.busy = false; D.audit.unshift({ id: uid('ev'), at: Date.now(), actor: me().id, action: 'Changed brand color', type: 'Settings', target: ws.name, outcome: 'success', ip: '10.4.12.30', device: 'Chrome on macOS' }); refresh(); toast(S.appearance.accent === 'workspace' ? 'Brand color updated' : 'Brand color updated. You’re using your own accent — switch to Workspace brand in Preferences to see it.'); };
+A['pol-brand-save'] = async () => { const ws = curWs(); const b = ui('polBrand:' + ws.id); if (!admBrandDirty() || b.busy) return; b.busy = true; refresh(); await sleep(700); ws.accent = b.v; ws.color = polAccentHex(b.v); b.busy = false; D.audit.unshift({ id: uid('ev'), at: Date.now(), actor: me().id, action: 'Changed brand color', type: 'Settings', target: ws.name, outcome: 'success', ip: '10.4.12.30', device: 'Chrome on macOS' }); refresh(); toast(S.appearance.accent === 'workspace' ? 'Brand color updated' : 'Brand color updated. You’re using your own accent — switch to Workspace brand in Preferences to see it.'); };
 
 /* ═══════════════════════════ Share a chat ═══════════════════════════ */
 const pol_chatThread0 = P.chatThread;
@@ -5896,6 +6058,12 @@ P.design = a => {
 /* Review notes for the new surfaces */
 NOTES.overview.changes.push('New: Knowledge gaps — the most-asked questions without a good answer, each with Add documents. It turns usage data into the next content task.');
 NOTES.settings.changes.push('New: Brand color for the workspace, with a live preview. Members can still choose their own accent.');
+const settingsJourneyAt = JOURNEYS.findIndex(j => j.id === 'j10');
+JOURNEYS.splice(settingsJourneyAt < 0 ? JOURNEYS.length : settingsJourneyAt, 0,
+  { id: 'j9b', title: 'Update workspace identity', who: 'admin', desc: 'Edit the name → review a URL change and broken-link impact → save.', start: () => { setPersona('admin'); go('/settings?tab=general'); } },
+  { id: 'j9c', title: 'Set the workspace brand', who: 'admin', desc: 'Choose an accent → compare the live product preview → save for members.', start: () => { setPersona('admin'); go('/settings?tab=brand'); } },
+  { id: 'j9d', title: 'Archive a workspace safely', who: 'admin', desc: 'Review access, sync and retention effects → type the workspace code → request archive.', start: () => { setPersona('admin'); go('/settings?tab=archive'); setTimeout(() => A['adm-ws-archive']?.(), 140); } },
+);
 NOTES.chatThread.changes.push('New: Share — a link that respects permissions; recipients only open sources they can access.');
 NOTES.docViewer.changes.push('New: select any passage to Ask about it or Copy it.');
 NOTES.chatHome.changes.push('New: a five-step first-run tour (account menu → Product tour).');
@@ -6083,11 +6251,12 @@ function wk_docFromAnswer(title, text) {
     const a = wk_newArt({ conv: 'c2', title: 'Claims over $500 — Q3', file: 'claims_over_500_q3.xlsx', type: 'xlsx', rev: { ...wk_claimsSheet(), summary: 'First version — 14 claims and a total by department' }, sources: ['d-fin-reimb'] });
     a.revs[0].at = ago(3 * HOUR); m4.artifacts = [{ id: a.id, rev: 1 }]; delete m4.artifact;
     m4.work = [
-      { k: 'search', label: 'Searched Finance & Procurement', d: '1 relevant file' },
-      { k: 'prepare', label: 'Opened Pending reimbursements Q3.xlsx in a secure workspace', d: '1 sheet as CSV' },
+      { k: 'search', label: 'Searched Finance', d: '1 relevant file' },
+      { k: 'prepare', label: 'Opened Pending reimbursements Q3.xlsx in secure workspace', d: '1 sheet as CSV' },
       { k: 'code', label: 'Ran 2 commands', runs: [
         { cmd: 'import pandas as pd\ndf = pd.read_csv("~/pending-reimb-q3/Claims.csv")\nbig = df[df["Amount (USD)"] > 500]\nprint(len(big), big["Amount (USD)"].sum())', out: '14 18940', exit: 0 },
-        { cmd: 'big.groupby("Department")["Amount (USD)"].agg(["count", "sum"]).to_excel("claims_over_500_q3.xlsx")', out: 'Saved claims_over_500_q3.xlsx', exit: 0 }] },
+        { cmd: 'big.groupby("Department")["Amount (USD)"].agg(["count", "sum"]).to_excel("claims_over_500_q3.xlsx")', out: 'Saved claims_over_500_q3.xlsx', exit: 0 },
+      ] },
       { k: 'export', label: 'Created claims_over_500_q3.xlsx', d: 'Version 1' },
     ];
     m4.dur = 14;
@@ -6326,7 +6495,7 @@ function wk_plan(q, conv, files, mod) {
     const instr = q.replace(/^Update “[^”]+”:\s*/, '');
     const t = wk_transform(target, instr); const next = target.revs.length + 1;
     return { text: `Done — **${target.title}** is now on version ${next}. ${t.summary}. Open it to review the changes, or restore an earlier version from History.`, citations: [], noResults: null, partial: false, searchLabel: 'the files in this chat',
-      work: [{ k: 'prepare', label: 'Reused the files already in the secure workspace' }, { k: 'code', label: 'Ran code', runs: [{ cmd: WK_KIND(target.type) === 'sheet' ? `df = pd.read_excel("${target.file}")\n# ${instr}\ndf.to_excel("${target.file}", index=False)` : `doc = Document("${target.file}")\n# ${instr}\ndoc.save("${target.file}")`, out: `Saved ${target.file}`, exit: 0 }] }, { k: 'export', label: `Updated ${target.file}`, d: `Version ${next}` }],
+      work: [{ k: 'prepare', label: 'Reused the files already opened in this chat' }, { k: 'code', label: 'Ran code', runs: [{ cmd: WK_KIND(target.type) === 'sheet' ? `df = pd.read_excel("${target.file}")\n# ${instr}\ndf.to_excel("${target.file}", index=False)` : `doc = Document("${target.file}")\n# ${instr}\ndoc.save("${target.file}")`, out: `Saved ${target.file}`, exit: 0 }] }, { k: 'export', label: 'Updated file', d: `Version ${next}` }],
       apply: () => { const r = wk_addRev(target, { ...t.rev, summary: t.summary }); return [{ id: target.id, rev: r.n }]; }, editOf: target.id };
   }
   const base = chat_answer(q, conv.scope || [], files.map(f => f.name));
@@ -6340,16 +6509,23 @@ function wk_plan(q, conv, files, mod) {
     const isClaims = !!base.artifact || /reimburse|claim/i.test(q);
     const title = isClaims ? 'Claims over $500 — Q3' : sheetFile ? `${sheetFile.name.replace(/\.[^.]+$/, '')} — reviewed` : chat_title(q).replace(/…$/, '');
     const file = title.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') + '.xlsx';
-    if (sheetFile) work.push({ k: 'prepare', label: `Opened ${sheetFile.name} in a secure workspace`, d: '1 sheet as CSV' });
-    else work.push({ k: 'prepare', label: 'Started a secure workspace', d: 'Python, no internet' });
-    work.push({ k: 'code', label: 'Ran 2 commands', runs: [{ cmd: `import pandas as pd\ndf = pd.read_csv("~/${(sheetFile?.name || 'source').toLowerCase().replace(/[^a-z0-9.]+/g, '-')}.csv")\nprint(df.shape)`, out: '(212, 5)', exit: 0 }, { cmd: `result.to_excel("${file}", index=False)`, out: `Saved ${file}`, exit: 0 }] });
-    work.push({ k: 'export', label: `Created ${file}`, d: 'Version 1' });
+    work.push(
+      { k: 'prepare', label: 'Started secure workspace', d: 'Python · no internet' },
+      { k: 'code', label: 'Ran 2 commands', runs: isClaims ? [
+        { cmd: `import pandas as pd\ndf = pd.read_csv("~/${(sheetFile?.name || 'pending-reimb-q3/Claims.csv').toLowerCase().replace(/[^a-z0-9./]+/g, '-')}")\nbig = df[df["Amount (USD)"] > 500]\nprint(len(big), big["Amount (USD)"].sum())`, out: '14 18940', exit: 0 },
+        { cmd: `big.groupby("Department")["Amount (USD)"].agg(["count", "sum"]).to_excel("${file}")`, out: `Saved ${file}`, exit: 0 },
+      ] : [
+        { cmd: `import pandas as pd\ndf = pd.read_csv("~/${(sheetFile?.name || 'source').toLowerCase().replace(/[^a-z0-9.]+/g, '-')}.csv")\nprint(df.shape)`, out: '(212, 5)', exit: 0 },
+        { cmd: `result.to_excel("${file}", index=False)`, out: `Saved ${file}`, exit: 0 },
+      ] },
+      { k: 'export', label: `Created ${file}`, d: 'Version 1' },
+    );
     if (!base.artifact) text = (text ? text + '\n\n' : '') + `I put the results in **${title}** so you can filter and share them.`;
     apply = () => [{ id: wk_newArt({ conv: conv.id, title, file, type: 'xlsx', rev: { ...(isClaims ? wk_claimsSheet() : wk_vendorSheet()), summary: 'First version' }, sources: base.citations.map(c => c.doc) }).id, rev: 1 }];
   } else if (!base.noResults && WK_DOC_RX.test(q)) {
     const t0 = q.replace(/\s+/g, ' ').trim().replace(/[?.!]+$/, '').replace(/^(please\s+)?(draft|write|create|make|prepare)\s+(me\s+)?(a|an|the)?\s*/i, ''); const title = (t0.length > 60 ? t0.slice(0, 57).replace(/\s\S*$/, '') + '…' : t0).replace(/^./, c => c.toUpperCase());
     const file = title.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40) + '.docx';
-    work.push({ k: 'prepare', label: 'Started a secure workspace', d: 'Python, no internet' }, { k: 'code', label: 'Ran code', runs: [{ cmd: `from docx import Document\ndoc = Document()\ndoc.add_heading("${title}", 1)\n# sections from the cited passages\ndoc.save("${file}")`, out: `Saved ${file}`, exit: 0 }] }, { k: 'export', label: `Created ${file}`, d: 'Version 1' });
+    work.push({ k: 'prepare', label: 'Started secure workspace', d: 'Python · no internet' }, { k: 'code', label: 'Ran code', runs: [{ cmd: `from docx import Document\ndoc = Document()\ndoc.add_heading("${title}", 1)\n# sections from the cited passages\ndoc.save("${file}")`, out: `Saved ${file}`, exit: 0 }] }, { k: 'export', label: `Created ${file}`, d: 'Version 1' });
     const html = wk_docFromAnswer(title, text);
     text += `\n\nI also saved this as **${title}** — a Word document you can edit, review and save to knowledge.`;
     apply = () => [{ id: wk_newArt({ conv: conv.id, title, file, type: 'docx', rev: { html, summary: 'First version' }, sources: base.citations.map(c => c.doc) }).id, rev: 1 }];
@@ -6401,33 +6577,49 @@ MENUS['wk-ans-more'] = el => { const { m } = chat_findMsg(el.dataset.msg); const
 ]; };
 
 /* ═══════════════════════════ Rendering an answer ═══════════════════════════ */
-const WK_STEP_IC = { search: 'search', read: 'file-text', prepare: 'server', code: 'terminal', export: 'file' };
 function wk_workSummary(m) {
-  const w = m.work || []; const s = []; const srch = w.find(x => x.k === 'search'); if (srch) s.push(chat_clean(srch.label));
-  const runs = w.filter(x => x.k === 'code').flatMap(x => x.runs || []); if (runs.length) { const bad = runs.filter(r => r.exit).length; s.push(runs.length === 1 && !bad ? 'ran code' : `ran ${plural(runs.length, 'command')}${bad ? `, ${bad} failed` : ''}`); }
-  const ex = w.filter(x => x.k === 'export'); if (ex.length) s.push(ex.some(x => /^Updated/.test(x.label)) ? 'updated a file' : `created ${plural(ex.length, 'file')}`);
-  return `Worked for ${m.dur || 1}s · ${s.map(x => x.replace(/^./, c => c.toUpperCase())).join(' · ')}`;
+  const steps = (m.work || []).filter(s => !s.live);
+  if (!steps.length && !(m.artifacts || []).length) return '';
+  const parts = [];
+  const search = steps.find(s => s.k === 'search');
+  if (search) parts.push(chat_clean(search.label));
+  const runs = steps.flatMap(s => s.runs || []);
+  if (runs.length) {
+    const failed = runs.filter(r => r.exit).length;
+    parts.push(runs.length === 1 && !failed ? 'Ran code' : `Ran ${plural(runs.length, 'command')}${failed ? `, ${failed} failed` : ''}`);
+  }
+  const created = (m.artifacts || []).filter(r => r.rev <= 1).length;
+  const updated = (m.artifacts || []).length - created;
+  if (created) parts.push(`Created ${plural(created, 'file')}`);
+  if (updated) parts.push(`Updated ${plural(updated, 'file')}`);
+  if (!parts.length && steps[0]) parts.push(chat_clean(steps[0].label));
+  return [`Worked for ${m.dur || 1}s`, ...parts].join(' · ');
 }
 function wk_workHtml(m) {
-  const u = chat_ui(); const live = m.state === 'streaming' && m.phase === 'work'; const open = live || !!u.open[m.id];
-  const lastLive = (m.work || []).findLast?.(s => s.live);
-  const head = live ? `<span class="wk-sum" aria-live="polite">${ic('loader', 'spin i-sm')}<span class="ellipsis">${esc(chat_clean(lastLive?.label || `Searching ${m.searching || 'your knowledge'}`))}…</span></span>`
-    : `<button class="wk-sum" data-act="chat-act" data-msg="${m.id}" aria-expanded="${open}">${ic(open ? 'chevron-down' : 'chevron-right', 'i-sm')}<span class="ellipsis">${esc(wk_workSummary(m))}</span></button>`;
-  if (!open) return `<div class="wk-work">${head}</div>`;
-  const usesShell = (m.work || []).some(s => s.k === 'code' || s.k === 'prepare');
-  const steps = (m.work || []).map((s, si) => {
-    const cls = s.live ? 'live' : s.bad ? 'bad' : 'ok';
-    const runs = (s.runs || []).map((r, ri) => { const key = `${m.id}:${si}:${ri}`; const show = !!u.open[key]; return `<div class="wk-run"><div class="wk-run-h">${ic('terminal', 'i-xs')}<span>Command ${ri + 1}</span><button class="btn btn-ghost btn-sm" style="--h:22px" data-act="wk-run-t" data-k="${key}" aria-expanded="${show}">${show ? 'Hide code' : 'Show code'}</button><span class="ex ${r.exit ? 'bad' : ''}">${r.exit ? 'failed' : 'ok'}</span></div>${show ? `<pre>${esc(r.cmd)}</pre>` : ''}${r.out && (show || r.exit) ? `<pre class="out ${r.err ? 'err' : ''}">${esc(show ? r.out : r.out.split('\n').pop())}</pre>` : ''}</div>`; }).join('');
-    const exp = s.k === 'export' ? (() => { const ref = (m.artifacts || []).find(a => s.label.includes(wk_art(a.id)?.file)); return ref ? ` ${btn('Open', { v: 'link', act: 'wk-open', data: { id: ref.id, rev: ref.rev } })}` : ''; })() : '';
-    return `<div class="wk-step ${cls}">${ic(WK_STEP_IC[s.k] || 'check', 'i-sm')}<div class="grow"><div>${esc(chat_clean(s.label))}${s.d ? ` <span class="d">· ${esc(s.d)}</span>` : ''}${exp}</div>${runs}</div></div>`;
+  const u = chat_ui(), work = m.work || [];
+  const live = m.state === 'streaming' && m.phase === 'work', open = live || !!u.open[m.id];
+  const lastLive = work.findLast?.(s => s.live);
+  const head = live
+    ? `<span class="wk-sum" role="status" aria-live="polite">${ic('loader', 'spin i-sm')}<span class="ellipsis">${esc(chat_clean(lastLive?.label || `Finding information in ${m.searching || 'your knowledge'}`))}…</span></span>`
+    : `<button class="wk-sum" data-act="chat-act" data-msg="${m.id}" aria-expanded="${open}">${ic(open ? 'chevron-down' : 'chevron-right', 'i-sm')}<span class="ellipsis">${esc(wk_workSummary(m) || 'How this answer was found')}</span></button>`;
+  if (!open || !work.length) return `<div class="wk-work">${head}</div>`;
+  const icons = { search: 'search', read: 'file-text', prepare: 'server', code: 'terminal', export: 'file', edit: 'pencil', note: 'message-square', other: 'settings' };
+  const steps = work.map((s, si) => {
+    const runs = (s.runs || []).map((r, ri) => {
+      const key = `${m.id}:run:${si}:${ri}`, show = !!u.open[key];
+      const lastError = r.exit ? String(r.out || '').trim().split('\n').filter(Boolean).at(-1) : '';
+      return `<div class="wk-run"><div class="wk-run-h">${ic('terminal', 'i-xs')}<span>Command ${ri + 1}</span><button class="btn btn-ghost btn-sm" data-act="wk-run-t" data-k="${key}" aria-expanded="${show}">${show ? 'Hide code' : 'Show code'}</button><span class="${cx('ex', r.exit && 'bad')}">${r.exit ? `failed · exit ${r.exit}` : 'ok'}</span></div>${show ? `<pre>${esc(r.cmd)}</pre>${r.out ? `<pre class="${cx('out', r.err && 'err')}">${esc(r.out)}</pre>` : ''}` : lastError ? `<pre class="out err">${esc(lastError)}</pre>` : ''}</div>`;
+    }).join('');
+    return `<li class="${cx('wk-step', s.live ? 'live' : s.bad ? 'bad' : 'ok')}">${ic(icons[s.k] || 'settings', 'i-sm')}<div class="grow"><div>${esc(chat_clean(s.label))}${s.d ? ` <span class="d">· ${esc(s.d)}</span>` : ''}</div>${runs}</div></li>`;
   }).join('');
-  return `<div class="wk-work">${head}<div class="wk-steps">${steps}${usesShell ? `<div class="wk-sandbox">${ic('shield', 'i-xs')}Ran in a private workspace for this chat · no internet · only the files you shared</div>` : ''}</div></div>`;
+  const sandbox = work.some(s => s.runs?.length) ? `<div class="wk-sandbox">${ic('shield', 'i-xs')}<span>Ran in a private workspace for this chat · no internet · only the files you shared</span></div>` : '';
+  return `<div class="wk-work">${head}<ol class="wk-steps" aria-label="Steps">${steps}</ol>${sandbox}</div>`;
 }
-A['wk-run-t'] = el => { const u = chat_ui(); u.open[el.dataset.k] = !u.open[el.dataset.k]; const { m } = chat_findMsg(el.dataset.k.split(':')[0]); m ? chat_paint(m) : refresh(); };
+A['wk-run-t'] = el => { const u = chat_ui(); u.open[el.dataset.k] = !u.open[el.dataset.k]; const { m } = chat_findMsg(el.dataset.k.split(':run:')[0]); m ? chat_paint(m) : refresh(); };
 function wk_cardsHtml(m) {
   const refs = m.artifacts || []; if (!refs.length) return '';
   const p = chat_ui().panel;
-  return `<div class="wk-cards">${refs.map(r => { const a = wk_art(r.id); if (!a) return ''; const rev = wk_rev(a, r.rev), latest = wk_latest(a); const newer = latest.n > rev.n;
+  return `<div class="wk-cards" aria-label="Files from this answer">${refs.map(r => { const a = wk_art(r.id); if (!a) return ''; const rev = wk_rev(a, r.rev), latest = wk_latest(a); const newer = latest.n > rev.n;
     return `<div class="${cx('wk-card', p?.kind === 'file' && p.art === a.id && p.rev === rev.n && 'is-on')}" role="button" tabindex="0" data-act="wk-open" data-id="${a.id}" data-rev="${rev.n}" aria-label="Open ${esc(a.title)}, version ${rev.n}">${fileIcon(a.type, 36)}<div class="grow" style="min-width:0"><div class="t ellipsis">${esc(a.title)}</div><div class="m">Version ${rev.n} · ${WK_FMT[a.type] || a.type} · ${fmtSize(rev.size)}${newer ? ` · <span class="newer">Version ${latest.n} available</span>` : ''}</div></div>${btn('', { v: 'ghost', size: 'sm', icon: 'download', menu: 'wk-dl', data: { id: a.id, rev: rev.n }, tip: 'Download' })}</div>`; }).join('')}</div>`;
 }
 chat_aiInner = function (conv, m) {
@@ -6599,6 +6791,341 @@ NOTES.chatThread.changes.push(
   'Answers keep earlier attempts (‹ 1/2 ›), Retry offers More detail / Shorter, and editing a question replaces the answer after a confirmation.');
 NOTES.chatThread.states = [...(NOTES.chatThread.states || []), 'Open “Vendor renewals needing review” and review the spreadsheet changes.', 'Edit the summary document and save it as a new version.', 'Set State → Error, then ask for a change: the file work fails safely.'];
 NOTES.chatHome.changes.push('The + button adds files from your computer or from knowledge; video and app files are refused with a reason.');
+</script>
+<style>
+/* ═══════════════════════════════════════════════════════════════════════════
+   Canonical visual contract — "Quiet intelligence"
+   The established BoMesh concept remains authoritative. Selected mechanics
+   are ported from pinned Magic UI source: pointer-aware cards, a restrained
+   shimmer, a stateful border beam, dot texture, and one-time blur fade.
+   Product information, evidence, and existing behavior stay primary.
+   ═══════════════════════════════════════════════════════════════════════════ */
+body{letter-spacing:-.003em}
+#frame{height:100dvh;min-height:100vh;background:radial-gradient(680px 420px at 8% -12%,color-mix(in srgb,var(--primary) 7%,transparent),transparent 72%),var(--canvas)}
+.skip-link{position:fixed;top:8px;left:8px;z-index:120;padding:9px 12px;border-radius:var(--r-md);background:var(--text);color:var(--text-inv);box-shadow:var(--sh-pop);transform:translateY(calc(-100% - 16px));transition:transform var(--duration-fast) var(--ease)}
+.skip-link:focus{transform:translateY(0)}
+.sheet{border-radius:var(--r-xl)}
+.title{font-size:26px;letter-spacing:-.025em}
+.page{max-width:var(--page-max)}
+.btn{transition-duration:var(--duration-fast);transition-timing-function:var(--ease)}
+.btn-primary,.send{background:linear-gradient(180deg,color-mix(in srgb,var(--primary) 88%,white),var(--primary));box-shadow:0 1px 2px rgba(42,33,126,.22),inset 0 1px 0 rgba(255,255,255,.18)}
+.btn-primary:hover,.send:hover{background:linear-gradient(180deg,color-mix(in srgb,var(--primary-hover) 88%,white),var(--primary-hover))}
+.card-link,.starter,.wk-card,.chat-src,.pol-theme-card{transition-duration:var(--duration-fast);transition-timing-function:var(--ease)}
+.card-link:hover,.starter:hover,.wk-card:hover{border-color:color-mix(in srgb,var(--primary) 25%,var(--border-2));box-shadow:var(--sh-2)}
+.input,.select,.textarea{min-height:38px}
+.composer{border-color:var(--border-2);box-shadow:0 16px 44px -28px rgba(18,19,26,.38),var(--sh-1)}
+.composer:focus-within{border-color:color-mix(in srgb,var(--primary) 54%,var(--border-strong));box-shadow:0 20px 52px -28px color-mix(in srgb,var(--primary) 42%,transparent),var(--focus)}
+.auth-art.auth-mesh{--mesh-violet:#8B7CFF;--mesh-cyan:#7DD3FC;--mesh-blue:#818CF8;--mesh-ink:#090A12;background:radial-gradient(760px 520px at 8% 38%,rgba(88,71,232,.24),transparent 72%),linear-gradient(145deg,#090A12,#111321)}
+.auth-art.auth-mesh::after{opacity:.28}
+.km-stage{border-color:rgba(194,197,222,.14);background:linear-gradient(145deg,rgba(255,255,255,.045),rgba(255,255,255,.012));box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 24px 64px rgba(0,0,0,.22)}
+.km-core{box-shadow:0 0 0 7px rgba(88,71,232,.055),0 18px 44px rgba(0,0,0,.24),inset 0 1px 0 rgba(255,255,255,.14)}
+@property --qi-beam-angle{syntax:"<angle>";initial-value:0deg;inherits:false}
+@keyframes qi-blur-fade{from{opacity:0;filter:blur(6px);transform:translateY(6px)}}
+@keyframes qi-border-beam{to{--qi-beam-angle:360deg}}
+.mu-blur-fade{animation:qi-blur-fade 420ms var(--ease) both}
+.mu-magic-card{--mu-x:-240px;--mu-y:-240px;position:relative;isolation:isolate;overflow:hidden}
+.mu-magic-card::after{content:"";position:absolute;inset:0;z-index:0;border-radius:inherit;background:radial-gradient(220px circle at var(--mu-x) var(--mu-y),color-mix(in srgb,var(--primary) 11%,transparent),transparent 72%);opacity:0;pointer-events:none;transition:opacity 260ms var(--ease)}
+.mu-magic-card>*{position:relative;z-index:1}
+.mu-shimmer-button{overflow:hidden;isolation:isolate}
+.mu-shimmer-button::before{content:"";position:absolute;inset:-40% auto -40% -55%;z-index:0;width:34%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.34),transparent);transform:skewX(-18deg) translateX(0);transition:transform 560ms var(--ease);pointer-events:none}
+.mu-shimmer-button>*{position:relative;z-index:1}
+.mu-shimmer-button.is-loading::before{display:none}
+.mu-border-beam{position:relative;isolation:isolate}
+.mu-border-beam::after{content:"";position:absolute;inset:-1px;z-index:3;padding:1px;border-radius:inherit;background:conic-gradient(from var(--qi-beam-angle),transparent 0deg 302deg,color-mix(in srgb,var(--primary) 42%,transparent) 320deg,color-mix(in srgb,var(--primary) 78%,white) 338deg,transparent 358deg);-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;animation:qi-border-beam 7s linear infinite;pointer-events:none}
+h1[tabindex="-1"]:focus{box-shadow:none}
+@media (hover:hover) and (pointer:fine){
+  .mu-magic-card:hover::after{opacity:1}
+  .mu-shimmer-button:hover::before{transform:skewX(-18deg) translateX(470%)}
+}
+
+/* Canonical reference page */
+.ds4-page{max-width:1160px}
+.ds4-hero{position:relative;overflow:hidden;margin:-4px 0 48px;padding:44px;border:1px solid var(--border);border-radius:20px;background:var(--sheet);box-shadow:var(--sh-sheet)}
+.ds4-hero::before{content:"";position:absolute;inset:0;background:radial-gradient(520px 240px at 100% 0%,color-mix(in srgb,var(--primary) 14%,transparent),transparent 72%),radial-gradient(circle at 1px 1px,color-mix(in srgb,var(--text) 7%,transparent) 1px,transparent 1.25px) 0 0/18px 18px;mask-image:linear-gradient(105deg,transparent 12%,#000 100%);pointer-events:none}
+.ds4-hero>*{position:relative}
+.ds4-kicker{display:inline-flex;align-items:center;gap:8px;color:var(--primary-text);font:600 11px/1 var(--mono);letter-spacing:.09em;text-transform:uppercase}
+.ds4-kicker::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--primary);box-shadow:0 0 0 4px var(--primary-soft)}
+.ds4-hero h1{max-width:760px;margin-top:18px;font-size:clamp(34px,5vw,58px);font-weight:600;line-height:1.02;letter-spacing:-.052em;text-wrap:balance}
+.ds4-hero p{max-width:700px;margin-top:18px;color:var(--text-2);font-size:16px;line-height:1.65;text-wrap:pretty}
+.ds4-hero-foot{display:flex;align-items:center;gap:16px;margin-top:28px;flex-wrap:wrap}
+.ds4-rule{display:flex;align-items:center;gap:8px;color:var(--text-3);font-size:12.5px}
+.ds4-rule .i{color:var(--ok)}
+.ds4-sec{margin:0 0 52px;scroll-margin-top:24px}
+.ds4-sec-head{display:grid;grid-template-columns:180px minmax(0,1fr);gap:28px;padding-top:22px;border-top:1px solid var(--border)}
+.ds4-sec-no{font:500 11px/1.3 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text-3)}
+.ds4-sec-copy h2{font-size:22px;font-weight:600;letter-spacing:-.025em}
+.ds4-sec-copy>p{max-width:720px;margin:5px 0 20px;color:var(--text-2);font-size:14px}
+.ds4-grid{display:grid;gap:12px}.ds4-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.ds4-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.ds4-grid-4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.ds4-demo{border:1px solid var(--border);border-radius:var(--r-xl);background:var(--sheet);overflow:hidden}
+.ds4-demo-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 14px;border-bottom:1px solid var(--border);color:var(--text-3);font:500 11px/1.3 var(--mono);letter-spacing:.04em;text-transform:uppercase}
+.ds4-demo-body{padding:18px}
+.ds4-swatch{min-height:116px;padding:14px;display:flex;flex-direction:column;justify-content:flex-end;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--sw);color:var(--ink,var(--text))}
+.ds4-swatch b{font-size:13px}.ds4-swatch span{font:500 11px var(--mono);opacity:.72;margin-top:2px}
+.ds4-type{display:grid;grid-template-columns:150px minmax(0,1fr);gap:16px;align-items:baseline;padding:12px 0;border-bottom:1px solid var(--border)}
+.ds4-type:last-child{border-bottom:0}.ds4-type>span:first-child{color:var(--text-3);font:500 11px var(--mono)}
+.ds4-token-row{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap}.ds4-token{display:grid;justify-items:center;gap:7px;color:var(--text-3);font:500 11px var(--mono)}.ds4-token i{display:block;background:var(--primary-soft-2);border-radius:3px}
+.ds4-nav{display:grid;grid-template-columns:210px minmax(0,1fr);min-height:360px;background:var(--canvas)}
+.ds4-side{padding:10px;display:flex;flex-direction:column;gap:4px;border-right:1px solid var(--border)}
+.ds4-side-row{height:36px;padding:0 10px;display:flex;align-items:center;gap:9px;border-radius:var(--r-md);color:var(--text-2);font-size:13px}
+.ds4-side-row.on{background:var(--sheet);color:var(--text);box-shadow:var(--sh-sheet)}
+.ds4-side-row .i{width:16px;height:16px}.ds4-side-row span:last-child{margin-left:auto}
+.ds4-work{padding:8px}.ds4-top{height:48px;padding:0 14px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border);background:var(--sheet)}
+.ds4-work-main{margin-top:8px;min-height:288px;padding:26px;border-radius:var(--r-lg);background:var(--sheet);box-shadow:var(--sh-sheet)}
+.ds4-rail{display:flex;align-items:center;gap:8px;padding:12px;border-top:1px solid var(--border);background:var(--subtle)}
+.ds4-rail .ds4-side-row{width:40px;height:40px;padding:0;justify-content:center;background:var(--sheet);box-shadow:var(--sh-1)}
+.ds4-btn-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ds4-card{padding:18px;min-height:148px;display:flex;flex-direction:column;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--sheet)}
+.ds4-card.interactive{cursor:pointer;transition:border-color var(--duration-fast),box-shadow var(--duration-fast),background var(--duration-fast)}
+.ds4-card.interactive:hover{border-color:color-mix(in srgb,var(--primary) 34%,var(--border));box-shadow:var(--sh-2)}
+.ds4-card.selected{border-color:var(--primary);box-shadow:0 0 0 1px var(--primary);background:var(--primary-soft)}
+.ds4-card-title{font-weight:600}.ds4-card-copy{margin-top:4px;color:var(--text-2);font-size:13.5px}.ds4-card-meta{margin-top:auto;padding-top:18px;color:var(--text-3);font-size:12px}
+.ds4-metric{font-size:30px;font-weight:600;letter-spacing:-.04em}.ds4-delta{color:var(--ok);font-size:12.5px}
+.ds4-meta{display:grid;grid-template-columns:120px minmax(0,1fr);gap:8px 14px;font-size:13px}.ds4-meta dt{color:var(--text-3)}.ds4-meta dd{margin:0}
+.ds4-ai{display:grid;gap:18px}.ds4-answer{font-size:15px;line-height:1.7}.ds4-user{justify-self:end;max-width:78%;padding:10px 14px;border-radius:16px 16px 5px 16px;background:var(--sunken);font-size:14px}
+.ds4-result{display:flex;align-items:flex-start;gap:10px;padding:11px;border:1px solid var(--border);border-radius:var(--r-md);background:var(--sheet)}
+.ds4-result b{font-size:13.5px}.ds4-result p{margin-top:2px;color:var(--text-2);font-size:12.5px}
+.ds4-exec{display:flex;align-items:flex-start;gap:10px;color:var(--text-2);font-size:13px}.ds4-exec+.ds4-exec{margin-top:10px}.ds4-exec-mark{width:18px;height:18px;display:grid;place-items:center;border-radius:50%;background:var(--ok-bg);color:var(--ok)}.ds4-exec-mark .i{width:11px;height:11px}
+.ds4-command{border:1px solid var(--border);border-radius:var(--r-xl);background:var(--raised);box-shadow:var(--sh-pop);overflow:hidden}.ds4-command-in{height:52px;padding:0 14px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border)}.ds4-command-item{display:flex;align-items:center;gap:10px;padding:10px 12px;margin:5px;border-radius:var(--r-md);background:var(--hover);font-size:13px}
+.ds4-pop{width:100%;padding:14px;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--raised);box-shadow:var(--sh-pop)}
+.ds4-layer-thumb{position:relative;min-height:190px;overflow:hidden;border:1px solid var(--border);border-radius:var(--r-xl);background:var(--canvas)}
+.ds4-layer-thumb::before{content:"";position:absolute;inset:0;background:rgba(12,13,20,.24)}
+.ds4-mini-modal{position:absolute;left:50%;top:50%;width:72%;transform:translate(-50%,-50%);padding:16px;border-radius:var(--r-lg);background:var(--raised);box-shadow:var(--sh-pop)}
+.ds4-mini-drawer{position:absolute;right:7px;top:7px;bottom:7px;width:58%;padding:16px;border-radius:var(--r-lg);background:var(--raised);box-shadow:var(--sh-pop)}
+.ds4-audit{display:grid;grid-template-columns:150px 110px minmax(0,1fr);gap:12px;padding:12px 0;border-bottom:1px solid var(--border);font-size:13.5px}.ds4-audit:last-child{border-bottom:0}.ds4-audit strong{font-weight:600}.ds4-audit span:last-child{color:var(--text-2)}
+.ds4-status{font:600 10.5px var(--mono);letter-spacing:.04em;text-transform:uppercase;color:var(--primary-text)}
+.ds4-source-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.ds4-source{padding:16px;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--sheet)}
+.ds4-source h3{font-size:14px;font-weight:600}
+.ds4-source p{margin:5px 0 14px;color:var(--text-2);font-size:13px;line-height:1.5}
+.ds4-source a{display:inline-flex;align-items:center;gap:6px;font:500 11.5px var(--mono)}
+.ds4-source code{display:block;margin-top:4px;color:var(--text-3);font:500 10.5px var(--mono);overflow-wrap:anywhere}
+.mobile-side-close{display:none}
+
+/* Small-screen product shell: a real top bar replaces the icon rail. */
+@container app (max-width:640px){
+  #app{grid-template-columns:minmax(0,1fr);grid-template-rows:var(--header-h) minmax(0,1fr)}
+  #app.auth{display:block}
+  .mobile-bar{grid-column:1;grid-row:1;display:flex;align-items:center;gap:10px;padding:6px 10px;border-bottom:1px solid var(--border);background:var(--canvas);z-index:18}
+  .mobile-bar .btn{--h:40px}
+  .mobile-bar .ws-name{display:flex;align-items:center;gap:8px;flex:1}
+  .side:not(.expanded){display:none}
+  .side.expanded{display:flex;top:0;bottom:0;width:min(var(--side-w),calc(100% - 52px));padding:10px;background:var(--canvas)}
+  .side.expanded .ws-switch{padding-right:46px}
+  .mobile-side-close{display:grid;position:absolute;top:16px;right:14px;z-index:2;background:var(--raised);box-shadow:var(--sh-1)}
+  .main{grid-column:1;grid-row:2;padding:6px;min-height:0}
+  .sheet{border-radius:var(--r-lg)}
+  .page{padding:20px 16px 56px}
+  .page-head{gap:14px;margin-bottom:18px}.page-head .actions{width:100%;flex-wrap:wrap}.page-head .actions>.btn{flex:1}
+  .title{font-size:24px}.sub{font-size:13.5px}
+  .g2,.g3,.g4,.rv-ia,.rv-dec,.pol-new,.src-tiles,.pf-stats,.adm-stats,.ds4-grid-2,.ds4-grid-3,.ds4-grid-4,.ds4-source-grid{grid-template-columns:minmax(0,1fr)}
+  .toolbar{align-items:stretch}.toolbar .search{width:100%}.toolbar .spacer{display:none}
+  .kbm-card{min-height:154px}.kv,.ds4-meta{grid-template-columns:minmax(0,1fr)}
+  .modal{border-radius:var(--r-xl) var(--r-xl) 0 0}.overlay{align-items:end;padding:8px 8px 0}.modal-body{padding-inline:18px}.modal-head,.modal-foot{padding-inline:18px}
+  .drawer{inset:6px;width:calc(100% - 12px)}
+  .chat-top{padding-inline:10px}.thread{padding:10px 16px 32px;gap:24px}.composer-wrap{padding:0 12px 12px}.composer{border-radius:16px}.msg-user{max-width:92%}
+  .welcome{padding:54px 18px 24px}.welcome h1{font-size:clamp(29px,9vw,38px)}.starters{gap:8px}.starter{min-height:auto}
+  .panel,.panel.wk-panel,.chat.wk-wide .panel.wk-panel{width:100%;max-width:none}
+  .wk-cards{grid-template-columns:minmax(0,1fr)}.wk-ph{padding-left:12px}.wk-tabs{padding-inline:10px;gap:12px;overflow:auto}
+  .docv-head{padding:12px 14px}.docv-head .actions{width:100%;flex-wrap:wrap}.viewer-canvas{padding:10px}.doc-page,.wk-doc .doc-page{padding:26px 22px}.docv-slide{padding:28px 24px}
+  .adm-roles{grid-template-columns:minmax(0,1fr)}.adm-rolelist{position:static}.adm-starter{grid-template-columns:22px minmax(0,1fr)}.adm-starter-act{grid-column:2;margin-top:0}
+  .callout{flex-wrap:wrap}.callout .actions{width:100%}.callout .actions .btn{flex:1}
+  .ds4-page{padding-inline:14px}.ds4-hero{padding:28px 22px;margin-bottom:40px}.ds4-hero h1{font-size:36px}.ds4-sec-head{grid-template-columns:minmax(0,1fr);gap:10px}.ds4-nav{grid-template-columns:58px minmax(0,1fr)}.ds4-side{padding:8px}.ds4-side-row{width:40px;padding:0;justify-content:center}.ds4-side-row>span{display:none}.ds4-work-main{padding:18px}.ds4-type{grid-template-columns:minmax(0,1fr);gap:4px}.ds4-audit{grid-template-columns:minmax(0,1fr);gap:3px}
+  .ds-row{align-items:flex-start}.ds-label{width:100%}
+  .toasts{left:10px;right:10px;bottom:12px;transform:none}.toast{min-width:0;width:100%}
+  .btn{min-height:44px}.btn-sm{min-height:40px}.btn-icon{min-width:44px}
+  .input,.select,.textarea,.composer textarea{min-height:44px;font-size:16px}
+}
+@media (prefers-reduced-motion:reduce){
+  .ds4-hero::before,.mu-blur-fade,.mu-border-beam::after{animation:none}
+  .mu-magic-card::after,.mu-shimmer-button::before{display:none}
+}
+</style>
+<script>
+'use strict';
+/* Canonical reference content. Product routes keep their audited behavior;
+   /review records the mapping and /design is the visual contract. */
+const MAGIC_UI_REVISION = 'efe76fc5755eca1142dd4f74c1d6f0ace2887e3c';
+const MAGIC_UI_SOURCE_ROOT = `https://github.com/magicuidesign/magicui/blob/${MAGIC_UI_REVISION}/apps/www/registry/magicui/`;
+const QI_MAGIC_COMPONENTS = [
+  ['Magic Card','magic-card.tsx','Pointer-aware emphasis on existing interactive cards; token colors and current geometry stay unchanged.'],
+  ['Shimmer Button','shimmer-button.tsx','A single restrained sweep on primary-button hover, never an always-running CTA effect.'],
+  ['Border Beam','border-beam.tsx','Applied only to the design contract and an actively working chat composer.'],
+  ['Blur Fade','blur-fade.tsx','One short route-entry transition; state rerenders do not replay it.'],
+  ['Dot Pattern','dot-pattern.tsx','Low-contrast atmosphere on reference and authentication surfaces only.'],
+];
+let qiLastRoute = '';
+function qiEnhance(app, routeChanged) {
+  $$('.card-link,.starter,.wk-card,.ds4-card.interactive,.pol-theme-card,.ds4-source', app).forEach(el => el.classList.add('mu-magic-card'));
+  $$('.btn-primary', app).forEach(el => el.classList.add('mu-shimmer-button'));
+  const composer = $('.composer', app);
+  if (composer?.querySelector('.chat-stop')) composer.classList.add('mu-border-beam');
+  if (S.cur?.r.page === 'design') $('.ds4-hero', app)?.classList.add('mu-border-beam');
+  let heading = $('h1', app);
+  if (!heading && S.cur?.r.mode !== 'auth') {
+    const title = S.cur?.r.page === 'chatThread' ? convById(S.cur.params.id)?.title : S.cur?.r.title;
+    const host = $('#sheet', app) || app;
+    if (title) {
+      host.insertAdjacentHTML('afterbegin', `<h1 class="sr-only">${esc(title)}</h1>`);
+      heading = $('h1', app);
+    }
+  }
+  if (!routeChanged) return;
+  const entry = $('.page-head,.welcome,.ds4-hero,.auth-card,.docv-head', app);
+  entry?.classList.add('mu-blur-fade');
+  if (heading && !$('[data-autofocus]', app)) {
+    heading.tabIndex = -1;
+    requestAnimationFrame(() => heading?.focus({ preventScroll:true }));
+  }
+}
+document.addEventListener('pointermove', e => {
+  const card = e.target.closest?.('.mu-magic-card');
+  if (!card || e.pointerType === 'touch') return;
+  const r = card.getBoundingClientRect();
+  card.style.setProperty('--mu-x', `${e.clientX - r.left}px`);
+  card.style.setProperty('--mu-y', `${e.clientY - r.top}px`);
+});
+document.addEventListener('pointerout', e => {
+  const card = e.target.closest?.('.mu-magic-card');
+  if (card && !card.contains(e.relatedTarget)) {
+    card.style.setProperty('--mu-x', '-240px');
+    card.style.setProperty('--mu-y', '-240px');
+  }
+});
+const qiLayerTriggers = [];
+function qiRememberLayerTrigger() {
+  const el = document.activeElement;
+  if (!(el instanceof HTMLElement) || el === document.body) return;
+  qiLayerTriggers.push({
+    el,
+    id: el.id,
+    act: el.dataset.act || '',
+    dataId: el.dataset.id || '',
+    label: el.getAttribute('aria-label') || '',
+  });
+}
+function qiRestoreLayerTrigger() {
+  const ref = qiLayerTriggers.pop();
+  if (!ref) return;
+  requestAnimationFrame(() => {
+    let el = ref.el?.isConnected ? ref.el : null;
+    if (!el && ref.id) el = document.getElementById(ref.id);
+    if (!el && ref.act) {
+      const matches = $$(`[data-act="${CSS.escape(ref.act)}"]`);
+      el = matches.find(node => !ref.dataId || node.dataset.id === ref.dataId) || null;
+    }
+    if (!el && ref.label) el = $(`[aria-label="${CSS.escape(ref.label)}"]`);
+    el?.focus({ preventScroll:true });
+  });
+}
+const qiOpenModalBase = openModal;
+openModal = function (name, props = {}) { qiRememberLayerTrigger(); qiOpenModalBase(name, props); };
+const qiCloseModalBase = closeModal;
+closeModal = function () { qiCloseModalBase(); qiRestoreLayerTrigger(); };
+const qiOpenDrawerBase = openDrawer;
+openDrawer = function (name, props = {}) { qiRememberLayerTrigger(); qiOpenDrawerBase(name, props); };
+const qiCloseDrawerBase = closeDrawer;
+closeDrawer = function () { qiCloseDrawerBase(); qiRestoreLayerTrigger(); };
+const qiOpenPaletteBase = openPalette;
+openPalette = function () { qiRememberLayerTrigger(); qiOpenPaletteBase(); };
+A.palette = openPalette;
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && S.palette) requestAnimationFrame(qiRestoreLayerTrigger);
+}, true);
+function ds4MobileBar() {
+  const platform = S.cur.r.mode === 'platform', ws = curWs();
+  return `<header class="mobile-bar"><button class="btn btn-ghost btn-icon" data-act="side-open" aria-label="Open navigation">${ic('menu')}</button><div class="ws-name">${platform ? `${ic('layers','i-sm')}<span>Platform console</span>` : `${wsMark(ws,26)}<span class="ellipsis">${esc(ws.name)}</span>`}</div>${platform ? '' : iconBtn('plus','New chat',{href:'/chat'})}</header>`;
+}
+const ds4RenderBase = render;
+render = function () {
+  polApplyAppearance();
+  ds4RenderBase();
+  const app = $('#app');
+  if (S.cur && (S.cur.r.mode === 'workspace' || S.cur.r.mode === 'platform')) {
+    app?.insertAdjacentHTML('afterbegin', ds4MobileBar());
+    app?.querySelector('.side')?.insertAdjacentHTML('afterbegin', `<button class="btn btn-ghost btn-icon mobile-side-close" data-act="side-close" aria-label="Close navigation">${ic('x')}</button>`);
+  }
+  const content = app?.matches('.main,main,.review') ? app : (app?.querySelector('.main,main,.review') || app);
+  if (content) {
+    content.id ||= 'main-content';
+    app.insertAdjacentHTML('afterbegin', '<a class="skip-link" href="#main-content">Skip to main content</a>');
+  }
+  const routeKey = S.cur?.path || '';
+  const routeChanged = routeKey !== qiLastRoute;
+  qiLastRoute = routeKey;
+  qiEnhance(app, routeChanged);
+};
+window.removeEventListener('hashchange', ds4RenderBase);
+window.addEventListener('hashchange', render);
+
+const DS4_AUDIT = [
+  ['Shell & navigation','Keep','One permission-aware sidebar; icon rail at tablet; top bar + drawer on phones.'],
+  ['Buttons & fields','Merge','One variant and size system from the existing shared helpers; no page-local control recipes.'],
+  ['Cards & lists','Restyle','Quiet hairline surfaces. Elevation appears only on hover or floating layers.'],
+  ['Tables','Keep','Sticky headers, sorting, selection, filters, paging, and horizontal containment remain intact.'],
+  ['Chat & AI work','Restyle','Answers stay on the reading rail; work steps are quiet; evidence amber remains the signature.'],
+  ['Dialogs & drawers','Merge','One modal anatomy and one edge drawer, with focus, Escape, scrim, and mobile sheet behavior.'],
+  ['Loading / empty / error','Merge','One region-state pattern; empty copy names the next action, errors preserve recovery.'],
+  ['Appearance','Standardize','Light and dark share semantics. Indigo is the default action color; statuses and evidence never drift.'],
+];
+function ds4MagicSources() {
+  return `<div class="ds4-source-grid">${QI_MAGIC_COMPONENTS.map(([name,file,use]) => `<article class="ds4-source"><h3>${name}</h3><p>${use}</p><a href="${MAGIC_UI_SOURCE_ROOT + file}" target="_blank" rel="noreferrer">Official source ${ic('arrow-up-right','i-xs')}</a><code>${file} · ${MAGIC_UI_REVISION.slice(0,12)}</code></article>`).join('')}</div>`;
+}
+function ds4AuditRows() {
+  return DS4_AUDIT.map(([pattern,decision,reason]) => `<div class="ds4-audit"><strong>${pattern}</strong><span class="ds4-status">${decision}</span><span>${reason}</span></div>`).join('');
+}
+P.review = () => {
+  const roleTag = r => badge(r === 'member' ? 'neu' : r === 'admin' ? 'accent' : 'outline', PERSONA_LABEL[r], { dot:false });
+  return `<div class="page ds4-page">
+    <section class="ds4-hero"><span class="ds4-kicker">BoMesh frontend audit</span><h1>One calm system for grounded company knowledge.</h1><p>The current product already has the right behavioral spine: one permission-aware shell, knowledge-first chat, governed sources, access management, and evidence-linked documents. This reference keeps those flows and gives every surface one visual grammar.</p><div class="ds4-hero-foot">${btn('Open visual contract',{v:'primary',size:'lg',href:'/design',iconRight:'arrow-right'})}${btn('Start at sign-in',{size:'lg',act:'rv-start',data:{p:'member',to:'/signin'}})}<span class="ds4-rule">${ic('check-circle')}Only this prototype file changes</span></div></section>
+    <section class="ds4-sec"><div class="ds4-sec-head"><span class="ds4-sec-no">01 · Direction</span><div class="ds4-sec-copy"><h2>Quiet intelligence</h2><p>Neutral reading surfaces, one indigo action family, amber evidence, restrained canvas atmosphere, modest radii, hairline borders, and motion only when state changes.</p><div class="ds4-grid ds4-grid-3">
+      <div class="ds4-card"><span class="pol-ic info">${ic('layers')}</span><div class="ds4-card-title" style="margin-top:14px">Surfaces carry hierarchy</div><div class="ds4-card-copy">Canvas → sheet → raised. Shadows belong to floating layers, not every card.</div></div>
+      <div class="ds4-card"><span class="pol-ic warn">${ic('quote')}</span><div class="ds4-card-title" style="margin-top:14px">Evidence is the signature</div><div class="ds4-card-copy">Amber means source lineage and cited passages—never a generic accent.</div></div>
+      <div class="ds4-card"><span class="pol-ic ok">${ic('activity')}</span><div class="ds4-card-title" style="margin-top:14px">Motion explains change</div><div class="ds4-card-copy">150–220 ms transitions, calm streaming, static equivalents under reduced motion.</div></div>
+    </div></div></div></section>
+    <section class="ds4-sec"><div class="ds4-sec-head"><span class="ds4-sec-no">02 · Audit map</span><div class="ds4-sec-copy"><h2>Current implementation → canonical pattern</h2><p>All major frontend routes were traced: authentication, chat, conversations, knowledge, documents, sources, workspace management, and platform administration.</p><div class="ds4-demo"><div class="ds4-demo-body">${ds4AuditRows()}</div></div></div></div></section>
+    <section class="ds4-sec"><div class="ds4-sec-head"><span class="ds4-sec-no">03 · Flows</span><div class="ds4-sec-copy"><h2>Behavior stays the source of truth</h2><p>Each journey enters where the user would and keeps existing permissions, validation, recovery, loading, empty, and error states.</p><div class="ds4-grid ds4-grid-2">${JOURNEYS.map(j => `<div class="card rv-j"><div class="grow"><div class="row gap-8 wrap"><span class="t">${esc(j.title)}</span>${roleTag(j.who)}</div><div class="d">${esc(j.desc)}</div></div>${btn('Start',{size:'sm',act:'rv-journey',data:{id:j.id},iconRight:'arrow-right'})}</div>`).join('')}</div></div></div></section>
+  </div>`;
+};
+
+function ds4Section(no,title,copy,body,id='') {
+  return `<section class="ds4-sec" ${id ? `id="${id}"` : ''}><div class="ds4-sec-head"><span class="ds4-sec-no">${no}</span><div class="ds4-sec-copy"><h2>${title}</h2><p>${copy}</p>${body}</div></div></section>`;
+}
+function ds4Demo(label,body,cls='') {
+  return `<div class="ds4-demo ${cls}"><div class="ds4-demo-head"><span>${label}</span><span>${ic('sparkles','i-xs')}</span></div><div class="ds4-demo-body">${body}</div></div>`;
+}
+function ds4Swatch(label,token,ink='') {
+  return `<div class="ds4-swatch" style="--sw:var(${token});${ink ? `--ink:${ink}` : ''}"><b>${label}</b><span>${token}</span></div>`;
+}
+P.design = () => {
+  const d = ui('ds4',{sw:true});
+  const nav = `<div class="ds4-nav"><aside class="ds4-side"><div class="ds4-side-row">${wsMark(curWs(),24)}<span class="grow">Northwind</span></div><div class="ds4-side-row on">${ic('plus')}<span>New chat</span></div><div class="ds4-side-row">${ic('inbox')}<span>Inbox</span><span>5</span></div><div class="ds4-side-row">${ic('search')}<span>Search</span></div><div class="ds4-side-row">${ic('book')}<span>Knowledge</span></div><div style="flex:1"></div><div class="ds4-side-row">${avatar('Linh Tran',24)}<span>Linh Tran</span></div></aside><div class="ds4-work"><header class="ds4-top">${iconBtn('menu','Open navigation')}<b class="grow">HR Policies</b>${iconBtn('search','Search')}${iconBtn('plus','New chat')}</header><div class="ds4-work-main"><span class="faint" style="font-size:12px">Knowledge / HR Policies</span><h3 style="font-size:21px;margin-top:8px">Travel and expense guidance</h3><p class="muted" style="margin-top:6px;max-width:500px">A calm sheet keeps enterprise content readable while navigation stays predictable.</p></div><div class="ds4-rail"><span class="faint" style="font-size:12px;margin-right:4px">Collapsed rail</span><div class="ds4-side-row on">${ic('book')}</div><div class="ds4-side-row">${ic('search')}</div><div class="ds4-side-row">${ic('settings')}</div></div></div></div>`;
+  const buttonBody = `<div class="stack gap-16"><div class="ds4-btn-row">${btn('Save changes',{v:'primary'})}${btn('Secondary')}${btn('Outline',{cls:'b-outline'})}${btn('Ghost',{v:'ghost'})}${btn('Delete',{v:'danger'})}${iconBtn('more','More actions')}</div><div class="ds4-btn-row">${btn('Disabled',{v:'primary',disabled:true})}${btn('Saving',{v:'primary',loading:true})}${btn('Small',{size:'sm'})}${btn('Large',{v:'primary',size:'lg'})}</div></div>`;
+  const inputs = `<div class="ds4-grid ds4-grid-2"><div>${field({id:'ds4-name',label:'Knowledge base name',hint:'Visible to everyone with access.',control:input({id:'ds4-name',value:'HR Policies'})})}${field({id:'ds4-search',label:'Search',control:`<div class="input-wrap">${ic('search')}<input class="input" id="ds4-search" placeholder="Search documents"></div>`})}${field({id:'ds4-desc',label:'Description',optional:true,control:textarea({id:'ds4-desc',value:'Employee handbook, leave, travel and benefits.',rows:3})})}</div><div>${field({id:'ds4-role',label:'Role',control:select({id:'ds4-role',value:'viewer',options:[['viewer','Viewer'],['editor','Editor'],['owner','Owner']]})})}<div class="field"><span class="label">Selection controls</span><div class="stack gap-12"><label class="row gap-8"><input class="check" type="checkbox" checked>Include archived documents</label><label class="row gap-8"><input class="radio" type="radio" name="ds4-radio" checked>Daily sync</label><label class="row gap-8"><input class="radio" type="radio" name="ds4-radio">Weekly sync</label><div class="row gap-8">${toggle({on:d.sw,act:'ds4-switch',label:'Notify me'})}<span>Notify me</span></div></div></div></div></div>`;
+  const cards = `<div class="ds4-grid ds4-grid-3"><article class="ds4-card"><div class="ds4-card-title">Basic card</div><div class="ds4-card-copy">A bounded group with no implied action.</div><div class="ds4-card-meta">Updated 18 minutes ago</div></article><button class="ds4-card interactive" style="text-align:left"><div class="ds4-card-title">Interactive card</div><div class="ds4-card-copy">Border and elevation respond without changing geometry.</div><div class="ds4-card-meta">Open knowledge base →</div></button><button class="ds4-card selected" style="text-align:left"><div class="ds4-card-title">Selected card</div><div class="ds4-card-copy">Accent soft is reserved for selection.</div><div class="ds4-card-meta">Selected</div></button><article class="ds4-card"><div class="row between"><span class="ds4-card-title">Source health</span>${status('source','healthy')}</div><div class="ds4-card-copy">People Ops space is current.</div><div class="ds4-card-meta">Last synced 18 minutes ago</div></article><article class="ds4-card"><span class="faint">Questions · 7 days</span><span class="ds4-metric">4,310</span><span class="ds4-delta">↑ 12% from prior period</span><div class="ds4-card-meta">${progress(72)}</div></article><article class="ds4-card"><div class="row between"><span class="ds4-card-title">Document processing</span>${badge('warn','Needs attention')}</div><div class="ds4-card-copy">2 documents need a readable copy.</div><div class="ds4-card-meta">Status always pairs text with color.</div></article></div>`;
+  const data = `<div class="stack gap-16">${tabs([{id:'docs',label:'Documents',count:18},{id:'sources',label:'Sources',count:2},{id:'access',label:'Access'}],'docs','/design')}<div class="ds4-grid ds4-grid-2">${ds4Demo('List & metadata',`<div class="list"><div class="list-row">${fileIcon('pdf')}<div class="grow"><b>Travel & Expense Policy.pdf</b><div class="cell-sub">HR Policies · PDF · 2.4 MB</div></div>${status('doc','ready')}</div><div class="list-row">${fileIcon('xlsx')}<div class="grow"><b>Reimbursement limits.xlsx</b><div class="cell-sub">Finance · Excel · 860 KB</div></div>${status('doc','processing')}</div></div><dl class="ds4-meta" style="margin-top:16px"><dt>Owner</dt><dd>People Ops</dd><dt>Updated</dt><dd>October 22, 2026</dd><dt>Access</dt><dd>Everyone in Northwind</dd></dl>`)}${ds4Demo('Badges & status',`<div class="ds4-btn-row">${badge('accent','Selected',{dot:false})}${badge('ok','Ready')}${badge('warn','Pending')}${badge('err','Failed')}${badge('outline','Restricted',{dot:false})}</div><div class="divider"></div>${callout('info','Sync in progress','19 of 28 documents processed.')}`)}</div><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Name</th><th>Status</th><th class="opt-md">Knowledge base</th><th class="c-num">Updated</th></tr></thead><tbody><tr><td><div class="cell-main">${fileIcon('pdf',28)}Travel & Expense Policy.pdf</div></td><td>${status('doc','ready')}</td><td class="opt-md">HR Policies</td><td class="c-num faint">18 min</td></tr><tr><td><div class="cell-main">${fileIcon('xlsx',28)}Reimbursement limits.xlsx</div></td><td>${status('doc','processing')}</td><td class="opt-md">Finance</td><td class="c-num faint">2 h</td></tr><tr><td><div class="cell-main">${fileIcon('docx',28)}Onboarding guide.docx</div></td><td>${status('doc','failed')}</td><td class="opt-md">People Ops</td><td class="c-num faint">Yesterday</td></tr></tbody></table></div></div>`;
+  const feedback = `<div class="ds4-grid ds4-grid-2"><div class="stack gap-8">${callout('ok','Changes saved','The assistant will use the new instructions.')}${callout('warn','2 documents need attention','Upload readable copies to make them searchable.')}${callout('err','Sales Enablement stopped syncing','Reconnect Google Drive to resume updates.')}</div><div class="ds4-demo"><div class="ds4-demo-body"><div class="grid g2"><div>${empty({icon:'upload',title:'Add your first documents',body:'Upload files or connect a source.',actions:btn('Upload files',{v:'primary',size:'sm'})})}</div><div>${errorState({boxed:false})}</div></div><div class="divider"></div>${skelRows(2,3).replace('class="tbl-wrap"','class=""')}<div class="ds4-btn-row" style="margin-top:16px">${btn('Success toast',{act:'ds-toast',data:{t:'ok'}})}${btn('Error toast',{act:'ds-toast',data:{t:'err'}})}${btn('Toast with undo',{act:'ds-toast',data:{t:'undo'}})}</div></div></div></div>`;
+  const overlays = `<div class="ds4-grid ds4-grid-3">${ds4Demo('Dropdown',`<div class="ds4-pop"><div class="menu-label">Actions</div><button class="menu-item">${ic('pencil')}<span class="grow">Rename</span></button><button class="menu-item">${ic('copy')}<span class="grow">Duplicate</span></button><div class="menu-sep"></div><button class="menu-item danger">${ic('archive')}<span class="grow">Archive</span></button></div>`)}${ds4Demo('Popover & tooltip',`<div class="ds4-pop"><b>Search scope</b><p class="muted" style="font-size:13px;margin:4px 0 12px">Choose where this question should search.</p>${select({id:'ds4-scope',value:'all',options:[['all','All knowledge'],['hr','HR Policies']]})}</div><div class="ds4-btn-row" style="margin-top:16px">${btn('Hover for tooltip',{v:'ghost',tip:'Clear, contextual help'})}${btn('Open menu',{menu:'ds4-menu',icon:'more'})}</div>`)}${ds4Demo('Modal & drawer',`<div class="ds4-layer-thumb"><div class="ds4-mini-modal"><b>Archive 3 documents?</b><p class="muted" style="font-size:12.5px;margin:5px 0 12px">They can be restored for 30 days.</p><div class="row end gap-8">${btn('Cancel',{size:'sm'})}${btn('Archive',{v:'danger',size:'sm'})}</div></div></div><div class="ds4-btn-row" style="margin-top:16px">${btn('Open modal',{act:'ds4-modal'})}${btn('Open drawer',{act:'ds-drawer'})}${btn('Command palette',{act:'palette',icon:'search'})}</div>`)}</div>`;
+  const ai = `<div class="ds4-grid ds4-grid-2">${ds4Demo('Conversation',`<div class="ds4-ai"><div class="ds4-user">What is the international travel per diem?</div><div class="ds4-answer"><div class="wk-work"><button class="wk-sum">${ic('chevron-right','i-sm')}<span>Worked for 4s · Searched HR Policies</span></button></div><p>The meal per diem is <strong>USD 75 per day</strong> <button class="cite" aria-label="Source 1">1</button>. Receipts are still required for lodging and transport <button class="cite" aria-label="Source 2">2</button>.</p><div class="src-row"><span class="ev-chip"><span class="n">1</span>${fileIcon('pdf',16)}<span class="ellipsis">Travel Policy.pdf</span></span><span class="ev-chip"><span class="n">2</span>${fileIcon('pdf',16)}<span class="ellipsis">Expense Guide.pdf</span></span></div></div></div>`)}${ds4Demo('Search result & activity',`<div class="ds4-result">${fileIcon('pdf',28)}<div><b>Travel & Expense Policy.pdf</b><p>HR Policies · Page 4 · Updated 2 days ago</p></div></div><div class="divider"></div><div class="ds4-exec"><span class="ds4-exec-mark">${ic('check','i-xs')}</span><div><b>Searched HR Policies</b><div class="faint">6 relevant passages</div></div></div><div class="ds4-exec"><span class="ds4-exec-mark">${ic('check','i-xs')}</span><div><b>Read 2 sources</b><div class="faint">Travel and expense policy</div></div></div>`)}${ds4Demo('Command / search palette',`<div class="ds4-command"><div class="ds4-command-in">${ic('search')}<span class="faint grow">Search chats, knowledge and pages…</span><kbd>Esc</kbd></div><div class="palette-group">Documents</div><div class="ds4-command-item">${fileIcon('pdf',26)}<span class="grow">Travel & Expense Policy.pdf</span><span class="faint">HR Policies</span></div><div class="palette-group">Go to</div><div class="ds4-command-item">${ic('book')}<span class="grow">Knowledge</span><kbd>↵</kbd></div></div>`)}${ds4Demo('Citation detail',`<div class="faint" style="font-size:12px;margin-bottom:8px">Travel & Expense Policy.pdf · page 4</div><div class="passage">Employees traveling internationally receive a meal per diem of USD 75 per calendar day.</div><p style="margin-top:14px;line-height:1.65">The reader scrolls to <mark class="ev is-focus">the exact cited passage</mark> and keeps source lineage visible.</p>`)}</div>`;
+  const foundation = `<div class="ds4-grid ds4-grid-4">${ds4Swatch('Page','--canvas')}${ds4Swatch('Main surface','--sheet')}${ds4Swatch('Elevated','--raised')}${ds4Swatch('Inset','--sunken')}${ds4Swatch('Foreground','--text','var(--sheet)')}${ds4Swatch('Muted text','--text-2','var(--sheet)')}${ds4Swatch('Border','--border-2')}${ds4Swatch('Accent','--primary','#fff')}${ds4Swatch('Evidence','--ev-bg')}${ds4Swatch('Success','--ok','#fff')}${ds4Swatch('Warning','--warn','#fff')}${ds4Swatch('Danger','--err','#fff')}</div><div class="ds4-grid ds4-grid-2" style="margin-top:18px">${ds4Demo('Typography',`<div class="ds4-type"><span>Display · 58/600</span><strong style="font-size:32px;letter-spacing:-.045em">Grounded knowledge</strong></div><div class="ds4-type"><span>Page · 26/600</span><strong style="font-size:26px;letter-spacing:-.025em">HR Policies</strong></div><div class="ds4-type"><span>Body · 14/1.5</span><span>Every answer stays linked to its source.</span></div><div class="ds4-type"><span>Reading · 15/1.7</span><span style="font-size:15px;line-height:1.7">Long-form answers optimize for calm scanning.</span></div><div class="ds4-type"><span>Mono · 12/500</span><code class="mono">v2 · 99.98% · [1]</code></div>`)}${ds4Demo('Spacing, radius, shadow, icons',`<div class="ds4-token-row">${[4,8,12,16,24,32,48].map(n=>`<span class="ds4-token"><i style="width:${n}px;height:${n}px"></i>${n}</span>`).join('')}</div><div class="divider"></div><div class="ds4-btn-row"><span class="tag">Control · 9px</span><span class="tag">Card · 12px</span><span class="tag">Layer · 16px</span></div><div class="divider"></div><div class="ds4-btn-row">${ic('search','i-sm')}${ic('book')}${ic('sparkles','i-lg')}<span class="faint">15 / 18 / 22 px · 1.75 stroke</span></div><div style="height:54px;margin-top:16px;border-radius:var(--r-lg);background:var(--raised);box-shadow:var(--sh-pop);display:grid;place-items:center">Floating elevation only</div>`)}</div>`;
+  const sourceMap = ds4MagicSources();
+  return `<div class="page ds4-page"><section class="ds4-hero"><span class="ds4-kicker">Canonical visual contract</span><h1>Quiet intelligence, made visible.</h1><p>This is the source of truth for every new BoMesh screen: clean neutral surfaces, exact spacing, restrained motion, and evidence that is always recognizable.</p><div class="ds4-hero-foot">${btn(S.theme==='dark'?'Use light mode':'Use dark mode',{v:'primary',icon:S.theme==='dark'?'sun':'moon',act:'pref-theme',data:{value:S.theme==='dark'?'light':'dark'}})}${btn('Open product index',{href:'/review'})}<span class="ds4-rule">${ic('check-circle')}Responsive · accessible · token-driven</span></div></section>
+    ${ds4Section('01 · Foundation','Foundation','Primitive values map to semantic roles, then components. New screens use meaning—not raw hex, radius, or shadow values.',foundation)}
+    ${ds4Section('02 · Navigation','Navigation','The product uses one permission-aware sidebar. Tablet collapses to an icon rail; phone uses a top bar that opens the same navigation.',nav)}
+    ${ds4Section('03 · Actions','Buttons','One primary action per view. Secondary, outline, ghost, destructive, icon-only, disabled, and loading states share one geometry.',ds4Demo('Button hierarchy',buttonBody))}
+    ${ds4Section('04 · Input','Inputs & selection','Visible labels, nearby help, inline errors, generous focus rings, and native semantics. Search is an input—not a decorative box.',ds4Demo('Form controls',inputs))}
+    ${ds4Section('05 · Surface','Cards','Cards group related content. Interactive and selected states are explicit; metrics and status keep the same surface grammar.',cards)}
+    ${ds4Section('06 · Data','Data display','Tables, lists, metadata, badges, status, and tabs prioritize scanning and preserve labels when color disappears.',data)}
+    ${ds4Section('07 · Feedback','Feedback & states','Async regions always define loading, empty, success, warning, and error behavior with a clear next action.',feedback)}
+    ${ds4Section('08 · Layers','Overlay','Dropdowns, popovers, modals, drawers, tooltips, and the command palette share one elevated surface and focus treatment.',overlays)}
+    ${ds4Section('09 · Product','AI & evidence','The existing agent flow stays intact: message, work, grounded answer, source chips, search results, execution steps, and citation detail.',ai)}
+    ${ds4Section('10 · Source','Magic UI source mechanics','Quiet Intelligence remains the visual concept. These pinned official components supply selected interaction mechanics; they do not replace BoMesh tokens, evidence semantics, navigation, or product flows.',sourceMap)}
+  </div>`;
+};
+A['ds4-switch'] = () => { ui('ds4').sw = !ui('ds4').sw; refresh(); };
+A['ds4-modal'] = () => openModal('ds4-modal');
+A['ds4-drawer'] = () => openDrawer('dsDemo');
+M['ds4-modal'] = () => ({ size:'sm', title:'Archive 3 documents?', sub:'HR Policies', body:callout('warn','They will stop appearing in answers','You can restore them for 30 days.'), foot:btn('Cancel',{act:'close-modal'})+btn('Archive',{v:'danger',act:'close-modal'}) });
+MENUS['ds4-menu'] = () => [{label:'Open details',icon:'file-text',run:()=>toast('Opened details')},{label:'Copy link',icon:'copy',run:()=>toast('Link copied')},{sep:true},{label:'Archive',icon:'archive',danger:true,run:()=>toast('Archived',{action:{label:'Undo',run:()=>toast('Restored')}})}];
 </script>
 <script>
 'use strict';

@@ -689,7 +689,7 @@ error body (`code`, `message`, `request_id`, `details`), identity from the
 access session (never from the body), and `404` for resources the caller
 cannot see.
 
-Swap procedure when a backend lands (docs/ux-refactor-plan.md §7): implement
+Swap procedure when a backend lands (`ui_preview/ux-refactor-plan.md` §7): implement
 the endpoint with the shapes below, replace the client function body with the
 real request, delete the local implementation and its `PENDING_FEATURES`
 entry, remove the Preview marker, then move the contract from this section

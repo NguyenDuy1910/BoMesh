@@ -4,7 +4,7 @@
  * Every state a person reads — a document's processing, a source's sync, an
  * account's grant, a run's outcome — is said here and only here, so "Failed"
  * on one page and "Failed" on another are the same word in the same colour.
- * Copied from the approved prototype (`docs/ux-review.html`, `const STATUS =`);
+ * Copied from the approved prototype (`ui_preview/ux-review.html`, `const STATUS =`);
  * `schedule`, `session` and `account.draft` extend it for backend states the prototype
  * has no row for.
  *

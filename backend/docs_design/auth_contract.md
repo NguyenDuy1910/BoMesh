@@ -153,7 +153,7 @@ off. An address the caller may not open renders a no-access page. Legacy
 `/app`, `/library` and `/workspace-control/*` addresses redirect permanently to
 their `/chat`, `/knowledge`, `/manage/*` and `/platform/*` successors.
 
-The Flutter app follows `docs/mobile-ux-blueprint.html`: Chat, Knowledge and
+The Flutter app follows `ui_preview/mobile-ux-blueprint.html`: Chat, Knowledge and
 Inbox are always present, and Manage appears only when the session holds a
 workspace management permission. All are presentation over the session's
 permissions, never an authorization layer. Manage sections follow these codes:

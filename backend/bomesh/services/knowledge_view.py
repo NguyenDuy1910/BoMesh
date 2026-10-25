@@ -82,7 +82,7 @@ class KnowledgeViewService:
                 "external_url": CitationResolver.original_url(
                     self._presenter.source_identity(item), citation
                 ),
-                "citation": citation,
+                "citation": citation.model_dump(mode="json"),
             }
 
     async def get_item(

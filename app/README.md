@@ -1,7 +1,7 @@
 # BoMesh Flutter application
 
 Flutter client for the existing `/api/v1` API, following
-`docs/mobile-ux-blueprint.html`. Destinations: **Chat**, **Knowledge**,
+`ui_preview/mobile-ux-blueprint.html`. Destinations: **Chat**, **Knowledge**,
 **Inbox**, and **Manage** (only for people holding a workspace management
 permission). Search and the account sheet sit in the header; the Platform
 console is a separate scope opened from the account sheet. Permissions and
@@ -147,4 +147,4 @@ fragmentation/authorization, attachment ownership, History rename, form/layout
 boundaries and "Make searchable" (run requests for a collection or one
 document, 409 messages, failed reasons, and nothing offered without
 `ingestion.run`). Use the running application for integration and visual
-verification against `docs/mobile-ux-blueprint.html`.
+verification against `ui_preview/mobile-ux-blueprint.html`.

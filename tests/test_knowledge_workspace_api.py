@@ -1,23 +1,29 @@
 from __future__ import annotations
+from contextlib import asynccontextmanager
 
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import quote
 from uuid import UUID, uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
 import api.app as api_app
 import api.deps as api_deps
+import bomesh.services.knowledge_view as knowledge_view_module
+from bomesh.connector.protocol import CitationInfo, SourceIdentity
 from bomesh.services import AuthContext
 from bomesh.services.document_presentation import (
     DocumentPresenter,
     LatestRunItem,
     public_document_status,
 )
+from bomesh.services.knowledge_view import KnowledgeViewService
 
 
 def _caller() -> AuthContext:
@@ -116,6 +122,90 @@ def test_knowledge_and_collection_routes_follow_resource_contract(monkeypatch) -
     assert collection.status_code == 200, collection.text
     assert calls == ["home", "list", "create", "get"]
 
+
+@pytest.mark.asyncio
+async def test_citation_payload_is_json_ready_for_the_api(monkeypatch) -> None:
+    document_id = uuid4()
+    collection_id = uuid4()
+    chunk_id = f"{document_id}:10"
+    citation = CitationInfo(
+        section="Reimbursements",
+        section_path=("Finance", "Reimbursements"),
+        page_start=10,
+        page_end=10,
+    )
+    item = SimpleNamespace(
+        id=document_id,
+        title="Pending reimbursements Q3.xlsx",
+        mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+    class Sessions:
+        def begin(self):
+            @asynccontextmanager
+            async def scope():
+                yield SimpleNamespace()
+
+            return scope()
+
+    class Knowledge(KnowledgeViewService):
+        async def _authorized_item(self, *_: object, **__: object):
+            return item, collection_id
+
+        async def _indexed_payloads(self, *_: object, **__: object):
+            return [{"chunk_id": chunk_id}]
+
+    class Citations:
+        def __init__(self, _: object) -> None:
+            pass
+
+        async def get(self, _: UUID, requested_chunk_id: str) -> CitationInfo:
+            assert requested_chunk_id == chunk_id
+            return citation
+
+    presenter = SimpleNamespace(
+        presigned_url=lambda _: None,
+        preview_payload=lambda _: None,
+        source_identity=lambda _: SourceIdentity(
+            connector_id="upload",
+            provider="file",
+            external_id=str(document_id),
+        ),
+    )
+    monkeypatch.setattr(knowledge_view_module, "CitationService", Citations)
+
+    knowledge = Knowledge(
+        Sessions(),  # type: ignore[arg-type]
+        index=SimpleNamespace(),
+        presenter=presenter,
+    )
+    value = await knowledge.get_citation(
+        _caller(), item_id=str(document_id), chunk_id=chunk_id
+    )
+    assert value["citation"] == citation.model_dump(mode="json")
+
+    async def caller() -> AuthContext:
+        return _caller()
+
+    async def get_knowledge() -> Knowledge:
+        return knowledge
+
+    monkeypatch.setitem(
+        api_app.app.dependency_overrides, api_deps.get_auth_context, caller
+    )
+    monkeypatch.setitem(
+        api_app.app.dependency_overrides,
+        api_deps.get_knowledge_view_service,
+        get_knowledge,
+    )
+    with TestClient(api_app.app) as client:
+        response = client.get(
+            f"/api/v1/knowledge/documents/{document_id}/citations/"
+            f"{quote(chunk_id, safe='')}"
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["citation"]["page_start"] == 10
 
 def test_document_processing_follows_index_state_and_current_version() -> None:
     now = datetime.now(timezone.utc)

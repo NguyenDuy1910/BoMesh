@@ -6,7 +6,7 @@ Tailwind 4 · lucide-react) so that its information architecture, design system,
 pages and flows match the approved UX prototype:
 
 ```
-docs/ux-review.html
+ui_preview/ux-review.html
 ```
 
 The prototype is the **design specification**, not code to copy. It is one
@@ -46,7 +46,7 @@ the implemented contract and the proposed contracts the UI already depends on.
    proves the change. Keep project-wide suites for the end of each phase.
 7. **Docs stay in sync.** After each phase, update `backend/docs_design` if
    routes, contracts, lifecycle or architecture changed. Record the decisions in
-   `docs/knowledge-management-ux-plan.md` (extend it; do not create a parallel
+   `ui_preview/knowledge-management-ux-plan.md` (extend it; do not create a parallel
    UX doc).
 
 ## How to read the prototype efficiently
@@ -54,7 +54,7 @@ the implemented contract and the proposed contracts the UI already depends on.
 The file is about 700 KB. Do not read it top to bottom. Grep and read these
 sections:
 
-| What you need | Where in `docs/ux-review.html` |
+| What you need | Where in `ui_preview/ux-review.html` |
 | --- | --- |
 | Design tokens (light + dark), every component class | first `<style>` block: `:root{`, `html[data-theme="dark"]`, `.btn`, `.input`, `.tbl`, `.badge`, `.tabs`, `.modal`, `.drawer`, `.menu`, `.toast`, `.state`, `.cite`, `.passage`, `mark.ev` |
 | Accent themes, backgrounds, density | `Round 2 — themes` style block (`html[data-accent=…]`, `html[data-bg=…]`, `html[data-density=…]`) |
@@ -64,7 +64,7 @@ sections:
 | End-to-end journeys | `const JOURNEYS` and every `JOURNEYS.splice` |
 | Each page | `P.<pageName> =` (`chatHome`, `chatThread`, `chats`, `kbList`, `kbDetail`, `docViewer`, `overview`, `sources`, `access`, `assistant`, `activity`, `settings`, `pWorkspaces`, …) |
 | Chat file work (attachments, secure workspace timeline, artifact panel) | `Round 3 — working with files` block: `wk_chipHtml`, `wk_workHtml`, `wk_cardsHtml`, `wk_filePanel`, `wk_historyHtml`, `wk_askHtml` |
-| Copy rules applied everywhere | `docs/ux-review.html#/review` → “Key decisions”; the prototype's `CONTRACT`-style comments |
+| Copy rules applied everywhere | `ui_preview/ux-review.html#/review` → “Key decisions”; the prototype's `CONTRACT`-style comments |
 
 To see behaviour, open the file in a browser (Playwright is already a dev
 dependency). Use the prototype bar at the bottom to switch role
@@ -275,7 +275,7 @@ verification performed, open decisions.
    `web/src/{app,components,modules,lib}`.
 2. Write a short mapping table (prototype page → current component → target
    route and component → backend status). Add it to
-   `docs/knowledge-management-ux-plan.md`.
+   `ui_preview/knowledge-management-ux-plan.md`.
 3. Capture “before” screenshots of every current route with Playwright into
    `/tmp/ux-before/`.
 4. Run `cd web && npm run typecheck && npm test` and record the baseline.
@@ -352,8 +352,8 @@ Follow `P.chatHome`, `P.chatThread`, `P.chats` and the Round-3 file-work block.
   2. Streamed markdown with amber citation chips.
   3. File cards.
   4. Source chips.
-  5. Actions: copy, retry menu (try again / more detail / shorter / search all
-     knowledge), feedback, sources, more (copy Markdown, save answer to My files).
+  5. Actions: copy, retry menu (Retry / More detail / Shorter), thumbs,
+     Sources and More.
   6. Answer variants pager kept locally.
 - User message: copy, edit in place with confirmation when later messages will
   be dropped.
@@ -496,7 +496,7 @@ without platform permission gets the no-access page; screenshots.
 
 ```
 Code changed        (by module)
-Docs changed        (backend/docs_design files, docs/knowledge-management-ux-plan.md)
+Docs changed        (backend/docs_design files, ui_preview/knowledge-management-ux-plan.md)
 Contract decisions  (approved / proposed / rejected — one line each)
 Verification        (commands run with results; Playwright flows walked; screenshots location)
 Pending APIs        (key → client function → proposed endpoint → screens using it)

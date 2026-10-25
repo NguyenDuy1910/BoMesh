@@ -123,9 +123,9 @@ shows the schedule as a sentence ("Daily at 02:00"), never a cron string.
 - No tenant storage or ingestion quota model currently exists. Collection
   uploads enforce the configured per-file upload and processing limits.
 
-## Refactor to the approved prototype (`docs/ux-review.html`)
+## Refactor to the approved prototype (`ui_preview/ux-review.html`)
 
-The prototype is the design specification; `docs/ux-refactor-plan.md` is the
+The prototype is the design specification; `ui_preview/ux-refactor-plan.md` is the
 execution brief. This section records the decisions taken while implementing
 it. Where it conflicts with the earlier sections above (rails, "Ingestion",
 separate Schedules destination), this section wins.
