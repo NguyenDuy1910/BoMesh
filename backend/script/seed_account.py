@@ -44,9 +44,9 @@ class SeedAccount:
 
 
 SEED_ACCOUNTS = (
-    SeedAccount("admin@gmail.com.com", "sample-admin-1", "Sample Admin 1"),
-    SeedAccount("admin2@gmail.com.com", "sample-admin-2", "Sample Admin 2"),
-    SeedAccount("admin3@gmail.com.com", "sample-admin-3", "Sample Admin 3"),
+    SeedAccount("admin@gmail.com", "sample-admin-1", "Sample Admin 1"),
+    SeedAccount("admin2@gmail.com", "sample-admin-2", "Sample Admin 2"),
+    SeedAccount("admin3@gmail.com", "sample-admin-3", "Sample Admin 3"),
 )
 
 
