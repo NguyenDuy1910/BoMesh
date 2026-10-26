@@ -44,14 +44,14 @@ class SeedAccount:
 
 
 SEED_ACCOUNTS = (
-    SeedAccount("admin1@gamil.com", "sample-admin-1", "Sample Admin 1"),
-    SeedAccount("admin2@gamil.com", "sample-admin-2", "Sample Admin 2"),
-    SeedAccount("admin3@gamil.com", "sample-admin-3", "Sample Admin 3"),
+    SeedAccount("admin@gmail.com.com", "sample-admin-1", "Sample Admin 1"),
+    SeedAccount("admin2@gmail.com.com", "sample-admin-2", "Sample Admin 2"),
+    SeedAccount("admin3@gmail.com.com", "sample-admin-3", "Sample Admin 3"),
 )
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
+    parser = argparse.ArgumentParser(\
         description="Seed three full-access local test accounts."
     )
     parser.add_argument(
