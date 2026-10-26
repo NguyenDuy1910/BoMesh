@@ -59,14 +59,21 @@ class ChatController extends ChangeNotifier {
       selectedCollectionIds.isNotEmpty &&
       selectedCollections.length != selectedCollectionIds.length;
 
-  Future<void> initialize({String? documentId, String? documentTitle}) async {
+  Future<void> initialize({
+    String? documentId,
+    String? documentTitle,
+    String? collectionId,
+    String? collectionTitle,
+    String? prompt,
+    String? conversationId,
+  }) async {
     final view = ++_viewToken;
     try {
       final saved = await _store.listConversations();
       if (_disposed || view != _viewToken) return;
       conversations = saved;
-      if (documentId == null) {
-        final selected = await _store.selectedConversation();
+      if (documentId == null && collectionId == null && prompt == null) {
+        final selected = conversationId ?? await _store.selectedConversation();
         if (_disposed || view != _viewToken) return;
         // Only a conversation someone had open is reopened; otherwise Ask
         // starts on its home, with recent chats one tap away.
@@ -80,7 +87,14 @@ class ChatController extends ChangeNotifier {
         messages = restored;
         _restoreCollections();
       } else {
-        referenceDocument(documentId, documentTitle ?? 'Document');
+        if (documentId != null) {
+          referenceDocument(documentId, documentTitle ?? 'Document');
+        }
+        applyInitialDraft(
+          collectionId: collectionId,
+          collectionTitle: collectionTitle,
+          prompt: prompt,
+        );
       }
     } catch (cause) {
       if (!_disposed && view == _viewToken) error = cause.toString();
@@ -91,6 +105,22 @@ class ChatController extends ChangeNotifier {
       }
     }
     if (isConfigured) unawaited(loadCollections());
+  }
+
+  void applyInitialDraft({
+    String? collectionId,
+    String? collectionTitle,
+    String? prompt,
+  }) {
+    if (_disposed) return;
+    if (collectionId != null) {
+      selectedCollectionIds = {collectionId};
+    }
+    if (prompt != null) setDraft(prompt);
+    if (collectionId != null && isConfigured) {
+      unawaited(loadCollections());
+    }
+    _notify();
   }
 
   Future<void> loadCollections() async {
@@ -247,6 +277,21 @@ class ChatController extends ChangeNotifier {
   void clearCollections() {
     if (_disposed || isGenerating) return;
     selectedCollectionIds = {};
+    _notify();
+  }
+
+  void rateAnswer(String id, bool helpful) {
+    if (_disposed || isGenerating) return;
+    messages = messages.map((message) {
+      if (message.id != id || message.role != ChatRole.assistant) return message;
+      return ChatMessage(
+        id: message.id, role: message.role, text: message.text,
+        documents: message.documents, collections: message.collections,
+        turn: message.turn, createdAt: message.createdAt,
+        rating: message.rating == helpful ? null : helpful,
+      );
+    }).toList();
+    _persist();
     _notify();
   }
 
@@ -423,7 +468,6 @@ class ChatController extends ChangeNotifier {
     await _run(
       text: text,
       includeUserMessage: true,
-      historyMessages: List.of(messages),
       displayMessages: List.of(messages),
       documents: documents,
       scope: selectedCollections,
@@ -448,7 +492,7 @@ class ChatController extends ChangeNotifier {
     await _run(
       text: user.text,
       includeUserMessage: false,
-      historyMessages: messages.sublist(0, userIndex),
+      replaceFromTurn: _serverTurnIndex(messages, userIndex),
       displayMessages: messages.sublist(0, userIndex + 1),
       documents: user.documents,
       scope: user.collections,
@@ -460,7 +504,7 @@ class ChatController extends ChangeNotifier {
   Future<void> _run({
     required String text,
     required bool includeUserMessage,
-    required List<ChatMessage> historyMessages,
+    int? replaceFromTurn,
     required List<ChatMessage> displayMessages,
     required List<ConversationDocument> documents,
     required List<ChatCollection> scope,
@@ -497,7 +541,7 @@ class ChatController extends ChangeNotifier {
       final handle = service.streamMessage(
         message: text,
         conversationId: id,
-        history: _historyFromMessages(historyMessages),
+        replaceFromTurn: replaceFromTurn,
         attachmentIds: documents.map((value) => value.id).toSet().toList(),
         collectionIds: scope.map((value) => value.id).toSet().toList(),
       );
@@ -655,30 +699,20 @@ class ComposerAttachment {
   final UploadFile? upload;
 }
 
-List<Map<String, String>> _historyFromMessages(List<ChatMessage> messages) {
-  var remaining = 24000;
-  final selected = <Map<String, String>>[];
-  for (final message in messages.reversed) {
-    final content = _clipHistory(message.displayText.trim());
-    if (content.isEmpty) continue;
-    if (selected.length == 24 || content.length > remaining) break;
-    selected.add({'role': message.role.name, 'content': content});
-    remaining -= content.length;
+/// Zero-based index the server gives `messages[userIndex]` among this
+/// conversation's user turns. The server stores a question once its stream
+/// starts; an earlier question whose answer never got `response.created` was
+/// rejected before that, so it is not counted.
+int _serverTurnIndex(List<ChatMessage> messages, int userIndex) {
+  var index = 0;
+  for (var position = 0; position < userIndex; position += 1) {
+    if (messages[position].role != ChatRole.user) continue;
+    final answer = position + 1 < userIndex
+        ? messages[position + 1].turn
+        : null;
+    if (answer == null || answer.responseOrder.isNotEmpty) index += 1;
   }
-  final result = selected.reversed.toList();
-  while (result.firstOrNull?['role'] == 'assistant') {
-    result.removeAt(0);
-  }
-  return result;
-}
-
-String _clipHistory(String value) {
-  const max = 8000;
-  const marker = '\n…\n';
-  if (value.length <= max) return value;
-  final available = max - marker.length;
-  final leading = (available * 0.6).ceil();
-  return '${value.substring(0, leading)}$marker${value.substring(value.length - (available - leading))}';
+  return index;
 }
 
 String _titleFromMessage(String value) {

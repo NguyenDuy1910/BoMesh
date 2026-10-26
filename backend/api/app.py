@@ -178,15 +178,20 @@ log = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    """Repair state lost workflows left behind; close every client at shutdown."""
+    """Repair state lost workflows left behind, start the sandbox pool, and
+    close every client at shutdown."""
 
     reconciling = asyncio.create_task(_reconcile_ingestion())
+    # The sandbox never delays startup: until Docker answers, chat simply
+    # runs without sandbox tools.
+    sandbox = asyncio.create_task(_start_sandbox())
     try:
         yield
     finally:
-        reconciling.cancel()
-        with suppress(asyncio.CancelledError):
-            await reconciling
+        for task in (reconciling, sandbox):
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
         await get_runtime().aclose()
 
 
@@ -196,6 +201,13 @@ async def _reconcile_ingestion() -> None:
         await get_runtime().ingestion_run_service().reconcile()
     except Exception:  # noqa: BLE001 - best effort; a run's next read repairs it too
         log.warning("ingestion runs could not be reconciled", exc_info=True)
+
+
+async def _start_sandbox() -> None:
+    try:
+        await get_runtime().start()
+    except Exception:  # noqa: BLE001 - chat works without the sandbox
+        log.warning("the sandbox could not be started", exc_info=True)
 
 
 def create_app() -> FastAPI:

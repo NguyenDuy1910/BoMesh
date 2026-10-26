@@ -2,26 +2,25 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from time import perf_counter
 from typing import TYPE_CHECKING, Any, Protocol, TypeAlias
 from uuid import uuid4
 
-from bomesh.agent.execution import ExecutionCapability
+from bomesh.agent.execution import ShellCommandResult, ShellRun
 from bomesh.agent.models import (
     AgentContext,
     CitationReferences,
-    ConversationMessage,
     Evidence,
 )
 from bomesh.agent.protocol import (
     InputImage,
     InputText,
     FunctionCallOutputItem,
-    HostedExecutionResultItem,
     Item,
     Prompt,
+    Reasoning,
+    ReasoningEffort,
     Tool,
     RuntimeActivityEvent,
     ResponseStreamEvent,
@@ -64,7 +63,7 @@ class ResourceRef:
 
 @dataclass(frozen=True, slots=True)
 class SandboxMaterialization:
-    """A durable resource made available to the next hosted-shell step."""
+    """A durable resource copied into the conversation sandbox's home directory."""
 
     resource: ResourceRef
     # Where the shell finds it: the original first, then any renditions.
@@ -197,22 +196,17 @@ class ResourceResolver(Protocol):
     async def materialize(self, resource: ResourceRef) -> tuple[ModelContent, ...]: ...
 
 
-class ExecutionCapabilityResolver(Protocol):
-    """Resolve hosted-execution support for the provider and model of one step."""
-
-    def resolve(
-        self, *, provider: str, model: str | None
-    ) -> ExecutionCapability: ...
-
-
 class SandboxRuntime(Protocol):
     """Request-scoped sandbox actions available to the generic agent loop."""
 
-    async def configure_execution(
-        self, capability: ExecutionCapability
-    ) -> ExecutionCapability: ...
+    @property
+    def guidance(self) -> str:
+        """Model-visible runtime facts; constant for a conversation."""
+        ...
 
-    async def observe_execution(self, items: tuple[Item, ...]) -> None: ...
+    async def run_commands(
+        self, commands: tuple[str, ...], *, timeout_seconds: int | None
+    ) -> ShellRun: ...
 
     async def materialize_resource(
         self, resource: ResourceRef
@@ -249,10 +243,13 @@ class SessionConfiguration:
     max_tool_calls: int = 6
     max_history_messages: int = 24
     max_history_characters: int = 24_000
-    recent_history_messages: int = 6
-    max_tool_result_characters: int = 10_000
-    max_tool_context_characters: int = 12_000
+    max_tool_result_characters: int = 12_000
+    # Observations kept in one turn's input before the oldest are evicted;
+    # generous so the request prefix stays append-only within a turn.
+    max_tool_context_characters: int = 60_000
     max_user_message_characters: int = 4_000
+    # ``None`` omits ``reasoning`` from the request; ``none`` turns it off.
+    reasoning_effort: ReasoningEffort | None = "none"
     # Wraps each tool execution, so it must stay above a tool's own budget
     # (knowledge_search allows 25s) or the executor cancels before the tool can
     # report its own timeout outcome.
@@ -273,7 +270,6 @@ class SessionConfiguration:
             min(
                 self.max_history_messages,
                 self.max_history_characters,
-                self.recent_history_messages,
                 self.max_tool_result_characters,
                 self.max_tool_context_characters,
                 self.max_user_message_characters,
@@ -281,8 +277,6 @@ class SessionConfiguration:
             < 1
         ):
             raise ValueError("agent context limits must be at least one")
-        if self.recent_history_messages > self.max_history_messages:
-            raise ValueError("recent conversation messages exceed the history limit")
         if self.tool_timeout_seconds <= 0:
             raise ValueError("tool timeout must be greater than zero")
         if self.max_tokens is not None and self.max_tokens < 1:
@@ -291,24 +285,6 @@ class SessionConfiguration:
             raise ValueError("max_sampling_retries must be non-negative")
         if self.sampling_retry_base_delay_seconds <= 0:
             raise ValueError("sampling_retry_base_delay_seconds must be greater than zero")
-
-
-@dataclass(frozen=True, slots=True)
-class ConversationWindow:
-    """A bounded history split into compressible and recent messages."""
-
-    older_messages: tuple[ConversationMessage, ...]
-    recent_messages: tuple[ConversationMessage, ...]
-
-    @property
-    def messages(self) -> tuple[ConversationMessage, ...]:
-        return (*self.older_messages, *self.recent_messages)
-
-    def older_payload(self) -> list[dict[str, str]]:
-        return _message_payload(self.older_messages)
-
-    def older_json(self) -> str:
-        return _compact_json(self.older_payload())
 
 
 @dataclass(slots=True)
@@ -327,9 +303,7 @@ class ConversationState:
         """Tool outputs acquired during this turn, in interaction order."""
 
         return tuple(
-            item
-            for item in self.items
-            if isinstance(item, (FunctionCallOutputItem, HostedExecutionResultItem))
+            item for item in self.items if isinstance(item, FunctionCallOutputItem)
         )
 
     def initialize(self, items: tuple[Item, ...]) -> None:
@@ -349,7 +323,6 @@ class SessionServices:
     model: object
     tool_registry: object
     resource_resolver: ResourceResolver | None = None
-    execution_capability_resolver: ExecutionCapabilityResolver | None = None
     sandbox_runtime: SandboxRuntime | None = None
     tracer: Tracer | None = None
 
@@ -362,6 +335,10 @@ class ResolvedStepSettings:
     temperature: float | None
     max_output_tokens: int | None
     parallel_tool_calls: bool
+    reasoning_effort: ReasoningEffort | None = None
+    # The conversation id: routes every request of one conversation to a warm
+    # provider prompt cache.
+    prompt_cache_key: str | None = None
     provider_options: dict[str, Any] = field(default_factory=dict)
 
 
@@ -406,9 +383,13 @@ class StepContext:
     turn_id: str
     step_index: int
     settings: ResolvedStepSettings
-    execution_capability: ExecutionCapability
+    # Static per conversation: present whenever a sandbox serves the session.
+    sandbox_guidance: str | None
     resources: tuple[ResourceRef, ...]
     tool_names: tuple[str, ...]
+    # False once a turn's tool limits are reached: the tools stay declared
+    # (stable request prefix) but the model is told not to call them.
+    tools_enabled: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -418,32 +399,31 @@ class ModelInput:
     turn_id: str
     step_index: int
     settings: ResolvedStepSettings
-    execution_capability: ExecutionCapability
+    sandbox_guidance: str | None
     instructions: str
     input_items: tuple[Item, ...]
     tools: tuple[Tool, ...]
+    tools_enabled: bool = True
 
     def prompt(self, *, previous_response_id: str | None) -> Prompt:
         """Project the materialized agent context onto the transport contract."""
 
+        effort = self.settings.reasoning_effort
         return Prompt(
             input=self.input_items,
             model=self.settings.model,
             instructions=self.instructions,
             tools=self.tools,
-            execution_capability=self.execution_capability,
             tool_choice=(
-                "auto"
-                if self.tools or self.execution_capability.hosted_shell
-                else None
+                ("auto" if self.tools_enabled else "none") if self.tools else None
             ),
             parallel_tool_calls=(
-                self.settings.parallel_tool_calls
-                if self.tools or self.execution_capability.hosted_shell
-                else None
+                self.settings.parallel_tool_calls if self.tools else None
             ),
             temperature=self.settings.temperature,
             max_output_tokens=self.settings.max_output_tokens,
+            reasoning=Reasoning(effort=effort) if effort is not None else None,
+            prompt_cache_key=self.settings.prompt_cache_key,
             previous_response_id=previous_response_id,
             provider_options=self.settings.provider_options,
         )
@@ -451,16 +431,6 @@ class ModelInput:
 
 def duration_ms(started_at: float) -> int:
     return round((perf_counter() - started_at) * 1_000)
-
-
-def _compact_json(value: object) -> str:
-    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-
-
-def _message_payload(
-    messages: tuple[ConversationMessage, ...],
-) -> list[dict[str, str]]:
-    return [{"role": message.role, "content": message.content} for message in messages]
 
 
 # Import primary runtime classes only after the shared package contracts exist.
@@ -473,10 +443,9 @@ __all__ = [
     "AgentExecutionError",
     "AgentStreamEvent",
     "ConversationState",
-    "ConversationWindow",
     "ContextManager",
-    "ExecutionCapability",
-    "ExecutionCapabilityResolver",
+    "ShellCommandResult",
+    "ShellRun",
     "AttachmentInput",
     "AttachmentRef",
     "ImageInput",

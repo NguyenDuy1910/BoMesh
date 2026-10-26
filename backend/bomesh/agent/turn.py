@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from time import perf_counter
 
@@ -35,13 +36,15 @@ from bomesh.agent.session import Session
 from bomesh.agent.tools import ToolExecutionBatch, ToolOrchestrator, ToolProgress
 from bomesh.observability import TraceSerializer
 
+_log = logging.getLogger(__name__)
+
 
 async def run_turn(session: Session, turn: TurnContext) -> AsyncIterator[AgentStreamEvent]:
     """Stream one turn, recapturing StepContext before every model request."""
 
     orchestrator = ToolOrchestrator(
         timeout_seconds=session.configuration.tool_timeout_seconds,
-        max_output_characters=session.configuration.max_tool_context_characters,
+        max_output_characters=session.configuration.max_tool_result_characters,
         tracer=session.tracer,
     )
     previous_response_id: str | None = None
@@ -68,10 +71,8 @@ async def run_turn(session: Session, turn: TurnContext) -> AsyncIterator[AgentSt
 
         previous_response_id = response.id
         session.record(response.output)
-        if session.sandbox is not None:
-            await session.sandbox.observe_execution(response.output)
         if response.function_calls:
-            if not step_context.tool_names:
+            if not (step_context.tools_enabled and step_context.tool_names):
                 raise AgentExecutionError("model requested a tool after the safety limit")
             turn.tool_round += 1
             batch: ToolExecutionBatch | None = None
@@ -256,6 +257,19 @@ async def run_sampling_request(
             generation_trace.set_output(
                 TraceSerializer.full(TraceSerializer.model_output(reducer.response))
             )
+            usage = reducer.response.usage
+            if usage is not None:
+                generation_trace.set_usage(usage)
+                _log.info(
+                    "agent_step_usage request_id=%s step=%d input_tokens=%d "
+                    "cached_tokens=%d output_tokens=%d reasoning_tokens=%d",
+                    turn.environment.agent_context.request_id,
+                    turn.model_iteration,
+                    usage.input_tokens,
+                    usage.input_tokens_details.cached_tokens,
+                    usage.output_tokens,
+                    usage.output_tokens_details.reasoning_tokens,
+                )
         # Trace end: the settled response and token timing are now available.
 
 

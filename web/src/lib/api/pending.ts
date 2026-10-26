@@ -6,7 +6,7 @@ import { pendingConfig } from "@/lib/config/pending";
  * "UI first, API pending": screens whose backend does not exist yet call a
  * typed client function that routes through `pendingApi`, backed by a local
  * implementation in `lib/api/pending/<feature>.ts`. When the endpoint ships,
- * only the client function body changes (see docs/ux-refactor-plan.md §7);
+ * only the client function body changes (see ui_preview/ux-refactor-plan.md §7);
  * the proposed request/response shapes live in
  * `backend/docs_design/api_contract.md` under "Proposed — UI built, API
  * pending", at the anchor named by `docsAnchor`.

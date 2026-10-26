@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 /// The colours of the app, light and dark.
 ///
-/// Warm paper and ink with one violet accent. Colour is reserved for meaning:
+/// Cool neutral surfaces and blueprint indigo. Colour is reserved for meaning:
 /// the accent marks the primary action and the current place; tones identify
 /// collections and file types; status colours appear only beside a status
 /// word.
@@ -68,24 +68,29 @@ class AppColors extends ThemeExtension<AppColors> {
   final Color info, infoSoft;
   final Color codeSurface, codeText;
 
+  /// Amber belongs to source evidence, independently of status and accent.
+  Color get evidence => dark ? const Color(0xFFF3D06A) : const Color(0xFF6A4D00);
+  Color get evidenceSoft =>
+      dark ? const Color(0xFF38301D) : const Color(0xFFFFF2C2);
+
   /// How strongly a tone colours its tile background.
   final double tint;
   final bool dark;
 
   static const light = AppColors(
     canvas: Color(0xFFFFFFFF),
-    paper: Color(0xFFF7F6F3),
-    subtle: Color(0xFFF2F0EC),
-    press: Color(0xFFEBE8E3),
-    line: Color(0xFFECE8E2),
-    lineStrong: Color(0xFFD9D4CC),
-    ink: Color(0xFF17161C),
-    ink2: Color(0xFF4B4753),
-    ink3: Color(0xFF78737F),
-    brand: Color(0xFF5B4CDB),
-    brandPress: Color(0xFF4A3BC6),
-    brandSoft: Color(0xFFEFEDFE),
-    brandInk: Color(0xFF4536B8),
+    paper: Color(0xFFF1F2F4),
+    subtle: Color(0xFFF7F8FA),
+    press: Color(0xFFE8EAEE),
+    line: Color(0xFFE4E7EB),
+    lineStrong: Color(0xFFD3D7DD),
+    ink: Color(0xFF0E1217),
+    ink2: Color(0xFF434C58),
+    ink3: Color(0xFF646D79),
+    brand: Color(0xFF3B38C4),
+    brandPress: Color(0xFF302EA1),
+    brandSoft: Color(0xFFEEEEFC),
+    brandInk: Color(0xFF3431AC),
     onBrand: Color(0xFFFFFFFF),
     success: Color(0xFF1F7A48),
     successSoft: Color(0xFFE7F5ED),
@@ -102,20 +107,20 @@ class AppColors extends ThemeExtension<AppColors> {
   );
 
   static const night = AppColors(
-    canvas: Color(0xFF121117),
-    paper: Color(0xFF0D0C11),
-    subtle: Color(0xFF1C1B23),
-    press: Color(0xFF25232E),
-    line: Color(0xFF25232D),
-    lineStrong: Color(0xFF383542),
-    ink: Color(0xFFF3F2F7),
-    ink2: Color(0xFFCBC7D4),
-    ink3: Color(0xFF9A95A6),
-    brand: Color(0xFF9B8CFF),
-    brandPress: Color(0xFFB2A6FF),
-    brandSoft: Color(0xFF262143),
-    brandInk: Color(0xFFC3BAFF),
-    onBrand: Color(0xFF14121C),
+    canvas: Color(0xFF13161A),
+    paper: Color(0xFF0B0D10),
+    subtle: Color(0xFF171A1F),
+    press: Color(0xFF262B32),
+    line: Color(0xFF252A31),
+    lineStrong: Color(0xFF313740),
+    ink: Color(0xFFECEEF1),
+    ink2: Color(0xFFB9BFC8),
+    ink3: Color(0xFF8E96A1),
+    brand: Color(0xFF6461F0),
+    brandPress: Color(0xFF7C7AF5),
+    brandSoft: Color(0xFF232542),
+    brandInk: Color(0xFFAAA8F7),
+    onBrand: Color(0xFFFFFFFF),
     success: Color(0xFF5FD39B),
     successSoft: Color(0xFF15302A),
     warning: Color(0xFFF2BE63),
@@ -158,6 +163,21 @@ class AppColors extends ThemeExtension<AppColors> {
   Color toneInk(Tone value) =>
       dark ? Color.lerp(tone(value), Colors.white, 0.28)! : tone(value);
 
+  AppColors withAccent(Color accent) => AppColors(
+    canvas: canvas, paper: paper, subtle: subtle, press: press,
+    line: line, lineStrong: lineStrong, ink: ink, ink2: ink2, ink3: ink3,
+    brand: accent,
+    brandPress: Color.lerp(accent, dark ? Colors.white : Colors.black, .18)!,
+    brandSoft: Color.alphaBlend(accent.withValues(alpha: dark ? .20 : .09), canvas),
+    brandInk: Color.lerp(accent, dark ? Colors.white : Colors.black, dark ? .45 : .12)!,
+    onBrand: accent.computeLuminance() > .5 ? const Color(0xFF0B0D10) : Colors.white,
+    success: success, successSoft: successSoft,
+    warning: warning, warningSoft: warningSoft,
+    danger: danger, dangerSoft: dangerSoft,
+    info: info, infoSoft: infoSoft,
+    codeSurface: codeSurface, codeText: codeText, tint: tint, dark: dark,
+  );
+
   @override
   AppColors copyWith() => this;
 
@@ -191,6 +211,8 @@ enum Tone {
 abstract final class AppTheme {
   static ThemeData get light => _build(AppColors.light);
   static ThemeData get dark => _build(AppColors.night);
+  static ThemeData accented({required bool dark, required Color accent}) =>
+      _build((dark ? AppColors.night : AppColors.light).withAccent(accent));
 
   static ThemeData _build(AppColors c) {
     final brightness = c.dark ? Brightness.dark : Brightness.light;
@@ -223,6 +245,7 @@ abstract final class AppTheme {
       surfaceTint: Colors.transparent,
     );
     final base = ThemeData(
+      fontFamily: 'IBM Plex Sans',
       useMaterial3: true,
       brightness: brightness,
       colorScheme: scheme,
@@ -295,7 +318,7 @@ abstract final class AppTheme {
           fontSize: 12,
           fontWeight: FontWeight.w600,
         ),
-      ),
+      ).apply(fontFamily: 'IBM Plex Sans'),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           minimumSize: const Size(48, 48),

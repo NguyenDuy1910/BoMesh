@@ -1,21 +1,19 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../app/workspace_scope.dart';
 import '../../core/api_client.dart';
 import '../../ui/ui.dart';
-import '../auth/session.dart';
+import '../manage/ingestion/ingestion_page.dart';
 import 'document_feed.dart';
 import 'knowledge_models.dart';
-import 'knowledge_widgets.dart';
 import 'share_sheet.dart';
 import 'upload_sheet.dart';
 
-/// A folder you can share: where it sits, what it is for, who can open it,
-/// then what is inside.
-///
-/// Upload is the one big action (with `collection.update`); Share sits beside
-/// the people who already have access (with `collection.share`); rename and
-/// delete live in "···".
+enum _Tab { documents, sources, access, settings }
+
+/// Documents lead; management is scoped to this resource's permissions.
 class CollectionPage extends StatefulWidget {
   const CollectionPage({super.key, required this.collection});
   final KnowledgeCollection collection;
@@ -26,201 +24,118 @@ class CollectionPage extends StatefulWidget {
 
 class _CollectionPageState extends State<CollectionPage> {
   ApiClient? _api;
-  late AuthSession _session;
   late KnowledgeCollection _collection = widget.collection;
   DocumentFeed? _feed;
-
-  /// Every collection this person can read: for the path and what is inside.
-  List<KnowledgeCollection> _all = const [];
-  List<CollectionGrant>? _grants;
+  List<KnowledgeCollection> _children = const [];
+  _Tab _tab = _Tab.documents;
+  String _query = '', _filter = '';
+  Timer? _debounce;
+  final Set<String> _retrying = {};
   bool _starting = false;
+  Object? _metaError;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final scope = WorkspaceScope.of(context);
-    _session = scope.session;
-    if (!identical(scope.api, _api)) {
-      _api = scope.api;
-      _feed?.dispose();
-      _feed = DocumentFeed(scope.api, collectionId: _collection.id)..load();
+    final api = WorkspaceScope.of(context).api;
+    if (!identical(api, _api)) {
+      _api = api;
+      _resetFeed();
       _loadMeta();
     }
   }
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _feed?.dispose();
     super.dispose();
   }
 
-  ApiClient get _client => _api!;
-  DocumentFeed get _documents => _feed!;
+  bool _allowed(String permission) => _collection.can(permission);
+  bool get _canSources => WorkspaceScope.of(context).session.can('source.manage');
   String get _path => '/collections/${Uri.encodeComponent(_collection.id)}';
 
-  bool _allowed(String permission) =>
-      allowedOn(_session, _collection, permission);
+  void _resetFeed() {
+    _feed?.dispose();
+    _feed = DocumentFeed(_api!, collectionId: _collection.id,
+        search: _query, processingFilter: _filter)..load();
+  }
 
   Future<void> _loadMeta() async {
     try {
-      final all = (await readAllPages(
-        _client,
-        '/collections',
-      )).map(KnowledgeCollection.fromJson).toList();
+      final values = await Future.wait([
+        _api!.get(_path),
+        readAllPages(_api!, '/collections'),
+      ]);
       if (!mounted) return;
       setState(() {
-        _all = all;
-        _collection =
-            all.where((item) => item.id == _collection.id).firstOrNull ??
-            _collection;
+        _collection = KnowledgeCollection.fromJson(values[0] as JsonMap);
+        _children = (values[1] as List<JsonMap>)
+            .map(KnowledgeCollection.fromJson)
+            .where((item) => item.parentId == _collection.id).toList();
+        _metaError = null;
       });
-    } catch (_) {
-      // The path and sub-collections are context; the items still load.
-    }
-    if (!_allowed('collection.share')) return;
-    try {
-      final grants = await readGrants(_client, _collection.id);
-      if (mounted) setState(() => _grants = grants);
-    } catch (_) {
-      // The share sheet reports its own failure.
+    } catch (error) {
+      if (mounted) setState(() => _metaError = error);
     }
   }
 
-  Future<void> _refresh() =>
-      Future.wait([_documents.load(quiet: true), _loadMeta()]);
-
-  List<KnowledgeCollection> get _ancestors {
-    final byId = {for (final item in _all) item.id: item};
-    final path = <KnowledgeCollection>[];
-    final seen = {_collection.id};
-    var parent = byId[_collection.parentId];
-    while (parent != null && seen.add(parent.id)) {
-      path.insert(0, parent);
-      parent = byId[parent.parentId];
-    }
-    return path;
-  }
-
-  List<KnowledgeCollection> get _children =>
-      _all.where((item) => item.parentId == _collection.id).toList();
-
-  Future<void> _open(KnowledgeCollection collection) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => CollectionPage(collection: collection),
-      ),
-    );
-    if (mounted) await _refresh();
+  Future<void> _refresh() async {
+    await Future.wait([_feed!.load(quiet: true), _loadMeta()]);
   }
 
   Future<void> _upload() async {
-    if (await showUploadSheet(context, into: _collection) && mounted) {
+    if (await showUploadSheet(context, into: _collection, onQueued: (runId) {
+      if (mounted) _feed!.follow(runId);
+    }) && mounted) {
       await _refresh();
     }
   }
 
-  Future<void> _share() async {
-    await showShareSheet(context, _collection);
-    if (mounted) await _loadMeta();
+  void _ask() {
+    WorkspaceScope.of(context).askAboutCollection?.call(_collection.id, _collection.title);
   }
 
-  /// One run for the pending and outdated documents of this collection.
-  Future<void> _makeSearchable() async {
-    if (_starting) return;
+  Future<void> _retry(KnowledgeDocument document) async {
+    if (!_retrying.add(document.id)) return;
+    setState(() {});
+    try {
+      final run = await startProcessing(_api!, documentIds: [document.id]);
+      if (!mounted) return;
+      _feed!.follow(run);
+      await _feed!.load(quiet: true);
+    } catch (error) {
+      if (mounted) showError(context, error);
+    } finally {
+      if (mounted) setState(() => _retrying.remove(document.id));
+    }
+  }
+
+  Future<void> _processPending() async {
     setState(() => _starting = true);
     try {
-      final run = await startProcessing(_client, collectionId: _collection.id);
-      _documents.follow(run);
-      await _documents.load(quiet: true);
+      final run = await startProcessing(_api!, collectionId: _collection.id);
+      if (!mounted) return;
+      _feed!.follow(run);
+      await _feed!.load(quiet: true);
     } catch (error) {
-      // A 409 explains itself, e.g. nothing is left to make searchable.
       if (mounted) showError(context, error);
     } finally {
       if (mounted) setState(() => _starting = false);
     }
   }
 
-  String get _goneLine {
-    final count = _collection.documentCount;
-    return count == 1
-        ? '1 item stops appearing in answers'
-        : '${groupedNumber(count)} items stop appearing in answers';
-  }
-
-  Future<void> _more() async {
-    final action = await showAppSheet<String>(
-      context,
-      builder: (sheetContext) => Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (_allowed('collection.update'))
-            SheetOption(
-              icon: Icons.edit_outlined,
-              title: 'Rename and describe',
-              onTap: () => Navigator.pop(sheetContext, 'edit'),
-            ),
-          if (_allowed('collection.delete'))
-            SheetOption(
-              icon: Icons.delete_outline_rounded,
-              danger: true,
-              title: 'Delete collection',
-              subtitle: _goneLine,
-              onTap: () => Navigator.pop(sheetContext, 'delete'),
-            ),
-        ],
-      ),
-    );
-    if (!mounted) return;
-    switch (action) {
-      case 'edit':
-        await _edit();
-      case 'delete':
-        await _delete();
-    }
-  }
-
-  Future<void> _edit() async {
-    final values = await showCollectionForm(
-      context,
-      title: 'Rename and describe',
-      initialTitle: _collection.title,
-      initialDescription: _collection.description,
-      confirmLabel: 'Save',
-    );
-    if (values == null || !mounted) return;
-    try {
-      final updated = await _client.patch(
-        _path,
-        body: {'title': values.title, 'description': values.description},
-      );
-      if (!mounted) return;
-      setState(() {
-        _collection = KnowledgeCollection.fromJson({
-          ...updated,
-          if (updated['permissions'] is! List)
-            'permissions': _collection.permissions.toList(),
-        });
-      });
-    } catch (error) {
-      if (mounted) showError(context, error);
-    }
-  }
-
   Future<void> _delete() async {
-    final confirmed = await confirmAction(
-      context,
+    final confirmed = await confirmAction(context,
       title: 'Delete “${_collection.title}”?',
-      message: '$_goneLine. This can’t be undone.',
-      confirmLabel: 'Delete collection',
-      destructive: true,
+      message: 'This knowledge base and its documents stop appearing in answers. There is no restore action.',
+      confirmLabel: 'Delete knowledge base', destructive: true,
     );
     if (!confirmed || !mounted) return;
     try {
-      await _client.delete(_path);
-      if (!mounted) return;
-      showToast(context, 'Collection deleted');
-      Navigator.of(context).pop();
+      await _api!.delete(_path);
+      if (mounted) Navigator.pop(context);
     } catch (error) {
       if (mounted) showError(context, error);
     }
@@ -229,284 +144,170 @@ class _CollectionPageState extends State<CollectionPage> {
   @override
   Widget build(BuildContext context) {
     final canUpload = _allowed('collection.update');
-    final children = _children;
+    final tabs = {
+      _Tab.documents: 'Documents',
+      if (_canSources) _Tab.sources: 'Sources',
+      if (_allowed('collection.share')) _Tab.access: 'Access',
+      if (canUpload || _allowed('collection.delete')) _Tab.settings: 'Settings',
+    };
+    final selected = tabs.containsKey(_tab) ? _tab : _Tab.documents;
     return Scaffold(
-      appBar: AppHeader(
-        actions: [
-          if (canUpload || _allowed('collection.delete'))
-            IconButton(
-              tooltip: 'More',
-              onPressed: _more,
-              icon: const Icon(Icons.more_horiz_rounded),
-            ),
-        ],
-      ),
-      floatingActionButton: canUpload
-          ? AppFab(
-              icon: Icons.upload_rounded,
-              label: 'Upload',
-              onPressed: _upload,
-            )
+      appBar: AppHeader(title: _collection.title, actions: [
+        IconButton(tooltip: 'Ask about this knowledge base',
+          onPressed: _ask, icon: const Icon(Icons.auto_awesome_outlined)),
+      ]),
+      floatingActionButton: selected == _Tab.documents
+          ? AppFab(icon: canUpload ? Icons.add_rounded : Icons.auto_awesome_rounded,
+              label: canUpload ? 'Add' : 'Ask', onPressed: canUpload ? _upload : _ask)
           : null,
-      body: RefreshIndicator(
-        onRefresh: _refresh,
-        child: ListView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: EdgeInsets.fromLTRB(
-            16,
-            0,
-            16,
-            canUpload ? kFabClearance : 28,
-          ),
-          children: [
-            _Breadcrumbs(
-              path: [
-                'Knowledge',
-                for (final item in _ancestors) item.title,
-                _collection.title,
+      body: Column(children: [
+        if (tabs.length > 1)
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(children: [
+              for (final entry in tabs.entries) ...[
+                ChoiceChip(label: Text(entry.value), selected: selected == entry.key,
+                  onSelected: (_) => setState(() => _tab = entry.key)),
+                const SizedBox(width: 8),
               ],
+            ]),
+          ),
+        Expanded(child: switch (selected) {
+          _Tab.documents => _documents(),
+          _Tab.sources => CollectionSources(collectionId: _collection.id),
+          _Tab.access => Padding(padding: const EdgeInsets.all(16),
+              child: CollectionAccessView(key: ValueKey(_collection.id), collection: _collection)),
+          _Tab.settings => _CollectionSettings(
+              key: ValueKey('${_collection.id}:${_collection.title}:${_collection.description}'),
+              collection: _collection,
+              onSave: (title, description) async {
+                await _api!.patch(_path, body: {'title': title, 'description': description});
+                if (mounted) await _loadMeta();
+              },
+              onDelete: _allowed('collection.delete') ? _delete : null,
             ),
-            _hero(),
-            if (children.isNotEmpty) ...[
-              SectionLabel(
-                'Inside',
-                aside: countOf(children.length, 'collection'),
-              ),
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    for (final child in children) ...[
-                      _Chip(label: child.title, onTap: () => _open(child)),
-                      const SizedBox(width: 8),
-                    ],
-                  ],
-                ),
-              ),
-            ],
-            ListenableBuilder(
-              listenable: _documents,
-              builder: (context, _) => Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  ?_searchableNotice(),
-                  SectionLabel(
-                    'Items',
-                    aside: _documents.loading
-                        ? null
-                        : groupedNumber(_documents.total),
-                  ),
-                ],
-              ),
-            ),
-            DocumentFeedView(
-              feed: _documents,
-              empty: EmptyView(
-                icon: Icons.insert_drive_file_outlined,
-                title: 'Nothing here yet',
-                message: canUpload
-                    ? 'Upload files to add them to this collection.'
-                    : 'Files added to this collection appear here.',
-              ),
-            ),
-          ],
-        ),
-      ),
+        }),
+      ]),
     );
   }
 
-  /// One quiet line when some items are not searchable and this person can
-  /// make them so.
-  Widget? _searchableNotice() {
-    final feed = _documents;
-    if (feed.loading || feed.error != null || !_allowed('ingestion.run')) {
-      return null;
-    }
-    if (feed.following) {
-      return const Padding(
-        padding: EdgeInsets.only(top: 16),
-        child: InlineNotice(
-          icon: Icons.autorenew_rounded,
-          text: 'Making them searchable. This list updates as each is done.',
-        ),
-      );
-    }
-    final waiting = feed.documents
-        .where(
-          (document) => document.isProcessable && document.processing.awaitsRun,
-        )
-        .length;
-    if (waiting == 0) return null;
-    return Padding(
-      padding: const EdgeInsets.only(top: 16),
-      child: InlineNotice(
-        icon: Icons.auto_awesome_rounded,
-        text: feed.hasMore
-            ? 'Some items aren’t searchable yet'
-            : waiting == 1
-            ? '1 item isn’t searchable yet'
-            : '${groupedNumber(waiting)} items aren’t searchable yet',
-        actionLabel: 'Make searchable',
-        onAction: _starting ? null : _makeSearchable,
-      ),
-    );
-  }
-
-  Widget _hero() {
-    final colors = context.colors;
-    final grants = _grants;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 12, 4, 2),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              ToneTile(
-                tone: toneFor(_collection.id),
-                icon: Icons.menu_book_outlined,
-                size: TileSize.large,
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _collection.title,
-                      style: TextStyle(
-                        color: colors.ink,
-                        fontSize: 22,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.6,
-                        height: 1.2,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    CollectionFacts(collection: _collection),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          if (_collection.description.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Text(
-              _collection.description,
-              style: TextStyle(color: colors.ink2, fontSize: 14.5, height: 1.5),
-            ),
-          ],
-          if (_allowed('collection.share')) ...[
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                if (grants != null && grants.isNotEmpty) ...[
-                  AvatarStack(names: [for (final grant in grants) grant.name]),
-                  const SizedBox(width: 10),
-                ],
-                Expanded(
-                  child: Text(
-                    grants == null
-                        ? ''
-                        : grants.isEmpty
-                        ? 'Not shared yet'
-                        : 'Shared with ${groupedNumber(grants.length)}',
-                    style: TextStyle(color: colors.ink3, fontSize: 13),
-                  ),
-                ),
-                FilledButton.icon(
-                  style: secondaryButtonStyle(context, small: true),
-                  onPressed: _share,
-                  icon: const Icon(Icons.person_add_alt_1_outlined, size: 18),
-                  label: const Text('Share'),
-                ),
-              ],
-            ),
-          ],
+  Widget _documents() => RefreshIndicator(
+    onRefresh: _refresh,
+    child: ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: kPagePadding.copyWith(bottom: kFabClearance),
+      children: [
+        if (_metaError != null) InlineNotice(
+          text: friendlyError(_metaError!), actionLabel: 'Retry', onAction: _loadMeta),
+        if (_collection.description.isNotEmpty) ...[
+          Text(_collection.description, style: TextStyle(color: context.colors.ink2)),
+          const SizedBox(height: 12),
         ],
-      ),
-    );
-  }
-}
-
-/// Where a collection sits: "Knowledge › Parent › This one".
-class _Breadcrumbs extends StatelessWidget {
-  const _Breadcrumbs({required this.path});
-  final List<String> path;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: Text.rich(
-        TextSpan(
-          children: [
-            for (var index = 0; index < path.length; index++) ...[
-              if (index > 0)
-                WidgetSpan(
-                  alignment: PlaceholderAlignment.middle,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 2),
-                    child: Icon(
-                      Icons.chevron_right_rounded,
-                      size: 16,
-                      color: colors.ink3,
-                    ),
-                  ),
-                ),
-              TextSpan(
-                text: path[index],
-                style: index == path.length - 1
-                    ? TextStyle(color: colors.ink, fontWeight: FontWeight.w700)
-                    : null,
-              ),
-            ],
+        AppSearchField(hint: 'Search ${_collection.title}', onChanged: (value) {
+          _debounce?.cancel();
+          _debounce = Timer(const Duration(milliseconds: 300), () {
+            if (!mounted) return;
+            setState(() { _query = value.trim(); _resetFeed(); });
+          });
+        }),
+        const SizedBox(height: 8),
+        SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [
+          for (final entry in const {'': 'All', 'attention': 'Needs attention',
+              'failed': 'Failed', 'processing': 'Processing'}.entries) ...[
+            ChoiceChip(label: Text(entry.value), selected: _filter == entry.key,
+              onSelected: (_) => setState(() { _filter = entry.key; _resetFeed(); })),
+            const SizedBox(width: 8),
           ],
+        ])),
+        if (_children.isNotEmpty) ...[
+          const SectionLabel('Inside this knowledge base'),
+          for (final child in _children) ListRow(
+            title: child.title, leading: const Icon(Icons.folder_outlined),
+            onTap: () async {
+              await Navigator.push(context, MaterialPageRoute<void>(
+                builder: (_) => CollectionPage(collection: child)));
+              if (mounted) await _refresh();
+            },
+          ),
+        ],
+        ListenableBuilder(listenable: _feed!, builder: (context, _) => Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (_feed!.following || _feed!.documents.any((d) => d.processing.isProcessing))
+              const InlineNotice(icon: Icons.autorenew_rounded,
+                text: 'Processing documents. You can leave this screen; server processing continues.'),
+            if (_allowed('ingestion.run') && _feed!.documents.any((d) =>
+                d.isProcessable && d.processing.awaitsRun))
+              InlineNotice(text: 'Some documents are not searchable yet.',
+                actionLabel: 'Process pending', onAction: _starting ? null : _processPending),
+            SectionLabel('Documents', aside: _feed!.loading ? null : groupedNumber(_feed!.total)),
+          ],
+        )),
+        DocumentFeedView(feed: _feed!, retrying: _retrying,
+          onRetryDocument: _allowed('ingestion.run') ? _retry : null,
+          empty: EmptyView(icon: Icons.upload_file_outlined,
+            title: _filter.isNotEmpty || _query.isNotEmpty ? 'No matching documents' : 'No documents yet',
+            message: _allowed('collection.update')
+                ? 'Add files to this knowledge base. They become searchable after processing.'
+                : 'Documents shared in this knowledge base appear here.'),
         ),
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(color: colors.ink3, fontSize: 13),
-      ),
-    );
-  }
+      ],
+    ),
+  );
 }
 
-/// A sub-collection, as a rounded chip.
-class _Chip extends StatelessWidget {
-  const _Chip({required this.label, required this.onTap});
-  final String label;
-  final VoidCallback onTap;
+class _CollectionSettings extends StatefulWidget {
+  const _CollectionSettings({super.key, required this.collection, required this.onSave, this.onDelete});
+  final KnowledgeCollection collection;
+  final Future<void> Function(String title, String description) onSave;
+  final Future<void> Function()? onDelete;
+  @override
+  State<_CollectionSettings> createState() => _CollectionSettingsState();
+}
+
+class _CollectionSettingsState extends State<_CollectionSettings> {
+  late final _title = TextEditingController(text: widget.collection.title);
+  late final _description = TextEditingController(text: widget.collection.description);
+  bool _saving = false;
+  bool get _dirty => _title.text.trim() != widget.collection.title ||
+      _description.text.trim() != widget.collection.description;
 
   @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Material(
-      color: colors.canvas,
-      shape: StadiumBorder(side: BorderSide(color: colors.lineStrong)),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Container(
-          constraints: const BoxConstraints(minHeight: 34),
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.menu_book_outlined, size: 15, color: colors.ink2),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  color: colors.ink2,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+  void dispose() { _title.dispose(); _description.dispose(); super.dispose(); }
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    try {
+      await widget.onSave(_title.text.trim(), _description.text.trim());
+      if (mounted) showToast(context, 'Changes saved');
+    } catch (error) {
+      if (mounted) showError(context, error);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
+
+  @override
+  Widget build(BuildContext context) => ListView(padding: kPagePadding, children: [
+    TextField(controller: _title, maxLength: 255,
+      readOnly: !widget.collection.can('collection.update'),
+      decoration: const InputDecoration(labelText: 'Name'),
+      onChanged: (_) => setState(() {})),
+    const SizedBox(height: 12),
+    TextField(controller: _description, maxLength: 2000, minLines: 3, maxLines: 6,
+      readOnly: !widget.collection.can('collection.update'),
+      decoration: const InputDecoration(labelText: 'Description'),
+      onChanged: (_) => setState(() {})),
+    if (_dirty && widget.collection.can('collection.update'))
+      FilledButton(onPressed: _saving || _title.text.trim().isEmpty ? null : _save,
+        child: Text(_saving ? 'Saving…' : 'Save changes')),
+    if (widget.onDelete != null) ...[
+      const SectionLabel('Delete knowledge base'),
+      const Text('Removes it and its documents from answers. No restore action is available.'),
+      const SizedBox(height: 12),
+      OutlinedButton(onPressed: _saving ? null : widget.onDelete,
+        child: const Text('Delete knowledge base')),
+    ],
+  ]);
 }

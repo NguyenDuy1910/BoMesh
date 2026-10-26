@@ -5,9 +5,9 @@ Status: accepted design. Implementation follows this document.
 ## Problem
 
 People must be able to read a whole knowledge document in BoMesh — from a
-citation in chat and from the Library — not only the cited passage. Today only
-PDFs have page images; Word, Excel, text and Markdown files show at most one
-passage, and the Library's "Original" view has no real content at all.
+citation in chat and from Knowledge (the web Library) — not only the cited
+passage. Today only PDFs have page images; Word, Excel, text and Markdown files
+show at most one passage, and the Library's "Original" view has no real content at all.
 
 ## Decision
 

@@ -25,12 +25,14 @@ class AppHeader extends StatelessWidget implements PreferredSizeWidget {
     this.paper = false,
     this.rule = false,
     this.bottom,
+    this.onTitleTap,
   });
   final String? title, subtitle;
 
   /// Replaces the automatic back button (for example, a History button).
   final Widget? leading;
   final List<Widget> actions;
+  final VoidCallback? onTitleTap;
   final bool paper, rule;
   final PreferredSizeWidget? bottom;
 
@@ -63,7 +65,10 @@ class AppHeader extends StatelessWidget implements PreferredSizeWidget {
       shape: rule ? Border(bottom: BorderSide(color: colors.line)) : null,
       title: title == null
           ? null
-          : Column(
+          : InkWell(
+              onTap: onTitleTap,
+              borderRadius: BorderRadius.circular(10),
+              child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -82,6 +87,7 @@ class AppHeader extends StatelessWidget implements PreferredSizeWidget {
                         ?.copyWith(fontSize: 12),
                   ),
               ],
+            ),
             ),
       actions: [...actions, const SizedBox(width: 6)],
       bottom: bottom,
@@ -135,30 +141,19 @@ class SectionLabel extends StatelessWidget {
         children: [
           Expanded(
             child: Text(
-              title.toUpperCase(),
+              title,
               style: TextStyle(
                 color: colors.ink3,
                 fontSize: 13,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.3,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.1,
               ),
             ),
           ),
           if (actionLabel != null)
-            GestureDetector(
-              onTap: onAction,
-              behavior: HitTestBehavior.opaque,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Text(
-                  actionLabel!,
-                  style: TextStyle(
-                    color: colors.brandInk,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
+            TextButton(
+              onPressed: onAction,
+              child: Text(actionLabel!),
             )
           else if (aside != null)
             Text(aside!, style: TextStyle(color: colors.ink3, fontSize: 13)),
@@ -315,9 +310,11 @@ class AppSearchField extends StatefulWidget {
     required this.onChanged,
     this.controller,
     this.autofocus = false,
+    this.onSubmitted,
   });
   final String hint;
   final ValueChanged<String> onChanged;
+  final ValueChanged<String>? onSubmitted;
   final TextEditingController? controller;
   final bool autofocus;
 
@@ -354,6 +351,7 @@ class _AppSearchFieldState extends State<AppSearchField> {
               controller: _controller,
               autofocus: widget.autofocus,
               textInputAction: TextInputAction.search,
+              onSubmitted: widget.onSubmitted,
               onChanged: (value) {
                 setState(() {});
                 widget.onChanged(value);

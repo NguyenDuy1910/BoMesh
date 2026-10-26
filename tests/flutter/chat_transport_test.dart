@@ -42,7 +42,6 @@ void main() {
       final handle = service.streamMessage(
         message: 'Hello',
         conversationId: newRequestId(),
-        history: [],
         attachmentIds: [],
         collectionIds: [],
       );
@@ -79,7 +78,6 @@ void main() {
       final handle = service.streamMessage(
         message: 'Hello',
         conversationId: newRequestId(),
-        history: [],
         attachmentIds: [],
         collectionIds: [],
       );
@@ -88,6 +86,60 @@ void main() {
         throwsA(isA<ApiException>()),
       );
       expect(expired, isTrue);
+    },
+  );
+
+  test(
+    'chat request leaves history to the server and names the replaced turn',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      final bodies = <Map<String, dynamic>>[];
+      server.listen((request) async {
+        bodies.add(
+          jsonDecode(await utf8.decoder.bind(request).join())
+              as Map<String, dynamic>,
+        );
+        request.response.headers.contentType = ContentType(
+          'text',
+          'event-stream',
+        );
+        request.response.write('data: [DONE]\n\n');
+        await request.response.close();
+      });
+      final api = ApiClient(baseUrl: 'http://127.0.0.1:${server.port}')
+        ..accessToken = 'session';
+      final service = ChatService(api);
+      addTearDown(service.close);
+      addTearDown(api.close);
+      for (final replaceFromTurn in [null, 2]) {
+        await service
+            .streamMessage(
+              message: 'Hello',
+              conversationId: 'conversation',
+              attachmentIds: ['document'],
+              collectionIds: ['collection'],
+              replaceFromTurn: replaceFromTurn,
+            )
+            .events
+            .toList()
+            .timeout(const Duration(seconds: 10));
+      }
+      expect(bodies, [
+        {
+          'message': 'Hello',
+          'conversation_id': 'conversation',
+          'attachment_ids': ['document'],
+          'collection_ids': ['collection'],
+        },
+        {
+          'message': 'Hello',
+          'conversation_id': 'conversation',
+          'replace_from_turn': 2,
+          'attachment_ids': ['document'],
+          'collection_ids': ['collection'],
+        },
+      ]);
     },
   );
 }

@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class ConversationMessage:
-    """A bounded prior turn supplied by the client for model context."""
+    """A prior answered turn loaded from the server-owned conversation."""
 
     role: Literal["user", "assistant"]
     content: str

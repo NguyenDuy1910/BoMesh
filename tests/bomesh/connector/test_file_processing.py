@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from io import BytesIO
 from types import SimpleNamespace
 
 import pytest
 from docling.datamodel.base_models import (
     ConversionStatus,
     DocumentStream,
+    VlmStopReason,
 )
 from docling_core.transforms.chunker import DocChunk, DocMeta
 from docling_core.transforms.chunker.line_chunker import LineBasedTokenChunker
@@ -23,6 +25,7 @@ from docling_core.types.doc import (
     TableData,
     TextItem,
 )
+from openpyxl import Workbook
 
 from bomesh.connector.file import UnsupportedFileTypeError
 from bomesh.connector.file.processing import FileProcessor
@@ -157,8 +160,13 @@ def test_docling_processor_reuses_converter_and_enforces_limits() -> None:
         processor.process_bytes(b"x" * 33, file_name="large.pdf")
 
 
-def _text_pdf(pages: list[list[tuple[float, float, float, str]]]) -> bytes:
-    """A minimal typed PDF: each page lists (x, baseline, font size, text) in Helvetica."""
+def _text_pdf(
+    pages: list[list[tuple[float, float, float, str]]], *, scans: frozenset[int] = frozenset()
+) -> bytes:
+    """A minimal typed PDF: each page lists (x, baseline, font size, text) in Helvetica.
+
+    A page whose 0-based index is in ``scans`` also carries a full-page image.
+    """
 
     objects = {
         1: b"<< /Type /Catalog /Pages 2 0 R >>",
@@ -166,10 +174,12 @@ def _text_pdf(pages: list[list[tuple[float, float, float, str]]]) -> bytes:
     }
     kids = []
     number = 4
-    for lines in pages:
+    for index, lines in enumerate(pages):
         stream = "".join(
             f"BT /F1 {size} Tf {x} {y} Td ({text}) Tj ET\n" for x, y, size, text in lines
         ).encode("latin-1")
+        if index in scans:
+            stream += b"q 612 0 0 792 0 0 cm BI /W 1 /H 1 /CS /G /BPC 8 ID \x80 EI Q\n"
         objects[number] = (
             b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
             b"/Resources << /Font << /F1 3 0 R >> >> /Contents %d 0 R >>" % (number + 1)
@@ -209,6 +219,12 @@ def _handbook_page(number: int) -> list[tuple[float, float, float, str]]:
     ]
 
 
+_HANDBOOK_PARAGRAPH = (
+    "Travel requests are approved by the budget owner before booking any"
+    " information is shared with vendors."
+)
+
+
 def _texts(document: DoclingDocument) -> list[tuple[str, int, str]]:
     return [
         (type(item).__name__, item.prov[0].page_no, item.text)
@@ -227,12 +243,7 @@ def test_a_pdf_is_read_from_its_own_text_layer_without_a_model() -> None:
     # the running header and page numbers dropped from every page.
     assert _texts(document)[:3] == [
         ("SectionHeaderItem", 1, "Chapter 1"),
-        (
-            "TextItem",
-            1,
-            "Travel requests are approved by the budget owner before booking any"
-            " information is shared with vendors.",
-        ),
+        ("TextItem", 1, _HANDBOOK_PARAGRAPH),
         ("TextItem", 1, "Receipts are kept for seven years."),
     ]
     assert [page for _, page, _ in _texts(document)] == [1, 1, 1, 2, 2, 2, 3, 3, 3]
@@ -245,12 +256,104 @@ def test_a_pdf_is_read_from_its_own_text_layer_without_a_model() -> None:
 
 
 @pytest.mark.parametrize("pages", [1, 3], ids=["one-page", "multi-page"])
-def test_a_pdf_without_a_text_layer_has_nothing_to_index(pages: int) -> None:
+def test_a_scan_without_a_vision_model_has_nothing_to_index(pages: int) -> None:
     # From three pages on, running headers are looked for: a scan has none.
-    scan = _text_pdf([[] for _ in range(pages)])
+    scan = _text_pdf([[] for _ in range(pages)], scans=frozenset(range(pages)))
 
     with pytest.raises(DoclingProcessingError, match="No extractable content"):
         DoclingProcessor().process_bytes(scan, file_name="scan.pdf")
+
+
+class _VisionConverter:
+    """Docling's VLM pipeline result shape: one transcribed paragraph per page."""
+
+    def __init__(self) -> None:
+        self.page_ranges: list[tuple[int, int]] = []
+
+    def convert(self, source: object, **kwargs: object) -> object:
+        first, last = kwargs["page_range"]
+        self.page_ranges.append((first, last))
+        document = DoclingDocument(name="scan")
+        for page_no in range(first, last + 1):
+            document.add_page(page_no=page_no, size=Size(width=612, height=792))
+            document.add_text(
+                label=DocItemLabel.TEXT,
+                text=f"Transcribed page {page_no}",
+                prov=ProvenanceItem(
+                    page_no=page_no,
+                    bbox=DoclingBoundingBox(l=0, t=792, r=612, b=0),
+                    charspan=(0, 0),
+                ),
+            )
+        pages = [
+            SimpleNamespace(
+                page_no=page_no,
+                predictions=SimpleNamespace(
+                    vlm_response=SimpleNamespace(stop_reason=VlmStopReason.END_OF_SEQUENCE)
+                ),
+            )
+            for page_no in range(first, last + 1)
+        ]
+        return SimpleNamespace(
+            status=ConversionStatus.SUCCESS, errors=[], document=document, pages=pages
+        )
+
+
+def test_scanned_pages_are_transcribed_in_place_among_text_layer_pages() -> None:
+    vision = _VisionConverter()
+    pdf = _text_pdf(
+        [_handbook_page(1), [], [], _handbook_page(4), _handbook_page(5)], scans=frozenset({1, 2})
+    )
+
+    document = DoclingProcessor(vision_converter=vision).process_bytes(pdf, file_name="mixed.pdf")
+
+    # Only the scanned run reaches the model; typed pages keep their text layer,
+    # running headers are still dropped across them, and pages keep their numbers.
+    assert vision.page_ranges == [(2, 3)]
+    assert [(page, text) for _, page, text in _texts(document)] == [
+        (1, "Chapter 1"),
+        (1, _HANDBOOK_PARAGRAPH),
+        (1, "Receipts are kept for seven years."),
+        (2, "Transcribed page 2"),
+        (3, "Transcribed page 3"),
+        (4, "Chapter 4"),
+        (4, _HANDBOOK_PARAGRAPH),
+        (4, "Receipts are kept for seven years."),
+        (5, "Chapter 5"),
+        (5, _HANDBOOK_PARAGRAPH),
+        (5, "Receipts are kept for seven years."),
+    ]
+
+
+def test_spreadsheet_banner_rows_leave_the_table_and_the_real_header_leads_it() -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Graduation list, round 4", None, None])
+    sheet.append(["Check your details before 12/07.", None, None])
+    sheet.append(["No", "Student ID", "Name"])
+    sheet.append([1, "09101070", "Minh"])
+    sheet.append([2, "09911028", "Nghiep"])
+    sheet.merge_cells("A1:C1")
+    sheet.merge_cells("A2:C2")
+    data = BytesIO()
+    workbook.save(data)
+
+    document = DoclingProcessor().process_bytes(data.getvalue(), file_name="list.xlsx")
+
+    items = [item for item, _ in document.iterate_items()]
+    assert [getattr(item, "text", None) for item in items[:2]] == [
+        "Graduation list, round 4",
+        "Check your details before 12/07.",
+    ]
+    (table,) = document.tables
+    assert table.data.num_rows == 3
+    assert [cell.text for cell in table.data.table_cells if cell.column_header] == [
+        "No",
+        "Student ID",
+        "Name",
+    ]
+    chunks = DoclingChunker().chunk(document, item_id="list")
+    assert any("1, Student ID = 09101070" in chunk.chunk_text for chunk in chunks)
 
 
 def test_document_mapper_preserves_structure_storage_and_normalized_provenance() -> None:

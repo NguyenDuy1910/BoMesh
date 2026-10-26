@@ -31,6 +31,33 @@ class _RunPageState extends State<RunPage> with LivePolling<RunPage> {
   bool _loadingMore = false;
   Object? _error;
   bool _retrying = false;
+  bool _canRetry = false;
+  final Map<String, bool> _processingPermissions = {};
+
+  Future<bool> _mayRetry(IngestionRun run) async {
+    if (run.active || run.retryable == 0) return false;
+    if (!mounted) return false;
+    if (WorkspaceScope.of(context).session.can('ingestion.run')) return true;
+    final items = await readAllPages(_api, '$_path/items');
+    final ids = {
+      for (final item in items)
+        if (['failed', 'cancelled', 'skipped'].contains(item['status']))
+          textOf(item['collection_id']),
+    };
+    if (ids.isEmpty || ids.contains('')) return false;
+    for (final id in ids) {
+      if (!_processingPermissions.containsKey(id)) {
+        try {
+          final collection = await _api.get('/collections/${Uri.encodeComponent(id)}');
+          _processingPermissions[id] = (collection['permissions'] as List?)?.contains('ingestion.run') ?? false;
+        } catch (_) {
+          return false;
+        }
+      }
+      if (_processingPermissions[id] != true) return false;
+    }
+    return true;
+  }
 
   String get _path => '/ingestion-runs/${Uri.encodeComponent(widget.runId)}';
 
@@ -57,9 +84,11 @@ class _RunPageState extends State<RunPage> with LivePolling<RunPage> {
       final run = IngestionRun.fromJson(await _api.get(_path));
       final title = await _names.title(run);
       final failed = await _readFailed(1);
+      final canRetry = await _mayRetry(run);
       if (!mounted) return;
       setState(() {
         _run = run;
+        _canRetry = canRetry;
         _title = title;
         _failed = objectList(failed['items']);
         _failedTotal = intOf(failed['total']);
@@ -86,9 +115,11 @@ class _RunPageState extends State<RunPage> with LivePolling<RunPage> {
         previous.failed != run.failed ||
         previous.active != run.active;
     final failed = failedChanged ? await _readFailed(1) : null;
+    final canRetry = failedChanged ? await _mayRetry(run) : _canRetry;
     if (!mounted) return;
     setState(() {
       _run = run;
+      _canRetry = canRetry;
       if (failed != null) {
         _failed = objectList(failed['items']);
         _failedTotal = intOf(failed['total']);
@@ -232,7 +263,7 @@ class _RunPageState extends State<RunPage> with LivePolling<RunPage> {
                 ? ErrorView(error: _error!, onRetry: _load)
                 : const LoadingView())
           : RefreshIndicator(onRefresh: _load, child: _body(run)),
-      bottomNavigationBar: run == null || run.active || run.retryable == 0
+      bottomNavigationBar: run == null || run.active || run.retryable == 0 || !_canRetry
           ? null
           : StickyActionBar(
               note: run.succeeded > 0

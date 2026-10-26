@@ -70,9 +70,6 @@ from bomesh.agent.protocol import (
 )
 from bomesh.agent.reducer import ResponseReducer
 from bomesh.agent.transports import RESPONSES_PROVIDERS, response_stream
-from bomesh.agent.transports.openrouter_execution_mapper import (
-    OpenRouterExecutionMapper,
-)
 from bomesh.agent.transports.responses_adapter import ResponsesStream, render_input
 
 PROVIDERS = sorted(RESPONSES_PROVIDERS)
@@ -311,7 +308,7 @@ async def test_refusal_and_hosted_tool_items_are_handled() -> None:
 
 
 @pytest.mark.asyncio
-async def test_hosted_shell_items_preserve_the_provider_execution_observation() -> None:
+async def test_provider_shell_items_are_preserved_as_extension_items() -> None:
     shell_call = ResponseFunctionShellToolCall(
         id="shell_1",
         call_id="shell-call-1",
@@ -355,64 +352,6 @@ async def test_hosted_shell_items_preserve_the_provider_execution_observation() 
     ]
     assert all(isinstance(event.item, ExtensionItem) for event in events)
     assert events[1].item.model_dump()["output"][0]["outcome"]["exit_code"] == 0
-
-
-@pytest.mark.asyncio
-async def test_openrouter_shell_output_is_normalized_before_the_agent_stream() -> None:
-    shell_call = ResponseFunctionShellToolCall(
-        id="shell_1",
-        call_id="shell-call-1",
-        type="shell_call",
-        status="completed",
-        action={"commands": ["python --version"]},
-    )
-    shell_output = ResponseFunctionShellToolCallOutput(
-        id="shell_output_1",
-        call_id="shell-call-1",
-        type="shell_call_output",
-        status="completed",
-        output=[
-            {
-                "stdout": "Python 3.12.0\\n",
-                "stderr": "",
-                "outcome": {"type": "exit", "exit_code": 0},
-            }
-        ],
-    )
-
-    class OpenRouterShellTransport(ScriptedResponsesTransport):
-        def __init__(self) -> None:
-            super().__init__(
-                [
-                    [
-                        ResponseOutputItemDoneEvent(
-                            type="response.output_item.done",
-                            sequence_number=0,
-                            output_index=0,
-                            item=shell_call,
-                        ),
-                        ResponseOutputItemDoneEvent(
-                            type="response.output_item.done",
-                            sequence_number=1,
-                            output_index=1,
-                            item=shell_output,
-                        ),
-                    ]
-                ]
-            )
-            self._execution_mapper = OpenRouterExecutionMapper()
-
-        def normalize_output_item(self, native: Any):  # type: ignore[no-untyped-def]
-            return self._execution_mapper.normalize_output_item(native)
-
-    transport = OpenRouterShellTransport()
-    events = [event async for event in ResponsesStream(transport).stream(Prompt(input=()))]
-
-    assert [event.item.type for event in events] == [
-        "hosted_execution_call",
-        "hosted_execution_result",
-    ]
-    assert events[1].item.model_dump()["output"][0]["exit_code"] == 0
 
 
 @pytest.mark.asyncio

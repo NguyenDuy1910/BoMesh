@@ -10,6 +10,7 @@ create a second API contract here.
 | --- | --- |
 | [Getting started](getting-started.md) | Local dependencies, initialization, development identity, and reset behavior. |
 | [Architecture](architecture.md) | HTTP boundary, package ownership, request flow, and infrastructure responsibilities. |
+| [UI and UX concept source](../ui_preview/README.md) | Canonical web/app visual language, prototypes, user flows, and implementation guidance. |
 | [API contract](../backend/docs_design/api_contract.md) | Versioned routes, DTO rules, auth/session semantics, errors, and lifecycle contract. |
 | [OpenAPI snapshot](../backend/docs_design/openapi.yaml) | Checked-in OpenAPI 3.1 contract generated from the FastAPI application. |
 | [Database architecture](../backend/docs_design/database_architecture.md) | Tenant boundaries, identity/session separation, Item lineage, storage ownership, and ID/index policy. |

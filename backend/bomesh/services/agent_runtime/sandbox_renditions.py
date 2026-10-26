@@ -1,4 +1,4 @@
-"""Shell-friendly copies of files the hosted shell cannot open by itself."""
+"""Shell-friendly copies of workbooks materialized into the sandbox."""
 
 from __future__ import annotations
 
@@ -29,8 +29,8 @@ class Rendition:
 def renditions(file_name: str, data: bytes) -> tuple[Rendition, ...]:
     """Return the copies the shell needs to read ``file_name``, if any.
 
-    The hosted shell has pandas but no Excel reader and no internet, so a
-    workbook also arrives as one CSV per non-empty sheet. Every cell value is
+    A workbook also arrives as one CSV per non-empty sheet, so a quick
+    ``head``/``grep``/pandas pass needs no Excel parsing. Every cell value is
     kept as is, header rows included: deciding which row is the header is the
     analysis, not the copy. A workbook that will not open yields no copies and
     the original is still delivered.

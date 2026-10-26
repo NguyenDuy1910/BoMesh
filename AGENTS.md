@@ -36,6 +36,36 @@ Do not design a competing architecture when the source of truth already defines 
 
 ---
 
+## UI and UX source of truth
+
+Before changing web or app UI, UX, navigation, or user flows, inspect:
+
+```text
+/Users/nguyenduy/Documents/utex/BoMesh/ui_preview
+```
+
+This directory is the canonical home for shared web/app visual concepts, component patterns, responsive behavior, and UX flows.
+
+Use:
+
+```text
+ui_preview/ux-review.html
+→ canonical visual language and interactive web prototype
+
+ui_preview/mobile-ux-blueprint.html
+→ app/mobile adaptation of the same concept and patterns
+
+ui_preview/ux-refactor-plan.md
+ui_preview/knowledge-management-ux-plan.md
+→ implementation and domain-flow decisions
+```
+
+Keep product behavior and backend contracts aligned with `backend/docs_design`; `ui_preview` owns presentation and UX, not API, authorization, persistence, or agent contracts.
+
+Do not create parallel design concepts or UX-flow documents under `docs/`, `web/`, or `app/`. Update the canonical references in `ui_preview` instead.
+
+---
+
 ## Required workflow
 
 For every implementation task:

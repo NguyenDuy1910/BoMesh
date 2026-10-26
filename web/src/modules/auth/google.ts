@@ -8,7 +8,6 @@ interface GoogleIdentityApi {
     callback: (response: GoogleCredentialResponse) => void;
     auto_select: boolean;
     cancel_on_tap_outside: boolean;
-    use_fedcm_for_button: boolean;
   }): void;
   renderButton(
     parent: HTMLElement,
@@ -33,29 +32,25 @@ declare global {
 
 const scriptId = "google-identity-services";
 
-/** Render Google's supported button flow instead of driving One Tap from a
- * custom click handler. FedCM treats the button click as the required user
- * activation and no longer exposes dependable display-moment callbacks. */
+interface GoogleCallbacks {
+  onCredential: (credential: string) => void;
+  onError: (message: string) => void;
+}
+
+let initialization: { clientId: string; promise: Promise<GoogleIdentityApi> } | null = null;
+let currentCallbacks: GoogleCallbacks | null = null;
+
+/** Render Google's supported button while sharing its page-global client.
+ * React Strict Mode and route remounts may render more than once, but GIS must
+ * be initialized once. The default popup UX avoids requiring optional FedCM. */
 export async function renderGoogleSignInButton(
   host: HTMLElement,
   clientId: string,
   onCredential: (credential: string) => void,
   onError: (message: string) => void,
 ): Promise<void> {
-  const identity = await loadGoogleIdentity();
-  identity.initialize({
-    client_id: clientId,
-    auto_select: false,
-    cancel_on_tap_outside: true,
-    use_fedcm_for_button: true,
-    callback: (response) => {
-      if (response.credential) {
-        onCredential(response.credential);
-        return;
-      }
-      onError("Google did not return a sign-in credential. Please try again.");
-    },
-  });
+  const identity = await initializeGoogleIdentity(clientId);
+  currentCallbacks = { onCredential, onError };
   host.replaceChildren();
   identity.renderButton(host, {
     type: "standard",
@@ -68,6 +63,38 @@ export async function renderGoogleSignInButton(
     // The product is written in English; Google would otherwise follow the browser.
     locale: document.documentElement.lang || "en",
   });
+}
+
+async function initializeGoogleIdentity(clientId: string): Promise<GoogleIdentityApi> {
+  if (initialization) {
+    if (initialization.clientId !== clientId) {
+      throw new Error("Google Identity cannot use multiple client IDs on the same page.");
+    }
+    return initialization.promise;
+  }
+
+  const promise = loadGoogleIdentity()
+    .then((identity) => {
+      identity.initialize({
+        client_id: clientId,
+        auto_select: false,
+        cancel_on_tap_outside: true,
+        callback: (response) => {
+          if (response.credential) {
+            currentCallbacks?.onCredential(response.credential);
+            return;
+          }
+          currentCallbacks?.onError("Google did not return a sign-in credential. Please try again.");
+        },
+      });
+      return identity;
+    })
+    .catch((error: unknown) => {
+      if (initialization?.promise === promise) initialization = null;
+      throw error;
+    });
+  initialization = { clientId, promise };
+  return promise;
 }
 
 async function loadGoogleIdentity(): Promise<GoogleIdentityApi> {

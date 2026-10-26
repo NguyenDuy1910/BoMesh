@@ -1,38 +1,46 @@
-"""Coordinate one request's sandbox materialization and artifact promotion."""
+"""Coordinate one request's sandbox container, files and artifact promotion."""
 
 from __future__ import annotations
 
+import logging
 import mimetypes
-from dataclasses import replace
 from pathlib import PurePosixPath
 from uuid import UUID
 
 from bomesh.agent import (
-    ExecutionCapability,
     ResourceRef,
     SandboxArtifact,
     SandboxMaterialization,
+    ShellRun,
 )
-from bomesh.agent.protocol import HostedExecutionResultItem, Item
 from bomesh.services import (
     ArtifactValidationError,
     AuthContext,
+    AuthorizationError,
+    DocumentNotFoundError,
     SandboxManifestResource,
-    SandboxProviderFile,
+    SandboxMaterializedFile,
     SandboxSessionState,
 )
-from bomesh.services.agent_runtime import SandboxProvider
+from bomesh.services.agent_runtime.docker_sandbox import (
+    PROVIDER,
+    SANDBOX_HOME,
+    DockerSandbox,
+    SandboxContainerGone,
+)
 from bomesh.services.agent_runtime.sandbox_renditions import renditions
 from bomesh.services.artifact import ArtifactService
 from bomesh.services.sandbox_session import SandboxSessionService
 
+_log = logging.getLogger(__name__)
+
 
 class SandboxWorkspace:
-    """Use durable resources in a provider sandbox without exposing bindings.
+    """Use durable resources in the conversation's container without exposing it.
 
-    The workspace is request-scoped. It asks ``SandboxSessionService`` for a
-    prior binding only when a shell-capable sampling step or a sandbox action
-    actually needs one, so ordinary chat never creates provider state.
+    The workspace is request-scoped. It binds a container only when a sandbox
+    tool actually needs one, so ordinary chat never claims a container or
+    creates a sandbox session. Container ids and host details never leave it.
     """
 
     def __init__(
@@ -41,145 +49,93 @@ class SandboxWorkspace:
         access: AuthContext,
         conversation_id: UUID,
         request_id: str,
-        provider: SandboxProvider,
+        sandbox: DockerSandbox,
         sessions: SandboxSessionService,
         artifacts: ArtifactService,
+        max_export_bytes: int,
     ) -> None:
         self._access = access
         self._conversation_id = conversation_id
         self._request_id = request_id
-        self._provider = provider
+        self._sandbox = sandbox
         self._sessions = sessions
         self._artifacts = artifacts
+        self._max_export_bytes = max_export_bytes
         self._state: SandboxSessionState | None = None
-        self._state_loaded = False
-        self._recovery: SandboxSessionState | None = None
-        self._recovery_loaded = False
+        self._container_id: str | None = None
         self._exported: dict[str, SandboxArtifact] = {}
-        # Provider files attached to the step being sampled; they count as
-        # delivered once that step reports an execution.
-        self._attaching: tuple[str, ...] = ()
+
+    @property
+    def guidance(self) -> str:
+        return self._sandbox.guidance
 
     @property
     def artifacts(self) -> tuple[SandboxArtifact, ...]:
         return tuple(self._exported.values())
 
-    async def configure_execution(
-        self, capability: ExecutionCapability
-    ) -> ExecutionCapability:
-        """Attach an opaque resumed environment or initial provider files."""
+    async def run_commands(
+        self, commands: tuple[str, ...], *, timeout_seconds: int | None
+    ) -> ShellRun:
+        """Run a command batch in the conversation's container."""
 
-        if (
-            not capability.hosted_shell
-            or capability.provider != self._provider.provider
-        ):
-            return capability
-        state = await self._current_state()
-        if state is None:
-            return capability
-        if state.environment_id is None:
-            # A new workspace receives everything prepared so far.
-            self._attaching = tuple(file.id for file in state.materialized_files)
-            return replace(capability, workspace_file_ids=self._attaching)
-        # A running workspace keeps its files; only newly prepared ones ride
-        # on this step.
-        self._attaching = tuple(
-            file.id for file in state.materialized_files if not file.delivered
-        )
-        return replace(
-            capability,
-            environment_id=state.environment_id,
-            workspace_file_ids=self._attaching,
-        )
-
-    async def observe_execution(self, items: tuple[Item, ...]) -> None:
-        """Persist only provider-generated environment and file observations."""
-
-        results = tuple(
-            item for item in items if isinstance(item, HostedExecutionResultItem)
-        )
-        for result in results:
-            environment = result.environment
-            if (
-                environment is None
-                or environment.provider != self._provider.provider
-            ):
-                continue
-            state = await self._ensure_state()
-            reported_files = tuple(
-                SandboxProviderFile(id=file.id, name=file.name or file.id)
-                for file in result.files
-                if file.provider == self._provider.provider
+        timeout = timeout_seconds or self._sandbox.default_timeout_seconds
+        try:
+            return await self._sandbox.run(
+                await self._container(), commands, timeout_seconds=timeout
             )
-            reported_names = {file.name for file in reported_files}
-            files = (*reported_files, *(file for file in state.observed_files if file.name not in reported_names))
-            self._state = await self._sessions.record_execution(
-                self._access,
-                session_id=state.id,
-                environment_id=environment.id,
-                files=files,
-                delivered_file_ids=self._attaching,
+        except SandboxContainerGone:
+            # Removed underneath this request (reaper, daemon restart): rebuild
+            # once from the durable manifest and run the batch there.
+            self._container_id = None
+            return await self._sandbox.run(
+                await self._container(), commands, timeout_seconds=timeout
             )
-            self._attaching = ()
 
     async def materialize_resource(
         self, resource: ResourceRef
     ) -> SandboxMaterialization:
-        """Upload one authorized Item for the next shell step.
+        """Copy one authorized Item into the home directory; return its paths."""
 
-        A new workspace receives it when it starts; a running one receives it
-        on its next shell request. The result says where the shell finds it.
-        """
-
-        state = await self._ensure_state()
-        await self._recover_if_needed(state)
-        state = await self._ensure_state()
+        container_id = await self._container()
+        state = self._bound_state()
         if not any(file.resource_id == resource.id for file in state.materialized_files):
-            await self._materialize(state, resource)
-            state = await self._ensure_state()
+            try:
+                await self._materialize(container_id, resource)
+            except SandboxContainerGone:
+                self._container_id = None
+                container_id = await self._container()
+                if not any(
+                    file.resource_id == resource.id
+                    for file in self._bound_state().materialized_files
+                ):
+                    await self._materialize(container_id, resource)
         return SandboxMaterialization(
             resource=resource,
             paths=tuple(
-                self._provider.workspace_path(file_id=file.id, file_name=file.name)
-                for file in state.materialized_files
+                f"~/{file.path}"
+                for file in self._bound_state().materialized_files
                 if file.resource_id == resource.id
             ),
         )
 
     async def promote_file(self, file_name: str, *, summary: str) -> SandboxArtifact:
-        """Export one observed sandbox file into the durable artifact lifecycle."""
+        """Export one sandbox file into the durable artifact lifecycle."""
 
-        requested_name = _safe_workspace_name(_home_relative(file_name))
-        state = await self._current_state()
-        if state is None or state.environment_id is None:
-            raise ArtifactValidationError("no active workspace file is available to export")
-        source = next(
-            (file for file in state.observed_files if file.name == requested_name),
-            None,
-        )
-        if source is None:
-            # Shell results report at most a few changed files per call, so a
-            # file written earlier may only be found in the workspace itself.
-            found = await self._provider.find_file(
-                environment_id=state.environment_id, path=requested_name
-            )
-            if found is None:
-                raise ArtifactValidationError(
-                    f"{requested_name} is not in the workspace home directory; "
-                    "write the file under ~ and export it by its path relative to ~"
-                )
-            source = SandboxProviderFile(id=found.id, name=requested_name)
-        try:
-            data = await self._provider.download_file(
-                environment_id=state.environment_id, file_id=source.id
-            )
-        except Exception as exc:  # provider errors must not leak into model context
-            await self._sessions.expire(self._access, session_id=state.id)
-            self._state = None
-            self._state_loaded = True
+        requested_name = sandbox_path(file_name)
+        container_id = await self._existing_container()
+        if container_id is None:
             raise ArtifactValidationError(
-                "the workspace is no longer available; its durable inputs can be "
-                "materialized again in a new workspace"
+                "the sandbox has no files yet; create the file with run_shell first"
+            )
+        try:
+            data = await self._sandbox.read_file(
+                container_id, requested_name, max_bytes=self._max_export_bytes
+            )
+        except SandboxContainerGone as exc:
+            self._container_id = None
+            raise ArtifactValidationError(
+                "the sandbox was reset and that file is gone; its durable inputs "
+                "are restored on the next run_shell call, so recreate the file"
             ) from exc
         mime_type = mimetypes.guess_type(requested_name)[0] or "application/octet-stream"
         artifact = await self._artifacts.record_generated(
@@ -195,149 +151,197 @@ class SandboxWorkspace:
         revision = artifact.get("revision")
         if not isinstance(revision, int) or revision < 1:
             raise RuntimeError("artifact service returned an invalid revision")
+        size_bytes = artifact.get("size_bytes")
         self._state = await self._sessions.record_resource(
             self._access,
-            session_id=state.id,
+            session_id=self._bound_state().id,
             resource=SandboxManifestResource(
                 resource_id=artifact_id,
                 name=str(artifact["file_name"]),
                 mime_type=str(artifact["mime_type"]),
-                size_bytes=artifact.get("size_bytes")
-                if isinstance(artifact.get("size_bytes"), int)
-                else None,
+                size_bytes=size_bytes if isinstance(size_bytes, int) else None,
             ),
         )
+        updated_at = artifact.get("updated_at")
         exported = SandboxArtifact(
             id=artifact_id,
             title=str(artifact["title"]),
             name=str(artifact["file_name"]),
             mime_type=str(artifact["mime_type"]),
             revision=revision,
-            size_bytes=artifact.get("size_bytes")
-            if isinstance(artifact.get("size_bytes"), int)
-            else 0,
-            updated_at=artifact.get("updated_at")
-            if isinstance(artifact.get("updated_at"), str)
-            else None,
+            size_bytes=size_bytes if isinstance(size_bytes, int) else 0,
+            updated_at=updated_at if isinstance(updated_at, str) else None,
         )
         # One entry per file, first-exported order, carrying its newest revision.
         self._exported[artifact_id] = exported
         return exported
 
-    async def _current_state(self) -> SandboxSessionState | None:
-        if not self._state_loaded:
-            self._state = await self._sessions.active(
-                self._access,
-                conversation_id=self._conversation_id,
-                provider=self._provider.provider,
-            )
-            self._state_loaded = True
-        return self._state
+    # -- Container binding ----------------------------------------------------
 
-    async def _ensure_state(self) -> SandboxSessionState:
-        state = await self._current_state()
+    async def _existing_container(self) -> str | None:
+        """The bound container, without claiming one when there is none."""
+
+        if self._container_id is not None:
+            return self._container_id
+        state = await self._sessions.active(
+            self._access, conversation_id=self._conversation_id, provider=PROVIDER
+        )
         if state is None:
-            state = await self._sessions.ensure(
-                self._access,
-                conversation_id=self._conversation_id,
-                provider=self._provider.provider,
-            )
+            return None
+        container_id = await self._sandbox.resolve(
+            session_id=state.id, container_id=state.container_id
+        )
+        if container_id is not None and container_id == state.container_id:
             self._state = state
-        return state
+            self._container_id = container_id
+        return self._container_id
 
-    async def _recover_if_needed(self, state: SandboxSessionState) -> None:
-        """Re-upload the prior manifest only after an expired workspace is reused."""
+    async def _container(self) -> str:
+        """The conversation's running container, claiming and rebuilding as needed."""
 
-        if not self._recovery_loaded:
-            self._recovery = await self._sessions.recoverable(
+        if self._container_id is not None:
+            return self._container_id
+        state = await self._sessions.ensure(
+            self._access, conversation_id=self._conversation_id, provider=PROVIDER
+        )
+        async with self._sandbox.lock(state.id):
+            container_id = await self._sandbox.resolve(
+                session_id=state.id, container_id=state.container_id
+            )
+            if container_id is not None and container_id == state.container_id:
+                self._state = state
+                self._container_id = container_id
+                return container_id
+            claimed = container_id or await self._sandbox.claim(session_id=state.id)
+            bound = await self._sessions.bind_container(
                 self._access,
-                conversation_id=self._conversation_id,
-                provider=self._provider.provider,
+                session_id=state.id,
+                container_id=claimed,
+                replaces=state.container_id,
             )
-            self._recovery_loaded = True
-        if self._recovery is None:
-            return
-        for manifest_resource in self._recovery.manifest:
-            current = await self._ensure_state()
-            if any(
-                file.resource_id == manifest_resource.resource_id
-                for file in current.materialized_files
-            ):
-                continue
-            await self._materialize(
-                current,
-                ResourceRef(
-                    id=manifest_resource.resource_id,
-                    name=manifest_resource.name,
-                    mime_type=manifest_resource.mime_type,
-                    size_bytes=manifest_resource.size_bytes,
-                ),
-            )
-        self._recovery = None
+            if bound.container_id != claimed and bound.container_id is not None:
+                # Another process bound this session first; use its container.
+                await self._sandbox.discard(claimed)
+                self._state = bound
+                self._container_id = bound.container_id
+                return bound.container_id
+            self._state = bound
+            self._container_id = claimed
+            await self._rebuild(claimed, bound)
+            return claimed
 
-    async def _materialize(
-        self, state: SandboxSessionState, resource: ResourceRef
-    ) -> None:
+    async def _rebuild(self, container_id: str, state: SandboxSessionState) -> None:
+        """Restore every durable input the conversation had in an earlier container."""
+
+        manifest = list(state.manifest)
+        previous = await self._sessions.recoverable(
+            self._access, conversation_id=self._conversation_id, provider=PROVIDER
+        )
+        if previous is not None:
+            known = {resource.resource_id for resource in manifest}
+            manifest.extend(
+                resource for resource in previous.manifest if resource.resource_id not in known
+            )
+        for resource in manifest:
+            try:
+                await self._materialize(
+                    container_id,
+                    ResourceRef(
+                        id=resource.resource_id,
+                        name=resource.name,
+                        mime_type=resource.mime_type,
+                        size_bytes=resource.size_bytes,
+                    ),
+                )
+            except (ArtifactValidationError, AuthorizationError, DocumentNotFoundError):
+                # Deleted or no longer readable: it simply does not come back.
+                _log.info("sandbox rebuild skipped resource %s", resource.resource_id)
+
+    async def _materialize(self, container_id: str, resource: ResourceRef) -> None:
         try:
             resource_id = UUID(resource.id)
         except ValueError as exc:
             raise ArtifactValidationError("resource cannot be materialized") from exc
         source = await self._artifacts.source_file(self._access, resource_id)
-        uploads = (
-            (source.file_name, source.mime_type, source.data),
-            *(
-                (copy.file_name, copy.mime_type, copy.data)
-                for copy in renditions(source.file_name, source.data)
-            ),
+        taken = {
+            file.path
+            for file in self._bound_state().materialized_files
+            if file.resource_id != resource.id
+        }
+        files = tuple(
+            (_free_name(_base_name(name), taken, resource.id), data)
+            for name, data in (
+                (source.file_name, source.data),
+                *(
+                    (copy.file_name, copy.data)
+                    for copy in renditions(source.file_name, source.data)
+                ),
+            )
         )
-        provider_files: list[SandboxProviderFile] = []
-        for name, mime_type, data in uploads:
-            uploaded = await self._provider.upload_file(
-                file_name=_safe_workspace_name(name), mime_type=mime_type, data=data
-            )
-            if uploaded.provider != self._provider.provider:
-                raise RuntimeError("sandbox provider returned a foreign file reference")
-            provider_files.append(
-                SandboxProviderFile(
-                    id=uploaded.id, name=name, resource_id=resource.id, delivered=False
-                )
-            )
+        await self._sandbox.write_files(container_id, files)
         self._state = await self._sessions.record_materialization(
             self._access,
-            session_id=state.id,
+            session_id=self._bound_state().id,
+            container_id=container_id,
             resource=SandboxManifestResource(
                 resource_id=resource.id,
                 name=source.file_name,
                 mime_type=source.mime_type,
                 size_bytes=source.size_bytes,
             ),
-            provider_files=provider_files,
+            files=tuple(
+                SandboxMaterializedFile(path=path, resource_id=resource.id)
+                for path, _ in files
+            ),
         )
 
+    def _bound_state(self) -> SandboxSessionState:
+        if self._state is None:
+            raise RuntimeError("sandbox workspace has no bound session")
+        return self._state
 
-def _home_relative(value: str) -> str:
-    """Accept ``~/x`` and ``x`` alike: workspace files are named from home."""
+
+def sandbox_path(value: str) -> str:
+    """Normalize a model-supplied path to one relative to the sandbox home.
+
+    ``~/x``, ``x`` and ``/home/sandbox/x`` name the same file. Other absolute
+    paths, ``..`` segments and control characters are rejected before any
+    container call.
+    """
 
     normalized = value.strip()
-    return normalized[2:] if normalized.startswith("~/") else normalized
-
-
-def _safe_workspace_name(value: str) -> str:
-    """Accept a virtual sandbox path but reject traversal before provider I/O."""
-
-    normalized = value.strip()
+    if normalized.startswith("~/"):
+        normalized = normalized[2:]
+    elif normalized.startswith(f"{SANDBOX_HOME}/"):
+        normalized = normalized[len(SANDBOX_HOME) + 1 :]
     if not normalized or "\\" in normalized or any(ord(char) < 32 for char in normalized):
-        raise ArtifactValidationError("workspace file name is invalid")
+        raise ArtifactValidationError("sandbox file path is invalid")
     path = PurePosixPath(normalized)
     if path.is_absolute():
         raise ArtifactValidationError(
-            "use the file's path relative to the workspace home directory (~)"
+            "use the file's path relative to the sandbox home directory (~)"
         )
-    if any(part in {"", ".", ".."} for part in path.parts):
-        raise ArtifactValidationError("workspace file name is invalid")
+    if any(part in {"", ".", ".."} for part in normalized.split("/")):
+        raise ArtifactValidationError("sandbox file path is invalid")
     if len(normalized) > 255:
-        raise ArtifactValidationError("workspace file name is invalid")
+        raise ArtifactValidationError("sandbox file path is invalid")
     return normalized
 
 
-__all__ = ["SandboxWorkspace"]
+def _base_name(value: str) -> str:
+    name = PurePosixPath(value.replace("\\", "/")).name.strip()
+    name = "".join(char for char in name if ord(char) >= 32)
+    if name in {"", ".", ".."}:
+        return "file"
+    return name[:200]
+
+
+def _free_name(name: str, taken: set[str], resource_id: str) -> str:
+    """Keep the original name unless another resource already uses it."""
+
+    chosen = name if name not in taken else f"{resource_id[:8]}-{name}"
+    taken.add(chosen)
+    return chosen
+
+
+__all__ = ["SandboxWorkspace", "sandbox_path"]

@@ -9,7 +9,6 @@ import type { KnowledgePreview } from "@/modules/knowledge/types";
 import { uploadCollectionFile } from "@/lib/api/upload";
 import { StreamEventDeduplicator } from "./stream-deduplicator";
 import type {
-  AgentHistoryMessage,
   ConversationDocument,
   ResponseStreamEvent,
 } from "./types";
@@ -28,7 +27,8 @@ export async function streamAgentResponse(
   message: string,
   options: {
     conversationId?: string | null;
-    history: AgentHistoryMessage[];
+    /** Zero-based user turn this request replaces; omitted appends a turn. */
+    replaceFromTurn?: number;
     attachmentIds?: string[];
     collectionItemIds?: string[];
     signal: AbortSignal;
@@ -48,9 +48,9 @@ export async function streamAgentResponse(
     body: JSON.stringify({
       message,
       conversation_id: options.conversationId ?? null,
-      history: options.history,
       attachment_ids: options.attachmentIds ?? [],
       collection_ids: options.collectionItemIds ?? [],
+      ...(options.replaceFromTurn === undefined ? {} : { replace_from_turn: options.replaceFromTurn }),
     }),
   });
   if (!response.ok || !response.body) {

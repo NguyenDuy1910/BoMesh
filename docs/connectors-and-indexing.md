@@ -64,7 +64,8 @@ context when unavailable. The original `chunk_text` remains the evidence text.
 Qdrant executes dense and BM25 searches for every query of a search in one
 request and combines all candidates with native reciprocal-rank fusion. The
 `knowledge` package applies tenant, source, tombstone, and principal filters
-before one LLM rerank, which acts as a relevance gate, and evidence projection.
+before evidence projection; the top fused candidates are used directly unless
+the optional LLM rerank (a relevance gate) is enabled.
 See `backend/docs_design/conversation_loop.md`.
 
 ## Access control

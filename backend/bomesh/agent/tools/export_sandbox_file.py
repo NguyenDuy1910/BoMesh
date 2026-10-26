@@ -1,4 +1,4 @@
-"""Promote an observed sandbox file into a durable conversation artifact."""
+"""Promote a sandbox file into a durable conversation artifact."""
 
 from __future__ import annotations
 
@@ -14,9 +14,10 @@ class ExportSandboxFile(Tool):
         return ToolSpec(
             name="export_sandbox_file",
             description=(
-                "Export one file reported by the hosted shell as a durable conversation "
-                "artifact. Use this only for a useful final or intermediate deliverable. "
-                "The file_name must exactly match a shell-reported workspace file."
+                "Save one file from the sandbox as a durable conversation "
+                "artifact the user can download. Use it only for a useful final or "
+                "intermediate deliverable. file_name is the file's path relative "
+                "to ~ (for example report.xlsx or out/chart.png)."
             ),
             input_schema={
                 "type": "object",
@@ -33,13 +34,13 @@ class ExportSandboxFile(Tool):
         if sandbox is None:
             return ToolResult(
                 content="",
-                error="Hosted workspace is unavailable.",
+                error="The sandbox is unavailable.",
                 metadata={"outcome": "unavailable", "result_count": 0},
             )
         try:
             artifact = await sandbox.promote_file(
                 str(invocation.payload.arguments["file_name"]),
-                summary="Exported from the hosted workspace.",
+                summary="Exported from the conversation sandbox.",
             )
         except ArtifactValidationError as exc:
             return ToolResult(

@@ -234,4 +234,84 @@ void main() {
       );
     },
   );
+
+  test(
+    'retry names the server turn it replaces and a new question appends',
+    () async {
+      final api = ApiClient(
+        client: MockClient(
+          (request) async =>
+              http.Response('{"items":[],"total":0}', 200, request: request),
+        ),
+      )..accessToken = 'token';
+      addTearDown(api.close);
+      final service = _RecordingChatService(api);
+      final controller = ChatController(
+        service,
+        ConversationStore(namespace: 'retry:team'),
+        identity(),
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      ChatMessage user(String text) => ChatMessage(
+        id: 'question-$text',
+        role: ChatRole.user,
+        text: text,
+        createdAt: DateTime.now(),
+      );
+      ChatMessage answer(String id, {required bool started}) => ChatMessage(
+        id: id,
+        role: ChatRole.assistant,
+        turn: ChatTurnState(
+          id: id,
+          status: started ? 'completed' : 'failed',
+          responseOrder: [if (started) 'response-$id'],
+        ),
+        createdAt: DateTime.now(),
+      );
+      controller.messages = [
+        user('first'),
+        answer('a1', started: true),
+        // Rejected before its stream started, so the server never stored it.
+        user('rejected'),
+        answer('a2', started: false),
+        user('third'),
+        answer('a3', started: true),
+        user('fourth'),
+        answer('a4', started: true),
+      ];
+
+      await controller.regenerate('a3');
+      expect(service.requests.last, (message: 'third', replaceFromTurn: 1));
+      expect(
+        controller.messages.map((value) => value.text).take(5).toList(),
+        ['first', '', 'rejected', '', 'third'],
+      );
+      expect(controller.messages.length, 6);
+
+      await controller.regenerate('a1');
+      expect(service.requests.last, (message: 'first', replaceFromTurn: 0));
+
+      await controller.sendMessage('next');
+      expect(service.requests.last, (message: 'next', replaceFromTurn: null));
+    },
+  );
+}
+
+class _RecordingChatService extends ChatService {
+  _RecordingChatService(super.api);
+
+  final requests = <({String message, int? replaceFromTurn})>[];
+
+  @override
+  ChatStreamHandle streamMessage({
+    required String message,
+    required String conversationId,
+    required List<String> attachmentIds,
+    required List<String> collectionIds,
+    int? replaceFromTurn,
+  }) {
+    requests.add((message: message, replaceFromTurn: replaceFromTurn));
+    return ChatStreamHandle(events: const Stream.empty(), cancel: () {});
+  }
 }

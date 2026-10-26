@@ -4,19 +4,14 @@ import '../../app/account_sheet.dart';
 import '../../app/workspace_scope.dart';
 import '../../core/api_client.dart';
 import '../../ui/ui.dart';
-import '../knowledge/knowledge_manage_page.dart';
 import 'access/access_page.dart';
 import 'access/requests_page.dart';
 import 'activity_page.dart';
 import 'ingestion/ingestion_page.dart';
-import 'platform/platform_overview.dart';
 import 'settings_page.dart';
 
-enum _Scope { workspace, platform }
 
-/// The Manage tab: operate by exception. What needs a decision comes first,
-/// in colour; the workspace at a glance second; the sections last — each only
-/// with its permission. Platform admins switch scope with a segmented control.
+/// Workspace operations, with attention items before navigation and metrics.
 class ManagePage extends StatefulWidget {
   const ManagePage({super.key});
 
@@ -25,7 +20,6 @@ class ManagePage extends StatefulWidget {
 }
 
 class _ManagePageState extends State<ManagePage> {
-  _Scope _scope = _Scope.workspace;
   ApiClient? _api;
   String _workspaceId = '';
   JsonMap? _overview;
@@ -89,40 +83,21 @@ class _ManagePageState extends State<ManagePage> {
   @override
   Widget build(BuildContext context) {
     final scope = WorkspaceScope.of(context);
-    final manage = scope.manage;
-    final both = manage.workspace && manage.platform;
-    final platform =
-        (manage.platform && !manage.workspace) ||
-        (both && _scope == _Scope.platform);
     return Scaffold(
       backgroundColor: context.colors.paper,
       appBar: AppHeader(
-        title: 'Manage',
-        subtitle: platform
-            ? 'Platform · all tenants'
-            : scope.session.workspaceName,
+        title: '',
         paper: true,
-        actions: const [AccountButton()],
-      ),
-      body: Column(
-        children: [
-          if (both)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 2, 16, 6),
-              child: Segmented<_Scope>(
-                segments: const {
-                  _Scope.workspace: 'Workspace',
-                  _Scope.platform: 'Platform',
-                },
-                selected: _scope,
-                onChanged: (value) => setState(() => _scope = value),
-              ),
-            ),
-          Expanded(
-            child: platform ? const PlatformOverview() : _workspace(scope),
+        actions: [
+          IconButton(
+            tooltip: 'Search',
+            onPressed: () => scope.openSearch?.call(),
+            icon: const Icon(Icons.search_rounded),
           ),
+          const AccountButton(),
         ],
       ),
+      body: _workspace(scope),
     );
   }
 
@@ -140,9 +115,13 @@ class _ManagePageState extends State<ManagePage> {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: kPagePadding,
         children: [
+          Text('Manage', style: Theme.of(context).textTheme.headlineMedium),
+          const SizedBox(height: 4),
+          Text(scope.session.workspaceName, style: TextStyle(color: context.colors.ink3)),
+          const SizedBox(height: 12),
           ..._attention(scope, overview),
-          if (overview != null) ..._glance(scope, overview),
           ..._sections(scope),
+          if (overview != null) ..._glance(scope, overview),
         ],
       ),
     );
@@ -162,7 +141,7 @@ class _ManagePageState extends State<ManagePage> {
     final cards = <Widget>[
       if (waiting > 0)
         AttentionCard(
-          tone: StatusTone.warning,
+          tone: StatusTone.danger,
           icon: Icons.shield_outlined,
           title: 'Access requests',
           subtitle: 'Waiting for your decision',
@@ -176,7 +155,7 @@ class _ManagePageState extends State<ManagePage> {
           title: '${countOf(failed, 'document')} failed',
           subtitle: 'They can’t be found in answers yet',
           count: failed,
-          onTap: () => _open(const IngestionPage()),
+          onTap: () => _open(const IngestionPage(initialTab: 1)),
         ),
     ];
     if (cards.isEmpty && overview == null) return const [];
@@ -209,7 +188,7 @@ class _ManagePageState extends State<ManagePage> {
             label: 'Documents',
             value: groupedNumber(intOf(knowledge['documents'])),
             note: countOf(intOf(knowledge['collections']), 'collection'),
-            onTap: opens(manage.knowledge, const KnowledgeManagePage()),
+            onTap: scope.openKnowledge,
           ),
           MetricCard.trend(
             label: 'Questions',
@@ -255,28 +234,20 @@ class _ManagePageState extends State<ManagePage> {
       onTap: () => _open(page),
     );
     final rows = <Widget>[
-      if (manage.knowledge)
-        row(
-          tone: Tone.violet,
-          icon: Icons.menu_book_outlined,
-          title: 'Knowledge',
-          subtitle: 'Collections, documents, sharing',
-          page: const KnowledgeManagePage(),
-        ),
       if (manage.ingestion)
         row(
           tone: Tone.cyan,
           icon: Icons.move_to_inbox_outlined,
-          title: 'Ingestion',
-          subtitle: 'Make documents searchable',
+          title: 'Sources',
+          subtitle: 'Connected content, sync history, accounts',
           page: const IngestionPage(),
         ),
       if (manage.access)
         row(
           tone: Tone.indigo,
           icon: Icons.shield_outlined,
-          title: 'Access',
-          subtitle: 'Members, groups, roles',
+          title: 'People & access',
+          subtitle: 'Members, groups, roles, requests',
           page: const AccessPage(),
           trailing: badge,
         )
@@ -284,11 +255,11 @@ class _ManagePageState extends State<ManagePage> {
         row(
           tone: Tone.indigo,
           icon: Icons.shield_outlined,
-          title: 'Access requests',
+          title: 'People & access',
           subtitle: waiting > 0
               ? 'Waiting for your decision'
               : 'Nothing waiting',
-          page: const RequestsPage(),
+          page: const AccessPage(),
           trailing: badge,
         ),
       if (manage.activity)
@@ -296,7 +267,7 @@ class _ManagePageState extends State<ManagePage> {
           tone: Tone.sky,
           icon: Icons.monitor_heart_outlined,
           title: 'Activity',
-          subtitle: 'Usage, sign-ins, audit',
+          subtitle: 'Changes and sign-ins',
           page: const ActivityPage(),
         ),
       if (manage.settings)

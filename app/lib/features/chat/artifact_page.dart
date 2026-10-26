@@ -30,8 +30,6 @@ Future<void> downloadArtifact(
   }
 }
 
-enum _FileAction { edit, revisions }
-
 /// A file the assistant made, shown the way Knowledge shows documents: a
 /// spreadsheet is a table, a text document is formatted text. Its actions
 /// sit at the bottom: Download, and Save to knowledge.
@@ -52,6 +50,11 @@ class _ArtifactPageState extends State<ArtifactPage> {
   JsonMap? _detail;
   JsonMap? _content;
   Object? _error;
+  JsonMap? _previousContent;
+  int? _previousRevision;
+  Object? _comparisonError;
+  String? _savedTo;
+  int _tab = 0;
   bool _loading = true;
   bool _downloading = false;
   bool _saving = false;
@@ -80,6 +83,7 @@ class _ArtifactPageState extends State<ArtifactPage> {
     setState(() {
       _loading = true;
       _error = null;
+      _comparisonError = null;
       if (revision != null) _revision = revision;
     });
     try {
@@ -88,10 +92,26 @@ class _ArtifactPageState extends State<ArtifactPage> {
         widget.artifact.id,
         _revision,
       );
+      final earlier = objectList(detail['revisions'])
+          .map((value) => intOf(value['revision']))
+          .where((value) => value < _revision).toList()..sort();
+      final previousRevision = earlier.lastOrNull;
+      JsonMap? previousContent;
+      Object? comparisonError;
+      if (previousRevision != null) {
+        try {
+          previousContent = await _service.artifactContent(widget.artifact.id, previousRevision);
+        } catch (cause) {
+          comparisonError = cause;
+        }
+      }
       if (!mounted || request != _request) return;
       setState(() {
         _detail = detail;
         _content = content;
+        _previousRevision = previousRevision;
+        _previousContent = previousContent;
+        _comparisonError = comparisonError;
       });
     } catch (cause) {
       if (mounted && request == _request) setState(() => _error = cause);
@@ -144,8 +164,11 @@ class _ArtifactPageState extends State<ArtifactPage> {
       final result = await _service.publishArtifact(
         widget.artifact.id,
         chosen.id,
+        // The server adds the stored file's extension to the title.
+        title: widget.artifact.fileName.replaceFirst(RegExp(r'\.[^.]+$'), ''),
       );
       if (!mounted) return;
+      setState(() => _savedTo = chosen.title);
       showToast(
         context,
         result['created'] == false
@@ -159,69 +182,98 @@ class _ArtifactPageState extends State<ArtifactPage> {
     }
   }
 
-  Future<void> _more() async {
-    final revisions = _revisions;
-    final action = await showAppSheet<_FileAction>(
-      context,
-      builder: (sheet) => Column(
-        mainAxisSize: MainAxisSize.min,
+  void _askForChanges() {
+    widget.controller.editArtifact(widget.artifact);
+    Navigator.pop(context);
+  }
+
+  Widget _history() => ListView(
+    padding: const EdgeInsets.all(16),
+    children: [
+      for (final revision in _revisions)
+        ListTile(
+          leading: const Icon(Icons.history_rounded),
+          title: Text('Version ${intOf(revision['revision'])}'),
+          subtitle: Text([
+            textOf(revision['summary']),
+            exactTime(revision['created_at']),
+          ].where((value) => value.isNotEmpty).join(' · ')),
+          selected: intOf(revision['revision']) == _revision,
+          trailing: intOf(revision['revision']) == _revision
+              ? const Icon(Icons.check_rounded) : null,
+          onTap: () {
+            setState(() => _tab = 0);
+            unawaited(_load(intOf(revision['revision'])));
+          },
+        ),
+    ],
+  );
+
+  Widget _changes() {
+    if (_comparisonError != null) {
+      return ErrorView(
+        error: _comparisonError!,
+        title: 'The previous version could not be loaded',
+        onRetry: _load,
+      );
+    }
+    final previous = _previousContent;
+    if (previous == null) {
+      return const Center(child: Padding(
+        padding: EdgeInsets.all(24),
+        child: Text('This is the first version. There is no earlier version to compare.'),
+      ));
+    }
+    final before = textOf(previous['content']);
+    final after = textOf(_content?['content']);
+    if (before.isNotEmpty || after.isNotEmpty) {
+      return ListView(
+        padding: const EdgeInsets.all(16),
         children: [
-          SheetOption(
-            icon: Icons.edit_outlined,
-            tone: Tone.violet,
-            title: 'Continue editing',
-            subtitle: 'Ask for changes in the chat',
-            onTap: () => Navigator.pop(sheet, _FileAction.edit),
-          ),
-          if (revisions.length > 1)
-            SheetOption(
-              icon: Icons.history_rounded,
-              title: 'Other revisions',
-              subtitle: countOf(revisions.length, 'revision'),
-              onTap: () => Navigator.pop(sheet, _FileAction.revisions),
-            ),
+          InlineNotice(text: before == after
+              ? 'The text is unchanged between these versions.'
+              : 'Compare the full text of versions $_previousRevision and $_revision below.'),
+          SectionLabel('Version $_previousRevision · before'),
+          SelectableText(before.isEmpty ? 'No text content.' : before),
+          SectionLabel('Version $_revision · after'),
+          SelectableText(after.isEmpty ? 'No text content.' : after),
         ],
-      ),
-    );
-    if (!mounted || action == null) return;
-    switch (action) {
-      case _FileAction.edit:
-        widget.controller.editArtifact(widget.artifact);
-        Navigator.pop(context);
-      case _FileAction.revisions:
-        final latest = intOf(_detail?['revision']);
-        final chosen = await showAppSheet<int>(
-          context,
-          title: 'Revisions',
-          subtitle: 'Choose one to preview.',
-          scrollable: true,
-          builder: (sheet) => Column(
-            mainAxisSize: MainAxisSize.min,
+      );
+    }
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(12),
+          child: Text('Version $_previousRevision → $_revision. Compare the original previews; automatic binary differences are not available.'),
+        ),
+        Expanded(
+          child: PageView(
             children: [
-              for (final revision in revisions)
-                SheetOption(
-                  icon: Icons.description_outlined,
-                  title: intOf(revision['revision']) == latest
-                      ? 'Revision ${intOf(revision['revision'])} · latest'
-                      : 'Revision ${intOf(revision['revision'])}',
-                  subtitle: textOf(revision['summary']).trim().isNotEmpty
-                      ? textOf(revision['summary']).trim()
-                      : [
-                          exactTime(revision['created_at']),
-                          if (intOf(revision['size_bytes']) > 0)
-                            readableBytes(intOf(revision['size_bytes'])),
-                        ].where((value) => value.isNotEmpty).join(' · '),
-                  selected: intOf(revision['revision']) == _revision,
-                  onTap: () =>
-                      Navigator.pop(sheet, intOf(revision['revision'])),
-                ),
+              _ArtifactPreview(
+                key: ValueKey('before-$_previousRevision'),
+                artifactId: widget.artifact.id,
+                revision: _previousRevision!,
+                content: previous,
+                fileName: _fileName,
+                onRetry: () => unawaited(_load()),
+              ),
+              _ArtifactPreview(
+                key: ValueKey('after-$_revision'),
+                artifactId: widget.artifact.id,
+                revision: _revision,
+                content: _content!,
+                fileName: _fileName,
+                onRetry: () => unawaited(_load()),
+              ),
             ],
           ),
-        );
-        if (mounted && chosen != null && chosen != _revision) {
-          unawaited(_load(chosen));
-        }
-    }
+        ),
+        const Padding(
+          padding: EdgeInsets.all(8),
+          child: Text('Swipe to compare the previous and selected versions.'),
+        ),
+      ],
+    );
   }
 
   @override
@@ -235,6 +287,10 @@ class _ArtifactPageState extends State<ArtifactPage> {
         title: 'The preview could not be loaded',
         onRetry: _load,
       );
+    } else if (_tab == 1) {
+      body = _changes();
+    } else if (_tab == 2) {
+      body = _history();
     } else {
       body = _ArtifactPreview(
         key: ValueKey(_revision),
@@ -252,13 +308,34 @@ class _ArtifactPageState extends State<ArtifactPage> {
         rule: true,
         actions: [
           IconButton(
-            tooltip: 'More',
-            onPressed: _more,
-            icon: const Icon(Icons.more_horiz_rounded),
+            tooltip: 'Download this version',
+            onPressed: _downloading ? null : _download,
+            icon: const Icon(Icons.download_rounded),
           ),
         ],
       ),
-      body: body,
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: SegmentedButton<int>(
+              segments: const [
+                ButtonSegment(value: 0, label: Text('Preview')),
+                ButtonSegment(value: 1, label: Text('Changes')),
+                ButtonSegment(value: 2, label: Text('History')),
+              ],
+              selected: {_tab},
+              onSelectionChanged: (value) => setState(() => _tab = value.single),
+            ),
+          ),
+          if (_savedTo != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: InlineNotice(text: 'Latest version saved to $_savedTo.'),
+            ),
+          Expanded(child: body),
+        ],
+      ),
       bottomNavigationBar: StickyActionBar(
         children: [
           FilledButton(
@@ -273,14 +350,9 @@ class _ArtifactPageState extends State<ArtifactPage> {
           ),
           Expanded(
             child: FilledButton.icon(
-              onPressed: _downloading ? null : _download,
-              icon: _downloading
-                  ? const SizedBox.square(
-                      dimension: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.download_rounded, size: 20),
-              label: const Text('Download'),
+              onPressed: widget.controller.isGenerating ? null : _askForChanges,
+              icon: const Icon(Icons.edit_outlined, size: 20),
+              label: const Text('Ask for changes'),
             ),
           ),
         ],

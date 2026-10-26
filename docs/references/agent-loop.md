@@ -114,7 +114,10 @@ rounds, tool-call count, durations, discovered evidence, used evidence IDs, and
 executed tool signatures. `SessionConfiguration` provides circuit breakers only — model turns, tool rounds, total
 tool calls, tool execution time, tool-output context size, history size,
 user-message size, and provider retry count. They are safety limits, not a
-prescribed workflow.
+prescribed workflow. Reaching the tool limits keeps the tools declared and sends
+`tool_choice: "none"`, so the request prefix stays cacheable; any call made
+anyway is refused. Request shaping for prompt caching is described in
+`backend/docs_design/conversation_loop.md`.
 
 ### Sampling requests and retries
 

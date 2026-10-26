@@ -128,19 +128,14 @@ class Role(BaseModel):
 # --- Agent and chat ---
 
 
-class ChatHistoryMessage(BaseModel):
-    """A prior user or assistant turn retained by the browser conversation store."""
-
-    role: Literal["user", "assistant"]
-    content: str = Field(min_length=1, max_length=8_000)
-
-
 class ChatRequest(BaseModel):
-    """A bounded chat turn submitted by the current WebUI."""
+    """One chat turn. The server owns the conversation's history."""
 
     message: str = Field(min_length=1, max_length=4_000)
     conversation_id: UUID | None = None
-    history: list[ChatHistoryMessage] = Field(default_factory=list, max_length=24)
+    # Zero-based index of the earlier user turn this request replaces (retry or
+    # edit); omitted appends a new turn.
+    replace_from_turn: int | None = Field(default=None, ge=0)
     collection_ids: list[UUID] = Field(default_factory=list, max_length=20)
     # Stable identities for resources attached to this turn. An attachment is
     # processed directly on upload; the agent can read it before that finishes.
@@ -150,6 +145,8 @@ class ChatRequest(BaseModel):
     def validate_collection_selection(self) -> ChatRequest:
         if len(self.collection_ids) != len(set(self.collection_ids)):
             raise ValueError("Collection IDs must be unique")
+        if self.replace_from_turn is not None and self.conversation_id is None:
+            raise ValueError("replace_from_turn requires conversation_id")
         return self
 
 
@@ -951,7 +948,6 @@ __all__ = [
     "ArtifactPublishRequest",
     "ArtifactPublishResponse",
     "ArtifactRevisionView",
-    "ChatHistoryMessage",
     "ChatRequest",
     "CollectionCreate",
     "CollectionUpdate",

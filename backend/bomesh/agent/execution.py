@@ -1,45 +1,59 @@
-"""Provider-neutral hosted-execution capability contract."""
+"""Provider-neutral contracts for commands run in a conversation sandbox."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from typing import Any
+
+#: Commands one ``run_shell`` call may carry.
+MAX_SHELL_COMMANDS = 5
 
 
 @dataclass(frozen=True, slots=True)
-class ExecutionCapability:
-    """Hosted-execution features resolved for one provider and model step."""
+class ShellCommandResult:
+    """The bounded outcome of one command run in the sandbox shell."""
 
-    provider: str
-    model: str | None
-    hosted_shell: bool = False
-    provider_files: bool = False
-    persistent_environments: bool = False
-    # Model-visible facts about the hosted runtime (paths, interpreters,
-    # libraries, network). The provider adapter owns them; the context
-    # manager only places them in the instructions.
-    guidance: str | None = None
-    # Opaque adapter state. It never becomes model context or a client event;
-    # the provider tool builder is the only consumer.
-    environment_id: str | None = field(default=None, repr=False, compare=False)
-    workspace_file_ids: tuple[str, ...] = field(default=(), repr=False, compare=False)
+    command: str
+    stdout: str
+    stderr: str
+    exit_code: int | None
+    timed_out: bool = False
 
     def __post_init__(self) -> None:
-        if not self.provider.strip():
-            raise ValueError("execution capability provider must not be blank")
-        if self.environment_id is not None and not self.environment_id.strip():
-            raise ValueError("execution environment id must not be blank")
-        if any(not identifier.strip() for identifier in self.workspace_file_ids):
-            raise ValueError("execution workspace file ids must not be blank")
+        if self.timed_out and self.exit_code is not None:
+            raise ValueError("a timed-out command cannot have an exit code")
+        if not self.timed_out and self.exit_code is None:
+            raise ValueError("a finished command needs an exit code")
+
+    def payload(self) -> dict[str, Any]:
+        # The command is already in the model's call; results align by index.
+        return {
+            "exit_code": self.exit_code,
+            "timed_out": self.timed_out,
+            "stdout": self.stdout,
+            "stderr": self.stderr,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ShellRun:
+    """One ``run_shell`` batch: every command result and the files it changed."""
+
+    results: tuple[ShellCommandResult, ...]
+    # Home-relative paths of regular files written during the batch.
+    changed_files: tuple[str, ...] = ()
 
     @property
-    def available(self) -> bool:
-        return any(
-            (
-                self.hosted_shell,
-                self.provider_files,
-                self.persistent_environments,
-            )
-        )
+    def failed(self) -> bool:
+        return any(result.timed_out or result.exit_code != 0 for result in self.results)
+
+    def payload(self) -> dict[str, Any]:
+        """The function-call output shared by the model and the clients."""
+
+        return {
+            "results": [result.payload() for result in self.results],
+            "changed_files": list(self.changed_files),
+        }
 
 
-__all__ = ["ExecutionCapability"]
+__all__ = ["MAX_SHELL_COMMANDS", "ShellCommandResult", "ShellRun"]

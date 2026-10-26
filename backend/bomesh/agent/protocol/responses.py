@@ -6,7 +6,6 @@ from typing import Any, Literal, TypeAlias
 
 from pydantic import Field
 
-from bomesh.agent.execution import ExecutionCapability
 from bomesh.agent.protocol import ProtocolModel
 from bomesh.agent.protocol.content import Annotation, OutputText
 from bomesh.agent.protocol.items import FunctionCallItem, Item, MessageItem
@@ -60,13 +59,31 @@ class IncompleteDetails(ProtocolModel):
     reason: str
 
 
+ReasoningEffort: TypeAlias = Literal["none", "minimal", "low", "medium", "high"]
+"""How much hidden reasoning a model may spend; ``none`` turns it off."""
+
+
+class Reasoning(ProtocolModel):
+    """The ``reasoning`` request configuration.
+
+    Only ``effort`` is modelled: BoMesh never asks for reasoning summaries or
+    encrypted reasoning content, because nothing replays them.
+    """
+
+    effort: ReasoningEffort
+
+
 class Prompt(ProtocolModel):
     """One provider-neutral model request.
 
     Field names follow ``CreateResponseBody``. ``provider_options`` is the
     request-level escape hatch: an adapter merges it into the native request
-    body verbatim, which keeps provider-only knobs (reasoning effort, routing
-    preferences, caching hints) out of the common contract.
+    body verbatim, which keeps provider-only knobs (routing preferences,
+    plugins) out of the common contract.
+
+    ``prompt_cache_key`` groups requests that share a prompt prefix so the
+    provider can route them to a warm cache; the agent sets it to the
+    conversation id.
 
     ``previous_response_id`` names the response this one continues. BoMesh
     replays the full item history on every request, so an adapter must not
@@ -85,13 +102,12 @@ class Prompt(ProtocolModel):
     max_tool_calls: int | None = Field(default=None, ge=1)
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     top_p: float | None = Field(default=None, ge=0.0, le=1.0)
+    reasoning: Reasoning | None = None
+    prompt_cache_key: str | None = Field(default=None, min_length=1, max_length=256)
     previous_response_id: str | None = None
     store: bool | None = None
     metadata: dict[str, str] = Field(default_factory=dict)
     provider_options: dict[str, Any] = Field(default_factory=dict)
-    # This runtime contract is consumed by the provider adapter, never emitted
-    # directly into the wire payload by the shared Responses renderer.
-    execution_capability: ExecutionCapability | None = None
 
 
 class Response(ProtocolModel):
@@ -178,6 +194,8 @@ __all__ = [
     "Response",
     "ResponseError",
     "Prompt",
+    "Reasoning",
+    "ReasoningEffort",
     "ResponseStatus",
     "ResponseUsage",
 ]

@@ -164,6 +164,9 @@ class FakeWorkspace {
 Finder notSearchableRows() =>
     find.textContaining('Not searchable yet', findRichText: true);
 
+/// A failed row states the server's reason in place of the status.
+Finder failedRows() => find.textContaining(encrypted, findRichText: true);
+
 void main() {
   setUp(
     () => SharedPreferencesAsyncPlatform.instance =
@@ -181,12 +184,13 @@ void main() {
       );
       await tester.pumpWidget(fake.collectionPage());
       await tester.pumpAndSettle();
-      expect(notSearchableRows(), findsNWidgets(2));
+      expect(notSearchableRows(), findsOneWidget);
+      expect(failedRows(), findsOneWidget);
       // A collection run takes pending and outdated documents; the failed
-      // one is retried on its own page.
-      expect(find.text('1 item isn’t searchable yet'), findsOneWidget);
+      // one is retried on its own row.
+      expect(find.text('Retry'), findsOneWidget);
 
-      await tester.tap(find.text('Make searchable'));
+      await tester.tap(find.text('Process pending'));
       await tester.pumpAndSettle();
       expect(fake.runBodies, [
         {
@@ -207,13 +211,14 @@ void main() {
     'a document that is not searchable yet starts a run for itself and follows it until it finishes',
     (tester) async {
       final fake = FakeWorkspace(
-        collectionPermissions: ['collection.read'],
+        // Collection.permissions is effective: it already includes
+        // workspace-wide grants such as ingestion.run.
+        collectionPermissions: ['collection.read', 'ingestion.run'],
         created: [
           http.Response(jsonEncode({'id': 'run', 'status': 'queued'}), 202),
         ],
         runStatuses: ['queued', 'completed'],
       );
-      // Workspace-wide ingestion.run applies to every collection.
       await tester.pumpWidget(
         fake.documentPage('pending', permissions: ['ingestion.run']),
       );
@@ -288,12 +293,10 @@ void main() {
     await tester.pumpWidget(fake.collectionPage());
     await tester.pumpAndSettle();
     // Rows still say so; nothing offers to change it.
-    expect(notSearchableRows(), findsNWidgets(2));
-    expect(
-      find.textContaining(RegExp('(isn’t|aren’t) searchable')),
-      findsNothing,
-    );
-    expect(find.text('Make searchable'), findsNothing);
+    expect(notSearchableRows(), findsOneWidget);
+    expect(failedRows(), findsOneWidget);
+    expect(find.text('Process pending'), findsNothing);
+    expect(find.text('Retry'), findsNothing);
 
     await tester.pumpWidget(fake.documentPage('pending'));
     await tester.pumpAndSettle();

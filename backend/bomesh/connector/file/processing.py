@@ -16,6 +16,7 @@ from bomesh.connector.file import (
     FileProcessingError,
     FileSizeLimitError,
     FileTextLimitError,
+    FileTranscriptionError,
     FinxFileExtensions,
     ProcessedFile,
     UnsupportedFileTypeError,
@@ -25,6 +26,7 @@ from bomesh.connector.processing import (
     DoclingChunkingError,
     DoclingProcessingError,
     DoclingProcessor,
+    DoclingTranscriptionError,
     DocumentMapper,
 )
 from bomesh.connector.protocol import (
@@ -255,6 +257,8 @@ class FileProcessor:
 
 def _file_error(exc: DoclingProcessingError) -> FileProcessingError:
     message = str(exc)
+    if isinstance(exc, DoclingTranscriptionError):
+        return FileTranscriptionError(message)
     normalized = message.casefold()
     if "unsupported file extension" in normalized:
         return UnsupportedFileTypeError(message)

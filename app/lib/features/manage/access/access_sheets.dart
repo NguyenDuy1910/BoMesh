@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../app/workspace_scope.dart';
 import '../../../core/api_client.dart';
 import '../../../ui/ui.dart';
 
@@ -504,184 +505,215 @@ class _NewGroupBodyState extends State<_NewGroupBody> {
   }
 }
 
-/// Who is in a group.
+/// A group's detail and full-set membership editor.
 Future<void> showGroupSheet(
   BuildContext context, {
   required ApiClient api,
   required AccessGroup group,
-}) => showAppSheet<void>(
-  context,
-  title: group.name,
-  subtitle: group.description.isEmpty
-      ? countOf(group.memberCount, 'member')
-      : group.description,
-  builder: (_) => _GroupMembers(api: api, group: group),
-);
+}) => showAppSheet<void>(context, title: group.name, scrollable: true,
+  builder: (_) => _GroupEditor(api: api, group: group));
 
-class _GroupMembers extends StatefulWidget {
-  const _GroupMembers({required this.api, required this.group});
+class _GroupEditor extends StatefulWidget {
+  const _GroupEditor({required this.api, required this.group});
   final ApiClient api;
   final AccessGroup group;
-
   @override
-  State<_GroupMembers> createState() => _GroupMembersState();
+  State<_GroupEditor> createState() => _GroupEditorState();
 }
 
-class _GroupMembersState extends State<_GroupMembers> {
-  late Future<AccessGroup> _group = _load();
-
-  Future<AccessGroup> _load() async => AccessGroup.fromJson(
-    await widget.api.get('/groups/${Uri.encodeComponent(widget.group.id)}'),
-  );
-
+class _GroupEditorState extends State<_GroupEditor> {
+  AccessGroup? _group;
+  List<JsonMap> _users = [];
+  Set<String> _selected = {};
+  final _name = TextEditingController(), _description = TextEditingController();
+  bool _busy = false, _started = false, _dirty = false, _active = true;
+  String? _error;
+  String get _path => '/groups/${Uri.encodeComponent(widget.group.id)}';
   @override
-  Widget build(BuildContext context) => FutureBuilder<AccessGroup>(
-    future: _group,
-    builder: (context, snapshot) {
-      if (snapshot.hasError) {
-        return ErrorView(
-          error: snapshot.error!,
-          onRetry: () => setState(() => _group = _load()),
-        );
-      }
-      final group = snapshot.data;
-      if (group == null) return const LoadingView();
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (group.members.isEmpty)
-            const InlineNotice(text: 'No one is in this group yet.')
-          else
-            Flexible(
-              child: ListView(
-                shrinkWrap: true,
-                children: [
-                  for (final member in group.members)
-                    ListRow(
-                      leading: PersonAvatar(
-                        name: personName(member),
-                        seed: textOf(member['id']),
-                      ),
-                      title: personName(member),
-                      subtitle: textOf(member['email']),
-                    ),
-                ],
-              ),
-            ),
-          const SizedBox(height: 10),
-          const InlineNotice(
-            text: 'Add or remove someone from a group on their member page.',
-          ),
-        ],
-      );
-    },
-  );
-}
-
-/// What a role is; capabilities are edited on the web.
-Future<void> showRoleSheet(
-  BuildContext context, {
-  required ApiClient api,
-  required AccessRole role,
-}) => showAppSheet<void>(
-  context,
-  title: role.name,
-  subtitle:
-      '${sentenceCase(role.gist)} · ${countOf(role.memberCount, 'member')}',
-  builder: (_) => _RoleCapabilities(api: api, role: role),
-);
-
-class _RoleCapabilities extends StatefulWidget {
-  const _RoleCapabilities({required this.api, required this.role});
-  final ApiClient api;
-  final AccessRole role;
-
+  void didChangeDependencies() { super.didChangeDependencies(); if (!_started) { _started = true; _load(); } }
   @override
-  State<_RoleCapabilities> createState() => _RoleCapabilitiesState();
-}
-
-class _RoleCapabilitiesState extends State<_RoleCapabilities> {
-  /// Permission code → its plain description, from the catalog.
-  late Future<Map<String, String>> _catalog = _load();
-
-  Future<Map<String, String>> _load() async {
-    final body = await widget.api.get('/permissions');
-    return {
-      for (final item in objectList(body['items']))
-        textOf(item['code']): textOf(item['description']),
-    };
+  void dispose() { _name.dispose(); _description.dispose(); super.dispose(); }
+  Future<void> _load() async {
+    setState(() { _busy = true; _error = null; });
+    try {
+      final group = AccessGroup.fromJson(await widget.api.get(_path));
+      if (!mounted) return;
+      final users = WorkspaceScope.of(context).session.can('user.manage') ? await readAllPages(widget.api, '/users') : group.members;
+      if (!mounted) return;
+      setState(() {
+        _group = group; _users = users;
+        for (final member in group.members) {
+          if (!_users.any((user) => user['id'] == member['id'])) _users.add(member);
+        }
+        _selected = {for (final member in group.members) textOf(member['id'])};
+        _name.text = group.name; _description.text = group.description;
+        _active = group.active; _dirty = false;
+      });
+    } catch (error) { if (mounted) setState(() => _error = friendlyError(error)); }
+    finally { if (mounted) setState(() => _busy = false); }
   }
+  Future<void> _save() async {
+    setState(() { _busy = true; _error = null; });
+    try {
+      await widget.api.patch(_path, body: {'display_name': _name.text.trim(), 'description': _description.text.trim().isEmpty ? null : _description.text.trim(), 'status': _active ? 'active' : 'inactive'});
+      await widget.api.put('$_path/members', body: {'user_ids': _selected.toList()});
+      if (mounted) Navigator.pop(context);
+    } catch (error) { if (mounted) setState(() => _error = friendlyError(error)); }
+    finally { if (mounted) setState(() => _busy = false); }
+  }
+  @override
+  Widget build(BuildContext context) => Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+    if (_busy) const LinearProgressIndicator(),
+    if (_error != null) InlineNotice(text: _error!, tone: StatusTone.danger, actionLabel: _group == null ? 'Try again' : null, onAction: _group == null ? _load : null),
+    if (_group != null) ...[
+      TextField(controller: _name, decoration: const InputDecoration(labelText: 'Group name'), onChanged: (_) => setState(() => _dirty = true)),
+      TextField(controller: _description, maxLines: 3, decoration: const InputDecoration(labelText: 'Description'), onChanged: (_) => setState(() => _dirty = true)),
+      SwitchListTile(title: const Text('Group active'), value: _active, onChanged: _busy ? null : (v) => setState(() { _active = v; _dirty = true; })),
+      SectionLabel('Members', aside: '${_selected.length} selected'),
+      if (!WorkspaceScope.of(context).session.can('user.manage')) const InlineNotice(text: 'You can remove current members. Adding people requires permission to view the workspace member directory.'),
+      for (final user in _users) CheckboxListTile(
+        title: Text(personName(user)), subtitle: Text(textOf(user['email'])),
+        value: _selected.contains(textOf(user['id'])), onChanged: _busy ? null : (selected) => setState(() {
+          if (selected == true) { _selected.add(textOf(user['id'])); } else { _selected.remove(textOf(user['id'])); }
+          _dirty = true;
+        })),
+      if (_dirty) FilledButton(onPressed: _busy || _name.text.trim().isEmpty ? null : _save, child: const Text('Save changes')),
+      TextButton(onPressed: _busy ? null : () async {
+        if (!await confirmAction(context, title: 'Delete group?', message: 'This removes the group and its membership. There is no restore action.', confirmLabel: 'Delete group', destructive: true) || !mounted) return;
+        setState(() => _busy = true);
+        try { await widget.api.delete(_path); if (context.mounted) Navigator.pop(context); }
+        catch (error) { if (mounted) setState(() => _error = friendlyError(error)); }
+        finally { if (mounted) setState(() => _busy = false); }
+      }, child: const Text('Delete group')),
+    ],
+  ]);
+}
 
+/// Built-in roles are read-only; duplication and creation use the same catalog.
+Future<void> showRoleSheet(BuildContext context, {required ApiClient api, required AccessRole role}) =>
+  showAppSheet<void>(context, title: role.name, scrollable: true,
+    builder: (_) => _RoleEditor(api: api, role: role));
+
+Future<void> showNewRoleSheet(BuildContext context, {required ApiClient api}) =>
+  showAppSheet<void>(context, title: 'Create role', scrollable: true,
+    builder: (_) => _RoleEditor(api: api));
+
+class _RoleEditor extends StatefulWidget {
+  const _RoleEditor({required this.api, this.role});
+  final ApiClient api;
+  final AccessRole? role;
+  @override
+  State<_RoleEditor> createState() => _RoleEditorState();
+}
+
+class _RoleEditorState extends State<_RoleEditor> {
+  final _name = TextEditingController();
+  List<JsonMap>? _catalog;
+  Set<String> _selected = {};
+  bool _busy = false, _dirty = false, _duplicate = false, _active = true;
+  AccessRole? _role;
+  String? _error;
+  bool get _locked => _role?.isSystem == true && !_duplicate;
+  @override
+  void initState() { super.initState(); _load(); }
+  @override
+  void dispose() { _name.dispose(); super.dispose(); }
+  Future<void> _load() async {
+    setState(() { _busy = true; _error = null; });
+    try {
+      final role = widget.role == null ? null : AccessRole.fromJson(await widget.api.get('/roles/${Uri.encodeComponent(widget.role!.id)}'));
+      final catalog = objectList((await widget.api.get('/permissions'))['items']);
+      if (!mounted) return;
+      setState(() {
+        _catalog = catalog; _role = role; _name.text = role?.name ?? '';
+        _selected = role?.permissionCodes.toSet() ?? {};
+        _active = role?.active ?? true;
+      });
+    } catch (error) { if (mounted) setState(() => _error = friendlyError(error)); }
+    finally { if (mounted) setState(() => _busy = false); }
+  }
+  Future<void> _save() async {
+    setState(() { _busy = true; _error = null; });
+    try {
+      final body = <String, dynamic>{'display_name': _name.text.trim(), 'permission_codes': _selected.toList()};
+      if (_role == null || _duplicate) {
+        await widget.api.post('/roles', body: body);
+      } else {
+        await widget.api.patch('/roles/${Uri.encodeComponent(_role!.id)}', body: {...body, 'status': _active ? 'active' : 'inactive'});
+      }
+      if (mounted) Navigator.pop(context);
+    } catch (error) { if (mounted) setState(() => _error = friendlyError(error)); }
+    finally { if (mounted) setState(() => _busy = false); }
+  }
+  String _area(String code) => switch (code.split('.').first) {
+    'tenant' => 'Workspace',
+    'user' || 'group' || 'role' || 'access' => 'People & access',
+    'source' || 'ingestion' => 'Sources',
+    'audit' => 'Activity',
+    _ => 'Knowledge',
+  };
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    final codes = widget.role.permissionCodes;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (codes.isNotEmpty)
-          Flexible(
-            child: FutureBuilder<Map<String, String>>(
-              future: _catalog,
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return InlineNotice(
-                    text: 'What this role can do could not be loaded.',
-                    tone: StatusTone.warning,
-                    actionLabel: 'Try again',
-                    onAction: () => setState(() => _catalog = _load()),
-                  );
-                }
-                final catalog = snapshot.data;
-                if (catalog == null) return const LoadingView();
-                final lines = [
-                  for (final code in codes)
-                    if ((catalog[code] ?? '').isNotEmpty) catalog[code]!,
-                ];
-                return ListView(
-                  shrinkWrap: true,
-                  children: [
-                    for (final line in lines)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 4,
-                          vertical: 6,
-                        ),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Icon(
-                              Icons.check_rounded,
-                              size: 18,
-                              color: colors.success,
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Text(
-                                line,
-                                style: TextStyle(
-                                  color: colors.ink2,
-                                  fontSize: 14.5,
-                                  height: 1.4,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                  ],
-                );
-              },
-            ),
-          ),
-        const SizedBox(height: 12),
-        const InlineNotice(
-          icon: Icons.computer_rounded,
-          text: 'Edit what a role can do on the web.',
-        ),
+    final catalog = _catalog;
+    final groups = <String, List<JsonMap>>{};
+    for (final item in catalog ?? <JsonMap>[]) {
+      groups.putIfAbsent(_area(textOf(item['code'])), () => []).add(item);
+    }
+    final unknown = _selected.where((code) => !(catalog ?? <JsonMap>[]).any((p) => p['code'] == code)).length;
+    return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      if (_busy) const LinearProgressIndicator(),
+      if (_error != null) InlineNotice(text: _error!, tone: StatusTone.danger, actionLabel: catalog == null ? 'Try again' : null, onAction: catalog == null ? _load : null),
+      if (catalog != null) ...[
+        TextField(controller: _name, readOnly: _locked, decoration: const InputDecoration(labelText: 'Role name'), onChanged: (_) => setState(() => _dirty = true)),
+        if (_role != null && !_duplicate) ...[
+          Text('${countOf(_role!.memberCount, 'member')} · ${_role!.isSystem ? 'Built-in role' : 'Custom role'}'),
+          OutlinedButton.icon(onPressed: _busy ? null : () => setState(() {
+            _duplicate = true; _dirty = true; _name.text = '${_role!.name} copy';
+            final assignable = catalog.map((p) => textOf(p['code'])).toSet();
+            _selected = _selected.intersection(assignable);
+          }), icon: const Icon(Icons.copy_outlined), label: const Text('Duplicate role')),
+        ],
+        if (_locked) const InlineNotice(text: 'Built-in roles cannot be changed. Duplicate this role to customize its permissions.'),
+        if (unknown > 0) InlineNotice(text: '$unknown existing permissions are outside your assignable catalog. They are preserved when saving; the server enforces your permission ceiling.'),
+        if (!_locked && _role != null && !_duplicate) SwitchListTile(title: const Text('Role active'), subtitle: const Text('Inactive roles cannot be assigned to new members.'), value: _active, onChanged: _busy ? null : (v) => setState(() { _active = v; _dirty = true; })),
+        for (final group in groups.entries) ...[
+          SectionLabel(group.key, aside: '${group.value.where((p) => _selected.contains(p['code'])).length} of ${group.value.length}'),
+          for (final permission in group.value) SwitchListTile(
+            title: Text(textOf(permission['description'], 'Workspace capability')),
+            value: _selected.contains(textOf(permission['code'])),
+            onChanged: _locked || _busy ? null : (value) => setState(() {
+              if (value) { _selected.add(textOf(permission['code'])); } else { _selected.remove(textOf(permission['code'])); }
+              _dirty = true;
+            })),
+        ],
+        if (!_locked && (_dirty || _role == null)) FilledButton(
+          onPressed: _busy || _name.text.trim().isEmpty ? null : _save,
+          child: Text(_role == null || _duplicate ? 'Create role' : 'Save changes')),
       ],
-    );
+    ]);
   }
+}
+
+Future<Set<String>?> pickRoles(BuildContext context, {required List<AccessRole> roles, required Set<String> selected}) =>
+  showAppSheet<Set<String>>(context, title: 'Workspace roles', scrollable: true,
+    builder: (_) => _RolePicker(roles: roles, selected: selected));
+
+class _RolePicker extends StatefulWidget {
+  const _RolePicker({required this.roles, required this.selected});
+  final List<AccessRole> roles;
+  final Set<String> selected;
+  @override
+  State<_RolePicker> createState() => _RolePickerState();
+}
+class _RolePickerState extends State<_RolePicker> {
+  late final _selected = {...widget.selected};
+  @override
+  Widget build(BuildContext context) => Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+    const InlineNotice(text: 'Roles combine their permissions. Changes apply only when you save.'),
+    for (final role in widget.roles) CheckboxListTile(title: Text(role.name), subtitle: Text(role.summary),
+      value: _selected.contains(role.id), onChanged: !role.active && !_selected.contains(role.id) ? null : (v) => setState(() {
+        if (v == true) { _selected.add(role.id); } else { _selected.remove(role.id); }
+      })),
+    FilledButton(onPressed: () => Navigator.pop(context, _selected), child: const Text('Save roles')),
+  ]);
 }

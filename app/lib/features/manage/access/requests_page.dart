@@ -29,11 +29,9 @@ class _Request {
   bool get forCollection => type == 'resource_access';
 }
 
-/// Waiting for [session]'s decision: pending, someone else's, and of a kind
-/// this person reviews.
+/// Pending requests of a kind this caller has permission to review.
 bool _reviewable(AuthSession session, _Request request) =>
     request.pending &&
-    request.requesterId != session.userId &&
     session.can(request.forCollection ? 'access.manage' : 'source.manage');
 
 Future<List<_Request>> _loadRequests(ApiClient api) async =>
@@ -68,7 +66,9 @@ Future<DateTime?> oldestWaitingRequest(
 /// Access requests: the ones waiting for your decision, as cards with
 /// Approve and Deny side by side; then your own; then what was decided.
 class RequestsPage extends StatefulWidget {
-  const RequestsPage({super.key});
+  const RequestsPage({super.key, this.initialRequestId, this.embedded = false});
+  final String? initialRequestId;
+  final bool embedded;
 
   @override
   State<RequestsPage> createState() => _RequestsPageState();
@@ -102,6 +102,11 @@ class _RequestsPageState extends State<RequestsPage> {
     setState(() => _error = null);
     try {
       final requests = await _loadRequests(_api);
+      if (!mounted) return;
+      final targetId = widget.initialRequestId;
+      if (targetId != null && !requests.any((request) => request.id == targetId)) {
+        requests.add(_Request.fromJson(await _api.get('/approval-requests/${Uri.encodeComponent(targetId)}')));
+      }
       if (!mounted) return;
       setState(() => _requests = requests);
       await _resolveTitles(requests);
@@ -164,7 +169,7 @@ class _RequestsPageState extends State<RequestsPage> {
   Future<void> _approve(_Request request) => _decide(
     request,
     'approved',
-    done: 'Approved — ${request.requester} can open ${_target(request)}',
+    done: request.forCollection ? 'Approved — ${request.requester} can open ${_target(request)}' : 'Connector request approved',
   );
 
   Future<void> _deny(_Request request) async {
@@ -196,14 +201,17 @@ class _RequestsPageState extends State<RequestsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final requests = _requests;
+    final allRequests = _requests;
+    final requests = widget.initialRequestId == null
+        ? allRequests
+        : allRequests?.where((request) => request.id == widget.initialRequestId).toList();
     final waiting = [
       for (final request in requests ?? const <_Request>[])
         if (_reviewable(_session, request)) request,
     ]..sort((a, b) => _compareTime(a.createdAt, b.createdAt));
     final mine = [
       for (final request in requests ?? const <_Request>[])
-        if (request.pending && request.requesterId == _session.userId) request,
+        if (request.pending && request.requesterId == _session.userId && !_reviewable(_session, request)) request,
     ];
     final decided = [
       for (final request in requests ?? const <_Request>[])
@@ -311,6 +319,7 @@ class _RequestsPageState extends State<RequestsPage> {
         ),
       );
     }
+    if (widget.embedded) return body;
 
     return Scaffold(
       backgroundColor: context.colors.paper,

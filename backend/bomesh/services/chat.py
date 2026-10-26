@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
-from typing import Literal
+from typing import Any
 from uuid import UUID, uuid4
 
 from bomesh.agent import (
@@ -16,15 +17,11 @@ from bomesh.agent import (
     TextInput,
     UserTurn,
 )
-from bomesh.agent.models import AgentContext, ConversationMessage
+from bomesh.agent.models import AgentContext
 from bomesh.agent.protocol import (
-    HostedExecutionCallItem,
-    HostedExecutionResultItem,
-    Item,
     Response,
     ResponseCompletedEvent,
-    ResponseOutputItemAddedEvent,
-    ResponseOutputItemDoneEvent,
+    ResponseSnapshotEventBase,
 )
 from bomesh.db.engine import SessionFactory, transaction_scope
 from bomesh.services import (
@@ -36,7 +33,6 @@ from bomesh.services import (
 from bomesh.services.identity_access.authorization import AuthorizationService
 from bomesh.services.conversation import ConversationService
 
-HistoryTurn = tuple[Literal["user", "assistant"], str]
 _RESOURCE_TOOL_NAMES = frozenset(
     {
         "inspect_resource",
@@ -72,28 +68,41 @@ class ChatService:
         *,
         message: str,
         conversation_id: UUID | None,
-        history: Sequence[HistoryTurn],
         collection_item_ids: Sequence[UUID],
         attachment_ids: Sequence[UUID] = (),
+        replace_from_turn: int | None = None,
         is_disconnected: Callable[[], Awaitable[bool]],
     ) -> AsyncIterator[str]:
-        """Yield serialized agent events for one authorized chat turn."""
+        """Yield serialized agent events for one authorized chat turn.
+
+        The server owns conversation history: earlier answered turns come from
+        storage, never from the client. ``replace_from_turn`` names the active
+        user turn a retry or edit replaces; history stops before it, and
+        ``start_turn`` supersedes it and everything after it.
+        """
 
         require_tenant_permission(access, KNOWLEDGE_READ_PERMISSION)
         if access.tenant_id is None:
             raise PermissionError("an active tenant membership is required for chat")
-        selected_ids = await self._resolve_knowledge_scope(access, collection_item_ids)
         resolved_conversation_id = conversation_id or uuid4()
-        referenced_resources = (
-            await self._conversations.referenced_resources(
-                resolved_conversation_id, access=access
+        attachments = tuple(dict.fromkeys(attachment_ids))
+        # Independent reads, each in its own transaction: run them together.
+        selected_ids, referenced_resources, attachment_resources, history = await _gather(
+            self._resolve_knowledge_scope(access, collection_item_ids),
+            self._conversations.referenced_resources(
+                resolved_conversation_id, access=access, before_turn=replace_from_turn
             )
             if conversation_id is not None
-            else ()
-        )
-        attachments = tuple(dict.fromkeys(attachment_ids))
-        attachment_resources = await self._conversations.resources(
-            attachments, access=access
+            else _nothing(),
+            self._conversations.resources(attachments, access=access),
+            self._conversations.history(
+                resolved_conversation_id,
+                access=access,
+                limit_messages=self._agent.configuration.max_history_messages,
+                before_turn=replace_from_turn,
+            )
+            if conversation_id is not None
+            else _nothing(),
         )
         context = AgentContext(
             user_id=str(require_user_identity(access)),
@@ -102,10 +111,7 @@ class ChatService:
             collection_item_ids=tuple(str(value) for value in selected_ids),
             conversation_id=str(resolved_conversation_id),
             request_id=uuid4().hex,
-            history=tuple(
-                ConversationMessage(role=role, content=content)
-                for role, content in history
-            ),
+            history=history,
             allowed_tool_names=self._available_tool_names(
                 resources_available=bool(attachment_resources or referenced_resources)
             ),
@@ -122,18 +128,20 @@ class ChatService:
                 ),
             )
         )
-        await self._conversations.start_turn(
+        question = await self._conversations.start_turn(
             resolved_conversation_id,
             access=access,
             content=message,
             attachment_ids=attachments,
             request_id=context.request_id or "",
+            replace_from_turn=replace_from_turn,
         )
         return self._event_stream(
             user_turn,
             context,
             access=access,
             conversation_id=resolved_conversation_id,
+            question_id=question.id,
             resource_resolver=(
                 self._resource_resolver(access)
                 if self._resource_resolver is not None
@@ -155,6 +163,7 @@ class ChatService:
         *,
         access: AuthContext,
         conversation_id: UUID,
+        question_id: UUID,
         resource_resolver: ResourceResolver | None,
         sandbox_runtime: SandboxRuntime | None,
         is_disconnected: Callable[[], Awaitable[bool]],
@@ -176,13 +185,14 @@ class ChatService:
                     if answer:
                         final_answer = answer
                         referenced_document_ids = referenced_item_ids(event.response)
-                yield _public_event(event).model_dump_json()
+                yield _public_event(event, conversation_id).model_dump_json()
         finally:
             await stream.aclose()
         if final_answer:
             await self._conversations.finish_turn(
                 conversation_id,
                 access=access,
+                question_id=question_id,
                 content=final_answer,
                 referenced_document_ids=referenced_document_ids,
                 request_id=context.request_id or "",
@@ -249,19 +259,22 @@ def _artifact_ids(sandbox: SandboxRuntime | None) -> tuple[UUID, ...]:
     return tuple(result)
 
 
-def _public_event(event):  # type: ignore[no-untyped-def]
-    """Remove opaque execution bindings before an agent event reaches the web."""
+def _public_event(event, conversation_id: UUID):  # type: ignore[no-untyped-def]
+    """Report the conversation on every event that carries the response.
 
-    if isinstance(event, (ResponseOutputItemAddedEvent, ResponseOutputItemDoneEvent)):
-        return event.model_copy(update={"item": _public_item(event.item)})
-    if isinstance(event, ResponseCompletedEvent):
+    The first such event is ``response.created``, so a client that omitted
+    ``conversation_id`` learns the one the server generated before any output.
+    """
+
+    if isinstance(event, ResponseSnapshotEventBase):
         return event.model_copy(
             update={
                 "response": event.response.model_copy(
                     update={
-                        "output": tuple(
-                            _public_item(item) for item in event.response.output
-                        )
+                        "metadata": {
+                            **event.response.metadata,
+                            "conversation_id": str(conversation_id),
+                        }
                     }
                 )
             }
@@ -269,16 +282,28 @@ def _public_event(event):  # type: ignore[no-untyped-def]
     return event
 
 
-def _public_item(item: Item) -> Item:
-    if isinstance(item, HostedExecutionCallItem):
-        return item.model_copy(update={"environment": None})
-    if isinstance(item, HostedExecutionResultItem):
-        return item.model_copy(update={"environment": None, "files": ()})
-    return item
+async def _nothing() -> tuple[Any, ...]:
+    return ()
+
+
+async def _gather(*operations: Awaitable[Any]) -> list[Any]:
+    """Await operations concurrently; on the first failure cancel the rest.
+
+    Unlike ``TaskGroup`` this re-raises the original exception, so service
+    errors keep their HTTP mapping.
+    """
+
+    tasks = [asyncio.ensure_future(operation) for operation in operations]
+    try:
+        return await asyncio.gather(*tasks)
+    except BaseException:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
 
 
 __all__ = [
     "ChatService",
-    "HistoryTurn",
     "referenced_item_ids",
 ]

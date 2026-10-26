@@ -177,7 +177,11 @@ class ConversationStore {
               message.displayText.toLowerCase().contains(needle) ||
               message.documents.any(
                 (document) => document.fileName.toLowerCase().contains(needle),
-              ),
+              ) ||
+              (message.turn?.artifacts.any(
+                (artifact) => artifact.fileName.toLowerCase().contains(needle) ||
+                    artifact.title.toLowerCase().contains(needle),
+              ) ?? false),
         )) {
           found.add(conversation.id);
         }

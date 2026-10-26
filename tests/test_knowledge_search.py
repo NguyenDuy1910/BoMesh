@@ -265,6 +265,8 @@ class NothingRelevantReranker:
 
 
 class StubEmbedder:
+    embedding_model = "stub-embedding"
+
     def __init__(self) -> None:
         self.queries: list[str] = []
 
@@ -379,6 +381,7 @@ async def test_collection_scoped_retrieval_filters_before_reranking() -> None:
     retriever = ItemKnowledgeRetriever(
         index,
         reranker=reranker,
+        reranking_enabled=True,
     )
     context = AgentContext(
         user_id="person@example.test",
@@ -410,7 +413,7 @@ async def test_retrieval_ranks_every_query_together_in_one_rerank() -> None:
     events: list[str] = []
     index = StubDocumentIndex([DOCUMENT], events=events)
     reranker = RecordingReranker(events)
-    retriever = ItemKnowledgeRetriever(index, reranker=reranker)
+    retriever = ItemKnowledgeRetriever(index, reranker=reranker, reranking_enabled=True)
 
     await retriever.search(
         ["annual leave", "carry over", "Annual  leave"], limit=3, ctx=CONTEXT
@@ -428,6 +431,7 @@ async def test_retrieval_returns_nothing_when_the_reranker_finds_nothing_relevan
     retriever = ItemKnowledgeRetriever(
         StubDocumentIndex([DOCUMENT]),
         reranker=NothingRelevantReranker(),  # type: ignore[arg-type]
+        reranking_enabled=True,
     )
 
     assert await retriever.search(["xin chào"], limit=3, ctx=CONTEXT) == []
@@ -444,7 +448,9 @@ async def test_document_index_retriever_validates_before_search_or_reranking(
 ) -> None:
     events: list[str] = []
     index = StubDocumentIndex([DOCUMENT], events=events)
-    retriever = ItemKnowledgeRetriever(index, reranker=RecordingReranker(events))
+    retriever = ItemKnowledgeRetriever(
+        index, reranker=RecordingReranker(events), reranking_enabled=True
+    )
     context = AgentContext(
         user_id="user-1",
         tenant_id="tenant-1",
@@ -788,12 +794,106 @@ async def test_reranking_failure_falls_back_to_candidate_order() -> None:
         index,
         reranker=FailingReranker(),  # type: ignore[arg-type]
         candidate_count=7,
+        reranking_enabled=True,
     )
 
     results = await retriever.search(["annual leave"], limit=1, ctx=CONTEXT)
 
     assert index.calls[0]["limit"] == 7
     assert [item.chunk_id for item in results] == ["second"]
+
+
+class SlowReranker:
+    def __init__(self) -> None:
+        self.cancelled = False
+
+    async def rerank(
+        self,
+        chunks: Sequence[ContextualChunk],
+        *,
+        queries: Sequence[str],
+        limit: int,
+    ) -> list[ContextualChunk]:
+        del queries, limit
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
+        return list(chunks)
+
+
+@pytest.mark.asyncio
+async def test_rerank_timeout_keeps_the_fused_candidates() -> None:
+    """A slow reranker must not cost the search its fused evidence."""
+
+    first = _chunk(chunk_id="first", score=0.2)
+    second = _chunk(chunk_id="second", score=0.9)
+    reranker = SlowReranker()
+    retriever = ItemKnowledgeRetriever(
+        StubDocumentIndex([first, second]),
+        reranker=reranker,  # type: ignore[arg-type]
+        reranking_enabled=True,
+        rerank_timeout_seconds=0.01,
+    )
+
+    results = await retriever.search(["annual leave"], limit=2, ctx=CONTEXT)
+
+    assert reranker.cancelled is True
+    assert [item.chunk_id for item in results] == ["second", "first"]
+
+
+@pytest.mark.asyncio
+async def test_reranking_is_off_by_default_and_uses_fused_order() -> None:
+    events: list[str] = []
+    first = _chunk(chunk_id="first", score=0.2)
+    second = _chunk(chunk_id="second", score=0.9)
+    retriever = ItemKnowledgeRetriever(
+        StubDocumentIndex([first, second], events=events),
+        reranker=RecordingReranker(events),
+    )
+
+    results = await retriever.search(["annual leave"], limit=1, ctx=CONTEXT)
+
+    assert events == ["index"]
+    assert [item.chunk_id for item in results] == ["second"]
+
+
+@pytest.mark.asyncio
+async def test_repeated_query_reuses_the_cached_query_embedding() -> None:
+    backend = StubIndexBackend()
+    embedder = StubEmbedder()
+    index = ItemIndex(backend=backend, embedder=embedder)  # type: ignore[arg-type]
+    scope = {"limit": 3, "tenant_id": "tenant-1", "collection_item_ids": ("collection-1",)}
+
+    await index.search_item_content(["annual leave"], **scope)  # type: ignore[arg-type]
+    await index.search_item_content(["  annual   leave "], **scope)  # type: ignore[arg-type]
+
+    assert embedder.queries == ["annual leave"]
+    assert [call[0] for call in backend.calls] == [
+        [("annual leave", [0.1, 0.2])],
+        [("annual leave", [0.1, 0.2])],
+    ]
+
+
+@pytest.mark.asyncio
+async def test_query_embedding_cache_is_bounded_and_can_be_disabled() -> None:
+    embedder = StubEmbedder()
+    bounded = ItemIndex(
+        backend=StubIndexBackend(), embedder=embedder, query_embedding_cache_size=1  # type: ignore[arg-type]
+    )
+    scope = {"limit": 3, "tenant_id": "tenant-1", "collection_item_ids": ("collection-1",)}
+    for query in ("annual leave", "carry over", "annual leave"):
+        await bounded.search_item_content([query], **scope)  # type: ignore[arg-type]
+    assert embedder.queries == ["annual leave", "carry over", "annual leave"]
+
+    uncached_embedder = StubEmbedder()
+    uncached = ItemIndex(
+        backend=StubIndexBackend(), embedder=uncached_embedder, query_embedding_cache_size=0  # type: ignore[arg-type]
+    )
+    for _ in range(2):
+        await uncached.search_item_content(["annual leave"], **scope)  # type: ignore[arg-type]
+    assert uncached_embedder.queries == ["annual leave", "annual leave"]
 
 
 def test_context_builder_is_bounded_deduplicated_and_canonical() -> None:

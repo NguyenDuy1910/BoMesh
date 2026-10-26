@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../core/api_client.dart';
 import '../features/auth/auth_page.dart';
 import '../features/auth/session.dart';
+import '../features/auth/workspace_page.dart';
 import '../ui/ui.dart';
 import 'app_brand.dart';
 import 'appearance.dart';
@@ -23,6 +24,7 @@ class _ProductAppState extends State<ProductApp> with WidgetsBindingObserver {
   late final AppearanceController _appearance;
   final _rootNavigator = GlobalKey<NavigatorState>();
   String? _identity;
+  String? _workspaceChosenFor;
 
   @override
   void initState() {
@@ -59,8 +61,8 @@ class _ProductAppState extends State<ProductApp> with WidgetsBindingObserver {
         navigatorKey: _rootNavigator,
         title: AppBrand.productName,
         debugShowCheckedModeBanner: false,
-        theme: AppTheme.light,
-        darkTheme: AppTheme.dark,
+        theme: AppTheme.accented(dark: false, accent: _appearance.accent.light),
+        darkTheme: AppTheme.accented(dark: true, accent: _appearance.accent.dark),
         themeMode: _appearance.mode,
         home: ListenableBuilder(
           listenable: _auth,
@@ -71,6 +73,7 @@ class _ProductAppState extends State<ProductApp> with WidgetsBindingObserver {
               );
             }
             final session = _auth.session;
+            if (session == null) _workspaceChosenFor = null;
             final identity = session == null
                 ? 'signed-out'
                 : '${session.namespace}:${session.accessToken}';
@@ -88,6 +91,18 @@ class _ProductAppState extends State<ProductApp> with WidgetsBindingObserver {
               key: ValueKey(identity),
               child: session == null
                   ? AuthPage(controller: _auth)
+                  : session.workspaces.length != 1 &&
+                        _workspaceChosenFor != session.userId
+                  ? WorkspacePage(
+                      controller: _auth,
+                      onSelected: (id) async {
+                        final selected = id == session.activeWorkspaceId ||
+                            await _auth.switchWorkspace(id);
+                        if (selected && mounted) {
+                          setState(() => _workspaceChosenFor = session.userId);
+                        }
+                      },
+                    )
                   : WorkspaceShell(
                       api: _api,
                       auth: _auth,

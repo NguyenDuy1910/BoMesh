@@ -28,6 +28,23 @@ Future<void> showShareSheet(
   );
 }
 
+/// The same ACL editor used by the collection's Access tab and share sheet.
+class CollectionAccessView extends StatelessWidget {
+  const CollectionAccessView({super.key, required this.collection});
+  final KnowledgeCollection collection;
+
+  @override
+  Widget build(BuildContext context) {
+    final scope = WorkspaceScope.of(context);
+    return _ShareBody(
+      api: scope.api,
+      session: scope.session,
+      collection: collection,
+      showDone: false,
+    );
+  }
+}
+
 /// One grant on a collection (`CollectionAccess`).
 class CollectionGrant {
   CollectionGrant.fromJson(JsonMap value)
@@ -117,10 +134,12 @@ class _ShareBody extends StatefulWidget {
     required this.api,
     required this.session,
     required this.collection,
+    this.showDone = true,
   });
   final ApiClient api;
   final AuthSession session;
   final KnowledgeCollection collection;
+  final bool showDone;
 
   @override
   State<_ShareBody> createState() => _ShareBodyState();
@@ -318,10 +337,11 @@ class _ShareBodyState extends State<_ShareBody> {
                       ),
               ),
           const SizedBox(height: 16),
-          FilledButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Done'),
-          ),
+          if (widget.showDone)
+            FilledButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Done'),
+            ),
         ],
       ),
     );

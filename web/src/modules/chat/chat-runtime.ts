@@ -5,7 +5,6 @@ import { releaseConversationDocument, streamAgentResponse, type SharedConversati
 import { CHAT_LIMITS } from "./attachments";
 import {
   editTruncation,
-  historyFromMessages,
   regenerationContext,
   retryRequest,
   type RetryMode,
@@ -230,7 +229,7 @@ async function runAnswer(
   assistantId: string,
   request: {
     text: string;
-    history: ChatMessage[];
+    replaceFromTurn?: number;
     documents: ConversationDocument[];
     collections: ConversationCollection[];
   },
@@ -244,7 +243,7 @@ async function runAnswer(
   try {
     await streamAgentResponse(request.text, {
       conversationId,
-      history: historyFromMessages(request.history),
+      replaceFromTurn: request.replaceFromTurn,
       attachmentIds: request.documents.map((document) => document.id),
       collectionItemIds: request.collections.map((collection) => collection.id),
       signal: controller.signal,
@@ -313,17 +312,16 @@ export function sendQuestion(
   const thread = threads.get(conversationId);
   if (!thread || thread.status !== "ready" || controllers.has(conversationId)) return;
   const text = input.text.slice(0, CHAT_LIMITS.messageCharacters);
-  const history = thread.messages;
   const assistantId = newId("assistant");
   setThread(conversationId, {
     ...thread,
     messages: [
-      ...history,
+      ...thread.messages,
       userMessage(text, input.documents, input.collections),
       { id: assistantId, role: "assistant", parts: [], turn: freshTurn(assistantId) },
     ],
   });
-  void runAnswer(conversationId, assistantId, { text, history, documents: input.documents, collections: input.collections });
+  void runAnswer(conversationId, assistantId, { text, documents: input.documents, collections: input.collections });
 }
 
 /**
@@ -340,7 +338,7 @@ export function retryAnswer(conversationId: string, assistantId: string, mode: R
   updateMessage(conversationId, assistantId, (message) => beginAttempt(message, freshTurn(message.id)));
   void runAnswer(conversationId, assistantId, {
     text: request.requestText,
-    history: request.historyMessages,
+    replaceFromTurn: request.replaceFromTurn,
     documents: request.documents,
     collections: request.collections,
   });
@@ -364,7 +362,7 @@ export function answerQuestion(conversationId: string, userMessageId: string): v
   });
   void runAnswer(conversationId, assistantId, {
     text: context.userText,
-    history: context.historyMessages,
+    replaceFromTurn: context.replaceFromTurn,
     documents: context.documents,
     collections: context.collections,
   });
@@ -398,7 +396,12 @@ export function editQuestion(conversationId: string, userMessageId: string, text
       { id: assistantId, role: "assistant", parts: [], turn: freshTurn(assistantId) },
     ],
   });
-  void runAnswer(conversationId, assistantId, { text: trimmed, history: truncation.kept, documents, collections });
+  void runAnswer(conversationId, assistantId, {
+    text: trimmed,
+    replaceFromTurn: truncation.replaceFromTurn,
+    documents,
+    collections,
+  });
 }
 
 /** Stop the live answer; what arrived so far stays, marked as stopped. */

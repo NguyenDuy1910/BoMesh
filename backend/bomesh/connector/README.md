@@ -38,10 +38,17 @@ PDFs are read from their own text layer (`processing/pdf_text.py`, PDFium): no
 model call and no page images, about a millisecond per page. Lines become
 paragraphs and headings (by spacing and type size) with page and box
 provenance for citations; running headers, footers and page numbers are
-dropped. Scans, text inside pictures and table structure are not read: a PDF
-with no text layer fails with "the file has no text to index". The former
-remote-vision transcription is kept, commented out, at the end of
-`processing/docling.py`.
+dropped. A scanned page (an image and fewer than 20 characters of text) is
+transcribed by Docling's VLM pipeline with the configured vision model
+(`BOMESH_DOCLING_MODEL` on OpenRouter, Markdown response, ~5 s/page) and
+spliced in at its page number; without that model a fully scanned PDF fails
+with "the file has no text to index". Text inside pictures of typed pages is
+not read.
+
+Spreadsheets go through Docling's xlsx backend. Leading rows whose only text
+is one cell merged across columns (a sheet title, a notes line) are moved out
+of the table as text, so the first real row is the column header the chunker
+repeats ("row, column = value").
 
 `ConnectorPipeline` consumes `ItemChange` values and hands Item registrations
 and removals to a `ConnectorRegistrationSink`; `SourceSyncService`

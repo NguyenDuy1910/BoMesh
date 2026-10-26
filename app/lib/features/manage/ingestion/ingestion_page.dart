@@ -7,11 +7,12 @@ import 'ingestion_models.dart';
 import 'new_run_sheet.dart';
 import 'run_page.dart';
 import 'source_sheet.dart';
+import 'connection_flow.dart';
 
-/// Manage → Ingestion: runs readable at a glance, and the connected sources.
-/// The tab decides the one action — New run on Runs, Sync now per source.
+/// Sources, processing history and connected accounts share one lifecycle.
 class IngestionPage extends StatefulWidget {
-  const IngestionPage({super.key});
+  const IngestionPage({super.key, this.initialTab = 0});
+  final int initialTab;
 
   @override
   State<IngestionPage> createState() => _IngestionPageState();
@@ -23,6 +24,7 @@ class _IngestionPageState extends State<IngestionPage>
   ApiClient? _api;
   late RunNames _names;
   final _runsKey = GlobalKey<_RunsTabState>();
+  final _sourcesKey = GlobalKey<_SourcesTabState>();
 
   @override
   void didChangeDependencies() {
@@ -32,10 +34,10 @@ class _IngestionPageState extends State<IngestionPage>
       _api = scope.api;
       _names = RunNames(scope.api);
     }
-    final length = scope.session.can('source.manage') ? 2 : 1;
+    const length = 3;
     if (_tabs?.length != length) {
       _tabs?.dispose();
-      _tabs = TabController(length: length, vsync: this)
+      _tabs = TabController(length: length, initialIndex: widget.initialTab.clamp(0, 2), vsync: this)
         ..addListener(() {
           if (mounted) setState(() {});
         });
@@ -63,12 +65,18 @@ class _IngestionPageState extends State<IngestionPage>
     _runsKey.currentState?.reload();
   }
 
+  Future<void> _connect() async {
+    final source = await showConnectSourceSheet(context);
+    if (!mounted || source == null) return;
+    _sourcesKey.currentState?._load();
+    _tabs!.animateTo(0);
+  }
+
   @override
   Widget build(BuildContext context) {
     final scope = WorkspaceScope.of(context);
     final tabs = _tabs!;
-    final withSources = tabs.length == 2;
-    final onRuns = tabs.index == 0;
+    final onRuns = tabs.index == 1;
     final runs = _RunsTab(
       key: _runsKey,
       api: scope.api,
@@ -79,28 +87,27 @@ class _IngestionPageState extends State<IngestionPage>
     return Scaffold(
       backgroundColor: context.colors.paper,
       appBar: AppHeader(
-        title: 'Ingestion',
+        title: 'Sources',
         paper: true,
-        bottom: withSources
-            ? AppTabBar(controller: tabs, labels: const ['Runs', 'Sources'])
-            : null,
+        bottom: AppTabBar(controller: tabs, labels: const ['Sources', 'Sync history', 'Accounts']),
       ),
-      body: withSources
-          ? TabBarView(
-              controller: tabs,
-              children: [
-                runs,
-                _SourcesTab(api: scope.api, names: _names),
-              ],
-            )
-          : runs,
+      body: TabBarView(
+        controller: tabs,
+        children: [
+          _SourcesTab(key: _sourcesKey, api: scope.api, names: _names),
+          runs,
+          const ConnectionAccounts(),
+        ],
+      ),
       floatingActionButton: onRuns && scope.session.can('ingestion.run')
           ? AppFab(
               icon: Icons.play_arrow_rounded,
-              label: 'New run',
+              label: 'Process documents',
               onPressed: _newRun,
             )
-          : null,
+          : tabs.index == 0
+              ? AppFab(icon: Icons.add_rounded, label: 'Connect source', onPressed: _connect)
+              : null,
     );
   }
 }
@@ -167,11 +174,8 @@ class _RunsTabState extends State<_RunsTab>
 
   @override
   Future<void> poll() async {
-    final page = await widget.api.get(
-      '/ingestion-runs',
-      query: {'page': 1, 'page_size': 30},
-    );
-    final runs = objectList(page['items']).map(IngestionRun.fromJson).toList();
+    final runs = (await readAllPages(widget.api, '/ingestion-runs'))
+        .map(IngestionRun.fromJson).toList();
     final titles = Map.fromIterables(
       runs.map((run) => run.id),
       await Future.wait(runs.map(widget.names.title)),
@@ -206,9 +210,9 @@ class _RunsTabState extends State<_RunsTab>
           children: [
             EmptyView(
               icon: Icons.move_to_inbox_outlined,
-              title: 'No runs yet',
-              message: 'A run makes new and changed documents searchable in answers.',
-              actionLabel: widget.onNewRun == null ? null : 'New run',
+              title: 'No sync history yet',
+              message: 'Processing runs make new and changed documents searchable. Connect a source or process waiting documents.',
+              actionLabel: widget.onNewRun == null ? null : 'Process documents',
               onAction: widget.onNewRun,
             ),
           ],
@@ -331,20 +335,29 @@ class _RunCard extends StatelessWidget {
 // Sources
 
 class _SourcesTab extends StatefulWidget {
-  const _SourcesTab({required this.api, required this.names});
+  const _SourcesTab({super.key, required this.api, required this.names, this.collectionId});
   final ApiClient api;
   final RunNames names;
+  final String? collectionId;
 
   @override
   State<_SourcesTab> createState() => _SourcesTabState();
 }
 
 class _SourcesTabState extends State<_SourcesTab>
-    with AutomaticKeepAliveClientMixin {
+    with AutomaticKeepAliveClientMixin, LivePolling<_SourcesTab> {
   List<JsonMap>? _sources;
   Map<String, String> _collections = const {};
   final Set<String> _syncing = {};
   Object? _error;
+  String _search = '';
+  bool _attentionOnly = false;
+  @override
+  Duration get pollInterval => const Duration(seconds: 4);
+  @override
+  bool get hasLiveWork => _sources?.any((s) => objectOf(s['sync'])['status'] == 'running') ?? false;
+  @override
+  Future<void> poll() => _load();
 
   @override
   bool get wantKeepAlive => true;
@@ -366,7 +379,9 @@ class _SourcesTabState extends State<_SourcesTab>
 
   Future<void> _load() async {
     try {
-      final sources = await readAllPages(widget.api, '/sources');
+      final sources = await readAllPages(widget.api, '/sources', query: {
+        if (widget.collectionId != null) 'collection_id': widget.collectionId,
+      });
       final ids = {
         for (final source in sources) textOf(source['collection_id']),
       }..remove('');
@@ -380,6 +395,7 @@ class _SourcesTabState extends State<_SourcesTab>
         _collections = titles;
         _error = null;
       });
+      syncPolling();
     } catch (error) {
       if (mounted) setState(() => _error = error);
     }
@@ -416,7 +432,7 @@ class _SourcesTabState extends State<_SourcesTab>
       api: widget.api,
       source: source,
       collectionTitle: _collectionOf(source),
-      canSync: true,
+      canSync: WorkspaceScope.of(context).session.can('source.manage'),
     );
     if (mounted) _load();
   }
@@ -444,27 +460,36 @@ class _SourcesTabState extends State<_SourcesTab>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final sources = _sources;
+    final sources = _sources?.where((source) {
+      final sync = objectOf(source['sync']);
+      final attention = ['failed', 'connection_required'].contains(source['status']) || sync['status'] == 'failed' || intOf(sync['failed']) > 0;
+      return (!_attentionOnly || attention) && sourceName(source).toLowerCase().contains(_search.toLowerCase());
+    }).toList();
     if (sources == null) {
       return _error != null
           ? ErrorView(error: _error!, onRetry: _load)
           : const LoadingView();
     }
-    const notice = InlineNotice(
-      text: 'Connect new sources from BoMesh on the web.',
-      icon: Icons.power_outlined,
-    );
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: kPagePadding,
+        padding: kPagePadding.copyWith(bottom: kFabClearance),
         children: [
+          TextField(
+            decoration: const InputDecoration(labelText: 'Search sources', prefixIcon: Icon(Icons.search_rounded)),
+            onChanged: (value) => setState(() => _search = value),
+          ),
+          Wrap(spacing: 8, children: [
+            ChoiceChip(label: const Text('All'), selected: !_attentionOnly, onSelected: (_) => setState(() => _attentionOnly = false)),
+            ChoiceChip(label: const Text('Needs attention'), selected: _attentionOnly, onSelected: (_) => setState(() => _attentionOnly = true)),
+          ]),
+          if (_error != null) InlineNotice(text: friendlyError(_error!), tone: StatusTone.danger),
           if (sources.isEmpty)
             const EmptyView(
               icon: Icons.power_outlined,
-              title: 'No sources connected',
-              message: 'Connect new sources from BoMesh on the web.',
+              title: 'No sources here',
+              message: 'Connect a source to keep knowledge up to date, or try another filter.',
             )
           else ...[
             SectionLabel(
@@ -473,8 +498,6 @@ class _SourcesTabState extends State<_SourcesTab>
               first: true,
             ),
             ListGroup(children: [for (final source in sources) _row(source)]),
-            const SizedBox(height: 14),
-            notice,
           ],
         ],
       ),
@@ -486,7 +509,9 @@ class _SourcesTabState extends State<_SourcesTab>
     final busy = _syncing.contains(id);
     final status = textOf(source['status']);
     final canSync =
+        WorkspaceScope.of(context).session.can('source.manage') &&
         status != 'connection_required' &&
+        status != 'paused' &&
         status != 'disabled' &&
         textOf(objectOf(source['sync'])['status']) != 'running';
     return ListRow(
@@ -514,4 +539,38 @@ class _SourcesTabState extends State<_SourcesTab>
             ),
     );
   }
+}
+
+/// Sources feeding one knowledge base, sharing the same connect/detail journey.
+class CollectionSources extends StatelessWidget {
+  const CollectionSources({super.key, required this.collectionId});
+  final String collectionId;
+  @override
+  Widget build(BuildContext context) {
+    final scope = WorkspaceScope.of(context);
+    return _CollectionSourcesBody(collectionId: collectionId, api: scope.api);
+  }
+}
+
+class _CollectionSourcesBody extends StatefulWidget {
+  const _CollectionSourcesBody({required this.collectionId, required this.api});
+  final String collectionId;
+  final ApiClient api;
+  @override
+  State<_CollectionSourcesBody> createState() => _CollectionSourcesBodyState();
+}
+
+class _CollectionSourcesBodyState extends State<_CollectionSourcesBody> {
+  final _key = GlobalKey<_SourcesTabState>();
+  @override
+  Widget build(BuildContext context) => Column(children: [
+    Expanded(child: _SourcesTab(key: _key, api: widget.api, names: RunNames(widget.api), collectionId: widget.collectionId)),
+      SafeArea(top: false, child: Padding(padding: const EdgeInsets.all(12), child: FilledButton.icon(
+        icon: const Icon(Icons.add_rounded), label: const Text('Connect a source'),
+        onPressed: () async {
+          final source = await showConnectSourceSheet(context, collectionId: widget.collectionId);
+          if (mounted && source != null) _key.currentState?._load();
+        },
+      ))),
+  ]);
 }

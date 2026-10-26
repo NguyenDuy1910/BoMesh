@@ -191,30 +191,21 @@ export interface FunctionCallOutputItem extends OutputItemBase {
   output: string;
 }
 
-/** A command dispatched and executed by the provider's hosted environment. */
-export interface HostedExecutionCallItem extends OutputItemBase {
-  type: "hosted_execution_call";
-  call_id: string;
-  commands: string[];
-  timeout_ms?: number;
-  max_output_characters?: number;
-}
-
-export interface HostedExecutionOutput {
+/** One command's outcome inside a `run_shell` function_call_output. */
+export interface ShellCommandOutput {
   stdout: string;
   stderr: string;
   exit_code?: number | null;
   timed_out: boolean;
 }
 
-/** The provider's finished hosted-shell observation used by the chat renderer. */
-export interface HostedExecutionResultItem extends OutputItemBase {
-  type: "hosted_execution_result";
-  call_id: string;
-  commands: string[];
-  output: HostedExecutionOutput[];
-  /** Safe file names reported by the workspace; never provider file IDs. */
-  workspace_files?: string[];
+/**
+ * The JSON a `run_shell` function_call_output carries. `results` align with
+ * the call's `commands` argument; `changed_files` are home-relative paths.
+ */
+export interface ShellRunOutput {
+  results: ShellCommandOutput[];
+  changed_files: string[];
 }
 
 export interface ReasoningItem extends OutputItemBase {
@@ -235,8 +226,6 @@ export type OutputItem =
   | MessageItem
   | FunctionCallItem
   | FunctionCallOutputItem
-  | HostedExecutionCallItem
-  | HostedExecutionResultItem
   | ReasoningItem
   | ExtensionOutputItem;
 
@@ -457,9 +446,4 @@ export interface CachedChatMessage {
   variantIndex?: number;
   feedback?: AnswerFeedback;
   createdAt: number;
-}
-
-export interface AgentHistoryMessage {
-  role: "user" | "assistant";
-  content: string;
 }

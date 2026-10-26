@@ -95,7 +95,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final workspace = _workspace;
     return Scaffold(
       backgroundColor: colors.paper,
-      appBar: const AppHeader(title: 'Settings', paper: true),
+      appBar: const AppHeader(title: 'Workspace settings', paper: true),
       body: workspace == null
           ? (_error != null
                 ? ErrorView(error: _error!, onRetry: _retry)
@@ -149,7 +149,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   onPressed: _saving || _name.text.trim().isEmpty
                       ? null
                       : _save,
-                  child: Text(_saving ? 'Saving…' : 'Save'),
+                  child: Text(_saving ? 'Saving…' : 'Save changes'),
                 ),
               ],
             )

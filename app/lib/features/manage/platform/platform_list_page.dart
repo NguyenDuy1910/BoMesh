@@ -10,10 +10,10 @@ import '../../../ui/ui.dart';
 /// with its status word, and a read-only detail on tap.
 enum PlatformListKind {
   tenants(
-    title: 'Tenants',
+    title: 'Workspaces',
     path: '/platform/workspaces',
-    hint: 'Search tenants',
-    noun: 'tenant',
+    hint: 'Search workspaces',
+    noun: 'workspace',
     icon: Icons.apartment_rounded,
     filterParam: 'status',
     filters: {

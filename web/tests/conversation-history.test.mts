@@ -3,7 +3,6 @@ import test from "node:test";
 
 import {
   editTruncation,
-  historyFromMessages,
   regenerationContext,
   retryRequest,
 } from "../src/modules/chat/conversation-history.ts";
@@ -18,53 +17,7 @@ function message(id: string, role: "user" | "assistant", text: string): ChatMess
   };
 }
 
-test("history keeps the final response from a semantic multi-response Turn", () => {
-  const messages: ChatMessage[] = [
-    message("old-user", "user", "O".repeat(20_000)),
-    message("old-assistant", "assistant", "A".repeat(5_000)),
-    message("recent-user", "user", "What are the loan fees?"),
-    {
-      id: "recent-assistant",
-      role: "assistant",
-      parts: [],
-      turn: {
-        id: "turn-1",
-        status: "completed",
-        responseOrder: ["response-1", "response-2"],
-        responses: {
-          "response-1": {
-            id: "response-1", status: "completed", itemOrder: ["tool-1"],
-            items: {
-              "tool-1": {
-                type: "function_call", id: "tool-1", call_id: "call-1", name: "knowledge_search",
-                arguments: "{}", status: "completed",
-              },
-            },
-          },
-          "response-2": {
-            id: "response-2", status: "completed", itemOrder: ["message-1"],
-            items: {
-              "message-1": {
-                type: "message", id: "message-1", role: "assistant", status: "completed",
-                content: [{ type: "output_text", text: "The documented fee is 1%.", annotations: [] }],
-              },
-            },
-          },
-        },
-      },
-    },
-  ];
-
-  const history = historyFromMessages(messages);
-
-  assert.deepEqual(history.slice(-2), [
-    { role: "user", content: "What are the loan fees?" },
-    { role: "assistant", content: "The documented fee is 1%." },
-  ]);
-  assert.equal(history[0]?.role, "user");
-});
-
-test("regeneration excludes the replaced answer and current request from history", () => {
+test("regeneration replaces the question's turn, counted among user messages", () => {
   const messages = [
     message("user-1", "user", "Tell me about product Easy"),
     message("assistant-1", "assistant", "Easy is an internal loan product."),
@@ -75,21 +28,9 @@ test("regeneration excludes the replaced answer and current request from history
   const context = regenerationContext(messages, "assistant-2");
 
   assert.equal(context?.userText, "What are its fees?");
-  assert.deepEqual(context?.historyMessages, messages.slice(0, 2));
+  assert.equal(context?.replaceFromTurn, 1);
+  assert.equal(regenerationContext(messages, "assistant-1")?.replaceFromTurn, 0);
   assert.deepEqual(context?.displayMessages, messages.slice(0, 3));
-});
-
-test("oversized messages preserve both the subject and the latest details", () => {
-  const longAnswer = `Subject: Easy loan\n${"A".repeat(9_000)}\nFinal fee: 1%`;
-
-  const history = historyFromMessages([
-    message("user", "user", "Tell me about Easy loan"),
-    message("assistant", "assistant", longAnswer),
-  ]);
-
-  assert.equal(history[1]?.content.length, 8_000);
-  assert.match(history[1]?.content ?? "", /^Subject: Easy loan/);
-  assert.match(history[1]?.content ?? "", /Final fee: 1%$/);
 });
 
 test("a retry resends the question with its instruction and keeps the scope unless told to search everything", () => {
@@ -106,7 +47,7 @@ test("a retry resends the question with its instruction and keeps the scope unle
   const again = retryRequest(messages, "assistant-1", "again", 4_000);
   assert.equal(again?.requestText, "What is the per diem?");
   assert.deepEqual(again?.collections, [{ id: "c-hr", title: "HR Policies" }]);
-  assert.deepEqual(again?.historyMessages, []);
+  assert.equal(again?.replaceFromTurn, 0);
 
   const shorter = retryRequest(messages, "assistant-1", "shorter", 4_000);
   assert.match(shorter?.requestText ?? "", /^What is the per diem\?\n\n.*briefly/);
@@ -119,6 +60,17 @@ test("a retry resends the question with its instruction and keeps the scope unle
   assert.equal(long?.requestText.length, 4_000);
 });
 
+test("retrying the second answer replaces the second user turn", () => {
+  const messages = [
+    message("user-1", "user", "First?"),
+    message("assistant-1", "assistant", "One."),
+    message("user-2", "user", "Second?"),
+    message("assistant-2", "assistant", "Two."),
+  ];
+  assert.equal(retryRequest(messages, "assistant-2", "all_knowledge", 4_000)?.replaceFromTurn, 1);
+  assert.equal(retryRequest(messages, "assistant-1", "again", 4_000)?.replaceFromTurn, 0);
+});
+
 test("editing a question replaces its answer and counts only the later messages it drops", () => {
   const messages = [
     message("user-1", "user", "First?"),
@@ -127,8 +79,9 @@ test("editing a question replaces its answer and counts only the later messages 
     message("assistant-2", "assistant", "Two."),
   ];
 
-  assert.deepEqual(editTruncation(messages, "user-2"), { kept: messages.slice(0, 2), user: messages[2], dropped: 0 });
+  assert.deepEqual(editTruncation(messages, "user-2"), { kept: messages.slice(0, 2), user: messages[2], dropped: 0, replaceFromTurn: 1 });
   assert.equal(editTruncation(messages, "user-1")?.dropped, 2);
+  assert.equal(editTruncation(messages, "user-1")?.replaceFromTurn, 0);
   // A question with no answer yet drops nothing but what follows it.
   assert.equal(editTruncation(messages.slice(0, 3), "user-2")?.dropped, 0);
   assert.equal(editTruncation(messages, "assistant-1"), null);

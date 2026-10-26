@@ -12,7 +12,8 @@ import 'requests_page.dart';
 enum _AccessTab {
   members('Members', 'user.manage'),
   groups('Groups', 'group.manage'),
-  roles('Roles', 'role.manage');
+  roles('Roles', 'role.manage'),
+  requests('Requests', 'access.manage');
 
   const _AccessTab(this.label, this.permission);
   final String label, permission;
@@ -31,7 +32,7 @@ class AccessPage extends StatefulWidget {
 class _AccessPageState extends State<AccessPage> with TickerProviderStateMixin {
   List<_AccessTab> _visible = const [];
   TabController? _tabs;
-  int _membersVersion = 0, _groupsVersion = 0;
+  int _membersVersion = 0, _groupsVersion = 0, _rolesVersion = 0;
 
   /// When the longest-waiting request was made, for [_oldestFor] waiting.
   DateTime? _oldest;
@@ -43,7 +44,7 @@ class _AccessPageState extends State<AccessPage> with TickerProviderStateMixin {
     final scope = WorkspaceScope.of(context);
     final visible = [
       for (final tab in _AccessTab.values)
-        if (scope.session.can(tab.permission)) tab,
+        if (tab == _AccessTab.requests ? scope.manage.requests : scope.session.can(tab.permission)) tab,
     ];
     if (!_sameTabs(visible)) {
       final previous = _tabs?.index ?? 0;
@@ -117,14 +118,16 @@ class _AccessPageState extends State<AccessPage> with TickerProviderStateMixin {
 
     final requestsCard = waiting > 0
         ? AttentionCard(
-            tone: StatusTone.warning,
+            tone: StatusTone.danger,
             icon: Icons.shield_outlined,
             title: countOf(waiting, 'access request'),
             subtitle: _oldest == null
                 ? 'Waiting for your decision'
                 : 'Oldest waiting ${_age(_oldest!)}',
-            onTap: () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => const RequestsPage())),
+            onTap: () {
+              final index = _visible.indexOf(_AccessTab.requests);
+              if (index >= 0) _tabs?.animateTo(index);
+            },
           )
         : null;
 
@@ -189,7 +192,7 @@ class _AccessPageState extends State<AccessPage> with TickerProviderStateMixin {
                         icon: Icons.search_rounded,
                         title: 'No groups match “$search”',
                       ),
-                row: (group, _) => ListRow(
+                row: (group, reload) => ListRow(
                   leading: ToneTile(
                     tone: toneFor(group.id),
                     icon: Icons.group_outlined,
@@ -204,18 +207,21 @@ class _AccessPageState extends State<AccessPage> with TickerProviderStateMixin {
                           tone: StatusTone.neutral,
                         ),
                   chevron: true,
-                  onTap: () => showGroupSheet(context, api: api, group: group),
+                  onTap: () async {
+                    await showGroupSheet(context, api: api, group: group);
+                    reload();
+                  },
                 ),
               ),
               _AccessTab.roles => _SearchableList<AccessRole>(
                 key: const PageStorageKey('access-roles'),
-                version: 0,
+                version: _rolesVersion,
                 load: (_) => loadRoles(api),
                 empty: (_) => const EmptyView(
                   icon: Icons.shield_outlined,
                   title: 'No roles yet',
                 ),
-                row: (role, _) => ListRow(
+                row: (role, reload) => ListRow(
                   leading: const ToneTile(
                     tone: Tone.indigo,
                     icon: Icons.shield_outlined,
@@ -236,9 +242,13 @@ class _AccessPageState extends State<AccessPage> with TickerProviderStateMixin {
                         )
                       : null,
                   chevron: true,
-                  onTap: () => showRoleSheet(context, api: api, role: role),
+                  onTap: () async {
+                    await showRoleSheet(context, api: api, role: role);
+                    reload();
+                  },
                 ),
               ),
+              _AccessTab.requests => const RequestsPage(embedded: true),
             },
         ],
       );
@@ -255,6 +265,14 @@ class _AccessPageState extends State<AccessPage> with TickerProviderStateMixin {
         label: 'New group',
         onPressed: () => _newGroup(api),
       ),
+      _AccessTab.roles => AppFab(
+        icon: Icons.add_rounded,
+        label: 'Create role',
+        onPressed: () async {
+          await showNewRoleSheet(context, api: api);
+          if (mounted) setState(() => _rolesVersion++);
+        },
+      ),
       _ => null,
     };
 
@@ -262,19 +280,19 @@ class _AccessPageState extends State<AccessPage> with TickerProviderStateMixin {
       backgroundColor: colors.paper,
       appBar: AppHeader(
         paper: true,
-        title: 'Access',
+        title: 'People & access',
         bottom: _tabs == null
             ? null
             : AppTabBar(
                 controller: _tabs,
-                labels: [for (final tab in _visible) tab.label],
+                labels: [for (final tab in _visible) tab == _AccessTab.requests && waiting > 0 ? 'Requests ($waiting)' : tab.label],
               ),
       ),
       floatingActionButton: fab,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (requestsCard != null)
+          if (requestsCard != null && _current != _AccessTab.requests)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
               child: requestsCard,

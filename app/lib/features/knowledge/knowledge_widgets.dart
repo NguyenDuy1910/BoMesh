@@ -4,15 +4,15 @@ import '../../ui/ui.dart';
 import 'document_page.dart';
 import 'knowledge_models.dart';
 
-/// One file: its type tile, its name, and one quiet meta line —
-/// "XLSX · 15 KB · yesterday". Only a file that cannot be searched yet says
-/// so, in the place of its date. No badges, no buttons: tapping opens it.
+/// One document, with processing state and an in-place recovery action.
 class DocumentRow extends StatelessWidget {
   const DocumentRow({
     super.key,
     required this.document,
     this.onTap,
     this.onReturn,
+    this.onRetry,
+    this.retrying = false,
   });
   final KnowledgeDocument document;
 
@@ -21,6 +21,8 @@ class DocumentRow extends StatelessWidget {
 
   /// Called after the opened document closes, so the list can refresh.
   final VoidCallback? onReturn;
+  final VoidCallback? onRetry;
+  final bool retrying;
 
   @override
   Widget build(BuildContext context) {
@@ -30,10 +32,14 @@ class DocumentRow extends StatelessWidget {
       FileKind.typeWord(contentType: document.contentType, name: document.name),
       if (document.size > 0) readableBytes(document.size),
     ].join(' · ');
-    final (String last, Color? tone) = processing.isProcessing
-        ? ('Becoming searchable…', null)
+    final (String last, Color? tone) = processing.isFailed
+        ? (processing.error.isEmpty ? 'Processing failed' : processing.error, colors.danger)
+        : processing.isProcessing
+        ? ('Processing', null)
         : processing.notSearchable
-        ? ('Not searchable yet', colors.warning)
+        ? ('Not searchable yet', colors.ink3)
+        : processing.state == 'ready'
+        ? ('Ready · ${relativeTime(document.updatedAt)}', null)
         : (relativeTime(document.updatedAt), null);
     return ListRow(
       leading: FileTile(contentType: document.contentType, name: document.name),
@@ -51,6 +57,10 @@ class DocumentRow extends StatelessWidget {
         ),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
+      ),
+      trailing: onRetry == null ? null : TextButton(
+        onPressed: retrying ? null : onRetry,
+        child: Text(retrying ? 'Starting…' : processing.isFailed ? 'Retry' : 'Process'),
       ),
       onTap:
           onTap ??
@@ -72,10 +82,12 @@ class CollectionCard extends StatelessWidget {
     super.key,
     required this.collection,
     this.onTap,
+    this.onLongPress,
     this.children,
   });
   final KnowledgeCollection collection;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
 
   /// How many collections sit inside it, when known.
   final int? children;
@@ -92,6 +104,7 @@ class CollectionCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
+        onLongPress: onLongPress,
         child: Padding(
           padding: const EdgeInsets.all(14),
           child: Row(
@@ -166,11 +179,17 @@ class CollectionFacts extends StatelessWidget {
       children: [
         fact(
           Icons.insert_drive_file_outlined,
-          countOf(collection.documentCount, 'item'),
+          countOf(collection.documentCount, 'document'),
         ),
         if ((children ?? 0) > 0)
           fact(Icons.menu_book_outlined, countOf(children!, 'collection')),
         if (collection.sourceCount > 0) fact(Icons.refresh_rounded, 'Synced'),
+        fact(
+          collection.can('collection.update')
+              ? Icons.edit_outlined : Icons.visibility_outlined,
+          collection.can('collection.share') ? 'Can manage access'
+              : collection.can('collection.update') ? 'Can edit' : 'View only',
+        ),
       ],
     );
   }

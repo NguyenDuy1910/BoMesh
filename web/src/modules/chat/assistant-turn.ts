@@ -1,12 +1,20 @@
 import {
-  isHostedExecutionCallItem,
-  isHostedExecutionResultItem,
   isFunctionCallItem,
+  isFunctionCallOutputItem,
   isMessageItem,
   isOutputTextPart,
   orderedTurnItems,
 } from "./message-stream.ts";
-import type { HostedExecutionOutput, RuntimeActivity, TurnState } from "./types";
+import type {
+  FunctionCallItem,
+  FunctionCallOutputItem,
+  RuntimeActivity,
+  ShellCommandOutput,
+  TurnState,
+} from "./types";
+
+/** The sandbox shell tool; its call and output items are the shell record. */
+export const SHELL_TOOL = "run_shell";
 
 export type AssistantTurnItem =
   | {
@@ -23,19 +31,21 @@ export type AssistantTurnItem =
       callId: string;
       state: "running" | "completed" | "failed" | "timeout";
       commands: string[];
-      output: HostedExecutionOutput[];
+      output: ShellCommandOutput[];
       files: string[];
     };
 
 /**
  * Function calls are model intent, not user-visible activity. An activity
- * appears only after the runtime says that call actually began executing.
+ * appears only after the runtime says that call actually began executing; a
+ * `run_shell` call becomes a shell run instead.
  */
 export function assistantTurnItems(turn: TurnState | undefined): AssistantTurnItem[] {
   if (!turn) return [];
   const activities = new Map(
     (turn.runtimeActivities ?? []).map((activity) => [activity.callId, activity]),
   );
+  const outputs = functionOutputs(turn);
   const seenActivities = new Set<string>();
   const items: AssistantTurnItem[] = [];
 
@@ -62,40 +72,19 @@ export function assistantTurnItems(turn: TurnState | undefined): AssistantTurnIt
 
     if (isFunctionCallItem(item)) {
       const activity = activities.get(item.call_id);
+      const output = outputs.get(item.call_id);
+      if (item.name === SHELL_TOOL) {
+        seenActivities.add(item.call_id);
+        // Like any call, a shell run is shown once the runtime started it.
+        if (activity || output || turn.status !== "streaming") {
+          items.push(shellExecution(id, item, output));
+        }
+        continue;
+      }
       if (activity) {
         items.push({ kind: "activity", id: item.call_id, activity });
         seenActivities.add(item.call_id);
       }
-      continue;
-    }
-
-    if (isHostedExecutionCallItem(item)) {
-      items.push({
-        kind: "execution",
-        id,
-        callId: item.call_id,
-        state: "running",
-        commands: item.commands,
-        output: [],
-        files: [],
-      });
-      continue;
-    }
-
-    if (isHostedExecutionResultItem(item)) {
-      const timedOut = item.output.some((entry) => entry.timed_out);
-      const failed = item.output.some(
-        (entry) => !entry.timed_out && entry.exit_code !== 0,
-      );
-      items.push({
-        kind: "execution",
-        id,
-        callId: item.call_id,
-        state: timedOut ? "timeout" : failed ? "failed" : "completed",
-        commands: item.commands,
-        output: item.output,
-        files: item.workspace_files?.filter((file) => typeof file === "string") ?? [],
-      });
     }
   }
   for (const activity of turn.runtimeActivities ?? []) {
@@ -106,8 +95,46 @@ export function assistantTurnItems(turn: TurnState | undefined): AssistantTurnIt
   return items;
 }
 
-/** One hosted shell run, as the chat presents it. */
+/** One sandbox shell run, as the chat presents it. */
 export type ExecutionTurnItem = Extract<AssistantTurnItem, { kind: "execution" }>;
+
+/** `function_call_output` items of a turn, by the call they answer. */
+export function functionOutputs(turn: TurnState): Map<string, FunctionCallOutputItem> {
+  const outputs = new Map<string, FunctionCallOutputItem>();
+  for (const { item } of orderedTurnItems(turn)) {
+    if (isFunctionCallOutputItem(item)) outputs.set(item.call_id, item);
+  }
+  return outputs;
+}
+
+/**
+ * A `run_shell` call and its output as one run. The output's `results` align
+ * with the call's `commands`; an output that is not that JSON is a tool error
+ * and reads as one failed command.
+ */
+export function shellExecution(
+  id: string,
+  call: FunctionCallItem,
+  output: FunctionCallOutputItem | undefined,
+): ExecutionTurnItem {
+  const commands = shellCommands(call.arguments);
+  if (!output) {
+    return { kind: "execution", id, callId: call.call_id, state: "running", commands, output: [], files: [] };
+  }
+  const run = parseShellRun(output.output);
+  const results = run?.results ?? [{ stdout: "", stderr: output.output, exit_code: null, timed_out: false }];
+  return {
+    kind: "execution",
+    id,
+    callId: call.call_id,
+    state: results.some((entry) => entry.timed_out)
+      ? "timeout"
+      : results.some((entry) => !entry.timed_out && entry.exit_code !== 0) ? "failed" : "completed",
+    commands,
+    output: results,
+    files: run?.changed_files ?? [],
+  };
+}
 
 /**
  * One line that says what a shell run did. A failure names the error the
@@ -137,6 +164,39 @@ export function executionSummary(execution: ExecutionTurnItem): { label: string;
     label: count > 1 ? `Ran ${count} commands` : "Ran code",
     detail: files ? `${files} file${files === 1 ? "" : "s"} changed` : undefined,
   };
+}
+
+function shellCommands(rawArguments: string): string[] {
+  const commands = parseObject(rawArguments)?.commands;
+  return Array.isArray(commands)
+    ? commands.filter((command): command is string => typeof command === "string")
+    : [];
+}
+
+function parseShellRun(raw: string): { results: ShellCommandOutput[]; changed_files: string[] } | undefined {
+  const value = parseObject(raw);
+  if (!value || !Array.isArray(value.results)) return undefined;
+  const results = value.results
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object")
+    .map((entry) => ({
+      stdout: typeof entry.stdout === "string" ? entry.stdout : "",
+      stderr: typeof entry.stderr === "string" ? entry.stderr : "",
+      exit_code: typeof entry.exit_code === "number" ? entry.exit_code : null,
+      timed_out: entry.timed_out === true,
+    }));
+  const changed = Array.isArray(value.changed_files)
+    ? value.changed_files.filter((file): file is string => typeof file === "string")
+    : [];
+  return { results, changed_files: changed };
+}
+
+function parseObject(raw: string): Record<string, unknown> | undefined {
+  try {
+    const value = JSON.parse(raw) as unknown;
+    return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function firstLine(text: string | undefined) {

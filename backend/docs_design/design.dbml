@@ -451,11 +451,11 @@ Table sandbox_sessions {
   tenant_id uuid [not null]
   conversation_id uuid [not null]
   user_id uuid [not null]
-  provider varchar(64) [not null]
+  provider varchar(64) [not null, note: 'docker: the BoMesh-owned sandbox container']
   manifest jsonb [not null, default: `{}`, note: 'Provider-neutral Item identities; no workspace output bytes']
-  provider_state jsonb [not null, default: `{}`, note: 'Opaque provider recovery metadata']
+  provider_state jsonb [not null, default: `{}`, note: 'Container binding: {container_id, materialized_files: [{path, resource_id}]}; never exposed to clients']
   status varchar(16) [not null, default: 'active', note: 'active | expired | closed']
-  last_used_at timestamptz
+  last_used_at timestamptz [note: 'Touched by every request that uses the sandbox; the idle reaper expires sessions past BOMESH_SANDBOX_IDLE_TTL_SECONDS']
   deleted_at timestamptz
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
@@ -472,8 +472,14 @@ Table messages {
   content text [not null]
   metadata jsonb [not null, default: `{}`]
   sequence_number bigint [not null]
+  status varchar(16) [not null, default: 'active', note: 'active | superseded']
+  superseded_at timestamptz [note: 'Set when a retry or edit (replace_from_turn) replaced this message']
   created_at timestamptz [not null]
-  indexes { (conversation_id, sequence_number) [unique] }
+  indexes {
+    (conversation_id, sequence_number) [unique]
+    (conversation_id, status, sequence_number)
+  }
+  Note: 'Server-owned conversation history. Only active messages feed model context and conversation references. A retry/edit marks the replaced user message and every later message superseded instead of deleting them. Check message_status_is_valid: status IN (active, superseded) and superseded_at IS NOT NULL exactly when superseded.'
 }
 
 Table memories {

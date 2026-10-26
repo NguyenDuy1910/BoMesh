@@ -185,7 +185,12 @@ re-checks Item permission before returning a viewer target.
 ### Conversation and memory
 
 `conversations -> messages` is the only message ownership path. Message order
-uses `(conversation_id, sequence_number)`; message identity is UUID.
+uses `(conversation_id, sequence_number)`; message identity is UUID. Messages
+are the server-owned conversation history the agent reads. A retry or edit
+never deletes: it sets the replaced user message and every later message to
+`status = 'superseded'` with `superseded_at`, and only `active` messages reach
+model context or conversation references. Sequence numbers keep growing, so a
+replacement is ordered after what it replaced.
 
 Memory intentionally carries both `tenant_id` and `user_id`: memory belongs to
 a person inside a workspace. `conversation_id` and `source_message_id` are
@@ -225,7 +230,8 @@ Indexes follow known access paths, not every foreign key:
 - external resources by source/provider identity and last-seen time
 - ingestion runs by tenant/recency and tenant/status; run items by run/status,
   run/batch (the planner), and Item/recency (a Document's latest run)
-- messages by conversation/sequence
+- messages by conversation/sequence and conversation/status/sequence (active
+  history)
 - authorization grants by principal/scope/role
 - audit logs by tenant/action/time and actor/session
 

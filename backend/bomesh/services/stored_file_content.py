@@ -15,7 +15,12 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from bomesh.connector.file import FileNoTextError, FileProcessor, ProcessedFile
+from bomesh.connector.file import (
+    FileNoTextError,
+    FileProcessor,
+    FileTranscriptionError,
+    ProcessedFile,
+)
 from bomesh.connector.protocol import (
     AccessPolicy,
     DocumentKind,
@@ -100,8 +105,12 @@ class StoredFileContentService:
             )
         except FileNoTextError as exc:
             raise DocumentProcessingError(
-                "the file has no text to index; scanned PDFs and text inside images"
-                " are not supported yet"
+                "the file has no text to index; text inside images is not indexed"
+                " and scanned PDFs need a configured vision model"
+            ) from exc
+        except FileTranscriptionError as exc:
+            raise DocumentProcessingError(
+                "the scanned pages could not be transcribed; run the ingestion again later"
             ) from exc
         except Exception as exc:
             raise DocumentProcessingError(

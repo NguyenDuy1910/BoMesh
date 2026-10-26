@@ -120,6 +120,34 @@ Integration credentials are encrypted before they are written to
 `integration_credentials`. They are not Item metadata, Qdrant payload, frontend
 configuration, or audit-log content.
 
+## Agent sandbox (Docker)
+
+The agent's `run_shell` tool runs in BoMesh-owned Docker containers (one per
+conversation, no network, non-root, resource-limited). The API process needs
+access to the Docker daemon (`DOCKER_HOST` or the default socket) and the
+image:
+
+```bash
+docker build -t bomesh-sandbox:latest deployment/sandbox
+```
+
+```dotenv
+BOMESH_SANDBOX_ENABLED=true            # false: sandbox tools are never offered
+BOMESH_SANDBOX_IMAGE=bomesh-sandbox:latest
+BOMESH_SANDBOX_WARM_POOL_SIZE=2        # pristine containers kept ready
+BOMESH_SANDBOX_IDLE_TTL_SECONDS=1800   # idle conversation containers are removed
+BOMESH_SANDBOX_MEMORY=1g
+BOMESH_SANDBOX_CPUS=1.0
+BOMESH_SANDBOX_PIDS_LIMIT=256
+BOMESH_SANDBOX_COMMAND_TIMEOUT_SECONDS=60
+BOMESH_SANDBOX_MAX_OUTPUT_CHARACTERS=8000
+```
+
+Without Docker or the image the API logs a warning and chat works without
+sandbox tools. Containers carry the label `bomesh.sandbox=1`
+(`docker ps --filter label=bomesh.sandbox=1`). See
+`backend/docs_design/conversation_loop.md` ("Sandbox shell work").
+
 ## Health and observability
 
 `GET /health` reports API, Qdrant, OpenAI chat, OpenRouter embeddings, and

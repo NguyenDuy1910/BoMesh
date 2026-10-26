@@ -25,14 +25,8 @@ import api.app as api_app
 import api.deps as api_deps
 import bomesh.runtime as runtime_module
 from bomesh.agent import Agent, SessionConfiguration
-from bomesh.agent.models import AgentContext
-from bomesh.agent.protocol import (
-    ExecutionEnvironmentRef,
-    ExecutionOutput,
-    HostedExecutionResultItem,
-    ProviderResourceRef,
-    ResponseOutputItemDoneEvent,
-)
+from bomesh.agent.models import AgentContext, ConversationMessage
+from bomesh.agent.protocol import Response, ResponseCreatedEvent
 from bomesh.agent.tools import ToolExecutor, ToolRegistry, ToolSpec
 from bomesh.agent.tools.knowledge_search import KnowledgeSearch
 from bomesh.services.chat import ChatService, _public_event
@@ -186,28 +180,18 @@ async def test_finalized_document_loads_server_timestamp_before_presentation() -
     assert result["processing"]["state"] == "pending"
     assert result["updated_at"] == now
 
-def test_public_chat_events_strip_provider_workspace_bindings() -> None:
-    event = ResponseOutputItemDoneEvent(
-        output_index=0,
-        item=HostedExecutionResultItem(
-            call_id="shell-1",
-            output=(ExecutionOutput(stdout="done", exit_code=0),),
-            environment=ExecutionEnvironmentRef(provider="openrouter", id="container_1"),
-            files=(
-                ProviderResourceRef(
-                    provider="openrouter", id="cfile_1", name="report.csv"
-                ),
-            ),
-            workspace_files=("report.csv",),
-        ),
+def test_public_chat_events_report_the_conversation_on_response_snapshots() -> None:
+    conversation_id = uuid4()
+    event = ResponseCreatedEvent(
+        response=Response(id="resp-1", status="in_progress", metadata={"k": "v"})
     )
 
-    payload = _public_event(event).model_dump_json()
+    payload = json.loads(_public_event(event, conversation_id).model_dump_json())
 
-    assert "container_1" not in payload
-    assert "cfile_1" not in payload
-    assert "openrouter" not in payload
-    assert "report.csv" in payload
+    assert payload["response"]["metadata"] == {
+        "k": "v",
+        "conversation_id": str(conversation_id),
+    }
 
 
 def test_default_agent_composes_the_openai_transport(
@@ -344,12 +328,12 @@ class StubRetriever:
 
     async def search(
         self,
-        query: str,
+        queries: Sequence[str],
         *,
         limit: int,
         ctx: Any,
     ) -> list[Evidence]:
-        assert query == "leave policy"
+        assert list(queries) == ["leave policy"]
         assert limit == 5
         self.contexts.append(ctx)
         return self._evidence()
@@ -502,14 +486,21 @@ def _install_access(monkeypatch: Any) -> tuple[UUID, UUID]:
         def __init__(self) -> None:
             self.started: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
             self.finished: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+            self.history_reads: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+            # What the server holds for the conversation, as history() returns it.
+            self.stored_history: tuple[ConversationMessage, ...] = ()
 
-        async def start_turn(self, *_: Any, **__: Any) -> None:
+        async def start_turn(self, *_: Any, **__: Any) -> SimpleNamespace:
             self.started.append((_, __))
-            return None
+            return SimpleNamespace(id=uuid4())
 
         async def finish_turn(self, *_: Any, **__: Any) -> None:
             self.finished.append((_, __))
             return None
+
+        async def history(self, *_: Any, **__: Any) -> tuple[ConversationMessage, ...]:
+            self.history_reads.append((_, __))
+            return self.stored_history
 
         async def referenced_resources(self, *_: Any, **__: Any) -> tuple[Any, ...]:
             return ()
@@ -667,14 +658,15 @@ def test_chat_api_streams_agent_retrieval_and_sources(monkeypatch) -> None:
     agent = Agent(
         transport,
         registry,
-        configuration=SessionConfiguration(
-            max_model_turns=3,
-            max_tool_rounds=2,
-            recent_history_messages=2,
-        ),
+        configuration=SessionConfiguration(max_model_turns=3, max_tool_rounds=2),
     )
     monkeypatch.setattr(api_deps.get_runtime(), "_agent", agent)
     user_id, tenant_id = _install_access(monkeypatch)
+    conversations = api_deps.get_runtime()._conversations
+    conversations.stored_history = (
+        ConversationMessage(role="user", content="Recent scope question"),
+        ConversationMessage(role="assistant", content="Recent scope answer"),
+    )
     conversation_id = uuid4()
 
     with TestClient(api_app.app) as client:
@@ -686,10 +678,6 @@ def test_chat_api_streams_agent_retrieval_and_sources(monkeypatch) -> None:
                 "user_id": str(user_id),
                 "roles": [],
                 "conversation_id": str(conversation_id),
-                "history": [
-                    {"role": "user", "content": "Recent scope question"},
-                    {"role": "assistant", "content": "Recent scope answer"},
-                ],
                 "collection_ids": [str(UUID(int=12))],
             },
         )
@@ -702,6 +690,7 @@ def test_chat_api_streams_agent_retrieval_and_sources(monkeypatch) -> None:
     ]
     event_types = [event["type"] for event in events]
     assert event_types[0] == "response.created"
+    assert events[0]["response"]["metadata"]["conversation_id"] == str(conversation_id)
     assert event_types[-1] == "response.completed"
     assert [event["sequence_number"] for event in events] == list(
         range(1, len(events) + 1)
@@ -727,17 +716,23 @@ def test_chat_api_streams_agent_retrieval_and_sources(monkeypatch) -> None:
     assert annotation["citation"]["reference"] == "ref_1"
     assert annotation["citation"]["number"] == 1
     assert annotation["citation"]["source"]["provider"] == "confluence"
-    conversations = api_deps.get_runtime()._conversations
-    assert conversations is not None
+    assert len(conversations.history_reads) == 1
+    assert conversations.history_reads[0][0] == (conversation_id,)
+    assert conversations.history_reads[0][1]["before_turn"] is None
     assert len(conversations.started) == 1
     assert conversations.started[0][1]["content"] == "What is the leave policy?"
+    assert conversations.started[0][1]["replace_from_turn"] is None
     assert len(conversations.finished) == 1
     assert conversations.finished[0][1]["content"] == "Employees receive 20 days of annual leave [1]."
+    assert conversations.finished[0][1]["question_id"] is not None
     assert len(retriever.contexts) == 1
     assert len(retriever.contexts[0].collection_item_ids) == 1
     # ``/responses`` takes instructions as a request parameter, so the input is
     # items only — there is no synthetic leading system message.
     assert "<agent_instructions>" in transport.requests[0]["instructions"]
+    # Every request of the conversation shares one provider cache route.
+    assert transport.requests[0]["prompt_cache_key"] == str(conversation_id)
+    assert transport.requests[0]["reasoning"] == {"effort": "none"}
     assert [tool["name"] for tool in transport.requests[0]["tools"]] == [
         "knowledge_search"
     ]
@@ -898,7 +893,7 @@ def test_chat_api_resolves_a_cited_source_reference_to_canonical_metadata(
 
 
 class TwoChunkIndex:
-    """Two indexed chunks of the same document, as the index returns them."""
+    """Indexed chunks as the index returns them."""
 
     def __init__(self, chunks: list[ContextualChunk]) -> None:
         self._chunks = chunks
@@ -922,9 +917,11 @@ def test_chat_api_places_repeated_and_multiple_citations_inline(monkeypatch) -> 
     """
 
     first = _indexed_chunk()
+    # A second document: per-document numbering gives it the next number.
     second = first.model_copy(
         update={
-            "id": "9f1c2d34-0000-4000-8000-000000000001:13",
+            "id": "9f1c2d34-0000-4000-8000-000000000002:13",
+            "item_id": "9f1c2d34-0000-4000-8000-000000000002",
             "chunk_index": 13,
             "chunk_text": "Four endpoints serve the streaming API.",
             "relevance_score": 0.81,
@@ -1030,12 +1027,12 @@ def test_document_search_api_uses_authorized_retrieval_scope(monkeypatch) -> Non
 
         async def search(
             self,
-            query: str,
+            queries: Sequence[str],
             *,
             limit: int,
             ctx: AgentContext,
         ) -> list[Evidence]:
-            assert query == "annual leave"
+            assert list(queries) == ["annual leave"]
             assert limit == 4
             self.contexts.append(ctx)
             return [
@@ -1106,7 +1103,6 @@ def test_chat_api_flushes_safe_interleaved_events(monkeypatch) -> None:
                 "tenant_id": str(tenant_id),
                 "user_id": str(user_id),
                 "roles": [],
-                "history": [],
             },
         )
 
@@ -1171,7 +1167,7 @@ async def test_a_reasoning_item_replays_as_a_canonical_input_item() -> None:
 # handling are covered by tests/bomesh/agent/test_turn_runtime.py.
 
 
-def test_chat_api_rejects_unbounded_history(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_chat_api_rejects_a_negative_replace_from_turn(monkeypatch: pytest.MonkeyPatch) -> None:
     # Request validation is the whole subject: no runtime is composed.
     monkeypatch.setitem(
         api_app.app.dependency_overrides, api_deps.get_chat_service, lambda: None
@@ -1181,36 +1177,46 @@ def test_chat_api_rejects_unbounded_history(monkeypatch: pytest.MonkeyPatch) -> 
             "/api/v1/agent/chat",
             json={
                 "message": "hello",
-                "tenant_id": "tenant-1",
-                "user_id": "user-1",
-                "roles": [],
-                "history": [
-                    {"role": "user", "content": "previous turn"} for _ in range(25)
-                ],
+                "conversation_id": str(uuid4()),
+                "replace_from_turn": -1,
             },
         )
 
     assert response.status_code == 422
 
 
-def test_chat_api_rejects_history_message_over_context_budget(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Request validation is the whole subject: no runtime is composed.
-    monkeypatch.setitem(
-        api_app.app.dependency_overrides, api_deps.get_chat_service, lambda: None
+def test_chat_request_replacing_a_turn_requires_a_conversation() -> None:
+    with pytest.raises(ValueError, match="requires conversation_id"):
+        ChatRequest(message="hello", replace_from_turn=0)
+
+
+def test_chat_api_passes_replace_from_turn_to_history_and_start_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A retry reads history before the replaced turn, then replaces it."""
+
+    registry = ToolRegistry()
+    registry.register(KnowledgeSearch(StubRetriever()))
+    monkeypatch.setattr(
+        api_deps.get_runtime(), "_agent", Agent(InterleavedTransport(), registry)
     )
+    _install_access(monkeypatch)
+    conversations = api_deps.get_runtime()._conversations
+    conversation_id = uuid4()
+
     with TestClient(api_app.app) as client:
         response = client.post(
             "/api/v1/agent/chat",
             json={
-                "message": "hello",
-                "tenant_id": "tenant-1",
-                "user_id": "user-1",
-                "roles": [],
-                "history": [{"role": "assistant", "content": "A" * 8_001}],
+                "message": "What is the internal leave policy?",
+                "conversation_id": str(conversation_id),
+                "replace_from_turn": 1,
             },
         )
 
-    assert response.status_code == 422
+    assert response.status_code == 200, response.text
+    assert conversations.history_reads[0][1]["before_turn"] == 1
+    assert conversations.started[0][1]["replace_from_turn"] == 1
 
 
 def test_chat_request_accepts_an_optional_bounded_collection_selection() -> None:

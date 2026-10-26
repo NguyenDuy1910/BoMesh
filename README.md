@@ -153,6 +153,7 @@ Open:
 | Guide | Use it for |
 | --- | --- |
 | [Documentation index](docs/README.md) | Finding the right guide by responsibility. |
+| [UI and UX concept source](ui_preview/README.md) | Canonical web/app visual language, prototypes, user flows, and implementation guidance. |
 | [Getting started](docs/getting-started.md) | Local setup, reset behavior, and development identity. |
 | [Architecture](docs/architecture.md) | Package ownership, request flow, and infrastructure boundaries. |
 | [Connectors and indexing](docs/connectors-and-indexing.md) | Connector scopes, Docling, contextual hybrid retrieval, ACL projection, and retries. |

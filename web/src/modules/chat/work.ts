@@ -1,14 +1,12 @@
-import { executionSummary, type ExecutionTurnItem } from "./assistant-turn.ts";
+import { executionSummary, functionOutputs, shellExecution, SHELL_TOOL, type ExecutionTurnItem } from "./assistant-turn.ts";
 import { turnArtifacts } from "./artifacts.ts";
 import {
   isFunctionCallItem,
-  isHostedExecutionCallItem,
-  isHostedExecutionResultItem,
   isMessageItem,
   isOutputTextPart,
   orderedTurnItems,
 } from "./message-stream.ts";
-import type { HostedExecutionOutput, RuntimeActivity, TurnState } from "./types";
+import type { RuntimeActivity, ShellCommandOutput, TurnState } from "./types";
 
 /**
  * How an answer was found, as one collapsed line and the timeline it opens:
@@ -22,7 +20,7 @@ export type WorkStepState = "live" | "ok" | "bad";
 
 export interface WorkRun {
   command: string;
-  output?: HostedExecutionOutput;
+  output?: ShellCommandOutput;
   failed: boolean;
 }
 
@@ -46,7 +44,7 @@ export interface TurnWork {
   summary: string | null;
   /** What is running right now, for the live line. */
   liveLabel: string | null;
-  /** Whether a step ran in the secure workspace (shell). */
+  /** Whether a step ran in the sandbox (shell). */
   usesShell: boolean;
   /**
    * The turn failed while working on files and saved none of them — the
@@ -71,6 +69,7 @@ const TOOL_WORDS: Record<string, ToolWords> = {
   materialize_resource: { kind: "prepare", live: "Preparing a file", done: "Prepared a file", failed: "Couldn’t prepare a file" },
   materialize_sandbox_resource: { kind: "prepare", live: "Opening a file in the secure workspace", done: "Opened a file in the secure workspace", failed: "Couldn’t open a file in the secure workspace" },
   export_sandbox_file: { kind: "export", live: "Saving a file", done: "Saved a file", failed: "Couldn’t save the file" },
+  run_shell: { kind: "code", live: "Running code", done: "Ran code", failed: "Code hit an error" },
   artifact_create: { kind: "export", live: "Creating a document", done: "Created a document", failed: "Couldn’t create the document" },
   document_edit: { kind: "edit", live: "Editing a document", done: "Edited a document", failed: "Couldn’t edit the document" },
 };
@@ -107,37 +106,22 @@ export function turnWork(
   const steps: WorkStep[] = [];
   const seenCalls = new Set<string>();
   const where = scopeLabel(options.scopeTitles ?? []);
+  const outputs = functionOutputs(turn);
 
   for (const { id, item } of orderedTurnItems(turn)) {
     if (isFunctionCallItem(item)) {
       const fact = facts.get(item.call_id);
+      const output = outputs.get(item.call_id);
       // A function call is model intent; while streaming it only becomes a
       // step once the runtime says it began. A settled turn kept going after
       // the call, so the call ran.
-      if (!fact && streaming) continue;
+      if (!fact && !output && streaming) continue;
       seenCalls.add(item.call_id);
-      steps.push(toolStep(item.call_id, item.name, fact, item.arguments, where, streaming));
-      continue;
-    }
-    if (isHostedExecutionCallItem(item) || isHostedExecutionResultItem(item)) {
-      const execution: ExecutionTurnItem = isHostedExecutionResultItem(item)
-        ? {
-            kind: "execution",
-            id,
-            callId: item.call_id,
-            state: item.output.some((entry) => entry.timed_out)
-              ? "timeout"
-              : item.output.some((entry) => !entry.timed_out && entry.exit_code !== 0) ? "failed" : "completed",
-            commands: item.commands,
-            output: item.output,
-            files: item.workspace_files?.filter((file) => typeof file === "string") ?? [],
-          }
-        : { kind: "execution", id, callId: item.call_id, state: "running", commands: item.commands, output: [], files: [] };
-      // A result replaces the call it reports on.
-      const previous = steps.findIndex((step) => step.kind === "code" && step.id === `code:${item.call_id}`);
-      const step = codeStep(execution, streaming);
-      if (previous >= 0) steps[previous] = step;
-      else steps.push(step);
+      steps.push(
+        item.name === SHELL_TOOL
+          ? codeStep(shellExecution(id, item, output), streaming)
+          : toolStep(item.call_id, item.name, fact, item.arguments, where, streaming),
+      );
       continue;
     }
     if (isMessageItem(item) && item.role === "assistant" && item.phase === "commentary") {

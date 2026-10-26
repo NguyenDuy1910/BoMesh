@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 import '../../app/account_sheet.dart';
@@ -7,19 +5,13 @@ import '../../app/workspace_scope.dart';
 import '../../core/api_client.dart';
 import '../../ui/ui.dart';
 import 'collection_page.dart';
-import 'document_feed.dart';
 import 'knowledge_models.dart';
 import 'knowledge_widgets.dart';
-import 'upload_sheet.dart';
+import 'share_sheet.dart';
 
-enum _View { mine, workspace }
+enum _Access { all, editable, readOnly, personal }
 
-/// The Library: your files, and the workspace's shared collections.
-///
-/// Search and the My files / Workspace switch lead. Each file wears its type
-/// colour; only a file that can't be searched yet says so, in quiet text.
-/// Upload is the one primary action. Creating, sharing and deleting
-/// collections is management and lives in Manage → Knowledge.
+/// One permission-filtered home for personal and shared knowledge.
 class LibraryPage extends StatefulWidget {
   const LibraryPage({super.key});
 
@@ -29,19 +21,13 @@ class LibraryPage extends StatefulWidget {
 
 class _LibraryPageState extends State<LibraryPage> {
   ApiClient? _api;
-  _View _view = _View.mine;
-  final _searchField = TextEditingController();
-  Timer? _debounce;
-  String _query = '';
-
   List<KnowledgeCollection> _collections = const [];
   String? _personalId;
+  String _query = '';
+  _Access _access = _Access.all;
   Object? _error;
   bool _loading = true;
-
-  /// The documents shown: My files (optionally filtered), or the workspace
-  /// search. Null while the view has nothing to list.
-  DocumentFeed? _feed;
+  bool _openingPersonal = false;
 
   @override
   void didChangeDependencies() {
@@ -49,136 +35,151 @@ class _LibraryPageState extends State<LibraryPage> {
     final api = WorkspaceScope.of(context).api;
     if (!identical(api, _api)) {
       _api = api;
-      _loadHome();
+      _load();
     }
   }
 
-  @override
-  void dispose() {
-    _debounce?.cancel();
-    _searchField.dispose();
-    _feed?.dispose();
-    super.dispose();
-  }
-
-  Future<void> _loadHome({bool quiet = false}) async {
-    if (!quiet && !_loading) {
-      setState(() {
-        _loading = true;
-        _error = null;
-      });
-    }
+  Future<void> _load({bool quiet = false}) async {
+    if (!quiet) setState(() { _loading = true; _error = null; });
+    final api = _api!;
     try {
-      final value = await _api!.get('/knowledge/home');
-      if (!mounted) return;
-      final personal = textOf(value['personal_collection_id']);
-      final personalId = personal.isEmpty ? null : personal;
-      final changed = personalId != _personalId;
+      final home = await api.get('/knowledge/home');
+      if (!mounted || !identical(api, _api)) return;
       setState(() {
-        _collections = objectList(value['collections'])
-            .map(KnowledgeCollection.fromJson)
-            .toList();
-        _personalId = personalId;
+        _collections = objectList(home['collections'])
+            .map(KnowledgeCollection.fromJson).toList();
+        _personalId = textOf(home['personal_collection_id']);
         _loading = false;
         _error = null;
       });
-      final feed = _feed;
-      if (!quiet || changed || feed == null) {
-        _resetFeed();
-      } else {
-        await feed.load(quiet: true);
-      }
     } catch (error) {
-      if (!mounted) return;
-      if (quiet && _error == null && !_loading) {
-        showError(context, error);
-        return;
-      }
-      setState(() {
-        _error = error;
-        _loading = false;
-      });
-    }
-  }
-
-  /// A fresh feed for what the view and search ask for.
-  void _resetFeed() {
-    _feed?.dispose();
-    _feed = null;
-    if (_view == _View.mine && _personalId != null) {
-      _feed = DocumentFeed(_api!, collectionId: _personalId, search: _query)
-        ..load();
-    } else if (_view == _View.workspace && _query.isNotEmpty) {
-      _feed = DocumentFeed(_api!, search: _query)..load();
-    }
-    setState(() {});
-  }
-
-  void _onSearch(String value) {
-    _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 300), () {
-      if (!mounted || value.trim() == _query) return;
-      _query = value.trim();
-      _resetFeed();
-    });
-  }
-
-  void _switch(_View view) {
-    if (view == _view) return;
-    _view = view;
-    _resetFeed();
-  }
-
-  Future<void> _refresh() => _loadHome(quiet: true);
-
-  Future<void> _upload() async {
-    if (await showUploadSheet(context) && mounted) {
-      // The first upload creates My files, so the home is read again.
-      await _loadHome(quiet: true);
+      if (!mounted || !identical(api, _api)) return;
+      if (quiet) { showError(context, error); return; }
+      setState(() { _error = error; _loading = false; });
     }
   }
 
   Future<void> _open(KnowledgeCollection collection) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => CollectionPage(collection: collection),
+    await Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => CollectionPage(collection: collection),
+    ));
+    if (mounted) await _load(quiet: true);
+  }
+
+  Future<void> _openPersonal() async {
+    if (_openingPersonal) return;
+    setState(() => _openingPersonal = true);
+    try {
+      final personal = _collections.where((c) => c.id == _personalId).firstOrNull;
+      final collection = personal ?? KnowledgeCollection.fromJson(
+        await _api!.put('/collections/personal'),
+      );
+      if (mounted) await _open(collection);
+    } catch (error) {
+      if (mounted) showError(context, error);
+    } finally {
+      if (mounted) setState(() => _openingPersonal = false);
+    }
+  }
+
+  Future<void> _create() async {
+    final values = await showCollectionForm(
+      context,
+      title: 'Create knowledge base',
+      subtitle: 'Group documents by team or topic. Share access after creating it.',
+      confirmLabel: 'Create knowledge base',
+    );
+    if (values == null || !mounted) return;
+    try {
+      final collection = KnowledgeCollection.fromJson(await _api!.post(
+        '/collections',
+        body: {'title': values.title, 'description': values.description},
+      ));
+      if (mounted) await _open(collection);
+    } catch (error) {
+      if (mounted) showError(context, error);
+    }
+  }
+
+  Future<void> _actions(KnowledgeCollection collection) async {
+    final action = await showAppSheet<String>(
+      context,
+      title: collection.title,
+      builder: (sheetContext) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SheetOption(
+            icon: Icons.auto_awesome_outlined,
+            title: 'Ask about this knowledge base',
+            onTap: () => Navigator.pop(sheetContext, 'ask'),
+          ),
+          if (collection.can('collection.share'))
+            SheetOption(
+              icon: Icons.person_add_alt_outlined,
+              title: 'Share',
+              onTap: () => Navigator.pop(sheetContext, 'share'),
+            ),
+        ],
       ),
     );
-    if (mounted) await _loadHome(quiet: true);
+    if (!mounted) return;
+    if (action == 'ask') {
+      WorkspaceScope.of(context).askAboutCollection?.call(collection.id, collection.title);
+    } else if (action == 'share') {
+      await showShareSheet(context, collection);
+      if (mounted) await _load(quiet: true);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final mine = _view == _View.mine;
+    final scope = WorkspaceScope.of(context);
+    final canCreate = scope.session.can('knowledge.manage');
     return Scaffold(
-      appBar: const AppHeader(title: 'Library', actions: [AccountButton()]),
-      floatingActionButton: mine
-          ? AppFab(
-              icon: Icons.upload_rounded,
-              label: 'Upload',
-              onPressed: _upload,
-            )
+      backgroundColor: context.colors.paper,
+      appBar: AppHeader(paper: true, actions: [
+        IconButton(
+          tooltip: 'Search',
+          onPressed: scope.openSearch,
+          icon: const Icon(Icons.search_rounded),
+        ),
+        const AccountButton(),
+      ]),
+      floatingActionButton: canCreate
+          ? AppFab(icon: Icons.add_rounded, label: 'Create', onPressed: _create)
           : null,
       body: RefreshIndicator(
-        onRefresh: _refresh,
+        onRefresh: () => _load(quiet: true),
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: kPagePadding.copyWith(bottom: mine ? kFabClearance : 28),
+          padding: kPagePadding.copyWith(bottom: canCreate ? kFabClearance : 28),
           children: [
+            Text('Knowledge', style: Theme.of(context).textTheme.headlineMedium),
+            const SizedBox(height: 4),
+            Text('Everything the assistant can answer from',
+                style: TextStyle(color: context.colors.ink2)),
+            const SizedBox(height: 16),
             AppSearchField(
-              controller: _searchField,
-              hint: mine ? 'Search your files' : 'Search the workspace',
-              onChanged: _onSearch,
+              hint: 'Search knowledge bases',
+              onChanged: (value) => setState(() => _query = foldText(value.trim())),
             ),
             const SizedBox(height: 10),
-            Segmented<_View>(
-              segments: const {
-                _View.mine: 'My files',
-                _View.workspace: 'Workspace',
-              },
-              selected: _view,
-              onChanged: _switch,
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(children: [
+                for (final entry in const {
+                  _Access.all: 'All', _Access.editable: 'Can edit',
+                  _Access.readOnly: 'View only', _Access.personal: 'Only you',
+                }.entries) ...[
+                  ChoiceChip(
+                    label: Text(entry.value), selected: _access == entry.key,
+                    onSelected: (_) => setState(() => _access = entry.key),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+              ]),
             ),
+            const SizedBox(height: 16),
             ..._content(),
           ],
         ),
@@ -188,86 +189,44 @@ class _LibraryPageState extends State<LibraryPage> {
 
   List<Widget> _content() {
     if (_loading) return const [LoadingView()];
-    if (_error != null) {
-      return [
-        ErrorView(
-          error: _error!,
-          title: 'The Library couldn’t be loaded',
-          onRetry: _loadHome,
-        ),
-      ];
-    }
-    final feed = _feed;
-    if (_view == _View.mine) {
-      final empty = _query.isEmpty
-          ? const EmptyView(
-              icon: Icons.upload_file_outlined,
-              title: 'No files yet',
-              message: 'Upload a PDF, Word, Excel or text file to ask questions about it.',
-            )
-          : EmptyView(
-              icon: Icons.search_off_rounded,
-              title: 'No matches',
-              message: 'None of your files match “$_query”.',
-            );
-      if (feed == null) return [const SizedBox(height: 8), empty];
-      return [
-        _countLabel(feed, _query.isEmpty ? 'Recent' : 'Matches'),
-        DocumentFeedView(feed: feed, empty: empty),
-      ];
-    }
-    if (feed != null) {
-      return [
-        _countLabel(feed, 'Matches'),
-        DocumentFeedView(
-          feed: feed,
-          empty: EmptyView(
-            icon: Icons.search_off_rounded,
-            title: 'No matches',
-            message: 'Nothing in the workspace matches “$_query”.',
-          ),
-        ),
-      ];
-    }
-    final shared = topLevelOf(
-      _collections.where((item) => item.id != _personalId).toList(),
-    );
-    if (shared.isEmpty) {
-      return const [
-        SizedBox(height: 8),
-        EmptyView(
-          icon: Icons.menu_book_outlined,
-          title: 'No shared collections yet',
-          message: 'Collections shared with you appear here.',
-        ),
-      ];
-    }
-    final childCounts = <String, int>{};
-    for (final item in _collections) {
-      if (item.parentId.isNotEmpty) {
-        childCounts[item.parentId] = (childCounts[item.parentId] ?? 0) + 1;
-      }
-    }
+    if (_error != null) return [ErrorView(error: _error!, onRetry: _load)];
+    final showPersonal = (_access == _Access.all || _access == _Access.personal) &&
+        (_query.isEmpty || foldText('My files').contains(_query));
+    final shown = _collections.where((collection) {
+      if (collection.id == _personalId || _access == _Access.personal) return false;
+      if (_access == _Access.editable && !collection.can('collection.update')) return false;
+      if (_access == _Access.readOnly && collection.can('collection.update')) return false;
+      return foldText('${collection.title} ${collection.description}').contains(_query);
+    }).toList();
+    final personal = _collections.where((c) => c.id == _personalId).firstOrNull;
     return [
-      SectionLabel('Collections', aside: groupedNumber(shared.length)),
-      for (final collection in shared) ...[
+      if (showPersonal) ...[
+        ListGroup(children: [ListRow(
+          leading: const Icon(Icons.lock_outline_rounded),
+          title: 'My files',
+          subtitle: personal == null
+              ? 'Only you · Upload files for your own chats'
+              : 'Only you · ${countOf(personal.documentCount, 'document')}',
+          onTap: _openingPersonal ? null : _openPersonal,
+        )]),
+        const SizedBox(height: 16),
+      ],
+      for (final collection in shown) ...[
         CollectionCard(
           collection: collection,
-          children: childCounts[collection.id],
           onTap: () => _open(collection),
+          onLongPress: () => _actions(collection),
         ),
         const SizedBox(height: 10),
       ],
+      if (shown.isEmpty && _access != _Access.personal)
+        EmptyView(
+          icon: Icons.menu_book_outlined,
+          title: _query.isEmpty ? 'No matching knowledge bases' : 'No matches',
+          message: _query.isEmpty
+              ? 'Knowledge bases you can access appear here. You can always add your own files to My files.'
+              : 'Try another name or use Search to find documents and passages.',
+        ),
     ];
   }
-
-  Widget _countLabel(DocumentFeed feed, String title) => ListenableBuilder(
-    listenable: feed,
-    builder: (context, _) => SectionLabel(
-      title,
-      aside: feed.loading || feed.error != null || feed.documents.isEmpty
-          ? null
-          : countOf(feed.total, 'file'),
-    ),
-  );
 }

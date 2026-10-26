@@ -2,20 +2,25 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/api_client.dart';
 import '../features/auth/session.dart';
 import '../features/chat/chat_page.dart';
+import '../features/inbox/inbox_controller.dart';
+import '../features/inbox/inbox_page.dart';
+import '../features/search/search_page.dart';
 import '../features/knowledge/library_page.dart';
 import '../features/manage/access/requests_page.dart';
 import '../features/manage/manage_page.dart';
 import '../ui/ui.dart';
 import 'appearance.dart';
 import 'workspace_scope.dart';
+import 'app_tour.dart';
 
-enum _Tab { ask, library, manage }
+enum _Tab { ask, library, inbox, manage }
 
-/// The signed-in app: three destinations — Ask, Library and Manage.
+/// Permission-driven Chat, Knowledge, Inbox and optional Manage destinations.
 ///
 /// Manage appears only for people with a management permission. Each tab
 /// keeps its own navigation stack, so going deeper never hides the tab bar
@@ -42,6 +47,8 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     for (final tab in _Tab.values) tab: GlobalKey<NavigatorState>(),
   };
   String? _documentId, _documentTitle;
+  String? _collectionId, _collectionTitle, _prompt, _conversationId;
+  late final InboxController _inbox;
   int _chatRevision = 0;
   int _waiting = 0;
   late final ApiClient _workspaceApi;
@@ -57,23 +64,44 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
       ..onUnauthorized = () {
         if (widget.auth.session?.accessToken == token) widget.auth.expire();
       };
+    _inbox = InboxController(_workspaceApi, _session)..addListener(_inboxChanged);
+    unawaited(_inbox.refresh());
     unawaited(_countWaiting());
+    WidgetsBinding.instance.addPostFrameCallback((_) => _firstVisit());
   }
 
   @override
   void dispose() {
+    _inbox.removeListener(_inboxChanged);
+    _inbox.dispose();
     _workspaceApi.onUnauthorized = null;
     _workspaceApi.close();
     super.dispose();
   }
 
+  Future<void> _firstVisit() async {
+    final preferences = SharedPreferencesAsync();
+    final key = 'bomesh.tour:${Uri.encodeComponent(_workspaceApi.baseUrl)}:${Uri.encodeComponent(_session.namespace)}';
+    try {
+      if (await preferences.getBool(key) == true || !mounted) return;
+      final target = _navigators[_Tab.ask]!.currentState?.overlay?.context;
+      if (target == null || !target.mounted) return;
+      await showAppTour(target);
+      await preferences.setBool(key, true);
+    } catch (_) {
+      // Optional onboarding never blocks the workspace when storage is unavailable.
+    }
+  }
+
   List<_Tab> get _tabs => [
     _Tab.ask,
     _Tab.library,
+    _Tab.inbox,
     if (ManageAccess(_session).any) _Tab.manage,
   ];
 
   void _select(_Tab tab) {
+    if (tab == _Tab.inbox) unawaited(_inbox.refresh());
     if (tab == _tab) {
       _navigators[tab]!.currentState?.popUntil((route) => route.isFirst);
       return;
@@ -84,15 +112,39 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     });
   }
 
-  /// A new chat about one document: the Ask stack starts over with it.
-  void _askAboutDocument(String id, String title) {
+  void _askAboutDocument(String id, String title) =>
+      _startChat(documentId: id, documentTitle: title);
+
+  void _startChat({
+    String? documentId,
+    String? documentTitle,
+    String? collectionId,
+    String? collectionTitle,
+    String? prompt,
+    String? conversationId,
+  }) {
+    Navigator.of(context, rootNavigator: true).popUntil((route) => route.isFirst);
     setState(() {
-      _documentId = id;
-      _documentTitle = title;
+      _documentId = documentId;
+      _documentTitle = documentTitle;
+      _collectionId = collectionId;
+      _collectionTitle = collectionTitle;
+      _prompt = prompt;
+      _conversationId = conversationId;
       _chatRevision++;
       _navigators[_Tab.ask] = GlobalKey<NavigatorState>();
       _tab = _Tab.ask;
     });
+  }
+
+  void _inboxChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _openSearch() {
+    _navigators[_tab]!.currentState?.push(
+      MaterialPageRoute<void>(builder: (_) => const SearchPage()),
+    );
   }
 
   /// Requests waiting for this person's decision; drives the Manage badge.
@@ -111,8 +163,13 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
       key: ValueKey('chat-$_chatRevision'),
       initialDocumentId: _documentId,
       initialDocumentTitle: _documentTitle,
+      initialCollectionId: _collectionId,
+      initialCollectionTitle: _collectionTitle,
+      initialPrompt: _prompt,
+      initialConversationId: _conversationId,
     ),
     _Tab.library => const LibraryPage(),
+    _Tab.inbox => InboxPage(controller: _inbox),
     _Tab.manage => const ManagePage(),
   };
 
@@ -152,22 +209,26 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
               : Icons.chat_bubble_outline_rounded,
         _Tab.library =>
           selected ? Icons.menu_book_rounded : Icons.menu_book_outlined,
+        _Tab.inbox =>
+          selected ? Icons.inbox_rounded : Icons.inbox_outlined,
         _Tab.manage =>
           selected ? Icons.grid_view_rounded : Icons.grid_view_outlined,
       });
-      return tab == _Tab.manage
+      return tab == _Tab.inbox
           ? Badge(
-              isLabelVisible: _waiting > 0,
+              isLabelVisible: _inbox.unread > 0,
               smallSize: 8,
-              backgroundColor: colors.danger,
+              label: Text('${_inbox.unread}'),
+              backgroundColor: colors.brand,
               child: glyph,
             )
           : glyph;
     }
 
     String label(_Tab tab) => switch (tab) {
-      _Tab.ask => 'Ask',
-      _Tab.library => 'Library',
+      _Tab.ask => 'Chat',
+      _Tab.library => 'Knowledge',
+      _Tab.inbox => 'Inbox',
       _Tab.manage => 'Manage',
     };
 
@@ -177,6 +238,12 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
       auth: widget.auth,
       appearance: widget.appearance,
       askAboutDocument: _askAboutDocument,
+      askAboutCollection: (id, title) =>
+          _startChat(collectionId: id, collectionTitle: title),
+      askQuestion: (prompt) => _startChat(prompt: prompt),
+      openConversation: (id) => _startChat(conversationId: id),
+      openSearch: _openSearch,
+      openKnowledge: () => _select(_Tab.library),
       waitingRequests: _waiting,
       refreshWaitingRequests: _countWaiting,
       child: PopScope(
