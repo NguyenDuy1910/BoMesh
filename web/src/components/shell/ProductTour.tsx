@@ -78,19 +78,18 @@ export function useFirstRunTour(): TourController {
 
   const stop = useCallback(() => setStep(null), []);
   const go = useCallback((delta: 1 | -1) => {
-    setStep((current) => {
-      if (current === null) return null;
-      const next = current + delta;
-      if (next >= STEPS.length) {
-        toast.show({ message: "You’re all set. Ask your first question." });
-        window.requestAnimationFrame(() => {
-          document.querySelector<HTMLElement>('[data-tour="composer"] textarea, [data-tour="composer"] [contenteditable="true"]')?.focus();
-        });
-        return null;
-      }
-      return Math.max(0, next);
+    if (step === null) return;
+    const next = step + delta;
+    if (next < STEPS.length) {
+      setStep(Math.max(0, next));
+      return;
+    }
+    setStep(null);
+    toast.show({ message: "You’re all set. Ask your first question." });
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>('[data-tour="composer"] textarea, [data-tour="composer"] [contenteditable="true"]')?.focus();
     });
-  }, [toast]);
+  }, [step, toast]);
 
   return { step, start, go, stop };
 }
