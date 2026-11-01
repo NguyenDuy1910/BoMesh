@@ -1,0 +1,56 @@
+/* Knowledge bases, document tables and search (features/knowledge.js,
+   documents.js, search.js). Prefixes: kb-, doc-, srch-. The reader and its
+   page canvas live in reader.css. Tokens only. */
+
+/* ───── Knowledge base mark ───── */
+.kb-mark { --kb-mark: 36px; display: inline-grid; place-items: center; width: var(--kb-mark); height: var(--kb-mark); border-radius: calc(var(--kb-mark) * 0.28); flex: none; color: var(--white); font-weight: 600; font-size: calc(var(--kb-mark) * 0.42); line-height: 1; }
+.kb-mark--muted { background: var(--default); color: var(--muted); }
+
+/* ───── Knowledge list cards ───── */
+.kb-card { gap: 14px; min-height: 152px; }
+.kb-card__top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.kb-card__chips { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; min-width: 0; }
+.kb-space-link { display: inline-flex; border-radius: var(--radius-full); }
+.kb-space-link:hover .chip { background: var(--default-hover); }
+.kb-space-link:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.kb-card__name { font-size: 15px; line-height: 22px; font-weight: 600; }
+.kb-card__desc { font-size: 13px; line-height: 18px; color: var(--muted); }
+.kb-card__foot { margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 32px; font-size: 12px; line-height: 16px; color: var(--muted); }
+
+/* ───── Detail ───── */
+.kb-narrow { max-width: 760px; }
+.kb-narrow .card > .form-section { padding: 0; }
+.kb-select { width: auto; max-width: 240px; }
+.kb-suggest { display: flex; flex-wrap: wrap; gap: 6px; }
+.kb-pick { padding-right: 4px; }
+.kb-pick button { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; color: var(--muted); }
+.kb-pick button:hover { background: var(--default-hover); color: var(--foreground); }
+.kb-share-q { max-width: none; }
+.kb-share-list .item { padding: 8px 12px; }
+.kb-pct { width: 34px; text-align: right; flex: none; }
+
+/* Upload drop zone */
+.kb-drop { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 28px 16px; border-radius: var(--radius-2xl); border: 1.5px dashed var(--border-secondary); background: var(--surface-secondary); text-align: center; transition: background-color var(--dur-fast), border-color var(--dur-fast); }
+.kb-drop:hover, .kb-drop.is-drag { background: var(--accent-soft); border-color: var(--accent); }
+.kb-drop__icon { display: grid; place-items: center; width: 40px; height: 40px; border-radius: var(--radius-xl); background: var(--surface); color: var(--muted); box-shadow: var(--surface-shadow); margin-bottom: 4px; }
+
+/* ───── Document tables ───── */
+.doc-nowrap { white-space: nowrap; }
+
+/* ───── Search ───── */
+.srch-box { position: relative; display: flex; align-items: center; margin-bottom: 16px; }
+.srch-box > .i { position: absolute; left: 14px; color: var(--muted); pointer-events: none; }
+.srch-box .input { height: 48px; padding-left: 44px; padding-right: 44px; font-size: 16px; border-radius: var(--radius-2xl); }
+.srch-box .input::-webkit-search-cancel-button { display: none; }
+.srch-box__clear { position: absolute; right: 8px; }
+.srch-ask { flex-direction: row; align-items: center; gap: 12px; width: 100%; margin-bottom: 24px; padding: 12px 16px; }
+.srch-hl { background: var(--evidence); color: inherit; border-radius: 3px; padding: 0 1px; }
+.srch-list .item__desc { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.srch-more { display: flex; justify-content: flex-end; margin-top: 12px; font-size: 13px; }
+
+/* ───── Responsive ───── */
+@container app (max-width: 679px) {
+  .kb-select { max-width: 150px; }
+  .kb-card { min-height: 0; }
+  .srch-list .item__meta { display: none; }
+}

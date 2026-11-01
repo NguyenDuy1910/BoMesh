@@ -15,7 +15,7 @@ Keep implementations simple, explicit, typed, and aligned with the existing arch
 Before making any meaningful code change, inspect:
 
 ```text
-/Users/nguyenduy/Documents/utex/BoMesh/backend/docs_design
+backend/docs_design
 ```
 
 This directory is the architectural source of truth for the project.
@@ -38,31 +38,42 @@ Do not design a competing architecture when the source of truth already defines 
 
 ## UI and UX source of truth
 
-Before changing web or app UI, UX, navigation, or user flows, inspect:
+Before changing production code under `apps/web/` or `apps/mobile/`, inspect:
 
 ```text
-/Users/nguyenduy/Documents/utex/BoMesh/ui_preview
+apps/ux_preview
 ```
 
-This directory is the canonical home for shared web/app visual concepts, component patterns, responsive behavior, and UX flows.
+This directory is the canonical, framework-neutral source for shared web/mobile
+visual concepts, component patterns, responsive behavior, interaction states,
+and end-to-end UX flows.
 
 Use:
 
 ```text
-ui_preview/ux-review.html
-→ canonical visual language and interactive web prototype
+apps/ux_preview/ux-preview.html
+apps/ux_preview/styles/ux-preview.css
+apps/ux_preview/scripts/ux-preview.js
+→ the single reviewable UX preview for web and mobile
 
-ui_preview/mobile-ux-blueprint.html
-→ app/mobile adaptation of the same concept and patterns
-
-ui_preview/ux-refactor-plan.md
-ui_preview/knowledge-management-ux-plan.md
-→ implementation and domain-flow decisions
+apps/ux_preview/ux-refactor-plan.md
+apps/ux_preview/knowledge-management-ux-plan.md
+→ implementation and domain-flow notes
 ```
 
-Keep product behavior and backend contracts aligned with `backend/docs_design`; `ui_preview` owns presentation and UX, not API, authorization, persistence, or agent contracts.
+Every direct product-code change under `apps/web/` or `apps/mobile/` MUST first
+be represented in the canonical UX preview and its sibling CSS/JavaScript so
+the user can review the framework-neutral behavior before it is implemented in
+a production client. Do not implement the client change first and backfill the
+preview afterward.
 
-Do not create parallel design concepts or UX-flow documents under `docs/`, `web/`, or `app/`. Update the canonical references in `ui_preview` instead.
+Keep product behavior and backend contracts aligned with
+`backend/docs_design`; `apps/ux_preview` owns presentation and UX, not API,
+authorization, persistence, or agent contracts.
+
+Do not create parallel design concepts or UX-flow documents under `docs/`,
+`apps/web/`, or `apps/mobile/`. Update the canonical files in
+`apps/ux_preview/` instead.
 
 ---
 
@@ -387,7 +398,7 @@ Use environment variables or the configured secret-management mechanism.
 Tests belong under:
 
 ```text
-/Users/nguyenduy/Documents/utex/BoMesh/tests
+tests
 ```
 
 Reuse existing tests where possible.

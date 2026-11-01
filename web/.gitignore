@@ -1,9 +1,0 @@
-.next
-node_modules
-out
-dist
-.env
-.env.local
-.env.*.local
-npm-debug.log*
-*.tsbuildinfo

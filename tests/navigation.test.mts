@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-// Maps `@/` to web/src for the modules below; they must load after it.
-import "../web/tests/support/register-aliases.mjs";
-import type { AuthSession } from "../web/src/lib/auth/session.ts";
+// Maps `@/` to apps/web/src for the modules below; they must load after it.
+import "../apps/web/tests/support/register-aliases.mjs";
+import type { AuthSession } from "../apps/web/src/lib/auth/session.ts";
 
 const {
   MANAGE_NAV,
@@ -13,8 +13,8 @@ const {
   isNavItemActive,
   isPlatformPath,
   visibleNavItems,
-} = await import("../web/src/lib/navigation.ts");
-const { LEGACY_REDIRECTS } = await import("../web/src/lib/legacy-redirects.ts");
+} = await import("../apps/web/src/lib/navigation.ts");
+const { LEGACY_REDIRECTS } = await import("../apps/web/src/lib/legacy-redirects.ts");
 
 function session(permissions: string[] = [], platform: string[] = []): AuthSession {
   return {

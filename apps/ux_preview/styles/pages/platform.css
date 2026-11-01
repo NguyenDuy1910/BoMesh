@@ -1,0 +1,59 @@
+/* Platform console (features/platform.js). Prefix: pf- */
+
+/* Compact KPI row above the workspaces table */
+.pf-kpis { gap: 12px; margin-bottom: 20px; }
+.pf-kpis .stat { padding: 12px 16px; gap: 4px; }
+.pf-kpis .stat__value { font-size: 20px; line-height: 28px; }
+
+/* Chart axis labels and sparklines inside stat cards */
+.pf-axis { display: flex; justify-content: space-between; gap: 12px; margin-top: 6px; font-size: 12px; line-height: 16px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.pf-spark { margin-top: 4px; }
+
+/* Drawer sub-heading with a trailing count */
+.pf-sec-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.pf-sec-head .drawer__section-title { margin: 0; }
+
+/* "bomesh.app/" prefix joined to the web-address input */
+.pf-prefix { display: flex; align-items: stretch; min-width: 0; }
+.pf-prefix__text { display: flex; align-items: center; flex: none; padding: 0 10px; font-size: 14px; color: var(--muted); background: var(--surface-secondary); border-radius: var(--field-radius) 0 0 var(--field-radius); box-shadow: inset 0 0 0 1px var(--border); }
+.pf-prefix .input { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+
+/* Platform-wide (no workspace) marker */
+.pf-plat { display: inline-grid; place-items: center; width: 20px; height: 20px; flex: none; border-radius: var(--radius-sm); background: var(--default); color: var(--muted); }
+
+/* Connector cards: one action per card, pinned to the bottom */
+.pf-con { justify-content: space-between; min-height: 132px; }
+.pf-con__foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 32px; margin-top: auto; }
+
+/* Usage: questions + share-of-total bar */
+.pf-share { display: inline-flex; align-items: center; justify-content: flex-end; gap: 12px; }
+.pf-share .progress-bar { width: 96px; flex: none; }
+
+/* Tables */
+.pf-nowrap { white-space: nowrap; }
+.pf-target { max-width: 360px; }
+.pf-svc { display: inline-flex; align-items: center; gap: 6px; }
+.pf-note { margin-top: 4px; max-width: 520px; font-size: 13px; line-height: 18px; color: var(--muted); white-space: normal; }
+
+/* System health */
+.pf-banner { margin-bottom: 24px; }
+.pf-setting { display: block; margin-top: 4px; font-size: 12px; line-height: 16px; color: var(--muted); }
+.pf-setting code { padding: 1px 6px; border-radius: var(--radius-sm); background: var(--default); color: var(--foreground); overflow-wrap: anywhere; }
+.pf-model-trail { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.pf-models .item { align-items: flex-start; }
+
+@container app (max-width: 760px) {
+  .pf-share { justify-content: flex-start; }
+  .pf-share .progress-bar { width: 64px; }
+  .pf-target { max-width: none; }
+}
+@container app (max-width: 680px) {
+  .pf-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container app (max-width: 679px) {
+  .pf-models .item { flex-wrap: wrap; }
+  .pf-models .item__trail { width: 100%; padding-left: 40px; }
+  .pf-model-trail { flex-direction: row; align-items: center; gap: 8px; }
+  .pf-con { min-height: 0; }
+  .pf-tpl .choice-group { grid-template-columns: minmax(0, 1fr) !important; }
+}

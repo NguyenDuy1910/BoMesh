@@ -673,8 +673,8 @@ Before changing application code:
 Status: proposed, not implemented. Nothing in this section is in
 `openapi.yaml` or the endpoint map above, and no backend route serves it. The
 WebUI already ships these screens against typed client functions whose bodies
-call `pendingApi(<key>, …)` (`web/src/lib/api/pending.ts`); a local
-implementation in `web/src/lib/api/pending/<feature>.ts` answers with the
+call `pendingApi(<key>, …)` (`apps/web/src/lib/api/pending.ts`); a local
+implementation in `apps/web/src/lib/api/pending/<feature>.ts` answers with the
 shapes below, mirrors the permission rules below, keeps its state in the
 browser (`localStorage` namespaced `bomesh.pending.<key>.<account>.<workspace>`)
 and never writes to a real endpoint. Each subsection's anchor equals
@@ -689,7 +689,7 @@ error body (`code`, `message`, `request_id`, `details`), identity from the
 access session (never from the body), and `404` for resources the caller
 cannot see.
 
-Swap procedure when a backend lands (`ui_preview/ux-refactor-plan.md` §7): implement
+Swap procedure when a backend lands (`apps/ux_preview/ux-refactor-plan.md` §7): implement
 the endpoint with the shapes below, replace the client function body with the
 real request, delete the local implementation and its `PENDING_FEATURES`
 entry, remove the Preview marker, then move the contract from this section
