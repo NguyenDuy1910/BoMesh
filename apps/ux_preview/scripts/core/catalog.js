@@ -51,8 +51,8 @@ const KIND_RULES = [
   [/^w\d\d\b|lecture|slides/i, 'lecture'], [/^lab\b|\blab \d/i, 'lab'], [/assignment|project brief/i, 'assignment'], [/midterm|final exam|past exam|exam \d{4}/i, 'exam'],
   [/template/i, 'template'], [/agreement|\bnda\b|addendum|\bsow\b|order form|terms of service|\bdpa\b|\bmsa\b/i, 'contract'],
   [/api reference|release notes|changelog|architecture|spec\b|error codes|rate limits|glossary/i, 'spec'],
-  [/playbook|battlecard|pitch|script|case study|brief|objection|selling|sequences|kit\b/i, 'playbook'],
-  [/form\b|checklist/i, 'form'], [/procedure|process|how to/i, 'procedure'], [/policy|regulation|code of conduct|requirement/i, 'policy'],
+  [/playbook|battlecard|pitch|\bscript|case study|brief|objection|selling|sequences|kit\b|qbr deck/i, 'playbook'],
+  [/form\b|checklist|application\b/i, 'form'], [/procedure|process|how to/i, 'procedure'], [/policy|regulation|code of conduct|requirement|\brules\b|guidelines/i, 'policy'],
   [/guide|handbook|overview|explained/i, 'guide'], [/notes|minutes|interview/i, 'notes'], [/report|analysis|review\b/i, 'report'],
 ];
 const kindMeta = id => RESOURCE_KINDS[id] || RESOURCE_KINDS.reference;
@@ -142,11 +142,13 @@ function trustOf(doc) {
 const isDemoWs = () => !!curWs()?.demo;
 
 /* ═══════════════ Access-aware pools ═══════════════ */
-/** Resources the caller may read (any index status). Authorization happens here, before any listing, search or AI use. */
-const readableResources = () => D.docs.filter(d => { const kb = kbById(d.kb); return !d.archived && kb && !kb.archived && canReadKb(kb); });
-/** What Browse lists: readers see usable resources; editors of a base also see its files that aren't ready yet. */
-const catalogPool = () => readableResources().filter(d => isReaderVisible(d) || canEditKb(kbById(d.kb)));
-const canOpenRes = doc => !!doc && !doc.archived && canReadKb(kbById(doc.kb)) && !kbById(doc.kb)?.archived;
+/** Published = past review (the lifecycle lives in core/lifecycle.js). Submissions, rejected and unpublished documents never reach readers, search or the assistant. */
+const isPublishedStage = d => !d.stage || d.stage === 'published';
+/** Published resources the caller may read (any publishing status). Authorization happens here, before any listing, search or AI use. */
+const readableResources = () => D.docs.filter(d => { const kb = kbById(d.kb); return !d.archived && isPublishedStage(d) && kb && !kb.archived && canReadKb(kb); });
+/** What Browse lists: published knowledge people can use. Publishing problems are handled in Manage → Documents. */
+const catalogPool = () => readableResources().filter(isReaderVisible);
+const canOpenRes = doc => !!doc && !doc.archived && isPublishedStage(doc) && canReadKb(kbById(doc.kb)) && !kbById(doc.kb)?.archived;
 
 /* ═══════════════ Search ═══════════════ */
 const _textCache = new Map();
@@ -233,10 +235,10 @@ function catalogQueryOf(p) {
   facetsOn().forEach(f => { q[f.id] = (p.filters?.[f.id] || []).join(','); });
   return q;
 }
-/** '#/knowledge/browse?…' for a params patch, e.g. catalogHref({ filters: { topic: ['t-ml'] } }). */
+/** '#/knowledge?…' (Browse) for a params patch, e.g. catalogHref({ filters: { topic: ['t-ml'] } }). */
 function catalogHref(p = {}) {
   const qs = new URLSearchParams(Object.entries(catalogQueryOf({ view: 'list', ...p })).filter(([, v]) => v)).toString();
-  return '/knowledge/browse' + (qs ? '?' + qs : '');
+  return '/knowledge' + (qs ? '?' + qs : '');
 }
 const activeFilterCount = p => Object.values(p.filters || {}).reduce((a, v) => a + v.length, 0) + (p.saved ? 1 : 0);
 /** Run a catalog query: { rows:[{doc, score}], facets:{ id: [{value,label,count,on}] }, total, pool }.
@@ -284,6 +286,17 @@ function trackRecent(id) {
 }
 const recentResources = (n = 40) => userList('recent').map(x => ({ doc: docById(x.doc), at: x.at })).filter(x => canOpenRes(x.doc)).slice(0, n);
 const myViews = () => userList('views');
+
+/* ═══════════════ Home curation: featured and recently published ═══════════════ */
+/** Workspace admins pick the documents featured on Home (D.featured = doc ids, in order). Only resources the caller can open are returned. */
+const featuredIds = () => (D.featured ??= []);
+const isFeatured = id => featuredIds().includes(id);
+function toggleFeatured(id) { const l = featuredIds(), i = l.indexOf(id); if (i >= 0) l.splice(i, 1); else l.unshift(id); persist(); return i < 0; }
+const featuredResources = (n = 8) => featuredIds().map(docById).filter(d => canOpenRes(d) && isReaderVisible(d)).slice(0, n);
+/** When a document became available to readers: its approval/publication event, else its last update. */
+const publishedAt = d => { const e = (d.submission?.events || []).filter(x => x.kind === 'approved' || x.kind === 'published').at(-1); return e ? e.at : d.updated; };
+/** Trusted, readable, ready documents, newest first (Home "Recently published"). */
+const recentlyPublished = (n = 6) => catalogPool().filter(d => d.status === 'ready' && !kbById(d.kb)?.personal).sort((a, b) => publishedAt(b) - publishedAt(a)).slice(0, n);
 
 /* ═══════════════ Collections ═══════════════ */
 const collectionById = id => (D.collections || []).find(c => c.id === id && !c.archived);

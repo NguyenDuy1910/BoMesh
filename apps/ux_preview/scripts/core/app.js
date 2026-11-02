@@ -137,7 +137,7 @@ window.addEventListener('resize', () => S.menu && closeMenu(false));
 /* ── Boot (runs after every feature module registered its pages) ── */
 function boot() {
   hydrate();
-  applyTheme();
+  applyTheme(); applyLang();
   if (!PERSONAS[S.persona].workspaces?.includes(S.ws)) S.ws = PERSONAS[S.persona].workspaces?.[0] || S.ws;
   if (!location.hash) history.replaceState(null, '', S.signedIn ? '#' + homeRoute() : '#/signin');
   render();

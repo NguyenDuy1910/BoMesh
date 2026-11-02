@@ -11,20 +11,32 @@ const dataAttrs = o => Object.entries(o || {}).filter(([, v]) => v !== undefined
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const uid = (p = 'id') => p + '-' + Math.random().toString(36).slice(2, 8);
 const clone = o => JSON.parse(JSON.stringify(o));
-const fmtNum = n => Number(n).toLocaleString('en-US');
+/** Interface locale for numbers and dates (core/i18n.js owns S.lang). */
+const isVi = () => typeof S !== 'undefined' && S.lang === 'vi';
+const uiLocale = () => (isVi() ? 'vi-VN' : 'en-US');
+const fmtNum = n => Number(n).toLocaleString(uiLocale());
 const fmtCompact = n => n >= 1e6 ? (n / 1e6).toFixed(n >= 1e7 ? 0 : 1).replace(/\.0$/, '') + 'M' : n >= 1e4 ? Math.round(n / 1e3) + 'k' : n >= 1e3 ? (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'k' : String(n);
-const plural = (n, one, many = one + 's') => `${fmtNum(n)} ${n === 1 ? one : many}`;
+/** "12 documents". In Vietnamese nouns don't inflect: the singular is looked up in the noun dictionary. */
+const plural = (n, one, many = one + 's') => isVi() ? `${fmtNum(n)} ${(typeof I18N_VI_NOUNS !== 'undefined' && I18N_VI_NOUNS[one]) || one}` : `${fmtNum(n)} ${n === 1 ? one : many}`;
 const pct = (a, b) => b ? Math.round((a / b) * 100) : 0;
 function fmtSize(b) { if (b < 1024) return b + ' B'; if (b < 1048576) return Math.round(b / 1024) + ' KB'; if (b < 1073741824) return (b / 1048576).toFixed(1) + ' MB'; return (b / 1073741824).toFixed(1) + ' GB'; }
 function rel(ts) {
-  const d = Date.now() - ts; if (d < MIN) return 'Just now'; if (d < HOUR) return Math.round(d / MIN) + ' min ago';
-  if (d < DAY) return Math.round(d / HOUR) + ' h ago'; if (d < 2 * DAY) return 'Yesterday';
-  if (d < 7 * DAY) return Math.floor(d / DAY) + ' days ago'; return fmtDate(ts);
+  const d = Date.now() - ts, vi = isVi();
+  if (d < MIN) return vi ? 'Vừa xong' : 'Just now';
+  if (d < HOUR) return Math.round(d / MIN) + (vi ? ' phút trước' : ' min ago');
+  if (d < DAY) return Math.round(d / HOUR) + (vi ? ' giờ trước' : ' h ago');
+  if (d < 2 * DAY) return vi ? 'Hôm qua' : 'Yesterday';
+  if (d < 7 * DAY) return Math.floor(d / DAY) + (vi ? ' ngày trước' : ' days ago'); return fmtDate(ts);
 }
-function relFuture(ts) { const d = ts - Date.now(); if (d < HOUR) return 'in ' + Math.max(1, Math.round(d / MIN)) + ' min'; if (d < DAY) return 'in ' + Math.round(d / HOUR) + ' h'; return 'in ' + Math.round(d / DAY) + ' days'; }
-const fmtDate = ts => new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: new Date(ts).getFullYear() === new Date(NOW).getFullYear() ? undefined : 'numeric' });
-const fmtDateTime = ts => new Date(ts).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-const fmtTime = ts => new Date(ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+function relFuture(ts) {
+  const d = ts - Date.now(), vi = isVi();
+  if (d < HOUR) return vi ? `sau ${Math.max(1, Math.round(d / MIN))} phút` : 'in ' + Math.max(1, Math.round(d / MIN)) + ' min';
+  if (d < DAY) return vi ? `sau ${Math.round(d / HOUR)} giờ` : 'in ' + Math.round(d / HOUR) + ' h';
+  return vi ? `sau ${Math.round(d / DAY)} ngày` : 'in ' + Math.round(d / DAY) + ' days';
+}
+const fmtDate = ts => new Date(ts).toLocaleDateString(uiLocale(), { month: 'short', day: 'numeric', year: new Date(ts).getFullYear() === new Date(NOW).getFullYear() ? undefined : 'numeric' });
+const fmtDateTime = ts => new Date(ts).toLocaleString(uiLocale(), { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+const fmtTime = ts => new Date(ts).toLocaleTimeString(uiLocale(), { hour: 'numeric', minute: '2-digit' });
 function fmtDuration(ms) { const s = Math.round(ms / 1000); if (s < 60) return s + 's'; const m = Math.floor(s / 60); if (m < 60) return m + 'm ' + (s % 60) + 's'; return Math.floor(m / 60) + 'h ' + (m % 60) + 'm'; }
 let _seed = 7; const rnd = () => (_seed = (_seed * 16807) % 2147483647) / 2147483647;
 const pick = arr => arr[Math.floor(rnd() * arr.length)];

@@ -12,7 +12,7 @@ function renderLayer(fromRender) {
   let h = '';
   if (S.drawer) {
     const d = DR[S.drawer.name]?.(S.drawer.props || {}) || { title: 'Missing panel', body: '' };
-    h += `<div class="backdrop" data-act="close-drawer" data-anim="drawer-bd"></div><aside class="${cx('drawer__dialog', d.size && d.size !== 'md' && 'drawer__dialog--' + d.size)}" role="dialog" aria-modal="true" aria-labelledby="drawer-title" data-anim="drawer:${S.drawer.name}">
+    h += `<div class="${cx('backdrop', d.clear && 'backdrop--clear')}" data-act="close-drawer" data-anim="drawer-bd"></div><aside class="${cx('drawer__dialog', d.size && d.size !== 'md' && 'drawer__dialog--' + d.size)}" role="dialog" aria-modal="true" aria-labelledby="drawer-title" data-anim="drawer:${S.drawer.name}">
       <header class="drawer__header">${d.lead || ''}<div class="grow"><h2 class="drawer__heading" id="drawer-title">${esc(d.title)}</h2>${d.desc ? `<p class="drawer__description">${d.desc}</p>` : ''}</div><div class="drawer__header-actions">${d.headActions || ''}${iconBtn('x', 'Close', { act: 'close-drawer' })}</div></header>
       <div class="drawer__body" id="drawer-body" data-keep-scroll>${d.body}</div>${d.foot || d.footStart ? `<footer class="drawer__footer">${d.footStart ? `<div class="drawer__footer-start row gap-8">${d.footStart}</div>` : ''}${d.foot || ''}</footer>` : ''}</aside>`;
   }
@@ -143,10 +143,13 @@ function paletteResults(q) {
     { label: 'New chat', icon: 'message-plus', run: () => go('/chat') },
     can('knowledge.manage') && { label: 'Create knowledge base', icon: 'book', run: () => goThen('/knowledge/bases', () => A['kb-create']?.()) },
     { label: 'New collection', icon: 'list-plus', run: () => A['col-new']?.() },
+    canContribute() && { label: 'Contribute a document', icon: 'upload', run: () => A['contribute']?.() },
     can('source.manage') && { label: 'Connect a source', icon: 'plug', run: () => goThen('/sources', () => A['src-connect']?.()) },
     can('user.manage') && { label: 'Add people', icon: 'user-plus', run: () => goThen('/people', () => A['member-add']?.()) },
     { label: resolvedTheme() === 'dark' ? 'Switch to light theme' : 'Switch to dark theme', icon: resolvedTheme() === 'dark' ? 'sun' : 'moon', run: () => setTheme(resolvedTheme() === 'dark' ? 'light' : 'dark') },
-  ].filter(Boolean).filter(a => m(a.label)));
+    { label: 'Change theme and colors', icon: 'palette', run: () => X.appearance.open() },
+    { label: S.lang === 'vi' ? 'Switch to English' : 'Switch to Vietnamese (Tiếng Việt)', icon: 'globe', run: () => X.lang.change(S.lang === 'vi' ? 'en' : 'vi') },
+  ].filter(Boolean).filter(a => m(a.label) || m(tr(a.label) || '')));
   if (q) add('More', [{ label: `See all results for “${q}”`, icon: 'search', run: () => go('/search?q=' + encodeURIComponent(q)) }]);
   return out;
 }

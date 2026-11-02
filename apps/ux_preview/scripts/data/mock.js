@@ -3,11 +3,11 @@
    (knowledge, people, sources, chats, spaces, work, requests…) lives in that
    workspace's own store. D is a transparent view of the active workspace, so
    feature modules read and write D.kbs, D.members… without knowing which
-   workspace is open. Seeds: this file (Northwind, platform) and data/ute.js. */
+   workspace is open. Seeds: this file (Northwind, platform) and data/finx.js. */
 
 /* ═══════════════════════════ Data scopes ═══════════════════════════ */
 const WS_DATA_KEYS = new Set(['roles', 'groups', 'members', 'knownAccounts', 'kbs', 'docs', 'accounts', 'sources', 'runs', 'requests', 'audit', 'signins', 'usage', 'convs', 'assistant', 'gaps', 'artifacts',
-  'spaces', 'events', 'works', 'requestTypes', 'svcRequests', 'topics', 'collections', 'views', 'saved', 'recent', 'dupDismissed']);
+  'spaces', 'events', 'works', 'requestTypes', 'svcRequests', 'topics', 'collections', 'views', 'saved', 'recent', 'dupDismissed', 'topicProposals', 'featured']);
 const DB = { global: {}, ws: {} };
 let DATA_SEEDING = null;            // workspace being seeded by a data file
 const activeWsId = () => DATA_SEEDING || (typeof S !== 'undefined' && S.ws) || 'ws-northwind';
@@ -24,13 +24,13 @@ const D = new Proxy({}, {
 });
 
 /* ═══════════════════════════ Personas & permissions ═══════════════════════════ */
-const ALL_TENANT = ['tenant.read', 'tenant.manage', 'user.manage', 'role.manage', 'group.manage', 'knowledge.read', 'knowledge.manage', 'source.manage', 'ingestion.read', 'ingestion.run', 'ingestion.manage', 'access.manage', 'audit.read'];
+const ALL_TENANT = ['tenant.read', 'tenant.manage', 'user.manage', 'role.manage', 'group.manage', 'knowledge.read', 'knowledge.contribute', 'knowledge.manage', 'source.manage', 'ingestion.read', 'ingestion.run', 'ingestion.manage', 'access.manage', 'audit.read'];
 const PLATFORM_PERMS = ['platform.tenant.read', 'platform.user.read', 'platform.audit.read', 'platform.health.read'];
-/** Demo people. `workspaces` = memberships; UTE personas are added by data/ute.js. */
+/** Demo people. `workspaces` = memberships; Finx personas are added by data/finx.js. */
 const PERSONAS = {
-  member: { id: 'u-minh', name: 'Minh Pham', email: 'minh.pham@northwind.com', role: 'Member', label: 'Member', perms: ['tenant.read', 'knowledge.read'], workspaces: ['ws-northwind', 'ws-nwfin'] },
+  member: { id: 'u-minh', name: 'Minh Pham', email: 'minh.pham@northwind.com', role: 'Member', label: 'Member', perms: ['tenant.read', 'knowledge.read', 'knowledge.contribute'], workspaces: ['ws-northwind', 'ws-nwfin'] },
   admin: { id: 'u-linh', name: 'Linh Tran', email: 'linh.tran@northwind.com', role: 'Workspace admin', label: 'Admin', perms: ALL_TENANT, workspaces: ['ws-northwind', 'ws-nwfin'] },
-  operator: { id: 'u-alex', name: 'Alex Rivera', email: 'alex.rivera@northwind.com', role: 'Platform admin', label: 'Operator', perms: [...ALL_TENANT, ...PLATFORM_PERMS], workspaces: ['ws-northwind', 'ws-nwfin', 'ws-ute'] },
+  operator: { id: 'u-alex', name: 'Alex Rivera', email: 'alex.rivera@northwind.com', role: 'Platform admin', label: 'Operator', perms: [...ALL_TENANT, ...PLATFORM_PERMS], workspaces: ['ws-northwind', 'ws-nwfin', 'ws-finx'] },
 };
 
 /* ═══════════════════════════ Mock data ═══════════════════════════ */
@@ -43,14 +43,14 @@ D.workspaces = [
 D.permCatalog = [
   { group: 'Workspace', items: [['tenant.read', 'View the workspace overview'], ['tenant.manage', 'Change workspace settings and assistant setup']] },
   { group: 'People & access', items: [['user.manage', 'Add, suspend and remove members'], ['group.manage', 'Create and manage groups'], ['role.manage', 'Create and edit roles'], ['access.manage', 'Approve or deny access requests']] },
-  { group: 'Knowledge', items: [['knowledge.read', 'Ask questions and browse knowledge'], ['knowledge.manage', 'Create and organize knowledge bases']] },
+  { group: 'Knowledge', items: [['knowledge.read', 'Ask questions and browse knowledge'], ['knowledge.contribute', 'Contribute documents for review'], ['knowledge.manage', 'Create knowledge bases; review and publish what is submitted to bases they own']] },
   { group: 'Sources', items: [['source.manage', 'Connect and manage sources and schedules'], ['ingestion.read', 'View sync history'], ['ingestion.run', 'Start syncs and reprocess documents'], ['ingestion.manage', 'Cancel any running sync']] },
   { group: 'Activity', items: [['audit.read', 'View the activity log and sign-ins']] },
 ];
 D.roles = [
   { id: 'r-admin', name: 'Workspace admin', system: true, desc: 'Full control of this workspace.', perms: ALL_TENANT },
-  { id: 'r-member', name: 'Member', system: true, desc: 'Ask questions and browse the knowledge they can access.', perms: ['tenant.read', 'knowledge.read'] },
-  { id: 'r-km', name: 'Knowledge manager', system: false, desc: 'Owns knowledge bases and the sources that feed them.', perms: ['tenant.read', 'knowledge.read', 'knowledge.manage', 'source.manage', 'ingestion.read', 'ingestion.run'] },
+  { id: 'r-member', name: 'Member', system: true, desc: 'Ask questions, browse the knowledge they can access and contribute documents for review.', perms: ['tenant.read', 'knowledge.read', 'knowledge.contribute'] },
+  { id: 'r-km', name: 'Knowledge manager', system: false, desc: 'Owns knowledge bases, reviews what is submitted to them and manages the sources that feed them.', perms: ['tenant.read', 'knowledge.read', 'knowledge.contribute', 'knowledge.manage', 'source.manage', 'ingestion.read', 'ingestion.run'] },
   { id: 'r-auditor', name: 'Auditor', system: false, desc: 'Reviews activity and sign-ins. Cannot change anything.', perms: ['tenant.read', 'knowledge.read', 'audit.read'] },
 ];
 D.groups = [
@@ -284,7 +284,8 @@ const memberById = id => D.members.find(m => m.id === id);
 const groupById = id => D.groups.find(g => g.id === id);
 const roleById = id => D.roles.find(r => r.id === id);
 const convById = id => D.convs.find(c => c.id === id);
-const docsIn = kbId => D.docs.filter(d => d.kb === kbId && !d.archived);
+/** Published documents of a base (submissions, declined and unpublished documents live in Manage → Documents). */
+const docsIn = kbId => D.docs.filter(d => d.kb === kbId && !d.archived && (!d.stage || d.stage === 'published'));
 const groupMembers = gid => D.members.filter(m => m.groups.includes(gid));
 const actorName = id => id === 'system' ? 'BoMesh' : (memberById(id)?.name || id);
 const KB_ROLE_RANK = { none: 0, viewer: 1, editor: 2, owner: 3 };

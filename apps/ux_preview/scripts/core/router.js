@@ -16,8 +16,8 @@ function route(path, def) {
 route('/signin', { page: 'signin', mode: 'auth', title: 'Sign in' });
 route('/signup', { page: 'signup', mode: 'auth', title: 'Create account' });
 route('/workspaces', { page: 'workspaces', mode: 'auth', title: 'Choose a workspace' });
-// Member — `module` routes exist only where the workspace has that module on (core/workspace.js)
-route('/home', { page: 'home', mode: 'workspace', nav: 'home', title: 'Home', module: 'home' });
+// Member — Home is the knowledge-first landing in every workspace; `module` routes exist only where the workspace has that module on (core/workspace.js)
+route('/home', { page: 'home', mode: 'workspace', nav: 'home', title: 'Home' });
 route('/spaces', { page: 'spaces', mode: 'workspace', nav: 'spaces', title: 'Spaces', module: 'spaces', simLoad: true });
 route('/space/:id', { page: 'space', mode: 'workspace', nav: 'space', title: 'Space', module: 'spaces', simLoad: true });
 route('/work', { page: 'work', mode: 'workspace', nav: 'work', title: 'Work', module: 'work', simLoad: true });
@@ -31,9 +31,8 @@ route('/chat/:id', { page: 'chatThread', mode: 'workspace', nav: 'chat', title: 
 route('/chats', { page: 'chats', mode: 'workspace', nav: 'chats', title: 'Conversations', simLoad: true });
 route('/inbox', { page: 'inbox', mode: 'workspace', nav: 'inbox', title: 'Inbox', simLoad: true });
 route('/search', { page: 'search', mode: 'workspace', nav: 'search', title: 'Search' });
-// Knowledge: Discover → Browse (one catalog for search and filters) → Reader; Library is personal; bases are the governed homes.
-route('/knowledge', { page: 'hub', mode: 'workspace', nav: 'knowledge', title: 'Knowledge', simLoad: true });
-route('/knowledge/browse', { page: 'catalog', mode: 'workspace', nav: 'knowledge', title: 'Browse knowledge', simLoad: true });
+// Knowledge: Browse (one catalog for search and filters) → Reader; Library is personal; bases are the governed homes. Discovery lives on Home.
+route('/knowledge', { page: 'catalog', mode: 'workspace', nav: 'knowledge', title: 'Knowledge', simLoad: true });
 route('/knowledge/library', { page: 'library', mode: 'workspace', nav: 'knowledge', title: 'My library', simLoad: true });
 route('/knowledge/bases', { page: 'kbList', mode: 'workspace', nav: 'knowledge', title: 'Knowledge bases', simLoad: true });
 route('/knowledge/collections/:id', { page: 'collection', mode: 'workspace', nav: 'knowledge', title: 'Collection', simLoad: true });
@@ -41,17 +40,19 @@ route('/knowledge/:id', { page: 'kbDetail', mode: 'workspace', nav: 'knowledge',
 route('/doc/:id', { page: 'docViewer', mode: 'workspace', nav: 'knowledge', title: 'Document', bare: true });
 // Workspace admin
 route('/overview', { page: 'overview', mode: 'workspace', nav: 'overview', title: 'Overview', perm: 'tenant.manage', simLoad: true });
+// Curation and publication: review queue, every document's lifecycle, quality and topics (reviewers = owners of the bases).
+route('/documents', { page: 'documentsAdmin', mode: 'workspace', nav: 'documents', title: 'Documents', perm: 'knowledge.manage', simLoad: true });
 route('/sources', { page: 'sources', mode: 'workspace', nav: 'sources', title: 'Sources', perm: 'source.manage', simLoad: true });
 route('/connections', { page: 'connections', mode: 'workspace', nav: 'connections', title: 'Connections', perm: 'source.manage', simLoad: true });
 route('/people', { page: 'people', mode: 'workspace', nav: 'people', title: 'People', perm: 'user.manage', simLoad: true });
 route('/assistant', { page: 'assistant', mode: 'workspace', nav: 'assistant', title: 'Assistant', perm: 'tenant.manage' });
 route('/activity', { page: 'activity', mode: 'workspace', nav: 'activity', title: 'Activity', perm: 'audit.read', simLoad: true });
-route('/knowledge-health', { page: 'khealth', mode: 'workspace', nav: 'khealth', title: 'Knowledge health', perm: 'knowledge.manage', simLoad: true });
 route('/settings', { page: 'settings', mode: 'workspace', nav: 'settings', title: 'Settings', perm: 'tenant.manage' });
 // Platform operator
 route('/p/workspaces', { page: 'pWorkspaces', mode: 'platform', nav: 'p-workspaces', title: 'Workspaces', perm: 'platform.tenant.read', simLoad: true });
 route('/p/users', { page: 'pUsers', mode: 'platform', nav: 'p-users', title: 'Users', perm: 'platform.user.read', simLoad: true });
 route('/p/connectors', { page: 'pConnectors', mode: 'platform', nav: 'p-connectors', title: 'Connectors', perm: 'platform.tenant.read' });
+route('/p/indexing', { page: 'pIndexing', mode: 'platform', nav: 'p-indexing', title: 'Indexing', perm: 'platform.health.read', simLoad: true });
 route('/p/usage', { page: 'pUsage', mode: 'platform', nav: 'p-usage', title: 'Usage', perm: 'platform.tenant.read', simLoad: true });
 route('/p/audit', { page: 'pAudit', mode: 'platform', nav: 'p-audit', title: 'Audit log', perm: 'platform.audit.read', simLoad: true });
 route('/p/health', { page: 'pHealth', mode: 'platform', nav: 'p-health', title: 'System health', perm: 'platform.health.read' });
@@ -59,7 +60,7 @@ route('/p/health', { page: 'pHealth', mode: 'platform', nav: 'p-health', title: 
 route('/design', { page: 'design', mode: 'proto', title: 'Design system' });
 
 /** Old addresses keep working. */
-const REDIRECTS = { '/access': '/people', '/p/models': '/p/health', '/review': '/chat', '/documents': '/knowledge/browse' };
+const REDIRECTS = { '/access': '/people', '/p/models': '/p/health', '/review': '/chat', '/knowledge-health': '/documents', '/knowledge/browse': '/knowledge' };
 
 function parseHash() {
   const h = decodeURI(location.hash.slice(1)) || (S.signedIn ? homeRoute() : '/signin');

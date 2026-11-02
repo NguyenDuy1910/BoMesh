@@ -1,10 +1,8 @@
-/* Knowledge hub: Discover (/knowledge) and Browse (/knowledge/browse).
-   Discover is the front door — one search box, what you were reading, what's
-   new in your spaces, the topic index and collections. Browse is the one
-   catalog for search and filters; the URL holds its state, so every result
-   set is linkable and can be saved as a view.
+/* Knowledge: Browse (/knowledge) — the one catalog for search and filters;
+   the URL holds its state, so every result set is linkable and can be saved
+   as a view. Discovery (what exists, featured, recommended) lives on Home.
    Model: core/catalog.js. Pieces: X.res (resources.js).
-   Actions: hub-*, cat-*. Drawer: cat-filters. Modal: cat-save-view. Menu: cat-sort. */
+   Actions: cat-*. Drawer: cat-filters. Modal: cat-save-view. Menu: cat-sort. */
 (() => {
   'use strict';
 
@@ -14,103 +12,17 @@
   const LAYOUTS = [['list', 'List', 'list'], ['table', 'Table', 'table'], ['grid', 'Grid', 'grid']];
   /** The preview panel needs room next to the rail and results; below this the reader opens directly. */
   const wide = () => ($('#frame')?.clientWidth || innerWidth) >= 1200;
-  const readerPool = () => catalogPool().filter(isReaderVisible);
-  const spaceTag = sp => chip(sp.code || sp.name, { size: 'sm', tip: sp.name });
   const openDoc = (id, q = '') => go('/doc/' + id + (q ? '?q=' + encodeURIComponent(q) : ''));
 
-  /** Empty Knowledge (nothing readable yet, or the forced Empty state). */
-  function emptyKnowledge(from) {
+  /** Empty Browse (nothing readable yet, or the forced Empty state). */
+  function emptyKnowledge() {
     const up = X.res.uploadBtn('primary');
     return emptyState({
       icon: 'book', title: 'No knowledge yet', boxed: true,
-      desc: up ? 'Upload files or connect a source to start the catalog.' : 'Nothing has been shared with you yet.',
-      actions: up + (from === 'browse' ? btn('Knowledge bases', { href: '/knowledge/bases' }) : btn('Browse', { href: '/knowledge/browse' })),
+      desc: up ? 'Contribute files or connect a source to start the catalog.' : 'Nothing has been shared with you yet.',
+      actions: up + btn('Knowledge bases', { href: '/knowledge/bases' }),
     });
   }
-
-  /* ═══════════════ Discover ═══════════════ */
-  const searchBox = () => `<div class="hub-search" role="search">${ic('search', 'i-lg')}<input class="input input--lg" id="hub-q" type="search" value="${esc(ui('hub').q || '')}" placeholder="Search knowledge by title, topic or content" aria-label="Search knowledge" data-bind="hub.q" data-enter="hub-search" autocomplete="off" data-autofocus><span class="hub-search__go">${btn('Search', { v: 'primary', size: 'sm', act: 'hub-search' })}</span></div>`;
-
-  /** The five most common resource types, each a shortcut into Browse. */
-  function kindLinks(pool) {
-    const counts = new Map();
-    pool.forEach(d => { const k = res(d).kind; counts.set(k, (counts.get(k) || 0) + 1); });
-    const top = [...counts].sort((a, b) => b[1] - a[1] || kindMeta(a[0]).label.localeCompare(kindMeta(b[0]).label)).slice(0, 5);
-    return `<nav class="hub-kinds" aria-label="Browse by type">${top.map(([k, n]) => {
-      const m = kindMeta(k);
-      return `<a class="hub-kind" href="#${catalogHref({ filters: { kind: [k] } })}">${ic(m.icon, 'i-sm')}<span>${esc(m.plural)}</span><span class="hub-kind__n">${fmtNum(n)}</span></a>`;
-    }).join('')}<a class="hub-kind hub-kind--all" href="#/knowledge/browse"><span>All resources</span><span class="hub-kind__n">${fmtNum(pool.length)}</span>${ic('arrow-right', 'i-sm')}</a></nav>`;
-  }
-
-  function recentRegion() {
-    const rec = recentResources(5), at = new Map(rec.map(x => [x.doc.id, x.at]));
-    const body = rec.length
-      ? X.res.rows(rec.map(x => x.doc), d => ({ compact: true, trail: `<span class="hub-when" title="Opened ${esc(fmtDateTime(at.get(d.id)))}">${esc(rel(at.get(d.id)))}</span>` }))
-      : emptyState({ icon: 'history', title: 'Nothing opened yet', actions: btn('Browse knowledge', { size: 'sm', href: '/knowledge/browse' }), boxed: true, compact: true });
-    return section('Jump back in', body, { actions: linkBtn(`All saved (${fmtNum(savedResources().length)})`, { href: '/knowledge/library?tab=saved' }) });
-  }
-
-  /** New in the caller's spaces (Spaces module), otherwise the newest resources overall. */
-  function freshRegion(pool) {
-    const mine = hasModule('spaces') ? mySpaces() : [];
-    if (mine.length) {
-      const ids = new Set(mine.map(s => s.id)), where = new Map();
-      const hits = pool.filter(d => { const sp = res(d).contexts.filter(id => ids.has(id)); if (sp.length) where.set(d.id, sp); return sp.length; }).sort((a, b) => b.updated - a.updated);
-      const body = hits.length
-        ? X.res.rows(hits.slice(0, 5), d => ({ compact: true, trail: `<span class="hub-tags">${spaceTag(spaceById(where.get(d.id)[0]))}${where.get(d.id).length > 1 ? `<span class="hub-more">+${where.get(d.id).length - 1}</span>` : ''}</span>` }))
-        : emptyState({ icon: 'layers', title: 'Nothing in your spaces yet', boxed: true, compact: true });
-      return section('From your spaces', body, { actions: hits.length ? linkBtn(`See all (${fmtNum(hits.length)})`, { href: catalogHref({ filters: { space: [...ids] } }) }) : '' });
-    }
-    const newest = [...pool].sort((a, b) => b.updated - a.updated).slice(0, 5);
-    return section('Recently updated', X.res.rows(newest, { compact: true }), { actions: linkBtn('See all', { href: catalogHref({ sort: 'updated' }) }) });
-  }
-
-  /** Topic index: domains with their topics and counts, one dense list. */
-  function topicRegion() {
-    const tree = topicTree();
-    if (!tree.length) return section('Browse by topic', emptyState({ icon: 'tag', title: 'No topics yet', actions: btn('Browse all', { size: 'sm', href: '/knowledge/browse' }), boxed: true, compact: true }));
-    const counts = new Map((catalogSearch(parseCatalogQuery({})).facets.topic || []).map(o => [o.value, o.count]));
-    const link = (t, cls) => { const n = counts.get(t.id) || 0; return `<a class="${cx(cls, !n && 'is-zero')}" href="#${catalogHref({ filters: { topic: [t.id] } })}"><span class="truncate">${esc(t.name)}</span><span class="hub-count">${fmtNum(n)}</span></a>`; };
-    const body = `<div class="hub-topics">${tree.map(dm => `<div class="hub-tgroup">${link(dm, 'hub-tdomain')}${dm.children.length ? `<ul class="hub-tlist">${dm.children.map(t => `<li>${link(t, 'hub-topic')}</li>`).join('')}</ul>` : ''}</div>`).join('')}</div>`;
-    return section('Browse by topic', body, { actions: linkBtn('Browse all', { href: '/knowledge/browse' }) });
-  }
-
-  /** Featured, shared with my spaces, then mine — four at most. */
-  function collectionsRegion() {
-    const vis = visibleCollections(), uid_ = me().id;
-    const picks = [...new Set([...vis.filter(c => c.featured), ...vis.filter(c => collectionSpace(c)), ...vis.filter(c => c.owner === uid_)])].slice(0, 4);
-    const actions = (vis.length ? linkBtn('All collections', { href: '/knowledge/library?tab=collections' }) : '') + btn('New collection', { v: 'ghost', size: 'sm', icon: 'plus', act: 'col-new' });
-    const body = picks.length
-      ? list(picks.map(c => {
-        const s = shareLabel(c);
-        return item({
-          lead: itemIcon(c.featured ? 'sparkles' : 'layers', c.featured ? 'accent' : '', 'sm'), title: esc(c.name),
-          titleExtra: c.featured ? chip('Featured', { size: 'sm', tone: 'accent' }) : '',
-          desc: `<span class="hub-share">${ic(s.icon, 'i-xs')}<span class="truncate">${esc(s.label)}</span></span>`,
-          meta: `<span class="hub-colmeta"><span>${plural(c.items.length, 'item')}</span><span class="muted">${esc(rel(c.updated))}</span></span>`,
-          href: '/knowledge/collections/' + c.id,
-        });
-      }), 'hub-cols')
-      : emptyState({ icon: 'layers', title: 'No collections yet', desc: 'Group resources into a reading list.', boxed: true, compact: true });
-    return section('Collections', body, { actions });
-  }
-
-  P.hub = () => {
-    const head = X.res.hubHeader('discover', { actions: X.res.uploadBtn() });
-    const body = gate({
-      loading: () => `<div class="hub-top"><span class="skeleton hub-skel-search"></span></div><div class="hub-grid"><div class="hub-col">${skelRows(5)}${skelRows(4)}</div><div class="hub-col">${skelRows(7)}</div></div>`,
-      empty: () => emptyKnowledge('discover'),
-      error: () => errorState(),
-      ok: () => {
-        const pool = readerPool();
-        if (!pool.length) return emptyKnowledge('discover');
-        return `<div class="hub-top">${searchBox()}${kindLinks(pool)}</div>
-          <div class="hub-grid"><div class="hub-col">${recentRegion()}${freshRegion(pool)}</div><div class="hub-col">${topicRegion()}${collectionsRegion()}</div></div>`;
-      },
-    });
-    return `<div class="page hub">${head}${body}</div>`;
-  };
-  A['hub-search'] = () => { const h = ui('hub'), q = String(h.q ?? $('#hub-q')?.value ?? '').trim(); h.q = ''; go(catalogHref({ q })); };
 
   /* ═══════════════ Browse ═══════════════ */
   const cui = () => ui('cat', { fold: {}, more: {}, open: {}, page: 1 });
@@ -224,10 +136,10 @@
     const head = X.res.hubHeader('browse', { actions: X.res.uploadBtn() });
     const body = gate({
       loading: () => `<div class="cat-layout"><aside class="cat-rail" aria-busy="true">${Array.from({ length: 4 }, (_, i) => `<div class="cat-group"><span class="skeleton skeleton--line" style="width:${40 + i * 9}%"></span>${Array.from({ length: 4 }, (_, j) => `<span class="skeleton skeleton--line" style="width:${55 + ((i + j) * 13) % 35}%;height:10px"></span>`).join('')}</div>`).join('')}</aside><div class="cat-main"><span class="skeleton cat-skel-bar"></span>${skelRows(8)}</div></div>`,
-      empty: () => emptyKnowledge('browse'),
+      empty: emptyKnowledge,
       error: () => errorState(),
       ok: () => {
-        if (!catalogPool().length) return emptyKnowledge('browse');
+        if (!catalogPool().length) return emptyKnowledge();
         const r = catalogSearch(p), key = setKey(p);
         if (u.lastKey !== key) { u.page = 1; u.lastKey = key; }
         const sel = query.sel && wide() ? r.pool.find(d => d.id === query.sel) || null : null;

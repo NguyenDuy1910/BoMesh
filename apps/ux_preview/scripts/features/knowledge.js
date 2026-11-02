@@ -1,21 +1,16 @@
-/* Knowledge: knowledge base list, detail (documents, sources, access,
-   settings), create, upload, share, request access and ask. Document-level
-   helpers (row, drawer, processing, move, archive) live in documents.js. */
+/* Knowledge: knowledge base list, detail (resources, sources, access,
+   settings), create, share, request access and ask. Adding documents goes
+   through Contribute (contribute.js); review, publishing and the document
+   inventory live in Manage → Documents (curation.js). */
 (() => {
   'use strict';
 
   const ROLES = [['viewer', 'Viewer'], ['editor', 'Editor'], ['owner', 'Owner']];
   const ROLE_LABEL = { owner: 'Owner', editor: 'Editor', viewer: 'Viewer' };
   const ROLE_RANK = { viewer: 1, editor: 2, owner: 3 };
-  const ROLE_DESC = { viewer: 'Can search and read documents.', editor: 'Can also add, move and archive documents.', owner: 'Can also manage access and settings.' };
+  const ROLE_DESC = { viewer: 'Can search and read documents.', editor: 'Can also edit document details.', owner: 'Can also review submissions and manage access and settings.' };
   const SORTS = { updated: 'Recently updated', name: 'Name', docs: 'Most documents' };
   const COLORS = ['#B4467A', '#C2620F', '#2F6FB5', '#0E7C66', '#6B4FBF', '#1F7A8C', '#4E6B2E', '#A23B3B'];
-  const UPLOAD_OK = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'ppt', 'pptx', 'txt', 'md', 'html', 'zip'];
-  const MAX_BYTES = 100 * 1048576;
-  const SAMPLES = [
-    { name: 'Q4 Sales Kickoff.pptx', size: 8.4 * 1048576 }, { name: 'Pricing FAQ.docx', size: 214e3 }, { name: 'Meeting notes.txt', size: 12e3 },
-    { name: 'Archive 2025.zip', size: 46.2 * 1048576 }, { name: 'Product demo.mov', size: 182 * 1048576 },
-  ];
 
   /* ── Helpers ── */
   function audit(action, target, type = 'Knowledge') {
@@ -81,7 +76,6 @@
   /** The space that owns a base (Spaces module on only). */
   const kbSpace = kb => (hasModule('spaces') && kb.space ? spaceById(kb.space) : null);
   const spaceChip = sp => chip(sp.code || sp.name, { icon: spaceType(sp.type).icon, size: 'sm', tip: `${spaceType(sp.type).label} · ${sp.name}` });
-  const docsKey = id => 'kbdocs-' + id;
 
   /* ═══════════════════════════ Knowledge list ═══════════════════════════ */
   function sortKbs(rows, by) {
@@ -102,7 +96,7 @@
   function listEmpty(canCreate) {
     return canCreate
       ? emptyState({ icon: 'book', title: 'Create your first knowledge base', desc: 'Group documents by team or topic, then add files or connect a source.', actions: btn('Create knowledge base', { v: 'primary', icon: 'plus', act: 'kb-create' }), boxed: true })
-      : emptyState({ icon: 'book', title: 'Nothing has been shared with you yet', desc: 'Upload your own files to ask about them. Only you can see My files.', actions: btn('Upload to My files', { v: 'primary', icon: 'upload', act: 'kb-upload', data: { kb: visibleKbs().find(k => k.personal)?.id || '' } }), boxed: true });
+      : emptyState({ icon: 'book', title: 'Nothing has been shared with you yet', desc: 'Upload your own files to ask about them. Only you can see My files.', actions: btn('Upload to My files', { v: 'primary', icon: 'upload', act: 'contribute', data: { private: '1' } }), boxed: true });
   }
   P.kbList = () => {
     const u = ui('kbList', { sort: 'updated' });
@@ -155,7 +149,7 @@
 
   /* ═══════════════════════════ Knowledge base detail ═══════════════════════════ */
   function tabsFor(kb) {
-    const t = [{ id: 'documents', label: 'Resources', count: canEditKb(kb) ? docsIn(kb.id).length : readerDocs(kb).length }];
+    const t = [{ id: 'documents', label: 'Resources', count: readerDocs(kb).length }];
     if (kb.personal) return t;
     if (canEditKb(kb)) t.push({ id: 'sources', label: 'Sources', count: D.sources.filter(s => s.kb === kb.id).length });
     if (kbRole(kb) === 'owner') t.push({ id: 'access', label: 'Access', count: pendingRequests().filter(r => r.kb === kb.id).length || '', alert: true }, { id: 'settings', label: 'Settings' });
@@ -176,9 +170,9 @@
     }
     const tabList = tabsFor(kb);
     const tab = tabList.some(t => t.id === query.tab) ? query.tab : 'documents';
-    const edit = canEditKb(kb), hasDocs = docsIn(kb.id).length > 0;
+    const hasDocs = readerDocs(kb).length > 0;
     const actions = (hasDocs ? btn('Ask', { v: 'primary', icon: 'sparkles', act: 'kb-ask', data: { kb: kb.id } }) : '')
-      + (edit && (hasDocs || tab !== 'documents') ? btn('Add files', { icon: 'upload', act: 'kb-upload', data: { kb: kb.id } }) : '')
+      + (hasDocs || tab !== 'documents' ? addBtn(kb) : '')
       + (MENUS['kb-more']({ dataset: { kb: kb.id } }).length ? iconBtn('more', 'More', { menu: 'kb-more', data: { kb: kb.id } }) : '');
     const sp = kbSpace(kb);
     const owner = ownerOfKb(kb), topics = (kb.topics || []).map(t => `<a class="res-topic" href="#${X.res.topicHref(t)}">${esc(topicName(t))}</a>`).join('');
@@ -227,16 +221,32 @@
     if (A['chat-ask']) A['chat-ask']({ dataset: { q: `About “${d?.name}”: ${q}`, kb, doc } }); else go('/chat');
   };
 
-  /* ── Documents tab ── */
-  function docsEmpty(kb) {
-    if (!canEditKb(kb)) return emptyState({ icon: 'file-text', title: 'No resources yet', desc: 'The owners haven’t added anything here yet.', boxed: true });
-    const src = can('source.manage') && !kb.personal ? btn('Connect source', { icon: 'plug', act: 'kb-connect', data: { kb: kb.id } }) : '';
-    return emptyState({ icon: 'upload', title: 'Add files', desc: kb.personal ? 'Upload files to ask about them. Only you can see them.' : 'Upload files or connect a source. Documents become searchable once processed.', actions: btn('Add files', { v: 'primary', icon: 'upload', act: 'kb-upload', data: { kb: kb.id } }) + src, boxed: true });
+  /* ── Resources tab ── */
+  /** Adding documents: contributors submit to a shared base for review; My files is private and needs no review. */
+  function addBtn(kb, { v = 'secondary', label = 'Contribute' } = {}) {
+    if (kb.personal) return btn('Upload', { v, icon: 'upload', act: 'contribute', data: { private: '1' } });
+    return canContribute() && kb.contribute !== false && canReadKb(kb) ? btn(label, { v, icon: 'upload', act: 'contribute', data: { kb: kb.id } }) : '';
   }
-  /** What readers of a base see: usable resources only (no pipeline states). */
-  const readerDocs = kb => docsIn(kb.id).filter(isReaderVisible);
+  function docsEmpty(kb) {
+    const add = addBtn(kb, { v: 'primary', label: 'Add documents' });
+    if (kb.personal) return emptyState({ icon: 'upload', title: 'No files yet', desc: 'Upload files to ask about them. Only you can see them.', actions: add, boxed: true });
+    const src = can('source.manage') && kbRole(kb) === 'owner' ? btn('Connect source', { icon: 'plug', act: 'kb-connect', data: { kb: kb.id } }) : '';
+    return emptyState({ icon: 'file-text', title: 'Nothing published yet', desc: add ? 'Add documents to share them. A reviewer checks them before they’re published here.' : 'The owners haven’t published anything here yet.', actions: add + src, boxed: true });
+  }
+  /** What a base shows: published, usable resources (My files: all of the owner's files). */
+  const readerDocs = kb => (kb.personal ? docsIn(kb.id) : docsIn(kb.id).filter(isReaderVisible));
+  /** For the base's reviewers: what's waiting in Manage → Documents. */
+  function reviewAlert(kb) {
+    if (kb.personal || !can('knowledge.manage') || !canReviewKb(kb)) return '';
+    const docs = curatedDocs().filter(d => d.kb === kb.id);
+    const n = docs.filter(d => stageOf(d) === 'review').length, m = docs.filter(d => lifecycleOf(d).key === 'failed').length;
+    if (!n && !m) return '';
+    const to = m ? `/documents?tab=all&kb=${kb.id}&life=attention` : `/documents?tab=review&kb=${kb.id}`;
+    const title = [n && `${fmtNum(n)} in review`, m && `${fmtNum(m)} couldn’t be published`].filter(Boolean).join(' · ');
+    return `<div class="mb-12">${alertBox(m ? 'warning' : 'accent', title, '', btn('Manage in Documents', { v: 'secondary', size: 'sm', href: to }), { icon: m ? 'alert' : 'clock' })}</div>`;
+  }
   const READER_SORTS = { updated: 'Recently updated', title: 'Title A–Z', popular: 'Most opened' };
-  function readerTab(kb) {
+  function docsTab(kb) {
     const key = 'kbres-' + kb.id, u = ui(key, { sort: 'updated', page: 1 }), all = readerDocs(kb), toks = tokens(u.q || '');
     const cmp = { updated: (a, b) => b.updated - a.updated, title: (a, b) => a.name.localeCompare(b.name), popular: (a, b) => (b.views || 0) - (a.views || 0) }[u.sort] || ((a, b) => b.updated - a.updated);
     const rows = all.filter(d => !toks.length || scoreRes(d, toks) > 0).sort(cmp);
@@ -244,45 +254,16 @@
       loading: () => skelRows(8),
       empty: () => docsEmpty(kb),
       ok: () => {
-        if (!all.length) return docsEmpty(kb);
-        const toolbar = `<div class="toolbar">${searchField({ uiKey: key, placeholder: 'Search this knowledge base' })}${linkBtn('Browse with filters', { href: catalogHref({ filters: { kb: [kb.id] } }), icon: 'arrow-right' })}<div class="toolbar__end">${btn(READER_SORTS[u.sort], { v: 'ghost', size: 'sm', icon: 'sort', menu: 'kb-res-sort', data: { kb: kb.id }, aria: `aria-label="Sort: ${esc(READER_SORTS[u.sort])}"` })}</div></div>`;
-        if (!rows.length) return toolbar + noMatches(key, [], 'resources');
-        return toolbar + X.res.rows(paginate(rows, key, 20), { q: u.q || '' }) + pager(rows.length, key, 20);
+        const alert = reviewAlert(kb);
+        if (!all.length) return alert + docsEmpty(kb);
+        const browse = kb.personal ? '' : linkBtn('Browse with filters', { href: catalogHref({ filters: { kb: [kb.id] } }), icon: 'arrow-right' });
+        const toolbar = `<div class="toolbar">${searchField({ uiKey: key, placeholder: kb.personal ? 'Search my files' : 'Search this knowledge base' })}${browse}<div class="toolbar__end">${btn(READER_SORTS[u.sort], { v: 'ghost', size: 'sm', icon: 'sort', menu: 'kb-res-sort', data: { kb: kb.id }, aria: `aria-label="Sort: ${esc(READER_SORTS[u.sort])}"` })}</div></div>`;
+        if (!rows.length) return alert + toolbar + noMatches(key, [], 'resources');
+        return alert + toolbar + X.res.rows(paginate(rows, key, 20), { q: u.q || '' }) + pager(rows.length, key, 20);
       },
     });
   }
   MENUS['kb-res-sort'] = el => { const u = ui('kbres-' + el.dataset.kb); return [{ section: 'Sort by' }, ...Object.entries(READER_SORTS).map(([v, l]) => ({ label: l, checked: u.sort === v, run: () => { u.sort = v; u.page = 1; refresh(); } }))]; };
-  function docsTab(kb) {
-    if (!canEditKb(kb)) return readerTab(kb);
-    const key = docsKey(kb.id), edit = true, { STATUS_OPTS, TYPE_OPTS, typeGroup } = X.docOpts;
-    const u = ui(key, { sort: { key: 'updated', dir: 'desc' }, page: 1, sel: {} });
-    const all = docsIn(kb.id);
-    const failed = all.filter(d => d.status === 'failed'), waiting = all.filter(d => ['pending', 'outdated'].includes(d.status));
-    const rows = applySort(all.filter(d => matchesQ(key, d.name, X.docSub(d)) && (!u.st || d.status === u.st) && (!u.type || typeGroup(d) === u.type)), key, X.docSorters);
-    return gate({
-      loading: () => skelRows(8),
-      empty: () => docsEmpty(kb),
-      ok: () => {
-        if (!all.length) return docsEmpty(kb);
-        const toolbar = `<div class="toolbar">${searchField({ uiKey: key, placeholder: 'Search documents' })}${filterButton('Status', key, 'st', STATUS_OPTS)}${filterButton('Type', key, 'type', TYPE_OPTS)}${clearFilters(key, ['st', 'type'])}<span class="toolbar__end t-sm muted num">${plural(rows.length, 'document')}</span></div>`;
-        const parts = [failed.length && `${plural(failed.length, 'document')} couldn’t be processed`, waiting.length && (failed.length ? `${fmtNum(waiting.length)} waiting` : `${plural(waiting.length, 'document')} waiting to be processed`)].filter(Boolean);
-        const notice = edit && parts.length ? `<div class="mb-12">${alertBox(failed.length ? 'danger' : 'accent', parts.join(' · '), '', (failed.length && u.st !== 'failed' ? btn('Review', { size: 'sm', v: 'ghost', act: 'kb-show-failed', data: { kb: kb.id } }) : '') + (waiting.length ? btn('Process now', { size: 'sm', v: 'secondary', icon: 'play', act: 'kb-process-waiting', data: { kb: kb.id } }) : ''))}</div>` : '';
-        if (!rows.length) return toolbar + notice + noMatches(key, ['st', 'type'], 'documents');
-        const page = paginate(rows, key, 15);
-        const ids = new Set(all.map(d => d.id)); const sel = selIds(key).filter(id => ids.has(id));
-        const bulk = edit && sel.length ? bulkBar(key, btn('Reprocess', { v: 'ghost', size: 'sm', icon: 'retry', act: 'kb-bulk-process', data: { kb: kb.id } }) + (kb.personal ? '' : btn('Move', { v: 'ghost', size: 'sm', icon: 'folder', act: 'doc-move', data: { ids: sel.join(',') } })) + btn('Archive', { v: 'ghost', size: 'sm', icon: 'archive', act: 'kb-bulk-archive', data: { kb: kb.id } })) : '';
-        return toolbar + notice + table({ label: 'Documents', head: X.docHead(key, edit ? page.map(d => d.id) : null), rows: page.map(d => X.docRow(d, { uiKey: key, select: edit })), foot: pager(rows.length, key, 15) }) + bulk;
-      },
-    });
-  }
-  const selectedDocs = kbId => { const ids = new Set(docsIn(kbId).map(d => d.id)); return selIds(docsKey(kbId)).filter(id => ids.has(id)).map(docById); };
-  A['kb-show-failed'] = el => { const u = ui(docsKey(el.dataset.kb)); u.st = 'failed'; u.page = 1; refresh(); };
-  A['kb-process-waiting'] = el => { const docs = docsIn(el.dataset.kb).filter(d => ['pending', 'outdated'].includes(d.status)); X.processDocs(docs, { msg: `Processing ${plural(docs.length, 'document')}` }); };
-  A['kb-bulk-process'] = el => {
-    const docs = selectedDocs(el.dataset.kb); ui(docsKey(el.dataset.kb)).sel = {};
-    if (!X.processDocs(docs, { msg: `Reprocessing ${plural(docs.length, 'document')}` })) { refresh(); toast('These files can’t be reprocessed', { tone: 'danger' }); }
-  };
-  A['kb-bulk-archive'] = el => X.archiveDocs(selectedDocs(el.dataset.kb));
 
   /* ── Sources tab ── */
   function srcLine(s) {
@@ -474,79 +455,4 @@
     audit('Requested access', kb.name, 'People & access');
     closeModal(); refresh(); toast(`Request sent to the owners of ${kb.name}`);
   };
-
-  /* ═══════════════════════════ Upload ═══════════════════════════ */
-  function fileEntry(name, size) {
-    const ext = (name.includes('.') ? name.split('.').pop() : '').toLowerCase();
-    const err = !UPLOAD_OK.includes(ext) ? 'This file type isn’t supported' : size > MAX_BYTES ? 'Larger than 100 MB' : '';
-    return { id: uid('f'), name, size, type: ext || 'file', err, pct: 0 };
-  }
-  const uploadTargets = () => visibleKbs().filter(canEditKb);
-  /** A['kb-upload']({dataset:{kb}}). Without kb, the dialog asks where to add the files. */
-  A['kb-upload'] = el => {
-    const kb = kbById(el?.dataset?.kb);
-    const target = kb && canEditKb(kb) ? kb : uploadTargets()[0];
-    if (!target) { toast('You can’t add files to any knowledge base', { tone: 'danger' }); return; }
-    S.ui.kbUpload = { kb: target.id, pick: !kb, files: [], busy: false };
-    openModal('kb-upload', {});
-  };
-  M['kb-upload'] = () => {
-    const f = ui('kbUpload'), kb = kbById(f.kb);
-    const valid = f.files.filter(x => !x.err), skipped = f.files.length - valid.length;
-    const have = new Set(f.files.map(x => x.name));
-    const dest = f.pick && !f.busy ? `<div class="mb-16">${field({ id: 'kbu-kb', label: 'Add to', control: select({ id: 'kbu-kb', bind: 'kbUpload.kb', value: f.kb, options: uploadTargets().map(k => [k.id, k.name]), change: 'kb-up-dest' }) })}</div>` : '';
-    const drop = f.busy ? '' : `<button type="button" class="kb-drop" id="kb-drop" data-act="kb-up-browse" aria-describedby="kb-drop-hint"><span class="kb-drop__icon">${ic('upload', 'i-lg')}</span><span class="medium">Drop files here or <span class="text-accent">browse</span></span><span class="description" id="kb-drop-hint">PDF, Word, Excel, PowerPoint, text and ZIP · up to 100 MB each</span></button><input type="file" multiple id="kb-up-input" class="sr-only" tabindex="-1" aria-hidden="true" accept="${UPLOAD_OK.map(x => '.' + x).join(',')}" data-change="kb-up-files">`;
-    const row = x => item({
-      lead: fileIcon(x.type), title: esc(x.name),
-      desc: x.err ? `<span class="field-error">${ic('alert-circle')}<span>${esc(x.err)}</span></span>` : f.busy ? `<span class="row gap-8">${`<span class="grow">${progress(x.pct, x.pct >= 100 ? 'success' : '', 'Upload progress')}</span>`}<span class="num t-xs muted kb-pct">${Math.round(x.pct)}%</span></span>` : fmtSize(x.size),
-      trail: f.busy ? (x.err ? '<span class="t-xs muted">Skipped</span>' : x.pct >= 100 ? ic('check-circle', 'text-success') : '') : iconBtn('x', 'Remove ' + x.name, { size: 'sm', act: 'kb-up-remove', data: { id: x.id } }),
-    });
-    const samples = SAMPLES.filter(s => !have.has(s.name));
-    const sampleHtml = f.busy || !samples.length ? '' : `<div class="mt-16"><div class="t-label mb-8">Or try a sample file</div><div class="row wrap gap-6">${samples.map(s => btn(s.name, { v: 'outline', size: 'sm', icon: 'plus', act: 'kb-up-sample', data: { name: s.name } })).join('')}</div></div>`;
-    return {
-      size: 'lg', title: kb.personal && !f.pick ? 'Upload to My files' : 'Add files', desc: f.pick ? '' : kb.personal ? 'Only you can see these files.' : `To ${esc(kb.name)}`,
-      body: dest + drop + (f.files.length ? `<div class="${f.busy ? '' : 'mt-16'}">${list(f.files.map(row))}</div>` : '') + sampleHtml,
-      footStart: skipped && !f.busy ? `<span class="t-sm muted">${plural(skipped, 'file')} will be skipped</span>` : '',
-      foot: btn('Cancel', { act: 'close-modal', disabled: f.busy }) + btn(valid.length ? `Upload ${plural(valid.length, 'file')}` : 'Upload', { v: 'primary', icon: 'upload', act: 'kb-up-go', disabled: !valid.length, loading: f.busy }),
-    };
-  };
-  A['kb-up-dest'] = () => refreshLayer();
-  A['kb-up-browse'] = () => $('#kb-up-input')?.click();
-  A['kb-up-files'] = el => { const f = ui('kbUpload'); [...(el.files || [])].forEach(x => f.files.push(fileEntry(x.name, x.size))); refreshLayer(); };
-  A['kb-up-sample'] = el => { const s = SAMPLES.find(x => x.name === el.dataset.name); if (s) { ui('kbUpload').files.push(fileEntry(s.name, s.size)); refreshLayer(); } };
-  A['kb-up-remove'] = el => { const f = ui('kbUpload'); f.files = f.files.filter(x => x.id !== el.dataset.id); refreshLayer(); $('#kb-drop')?.focus(); };
-  document.addEventListener('dragover', e => { const z = e.target.closest?.('#kb-drop'); if (!z) return; e.preventDefault(); z.classList.add('is-drag'); });
-  document.addEventListener('dragleave', e => { const z = e.target.closest?.('#kb-drop'); if (z && !z.contains(e.relatedTarget)) z.classList.remove('is-drag'); });
-  document.addEventListener('drop', e => {
-    const z = e.target.closest?.('#kb-drop'); if (!z) return; e.preventDefault();
-    const files = [...(e.dataTransfer?.files || [])]; if (!files.length) return;
-    files.forEach(x => ui('kbUpload').files.push(fileEntry(x.name, x.size))); refreshLayer();
-  });
-  A['kb-up-go'] = () => {
-    const f = ui('kbUpload'); if (f.busy) return;
-    const valid = f.files.filter(x => !x.err); if (!valid.length) return;
-    f.busy = true; S.modal.props.guard = true; refreshLayer();
-    const timer = setInterval(() => {
-      if (S.modal?.name !== 'kb-upload') { clearInterval(timer); return; }
-      valid.forEach(x => { x.pct = Math.min(100, x.pct + 6 + Math.random() * (x.size > 2e7 ? 8 : 24)); });
-      refreshLayer();
-      if (valid.every(x => x.pct >= 100)) { clearInterval(timer); setTimeout(() => uploadDone(f, valid), 300); }
-    }, 140);
-  };
-  function uploadDone(f, valid) {
-    const kb = kbById(f.kb); closeModal();
-    const docs = valid.map(x => ({
-      id: uid('d'), kb: kb.id, name: x.name, type: x.type, size: Math.round(x.size), status: 'pending', source: 'upload', updated: Date.now(),
-      addedBy: kb.personal ? 'You' : me().name, pages: Math.max(1, Math.round(x.size / 9e4) % 60 || 4), passages: Math.round(18 + (x.size % 240)), fresh: true,
-      error: x.type === 'zip' ? 'This ZIP file is password-protected. Upload it without a password, or upload the files inside it.' : '',
-    }));
-    D.docs.push(...docs); kb.updated = Date.now();
-    audit(docs.length === 1 ? 'Uploaded a document' : `Uploaded ${plural(docs.length, 'document')}`, kb.name);
-    const u = ui(docsKey(kb.id), { sort: { key: 'updated', dir: 'desc' }, page: 1, sel: {} }); u.page = 1;
-    if (S.cur.path === '/knowledge/' + kb.id) { if (S.cur.query.tab && S.cur.query.tab !== 'documents') setQuery({ tab: '' }); else refresh(); }
-    else if (S.cur.path === '/knowledge/browse' || S.cur.path === '/knowledge/library') refresh();
-    else go('/knowledge/' + kb.id);
-    // Uploading only adds documents to the inventory; an explicit processing run makes them searchable.
-    toast(`Uploaded ${plural(docs.length, 'file')} · waiting to process`, { tone: 'accent', action: { label: 'Process now', run: () => X.processDocs(docs.filter(d => D.docs.includes(d) && d.status === 'pending'), { msg: `Processing ${plural(docs.length, 'document')}` }) } });
-  }
 })();

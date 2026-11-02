@@ -48,3 +48,8 @@
   .au-brand { margin-bottom: 24px; }
   .au-title { margin-bottom: 20px; }
 }
+
+/* Interface-language picker on pages without the app shell. */
+.au-brand { align-items: center; gap: 12px; }
+.lang-picker { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.lang-picker .select { width: auto; min-width: 128px; }

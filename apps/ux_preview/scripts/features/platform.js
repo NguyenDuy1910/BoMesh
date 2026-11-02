@@ -534,7 +534,7 @@
     }))) : '', { desc: `${plural(INCIDENTS.length, 'incident')} resolved in the last 30 days`, actions: btn(u.inc ? 'Hide' : 'Show', { v: 'ghost', size: 'sm', iconRight: u.inc ? 'chevron-up' : 'chevron-down', act: 'pf-inc-toggle', aria: `aria-expanded="${u.inc}"` }) });
     return `<div class="page">${pageHeader({ title: 'System health', desc: `Updated ${esc(rel(u.updated).toLowerCase())}`, extra: PREVIEW, actions: btn('Refresh', { icon: 'refresh', act: 'pf-health-refresh', loading: u.busy, disabled: u.busy }) })}
       ${gate({
-        ok: () => `<div class="pf-banner">${banner()}</div>${section('Services', services())}${section('AI capabilities', models(), { desc: 'Models are set in the deployment configuration and change on restart.' })}${incidents()}`,
+        ok: () => `<div class="pf-banner">${banner()}</div>${section('Services', services(), { actions: linkBtn('Indexing by workspace', { href: '/p/indexing', icon: 'arrow-up-right' }) })}${section('AI capabilities', models(), { desc: 'Models are set in the deployment configuration and change on restart.' })}${incidents()}`,
         loading: () => skelRows(7),
         empty: () => emptyState({ icon: 'server', title: 'No services reporting', desc: 'Status appears once the deployment reports in.', boxed: true }),
       })}</div>`;

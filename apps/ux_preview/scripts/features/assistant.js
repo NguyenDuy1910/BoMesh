@@ -11,8 +11,7 @@
     ['balanced', 'Balanced', 'The answer first, then key details.'],
     ['detailed', 'Detailed', 'Thorough, with steps and context.'],
   ];
-  const ROLE_LABEL = { student: 'Student', lecturer: 'Lecturer', researcher: 'Researcher', staff: 'Staff' };
-  const roleLabel = r => ROLE_LABEL[r] || PERSONAS[r]?.label || r;
+  const roleLabel = r => PERSONAS[r]?.label || r;
 
   const draft = () => (S.ui.asst ??= clone(D.assistant));
   const meta = () => ui('asstMeta', { tried: false, touched: {}, busy: false, role: '' });

@@ -1,6 +1,6 @@
-/* Knowledge bases, document tables and search (features/knowledge.js,
-   documents.js, search.js). Prefixes: kb-, doc-, srch-. The reader and its
-   page canvas live in reader.css. Tokens only. */
+/* Knowledge bases and search (features/knowledge.js, search.js). Prefixes:
+   kb-, srch-. The reader and its page canvas live in reader.css; document
+   curation in curation.css. Tokens only. */
 
 /* ───── Knowledge base mark ───── */
 .kb-mark { --kb-mark: 36px; display: inline-grid; place-items: center; width: var(--kb-mark); height: var(--kb-mark); border-radius: calc(var(--kb-mark) * 0.28); flex: none; color: var(--white); font-weight: 600; font-size: calc(var(--kb-mark) * 0.42); line-height: 1; }
@@ -27,15 +27,6 @@
 .kb-pick button:hover { background: var(--default-hover); color: var(--foreground); }
 .kb-share-q { max-width: none; }
 .kb-share-list .item { padding: 8px 12px; }
-.kb-pct { width: 34px; text-align: right; flex: none; }
-
-/* Upload drop zone */
-.kb-drop { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 28px 16px; border-radius: var(--radius-2xl); border: 1.5px dashed var(--border-secondary); background: var(--surface-secondary); text-align: center; transition: background-color var(--dur-fast), border-color var(--dur-fast); }
-.kb-drop:hover, .kb-drop.is-drag { background: var(--accent-soft); border-color: var(--accent); }
-.kb-drop__icon { display: grid; place-items: center; width: 40px; height: 40px; border-radius: var(--radius-xl); background: var(--surface); color: var(--muted); box-shadow: var(--surface-shadow); margin-bottom: 4px; }
-
-/* ───── Document tables ───── */
-.doc-nowrap { white-space: nowrap; }
 
 /* ───── Search ───── */
 .srch-box { position: relative; display: flex; align-items: center; margin-bottom: 16px; }

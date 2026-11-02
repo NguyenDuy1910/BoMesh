@@ -1,17 +1,12 @@
-/* Documents: shared document operations (table row, row menu, details
-   drawer, processing, replace, move, archive, download) and the rendition
-   model — the readable text of a resource, split into pages, outline and
-   passages — used by the reader (reader.js), search snippets and answers.
-   Exports: X.docRow, X.docHead, X.docSorters, X.docOpts, X.docSub,
-   X.whoCanSee, X.downloadDocument, X.processDocs, X.archiveDocs, X.docFix,
-   X.docModel, X.docText. */
+/* Documents: shared document operations (publishing, replace, move,
+   archive, download) and the rendition model — the readable text of a
+   resource, split into pages, outline and passages — used by the reader
+   (reader.js), the review preview (curation.js), search snippets and answers.
+   The document inventory itself lives in Manage → Documents (curation.js).
+   Exports: X.whoCanSee, X.downloadDocument, X.processDocs, X.archiveDocs,
+   X.docFix, X.docModel, X.docText. */
 (() => {
   'use strict';
-
-  const STATUS_OPTS = [['ready', 'Ready'], ['processing', 'Processing'], ['pending', 'Waiting'], ['outdated', 'Needs update'], ['failed', 'Failed'], ['unsupported', 'Not searchable']];
-  const TYPE_OPTS = [['pdf', 'PDF'], ['word', 'Word'], ['excel', 'Spreadsheet'], ['ppt', 'Slides'], ['text', 'Text']];
-  const TYPE_GROUP = { pdf: 'pdf', doc: 'word', docx: 'word', xls: 'excel', xlsx: 'excel', csv: 'excel', ppt: 'ppt', pptx: 'ppt', md: 'text', txt: 'text', html: 'text', json: 'text' };
-  X.docOpts = { STATUS_OPTS, TYPE_OPTS, typeGroup: d => TYPE_GROUP[d.type] || 'other' };
 
   /* ── Small helpers ── */
   function audit(action, target) {
@@ -22,7 +17,6 @@
     const src = d.source && d.source !== 'upload' ? srcById(d.source) : null;
     return src ? src.name : `Uploaded by ${byYou(d) ? 'you' : d.addedBy}`;
   }
-  X.docSub = docSub;
   function shareName(s) { return s.kind === 'group' ? (groupById(s.id)?.name || 'Group') : (memberById(s.id)?.name || 'Someone'); }
   function whoCanSee(kb) {
     if (kb.personal) return { icon: 'user', label: 'Only you', detail: '' };
@@ -35,7 +29,7 @@
   /* ── Download (browser-native local copy) ── */
   function downloadDocument(doc) {
     const kb = kbById(doc.kb);
-    const rows = [['Document', doc.name], ['Knowledge base', kb?.name || doc.kb], ['Status', STATUS.doc[doc.status]?.[1] || doc.status], ['Type', String(doc.type || '').toUpperCase()], ['Pages', doc.pages || '—'], ['Updated', fmtDateTime(doc.updated)], ['Source', docSub(doc)]];
+    const rows = [['Document', doc.name], ['Knowledge base', kb?.name || doc.kb], ['Status', lifecycleOf(doc).label], ['Type', String(doc.type || '').toUpperCase()], ['Pages', doc.pages || '—'], ['Updated', fmtDateTime(doc.updated)], ['Source', docSub(doc)]];
     const msg = `Downloaded ${doc.name}`;
     if (doc.type === 'pdf') return savePdf(withExt(doc.name, '.pdf'), doc.name, rows.map(([k, v]) => `${k}: ${v}`), msg);
     if (['xlsx', 'xls', 'csv'].includes(doc.type)) return saveCsv(withExt(doc.name, '.csv'), [['Field', 'Value'], ...rows], msg);
@@ -47,10 +41,12 @@
   /* ── Processing (simulated): Waiting → Processing → Ready | Failed ── */
   const stillLocked = d => /password/i.test(d.error || '');
   function processDocs(docs, { msg, quiet } = {}) {
-    docs = docs.filter(d => d && !d.archived && d.status !== 'unsupported' && d.status !== 'processing');
+    // Publishing = processing. Submissions are processed only after a reviewer approves them (core/lifecycle.js).
+    docs = docs.filter(d => d && !d.archived && isPublishedStage(d) && d.status !== 'unsupported' && d.status !== 'processing');
     if (!docs.length) return 0;
     docs.forEach(d => { d.status = 'processing'; });
-    audit(docs.length === 1 ? 'Processed a document' : `Processed ${plural(docs.length, 'document')}`, kbById(docs[0].kb)?.name || docs[0].name);
+    const own = d => !!kbById(d.kb)?.personal;
+    audit(docs.every(own) ? (docs.length === 1 ? 'Prepared a private file' : `Prepared ${plural(docs.length, 'private file')}`) : docs.length === 1 ? 'Published a document' : `Published ${plural(docs.length, 'document')}`, kbById(docs[0].kb)?.name || docs[0].name);
     refresh();
     if (msg && !quiet) toast(msg, { tone: 'accent' });
     setTimeout(() => {
@@ -62,15 +58,18 @@
         else { d.status = 'ready'; d.error = ''; d.updated = Date.now(); ok.push(d); }
       });
       refresh();
-      if (ok.length) toast(ok.length === 1 ? `${ok[0].name} is ready` : `${plural(ok.length, 'document')} are ready`);
-      bad.forEach(d => toast(`Couldn’t process ${d.name}`, { tone: 'danger', action: { label: 'Review', run: () => openDrawer('doc', { id: d.id }) } }));
+      // Private files (My files) are never published: they're "ready" for their owner.
+      const okOwn = ok.filter(own), okPub = ok.filter(d => !own(d));
+      const done = (list, verb) => list.length && toast(list.length === 1 ? `${list[0].name} is ${verb}` : `${plural(list.length, list === okOwn ? 'file' : 'document')} are ${verb}`, { action: list.length === 1 ? { label: 'Open', run: () => go('/doc/' + list[0].id) } : undefined });
+      done(okPub, 'published'); done(okOwn, 'ready');
+      bad.forEach(d => toast(own(d) ? `Couldn’t prepare ${d.name}` : `Couldn’t publish ${d.name}`, { tone: 'danger', action: { label: own(d) ? 'Open' : 'Review', run: () => go(!own(d) && can('knowledge.manage') && canReviewKb(kbById(d.kb)) ? '/documents?tab=all&life=attention' : '/doc/' + d.id) } }));
     }, 2600);
     return docs.length;
   }
   X.processDocs = processDocs;
   A['doc-process'] = el => {
     const d = docById(el.dataset.id); if (!d) return;
-    processDocs([d], { msg: `${d.status === 'pending' ? 'Processing' : 'Reprocessing'} ${d.name}` });
+    processDocs([d], { msg: `${d.status === 'pending' ? 'Publishing' : 'Republishing'} ${d.name}` });
   };
   /** Fix for a locked file: pick a new version with the real file picker, then process it. */
   A['doc-replace'] = el => {
@@ -81,7 +80,7 @@
       const f = inp.files?.[0]; inp.remove(); if (!f) return;
       d.error = ''; d.size = f.size || d.size; d.addedBy = me().name; d.source = 'upload';
       audit('Replaced a document', d.name);
-      processDocs([d], { msg: `Processing the new version of ${d.name}` });
+      processDocs([d], { msg: `Publishing the new version of ${d.name}` });
     });
     document.body.append(inp); inp.click();
   };
@@ -96,15 +95,14 @@
       confirm: 'Archive', danger: true, delay: 300,
       onConfirm: () => {
         docs.forEach(d => (d.archived = true));
-        const kbId = docs[0].kb; if (S.ui['kbdocs-' + kbId]) S.ui['kbdocs-' + kbId].sel = {};
         onDone?.(); refresh();
-        audit(one ? 'Archived document' : `Archived ${plural(docs.length, 'document')}`, one ? docs[0].name : kbById(kbId)?.name);
+        const kbName = kbById(docs[0].kb)?.name;
+        audit(one ? 'Archived document' : `Archived ${plural(docs.length, 'document')}`, one ? docs[0].name : kbName);
         toast(one ? `Archived “${docs[0].name}”` : `Archived ${plural(docs.length, 'document')}`, { action: { label: 'Undo', run: () => { docs.forEach(d => (d.archived = false)); refresh(); toast(one ? `Restored “${docs[0].name}”` : `Restored ${plural(docs.length, 'document')}`); } } });
       },
     });
   }
   X.archiveDocs = archiveDocs;
-  A['doc-archive'] = el => { const d = docById(el.dataset.id); if (d) archiveDocs([d], () => { if (S.drawer?.name === 'doc') S.drawer = null; }); };
 
   const moveTargets = from => visibleKbs().filter(k => k.id !== from && !k.personal && canEditKb(k));
   A['doc-move'] = el => {
@@ -129,88 +127,19 @@
     const { ids, from } = S.modal.props, target = kbById(ui('docMove').to); if (!target) return;
     const docs = ids.map(docById).filter(Boolean);
     docs.forEach(d => (d.kb = target.id)); target.updated = Date.now();
-    if (S.ui['kbdocs-' + from]) S.ui['kbdocs-' + from].sel = {};
-    closeModal(); if (S.drawer?.name === 'doc') S.drawer = null; refresh();
+    closeModal(); S.drawer = null; refresh();
     audit(`Moved ${plural(docs.length, 'document')}`, target.name);
     toast(`Moved ${plural(docs.length, 'document')} to ${target.name}`, { action: { label: 'Undo', run: () => { docs.forEach(d => (d.kb = from)); refresh(); toast(`Moved ${plural(docs.length, 'document')} back`); } } });
   };
 
-  /* ── Row, menu, drawer ── */
-  /** Table row shared by the knowledge base and all-documents tables. */
-  X.docRow = (d, { uiKey, select: withSel, showKb, act = 'doc-details' } = {}) => {
-    const kb = kbById(d.kb), on = withSel && !!ui(uiKey).sel?.[d.id];
-    return `<tr class="${cx('table__row', d.fresh && 'table__row--new')}" data-act="${act}" data-id="${d.id}" tabindex="0" ${on ? 'aria-selected="true"' : ''}>
-      ${withSel ? selCheck(uiKey, d.id, 'Select ' + d.name) : ''}
-      <td class="table__cell table__cell--primary"><div class="row gap-12">${fileIcon(d.type)}<div class="grow"><div class="cell-title truncate" title="${esc(d.name)}">${esc(d.name)}</div><div class="cell-sub truncate">${esc(showKb ? kb?.name : docSub(d))}</div></div></div></td>
-      <td class="table__cell">${status('doc', d.status)}</td>
-      <td class="table__cell muted doc-nowrap" title="${esc(fmtDateTime(d.updated))}">${rel(d.updated)}</td>
-      <td class="table__cell table__cell--num table__cell--hide-sm muted num">${fmtSize(d.size)}</td>
-      <td class="table__cell table__cell--actions">${iconBtn('more', 'More actions', { size: 'sm', menu: 'doc-row', data: { id: d.id } })}</td></tr>`;
-  };
-  X.docHead = (uiKey, pageIds) => `${pageIds ? selAllCheck(uiKey, pageIds) : ''}${sortHead('Name', 'name', uiKey)}${th('Status')}${sortHead('Updated', 'updated', uiKey)}${sortHead('Size', 'size', uiKey, 'table__column--num')}${th('<span class="sr-only">Actions</span>', 'table__column--actions')}`;
-  X.docSorters = { name: d => d.name.toLowerCase(), updated: d => d.updated, size: d => d.size };
-
-  const processLabel = d => d.status === 'pending' ? 'Process now' : d.status === 'failed' ? 'Try again' : 'Reprocess';
-  const canProcess = d => !['unsupported', 'processing'].includes(d.status) && !(d.status === 'failed' && stillLocked(d));
   /** The fix an editor can apply to a file that isn't readable (or changed at the source); '' when none. */
   X.docFix = (d, { v = 'secondary', size } = {}) => {
     const b = (label, icon, act) => btn(label, { v, size, icon, act, data: { id: d.id } });
+    const own = kbById(d.kb)?.personal;
     if (d.status === 'failed') return stillLocked(d) ? b('Replace file', 'upload', 'doc-replace') : b('Try again', 'retry', 'doc-process');
-    if (d.status === 'pending') return b('Process now', 'play', 'doc-process');
-    if (d.status === 'outdated') return b('Reprocess', 'retry', 'doc-process');
+    if (d.status === 'pending') return b(own ? 'Make searchable' : 'Publish now', 'play', 'doc-process');
+    if (d.status === 'outdated') return b(own ? 'Update' : 'Publish update', 'retry', 'doc-process');
     return '';
-  };
-  MENUS['doc-row'] = el => {
-    const d = docById(el.dataset.id); if (!d) return [];
-    const edit = canEditKb(kbById(d.kb));
-    return [
-      { label: 'Open', icon: 'file-text', run: () => go('/doc/' + d.id) },
-      { label: 'Details', icon: 'info', run: () => openDrawer('doc', { id: d.id }) },
-      { label: 'Download', icon: 'download', run: () => downloadDocument(d) },
-      ...(edit ? [
-        { sep: true },
-        canProcess(d) && { label: processLabel(d), icon: d.status === 'pending' ? 'play' : 'retry', run: () => A['doc-process']({ dataset: { id: d.id } }) },
-        d.status === 'failed' && stillLocked(d) && { label: 'Replace file', icon: 'upload', run: () => A['doc-replace']({ dataset: { id: d.id } }) },
-        !kbById(d.kb).personal && { label: 'Move to…', icon: 'folder', run: () => A['doc-move']({ dataset: { id: d.id } }) },
-        { label: 'Archive', icon: 'archive', danger: true, run: () => archiveDocs([d]) },
-      ].filter(Boolean) : []),
-    ];
-  };
-  A['doc-details'] = el => openDrawer('doc', { id: el.dataset.id });
-  A['doc-open'] = el => go('/doc/' + el.dataset.id);
-
-  function statusNote(d, edit) {
-    const fix = edit ? X.docFix(d, { size: 'sm' }) : '';
-    switch (d.status) {
-      case 'failed': return alertBox('danger', 'Couldn’t process this file', esc(d.error || 'The file couldn’t be opened.') + (edit ? '' : ' Ask an owner of this knowledge base to fix it.'), fix);
-      case 'pending': return alertBox('default', 'Waiting to be processed', 'It isn’t searchable yet.', fix);
-      case 'outdated': return alertBox('warning', 'The original changed', 'Answers use the previous version until it’s reprocessed.', fix);
-      case 'processing': return alertBox('accent', 'Processing', 'It’ll be searchable in a few minutes.');
-      case 'unsupported': return alertBox('default', 'Not searchable', 'This file type can’t be read. It’s kept here but not used in answers.');
-      default: return '';
-    }
-  }
-  DR.doc = ({ id }) => {
-    const d = docById(id), kb = d && kbById(d.kb);
-    if (!d || d.archived || !kb || !canReadKb(kb)) return { title: 'Document not available', body: emptyState({ icon: 'file', title: 'This document isn’t available', desc: 'It may have been archived or moved.' }) };
-    const edit = canEditKb(kb), src = d.source && d.source !== 'upload' ? srcById(d.source) : null, who = whoCanSee(kb);
-    const body = `${statusNote(d, edit) ? `<div class="drawer__section">${statusNote(d, edit)}</div>` : ''}
-      <div class="drawer__section"><h3 class="drawer__section-title">Details</h3>${kv([
-        ['Knowledge base', `<a class="link" href="#/knowledge/${kb.id}">${esc(kb.name)}</a>`],
-        ['Source', src ? `<span class="row gap-8">${appIcon(src.app, 'sm')}${esc(src.name)}</span>` : 'Uploaded file'],
-        ['Added by', esc(byYou(d) ? 'You' : d.addedBy)],
-        ['Updated', esc(fmtDateTime(d.updated))],
-        ['Size', esc(fmtSize(d.size))],
-        ['Pages', d.status === 'unsupported' ? '—' : fmtNum(d.pages)],
-        d.status === 'ready' && ['Passages', fmtNum(d.passages)],
-      ])}</div>
-      <div class="drawer__section"><h3 class="drawer__section-title">Who can see this</h3><div class="row gap-8">${ic(who.icon, 'i-sm muted')}<span>${esc(who.label)}</span></div>${who.detail ? `<p class="t-sm muted mt-4">${esc(who.detail)}</p>` : ''}${kbRole(kb) === 'owner' && !kb.personal ? `<div class="mt-8">${linkBtn('Manage access', { href: `/knowledge/${kb.id}?tab=access` })}</div>` : ''}</div>`;
-    return {
-      title: d.name, lead: fileIcon(d.type, 'lg'), desc: `${esc(kb.name)} · ${status('doc', d.status)}`, body,
-      headActions: iconBtn('download', 'Download', { act: 'doc-dl', data: { id: d.id } }),
-      footStart: edit ? btn('Archive', { v: 'ghost', icon: 'archive', act: 'doc-archive', data: { id: d.id } }) : '',
-      foot: (edit && canProcess(d) && d.status !== 'pending' ? btn(processLabel(d), { icon: 'retry', act: 'doc-process', data: { id: d.id } }) : '') + btn('Open', { v: 'primary', icon: 'external', href: '/doc/' + d.id }),
-    };
   };
   A['doc-dl'] = el => { const d = docById(el.dataset.id); if (d) downloadDocument(d); };
 
@@ -257,6 +186,22 @@
         if (!gi) b.title(title, sub);
         g.forEach(s => section(b, s));
       });
+    });
+  }
+  /** Vendor evaluations for the event streaming review: findings on pages 3–7 (throughput, exactly-once, operations, residency, cost). */
+  function evalDoc(title, what, [perf, eos, ops, res, cost], verdict) {
+    return build(b => {
+      b.page(1).title(title, `Core Banking Modernization · Platform Engineering · ${what} · Prepared by Nguyễn Hoàng Nam and Trần Minh Khoa`)
+        .h('Summary').p(verdict)
+        .p('This evaluation supports the decision in ADR-027: ledger balances change only through events, so the streaming platform carries every payment.');
+      b.page(2).h('How we evaluated').p('We replayed 40 payment event types from production traffic at three times the 2026 Tết peak, with the same producers and consumers on every platform.')
+        .ul(['Throughput and p99 latency at peak.', 'Exactly-once delivery for ledger consumers.', 'Effort for the platform team to run it.', 'Where the data is stored.', 'Total cost over three years.']);
+      b.page(3).h('Throughput at peak').p(perf);
+      b.page(4).h('Exactly-once support').p(eos);
+      b.page(5).h('Operations effort').p(ops);
+      b.page(6).h('Data residency').p(res).p('Payment events contain customer account numbers, so hosting them outside Vietnam needs a cross-border transfer assessment under Decree 13/2023.');
+      b.page(7).h('Three-year cost').p(cost);
+      b.page(8).h('Recommendation').p(verdict).p('Final choice is made by the CBM steering committee after the residency assessment.');
     });
   }
   const CLAIMS = [
@@ -323,39 +268,231 @@
       b.page(1).sheet(['Spend type', 'Up to', 'Approver', 'Notes'], [['Purchase', 'USD 5,000', 'Budget owner', ''], ['Purchase', 'USD 25,000', 'Department VP', ''], ['Purchase', 'USD 100,000', 'CFO', 'Two quotes required'], ['Purchase', 'Over USD 100,000', 'CEO and CFO', 'Board notified quarterly'], ['Expense claim', 'USD 2,000', 'Line manager', ''], ['Expense claim', 'Over USD 2,000', 'Department VP', 'Before reimbursement']],
         ['Purchases up to USD 5,000 are approved by the budget owner; USD 5,000 to 25,000 by the department VP.', 'Single expense claims above USD 2,000 require approval from the department VP before reimbursement.'], ['Limits', 'Delegations']);
     }),
-    'du-reg-rules': () => build(b => {
-      b.page(1).title('Academic Regulations 2024', 'UTE Campus · Academic Affairs Office · Version 3, effective Semester 1, 2026–2027')
-        .h('Purpose').p('The rules every undergraduate follows: credit loads, course registration and withdrawal, grading, academic warning and graduation.')
-        .p('These regulations implement the national rules for credit-based undergraduate training and replace the 2021 regulations.')
-        .h('Scope').p('These regulations apply to all full-time undergraduate students from Semester 1, 2026–2027. Faculties may add stricter rules for their own programs.');
-      b.page(3).h('Definitions').ul(['A credit equals 15 hours of lectures, or 30 hours of lab or practice, plus self-study.', 'A regular semester has 15 teaching weeks followed by up to 3 exam weeks.', 'The cumulative GPA counts every graded course, using the best grade of each course.']);
-      b.page(17).h('Credit load').p('The minimum registered load in a regular semester is 14 credits; students below this load must be approved by the Faculty.')
-        .p('The maximum load is 25 credits. Students with a cumulative GPA of 3.2 or higher may register up to 30 credits.')
-        .h('Course registration').p('Students register for courses on the student portal during the registration windows published in the Academic Calendar.')
-        .p('Courses can be added or dropped without a record until the end of week 2 of the semester.');
-      b.page(18).h('Withdrawal from a course').p('Students may withdraw from a registered course no later than the end of week 10 of the semester. Withdrawn courses appear as W on the transcript and do not count toward the GPA.')
-        .p('Withdrawal requests are sent through BoMesh Requests and confirmed by the Academic Affairs Office within 3 working days.')
-        .p('After week 10, students who stop attending a course receive a grade of F for it.')
-        .p('A withdrawal must not take the registered load below 14 credits unless the Faculty approves it. Tuition for withdrawn courses is not refunded.');
-      b.page(24).h('Grading').p('Each course is graded on a 10-point scale and converted to a letter grade and grade points.')
-        .table(['Score', 'Letter', 'Grade points'], [['8.5–10', 'A', '4.0'], ['7.0–8.4', 'B', '3.0'], ['5.5–6.9', 'C', '2.0'], ['4.0–5.4', 'D', '1.0'], ['Below 4.0', 'F', '0']])
-        .p('A course is passed with a grade of D or higher. Failed required courses must be retaken.');
-      b.page(31).h('Publishing grades').p('Lecturers must publish final grades on the student portal within 10 working days after the final exam.')
-        .p('Students may request re-grading of an exam within 7 days after the grade is published.');
-      b.page(35).h('Academic warning').p('A student receives an academic warning when the semester GPA is below 1.0, or when the cumulative GPA is below 1.2 in the first year, 1.4 in the second year, 1.6 in the third year or 1.8 afterwards.')
-        .p('Students with two consecutive academic warnings are suspended for one semester.');
-      b.page(41).h('Graduation').p('Students graduate when they meet all of the following conditions:')
-        .ul(['Complete every credit of their program, at least 132 credits for engineering programs.', 'Reach a cumulative GPA of 2.0 or higher.', 'Meet the English requirement for graduation.', 'Have no disciplinary action in progress.'])
-        .p('Graduation reviews take place in June and December. Students apply on the student portal.');
+    /* ── Finx Workspace (fictional digital bank) ── */
+    'fx-sec-access': () => build(b => {
+      b.page(1).title('Access Control Policy', 'Finx · Risk & Compliance · Version 5, effective 1 July 2026 · Owner: Võ Thị Lan')
+        .h('Purpose').p('This policy sets out how Finx grants, uses and removes access to its systems, so that customer funds and data are protected and every access can be explained to auditors and the State Bank of Vietnam.')
+        .h('Scope').p('It applies to all employees, contractors and service accounts that access Finx systems, including the payments gateway, the ledger service, core banking databases and the data platform.');
+      b.page(2).h('Principles').ul(['Least privilege: people get only the access their role needs.', 'Separation of duties: nobody approves their own access or their own change.', 'Every access is personal, logged and reviewed.'])
+        .h('Access levels').table(['Level', 'Examples', 'Approved by'], [['Standard', 'Email, wiki, ticketing', 'Line manager (automatic on joining)'], ['Elevated', 'Staging, non-production data', 'System owner'], ['Production', 'Payments gateway, ledger, core banking DB', 'System owner and change approver']]);
+      b.page(3).h('Production access').p('Production access is granted just in time for a maximum of 8 hours and requires an approved change ticket.')
+        .p('Engineers must complete the Secure Coding training before receiving any production access.')
+        .p('Requests are sent through BoMesh Requests to the IT Service Desk. Access ends automatically when the window closes; it is never extended silently — open a new request instead.')
+        .p('Standing production access is not allowed, except for break-glass accounts held by the SRE on-call lead.');
+      b.page(4).h('Break-glass access').p('Break-glass accounts may be used only during a declared Severity 1 or Severity 2 incident. Every use is reviewed by Risk & Compliance within 2 business days.');
+      b.page(5).h('Access reviews').p('System owners review every access right each quarter and revoke access that is no longer needed.')
+        .p('Access of leavers is removed on their last working day; access of movers is re-approved within 5 business days of the move.');
+      b.page(6).h('Exceptions and breaches').p('Exceptions need a Policy exception request with a named risk owner and an end date of at most 90 days.')
+        .p('Sharing credentials or bypassing just-in-time access is a disciplinary matter under the Code of Conduct.');
     }),
-    'du-reg-cal': () => build(b => {
-      b.page(1).title('Academic Calendar 2026–2027', 'UTE Campus · Academic Affairs Office')
-        .h('Semester 1').table(['What', 'When'], [['Classes start', 'Wednesday, 2 September 2026'], ['Course registration closes', 'Tuesday, 15 September 2026 (end of week 2)'], ['Midterm exams', 'Weeks 8–9'], ['Course withdrawal closes', 'Tuesday, 10 November 2026 (end of week 10)'], ['Last day of classes', 'Tuesday, 15 December 2026'], ['Final exams', 'Weeks 17–19']]);
-      b.page(2).h('Key dates').p('Week 10 of Semester 1 ends on Tuesday, 10 November 2026.')
-        .p('Tuition for Semester 1 must be paid by the end of week 6.')
-        .h('Holidays').ul(['Lunar New Year: 9–20 February 2027.', 'Hung Kings’ Commemoration: 16 April 2027.', 'Reunification Day and Labour Day: 30 April–1 May 2027.']);
-      b.page(3).h('Semester 2').table(['What', 'When'], [['Course registration opens', 'Tuesday, 1 December 2026'], ['Classes start', 'Monday, 22 February 2027'], ['Course withdrawal closes', 'End of week 10'], ['Final exams', 'Weeks 17–19']]);
-      b.page(4).h('Summer term').p('The summer term runs from 5 July to 22 August 2027. Courses open only when at least 20 students register.');
+    'fx-sec-incident': () => build(b => {
+      b.page(1).title('Incident Response Plan', 'Finx · Risk & Compliance with Site Reliability Engineering · Version 4 · Reviewed September 2026')
+        .h('Purpose').p('How Finx detects, declares, handles and learns from incidents that affect customers, funds, data or regulatory obligations.')
+        .h('Severity levels').table(['Severity', 'Meaning', 'Example'], [['Sev 1', 'Customers cannot pay or funds are at risk', 'Card authorization down, wrong ledger postings'], ['Sev 2', 'Major feature degraded for many customers', 'QR payments failing for one bank'], ['Sev 3', 'Limited impact, workaround exists', 'Slow statement downloads']]);
+      b.page(2).h('Declaring an incident').p('A Severity 1 incident must be declared in the #incident channel within 15 minutes of detection.')
+        .ul(['The on-call engineer who detects it becomes the first incident commander.', 'Open the incident in the status tool; it creates the timeline and pages the SRE lead.', 'Post an update in #incident every 30 minutes until the incident is mitigated.']);
+      b.page(3).h('Roles').ul(['Incident commander: coordinates the response and decides on mitigations.', 'Communications lead: updates Customer Care, status page and leadership.', 'Scribe: keeps the timeline for the postmortem.']);
+      b.page(4).h('Regulatory notification').p('When customer funds are affected, Risk & Compliance notifies the State Bank of Vietnam within 24 hours.')
+        .p('Personal data breaches are also reported to the Ministry of Public Security under Decree 13/2023 within 72 hours. Risk & Compliance drafts both notices; the CEO signs them.');
+      b.page(5).h('After the incident').p('Every Sev 1 and Sev 2 incident gets a blameless postmortem within 5 business days, with owners and due dates for each follow-up action.');
+    }),
+    'fx-sec-vendor': () => build(b => {
+      b.page(1).title('Third-party & SaaS Risk Standard', 'Finx · Risk & Compliance · Version 2')
+        .h('Purpose').p('How Finx assesses vendors and SaaS tools before buying them, so customer data and payment systems stay protected.');
+      b.page(2).h('When an assessment is needed').p('Any new software or SaaS tool that stores or processes customer data needs a vendor security assessment by Risk & Compliance before purchase.')
+        .ul(['Request it through BoMesh Requests (IT Service Desk → New software or SaaS tool).', 'Attach the vendor’s SOC 2 Type II report or ISO 27001 certificate.', 'Tools without customer data need only IT Service Desk approval.']);
+      b.page(3).h('Data location').p('Customer data must be stored in Vietnam unless a cross-border transfer assessment under Decree 13/2023 has been approved.');
+      b.page(4).h('Review').p('Approved vendors are reassessed every year, or sooner after a security incident at the vendor.');
+    }),
+    'fx-sec-exception': () => build(b => {
+      b.page(1).title('Policy Exception Procedure', 'Finx · Risk & Compliance')
+        .h('Rule').p('Policy exceptions are time-limited to at most 6 months and need written sign-off from the accountable risk owner.')
+        .ul(['State the policy, the reason and the compensating controls.', 'Name the risk owner and the end date.', 'Risk & Compliance records the exception in the risk register.']);
+      b.page(2).h('Renewal').p('An exception can be renewed once. After that, the system must comply or the policy must change.');
+    }),
+    'fx-sec-privacy': () => build(b => {
+      b.page(1).title('Customer Data Protection Standard', 'Finx · Risk & Compliance · Version 3 · Implements Decree 13/2023 on personal data protection')
+        .h('Purpose').p('The controls every team applies to customer personal data: names, national ID numbers, phone numbers, addresses, account and card data.');
+      b.page(2).h('Non-production environments').p('Customer personal data is masked by default in every non-production environment.')
+        .ul(['Test data is generated or masked by the data platform pipeline before it reaches staging.', 'Card numbers are never copied outside the PCI cardholder data environment.', 'Screenshots with customer data must not be posted in chat channels or tickets.']);
+      b.page(3).h('Access to unmasked data').p('Access to unmasked customer data requires an approved PII access request and the Data privacy training.')
+        .p('Requests go to Risk & Compliance through BoMesh Requests and state the purpose, the tables needed and an end date. Access is granted for at most 30 days.');
+      b.page(4).h('Retention and deletion').table(['Data', 'Kept for'], [['Transaction records', '10 years'], ['KYC documents', '5 years after the account closes'], ['Call recordings', '2 years'], ['Marketing consent logs', 'As long as consent is active, plus 2 years']]);
+    }),
+    'fx-sec-pci': () => build(b => {
+      b.page(1).sheet(['Req.', 'Control', 'Owner', 'Evidence', 'Status'], [
+        ['1.2.1', 'Network security controls restrict traffic to the CDE', 'Platform Engineering', 'Firewall rule review Q3', 'Effective'],
+        ['3.5.1', 'PAN rendered unreadable wherever stored', 'Payments Platform', 'Tokenization design + DB scan', 'Effective'],
+        ['6.4.3', 'Payment page scripts authorized and inventoried', 'Payments Platform', 'Script inventory export', 'In progress'],
+        ['7.2.4', 'User accounts and access reviewed every 6 months', 'Risk & Compliance', 'Quarterly access review sign-off', 'Effective'],
+        ['8.4.2', 'MFA for all access into the CDE', 'IT Service Desk', 'IdP policy report', 'Effective'],
+        ['10.4.1', 'Audit logs reviewed daily', 'Security Operations', 'SIEM daily review tickets', 'Effective'],
+        ['11.3.1', 'Internal vulnerability scans every 3 months', 'Security Operations', 'Scan reports Q2–Q3', 'Effective'],
+        ['12.10.1', 'Incident response plan in place and tested', 'Risk & Compliance', 'Tabletop exercise, Aug 2026', 'Effective'],
+        ['12.6.1', 'Security awareness training for all staff', 'People & Culture', 'Training completion report', 'Gap: 6% overdue'],
+      ], ['PCI DSS v4.0 control matrix — 64 requirements tracked; 9 shown. Fieldwork for the 2026 assessment starts in November.'], ['Controls', 'Evidence log', 'Gaps'], 'Showing 9 of 64 rows');
+    }),
+    'fx-ops-cutoff': () => build(b => {
+      b.page(1).title('Payment Cut-off Times & Settlement Windows', 'Finx · Banking Operations · Updated October 2026')
+        .h('Real-time transfers').p('NAPAS 247 interbank transfers settle in real time, 24 hours a day.')
+        .p('Transfers between Finx accounts are booked instantly at any time, including weekends and public holidays.');
+      b.page(2).h('Batch transfers and cut-offs').p('Batch transfers submitted after 15:30 are settled on the next business day.')
+        .table(['Channel', 'Cut-off (ICT)', 'Settlement'], [['NAPAS 247 (up to VND 500 million)', 'None', 'Real time'], ['Interbank batch (CITAD)', '15:30', 'Same business day'], ['Salary and bulk payouts', '14:00', 'Same business day'], ['Card settlement with schemes', '23:00', 'Next business day (T+1)'], ['QR merchant payouts', '22:00', 'Next business day']]);
+      b.page(3).h('Holidays').p('During Tết and other public holidays only NAPAS 247 and internal transfers run. Batches queue until the first business day after the holiday.');
+    }),
+    'fx-ops-dispute': () => build(b => {
+      b.page(1).title('Card Dispute Handling Procedure', 'Finx · Banking Operations · Cards & Disputes · Version 2')
+        .h('Purpose').p('How Banking Operations handles a cardholder’s disputed card transaction, from intake to chargeback and closure.');
+      b.page(2).h('Timelines').p('A cardholder dispute must be acknowledged within 2 business days and resolved within 45 days.')
+        .ul(['Log the dispute in the case tool with the transaction ID and the cardholder’s statement.', 'Block the card if the customer reports fraud.', 'Give provisional credit within 10 business days for fraud disputes above VND 2 million.']);
+      b.page(3).h('Chargebacks').table(['Reason', 'Scheme deadline', 'Evidence'], [['Fraud — card not present', '120 days', 'Cardholder declaration'], ['Goods not received', '120 days', 'Merchant contact attempt'], ['Duplicate processing', '90 days', 'Both transaction records']]);
+      b.page(4).h('Closing a case').p('Tell the customer the outcome in writing, reverse or confirm the provisional credit and attach all evidence to the case.');
+    }),
+    'fx-ops-recon': () => build(b => {
+      b.page(1).title('Daily Reconciliation Runbook', 'Finx · Banking Operations · Reconciliation team')
+        .h('When').p('Run every business day at 07:30, after the overnight NAPAS and card scheme settlement files arrive.')
+        .h('Steps').ul(['Check that all settlement files (NAPAS, Visa, Mastercard, QR partners) arrived in the recon bucket.', 'Run the matching job in the reconciliation tool for the previous business day.', 'Review unmatched items above VND 10 million first.', 'Assign each break to an owner with a reason code.', 'Post the summary in #ops-recon by 10:00.']);
+      b.page(2).h('Breaks').table(['Break type', 'Usual cause', 'Owner'], [['Missing in ledger', 'Late event from the gateway', 'Payments Platform on-call'], ['Missing in scheme file', 'Reversal not settled yet', 'Reconciliation'], ['Amount mismatch', 'FX or fee difference', 'Finance']])
+        .p('Breaks open longer than 3 business days are escalated to the Banking Operations lead.');
+    }),
+    'fx-eng-adr031': () => build(b => {
+      b.page(1).title('ADR-031 — Idempotency keys for payment APIs', 'Status: Accepted · Payments Platform · Deciders: Lê Thu Hà, Trần Minh Khoa, Nguyễn Hoàng Nam')
+        .h('Context').p('Mobile clients retry payment requests on network timeouts. Without idempotency a retry can debit a customer twice; the October incident review found 37 duplicate QR payments in one week.')
+        .h('Decision').p('Every POST to a payment API must carry an Idempotency-Key header.')
+        .ul(['Clients generate a UUID v4 per payment intent and reuse it for every retry.', 'Requests without the header are rejected with 400 Bad Request.', 'A key reused with a different request body returns 409 Conflict.']);
+      b.page(2).h('Storage').p('The gateway stores the first response for 24 hours and replays it for any retry with the same key.')
+        .p('Keys live in the gateway’s Redis cluster, scoped per merchant or per customer.')
+        .h('Consequences').ul(['Retries are safe for clients, partners and our own jobs.', 'Every payment API needs a contract test for repeated keys.', 'Redis memory grows with traffic; the 24-hour TTL keeps it bounded.']);
+    }),
+    'fx-eng-adr027': () => build(b => {
+      b.page(1).title('ADR-027 — Event-driven ledger updates', 'Status: Accepted · Core Banking Modernization · Deciders: Lê Thu Hà, Nguyễn Hoàng Nam')
+        .h('Context').p('Services wrote directly to ledger tables, so balances could change without an auditable event and reconciliation found breaks every day.')
+        .h('Decision').p('Ledger balances are updated only by consuming events from the payments topic, never by direct writes.')
+        .ul(['Producers publish PaymentPosted, PaymentReversed and FeeCharged events.', 'The ledger service is the only consumer allowed to change balances.', 'Events are kept for 7 days on the stream and forever in the event archive.']);
+      b.page(2).h('Consequences').p('Ledger consumers must process each event exactly once, so the streaming platform must support exactly-once delivery or idempotent consumption.')
+        .p('Choosing the streaming platform is tracked in the event streaming evaluation.');
+    }),
+    'fx-eng-handbook': () => build(b => {
+      b.page(1).title('Engineering Handbook 2026', 'Finx · Platform Engineering')
+        .h('How we work').p('Small teams own services end to end: design, build, run and fix. This handbook is the shared baseline; team pages add details.');
+      b.page(4).h('Code review').ul(['Every change to production code needs one approving review from someone other than the author.', 'Changes to payment flows also need a reviewer from Payments Platform.', 'Keep pull requests under 400 changed lines where possible.']);
+      b.page(9).h('Releases').p('Production deploys run Monday to Thursday, 09:00–16:00. Deploys outside that window need an approved emergency change.')
+        .p('A change freeze applies from 7 days before Tết until 3 days after it.');
+      b.page(14).h('On-call').p('Each service team runs a weekly on-call rotation. On-call engineers acknowledge a page within 5 minutes and follow the service runbook.');
+      b.page(22).h('Architecture decisions').p('Significant decisions are written as ADRs in the Engineering wiki and reviewed in the weekly architecture forum.');
+    }),
+    'fx-eng-eval-kafka': () => evalDoc('Evaluation — Confluent Cloud (Kafka)', 'Managed Apache Kafka on Confluent Cloud', [
+      'In our load test Confluent Cloud sustained 180,000 messages per second at a p99 latency of 42 ms.',
+      'Idempotent producers and transactions give exactly-once delivery between Kafka topics out of the box.',
+      'Brokers, upgrades and scaling are run by the vendor; our team only manages topics, ACLs and connectors.',
+      'The nearest Confluent Cloud region is Singapore; no region is available in Vietnam.',
+      'The estimated three-year cost is USD 1.26 million, including support and private networking.',
+    ], 'Strongest on throughput and operations effort; data residency needs a cross-border transfer assessment before payment events can leave Vietnam.'),
+    'fx-eng-eval-pulsar': () => evalDoc('Evaluation — Apache Pulsar (self-hosted)', 'Self-hosted Apache Pulsar in Finx data centers', [
+      'On six bare-metal brokers in our Ho Chi Minh City data center, Pulsar sustained 150,000 messages per second at a p99 latency of 55 ms.',
+      'Exactly-once processing requires Pulsar transactions, which our client libraries support only for Java.',
+      'Running Pulsar needs BookKeeper and ZooKeeper clusters; we estimate 2.5 full-time engineers to operate it.',
+      'All data stays in Finx\'s own data centers in Hanoi and Ho Chi Minh City.',
+      'Hardware, monitoring licences and staff time come to an estimated USD 0.94 million over three years.',
+    ], 'Cheapest and the only option that keeps data in Vietnam, but our Go services would not get exactly-once processing and operations effort is the highest.'),
+    'fx-eng-eval-msk': () => evalDoc('Evaluation — Amazon MSK', 'Amazon Managed Streaming for Apache Kafka', [
+      'A six-broker MSK cluster sustained 160,000 messages per second at a p99 latency of 48 ms.',
+      'MSK runs open-source Apache Kafka, so idempotent producers and transactions work as in any Kafka cluster.',
+      'AWS patches brokers, but partition rebalancing, upgrades and capacity planning remain our responsibility.',
+      'AWS has no region in Vietnam; the nearest are Singapore and Jakarta.',
+      'The estimated three-year cost is USD 1.02 million with reserved brokers.',
+    ], 'A middle option: standard Kafka semantics at a lower cost than Confluent, with more operations work and the same residency question.'),
+    'fx-pay-runbook': () => build(b => {
+      b.page(1).title('Runbook — Payment gateway timeouts', 'Payments Platform · On-call · Alert: gateway_timeout_rate_high')
+        .h('Symptoms').p('Card authorizations or QR payments return 504 from the gateway; the timeout-rate panel on the Payments Gateway dashboard turns red.')
+        .h('Decide').p('If the timeout rate exceeds 2% for 5 minutes, fail over card authorization to the secondary acquirer.')
+        .ul(['Acknowledge the page within 5 minutes.', 'Check the acquirer status panel: is one acquirer or all traffic affected?', 'If it is a Severity 1, declare it in #incident.']);
+      b.page(2).h('Fail over').ul(['Run `payctl failover --service card-auth --to secondary` from the bastion.', 'Watch the timeout rate fall below 0.5% within 3 minutes.', 'Tell Customer Care in #cs-payments that cards are on the secondary acquirer.'])
+        .h('Fail back').p('Fail back only after the primary acquirer confirms recovery and its health check has been green for 30 minutes.');
+    }),
+    'fx-pay-api': () => build(b => {
+      b.page(1).title('Payments API reference v3', 'Payments Platform · Base URL https://api.finx.vn/payments/v3')
+        .h('Authentication').p('Partners authenticate with OAuth 2.0 client credentials and mutual TLS. Tokens expire after 15 minutes.')
+        .h('Idempotency').p('Every POST request carries an Idempotency-Key header, as decided in ADR-031.');
+      b.page(2).h('Endpoints').table(['Method', 'Path', 'What it does'], [['POST', '/payments', 'Create a payment (card, NAPAS 247 or QR)'], ['GET', '/payments/{id}', 'Get a payment and its status'], ['POST', '/payments/{id}/refunds', 'Refund all or part of a payment'], ['POST', '/qr-codes', 'Create a dynamic VietQR code']]);
+      b.page(3).h('Errors and limits').table(['Code', 'Meaning'], [['400', 'Invalid request or missing Idempotency-Key'], ['409', 'Idempotency-Key reused with a different body'], ['429', 'Rate limit: 300 requests per second per partner'], ['504', 'Upstream acquirer timeout — safe to retry with the same key']]);
+    }),
+    'fx-pay-postmortem': () => build(b => {
+      b.page(1).title('Postmortem — QR payments outage, 14 Oct', 'Payments Platform · Severity 1 · Blameless')
+        .h('Summary').p('From 19:42 to 20:31 ICT on 14 October, 61% of QR payments failed after a certificate on the VietQR partner connection expired. About 48,000 customers were affected; no funds were lost.');
+      b.page(2).h('Timeline').table(['Time', 'Event'], [['19:42', 'Partner certificate expires; QR failures start'], ['19:49', 'Alert fires; on-call acknowledges'], ['19:55', 'Severity 1 declared in #incident'], ['20:24', 'New certificate deployed'], ['20:31', 'Success rate back to normal']]);
+      b.page(3).h('Actions').ul(['Alert 30 days before any partner certificate expires (owner: Nguyễn Hoàng Nam).', 'Add certificate expiry to the weekly on-call checklist (owner: Đặng Quốc Huy).', 'Notify the State Bank of Vietnam: not required — no customer funds were affected.']);
+    }),
+    'fx-data-mau': () => build(b => {
+      b.page(1).title('Metric definitions — Active customers', 'Data Platform · Metric owner: Phạm Quốc Bảo · Certified metric')
+        .h('Monthly active customers (MAC)').p('A monthly active customer has at least one customer-initiated financial transaction in the calendar month; logins alone do not count.')
+        .ul(['Counts: transfers, card payments, QR payments, bill payments, top-ups.', 'Does not count: interest postings, fees, refunds and other bank-initiated entries.', 'Customers are de-duplicated across app and web by customer ID.']);
+      b.page(2).h('Related metrics').table(['Metric', 'Definition', 'Table'], [['Daily active customers', 'Same rule, per calendar day (ICT)', 'mart.customer_activity_daily'], ['Engaged customers', 'At least 5 qualifying transactions in the month', 'mart.customer_activity_monthly'], ['Dormant customers', 'No qualifying transaction for 90 days', 'mart.customer_status']])
+        .p('Use the certified tables above; dashboards built on raw login events will not match board reporting.');
+    }),
+    'fx-data-dict': () => build(b => {
+      b.page(1).sheet(['Table', 'Column', 'Type', 'Description', 'PII'], [
+        ['dwh.customer', 'customer_id', 'STRING', 'Stable customer key across channels', 'No'],
+        ['dwh.customer', 'national_id', 'STRING', 'CCCD number — masked outside production', 'Yes'],
+        ['dwh.customer', 'kyc_level', 'INT', 'eKYC level 1–3', 'No'],
+        ['dwh.account', 'account_no', 'STRING', 'Finx account number', 'Yes'],
+        ['dwh.account', 'status', 'STRING', 'open, frozen, dormant, closed', 'No'],
+        ['dwh.transaction', 'txn_id', 'STRING', 'Ledger transaction ID', 'No'],
+        ['dwh.transaction', 'channel', 'STRING', 'napas247, card, qr, internal, bill', 'No'],
+        ['dwh.transaction', 'amount_vnd', 'DECIMAL(18,0)', 'Amount in VND', 'No'],
+        ['dwh.transaction', 'initiated_by', 'STRING', 'customer or bank', 'No'],
+      ], ['Data dictionary for the core banking warehouse. Columns marked PII are masked by default outside production.'], ['Columns', 'Tables', 'Change log'], 'Showing 9 of 412 rows');
+    }),
+    'fx-data-fraud': () => build(b => {
+      b.page(1).title('Fraud model v2 — Model card', 'Data Platform · Risk models · Approved by the Model Risk Committee, September 2026')
+        .h('Intended use').p('Scores every card and NAPAS 247 transaction in real time for fraud risk. Transactions above the decline threshold are blocked; those in the review band go to the fraud queue.');
+      b.page(2).h('Training data').p('Trained on 14 months of labelled transactions (Jul 2025 – Aug 2026), 0.08% fraud rate, with confirmed chargebacks and customer-reported fraud as labels.');
+      b.page(3).h('Performance').table(['Metric', 'v1', 'v2'], [['Fraud caught (recall at 0.5% review rate)', '71%', '83%'], ['False positive rate', '0.42%', '0.31%'], ['p99 scoring latency', '35 ms', '22 ms']]);
+      b.page(4).h('Limitations and monitoring').p('Performance is lower for new merchants with less than 30 days of history. Drift is monitored weekly; the model is retrained every quarter.');
+    }),
+    'fx-prod-roadmap': () => build(b => {
+      const slide = n => b.page(n, 'doc-page--slide');
+      slide(1).title('Product roadmap H1 2027', 'Finx · Product · Đỗ Phương Thảo · For all staff');
+      slide(2).h('Where we are').ul(['3.2 million monthly active customers, up 38% year on year.', 'QR payments are now 46% of transactions.', 'Core banking modernization is halfway: ledger and accounts are live on the new platform.']);
+      slide(3).h('H1 2027 themes').ul(['Pay: instant QR refunds and recurring payments.', 'Save: goal-based savings pockets.', 'Business: SME accounts with payroll.', 'Trust: real-time fraud alerts in the app.']);
+      slide(4).h('Q1 2027').table(['Initiative', 'Team', 'Target'], [['Instant QR refunds', 'Payments Platform', 'February'], ['Savings pockets beta', 'Retail', 'March'], ['Fraud alerts in app', 'Data Platform', 'March']]);
+      slide(5).h('Q2 2027').table(['Initiative', 'Team', 'Target'], [['SME accounts pilot', 'Business Banking', 'May'], ['Recurring payments', 'Payments Platform', 'June'], ['Open banking partner API (beta)', 'Partners', 'June']]);
+      slide(6).h('Dependencies').ul(['Event streaming platform chosen by January (Core Banking Modernization).', 'SBV approval for SME eKYC onboarding.', 'PCI DSS assessment completed in December.']);
+      slide(7).h('How to give feedback').p('Comment in the Product shared drive or join the roadmap AMA on the first Friday of each month.');
+    }),
+    'fx-prod-pricing': () => build(b => {
+      b.page(1).title('Pricing & fee schedule 2027', 'Finx · Product & Finance · Effective 1 January 2027')
+        .h('Retail customers').table(['Service', 'Fee'], [['NAPAS 247 transfer', 'Free'], ['QR payment', 'Free'], ['Debit card issuance (virtual)', 'Free'], ['Debit card issuance (physical)', 'VND 50,000'], ['Overseas card transaction', '2.5% of amount']]);
+      b.page(2).h('Merchants').table(['Service', 'Fee'], [['QR acceptance', '0.6% of amount'], ['Card acceptance (domestic)', '1.1% of amount'], ['Card acceptance (international)', '2.4% of amount'], ['Next-day payout', 'Free']]);
+      b.page(3).h('Changes').p('Fee changes are announced to customers at least 30 days in advance through the app and the website, as required by SBV rules.');
+    }),
+    'fx-pol-hybrid': () => build(b => {
+      b.page(1).title('Hybrid Work Policy', 'Finx · People & Culture · Effective 1 March 2026')
+        .h('Office days').p('Employees work from the office at least three days a week; Tuesday and Thursday are team days.')
+        .p('Teams choose their third office day together and publish it in the team calendar.');
+      b.page(2).h('Remote days').ul(['Work from a safe, private place in Vietnam with a reliable connection.', 'Use only Finx-managed laptops and the VPN.', 'Never handle customer data in public places.'])
+        .h('Exceptions').p('Managers may approve temporary changes for health or family reasons for up to 4 weeks; longer arrangements need People & Culture approval.');
+      b.page(3).h('On-call and operations roles').p('Banking Operations and on-call engineers follow their team rota, which can require more office days.');
+    }),
+    'fx-pol-travel': () => build(b => {
+      b.page(1).title('Travel & Expense Policy', 'Finx · People & Culture with Finance · Version 3')
+        .h('Purpose').p('How to plan business travel, what Finx pays for and how to claim it back.');
+      b.page(2).h('Approvals').ul(['Domestic trips: approved by your manager in the expense tool before booking.', 'International trips: also approved by your department head.', 'Book flights and hotels through the travel desk.']);
+      b.page(3).h('Allowances').table(['Item', 'Domestic', 'International'], [['Daily meal allowance', 'VND 400,000', 'USD 50'], ['Hotel cap per night', 'VND 1,800,000', 'USD 150'], ['Flights', 'Economy', 'Economy (premium economy over 6 hours)']]);
+      b.page(4).h('Claims').p('Submit claims with e-invoices (hóa đơn điện tử) within 15 days of returning. Claims are paid with the next payroll.');
+    }),
+    'fx-pol-onboarding': () => build(b => {
+      b.page(1).title('New joiner guide', 'Finx · People & Culture · Welcome to Finx')
+        .h('Your first day').ul(['Collect your laptop and badge from the IT Service Desk, floor 12.', 'Sign in to BoMesh to find policies, ask questions and send requests.', 'Meet your buddy for lunch.']);
+      b.page(2).h('Your first week').ul(['Complete the Data privacy and Secure coding (engineers) trainings.', 'Read the Code of Conduct and the Access Control Policy.', 'Join your team channels and the #finx-general channel.']);
+      b.page(3).h('Your first month').ul(['Agree on goals with your manager.', 'Attend the new joiner session with the leadership team.', 'Engineers: shadow one on-call week before joining the rotation.']);
+      b.page(4).h('Who to ask').table(['Topic', 'Where'], [['Laptop, accounts, access', 'IT Service Desk (BoMesh Requests)'], ['Policies and compliance', 'Risk & Compliance'], ['Pay, leave and benefits', 'People & Culture']]);
+    }),
+    'fx-lead-budget': () => build(b => {
+      b.page(1).sheet(['Cost center', 'FY2026 actual (VND bn)', 'FY2027 plan (VND bn)', 'Change', 'Owner'], [
+        ['Payments Platform', 182, 214, '+18%', 'Lê Thu Hà'], ['Core Banking Modernization', 236, 268, '+14%', 'Lê Thu Hà'], ['Data Platform', 121, 139, '+15%', 'Phạm Quốc Bảo'],
+        ['Banking Operations', 154, 158, '+3%', 'Lâm Bảo Ngọc'], ['Risk & Compliance', 88, 102, '+16%', 'Võ Thị Lan'], ['IT & Workplace', 96, 94, '−2%', 'Huỳnh Minh Quân'], ['Marketing', 210, 230, '+10%', 'Đỗ Phương Thảo'],
+      ], ['FY2027 operating budget plan — draft for the Board, confidential. Totals exclude capitalized software.'], ['Plan', 'Headcount', 'Assumptions'], 'Draft v4 · Finance');
     }),
   };
   const GENERIC = {
@@ -365,16 +502,21 @@
     'kb-legal': n => [['Parties', [`This document (${n}) is made between Northwind Group and the counterparty named on the signature page.`]], ['Term', ['The agreement starts on the effective date and continues for 24 months, renewing for 12-month periods unless either party gives 60 days’ written notice.']], ['Obligations', ['Each party keeps the other’s confidential information secret and uses it only to perform this agreement.']], ['Termination', ['Either party may end the agreement for a material breach not fixed within 30 days of written notice.']]],
     'kb-fin': n => [['Purpose', [`${n} explains how Finance & Procurement handles this process.`]], ['Rules', null, ['Raise requests in the procurement system before committing spend.', 'Attach a quote or contract for anything over USD 1,000.', 'Approvals follow the Approval Limits Matrix.']], ['Questions', ['Contact finance-ops@northwind.com.']]],
     'kb-eng': n => [['When to use this', [`Use ${n} when you are on call and something needs attention.`]], ['Steps', null, ['Acknowledge the page within five minutes.', 'Check the dashboards linked in the alert.', 'Post status in #incidents every 30 minutes.']], ['Escalation', ['If you can’t mitigate within 30 minutes, page the secondary on-call engineer.']]],
-    'kb-u-regs': n => [['Scope', [`${n} applies to all undergraduate students of UTE from Semester 1, 2026–2027 unless stated otherwise.`]], ['Rules', null, ['Deadlines refer to weeks of the academic calendar published by Academic Affairs.', 'Requests are sent through BoMesh Requests to the Academic Affairs Office.', 'The office answers within the service time shown for each request type.']], ['Fees', ['Fees are listed in Tuition & Fees 2026–2027 and are paid through the student portal.']], ['Contact', ['Academic Affairs Office, A1-102, Monday to Friday 07:30–16:30.']]],
-    'kb-u-sso': n => [['Purpose', [`${n} explains a Student Services procedure at UTE.`]], ['Who can apply', ['Enrolled students in good standing. Some services need a minimum GPA, shown on the request form.']], ['How it works', null, ['Send a request from BoMesh Requests.', 'Student Services checks your record and replies in Requests.', 'Pick up documents at A1-108 with your student card.']]],
-    'kb-u-ml': n => [['Learning goals', [`After ${n} you should be able to explain the main idea, apply it to a small dataset and recognise when it fails.`]], ['Key ideas', null, ['Start from the loss you are minimising and what each term means.', 'Check training and validation error together, never one alone.', 'Tune hyper-parameters on validation data, not on the test set.']], ['Practice', ['Work through the lab notebook, then try the self-check questions on the last slide.']]],
-    'kb-u-db': n => [['Learning goals', [`${n} covers one building block of relational databases and how to use it in SQL.`]], ['Key ideas', null, ['Model the data first: entities, keys and dependencies.', 'Write the query in relational algebra, then translate it to SQL.', 'Check results on a small table before running on the full dataset.']], ['Practice', ['Solve the lab exercises on the course PostgreSQL server.']]],
-    'kb-u-agri': n => [['Abstract', [`${n} studies how sensing and machine learning can support farming decisions in the Mekong Delta.`]], ['Method', ['Data were collected on experimental plots and labelled by agronomists; models were evaluated with held-out field data.']], ['Results', ['The approach improves on the baseline under field conditions; details per experiment are reported in the tables.']], ['Limitations', ['Results come from one region and season; broader validation is future work.']]],
-    'kb-u-grants': n => [['About this call', [`${n} sets the rules for applying for research funding.`]], ['Eligibility', ['Principal investigators hold a doctorate and a permanent position at the university.']], ['Budget and duration', ['Budgets and duration are listed per programme; justify every line against the work plan.']], ['How to apply', ['Submit through the Science & Technology Office before the internal deadline.']]],
     default: n => [['Notes', [`Working notes for ${n}.`]], ['Key points', null, ['Confirm goals and owners for the next quarter.', 'Agree on the timeline and the next check-in.', 'Share a short summary with the team afterwards.']], ['Next steps', ['Follow up within a week with the open questions.']]],
   };
+  /** Finx knowledge bases: used only for resources whose kind has no generator below. */
+  const FALLBACK = {
+    'kb-fx-eng': n => [['Context', [`${n} records how Platform Engineering builds and runs Finx services.`]], ['Guidance', null, ['Follow the Engineering Handbook unless this page says otherwise.', 'Link the ADR or ticket that motivated a change.', 'Ask in #eng-platform when something is unclear.']], ['Owner', ['Platform Engineering reviews this page every six months.']]],
+    'kb-fx-pay': n => [['Context', [`${n} belongs to the Payments Platform team (gateway, card authorization, NAPAS 247 and QR).`]], ['Guidance', null, ['Payment APIs follow ADR-031: every POST carries an Idempotency-Key.', 'Changes to payment flows need a Payments Platform reviewer.', 'Incidents follow the Incident Response Plan.']], ['On call', ['Page the Payments Platform on-call for anything customer-facing.']]],
+    'kb-fx-data': n => [['Context', [`${n} is maintained by the Data Platform team.`]], ['Guidance', null, ['Use certified tables and metric definitions for reporting.', 'Customer personal data is masked outside production.', 'Document every new table in the data dictionary.']], ['Questions', ['Ask in #data-platform or open a request to the Data Platform team.']]],
+    'kb-fx-ops': n => [['Purpose', [`${n} is a Banking Operations procedure.`]], ['Steps', null, ['Check the case or file in the operations tool.', 'Follow the cut-off times for the channel concerned.', 'Record the outcome and reason code on the case.']], ['Escalation', ['Escalate to the Banking Operations lead when a case breaches its service time.']]],
+    'kb-fx-sec': n => [['Purpose', [`${n} is part of the Finx security and compliance framework (SBV regulations, PCI DSS and Decree 13/2023).`]], ['Requirements', null, ['Follow least privilege and separation of duties.', 'Keep evidence for every control for at least five years.', 'Report suspected incidents in #incident immediately.']], ['Owner', ['Risk & Compliance owns this document and reviews it every year.']]],
+    'kb-fx-prod': n => [['Overview', [`${n} is shared by the Product team.`]], ['Key points', null, ['Check the date before sharing outside Finx.', 'Customer numbers are as of the last month end.', 'Pricing changes need Finance approval and 30 days’ customer notice.']], ['Questions', ['Ask in #product.']]],
+    'kb-fx-pol': n => [['Purpose', [`${n} is an internal policy from People & Culture.`]], ['Who it applies to', ['All Finx employees. Contractors follow their contract terms.']], ['How it works', null, ['Read the policy before making plans that depend on it.', 'Your manager approves requests in the HR portal.', 'People & Culture handles exceptions within five business days.']]],
+    'kb-fx-lead': n => [['Summary', [`${n} is a confidential Leadership & Finance document.`]], ['Key points', null, ['Figures are draft until approved by the Board.', 'Do not forward outside the leadership group.']]],
+  };
 
-  /* ── Kind-based renditions: resources without hand-written text (synced syllabi, theses, courseware, notices, uploads) ── */
+  /* ── Kind-based renditions: resources without hand-written text (synced pages, notices, uploads) ── */
   const hashOf = s => [...String(s)].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
   const lc = s => String(s || '').replace(/^([A-Z])(?![A-Z0-9])/, m => m.toLowerCase());
   const campus = () => curWs()?.template === 'campus';
@@ -386,33 +528,20 @@
     return { r, base, subject, code: m?.[1] || '', rest: m?.[2] || base, lead: doc.summary || '', owner: r.owner || r.kb?.name || curWs().name, org: curWs().name, topic: r.topics[0] ? topicName(r.topics[0]) : '', date: fmtDate(doc.updated), h: hashOf(doc.id), vi: r.lang === 'vi' };
   }
   const people = () => (campus() ? 'all students, lecturers and staff' : 'all employees');
-  /** Website notices: matched by title, English or Vietnamese body. */
+  /** Notices and announcements: matched by title, English or Vietnamese body. */
   const NOTICE_TEXT = [
-    [/course registration/i, { en: { p: ['Course registration for Semester 2 opens on December 1 on the student portal. Windows open by cohort: final-year students first, then third-, second- and first-year students.'], ul: ['Check your registration window on the student portal.', 'Clear any outstanding tuition first; blocked accounts can’t register.', 'Adding and withdrawing courses follow the Academic Regulations.'] } }],
-    [/exam schedule|lịch thi/i, {
-      en: { p: ['The exam schedule for Semester 1, 2026–2027 is published on the student portal. Final exams run from week 17 to week 19.'], ul: ['Bring your student card to every exam.', 'Arrive 15 minutes early; students more than 15 minutes late can’t sit the exam.', 'Report exam clashes to the Academic Affairs Office within 5 working days of this notice.'] },
-      vi: { p: ['Phòng Đào tạo thông báo lịch thi kết thúc học phần học kỳ 1 năm học 2026–2027 đã được công bố trên cổng thông tin sinh viên. Các kỳ thi diễn ra từ tuần 17 đến tuần 19.'], ul: ['Sinh viên mang theo thẻ sinh viên khi dự thi.', 'Có mặt tại phòng thi trước giờ thi 15 phút; sinh viên đến muộn quá 15 phút không được dự thi.', 'Trường hợp trùng lịch thi, sinh viên báo cho Phòng Đào tạo trong vòng 5 ngày làm việc kể từ ngày thông báo.'], after: ['Mọi thắc mắc xin liên hệ Phòng Đào tạo, phòng A1-102.'] } }],
-    [/tuition|học phí/i, {
-      en: { p: ['Tuition for Semester 1 must be paid by the end of week 6, on the student portal or at a partner bank.'], ul: ['Students who haven’t paid by the deadline can’t register for the next semester.', 'If you have a scholarship or fee waiver, check the remaining amount before paying.', 'Keep your receipt until the portal shows the payment.'] },
-      vi: { p: ['Sinh viên hoàn thành học phí học kỳ 1 trước cuối tuần 6 qua cổng thông tin sinh viên hoặc tại ngân hàng liên kết.'], ul: ['Sinh viên chưa hoàn thành học phí đúng hạn sẽ không được đăng ký học phần học kỳ tiếp theo.', 'Sinh viên được miễn, giảm học phí hoặc nhận học bổng kiểm tra số tiền còn lại trước khi nộp.', 'Giữ lại biên lai cho đến khi cổng thông tin cập nhật khoản thanh toán.'], after: ['Mọi thắc mắc xin liên hệ Phòng Kế hoạch – Tài chính.'] } }],
-    [/scholarship results/i, { en: { p: ['Results of the merit scholarship round for Semester 2, 2025–2026 are on the student portal.'], ul: ['Awards are paid to your registered bank account within 30 days.', 'Appeals go to Student Services within 10 working days of this notice.'] } }],
-    [/dormitory/i, { en: { p: ['Dormitory registration for Semester 2 is open on the student portal from week 12 to week 14.'], ul: ['Current residents renewing their room have priority until the end of week 12.', 'Room allocations are published in week 16.', 'The monthly fee is paid before check-in.'] } }],
-    [/graduation ceremony/i, { en: { p: ['The graduation ceremony for the December 2026 graduation review takes place in the main hall.'], ul: ['Register to attend on the student portal by November 30.', 'Collect your gown in building A1 from three days before the ceremony.', 'Each graduate may bring two guests.'] } }],
-    [/xét tốt nghiệp/i, { vi: { p: ['Phòng Đào tạo thông báo kế hoạch xét tốt nghiệp đợt tháng 12 năm 2026 cho sinh viên đại học hệ chính quy.'], ul: ['Sinh viên đủ điều kiện nộp đơn xét tốt nghiệp trên cổng thông tin sinh viên trước ngày 15/11/2026.', 'Điều kiện: tích lũy đủ số tín chỉ của chương trình, điểm trung bình tích lũy từ 2,0 trở lên và đạt chuẩn ngoại ngữ đầu ra.', 'Kết quả xét tốt nghiệp được công bố trong tuần thứ hai của tháng 12.'], after: ['Mọi thắc mắc xin liên hệ Phòng Đào tạo, phòng A1-102.'] } }],
-    [/english placement/i, { en: { p: ['The English placement test takes place in week 11 at the Foreign Languages Centre.'], ul: ['Register on the student portal by the end of week 10.', 'Bring your student card and a pencil.', 'Results are published within 7 days and count toward the English requirement for graduation.'] } }],
-    [/library opening/i, { en: { p: ['During the exam weeks the library opens from 07:00 to 22:00, Monday to Sunday.'], ul: ['Study rooms can be booked for up to 3 hours a day.', 'Borrowed books are due at the end of week 19.'] } }],
-    [/robotics team/i, { en: { p: ['The UTE robotics team won the national robotics contest final with a fully autonomous harvesting robot.', 'The team of eight students from the Faculty of Mechanical Engineering will represent Vietnam at the regional contest next year.'] } }],
-    [/field station/i, { en: { p: ['The Smart Agriculture Lab opened a field station in the Mekong Delta to test sensors and drones on working rice farms.', 'Students can join field trips through the lab’s research projects.'] } }],
-    [/wi-?fi/i, {
-      en: { p: ['Campus Wi-Fi will be unavailable on Saturday from 08:00 to 12:00 for maintenance.'], ul: ['Wired connections in the computer labs are not affected.', 'Save your work before 08:00 if you’re using online systems.'] },
-      vi: { p: ['Trung tâm Thông tin thông báo hệ thống Wi-Fi toàn trường tạm ngưng từ 8 giờ đến 12 giờ thứ Bảy để bảo trì.'], ul: ['Kết nối có dây tại các phòng máy không bị ảnh hưởng.', 'Sinh viên lưu lại bài làm trước 8 giờ nếu đang sử dụng các hệ thống trực tuyến.'] } }],
-    [/mental health/i, { en: { p: ['Mental health week runs next week with free talks, workshops and one-to-one sessions with counsellors.'], ul: ['Book a counselling session on the student portal.', 'All sessions are confidential.'] } }],
-    [/status letters/i, { en: { p: ['Student status confirmation letters are now issued within 2 working days of the request.'], ul: ['Request the letter in BoMesh Requests.', 'Pick it up at A1-108 with your student card.'] } }],
-    [/bosch/i, { en: { p: ['UTE signed a partnership with Bosch Vietnam that opens 60 internship places a year for engineering students.', 'Applications open through the faculties at the start of each semester.'] } }],
-    [/research week|nghiên cứu khoa học/i, {
-      en: { p: ['Research week invites students to present posters on their research projects.'], ul: ['Submit your poster abstract by the end of week 9.', 'Posters are A0, portrait, in English or Vietnamese.', 'The best three posters in each faculty receive an award.'] },
-      vi: { p: ['Nhà trường tổ chức Tuần lễ nghiên cứu khoa học sinh viên, mời sinh viên trình bày poster về đề tài nghiên cứu của mình.'], ul: ['Nộp tóm tắt poster trước cuối tuần 9.', 'Poster khổ A0, trình bày dọc, bằng tiếng Việt hoặc tiếng Anh.', 'Ba poster xuất sắc nhất của mỗi khoa được khen thưởng.'] } }],
-    [/parking/i, { en: { p: ['Parking next to building A5 closes from next Monday for construction. Use the parking area behind building D.'], ul: ['Motorbike passes stay valid.', 'Allow extra time to walk to classes in building A5.'] } }],
+    [/change freeze|tết|tet\b/i, {
+      en: { p: ['A production change freeze applies from 7 days before Tết until 3 days after it. Only emergency changes approved by the change advisory board can be deployed.'], ul: ['Merge and deploy planned work before the freeze starts.', 'Emergency changes need an incident or risk reference.', 'On-call rotations for the holiday are published in each team calendar.'] },
+      vi: { p: ['Công ty áp dụng giai đoạn đóng băng thay đổi trên môi trường production từ 7 ngày trước Tết đến 3 ngày sau Tết. Chỉ các thay đổi khẩn cấp được hội đồng phê duyệt thay đổi chấp thuận mới được triển khai.'], ul: ['Hoàn tất triển khai các thay đổi đã lên kế hoạch trước khi đóng băng.', 'Thay đổi khẩn cấp cần có mã sự cố hoặc mã rủi ro kèm theo.', 'Lịch trực Tết được đăng trên lịch của từng nhóm.'] } }],
+    [/pci|audit/i, { en: { p: ['The PCI DSS assessment fieldwork runs for two weeks. Assessors will interview control owners and sample evidence from the control matrix.'], ul: ['Check that the evidence for your controls is up to date.', 'Keep your calendar free for your interview slot.', 'Send questions to Risk & Compliance.'] } }],
+    [/access review/i, { en: { p: ['The quarterly access review is open. System owners confirm or revoke every access right in their systems.'], ul: ['Complete your review before the deadline in the review tool.', 'Revoke access that is no longer needed.', 'Unreviewed access is removed automatically after the deadline.'] } }],
+    [/maintenance|bảo trì/i, {
+      en: { p: ['Planned maintenance runs on Saturday night from 23:00 to 02:00. Internal tools may be unavailable; customer payments are not affected.'], ul: ['Save your work before 23:00.', 'Report problems after the window to the IT Service Desk.'] },
+      vi: { p: ['Bộ phận CNTT bảo trì hệ thống nội bộ vào tối thứ Bảy từ 23:00 đến 02:00. Giao dịch của khách hàng không bị ảnh hưởng.'], ul: ['Lưu lại công việc trước 23:00.', 'Báo lỗi sau thời gian bảo trì cho IT Service Desk.'] } }],
+    [/town ?hall|all.?hands/i, { en: { p: ['Join the quarterly town hall with the leadership team: results, priorities for next quarter and open Q&A.'], ul: ['Send questions in advance through the town hall form.', 'The recording is shared afterwards.'] } }],
+    [/holiday|nghỉ lễ/i, {
+      en: { p: ['Offices are closed on the public holiday. NAPAS 247 and card payments run as normal; batch transfers settle on the next business day.'], ul: ['Check the on-call rota for your team.', 'Plan approvals that need a business day in advance.'] },
+      vi: { p: ['Văn phòng nghỉ lễ theo quy định. Chuyển khoản NAPAS 247 và thanh toán thẻ vẫn hoạt động bình thường; giao dịch theo lô được xử lý vào ngày làm việc tiếp theo.'], ul: ['Kiểm tra lịch trực của nhóm.', 'Lên kế hoạch trước cho các phê duyệt cần ngày làm việc.'] } }],
   ];
   const KIND = {
     syllabus: (doc, c) => {
@@ -422,7 +551,7 @@
         { h: 'Learning outcomes', p: ['By the end of the course, students can:'], ul: [`Explain the core concepts and vocabulary of ${lc(course)}.`, `Apply ${lc(c.topic || course)} methods to small, well-defined engineering problems.`, 'Design, build and test a team project, and present the results.', 'Read technical material in English and write a clear report.'] },
         { h: 'Weekly plan', table: [['Weeks', 'Topic'], [['1–2', `Foundations of ${lc(course)}`], ['3–5', 'Core methods and worked examples'], ['6–7', 'Applied practice in the lab'], ['8', 'Midterm exam'], ['9–12', 'Advanced topics'], ['13–14', 'Team project and presentations'], ['15', 'Review']]] },
         { h: 'Assessment', p: ['The course is assessed through participation and quizzes (10%), labs and assignments (30%), a midterm exam (20%) and a final exam (40%).'], table: [['Component', 'Weight'], [['Participation and quizzes', '10%'], ['Labs and assignments', '30%'], ['Midterm exam', '20%'], ['Final exam', '40%']]], after: ['Students must score at least 4.0 out of 10 on the final exam to pass the course.', 'Students who miss more than 20% of classes can’t sit the final exam.'] },
-        { h: 'Required readings', ul: [`Lecture notes for ${c.code || course}, published weekly on UTEx LMS.`, `A core textbook on ${lc(course)} chosen by the course coordinator.`, 'Papers and lab handouts listed in each week’s module.'] },
+        { h: 'Required readings', ul: [`Lecture notes for ${c.code || course}, published weekly on the learning platform.`, `A core textbook on ${lc(course)} chosen by the course coordinator.`, 'Papers and lab handouts listed in each week’s module.'] },
         { h: 'Course policies', ul: ['Late submissions lose 10% a day and aren’t accepted after three days.', 'Copying code or text without attribution is reported under the academic integrity rules.', 'Questions about grades go to the lecturer first, then to the Faculty office.'] },
       ] });
     },
@@ -430,7 +559,7 @@
       const title = c.base.replace(/\s+[—–-]\s+(MSc|BEng) thesis \d{4}$/, ''), msc = /MSc thesis/.test(c.base);
       const author = doc.author || doc.addedBy, year = doc.year || new Date(doc.updated).getFullYear();
       const t = c.r.topics.join(' '), metric = /t-ml|t-cropdisease|t-sensing/.test(t) ? 'accuracy' : /t-net/.test(t) ? 'detection rate' : /t-iot|t-elec|t-irrigation/.test(t) ? 'energy saving' : /t-mech/.test(t) ? 'task success rate' : /t-db/.test(t) ? 'query speed-up' : 'test coverage';
-      const base = 68 + c.h % 14, prop = base + 4 + c.h % 9, sup = ['Assoc. Prof. Lê Văn Hùng', 'Dr. Phạm Thu Hà', 'Dr. Trương Quốc Bảo', 'Assoc. Prof. Nguyễn Thanh Sơn'][c.h % 4];
+      const base = 68 + c.h % 14, prop = base + 4 + c.h % 9, sup = ['the faculty supervisor', 'the lab supervisor', 'the programme supervisor'][c.h % 3];
       return flow(doc, { title, sub: `${msc ? 'Master of Science' : 'Bachelor of Engineering'} thesis · ${author} · ${year} · Supervisor: ${sup}`, per: 1, secs: [
         { h: 'Abstract', p: [c.lead || `Thesis by ${author} (${year}): ${title}.`, `We build a working prototype, evaluate it against a baseline on data collected for this study, and report where it helps and where it doesn’t.`, `The proposed approach reaches ${prop}% ${metric}, compared with ${base}% for the baseline.`, ...(c.vi ? [`Tóm tắt: Luận văn nghiên cứu đề tài “${title}”. Phương pháp đề xuất đạt ${prop}% so với ${base}% của phương pháp cơ sở.`] : [])] },
         { h: 'Chapter 1 — Introduction', p: [`${title} matters for ${campus() ? 'universities, students and local industry' : 'the organisation'} in Vietnam, but existing solutions are costly or were built for other settings.`], ul: ['Objective 1: define the problem and collect a representative dataset.', 'Objective 2: design and implement an approach that fits local constraints.', `Objective 3: evaluate it against a baseline using ${metric}.`] },
@@ -458,24 +587,24 @@
         { h: 'Preparation', ul: ['Read the lecture notes and prepare answers to the pre-lab questions.', 'Bring your lab notebook and student card.', 'Complete the safety induction for this lab before the session.'] },
         { h: 'Safety rules', ul: ['Wear safety glasses and closed shoes.', 'Ask the technician before switching on any machine or power supply.', 'Report any damage or accident immediately.'] },
         { h: 'Procedure', ul: ['Check the equipment against the list on the bench.', 'Set up as shown in the figure and ask the technician to check it.', 'Run the experiment and record each measurement in your notebook.', 'Repeat three times and compute the average.', 'Switch everything off and tidy the bench.'] },
-        { h: 'Report', p: ['Submit a short report on UTEx LMS within one week of the session: setup, results, answers to the questions and sources of error.'] },
+        { h: 'Report', p: ['Submit a short report on the learning platform within one week of the session: setup, results, answers to the questions and sources of error.'] },
         { h: 'Assessment', table: [['Part', 'Weight'], [['Pre-lab questions', '20%'], ['Work in the lab', '40%'], ['Report', '40%']]] },
       ] });
     },
     announcement: (doc, c) => build(b => {
       const hit = NOTICE_TEXT.find(([re]) => re.test(c.base))?.[1];
       const body = (c.vi ? hit?.vi : hit?.en) || (c.vi
-        ? { p: [`${c.subject}.`, 'Thông tin chi tiết được đăng trên ute.edu.vn và cổng thông tin sinh viên.'], after: ['Mọi thắc mắc xin liên hệ Phòng Đào tạo, phòng A1-102.'] }
+        ? { p: [`${c.subject}.`, `Thông tin chi tiết được đăng trên ${c.r.source.key === 'upload' ? 'cổng thông tin nội bộ' : c.r.source.name}.`], after: [`Mọi thắc mắc xin liên hệ ${c.owner}.`] }
         : { p: [`${c.subject}.`, `Details are published on ${c.r.source.key === 'upload' ? 'the intranet' : c.r.source.name}.`] });
-      b.page(1).title(c.base, c.vi ? `ute.edu.vn · Ngày đăng ${viDate(doc.updated)}` : `${c.r.source.name} · Published ${c.date}`);
+      b.page(1).title(c.base, c.vi ? `${c.r.source.name} · Ngày đăng ${viDate(doc.updated)}` : `${c.r.source.name} · Published ${c.date}`);
       if (c.lead) b.p(c.lead);
       body.p.forEach(x => b.p(x)); if (body.ul) b.ul(body.ul); (body.after || []).forEach(x => b.p(x));
       if (!c.vi && !body.after) b.p(`Questions: ${c.owner}.`);
     }),
     calendar: (doc, c) => flow(doc, { title: c.base.replace(/\s*\(.*\)$/, ''), sub: `${c.owner} · Updated ${c.date}`, per: 3, secs: [
-      { h: 'Semester 1', p: [c.lead || 'Key dates for the academic year.'], table: [['What', 'When'], [['Classes start', 'Wednesday, 2 September 2026'], ['Course withdrawal closes', 'Tuesday, 10 November 2026 (end of week 10)'], ['Final exams', 'Weeks 17–19']]] },
-      { h: 'Semester 2', table: [['What', 'When'], [['Course registration opens', 'Tuesday, 1 December 2026'], ['Classes start', 'Monday, 22 February 2027'], ['Final exams', 'Weeks 17–19']]] },
-      { h: 'Holidays', ul: ['Lunar New Year: 9–20 February 2027.', 'Reunification Day and Labour Day: 30 April–1 May 2027.'] },
+      { h: 'Key dates', p: [c.lead || 'Key dates for the year ahead.'], table: [['What', 'When'], [['Quarter-end close', 'Last business day of each quarter'], ['Planning deadline', 'Two weeks before the quarter starts'], ['Reviews', 'First week of each quarter']]] },
+      { h: 'Holidays', ul: ['Lunar New Year: 9–20 February 2027.', 'Hung Kings’ Commemoration: 16 April 2027.', 'Reunification Day and Labour Day: 30 April–1 May 2027.', 'National Day: 2 September 2027.'] },
+      { h: 'Changes', p: [`${c.owner} publishes changes to these dates at least two weeks in advance.`] },
     ] }),
     policy: (doc, c) => {
       const safety = /safety/i.test(c.base);
@@ -498,16 +627,16 @@
       { h: 'Contact', p: [`${c.owner} — open a request or visit the office during working hours.`] },
     ] }),
     guide: (doc, c) => {
-      const project = /capstone|project|thesis/i.test(c.base), intern = /internship/i.test(c.base);
+      const project = campus() && /capstone|project|thesis/i.test(c.base), intern = campus() && /internship/i.test(c.base);
       return flow(doc, { title: c.base, sub: `${c.owner} · Updated ${c.date}`, secs: [
         { h: 'Overview', p: [c.lead || `A practical guide to ${lc(c.subject.replace(/\s*(guide|handbook)$/i, ''))}.`] },
-        { h: 'Before you start', ul: ['Check that the information is for the current semester or year.', `Have your ${campus() ? 'student or staff' : 'employee'} account ready.`, 'Note the deadlines in the timeline below.'] },
+        { h: 'Before you start', ul: [`Check that the information is for the current ${campus() ? 'semester' : 'year'}.`, `Have your ${campus() ? 'student or staff' : 'employee'} account ready.`, 'Note the deadlines in the timeline below.'] },
         { h: 'Key steps', ul: project
           ? ['Form a team of 2–4 students and find a supervisor by week 2.', 'Submit the project proposal by week 4.', 'Present progress at the midterm review in week 8.', 'Submit the final report and defend the project in week 15.']
           : intern
             ? ['Choose a host company from the faculty list or propose your own.', 'Get the internship agreement signed before you start.', 'Work at least 8 weeks and keep a weekly log.', 'Submit the internship report and the company’s evaluation within 2 weeks of finishing.']
             : ['Read each section once, then use the outline to jump to what you need.', 'Follow the steps in order and keep copies of what you submit.', `Ask ${c.owner} when something is unclear.`] },
-        { h: 'Timeline', p: ['Plan at least four weeks ahead. Milestone dates are confirmed at the start of each semester.'] },
+        { h: 'Timeline', p: [`Plan at least four weeks ahead. Milestone dates are confirmed at the start of each ${campus() ? 'semester' : 'quarter'}.`] },
         { h: 'Where to get help', p: [`Contact ${c.owner}.`] },
       ] });
     },
@@ -545,7 +674,7 @@
     ] }),
     form: (doc, c) => flow(doc, { title: c.base, sub: `${c.owner} · Updated ${c.date}`, secs: [
       { h: 'Instructions', p: [c.lead || 'Fill in every field, sign the form and submit it to the office named below.'] },
-      { h: 'Fields', table: [['Field', 'What to enter'], [['Full name', 'As on your ID card'], ['ID number', 'Student or staff number'], ['Item or request', 'What you need and why'], ['Dates', 'From and to'], ['Signature', 'Yours, and your supervisor’s if required']]] },
+      { h: 'Fields', table: [['Field', 'What to enter'], [['Full name', 'As on your ID card'], ['ID number', campus() ? 'Student or staff number' : 'Employee number'], ['Item or request', 'What you need and why'], ['Dates', 'From and to'], ['Signature', 'Yours, and your manager’s if required']]] },
       { h: 'Submission', p: [`Submit the signed form to ${c.owner}. You get an answer within 3 working days.`] },
     ] }),
     report: (doc, c) => flow(doc, { title: c.base, sub: `${c.owner} · ${c.date}`, secs: [
@@ -559,6 +688,54 @@
       { h: 'Key information', ul: ['Check the version date before relying on the details.', 'Figures and contacts are correct as of the last update.'] },
       { h: 'Contacts', p: [`Questions go to ${c.owner}.`] },
     ] }),
+    spec: (doc, c) => {
+      const slug = c.subject.replace(/^ADR-\d+\s*[—–-]\s*/i, '');
+      if (/^ADR-\d+/i.test(c.base)) return flow(doc, { title: c.base, sub: `Status: Accepted · ${c.owner} · ${c.date}`, secs: [
+        { h: 'Context', p: [c.lead || `We need a consistent approach to ${lc(slug)} across services.`, 'Teams solved this differently, which made incidents harder to debug and reviews slower.'] },
+        { h: 'Decision', p: [`We adopt a single, documented approach to ${lc(slug)} for every new service; existing services migrate when they are next changed.`] },
+        { h: 'Alternatives considered', ul: ['Keep the current per-team approach.', 'Adopt a vendor product.', 'Build a shared library (chosen).'] },
+        { h: 'Consequences', ul: ['New services follow this ADR from day one.', 'The platform team maintains the shared library and its documentation.', 'Deviations are recorded as new ADRs.'] },
+      ] });
+      if (/api|reference/i.test(c.base)) return flow(doc, { title: c.base, sub: `${c.owner} · Updated ${c.date}`, secs: [
+        { h: 'Overview', p: [c.lead || `${c.subject} describes the endpoints, authentication and errors of this service.`] },
+        { h: 'Authentication', p: ['Internal callers use service tokens issued by the platform identity service; partners use OAuth 2.0 client credentials with mutual TLS.'] },
+        { h: 'Endpoints', table: [['Method', 'Path', 'Purpose'], [['GET', '/v1/items', 'List items, paginated'], ['GET', '/v1/items/{id}', 'Get one item'], ['POST', '/v1/items', 'Create an item (Idempotency-Key required)']]] },
+        { h: 'Errors', table: [['Code', 'Meaning'], [['400', 'Invalid request'], ['401', 'Missing or expired token'], ['409', 'Conflict with an earlier request'], ['429', 'Rate limited — retry after the given seconds']]] },
+      ] });
+      if (/metric|definition|kpi/i.test(c.base)) return flow(doc, { title: c.base, sub: `${c.owner} · Certified metric · ${c.date}`, secs: [
+        { h: 'Definition', p: [c.lead || `How ${lc(slug)} is calculated for reporting.`] },
+        { h: 'Rules', ul: ['Calendar periods use Vietnam time (ICT).', 'Test, staff and closed accounts are excluded.', 'Use the certified mart tables, not raw events.'] },
+        { h: 'Where to find it', p: ['The metric is published in the certified dashboards and the semantic layer.'] },
+      ] });
+      return flow(doc, { title: c.base, sub: `${c.owner} · Updated ${c.date}`, secs: [
+        { h: 'Overview', p: [c.lead || `${c.subject}: how it works and how to use it.`] },
+        { h: 'Design', ul: ['Owned by one team, with a named on-call rotation.', 'Configuration lives in the service repository.', 'Changes go through code review and the standard release process.'] },
+        { h: 'Operations', p: ['Dashboards and alerts are linked from the service catalog. Runbooks cover the most common alerts.'] },
+        { h: 'Contacts', p: [`Questions go to ${c.owner}.`] },
+      ] });
+    },
+    playbook: (doc, c) => flow(doc, { title: c.base, sub: `${c.owner} · ${c.date}`, per: SLIDES.includes(doc.type) ? 1 : 2, cls: SLIDES.includes(doc.type) ? 'doc-page--slide' : '', titlePage: SLIDES.includes(doc.type), spread: !SLIDES.includes(doc.type), secs: [
+      { h: 'Why this matters', p: [c.lead || `${c.subject}: what we want to achieve and for whom.`] },
+      { h: 'What we will do', ul: ['Agree on the goal and how we will measure it.', 'Ship the smallest useful version first.', 'Review results with the team and decide what is next.'] },
+      { h: 'Who is involved', p: [`${c.owner} leads; partner teams are named in each workstream.`] },
+      { h: 'Risks', ul: ['Regulatory approval takes longer than planned.', 'Dependencies on other teams slip.'] },
+    ] }),
+    faq: (doc, c) => flow(doc, { title: c.base, sub: `${c.owner} · Updated ${c.date}`, secs: [
+      { h: 'About these questions', p: [c.lead || `Answers to the questions people ask most about ${lc(c.subject.replace(/\s*faq$/i, ''))}.`] },
+      { h: 'Who do I ask when something isn’t covered?', p: [`Send a request to ${c.owner} in BoMesh Requests.`] },
+      { h: 'How often is this updated?', p: ['Every quarter, or when the underlying policy changes.'] },
+    ] }),
+    notes: (doc, c) => flow(doc, { title: c.base, sub: `${c.owner} · ${c.date}`, secs: [
+      { h: 'Summary', p: [c.lead || `Notes: ${lc(c.subject)}.`] },
+      { h: 'Decisions', ul: ['Agreed the scope and owners for the next step.', 'Open questions are tracked in the team board.'] },
+      { h: 'Actions', ul: ['Share these notes with the wider team.', 'Follow up on open questions within a week.'] },
+    ] }),
+    contract: (doc, c) => flow(doc, { title: c.base, sub: `${c.org} · ${c.owner} · ${c.date}`, secs: [
+      { h: 'Parties', p: [c.lead || `This agreement is made between ${c.org} and the counterparty named on the signature page.`] },
+      { h: 'Term', p: ['The agreement runs for 24 months from the effective date and renews for 12-month periods unless either party gives 60 days’ written notice.'] },
+      { h: 'Data protection', p: ['Each party processes personal data only as needed for this agreement and in line with Decree 13/2023.'] },
+      { h: 'Termination', p: ['Either party may terminate for a material breach not remedied within 30 days of written notice.'] },
+    ] }),
   };
   KIND.handbook = KIND.guide;
 
@@ -571,11 +748,16 @@
     if (SHEET.includes(doc.type)) return build(b => {
       if (/discount/i.test(base)) b.page(1).sheet(['Discount', 'Approver', 'How'], [['Up to 15%', 'Account executive', 'No approval needed'], ['15–25%', 'Regional sales director', 'Approve in the deal desk'], ['Over 25%', 'Chief Revenue Officer', 'Include a written business case'], ['Multi-year (+5%)', 'Same as above', 'On top of the base limit']], ['Discounts up to 15% may be approved by the account executive. Discounts between 15% and 25% require approval from the regional sales director.'], ['Guidelines']);
       else if (/pipeline/i.test(base)) b.page(1).sheet(['Account', 'Stage', 'Amount (USD)', 'Close date', 'Owner'], [['Acme Corp', 'Negotiation', 186000, 'Oct 30', 'Minh Pham'], ['Fabrikam', 'Proposal', 92000, 'Nov 14', 'Lan Do'], ['Tailspin Travel', 'Discovery', 48000, 'Dec 5', 'Minh Pham'], ['Woodgrove Bank', 'Negotiation', 240000, 'Nov 28', 'Kevin Ng'], ['Litware Labs', 'Qualified', 18000, 'Dec 19', 'Lan Do'], ['Contoso Legal', 'Proposal', 64000, 'Nov 7', 'Minh Pham']], [], ['September']);
-      else b.page(1).sheet(['Item', 'Owner', 'Status', 'Updated'], ['Kick-off', 'Review scope', 'Collect inputs', 'Draft', 'Feedback round', 'Final version', 'Share with team', 'Archive'].map((x, i) => [x, ['An Nguyen', 'Ben Walker', 'Mai Hoang', 'Linh Tran'][i % 4], i < 5 ? 'Done' : 'Open', `Sep ${3 + i * 3}`]), doc.summary ? [doc.summary] : [], ['Sheet1']);
+      else if (S.ws === 'ws-northwind') b.page(1).sheet(['Item', 'Owner', 'Status', 'Updated'], ['Kick-off', 'Review scope', 'Collect inputs', 'Draft', 'Feedback round', 'Final version', 'Share with team', 'Archive'].map((x, i) => [x, ['An Nguyen', 'Ben Walker', 'Mai Hoang', 'Linh Tran'][i % 4], i < 5 ? 'Done' : 'Open', `Sep ${3 + i * 3}`]), doc.summary ? [doc.summary] : [], ['Sheet1']);
+      else {
+        const who = (D.members || []).slice(0, 4).map(m => (Array.isArray(m) ? m[1] : m.name)).filter(Boolean);
+        const owners = who.length ? who : [res(doc).owner || curWs().name];
+        b.page(1).sheet(['Item', 'Owner', 'Status', 'Due'], ['Scope agreed', 'Inputs collected', 'Controls checked', 'Draft ready', 'Review round', 'Sign-off', 'Published', 'Archived'].map((x, i) => [x, owners[i % owners.length], i < 5 ? 'Done' : 'Open', fmtDate(doc.updated + (i - 4) * 3 * DAY)]), doc.summary ? [doc.summary] : [], ['Tracker']);
+      }
     });
     const kind = res(doc).kind;
     if (!GENERIC[doc.kb] && KIND[kind]) return KIND[kind](doc, ctxOf(doc));
-    const secs = (GENERIC[doc.kb] || GENERIC.default)(base);
+    const secs = (GENERIC[doc.kb] || FALLBACK[doc.kb] || GENERIC.default)(base);
     // The summary leads, so snippets and answers start from what the resource is about.
     if (doc.summary) secs[0] = [secs[0][0], [doc.summary, ...(secs[0][1] || [])], secs[0][2]];
     if (SLIDES.includes(doc.type)) return build(b => {

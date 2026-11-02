@@ -10,7 +10,7 @@
   const OPEN_SR = ['submitted', 'in_review'], DONE_SR = ['approved', 'declined', 'completed'];
   const svcType = id => (D.requestTypes || []).find(t => t.id === id);
   const officeIds = () => new Set((D.spaces || []).filter(s => s.type === 'office' && !s.archived).map(s => s.id));
-  const docsTo = () => '/knowledge/browse';
+  const docsTo = () => '/documents?tab=all';
   function audit(action, target, type = 'Knowledge') { D.audit.unshift({ id: uid('ev'), at: Date.now(), actor: me().id, action, type, target, outcome: 'success', ip: '10.4.12.30', device: 'Chrome on macOS' }); }
 
   /* ── Needs attention: derived from D, so an item disappears once resolved ── */
@@ -45,23 +45,25 @@
       const kbs = [...new Set(reqs.map(r => kbById(r.kb)?.name).filter(Boolean))];
       items.push({ id: 'req', tone: 'warning', icon: 'user-plus', title: `${plural(people, 'person', 'people')} waiting for access`, desc: esc(`To ${names(kbs)}`), actions: btn('Review', { v: 'secondary', size: 'sm', href: '/people?tab=requests' }) });
     }
+    const queue = reviewQueue();
+    if (queue.length) items.push({ id: 'cur-review', tone: 'accent', icon: 'clock', title: `${plural(queue.length, 'document')} waiting for review`, desc: esc(names(queue.map(d => d.name))), actions: btn('Review', { v: 'secondary', size: 'sm', href: '/documents?tab=review' }) });
+    const failed = managedKbs().flatMap(kb => docsIn(kb.id).filter(d => d.status === 'failed'));
+    if (failed.length) items.push({ id: 'docs-failed', tone: 'warning', icon: 'file-text', title: `${plural(failed.length, 'document')} couldn’t be published`, desc: esc(names(failed.map(d => d.name))), actions: btn('Review', { v: 'secondary', size: 'sm', href: '/documents?tab=all&life=attention' }) });
     managedKbs().forEach(kb => {
-      const failed = docsIn(kb.id).filter(d => d.status === 'failed');
-      if (failed.length) items.push({ id: 'docs-' + kb.id, tone: 'warning', icon: 'file-text', title: `${plural(failed.length, 'document')} in ${kb.name} couldn’t be processed`, desc: esc(failed.slice(0, 2).map(d => d.name).join(', ') + (failed.length > 2 ? ` and ${failed.length - 2} more` : '')), actions: btn('Review', { v: 'secondary', size: 'sm', href: `/knowledge/${kb.id}?tab=documents` }) });
       const old = docsIn(kb.id).filter(d => d.status === 'outdated');
       if (old.length === 1) items.push({ id: 'old-' + old[0].id, tone: 'warning', icon: 'history', title: `${old[0].name} needs an update`, desc: `${esc(kb.name)} · answers that cite it may be out of date`, actions: btn('View', { v: 'ghost', size: 'sm', href: '/doc/' + old[0].id }) + btn('Update', { v: 'secondary', size: 'sm', icon: 'upload', act: 'ov-doc-update', data: { id: old[0].id } }) });
-      else if (old.length) items.push({ id: 'old-' + kb.id, tone: 'warning', icon: 'history', title: `${plural(old.length, 'document')} in ${kb.name} need an update`, desc: esc(names(old.map(d => d.name))), actions: btn('Review', { v: 'secondary', size: 'sm', href: `/knowledge/${kb.id}?tab=documents` }) });
+      else if (old.length) items.push({ id: 'old-' + kb.id, tone: 'warning', icon: 'history', title: `${plural(old.length, 'document')} in ${kb.name} need an update`, desc: esc(names(old.map(d => d.name))), actions: btn('Review', { v: 'secondary', size: 'sm', href: `/documents?tab=all&life=attention&kb=${kb.id}` }) });
     });
     const waiting = waitingDocs();
-    if (waiting.length) items.push({ id: 'waiting', tone: 'default', icon: 'loader', title: `${plural(waiting.length, 'document')} waiting to be processed`, desc: esc(names(waiting.map(d => d.name))), actions: btn('Process now', { v: 'secondary', size: 'sm', act: 'ov-process' }) });
+    if (waiting.length) items.push({ id: 'waiting', tone: 'default', icon: 'loader', title: `${plural(waiting.length, 'document')} waiting to publish`, desc: esc(names(waiting.map(d => d.name))), actions: btn('Publish now', { v: 'secondary', size: 'sm', act: 'ov-process' }) });
     const due = X.khReview?.() || [];
-    if (due.length) items.push({ id: 'kh-review', tone: 'warning', icon: 'shield-check', title: `${plural(due.length, 'resource')} ${due.length === 1 ? 'is' : 'are'} due for review`, desc: esc(names(due.map(x => x.d.name))), actions: btn('Review', { v: 'secondary', size: 'sm', href: '/knowledge-health?tab=review' }) });
+    if (due.length) items.push({ id: 'kh-review', tone: 'warning', icon: 'shield-check', title: `${plural(due.length, 'resource')} ${due.length === 1 ? 'is' : 'are'} due for review`, desc: esc(names(due.map(x => x.d.name))), actions: btn('Review', { v: 'secondary', size: 'sm', href: '/documents?tab=quality&seg=reverify' }) });
     return items;
   }
-  /** Uploaded but not picked up for over 30 minutes, outside a running sync. */
+  /** Approved but not picked up for over 30 minutes, outside a running sync. */
   function waitingDocs() {
     const ids = new Set(managedKbs().map(k => k.id));
-    return D.docs.filter(d => !d.archived && ids.has(d.kb) && d.status === 'pending' && Date.now() - d.updated > 30 * MIN && srcById(d.source)?.status !== 'syncing');
+    return D.docs.filter(d => !d.archived && isPublishedStage(d) && ids.has(d.kb) && d.status === 'pending' && Date.now() - d.updated > 30 * MIN && srcById(d.source)?.status !== 'syncing');
   }
   function attentionHtml() {
     const items = attention();
@@ -86,7 +88,7 @@
   function kpis() {
     const u = D.usage;
     const ids = managedKbs().map(k => k.id);
-    const docs = D.docs.filter(d => !d.archived && ids.includes(d.kb));
+    const docs = D.docs.filter(d => !d.archived && isPublishedStage(d) && ids.includes(d.kb));
     const ready = docs.filter(d => d.status === 'ready').length;
     const srcBad = attentionSources().length, srcAll = D.sources.length;
     const last = hasModule('requests') ? slaCard()
@@ -94,7 +96,7 @@
     return `<div class="grid cols-4">
       ${statCard({ icon: 'message', label: 'Questions this week', value: fmtNum(u.questions7), meta: delta(u.questions7, u.questions7Prev), tone: 'accent', act: 'ov-usage' })}
       ${statCard({ icon: 'users', label: 'Active people', value: fmtNum(u.active), meta: delta(u.active, u.activePrev), act: 'go', data: { to: '/people' } })}
-      ${statCard({ icon: 'files', label: 'Documents ready', value: `${pct(ready, docs.length)}%`, meta: `${fmtNum(ready)} of ${fmtNum(docs.length)} searchable`, tone: ready < docs.length ? 'warning' : 'success', act: 'go', data: { to: docsTo() } })}
+      ${statCard({ icon: 'files', label: 'Documents searchable', value: `${pct(ready, docs.length)}%`, meta: `${fmtNum(ready)} of ${fmtNum(docs.length)} published documents`, tone: ready < docs.length ? 'warning' : 'success', act: 'go', data: { to: docsTo() } })}
       ${last}
     </div>`;
   }
@@ -111,7 +113,7 @@
         return item({
           lead: `<span class="ov-gap-n" title="Times asked">${g.n}×</span>`,
           title: `“${esc(g.q)}”`,
-          desc: `<span class="ov-line">${esc(kb.name)} · ${esc(g.why)}</span>${edit ? `<span class="ov-gap-actions">${btn('Answer it', { v: 'secondary', size: 'sm', icon: 'pencil', act: 'ov-gap-answer', data: { id: g.id } })}${btn('Add files', { v: 'ghost', size: 'sm', icon: 'upload', act: 'ov-gap-add', data: { kb: g.kb } })}</span>` : ''}`,
+          desc: `<span class="ov-line">${esc(kb.name)} · ${esc(g.why)}</span>${edit ? `<span class="ov-gap-actions">${btn('Answer it', { v: 'secondary', size: 'sm', icon: 'pencil', act: 'ov-gap-answer', data: { id: g.id } })}${btn('Add documents', { v: 'ghost', size: 'sm', icon: 'upload', act: 'ov-gap-add', data: { kb: g.kb } })}</span>` : ''}`,
           trail: iconBtn('x', 'Dismiss', { size: 'sm', act: 'ov-gap-dismiss', data: { id: g.id } }),
         });
       }), 'list--plain ov-gaps')
@@ -138,13 +140,13 @@
   A['ov-doc-update'] = el => call('doc-replace', { id: el.dataset.id }, () => go('/doc/' + el.dataset.id));
   A['ov-process'] = () => {
     const docs = waitingDocs(); if (!docs.length) return;
-    if (X.processDocs) X.processDocs(docs, { msg: `Processing ${plural(docs.length, 'document')}` });
+    if (X.processDocs) X.processDocs(docs, { msg: `Publishing ${plural(docs.length, 'document')}` });
     else go(docsTo());
   };
   A['ov-usage'] = () => { const c = $('.ov-usage'); if (!c) return; c.scrollIntoView({ behavior: 'smooth', block: 'center' }); c.classList.remove('ov-flash'); void c.offsetWidth; c.classList.add('ov-flash'); };
   A['ov-kb-create'] = () => call('kb-create', {}, () => go('/knowledge'));
   A['ov-add-people'] = () => call('member-add', {}, () => go('/people'));
-  A['ov-gap-add'] = el => { const kb = el.dataset.kb; goThen('/knowledge/' + kb, () => A['kb-upload']?.({ dataset: { kb } })); };
+  A['ov-gap-add'] = el => call('contribute', { kb: el.dataset.kb }, () => go('/knowledge/' + el.dataset.kb));
   A['ov-gap-dismiss'] = el => {
     const g = D.gaps.find(x => x.id === el.dataset.id); if (!g) return;
     g.dismissed = true; refresh();

@@ -9,6 +9,14 @@
 .lib-col__meta { flex-wrap: wrap; color: var(--muted); }
 .lib-col__meta .i { color: var(--muted); }
 
+/* Contributions: lifecycle filter, rows with the latest event and one next step */
+.lib-ctb-bar .search-field { flex: 1 1 200px; max-width: 320px; }
+.lib-ctb-seg { min-width: 0; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.lib-ctb-seg::-webkit-scrollbar { display: none; }
+.lib-ctb .item__title .chip { flex: none; }
+.lib-ctb__desc { display: flex; align-items: center; gap: 0 6px; min-width: 0; }
+.lib-ctb__kb { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* Collection header meta */
 .lib-col__head-meta { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
 
@@ -41,4 +49,14 @@
   .lib-edit__order { order: 2; }
   .lib-edit__body { flex-basis: 100%; }
   .lib-edit__body .file-icon { display: none; }
+  .lib-ctb { padding: 12px; gap: 10px; align-items: flex-start; }
+  .lib-ctb .item__lead { display: none; }
+  .lib-ctb .item__title { flex-wrap: wrap; row-gap: 4px; }
+  .lib-ctb .item__title .truncate { white-space: normal; flex-basis: 100%; }
+  .lib-ctb__desc { flex-direction: column; align-items: flex-start; }
+  .lib-ctb__desc .res-dot { display: none; }
+  .lib-ctb__kb { max-width: 100%; }
+  .lib-ctb__desc .truncate { white-space: normal; }
+  .lib-ctb-bar .search-field { max-width: none; flex-basis: 100%; }
+  .lib-share span { display: none; }
 }

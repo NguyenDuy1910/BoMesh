@@ -2,7 +2,7 @@
 
 Interactive, framework-free prototype of BoMesh — a context-aware AI workspace that answers from an organisation's own knowledge and helps people finish the work that follows — built on the HeroUI v3 design system. It is the canonical reference for BoMesh presentation and UX flows; API, authorization, persistence and agent contracts stay in `backend/docs_design`.
 
-Two demo workspaces run on the same platform: **Northwind Group** (Enterprise template) and **UTE Campus** (Campus template — courses, research groups and offices; see `docs/CAMPUS_WORKSPACE.md`).
+Two demo workspaces run on the same platform: **Northwind Group** (Enterprise template) and **Finx Workspace** (Enterprise template with Spaces, Work and Requests on — a fictional Vietnamese digital-banking and payments company; see `docs/FINX_WORKSPACE.md`). Every workspace lands on the knowledge-first **Home** (`docs/HOME.md`). The Campus template is available in Workspace setup but has no demo workspace.
 
 ## Open it
 
@@ -12,41 +12,46 @@ Open `ux-preview.html` directly in a browser (`file://`). No server, build, or d
 
 | Control | Purpose |
 | --- | --- |
-| Northwind · UTE Campus | Switch the demo workspace (the persona follows) |
-| Persona buttons | Northwind: Member · Admin · Operator. UTE: Student · Lecturer · Researcher · Admin · Operator |
+| Northwind · Finx | Switch the demo workspace (the persona follows) |
+| Persona buttons | Northwind: Member · Admin · Operator. Finx: Engineer · Lead · Analyst · Admin · Operator |
 | State | Force Live, Loading, Empty or Error on any app screen |
-| Theme | Light / dark / system and the background (Green, Neutral, Slate, Violet, Sand) |
+| Theme | Light / dark / system and quick themes; "Theme and colors…" opens the Appearance drawer (18 themes, accent, background tint, radius, font) |
+| EN / VI | Interface language (English / Tiếng Việt). Content stays in its own language |
 | Desktop · Tablet · Phone | Render the app at 834 px or 390 px using the real responsive rules |
 | Journeys | Start an end-to-end task for any persona |
 | Palette icon | Design-system gallery (`#/design`) |
 | Reset | Restore the original demo data |
 
-Demo sign-in (password `demo`): Northwind — `minh.pham@northwind.com`, `linh.tran@northwind.com`, `alex.rivera@northwind.com`; UTE — `22110101@student.ute.edu.vn`, `hunglv@ute.edu.vn`, `hapt@ute.edu.vn`, `lanvt@ute.edu.vn`.
+Demo sign-in (password `demo`): Northwind — `minh.pham@northwind.com`, `linh.tran@northwind.com`, `alex.rivera@northwind.com`; Finx — `khoa.tran@finx.vn`, `ha.le@finx.vn`, `bao.pham@finx.vn`, `lan.vo@finx.vn`.
 
 ## Product map
 
 | Persona | Destinations |
 | --- | --- |
-| Northwind member | New chat · Inbox · Knowledge (Discover · Browse · My library · Knowledge bases) · Conversations · Search (⌘K) · workspace switcher |
-| UTE student, lecturer, researcher | Home · Inbox · Work · Requests · Knowledge · Conversations · Spaces (my courses, labs) · Search |
-| Knowledge managers (lecturers, researchers, office staff) | + Manage › Knowledge health for the bases they look after |
-| Workspace admin | + Overview · Sources · Connections · Knowledge health · People · Assistant · Activity · Settings (incl. Workspace setup: template, modules, space types, workflows) |
-| Platform operator | Platform console: Workspaces · Users · Connectors · Usage · Audit log · System health |
+| Northwind member | Home · Inbox · Knowledge (Browse · My library incl. Contributions · Knowledge bases) · Contribute · Conversations · Search (⌘K) · workspace switcher |
+| Finx engineer, lead, analyst | Home · Inbox · Work · Requests · Knowledge · Conversations · Spaces (my teams, projects, offices) · Search |
+| Reviewers (owners of a knowledge base: Finx lead and analyst, office staff) | + Manage › Documents (Review · All documents · Quality · Topics) for the bases they own |
+| Workspace admin | + Overview · Documents · Sources · Connections · People · Assistant · Activity · Settings (incl. Workspace setup: template, modules, space types, workflows) |
+| Platform operator | Platform console: Workspaces · Users · Connectors · Indexing · Usage · Audit log · System health |
 
-See `docs/KNOWLEDGE_HUB.md` (knowledge concept, IA, journeys, backend alignment), `docs/CAMPUS_WORKSPACE.md` (UTE concept and journeys), `docs/PRODUCT_FLOW.md` (platform, IA, journeys), `docs/SCREEN_INVENTORY.md` (every route and surface), `docs/PAGE_AUDIT.md` (per-page purpose and decisions) and `docs/DESIGN_SYSTEM.md` (tokens, components, rules).
+See `docs/HOME.md` (knowledge-first Home: sections, curation, decisions), `docs/DOCUMENT_LIFECYCLE.md` (contribute → curate → publish, roles, permissions, taxonomy, journeys), `docs/KNOWLEDGE_HUB.md` (knowledge concept, IA, journeys, backend alignment), `docs/FINX_WORKSPACE.md` (Finx concept, personas and journeys), `docs/PRODUCT_FLOW.md` (platform, IA, journeys), `docs/SCREEN_INVENTORY.md` (every route and surface), `docs/PAGE_AUDIT.md` (per-page purpose and decisions) and `docs/DESIGN_SYSTEM.md` (tokens, components, rules).
 
 ## Code structure
 
 ```text
 ux-preview.html        stylesheets + ordered classic <script> tags (file:// safe)
 styles/                tokens → base → components (HeroUI) → layout → pages/*
-scripts/core/          util, icons, store (state + per-workspace persistence), workspace (templates, modules,
+scripts/core/          util, icons, store (state + per-workspace persistence), theme (personal appearance:
+                       accents, named themes, base tint, radius, font → CSS variables), i18n (interface language:
+                       localizes rendered nodes from scripts/i18n/<lang>.js; content untouched), workspace (templates, modules,
                        space types, workflows, work-kind registry), catalog (resource model: kinds, topics, trust,
                        permission-filtered search and facets, library, collections, governance signals),
-                       router (IA), ui (component builders), overlays (modal, drawer, menu, toast, palette, tooltip),
-                       shell, app (render + events), proto
-scripts/data/          mock.js (scoped data store D, Northwind + platform records), ute.js (UTE Campus),
-                       knowledge.js (taxonomies, resource metadata, UTE catalog, collections, library seeds)
+                       lifecycle (contribute → review → publish: stages, permissions, assistant suggestions,
+                       proposed topics, decisions), router (IA), ui (component builders), overlays (modal, drawer,
+                       menu, toast, palette, tooltip), shell, app (render + events), proto
+scripts/data/          mock.js (scoped data store D, Northwind + platform records), finx.js (Finx Workspace),
+                       knowledge.js (taxonomies, resource metadata, Finx catalog, featured, collections, library seeds),
+                       contributions.js (submissions in every lifecycle stage, source publishing policies)
 scripts/features/      one IIFE per product area: registers P (pages), A (actions), M (modals),
                        DR (drawers), MENUS, AFTER hooks and X (cross-module exports)
 ```

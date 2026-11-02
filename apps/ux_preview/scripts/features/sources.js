@@ -11,6 +11,9 @@
   const POOL = {
     gdrive: ['Q4 Pricing Update.pdf', 'Competitive Battlecard — Litware.pdf', 'Security Whitepaper 2026.pdf', 'Customer Onboarding Deck.pptx', 'Reference Call Guide.docx', 'Pricing FAQ.docx', 'Renewal Email Templates.docx', 'Partner Pricing Sheet.xlsx', 'Product Overview One-pager.pdf', 'Executive Briefing Deck.pptx', 'Brand Guidelines 2026.pdf', 'Campaign Calendar.xlsx'],
     confluence: ['Release Notes 4.3.md', 'Feature Flags Guide.md', 'Sandbox Reset Steps.md', 'Holiday Schedule 2026.md', 'Expense Categories.md', 'Incident Review Template.md', 'Team Directory.md', 'Data Export Guide.md', 'Access Request Process.md', 'Glossary Updates.md', 'On-call Handbook.md', 'Service Ownership.md'],
+    website: ['News — New office opening.html', 'Notice — Planned maintenance this weekend.html', 'News — Annual results published.html', 'Notice — Holiday opening hours.html', 'Notice — Updated privacy notice.html', 'News — New partnership announced.html'],
+    sharepoint: ['Vendor Risk Assessment Procedure.pdf', 'Business Continuity Plan 2026.pdf', 'Information Classification Standard.pdf', 'Quarterly Access Review Checklist.xlsx', 'Chargeback Reason Codes.xlsx', 'Leave Policy 2027.pdf', 'Records Retention Schedule.xlsx', 'Third-party Risk Register.xlsx'],
+    github: ['Runbook — Ledger consumer lag.md', 'ADR-043 — Outbox pattern for payment events.md', 'Payments API changelog.md', 'Service ownership map.md', 'Load test results — Q4.md', 'Webhook signing guide.md'],
   };
   /* Folder / space trees offered by the content picker. */
   const TREE = {
@@ -79,14 +82,22 @@
   function lastText(l) {
     if (l.result === 'failed') return 'Failed';
     if (l.result === 'cancelled') return 'Cancelled';
+    if (l.review) return [`${l.review} sent to review`, l.failed && `${l.failed} failed`].filter(Boolean).join(' · ');
     return [l.added && `${l.added} added`, l.updated && `${l.updated} updated`, l.failed && `${l.failed} failed`].filter(Boolean).join(' · ') || 'No changes';
   }
   const kbLink = kb => kb ? `<a class="src-kb" href="#/knowledge/${kb.id}" data-act="go" data-to="/knowledge/${kb.id}"><span class="src-kb__dot" style="background:${esc(kb.color)}"></span><span class="truncate">${esc(kb.name)}</span></a>` : '<span class="muted">Removed</span>';
   function audit(action, target, outcome = 'success') { D.audit.unshift({ id: uid('ev'), at: Date.now(), actor: me().id, action, type: 'Sources', target, outcome, ip: '10.4.12.30', device: 'Chrome on macOS' }); }
+  /* Publishing policy for new and changed files: trusted systems publish directly, others wait for a reviewer. */
+  const policyOf = s => (s.publish === 'review' ? 'review' : 'auto');
+  const POLICY = {
+    auto: { label: 'Publish automatically', short: 'Publishes automatically', icon: 'zap', desc: 'For trusted systems. New and changed files become searchable without a review.' },
+    review: { label: 'Send to review first', short: 'Review first', icon: 'shield-check', desc: 'A reviewer of the knowledge base approves each new or changed file before it’s published.' },
+  };
+  const policyChoices = () => Object.entries(POLICY).map(([k, p]) => [k, p.label, esc(p.desc)]);
 
   /* ═══════════════ Sync engine (simulated) ═══════════════ */
   const TICK_PAGES = ['sources', 'connections', 'kbDetail', 'overview'];
-  const FULL_PAGES = [...TICK_PAGES, 'kbList', 'documents', 'docViewer', 'inbox'];
+  const FULL_PAGES = [...TICK_PAGES, 'kbList', 'documents', 'documentsAdmin', 'library', 'docViewer', 'inbox'];
   /** Repaint whatever shows sync state. Progress ticks repaint only sync-aware views. */
   function rerender(full) {
     if (document.activeElement?.tagName === 'SELECT') { setTimeout(() => rerender(full), 500); return; }
@@ -98,7 +109,7 @@
   /** Starts a sync for a source whose account works. plan = { added, updated, failed, failures }. */
   function startSync(src, o = {}) {
     if (!src || src.status === 'syncing' || accById(src.account)?.status !== 'connected') return null;
-    const own = D.docs.filter(d => d.source === src.id && !d.archived);
+    const own = D.docs.filter(d => d.source === src.id && !d.archived && stageOf(d) === 'published');
     const stuck = own.filter(d => d.status === 'failed' && isLocked(d));
     const fixable = own.filter(d => ['failed', 'pending', 'outdated'].includes(d.status) && !isLocked(d)).length;
     const plan = o.plan || { added: 1 + Math.floor(rnd() * 3), updated: 2 + Math.floor(rnd() * 4) + fixable, failed: stuck.length, failures: stuck.map(d => d.id) };
@@ -123,27 +134,38 @@
     const n = pool[(i - 1) % pool.length], k = Math.floor((i - 1) / pool.length);
     return k ? n.replace(/(\.\w+)$/, ` (${k + 1})$1`) : n;
   }
-  /** Process documents (an Ingestion Run). Syncs only change the inventory: documents land as Waiting.
-      Scheduled syncs process what changed; manual and first syncs leave it for an explicit Process. */
+  /** Publish documents (an Ingestion Run). Syncs only change the inventory: documents land as Waiting to publish.
+      Scheduled syncs publish what changed; manual and first syncs leave it for an explicit Publish.
+      Review-policy sources send new and changed files to the review queue instead. */
   function processDocs(docs) {
     if (!docs.length) return;
     if (X.processDocs) { X.processDocs(docs, { quiet: true }); return; }
     setTimeout(() => { docs.forEach(d => { if (D.docs.includes(d) && d.status === 'pending') d.status = 'processing'; }); rerender(true); }, 1200);
     setTimeout(() => { docs.forEach(d => { if (D.docs.includes(d) && d.status === 'processing') { d.status = 'ready'; d.error = ''; d.updated = Date.now(); } }); rerender(true); }, 4200);
   }
-  const waitingDocs = s => D.docs.filter(d => d.source === s.id && !d.archived && ['pending', 'outdated'].includes(d.status));
+  /** Published documents from this source that are waiting to be (re)published. Submissions in review don't count. */
+  const waitingDocs = s => D.docs.filter(d => d.source === s.id && !d.archived && stageOf(d) === 'published' && ['pending', 'outdated'].includes(d.status));
   A['src-process'] = el => {
     const s = srcById(el.dataset.id); const docs = s ? waitingDocs(s) : [];
-    if (!docs.length) { toast('Nothing waiting to process', { tone: 'accent' }); return; }
-    processDocs(docs); audit('Started processing', s.name);
-    toast(`Processing ${plural(docs.length, 'document')} from ${s.name}`); rerender(true);
+    if (!docs.length) { toast('Nothing waiting to publish', { tone: 'accent' }); return; }
+    processDocs(docs); audit('Started publishing', s.name);
+    toast(`Publishing ${plural(docs.length, 'document')} from ${s.name}`); rerender(true);
   };
   A['src-process-all'] = () => {
     const list = D.sources.filter(s => s.status !== 'syncing'); const docs = list.flatMap(waitingDocs);
     if (!docs.length) return;
-    processDocs(docs); audit(`Started processing ${plural(docs.length, 'document')}`, 'Sources');
-    toast(`Processing ${plural(docs.length, 'document')}`); rerender(true);
+    processDocs(docs); audit(`Started publishing ${plural(docs.length, 'document')}`, 'Sources');
+    toast(`Publishing ${plural(docs.length, 'document')}`); rerender(true);
   };
+  /** A synced file that waits for a reviewer: a submission with no person behind it (via 'sync'). versionOf marks a changed file. */
+  function syncSubmission(src, name, { versionOf } = {}) {
+    const at = Date.now();
+    const d = mkDoc(src.kb, uid('d'), name, { source: src.id, addedBy: src.name, updated: at, status: 'pending' });
+    d.stage = 'review';
+    d.submission = { by: null, via: 'sync', at, note: '', kbBy: 'contributor', ...(versionOf ? { versionOf } : {}), events: [{ at, by: null, kind: 'submitted', text: `Synced from ${src.name}` }] };
+    D.docs.push(d); analyzeSoon(d);
+    return d;
+  }
   function finishRun(src, run) {
     clearInterval(ENG.timers[run.id]); delete ENG.timers[run.id];
     const p = run.plan || { added: 0, updated: run.counts.total, failed: 0 };
@@ -155,16 +177,34 @@
       src.status = src.prevStatus === 'paused' ? 'paused' : 'healthy'; delete src.prevStatus; src.progress = null; src.runId = null;
       src.last = { at: Date.now(), result: run.status, added: p.added, updated: p.updated, removed: 0, failed: run.counts.failed };
       src.next = src.status === 'paused' ? null : nextAt(src.schedule);
-      const own = D.docs.filter(d => d.source === src.id && !d.archived), affected = [];
+      const own = D.docs.filter(d => d.source === src.id && !d.archived && stageOf(d) === 'published'), affected = [], toReview = [];
+      const review = policyOf(src) === 'review';
+      // Approved documents that didn't finish publishing are retried either way.
       own.filter(d => ['failed', 'pending', 'outdated'].includes(d.status) && !isLocked(d)).forEach(d => { d.status = 'pending'; d.error = ''; d.updated = Date.now(); affected.push(d); });
-      own.filter(d => d.status === 'ready').slice(0, Math.max(0, p.updated - affected.length)).forEach(d => { d.status = 'pending'; d.updated = Date.now(); affected.push(d); });
-      for (let i = 0; i < p.added; i++) {
-        const d = mkDoc(src.kb, uid('d'), docName(src.app), { source: src.id, addedBy: src.name, updated: Date.now(), status: 'pending' });
-        D.docs.push(d); affected.push(d);
+      const changed = own.filter(d => d.status === 'ready').slice(0, Math.max(0, p.updated - affected.length));
+      if (review) {
+        // Changed files become new-version submissions; the published copy keeps answering until a reviewer approves.
+        const open = new Set(D.docs.filter(x => !x.archived && stageOf(x) === 'review').map(x => x.submission?.versionOf).filter(Boolean));
+        changed.filter(d => !open.has(d.id)).forEach(d => toReview.push(syncSubmission(src, d.name, { versionOf: d.id })));
+        for (let i = 0; i < p.added; i++) toReview.push(syncSubmission(src, docName(src.app)));
+        if (toReview.length) audit(`Sent ${plural(toReview.length, 'synced file')} to review`, src.name);
+      } else {
+        changed.forEach(d => { d.status = 'pending'; d.updated = Date.now(); affected.push(d); });
+        for (let i = 0; i < p.added; i++) {
+          const d = mkDoc(src.kb, uid('d'), docName(src.app), { source: src.id, addedBy: src.name, updated: Date.now(), status: 'pending' });
+          D.docs.push(d); affected.push(d);
+        }
       }
+      src.last.review = toReview.length;
       const kb = kbById(src.kb); if (kb) kb.updated = Date.now();
       if (run.trigger === 'Scheduled') processDocs(affected);
-      else toast(`${src.name} synced · ${plural(affected.length, 'document')} waiting to process`, { tone: run.counts.failed ? 'accent' : 'success', action: affected.length ? { label: 'Process', run: () => A['src-process']({ dataset: { id: src.id } }) } : kb ? { label: 'View', run: () => go(`/knowledge/${kb.id}?tab=documents`) } : undefined });
+      else {
+        const parts = [toReview.length && `${plural(toReview.length, 'document')} sent to review`, (affected.length || !review) && `${plural(affected.length, 'document')} waiting to publish`].filter(Boolean);
+        const action = toReview.length && canReview() ? { label: 'Review', run: () => go('/documents?tab=review') }
+          : affected.length ? { label: 'Publish', run: () => A['src-process']({ dataset: { id: src.id } }) }
+          : kb ? { label: 'View', run: () => go(`/knowledge/${kb.id}?tab=documents`) } : undefined;
+        toast(`${src.name} synced · ${parts.join(' · ') || 'no changes'}`, { tone: run.counts.failed ? 'accent' : 'success', action });
+      }
     }
     rerender(true);
   }
@@ -238,7 +278,7 @@
     const waitSrc = D.sources.filter(s => s.status !== 'syncing' && waitingDocs(s).length);
     if (waitSrc.length) {
       const n = waitSrc.reduce((a, s) => a + waitingDocs(s).length, 0);
-      out.push(alertBox('accent', `${plural(n, 'synced document')} waiting to process`, `From ${esc(waitSrc.map(s => s.name).join(', '))}. Processing makes them searchable.`, btn('Process all', { size: 'sm', icon: 'play', act: 'src-process-all' })));
+      out.push(alertBox('accent', `${plural(n, 'synced document')} waiting to publish`, `From ${esc(waitSrc.map(s => s.name).join(', '))}. Publishing makes them searchable.`, btn('Publish all waiting', { size: 'sm', icon: 'play', act: 'src-process-all' })));
     }
     return out.length ? `<div class="stack gap-8 mb-16">${out.join('')}</div>` : '';
   }
@@ -273,12 +313,13 @@
     if (acc?.status !== 'connected') return '';
     return btn('Sync now', { size: 'sm', icon: 'refresh', act: 'src-sync', data: { id: s.id } });
   }
+  function policyNote(s) { const p = POLICY[policyOf(s)]; return `<span class="cell-sub src-policy src-policy--${policyOf(s)}" title="${esc(p.desc)}">${ic(p.icon, 'i-xs')}<span class="truncate">${esc(p.short)}</span></span>`; }
   function srcRow(s) {
     const acc = accById(s.account);
     const last = s.last ? `<div class="stack"><span>${rel(s.last.at)}</span><span class="cell-sub ${s.last.result === 'failed' ? 'text-danger' : s.last.failed ? 'text-warning' : ''}">${esc(lastText(s.last))}</span></div>` : '<span class="muted">Never</span>';
     return `<tr class="${cx('table__row', ENG.newId === s.id && 'table__row--new')}" data-act="src-open" data-id="${s.id}" tabindex="0">
       <td class="table__cell table__cell--primary"><div class="row gap-12">${appIcon(s.app)}<div class="stack src-min"><span class="cell-title truncate">${esc(s.name)}</span><span class="cell-sub truncate">${esc(acc ? scopeText(s) : 'No account')}</span></div></div></td>
-      <td class="table__cell">${kbLink(kbById(s.kb))}</td>
+      <td class="table__cell"><div class="stack src-min src-kbcell">${kbLink(kbById(s.kb))}${policyNote(s)}</div></td>
       <td class="table__cell table__cell--hide-sm ${s.status === 'paused' ? 'muted' : ''}">${esc(schedText(s.schedule))}</td>
       <td class="table__cell table__cell--hide-sm">${last}</td>
       <td class="table__cell">${s.status === 'syncing' ? syncingChip(s) : status('source', s.status)}</td>
@@ -397,7 +438,7 @@
       top = `<div class="card card--secondary src-live"><div class="row between gap-12"><span class="medium">Syncing · ${p.done} of ${plural(p.total, 'document')}</span>${btn('Cancel', { v: 'ghost', size: 'sm', act: 'src-cancel', data: { id: s.id } })}</div>${progress(p.done / Math.max(1, p.total) * 100, '', 'Sync progress')}</div>`;
     }
     const waiting = waitingDocs(s).length;
-    if (!top && waiting) top = alertBox('accent', `${plural(waiting, 'document')} waiting to process`, 'Synced into the knowledge base. Process them to make them searchable.', srcCan() ? btn('Process', { v: 'primary', size: 'sm', icon: 'play', act: 'src-process', data: { id: s.id } }) : '');
+    if (!top && waiting) top = alertBox('accent', `${plural(waiting, 'document')} waiting to publish`, 'Synced into the knowledge base. Publish them to make them searchable.', srcCan() ? btn('Publish', { v: 'primary', size: 'sm', icon: 'play', act: 'src-process', data: { id: s.id } }) : '');
     const last = s.last ? `${rel(s.last.at)} · <span class="${s.last.result === 'failed' ? 'text-danger' : s.last.failed ? 'text-warning' : ''}">${esc(lastText(s.last).toLowerCase())}</span>` : 'Never';
     const next = s.status === 'paused' ? 'Paused' : s.next ? `${relFuture(s.next)} <span class="muted">· ${esc(fmtDateTime(s.next))}</span>` : s.schedule.freq === 'manual' ? 'When someone clicks Sync now' : s.status === 'reconnect' ? 'After you reconnect' : '—';
     const accCell = `<div class="row gap-8 wrap">${acc ? `<span class="truncate">${esc(acc.label)}</span>${acc.status !== 'connected' ? status('account', acc.status) : ''}` : '<span class="muted">None</span>'}${srcCan() ? btn('Change', { v: 'ghost', size: 'sm', menu: 'src-acc-switch', data: { id: s.id } }) : ''}</div>`;
@@ -420,6 +461,7 @@
     const scope = sec('What it syncs', list((s.scope?.length ? s.scope : ['Everything']).map(x => item({ lead: ic(s.app === 'gdrive' ? 'folder' : 'book', 'muted'), title: esc(x) }))), canM && acc ? btn('Change', { v: 'ghost', size: 'sm', act: 'src-scope', data: { id: s.id } }) : '');
     const dest = sec('Destination', list([item({ lead: `<span class="src-kb__dot src-kb__dot--lg" style="background:${esc(kb?.color || 'var(--default)')}"></span>`, title: esc(kb?.name || 'Removed knowledge base'), desc: kb ? plural(docsIn(kb.id).length, 'document') : '', trail: kb ? ic('chevron-right', 'muted') : '', href: kb ? `/knowledge/${kb.id}?tab=documents` : undefined })]));
     const sched = canM ? sec('Schedule', schedForm(s), '', 'src-sched') : '';
+    const policy = sec('New and changed files', policyForm(s, canM), '', 'src-policy');
     const runs = runsOf(s.id).slice(0, 5);
     const recent = sec('Recent syncs', runs.length ? list(runs.map(r => item({ title: esc(fmtDateTime(r.started)), desc: esc(deltaText(r)), trail: status('run', r.status), act: 'src-run-open', data: { id: r.id } }))) : '<p class="muted">No syncs yet.</p>', runs.length ? btn('View all', { v: 'ghost', size: 'sm', act: 'src-history', data: { id: s.id } }) : '');
     const danger = canM ? sec('Disconnect', `<div class="src-danger"><p class="description grow">Stops syncing. Documents already in ${esc(kb?.name || 'the knowledge base')} stay.</p>${btn('Disconnect', { v: 'danger-soft', size: 'sm', act: 'src-disconnect', data: { id: s.id } })}</div>`) : '';
@@ -432,7 +474,7 @@
     return {
       lead: appIcon(s.app, 'lg'), title: s.name, desc: esc(`${appName(s.app)}${acc ? ' · ' + acc.label : ''}`),
       headActions: canM ? iconBtn('more', 'More actions', { menu: 'src-row', data: { id: s.id, ctx: 'drawer' } }) : '',
-      body: sourceSummary(s, acc, kb) + scope + dest + sched + recent + danger,
+      body: sourceSummary(s, acc, kb) + scope + dest + policy + sched + recent + danger,
       foot,
     };
   };
@@ -445,6 +487,20 @@
     audit('Changed sync schedule', s.name); toast(`Schedule saved · ${schedText(s.schedule)}`); refresh();
   };
   A['src-scope'] = el => openWizard({ mode: 'scope', srcId: el.dataset.id });
+  /** Publishing policy: who decides when synced files become searchable. Changes apply to the next sync. */
+  function policyForm(s, canM) {
+    const cur = policyOf(s), waiting = D.docs.filter(d => d.source === s.id && !d.archived && stageOf(d) === 'review').length;
+    const queue = waiting ? `<div class="row gap-8 wrap mt-8"><span class="t-sm muted">${esc(`${plural(waiting, 'file')} from this source waiting in review`)}</span>${canReview() ? linkBtn('Open review', { href: '/documents?tab=review', icon: 'arrow-up-right' }) : ''}</div>` : '';
+    if (!canM) return `<div class="row gap-8">${ic(POLICY[cur].icon, 'i-sm muted')}<span class="medium">${esc(POLICY[cur].label)}</span></div><p class="description mt-4">${esc(POLICY[cur].desc)}</p>${queue}`;
+    return choiceGroup({ name: `src-pol-${s.id}`, value: cur, options: policyChoices(), act: 'src-policy', data: { id: s.id } }) + `<p class="description mt-8">Applies from the next sync. Files already published stay published.</p>${queue}`;
+  }
+  A['src-policy'] = el => {
+    const s = srcById(el.dataset.id), v = el.dataset.value; if (!s || !srcCan() || !POLICY[v] || policyOf(s) === v) return;
+    const before = s.publish;
+    s.publish = v; audit(v === 'review' ? 'Set synced files to need review' : 'Set synced files to publish automatically', s.name);
+    refresh();
+    toast(v === 'review' ? `${s.name}: new and changed files go to review first` : `${s.name}: new and changed files publish automatically`, { action: { label: 'Undo', run: () => { if (before) s.publish = before; else delete s.publish; audit('Changed publishing policy back', s.name); refresh(); } } });
+  };
   MENUS['src-acc-switch'] = el => {
     const s = srcById(el.dataset.id); if (!s) return [];
     const items = [{ section: 'Sync with' }, ...D.accounts.filter(a => a.app === s.app).map(a => ({
@@ -480,7 +536,7 @@
     const d = delta(r);
     const tiles = r.status === 'running' ? '' : `<div class="src-counts">${[['Added', d.added], ['Updated', d.updated], ['Failed', d.failed], ...(c.skipped ? [['Skipped', c.skipped]] : [])].map(([l, n]) => `<div class="src-counts__tile"><div class="src-counts__n num ${l === 'Failed' && n ? 'text-danger' : ''}">${fmtNum(n)}</div><div class="t-xs muted">${l}</div></div>`).join('')}</div>`;
     const fails = (r.failures || []).map(docById).filter(Boolean), open = fails.filter(x => x.status === 'failed');
-    const failHtml = fails.length ? sec('Couldn’t process', list(fails.map(x => item({ lead: fileIcon(x.type, 'sm'), title: esc(x.name), desc: esc(x.status === 'failed' ? (x.error || 'This file couldn’t be read.') : 'Processed in a later sync.'), trail: x.status === 'failed' ? ic('chevron-right', 'muted') : status('doc', x.status), href: `/doc/${x.id}` })))) : '';
+    const failHtml = fails.length ? sec('Couldn’t publish', list(fails.map(x => item({ lead: fileIcon(x.type, 'sm'), title: esc(x.name), desc: esc(x.status === 'failed' ? (x.error || 'This file couldn’t be read.') : 'Published in a later sync.'), trail: x.status === 'failed' ? ic('chevron-right', 'muted') : status('doc', x.status), href: `/doc/${x.id}` })))) : '';
     let foot = '';
     if (s) foot = btn('Open source', { act: 'src-open', data: { id: s.id } }) + (canM && open.length ? btn('Retry failed', { v: 'primary', icon: 'retry', act: 'src-retry', data: { id: r.id }, disabled: s.status === 'syncing' }) : '');
     return {
@@ -525,7 +581,7 @@
   function openWizard({ kb, app, acc, mode = 'create', srcId } = {}) {
     if (!srcCan()) { toast('Ask a workspace admin to connect sources', { tone: 'accent' }); return; }
     boot();
-    const w = S.ui.srcWiz = { step: 1, mode, srcId: '', app: '', acc: '', oauth: '', t: null, oauthErr: '', rcAcc: '', conf: { site: '', email: '', token: '' }, cerr: {}, sel: {}, open: {}, openFor: '', q: '', selErr: '', kb: '', kbName: '', freq: 'daily', day: 'Mon', time: '02:00', tz: 'Asia/Ho_Chi_Minh', err: {}, busy: false, ask: false, init: '' };
+    const w = S.ui.srcWiz = { step: 1, mode, srcId: '', app: '', acc: '', oauth: '', t: null, oauthErr: '', rcAcc: '', conf: { site: '', email: '', token: '' }, cerr: {}, sel: {}, open: {}, openFor: '', q: '', selErr: '', kb: '', kbName: '', freq: 'daily', day: 'Mon', time: '02:00', tz: 'Asia/Ho_Chi_Minh', publish: 'review', err: {}, busy: false, ask: false, init: '' };
     const k = kbById(kb); if (k && !k.personal && canEditKb(k)) w.kb = k.id;
     if (mode === 'scope') {
       const s = srcById(srcId); if (!s) return;
@@ -624,7 +680,10 @@
     const sched = `<div class="field"><span class="label">Keep in sync</span>${seg({ value: w.freq, options: [['manual', 'Manual'], ['daily', 'Daily'], ['weekly', 'Weekly']], act: 'src-wiz-freq', label: 'Keep in sync', full: true })}</div>${w.freq === 'manual' ? '<p class="description">Syncs only when someone clicks Sync now.</p>' : `<div class="src-sched-grid ${w.freq === 'weekly' ? 'src-sched-grid--3' : ''}">${w.freq === 'weekly' ? field({ id: 'src-w-day', label: 'Day', control: select({ id: 'src-w-day', bind: 'srcWiz.day', value: w.day, options: DAYS }) }) : ''}${field({ id: 'src-w-time', label: 'Time', control: select({ id: 'src-w-time', bind: 'srcWiz.time', value: w.time, options: TIMES }) })}${field({ id: 'src-w-tz', label: 'Time zone', control: select({ id: 'src-w-tz', bind: 'srcWiz.tz', value: w.tz, options: TZ }) })}</div>`}`;
     const content = items.length ? `${idx.path[items[0].id]}${items.length > 1 ? ` +${items.length - 1}` : ''} · about ${plural(docs, 'document')}` : '—';
     const summary = `<div class="card card--secondary">${kv([['Source', esc(wizName(w, items))], ['Account', `<span class="row gap-8">${appIcon(w.app, 'sm')}<span class="truncate">${esc(accById(w.acc)?.label || '—')}</span></span>`], ['Content', esc(content)]])}</div>`;
-    return `<div class="stack gap-16">${kbF}${nameF}${sched}${summary}</div>`;
+    const first = Math.min(docs, 30);
+    const then = w.publish === 'review' ? `The first sync sends about ${plural(first, 'file')} to the review queue.` : `About ${plural(first, 'file')} will be ready to publish after the first sync.`;
+    const policy = `<div class="field"><span class="label">New and changed files</span>${choiceGroup({ name: 'src-w-pol', value: w.publish, options: policyChoices(), act: 'src-wiz-policy' })}<p class="description">${esc(then)}</p></div>`;
+    return `<div class="stack gap-16">${kbF}${nameF}${sched}${policy}${summary}</div>`;
   }
 
   /* Wizard actions */
@@ -663,6 +722,7 @@
   A['src-wiz-clear'] = () => { ui('srcWiz').sel = {}; refreshLayer(); };
   A['src-wiz-kb'] = () => { const w = ui('srcWiz'); if (w.kb) delete w.err.kb; refreshLayer(); if (w.kb === '__new') requestAnimationFrame(() => $('#src-w-kbname')?.focus()); };
   A['src-wiz-freq'] = el => { ui('srcWiz').freq = el.dataset.value; refreshLayer(); };
+  A['src-wiz-policy'] = el => { if (POLICY[el.dataset.value]) { ui('srcWiz').publish = el.dataset.value; refreshLayer(); } };
   function kbNameErr(v) { const n = (v || '').trim(); if (!n) return 'Name the new knowledge base.'; if (D.kbs.some(k => !k.archived && k.name.toLowerCase() === n.toLowerCase())) return 'A knowledge base with this name already exists.'; return ''; }
   A['src-wiz-kbinput'] = () => { const w = ui('srcWiz'); if (!w.err.kbName) return; const e = kbNameErr(w.kbName); if (e !== w.err.kbName) { w.err.kbName = e; refreshLayer(); } };
   A['src-wiz-reacc'] = async el => {
@@ -716,7 +776,7 @@
     }
     const idx = treeIdx(w.app), items = selItems(w.app, w.sel), docs = items.reduce((a, n) => a + nodeDocs(n), 0);
     const schedule = { freq: w.freq, day: w.day, time: w.time, tz: w.tz, on: w.freq !== 'manual' };
-    const src = { id: uid('src'), name: wizName(w, items), app: w.app, account: w.acc, kb: kbId, status: 'healthy', scope: items.map(n => idx.path[n.id]), schedule, last: null, next: nextAt(schedule), created: Date.now(), owner: me().name };
+    const src = { id: uid('src'), name: wizName(w, items), app: w.app, account: w.acc, kb: kbId, status: 'healthy', scope: items.map(n => idx.path[n.id]), schedule, publish: w.publish === 'auto' ? 'auto' : 'review', last: null, next: nextAt(schedule), created: Date.now(), owner: me().name };
     D.sources.unshift(src); audit('Connected a source', src.name);
     closeModal(); S.ui.srcWiz = null;
     ENG.newId = src.id; Object.assign(ui('srcList', {}), { q: '', status: '' });

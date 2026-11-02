@@ -1,45 +1,5 @@
-/* Knowledge hub — Discover and Browse (features/hub.js). Prefixes: hub-, cat-.
+/* Knowledge — Browse (features/hub.js). Prefix: cat-.
    Shared resource rows, cards and chips live in resources.css. Tokens only. */
-
-/* ───── Discover ───── */
-.hub-top { margin-bottom: 32px; }
-.hub-search { position: relative; display: flex; align-items: center; }
-.hub-search > .i { position: absolute; left: 16px; color: var(--muted); pointer-events: none; }
-.hub-search .input { height: 52px; padding-left: 48px; padding-right: 96px; font-size: 16px; border-radius: var(--radius-2xl); }
-.hub-search .input::-webkit-search-cancel-button { display: none; }
-.hub-search__go { position: absolute; right: 8px; }
-.hub-kinds { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
-.hub-kind { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: var(--radius-full); box-shadow: inset 0 0 0 1px var(--border); font-size: 13px; font-weight: 500; color: var(--foreground); white-space: nowrap; transition: background-color var(--dur-fast); }
-.hub-kind .i { color: var(--muted); }
-.hub-kind:hover { background: var(--default-soft); }
-.hub-kind:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.hub-kind__n { font-size: 12px; font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
-.hub-kind--all { box-shadow: none; color: var(--accent-soft-foreground); }
-.hub-kind--all .i { color: inherit; }
-
-.hub-grid { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); gap: 32px; align-items: start; }
-.hub-col { min-width: 0; }
-.hub-skel-search { height: 52px; border-radius: var(--radius-2xl); }
-.hub-when { font-size: 12px; color: var(--muted); white-space: nowrap; margin-right: 6px; font-variant-numeric: tabular-nums; }
-.hub-tags { display: inline-flex; align-items: center; gap: 4px; margin-right: 4px; }
-.hub-more { font-size: 11px; color: var(--muted); }
-
-/* Topic index */
-.hub-topics { columns: 2 180px; column-gap: 24px; padding: 14px 16px 4px; background: var(--surface); border-radius: var(--radius-2xl); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); }
-.hub-tgroup { break-inside: avoid; padding-bottom: 12px; }
-.hub-tdomain, .hub-topic { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 3px 6px; margin: 0 -6px; border-radius: var(--radius-md); color: var(--foreground); transition: background-color var(--dur-fast); }
-.hub-tdomain { font-size: 13px; line-height: 20px; font-weight: 600; }
-.hub-topic { font-size: 13px; line-height: 18px; }
-.hub-tdomain:hover, .hub-topic:hover { background: var(--default-soft); }
-.hub-tdomain:focus-visible, .hub-topic:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
-.hub-tlist { list-style: none; margin: 2px 0 0; padding: 0; }
-.hub-count { margin-left: auto; flex: none; font-size: 12px; font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
-.hub-topic.is-zero, .hub-tdomain.is-zero { color: var(--muted); }
-
-/* Collections */
-.hub-share { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; }
-.hub-share .i { flex: none; }
-.hub-colmeta { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; font-size: 12px; line-height: 16px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
 /* ───── Browse ───── */
 .cat.page--wide { max-width: 1680px; }
@@ -146,7 +106,6 @@ button.cat-twist:hover { background: var(--default-soft); color: var(--foregroun
   .cat-layout > .cat-preview { display: none; }
 }
 @container app (max-width: 1023px) {
-  .hub-grid { grid-template-columns: minmax(0, 1fr); }
   .cat-layout, .cat-layout.has-preview { grid-template-columns: minmax(0, 1fr); }
   .cat-layout > .cat-rail { display: none; }
   .cat-filters-btn { display: inline-flex; }
@@ -156,14 +115,7 @@ button.cat-twist:hover { background: var(--default-soft); color: var(--foregroun
   .cat-bar__actions { width: 100%; }
 }
 @container app (max-width: 679px) {
-  .hub-top { margin-bottom: 24px; }
-  .hub-search .input { padding-right: 16px; }
-  .hub-search__go { display: none; }
-  .hub-topics { columns: 1; }
-  .hub-when { display: none; }
   .cat-cards { grid-template-columns: minmax(0, 1fr); }
   .cat-bar__actions .button { flex: 1 1 auto; }
   .cat-sub { flex-wrap: wrap; }
-  .hub-kinds { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-right: -16px; padding-right: 16px; }
-  .hub-kinds::-webkit-scrollbar { display: none; }
 }
