@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BoMesh</title>
+<meta name="description" content="BoMesh — context-aware AI workspace prototype (HeroUI design system)">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:opsz,wght@6..144,400..700&amp;display=swap" rel="stylesheet">
+<!-- Design system: tokens → base → HeroUI components → shell → screens -->
+<link rel="stylesheet" href="./styles/tokens.css">
+<link rel="stylesheet" href="./styles/base.css">
+<link rel="stylesheet" href="./styles/components.css">
+<link rel="stylesheet" href="./styles/layout.css">
+<link rel="stylesheet" href="./styles/pages/auth.css">
+<link rel="stylesheet" href="./styles/pages/chat.css">
+<link rel="stylesheet" href="./styles/pages/knowledge.css">
+<link rel="stylesheet" href="./styles/pages/resources.css">
+<link rel="stylesheet" href="./styles/pages/hub.css">
+<link rel="stylesheet" href="./styles/pages/library.css">
+<link rel="stylesheet" href="./styles/pages/reader.css">
+<link rel="stylesheet" href="./styles/pages/governance.css">
+<link rel="stylesheet" href="./styles/pages/sources.css">
+<link rel="stylesheet" href="./styles/pages/people.css">
+<link rel="stylesheet" href="./styles/pages/workspace-admin.css">
+<link rel="stylesheet" href="./styles/pages/platform.css">
+<link rel="stylesheet" href="./styles/pages/design.css">
+<link rel="stylesheet" href="./styles/pages/home.css">
+<link rel="stylesheet" href="./styles/pages/spaces.css">
+<link rel="stylesheet" href="./styles/pages/work.css">
+<link rel="stylesheet" href="./styles/pages/requests.css">
+<link rel="stylesheet" href="./styles/pages/work-research.css">
+</head>
+<body>
+<div id="frame"><div id="app"></div><div id="layer"></div></div>
+<div id="proto-root"></div>
+<!-- Classic scripts share one global scope and load in order, so the
+     prototype runs from file:// with no server or build step. -->
+<script src="./scripts/core/util.js"></script>
+<script src="./scripts/core/icons.js"></script>
+<script src="./scripts/data/mock.js"></script>
+<script src="./scripts/data/ute.js"></script>
+<script src="./scripts/data/knowledge.js"></script>
+<script src="./scripts/core/store.js"></script>
+<script src="./scripts/core/workspace.js"></script>
+<script src="./scripts/core/catalog.js"></script>
+<script src="./scripts/core/router.js"></script>
+<script src="./scripts/core/ui.js"></script>
+<script src="./scripts/core/overlays.js"></script>
+<script src="./scripts/core/shell.js"></script>
+<script src="./scripts/core/app.js"></script>
+<script src="./scripts/core/proto.js"></script>
+<script src="./scripts/features/auth.js"></script>
+<script src="./scripts/features/chat.js"></script>
+<script src="./scripts/features/chat-files.js"></script>
+<script src="./scripts/features/conversations.js"></script>
+<script src="./scripts/features/inbox.js"></script>
+<script src="./scripts/features/home.js"></script>
+<script src="./scripts/features/spaces.js"></script>
+<script src="./scripts/features/work.js"></script>
+<script src="./scripts/features/work-learning.js"></script>
+<script src="./scripts/features/work-research.js"></script>
+<script src="./scripts/features/requests.js"></script>
+<script src="./scripts/features/resources.js"></script>
+<script src="./scripts/features/knowledge.js"></script>
+<script src="./scripts/features/documents.js"></script>
+<script src="./scripts/features/reader.js"></script>
+<script src="./scripts/features/hub.js"></script>
+<script src="./scripts/features/library.js"></script>
+<script src="./scripts/features/governance.js"></script>
+<script src="./scripts/features/search.js"></script>
+<script src="./scripts/features/overview.js"></script>
+<script src="./scripts/features/sources.js"></script>
+<script src="./scripts/features/connections.js"></script>
+<script src="./scripts/features/people.js"></script>
+<script src="./scripts/features/assistant.js"></script>
+<script src="./scripts/features/activity.js"></script>
+<script src="./scripts/features/settings.js"></script>
+<script src="./scripts/features/platform.js"></script>
+<script src="./scripts/features/design.js"></script>
+<script>boot();</script>
+</body>
+</html>

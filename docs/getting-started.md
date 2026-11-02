@@ -12,7 +12,7 @@ connector development.
 - [Bun](https://bun.sh/) to run the WebUI
 - An OpenAI API key for chat and an OpenRouter API key for document vision and embeddings
 
-The Flutter app under `app/bomesh/` is optional. It needs a current Flutter
+The Flutter client under `apps/mobile/` is optional. It needs a current Flutter
 SDK only when you are working on the mobile client.
 
 ## Initialize the local stack
@@ -21,7 +21,7 @@ From the repository root:
 
 ```bash
 uv sync --project backend
-npm --prefix web ci
+npm --prefix apps/web ci
 make init
 ```
 

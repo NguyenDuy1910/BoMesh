@@ -9,7 +9,7 @@ boundaries that must be configured explicitly in deployment. Start with
 | File | Purpose |
 | --- | --- |
 | `backend/.env.example` | Complete backend configuration template used to create the ignored root `.env`. |
-| `web/.env.example` | Browser-only public-variable reference for deployments that inject WebUI configuration through the build. |
+| `apps/web/.env.example` | Browser-only public-variable reference for deployments that inject WebUI configuration through the build. |
 | `deployment/compose.yml` | Local PostgreSQL, Qdrant, MinIO, and Temporal topology. Optional Compose overrides go in ignored `deployment/.env`. |
 
 Do not commit credentials, encryption keys, signed object URLs, or deployment
@@ -172,9 +172,9 @@ appropriate for potentially sensitive prompts, outputs, and retrieved content.
 ```bash
 make status
 uv run --project backend pytest -q tests
-npm --prefix web test
-npm --prefix web run typecheck
-npm --prefix web run build
+npm --prefix apps/web test
+npm --prefix apps/web run typecheck
+npm --prefix apps/web run build
 ```
 
 `make reset-all` is the complete local data reset. It clears application and
@@ -194,3 +194,4 @@ request and response reference.
 | `MissingGreenlet` while listing datasources | Ensure the API was restarted after the datasource service update; the list query eager-loads connector credentials. |
 | Qdrant schema is incompatible | Run `make qdrant-init`; it recreates the local derived collection. |
 | `/health` is degraded | Inspect the individual service entries for missing provider credentials or unreachable dependencies. |
+| Turbopack panics with `Next.js package not found` after moving the WebUI | Stop the dev server, remove the generated `apps/web/.next/` cache, and restart `bun run web`. `turbopack.root` is pinned to `apps/web/`; do not reuse a cache generated at the old path. |

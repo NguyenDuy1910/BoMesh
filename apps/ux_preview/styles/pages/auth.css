@@ -1,0 +1,50 @@
+/* Auth: sign in, create account, workspace chooser (prefix au-). Layout comes from .auth* in layout.css. */
+.au-brand { margin-bottom: 32px; }
+.au-title { margin-bottom: 24px; }
+.au-sub { margin: -16px 0 24px; }
+.au-narrow { max-width: 400px; }
+.auth--single .auth__form-inner.au-narrow { max-width: 400px; }
+.auth--single .auth__form-inner.au-ws { max-width: 520px; }
+
+.au-google svg { flex: none; }
+.au-or { display: flex; align-items: center; gap: 12px; margin: 20px 0; color: var(--muted); font-size: 12px; }
+.au-or::before, .au-or::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--separator); }
+
+.au-pw > .input { padding-left: 12px; }
+.au-forgot { margin: 8px 0 20px; font-size: 13px; }
+.au-form-error { margin-bottom: 16px; }
+.au-foot { margin-top: 24px; text-align: center; font-size: 13px; color: var(--muted); }
+.au-foot--start { text-align: left; }
+.au-foot .link-button { font-size: 13px; }
+.au-hint { margin-top: 12px; text-align: center; font-size: 12px; line-height: 18px; color: var(--muted); text-wrap: balance; }
+.au-hint .link-button { font-size: 12px; font-family: var(--font-mono); overflow-wrap: anywhere; }
+
+/* Password strength */
+.au-strength { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.au-strength .progress-bar { flex: 1 1 auto; }
+.au-strength__label { min-width: 44px; text-align: right; color: var(--muted); }
+.au-rules { list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 12px; line-height: 16px; color: var(--muted); }
+.au-rules li { display: flex; align-items: center; gap: 6px; }
+.au-rules li.is-ok { color: var(--success-soft-foreground); }
+.au-terms { margin: 20px 0 24px; display: flex; flex-direction: column; gap: 6px; }
+
+/* Aside: one product proof */
+.au-aside { align-items: center; }
+.au-proof { width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 20px; }
+.au-proof__card { gap: 14px; padding: 20px; }
+.au-proof__q { align-self: flex-end; max-width: 85%; padding: 8px 12px; border-radius: var(--radius-2xl); background: var(--default); font-size: 13px; line-height: 18px; }
+.au-proof__a { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; line-height: 22px; }
+.au-proof__ai { display: grid; place-items: center; width: 24px; height: 24px; border-radius: var(--radius-lg); background: var(--accent-soft); color: var(--accent-soft-foreground); flex: none; margin-top: -1px; }
+.au-proof .cite { cursor: default; }
+.au-proof__sources { padding-left: 34px; }
+.au-source { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; height: 28px; padding: 0 10px 0 6px; border-radius: var(--radius-full); background: var(--surface-secondary); font-size: 12px; font-weight: 500; min-width: 0; }
+.au-proof__caption { font-size: 15px; line-height: 22px; color: var(--muted); text-align: center; text-wrap: balance; }
+
+/* Workspace chooser */
+.au-chev { color: var(--muted); }
+.au-console-mark { background: var(--foreground); color: var(--background); }
+
+@container app (max-width: 679px) {
+  .au-brand { margin-bottom: 24px; }
+  .au-title { margin-bottom: 20px; }
+}

@@ -1,0 +1,64 @@
+/* Design system gallery (prefix ds-). The page is its own scroll container (proto mode has no shell). */
+.ds { height: 100%; overflow-y: auto; background: var(--background); }
+.ds-top { position: sticky; top: 0; z-index: var(--z-sticky); background: var(--background); border-bottom: 1px solid var(--separator); }
+.ds-top__inner { max-width: 1100px; margin: 0 auto; height: var(--header-h); padding: 0 32px; display: flex; align-items: center; gap: 8px; }
+.ds-wrap { max-width: 1100px; margin: 0 auto; padding: 24px 32px 64px; }
+.ds-layout { display: grid; grid-template-columns: 168px minmax(0, 1fr); gap: 32px; align-items: start; }
+.ds-nav { position: sticky; top: calc(var(--header-h) + 24px); display: flex; flex-direction: column; gap: 2px; }
+.ds-nav__link { height: 32px; padding: 0 10px; border-radius: var(--radius-lg); font-size: 13px; color: var(--muted); text-align: left; transition: background-color var(--dur-fast), color var(--dur-fast); white-space: nowrap; }
+.ds-nav__link:hover { background: var(--default); color: var(--foreground); }
+.ds-nav__link[aria-current] { background: var(--accent-soft); color: var(--accent-soft-foreground); font-weight: 500; }
+.ds-main { min-width: 0; }
+.ds-main > .section { margin-top: 48px; scroll-margin-top: calc(var(--header-h) + 16px); }
+.ds-main > .section:first-child { margin-top: 0; }
+
+.ds-demo { gap: 16px; }
+.ds-demo > .card__header .card__title { font-size: 12px; line-height: 16px; font-weight: 500; color: var(--muted); }
+.ds-demo--flat { background: var(--surface-secondary); box-shadow: none; }
+.ds-narrow { max-width: 320px; }
+.ds-forms { gap: 32px; }
+.ds-pct { min-width: 36px; text-align: right; flex: none; }
+.ds-demo .row > .progress-bar { flex: 1 1 auto; }
+.ds-nowrap { white-space: nowrap; }
+.ds-start { align-items: start; }
+.ds-answer { font-size: 14px; line-height: 24px; }
+.ds-passage { font-size: 14px; line-height: 24px; color: var(--foreground); }
+
+/* Foundations */
+.ds-group + .ds-group { margin-top: 4px; }
+.ds-group .t-label { margin-bottom: 8px; }
+.ds-swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.ds-swatch { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ds-swatch__chip { height: 48px; border-radius: var(--radius-xl); box-shadow: inset 0 0 0 1px var(--border); margin-bottom: 4px; }
+.ds-swatch__name { font-size: 12px; line-height: 16px; color: var(--foreground); }
+.ds-swatch__val { font-size: 11px; line-height: 14px; color: var(--muted); font-family: var(--font-mono); }
+.ds-type { display: flex; flex-direction: column; }
+.ds-type__row { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 10px 0; min-width: 0; }
+.ds-type__row + .ds-type__row { border-top: 1px solid var(--separator); }
+.ds-type__meta { display: flex; gap: 12px; flex: none; font-size: 12px; line-height: 16px; color: var(--muted); }
+.ds-type__meta .mono { font-size: 11px; }
+.ds-tiles { display: flex; flex-wrap: wrap; gap: 16px; }
+.ds-tile { display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 88px; }
+.ds-radius { width: 56px; height: 56px; background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.ds-shadow { width: 88px; height: 56px; border-radius: var(--radius-xl); background: var(--surface); }
+.ds-space { display: flex; flex-direction: column; gap: 8px; }
+.ds-space__row { display: grid; grid-template-columns: 64px auto 1fr; align-items: center; gap: 12px; }
+.ds-space__bar { height: 12px; border-radius: var(--radius-sm); background: var(--accent); }
+
+/* Chip matrix */
+.ds-matrix { display: grid; grid-template-columns: 72px repeat(var(--cols), minmax(0, max-content)); gap: 12px 20px; align-items: center; overflow-x: auto; }
+
+@container app (max-width: 1023px) {
+  .ds-layout { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .ds-nav { position: static; flex-direction: row; overflow-x: auto; padding-bottom: 4px; margin: 0 -4px; }
+  .ds-nav__link { flex: none; }
+}
+@container app (max-width: 679px) {
+  .ds-top__inner { padding: 0 12px; }
+  .ds-wrap { padding: 20px 16px 48px; }
+  .ds-type__row { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .ds-type__meta { flex-wrap: wrap; }
+  .ds-matrix { grid-template-columns: 64px repeat(var(--cols), max-content); }
+  .ds-forms { gap: 0; }
+  .ds-forms > div + div { margin-top: 16px; }
+}

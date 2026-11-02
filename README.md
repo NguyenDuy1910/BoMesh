@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="web/public/bomesh-logo.png" alt="BoMesh" width="88" />
+  <img src="apps/web/public/bomesh-logo.png" alt="BoMesh" width="88" />
 </p>
 
 <h1 align="center">BoMesh</h1>
@@ -94,7 +94,7 @@ git clone <your-fork-or-repository-url>
 cd BoMesh
 
 uv sync --project backend
-npm --prefix web ci
+npm --prefix apps/web ci
 make init
 ```
 
@@ -153,7 +153,7 @@ Open:
 | Guide | Use it for |
 | --- | --- |
 | [Documentation index](docs/README.md) | Finding the right guide by responsibility. |
-| [UI and UX concept source](ui_preview/README.md) | Canonical web/app visual language, prototypes, user flows, and implementation guidance. |
+| [UI and UX source of truth](apps/ux_preview/README.md) | Canonical review surface for web/mobile visual language, interaction states, and end-to-end flows. |
 | [Getting started](docs/getting-started.md) | Local setup, reset behavior, and development identity. |
 | [Architecture](docs/architecture.md) | Package ownership, request flow, and infrastructure boundaries. |
 | [Connectors and indexing](docs/connectors-and-indexing.md) | Connector scopes, Docling, contextual hybrid retrieval, ACL projection, and retries. |
@@ -185,9 +185,9 @@ Run the verification suite from the repository root:
 
 ```bash
 uv run --project backend pytest -q tests
-npm --prefix web test
-npm --prefix web run typecheck
-npm --prefix web run build
+npm --prefix apps/web test
+npm --prefix apps/web run typecheck
+npm --prefix apps/web run build
 ```
 
 The terminal client is available after the API is running:

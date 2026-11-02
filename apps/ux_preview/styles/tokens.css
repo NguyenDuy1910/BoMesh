@@ -1,0 +1,185 @@
+/*
+ * BoMesh design tokens — HeroUI v3 theme.
+ * Source: HeroUI Theme Builder export (template=crm, hue 139.21, base 0.02,
+ * Google Sans, radius M, field radius L) plus HeroUI's calculated colors
+ * from packages/styles/themes/default/variables.css. Components consume only
+ * these semantic variables; never hard-code colors in component or page CSS.
+ */
+:root {
+  --white: oklch(100% 0 0);
+  --black: oklch(0% 0 0);
+  --snow: oklch(99.11% 0 0);
+  --eclipse: oklch(21.03% 0.0059 285.89);
+
+  --font-sans: "Google Sans Flex", "Google Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+
+  /* Radius (HeroUI scale; --radius = Medium) */
+  --radius: 0.5rem;
+  --field-radius: 0.75rem;
+  --radius-sm: calc(var(--radius) * 0.5);
+  --radius-md: calc(var(--radius) * 0.75);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.5);
+  --radius-2xl: calc(var(--radius) * 2);
+  --radius-3xl: calc(var(--radius) * 3);
+  --radius-full: 9999px;
+
+  --border-width: 1px;
+  --disabled-opacity: 0.5;
+  --ring-offset-width: 2px;
+
+  /* Motion (HeroUI easing) */
+  --ease-smooth: ease;
+  --ease-out: cubic-bezier(0.215, 0.61, 0.355, 1);
+  --ease-out-fluid: cubic-bezier(0.32, 0.72, 0, 1);
+  --dur-fast: 120ms;
+  --dur: 200ms;
+  --dur-slow: 320ms;
+
+  /* Layout */
+  --sidebar-w: 248px;
+  --content-max: 1200px;
+  --header-h: 52px;
+
+  /* Z-index */
+  --z-sticky: 10;
+  --z-sidebar: 40;
+  --z-overlay: 60;
+  --z-popover: 80;
+  --z-toast: 90;
+  --z-proto: 100;
+}
+
+/* Background (HeroUI Theme Builder "Base"): neutrals = lightness from the
+   export × tint chroma at the chosen hue. Switched with <html data-bg>.
+   Accent, status and evidence colors are unaffected. */
+:root { --base-hue: 139.21; --tint: 1; }
+[data-bg="green"] { --base-hue: 139.21; --tint: 1; }
+[data-bg="neutral"] { --base-hue: 286; --tint: 0; }
+[data-bg="slate"] { --base-hue: 250; --tint: 1; }
+[data-bg="violet"] { --base-hue: 292; --tint: 1; }
+[data-bg="sand"] { --base-hue: 75; --tint: 1; }
+
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+  --accent: oklch(62.04% 0.1950 139.21);
+  --accent-foreground: oklch(99.11% 0 0);
+  --background: oklch(97.02% calc(0.0200 * var(--tint)) var(--base-hue));
+  --border: oklch(90.00% calc(0.0200 * var(--tint)) var(--base-hue));
+  --danger: oklch(65.32% 0.2421 11.99);
+  --danger-foreground: oklch(99.11% 0 0);
+  --default: oklch(94.00% calc(0.0200 * var(--tint)) var(--base-hue));
+  --default-foreground: oklch(21.03% calc(0.0059 * var(--tint)) var(--base-hue));
+  --field-background: oklch(100.00% calc(0.0100 * var(--tint)) var(--base-hue));
+  --field-border: transparent;
+  --field-foreground: oklch(21.03% calc(0.0200 * var(--tint)) var(--base-hue));
+  --field-placeholder: oklch(55.17% calc(0.0400 * var(--tint)) var(--base-hue));
+  --focus: oklch(62.04% 0.1950 139.21);
+  --foreground: oklch(21.03% calc(0.0200 * var(--tint)) var(--base-hue));
+  --muted: oklch(55.17% calc(0.0400 * var(--tint)) var(--base-hue));
+  --overlay: oklch(100.00% calc(0.0060 * var(--tint)) var(--base-hue));
+  --overlay-foreground: oklch(21.03% calc(0.0200 * var(--tint)) var(--base-hue));
+  --scrollbar: oklch(87.10% calc(0.0200 * var(--tint)) var(--base-hue));
+  --segment: oklch(100.00% calc(0.0200 * var(--tint)) var(--base-hue));
+  --segment-foreground: oklch(21.03% calc(0.0200 * var(--tint)) var(--base-hue));
+  --separator: oklch(92.00% calc(0.0200 * var(--tint)) var(--base-hue));
+  --success: oklch(73.29% 0.2012 137.06);
+  --success-foreground: oklch(21.03% 0.0059 137.06);
+  --surface: oklch(100.00% calc(0.0100 * var(--tint)) var(--base-hue));
+  --surface-foreground: oklch(21.03% calc(0.0200 * var(--tint)) var(--base-hue));
+  --surface-secondary: oklch(95.24% calc(0.0160 * var(--tint)) var(--base-hue));
+  --surface-tertiary: oklch(93.73% calc(0.0160 * var(--tint)) var(--base-hue));
+  --warning: oklch(78.19% 0.1648 58.58);
+  --warning-foreground: oklch(21.03% 0.0059 58.58);
+  --backdrop: rgba(0, 0, 0, 0.4);
+
+  --surface-shadow: 0 2px 4px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.06), 0 0 1px 0 rgba(0, 0, 0, 0.06);
+  --overlay-shadow: 0 2px 8px 0 rgba(0, 0, 0, 0.06), 0 -6px 12px 0 rgba(0, 0, 0, 0.03), 0 14px 28px 0 rgba(0, 0, 0, 0.08);
+  --field-shadow: 0 2px 4px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.06), 0 0 1px 0 rgba(0, 0, 0, 0.06);
+  --card-border: transparent;
+
+  --accent-soft: color-mix(in oklab, var(--accent) 15%, transparent);
+  --accent-soft-foreground: color-mix(in oklab, var(--accent) 70%, var(--foreground) 30%);
+  --accent-soft-hover: color-mix(in oklab, var(--accent) 20%, transparent);
+  --danger-soft: color-mix(in oklab, var(--danger) 15%, transparent);
+  --danger-soft-foreground: color-mix(in oklab, var(--danger) 70%, var(--foreground) 40%);
+  --danger-soft-hover: color-mix(in oklab, var(--danger) 20%, transparent);
+  --warning-soft: color-mix(in oklab, var(--warning) 15%, transparent);
+  --warning-soft-foreground: color-mix(in oklab, var(--warning) 80%, var(--foreground) 70%);
+  --warning-soft-hover: color-mix(in oklab, var(--warning) 20%, transparent);
+  --success-soft: color-mix(in oklab, var(--success) 15%, transparent);
+  --success-soft-foreground: color-mix(in oklab, var(--success) 80%, var(--foreground) 60%);
+  --success-soft-hover: color-mix(in oklab, var(--success) 20%, transparent);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --accent: oklch(62.04% 0.1950 139.21);
+  --accent-foreground: oklch(99.11% 0 0);
+  --background: oklch(12.00% calc(0.0200 * var(--tint)) var(--base-hue));
+  --border: oklch(28.00% calc(0.0200 * var(--tint)) var(--base-hue));
+  --danger: oklch(59.40% 0.2046 10.88);
+  --danger-foreground: oklch(99.11% 0 0);
+  --default: oklch(27.40% calc(0.0200 * var(--tint)) var(--base-hue));
+  --default-foreground: oklch(99.11% 0 0);
+  --field-background: oklch(21.03% calc(0.0400 * var(--tint)) var(--base-hue));
+  --field-border: transparent;
+  --field-foreground: oklch(99.11% calc(0.0200 * var(--tint)) var(--base-hue));
+  --field-placeholder: oklch(70.50% calc(0.0400 * var(--tint)) var(--base-hue));
+  --focus: oklch(62.04% 0.1950 139.21);
+  --foreground: oklch(99.11% calc(0.0200 * var(--tint)) var(--base-hue));
+  --muted: oklch(70.50% calc(0.0400 * var(--tint)) var(--base-hue));
+  --overlay: oklch(21.03% calc(0.0400 * var(--tint)) var(--base-hue));
+  --overlay-foreground: oklch(99.11% calc(0.0200 * var(--tint)) var(--base-hue));
+  --scrollbar: oklch(70.50% calc(0.0200 * var(--tint)) var(--base-hue));
+  --segment: oklch(39.64% calc(0.0200 * var(--tint)) var(--base-hue));
+  --segment-foreground: oklch(99.11% calc(0.0200 * var(--tint)) var(--base-hue));
+  --separator: oklch(25.00% calc(0.0200 * var(--tint)) var(--base-hue));
+  --success: oklch(73.29% 0.2012 137.06);
+  --success-foreground: oklch(21.03% 0.0059 137.06);
+  --surface: oklch(21.03% calc(0.0400 * var(--tint)) var(--base-hue));
+  --surface-foreground: oklch(99.11% calc(0.0200 * var(--tint)) var(--base-hue));
+  --surface-secondary: oklch(25.70% calc(0.0300 * var(--tint)) var(--base-hue));
+  --surface-tertiary: oklch(27.21% calc(0.0300 * var(--tint)) var(--base-hue));
+  --warning: oklch(82.03% 0.1444 62.59);
+  --warning-foreground: oklch(21.03% 0.0059 62.59);
+  --backdrop: rgba(0, 0, 0, 0.6);
+
+  --surface-shadow: 0 0 0 0 transparent;
+  --overlay-shadow: 0 0 1px 0 rgba(255, 255, 255, 0.3) inset, 0 16px 40px -12px rgba(0, 0, 0, 0.6);
+  --field-shadow: 0 0 0 0 transparent;
+  --card-border: var(--border);
+
+  --accent-soft: color-mix(in oklab, var(--accent) 12%, transparent);
+  --accent-soft-foreground: color-mix(in oklab, var(--accent) 80%, var(--foreground) 30%);
+  --accent-soft-hover: color-mix(in oklab, var(--accent) 16%, transparent);
+  --danger-soft: color-mix(in oklab, var(--danger) 15%, transparent);
+  --danger-soft-foreground: color-mix(in oklab, var(--danger) 80%, var(--foreground) 40%);
+  --danger-soft-hover: color-mix(in oklab, var(--danger) 20%, transparent);
+  --warning-soft: color-mix(in oklab, var(--warning) 15%, transparent);
+  --warning-soft-foreground: color-mix(in oklab, var(--warning) 80%, var(--foreground) 30%);
+  --warning-soft-hover: color-mix(in oklab, var(--warning) 20%, transparent);
+  --success-soft: color-mix(in oklab, var(--success) 15%, transparent);
+  --success-soft-foreground: color-mix(in oklab, var(--success) 80%, var(--foreground) 30%);
+  --success-soft-hover: color-mix(in oklab, var(--success) 20%, transparent);
+}
+
+/* Calculated colors — identical formulas in both themes (HeroUI). */
+:root,
+[data-theme] {
+  --surface-hover: color-mix(in oklab, var(--surface) 92%, var(--surface-foreground) 8%);
+  --background-secondary: color-mix(in oklab, var(--background) 96%, var(--foreground) 4%);
+  --default-hover: color-mix(in oklab, var(--default) 96%, var(--default-foreground) 4%);
+  --accent-hover: color-mix(in oklab, var(--accent) 90%, var(--accent-foreground) 10%);
+  --danger-hover: color-mix(in oklab, var(--danger) 90%, var(--danger-foreground) 10%);
+  --field-hover: color-mix(in oklab, var(--field-background) 90%, var(--field-foreground) 2%);
+  --default-soft: color-mix(in oklab, var(--default) 50%, transparent);
+  --default-soft-hover: color-mix(in oklab, var(--default) 70%, transparent);
+  --separator-tertiary: color-mix(in oklab, var(--surface) 81%, var(--surface-foreground) 19%);
+  --border-secondary: color-mix(in oklab, var(--surface) 78%, var(--surface-foreground) 22%);
+  /* Evidence highlight: a fixed, non-themeable marker for cited passages. */
+  --evidence: color-mix(in oklab, var(--warning) 28%, transparent);
+  --evidence-strong: color-mix(in oklab, var(--warning) 48%, transparent);
+}
