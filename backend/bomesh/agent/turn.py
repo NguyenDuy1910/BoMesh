@@ -207,7 +207,11 @@ async def run_sampling_request(
 
     started_at = perf_counter()
     reducer = ResponseReducer()
-    projection = CitationProjection(turn.evidence, references=turn.references)
+    projection = CitationProjection(
+        turn.evidence,
+        workspace_id=turn.environment.agent_context.tenant_id,
+        references=turn.references,
+    )
     artifacts = ArtifactProjection(
         tuple(
             artifact

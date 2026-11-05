@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 from uuid import uuid4
 
-import bomesh.services.item_ingestion as item_ingestion
+import bomesh.services.knowledge_items.indexing as item_ingestion
 import pytest
 from bomesh.connector.protocol import (
     AccessPolicy,
@@ -32,23 +32,15 @@ from bomesh.connector.protocol import (
 )
 from bomesh.db.models import Item, ItemUpload
 from bomesh.document_index import IndexingContext, ItemIndex
-from bomesh.storage import (
-    ObjectStorageError,
-    PresignedRequest,
-    S3DocumentStorage,
-    StoredObject,
-    aws_s3,
-)
+from bomesh.storage import ObjectStorageError, PresignedRequest, StoredObject
 from bomesh.services import (
     DocumentProcessingError,
-    UploadTooLargeError,
 )
-from bomesh.services.item_ingestion import ItemIngestionService
-from bomesh.services.documents import DocumentService
-from bomesh.services.stored_file_content import StoredFileContentService
-from bomesh.services import document_rendition
-from bomesh.services.document_rendition import build_document_rendition
-from bomesh.services.preview import KnowledgePreview
+from bomesh.services.knowledge_items.indexing import ItemIngestionService
+from bomesh.services.knowledge_items.file_content import StoredFileContentService
+from bomesh.services.knowledge_items import rendition as rendition_module
+from bomesh.services.knowledge_items.rendition import build_document_rendition
+from bomesh.services.knowledge_items.preview import KnowledgePreview
 from PIL import Image
 
 
@@ -68,12 +60,26 @@ async def test_item_ingestion_owns_the_source_neutral_indexing_sequence(
 ) -> None:
     events: list[str] = []
 
+    class Session:
+        """Only what recording the finished index reads: the locked row."""
+
+        async def get(self, *_: Any, **__: Any) -> Item:
+            return stored
+
+        async def flush(self) -> None:
+            return None
+
+    async def unchanged_collection(_: object, item_id: Any) -> Any:
+        return stored.parent_item_id
+
+    monkeypatch.setattr(item_ingestion, "_governing_collection", unchanged_collection)
+
     class SessionFactory:
         def begin(self) -> SessionFactory:
             return self
 
-        async def __aenter__(self) -> object:
-            return object()
+        async def __aenter__(self) -> Session:
+            return Session()
 
         async def __aexit__(self, *_: Any) -> None:
             return None
@@ -85,9 +91,15 @@ async def test_item_ingestion_owns_the_source_neutral_indexing_sequence(
         async def mark_index_processing(self, _: Any) -> None:
             events.append("processing")
 
-        async def mark_index_ready(self, _: Any, *, processed_version: str) -> None:
+        async def mark_index_ready(
+            self, _: Any, *, processed_version: str, indexed_revision_number: int | None
+        ) -> None:
             assert processed_version == "parser=p;chunker=c"
+            assert indexed_revision_number is None
             events.append("ready")
+
+        async def current_revision(self, _: Any) -> None:
+            return None
 
         async def mark_index_failed(self, _: Any) -> None:
             events.append("failed")
@@ -179,6 +191,7 @@ def _document(
         mime_type=content_type,
         size_bytes=size_bytes,
         status=status,
+        publication_state="published",
         index_status="pending",
         metadata_={"file_name": "sample"},
     )
@@ -186,24 +199,9 @@ def _document(
         item_id=document.id,
         tenant_id=document.tenant_id,
         owner_user_id=owner_id,
-        idempotency_key="test",
         status="available",
     )
     return document
-
-
-def test_upload_limits_reject_oversize_objects() -> None:
-    uploads = DocumentService(
-        cast(Any, None),
-        object_storage=cast(Any, SimpleNamespace()),
-        ingestion=cast(Any, SimpleNamespace()),
-        presenter=cast(Any, SimpleNamespace()),
-        max_upload_bytes=100,
-    )
-
-    uploads._validate_upload_size(100)
-    with pytest.raises(UploadTooLargeError):
-        uploads._validate_upload_size(101)
 
 
 class _StreamingStorage:
@@ -379,269 +377,6 @@ def test_item_ingestion_has_no_raw_processing_implementation_dependencies() -> N
     assert "EmbeddingService" not in {
         node.name for node in ast.walk(tree) if isinstance(node, ast.ClassDef)
     }
-
-
-class _PresigningS3Client:
-    def __init__(self) -> None:
-        self.operation = ""
-        self.parameters: dict[str, Any] = {}
-        self.expires_in = 0
-        self.method = ""
-        self.uploaded_body: bytes | None = None
-
-    def generate_presigned_url(
-        self,
-        operation: str,
-        *,
-        Params: dict[str, str],
-        ExpiresIn: int,
-        HttpMethod: str,
-    ) -> str:
-        self.operation = operation
-        self.parameters = Params
-        self.expires_in = ExpiresIn
-        self.method = HttpMethod
-        return (
-            "https://documents.s3.amazonaws.com/users/user-1/documents/id/raw?signed=1"
-        )
-
-    def put_object(self, **kwargs: Any) -> dict[str, str]:
-        self.operation = "put_object"
-        self.parameters = kwargs
-        body = kwargs.get("Body")
-        if hasattr(body, "read"):
-            self.uploaded_body = body.read()
-        return {"ETag": '"etag-1"'}
-
-
-def test_s3_presigned_put_is_scoped_and_bounded() -> None:
-    client = _PresigningS3Client()
-    storage = S3DocumentStorage(bucket="documents", client=client)
-
-    request = storage.presign_upload(
-        "users/user 1/documents/id/raw",
-        content_type="application/pdf",
-        expires_seconds=600,
-    )
-    assert request.method == "PUT"
-    assert request.headers == {"Content-Type": "application/pdf"}
-    assert request.url.endswith("?signed=1")
-    assert client.operation == "put_object"
-    assert client.parameters == {
-        "Bucket": "documents",
-        "Key": "users/user 1/documents/id/raw",
-        "ContentType": "application/pdf",
-    }
-    assert client.expires_in == 600
-    assert client.method == "PUT"
-
-
-def test_s3_put_bytes_uses_the_same_object_storage_boundary() -> None:
-    client = _PresigningS3Client()
-    storage = S3DocumentStorage(bucket="documents", client=client)
-
-    stored = storage.put_bytes(
-        b"raw document",
-        "files/document-1/report.txt",
-        content_type="text/plain",
-    )
-
-    assert client.parameters == {
-        "Bucket": "documents",
-        "Key": "files/document-1/report.txt",
-        "Body": b"raw document",
-        "ContentType": "text/plain",
-    }
-    assert stored.size_bytes == len(b"raw document")
-    assert stored.content_type == "text/plain"
-    assert stored.etag == "etag-1"
-
-
-def test_s3_put_path_streams_from_a_file(tmp_path: Path) -> None:
-    path = tmp_path / "report.txt"
-    path.write_bytes(b"raw document")
-    client = _PresigningS3Client()
-    storage = S3DocumentStorage(bucket="documents", client=client)
-
-    storage.put_path(
-        path,
-        "files/document-1/report.txt",
-        content_type="text/plain",
-    )
-
-    assert client.uploaded_body == b"raw document"
-    assert client.parameters["Bucket"] == "documents"
-    assert client.parameters["Key"] == "files/document-1/report.txt"
-
-
-def test_s3_constructor_uses_the_standard_boto_session(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client = _PresigningS3Client()
-    captured: dict[str, Any] = {}
-
-    class _Session:
-        def __init__(self, *, region_name: str | None) -> None:
-            captured["region_name"] = region_name
-
-        def client(self, service: str, **kwargs: Any) -> _PresigningS3Client:
-            captured["service"] = service
-            captured["client_kwargs"] = kwargs
-            return client
-
-    monkeypatch.setattr(aws_s3.boto3, "Session", _Session)
-
-    storage = S3DocumentStorage(
-        bucket="documents",
-        region="ap-southeast-1",
-    )
-
-    assert isinstance(storage, S3DocumentStorage)
-    assert captured["region_name"] == "ap-southeast-1"
-    assert captured["service"] == "s3"
-    assert captured["client_kwargs"]["endpoint_url"] is None
-    assert "aws_access_key_id" not in captured["client_kwargs"]
-    assert "aws_secret_access_key" not in captured["client_kwargs"]
-
-
-def test_signed_urls_name_storage_as_the_client_reaches_it() -> None:
-    # Real boto3: signing makes no request. A phone cannot reach the backend's
-    # loopback storage address, so URLs it receives must name the public host.
-    storage = S3DocumentStorage(
-        bucket="documents",
-        region="us-east-1",
-        endpoint_url="http://127.0.0.1:9000",
-        public_endpoint_url="http://10.0.0.5:9000",
-        addressing_style="path",
-        access_key_id="key",
-        secret_access_key="secret",
-    )
-
-    download = storage.presign_download("documents/id/page-0001.webp", expires_seconds=60)
-    upload = storage.presign_upload(
-        "documents/id/raw", content_type="application/pdf", expires_seconds=60
-    )
-
-    assert download.url.startswith("http://10.0.0.5:9000/documents/documents/id/page-0001.webp?")
-    assert upload.url.startswith("http://10.0.0.5:9000/documents/documents/id/raw?")
-    unconfigured = S3DocumentStorage(
-        bucket="documents",
-        region="us-east-1",
-        endpoint_url="http://127.0.0.1:9000",
-        addressing_style="path",
-        access_key_id="key",
-        secret_access_key="secret",
-    )
-    assert unconfigured.presign_download("k", expires_seconds=60).url.startswith(
-        "http://127.0.0.1:9000/"
-    )
-
-
-def test_cloudflare_r2_uses_the_same_boto3_s3_adapter(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client = _PresigningS3Client()
-    captured: dict[str, Any] = {}
-
-    class _Session:
-        def __init__(self, **kwargs: str | None) -> None:
-            captured["session_kwargs"] = kwargs
-
-        def client(self, service: str, **kwargs: Any) -> _PresigningS3Client:
-            captured["service"] = service
-            captured["client_kwargs"] = kwargs
-            return client
-
-    monkeypatch.setattr(aws_s3.boto3, "Session", _Session)
-
-    storage = S3DocumentStorage.for_cloudflare_r2(
-        bucket="documents",
-        account_id="account-id",
-        access_key_id="r2-access-key",
-        secret_access_key="r2-secret-key",
-    )
-
-    assert storage.provider == "cloudflare_r2"
-    assert storage.bucket == "documents"
-    assert captured["session_kwargs"] == {
-        "region_name": "auto",
-        "aws_access_key_id": "r2-access-key",
-        "aws_secret_access_key": "r2-secret-key",
-    }
-    assert captured["service"] == "s3"
-    assert captured["client_kwargs"]["endpoint_url"] == (
-        "https://account-id.r2.cloudflarestorage.com"
-    )
-    assert captured["client_kwargs"]["config"].s3 == {"addressing_style": "path"}
-
-
-class _S3Body:
-    def __init__(self, content: bytes) -> None:
-        self._content = content
-        self._position = 0
-        self.closed = False
-
-    def read(self, limit: int) -> bytes:
-        block = self._content[self._position : self._position + limit]
-        self._position += len(block)
-        return block
-
-    def close(self) -> None:
-        self.closed = True
-
-
-class _ReadingS3Client:
-    def __init__(self, content: bytes) -> None:
-        self.content = content
-        self.body = _S3Body(content)
-        self.get_calls = 0
-
-    def head_object(self, **kwargs: str) -> dict[str, Any]:
-        return {"ContentLength": len(self.content)}
-
-    def get_object(self, **kwargs: str) -> dict[str, Any]:
-        self.get_calls += 1
-        return {"Body": self.body}
-
-
-@pytest.mark.asyncio
-async def test_s3_read_is_bounded_before_downloading_content() -> None:
-    client = _ReadingS3Client(b"four")
-    storage = S3DocumentStorage(bucket="documents", client=client)
-
-    with pytest.raises(ObjectStorageError, match="read limit"):
-        await storage.read("documents/id/raw", max_bytes=3)
-
-    assert client.get_calls == 0
-
-
-@pytest.mark.asyncio
-async def test_s3_read_closes_the_stream() -> None:
-    client = _ReadingS3Client(b"content")
-    storage = S3DocumentStorage(bucket="documents", client=client)
-
-    content = await storage.read("documents/id/raw", max_bytes=7)
-
-    assert content == b"content"
-    assert client.get_calls == 1
-    assert client.body.closed is True
-
-
-@pytest.mark.asyncio
-async def test_s3_download_to_path_streams_content(tmp_path: Path) -> None:
-    client = _ReadingS3Client(b"streamed content")
-    storage = S3DocumentStorage(bucket="documents", client=client)
-    destination = tmp_path / "downloaded.bin"
-
-    stored = await storage.download_to_path(
-        "documents/id/raw",
-        destination,
-        max_bytes=100,
-    )
-
-    assert destination.read_bytes() == b"streamed content"
-    assert stored.size_bytes == len(b"streamed content")
-    assert client.body.closed is True
 
 
 class _RecordingIndexBackend:
@@ -975,7 +710,7 @@ def test_document_rendition_drops_content_past_its_bounds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     content = _rendition_content(_document("text/plain"))
-    monkeypatch.setattr(document_rendition, "MAX_TABLE_ROWS", 2)
+    monkeypatch.setattr(rendition_module, "MAX_TABLE_ROWS", 2)
 
     table_cut = _rendition_json(build_document_rendition(content).data)
 
@@ -984,7 +719,7 @@ def test_document_rendition_drops_content_past_its_bounds(
     assert table["total_rows"] == 3
     assert table_cut["truncated"] is True
 
-    monkeypatch.setattr(document_rendition, "MAX_BLOCKS", 3)
+    monkeypatch.setattr(rendition_module, "MAX_BLOCKS", 3)
     blocks_cut = build_document_rendition(content)
 
     assert blocks_cut.truncated is True

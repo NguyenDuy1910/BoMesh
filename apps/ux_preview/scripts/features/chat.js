@@ -80,8 +80,7 @@ const TOPICS = [
 const STOP = new Set('what when where which with that this from have does about into your their there would could should please tell show give make find draft summarize latest list every explain passage'.split(' '));
 /* Canonical answers, copied at load so deleting c1/c2 never breaks the engine. */
 const CANON = Object.fromEntries(['c1', 'c2'].map(id => [id, clone(convById(id)?.messages.find(m => m.role === 'assistant') || {})]));
-const SEED = { c3: 'What changed in the parental leave policy for 2026?', c4: 'Summarize our enterprise pricing tiers.', c5: 'What are the steps to onboard a contractor?', c6: 'Draft a QBR brief for my next Acme meeting.', c7: 'How much is the remote work equipment stipend?', c8: 'What should a vendor security review checklist include?', c9: 'How do customers set up SSO?',
-  cu3: 'Outline a 15-minute recap of Week 4 regularization for Tuesday’s class.', cu4: 'Explain the bias–variance trade-off with an example from Week 4.', cu5: 'What does the regulation say about withdrawing after week 10 for medical reasons?', cu6: 'What GPA do I need for the academic excellence scholarship?' };
+const SEED = { c3: 'What changed in the parental leave policy for 2026?', c4: 'Summarize our enterprise pricing tiers.', c5: 'What are the steps to onboard a contractor?', c6: 'Draft a QBR brief for my next Acme meeting.', c7: 'How much is the remote work equipment stipend?', c8: 'What should a vendor security review checklist include?', c9: 'How do customers set up SSO?' };
 
 /* ═══════════════ Follow-up actions (module- and role-aware) ═══════════════
    An answer suggests the next step as {label, act, data} or {label, href}.
@@ -109,9 +108,7 @@ const NX = {
     return { label, act: 'work-start', data: { workflow, ...(sp ? { space: sp.id } : {}), ...(ids ? { docs: ids } : {}) } };
   },
 };
-/** Course concept answers: study from the cited material (students) or assess it (teaching team). */
-const studyNext = (space, docs) => [NX.work('study-guide', 'Make a study guide', space, docs), NX.work('practice-quiz', 'Practice quiz', space, docs), NX.work('quiz', 'Make a quiz for students', space, docs)];
-/** Where to take a question the sources don't settle: the space's teaching team, else the office that owns the knowledge. */
+/** Where to take a question the sources don't settle: the space's team, else the office that owns the knowledge. */
 function askNext(q, scope, space) {
   const sp = spaceById(space) || (D.spaces || []).find(s => s.kbs?.some(k => scope.includes(k)));
   const office = (sp?.type === 'office' && sp) || (D.spaces || []).find(s => s.type === 'office' && !s.archived && s.kbs?.some(k => !scope.length || scope.includes(k)));
@@ -124,67 +121,38 @@ function recordGap(g) {
   if (ex) ex.n += 1; else D.gaps.unshift({ id: uid('gap'), q: g.q, n: 1, kb: g.kb || null, why: g.why || 'No document covers it' });
 }
 
-/* ═══════════════ Campus answers (UTE Campus demo content) ═══════════════
+/* ═══════════════ Finx answers (Finx Workspace demo content) ═══════════════
    Topic: { k, when?, text | text(ctx), cites, next?(ctx), gap?, files?, live?(q) }.
    gap: the sources don't settle it — answer honestly, cite what they do say,
    offer who can decide, and record the question as a knowledge gap. */
 const ct = (doc, page, quote) => ({ doc, page, quote });
-const UQ = {
-  withdraw: ct('du-reg-rules', 18, 'Students may withdraw from a registered course no later than the end of week 10 of the semester. Withdrawn courses appear as W on the transcript and do not count toward the GPA.'),
-  week10: ct('du-reg-cal', 2, 'Week 10 of Semester 1 ends on Tuesday, 10 November 2026.'),
-  refund: ct('du-reg-fees', 5, 'Tuition for withdrawn courses is not refunded, except for courses cancelled by the university.'),
-  minLoad: ct('du-reg-rules', 17, 'The minimum registered load in a regular semester is 14 credits; students below this load must be approved by the Faculty.'),
-  grades: ct('du-reg-rules', 31, 'Lecturers must publish final grades on the student portal within 10 working days after the final exam.'),
-  regradeWindow: ct('du-reg-regrade', 1, 'Students may request re-grading of an exam within 7 days after the grade is published.'),
-  regradeFee: ct('du-reg-regrade', 2, 'The re-grading fee is 30,000 VND per course and is refunded if the grade changes.'),
-  transcript: ct('du-reg-fees', 6, 'Official transcripts are issued within two working days. Each copy costs 20,000 VND.'),
-  leave: ct('du-reg-leave', 1, 'Students who have completed at least one semester may suspend their studies for up to two semesters in total.'),
-  leaveEvidence: ct('du-reg-leave', 2, 'Requests must state the reason and attach supporting evidence where applicable, such as a medical certificate or a family confirmation letter.'),
-  scholar: ct('du-sso-schol', 3, 'Academic excellence scholarships require a semester GPA of at least 3.2 and no failed courses.'),
-  a1: ct('du-ml-a1', 1, 'Train a linear regression model to predict house prices and report the RMSE on the held-out test split. Submit a notebook and a two-page report.'),
-  lab2Scratch: ct('du-ml-lab2', 1, 'Implement batch gradient descent from scratch using NumPy only; do not use a machine learning library for this lab.'),
-  lab2Scale: ct('du-ml-lab2', 3, 'Standardize each feature to zero mean and unit variance before running gradient descent.'),
-  linreg: ct('du-ml-w02', 6, 'The model predicts ŷ = wᵀx and is trained by minimizing the mean squared error between predictions and targets.'),
-  alpha: ct('du-ml-w02', 18, 'If α is too large gradient descent can overshoot and diverge; if it is too small, convergence is slow.'),
-  l2: ct('du-ml-w04', 7, 'L2 regularization adds λ‖w‖² to the loss, shrinking all weights toward zero without making them exactly zero.'),
-  bias0: ct('du-ml-w04', 9, 'By convention the bias term w₀ is not regularized: it shifts every prediction equally and does not add model complexity.'),
-  l1: ct('du-ml-w04', 11, 'L1 regularization (lasso) can set weights exactly to zero, which performs feature selection.'),
-  bv: ct('du-ml-w04', 15, 'High variance: training error is low but validation error is much higher. High bias: both errors are high.'),
-  lambda: ct('du-ml-w04', 18, 'Increasing λ reduces variance but can increase bias; choose λ on a validation set.'),
-  cv: ct('du-ml-w04', 21, 'Select λ with k-fold cross-validation; never tune hyper-parameters on the test set.'),
-  gini: ct('du-ml-w05', 8, 'CART uses Gini impurity to choose splits for classification trees.'),
-  bagging: ct('du-ml-w05', 15, 'Bagging trains each tree on a bootstrap sample of the training data and averages their predictions to reduce variance.'),
-  forest: ct('du-ml-w05', 27, 'Sampling a subset of features at each split decorrelates the trees, so averaging them reduces variance.'),
-  unit: ct('du-ml-w06', 4, 'A neural network stacks layers of units; each unit computes a weighted sum of its inputs followed by a non-linear activation such as ReLU.'),
-  nonlin: ct('du-ml-w06', 9, 'Without non-linear activations, a stack of layers collapses into a single linear model.'),
-  backprop: ct('du-ml-w06', 19, 'Backpropagation applies the chain rule to compute the gradient of the loss with respect to every weight, layer by layer from the output back.'),
-  inner: ct('du-db-w05', 6, 'An INNER JOIN combines rows from two tables on a join condition and returns only the rows that have matching values in both tables.'),
-  left: ct('du-db-w05', 11, 'A LEFT JOIN returns every row of the left table; columns from the right table are NULL when there is no match.'),
-  lab3: ct('du-db-lab3', 2, 'Use a LEFT JOIN to list every student, including those who have not enrolled in any course.'),
-  nf1: ct('du-db-w07', 3, 'Normalization removes redundancy by decomposing relations according to their functional dependencies. A relation is in 1NF when every attribute holds a single, atomic value.'),
-  nf2: ct('du-db-w07', 5, 'A relation is in 2NF if it is in 1NF and every non-key attribute depends on the whole of every candidate key.'),
-  nf3: ct('du-db-w07', 9, 'A relation is in 3NF if, for every non-trivial functional dependency X → A, X is a superkey or A is part of some candidate key.'),
-  bcnf: ct('du-db-w07', 14, 'BCNF is stricter than 3NF: for every non-trivial functional dependency X → A, X must be a superkey.'),
-  p1Method: ct('du-ag-p1', 4, 'We fine-tune a MobileNetV3-Large pretrained on ImageNet, freezing the first 10 blocks.'),
-  p1Result: ct('du-ag-p1', 9, 'The fine-tuned model reached 96.2% accuracy with 21 ms inference on a mid-range Android phone.'),
-  p5Result: ct('du-ag-p5', 11, 'Accuracy drops from 99.1% on lab images to 93.4% on field images.'),
-  p2Transfer: ct('du-ag-p2', 9, 'Transfer learning dominates recent work: 71% of the studies fine-tune ImageNet-pretrained CNNs.'),
-  p2Lab: ct('du-ag-p2', 14, '68% of the surveyed studies evaluate only on PlantVillage, whose images are taken on uniform backgrounds.'),
-  p3Method: ct('du-ag-p3', 3, 'An 8-bit quantized CNN runs on an ESP32-S3 to classify soil moisture states from capacitive sensor traces.'),
-  p3Data: ct('du-ag-p3', 5, 'Data were logged every 5 minutes for 42 days on three experimental plots.'),
-  p3Result: ct('du-ag-p3', 8, 'The model classified soil moisture states with 92% accuracy at 38 mW average power.'),
-  p3Limit: ct('du-ag-p3', 10, 'Our approach targets sensor time series and does not address image-based disease detection.'),
-  p4: ct('du-ag-p4', 2, 'Nodes reporting every 15 minutes over LoRaWAN ran for 14 months on two AA batteries in flooded rice paddies.'),
-  nafBudget: ct('du-gr-naf', 5, 'The total budget of a basic research project may not exceed 2.5 billion VND.'),
-  nafScope: ct('du-gr-naf', 3, 'Priority areas for 2027 include applied artificial intelligence for agriculture and the environment. Projects may last up to 24 months.'),
-  nafDeadline: ct('du-gr-naf', 2, 'Proposals must be submitted through the NAFOSTED online system no later than 15 January 2027.'),
-  nafTpl: ct('du-gr-tpl', 2, 'Section B (Background and significance) should not exceed three pages.'),
-  cal1: ct('du-ag-proto', 1, 'Calibrate each capacitive soil sensor before deployment and again every 30 days in the field.'),
-  cal2: ct('du-ag-proto', 2, 'Record raw readings in dry air and in water to set the two end points of the scale.'),
-  cal3: ct('du-ag-proto', 3, 'Take gravimetric samples at three moisture levels and fit a linear calibration curve; accept the sensor only if R² ≥ 0.95.'),
-  cal4: ct('du-ag-proto', 5, 'Log the sensor ID, date, temperature and fitted coefficients in the calibration sheet.'),
+const FQ = {
+  jit: ct('fx-sec-access', 3, 'Production access is granted just in time for a maximum of 8 hours and requires an approved change ticket.'),
+  secCoding: ct('fx-sec-access', 3, 'Engineers must complete the Secure Coding training before receiving any production access.'),
+  review: ct('fx-sec-access', 5, 'System owners review every access right each quarter and revoke access that is no longer needed.'),
+  sev1: ct('fx-sec-incident', 2, 'A Severity 1 incident must be declared in the #incident channel within 15 minutes of detection.'),
+  sbv: ct('fx-sec-incident', 4, 'When customer funds are affected, Risk & Compliance notifies the State Bank of Vietnam within 24 hours.'),
+  breach: ct('fx-sec-incident', 4, 'Personal data breaches are also reported to the Ministry of Public Security under Decree 13/2023 within 72 hours. Risk & Compliance drafts both notices; the CEO signs them.'),
+  masked: ct('fx-sec-privacy', 2, 'Customer personal data is masked by default in every non-production environment.'),
+  pii: ct('fx-sec-privacy', 3, 'Access to unmasked customer data requires an approved PII access request and the Data privacy training.'),
+  piiDays: ct('fx-sec-privacy', 3, 'Requests go to Risk & Compliance through BoMesh Requests and state the purpose, the tables needed and an end date. Access is granted for at most 30 days.'),
+  napas: ct('fx-ops-cutoff', 1, 'NAPAS 247 interbank transfers settle in real time, 24 hours a day.'),
+  batch: ct('fx-ops-cutoff', 2, 'Batch transfers submitted after 15:30 are settled on the next business day.'),
+  holiday: ct('fx-ops-cutoff', 3, 'During Tết and other public holidays only NAPAS 247 and internal transfers run. Batches queue until the first business day after the holiday.'),
+  dispute: ct('fx-ops-dispute', 2, 'A cardholder dispute must be acknowledged within 2 business days and resolved within 45 days.'),
+  idemHeader: ct('fx-eng-adr031', 1, 'Every POST to a payment API must carry an Idempotency-Key header.'),
+  idemReplay: ct('fx-eng-adr031', 2, 'The gateway stores the first response for 24 hours and replays it for any retry with the same key.'),
+  ledger: ct('fx-eng-adr027', 1, 'Ledger balances are updated only by consuming events from the payments topic, never by direct writes.'),
+  timeout: ct('fx-pay-runbook', 1, 'If the timeout rate exceeds 2% for 5 minutes, fail over card authorization to the secondary acquirer.'),
+  failback: ct('fx-pay-runbook', 2, 'Fail back only after the primary acquirer confirms recovery and its health check has been green for 30 minutes.'),
+  mac: ct('fx-data-mau', 1, 'A monthly active customer has at least one customer-initiated financial transaction in the calendar month; logins alone do not count.'),
+  macTables: ct('fx-data-mau', 2, 'Use the certified tables above; dashboards built on raw login events will not match board reporting.'),
+  office: ct('fx-pol-hybrid', 1, 'Employees work from the office at least three days a week; Tuesday and Thursday are team days.'),
+  officeException: ct('fx-pol-hybrid', 2, 'Managers may approve temporary changes for health or family reasons for up to 4 weeks; longer arrangements need People & Culture approval.'),
+  remotePlace: ct('fx-pol-hybrid', 2, 'Work from a safe, private place in Vietnam with a reliable connection.'),
 };
-const ASK_STOP = new Set([...STOP, 'students', 'student', 'asked', 'most', 'questions', 'question', 'week', 'people', 'common', 'class', 'often']);
+const openDoc = (id, label) => (canDoc(docById(id)) ? { label, href: '/doc/' + id } : null);
+const ASK_STOP = new Set([...STOP, 'people', 'asked', 'most', 'questions', 'question', 'week', 'common', 'often', 'team', 'teams']);
 /** Visible calendar items in the next 7 days (Home's up-next when available, else the events I can see). */
 const eventVisible = e => { const sp = spaceById(e.space); return e.audience === 'all' || (e.audience === 'staff' ? isSpaceStaff(sp) : !!spaceRole(sp)); };
 const eventHref = e => e.work ? '/work/' + e.work : e.doc && canDoc(docById(e.doc)) ? '/doc/' + e.doc : e.requestType ? '/requests/new?type=' + e.requestType : '/space/' + e.space;
@@ -215,85 +183,54 @@ function askedLately(q) {
   let qs = allQs.filter(r => hit(r.fields?.question || '')), gaps = allGaps.filter(g => hit(g.q));
   if (!qs.length && !gaps.length) { qs = allQs; gaps = allGaps; }
   const parts = [];
-  if (qs.length) parts.push(`**Sent to your teaching teams this week**\n${qs.slice(0, 5).map(r => `- [“${mdText(r.fields.question)}”](/requests/${r.id}) — ${actorName(r.requester)}, ${rel(r.created).toLowerCase()}${r.status === 'completed' ? ' · answered' : ''}`).join('\n')}`);
+  if (qs.length) parts.push(`**Sent to your spaces this week**\n${qs.slice(0, 5).map(r => `- [“${mdText(r.fields.question)}”](/requests/${r.id}) — ${actorName(r.requester)}, ${rel(r.created).toLowerCase()}${r.status === 'completed' ? ' · answered' : ''}`).join('\n')}`);
   if (gaps.length) parts.push(`**Questions the knowledge couldn’t answer**\n${gaps.slice(0, 5).map(g => `- “${mdText(g.q)}” — asked ${plural(g.n, 'time')} · ${mdText(g.why)}`).join('\n')}`);
   const next = [hasModule('requests') && qs.length ? { label: 'Open the question queue', href: '/requests?tab=queue' } : null, isAdmin() && gaps.length ? { label: 'Review knowledge gaps', href: '/overview' } : null].filter(Boolean);
   return { text: parts.length ? parts.join('\n\n') : 'No questions came in this week, and nothing went unanswered.', citations: [], searchLabel: 'questions sent to your spaces',
     activity: [{ kind: 'search', label: 'Checked questions sent to your spaces', detail: plural(qs.length, 'question') }, { kind: 'search', label: 'Checked unanswered questions', detail: plural(gaps.length, 'gap') }], next, files: false };
 }
-const UTE_TOPICS = [
-  { k: /(notice|announcement|remind).*withdraw|withdraw.*(notice|announcement)/i, files: true, cites: [UQ.withdraw, UQ.week10, UQ.refund, UQ.minLoad],
-    text: 'Here’s a draft notice you can post.\n\n**Reminder: course withdrawal closes on Tuesday, 10 November**\n\nStudents may withdraw from a registered course until the end of week 10 [1], which is **Tuesday, 10 November 2026** [2]. Withdrawn courses appear as W on the transcript and don’t count toward the GPA [1].\n\nTuition for withdrawn courses is not refunded, except for courses the university cancels [3]. After withdrawing you must still be registered for at least 14 credits [4].\n\nTo withdraw, open **Requests → Withdraw from a course**.' },
-  { k: /(students|people|class) (ask|asked)|asked (most|about)|common questions|questions (about|did|students)|confus/i, when: () => isAdmin() || mySpaces().some(s => isSpaceStaff(s)), live: askedLately },
-  { k: /(withdraw|drop).*(after week|late|medical|sick|illness|hospital)|(medical|sick|illness|hospital).*(withdraw|drop)/i, cites: [UQ.withdraw, UQ.leave, UQ.leaveEvidence],
-    gap: { q: 'Can I withdraw after week 10 for medical reasons?', kb: 'kb-u-regs', why: 'The regulation has no rule for late medical withdrawal' },
-    text: ({ aaoStaff }) => `The regulation sets one withdrawal deadline: the **end of week 10** [1]. It doesn’t mention exceptions after week 10, for medical reasons or otherwise.\n\nThe documented route for a student who can’t continue for health reasons is a **leave of absence**: students who have completed at least one semester may suspend their studies for up to two semesters [2], with evidence such as a medical certificate [3].\n\n${aaoStaff ? 'Because the regulation is silent, students get no reliable answer here. Adding a rule would let the assistant answer it.' : 'Only Academic Affairs can say whether an exception is possible.'}`,
-    next: () => [NX.office('sp-aao', 'Ask Academic Affairs'), NX.request('rt-leave', 'Request a leave of absence')] },
-  { k: /withdraw|drop (a |the |my |one )?(course|class|subject)|rút (môn|học phần)/i, cites: [UQ.withdraw, UQ.week10, UQ.refund, UQ.minLoad],
-    text: ({ p }) => `You can withdraw from a course until the **end of week 10, which is Tuesday, November 10** this semester [1][2]. The course then shows as **W** on your transcript and doesn’t count toward your GPA [1].\n\nTuition for a withdrawn course is **not refunded**, unless the university cancelled the course [3].\n\n` + (p ? `One more check: you must keep **at least 14 credits** after withdrawing [4]. You’re registered for ${p.credits}, so ${p.credits - 3 >= 14 ? 'dropping one 3-credit course is fine' : 'dropping a course needs Faculty approval'}.` : 'Students must keep **at least 14 credits** after withdrawing [4].'),
-    next: () => [NX.request('rt-withdraw', 'Start a withdrawal request')] },
-  { k: /publish(ing)? (the )?(final )?grades|grade (submission|deadline)|submit (final )?grades/i, cites: [UQ.grades, UQ.regradeWindow],
-    text: 'You have **10 working days** after the final exam to publish final grades on the student portal [1]. Once they’re published, students have **7 days** to ask for re-grading [2].' },
-  { k: /re-?grad|re-?mark|regrad|phúc khảo|(grade|mark) (is|was|seems) (wrong|incorrect)|check my (exam|grade)/i, cites: [UQ.regradeWindow, UQ.regradeFee],
-    text: 'You can ask for an exam to be re-graded **within 7 days** after the grade is published [1].\n\nThe fee is **30,000 VND per course**, and it’s refunded if your grade changes [2].',
-    next: () => [NX.request('rt-regrade', 'Request re-grading')] },
-  { k: /transcript|bảng điểm/i, cites: [UQ.transcript],
-    text: 'Official transcripts are issued within **two working days**, and each copy costs **20,000 VND** [1].\n\nYou can ask for Vietnamese, English or both, and pick them up at A1-102 or have them posted.',
-    next: () => [NX.request('rt-transcript', 'Request a transcript')] },
-  { k: /leave of absence|suspend (my )?stud|(take|taking) (a |one |two )?(semester|term)s? off|pause (my )?stud|bảo lưu|defer (my )?stud/i, cites: [UQ.leave, UQ.leaveEvidence],
-    text: ({ p }) => `If you have completed at least one semester, you can suspend your studies for **up to two semesters in total** [1] and keep your place.${p ? ` You’re in year ${p.year}, so you meet that condition.` : ''}\n\nState your reason in the request and attach evidence where it applies, such as a medical certificate [2].`,
-    next: () => [NX.request('rt-leave', 'Request a leave of absence')] },
-  { k: /scholarship|học bổng/i, cites: [UQ.scholar],
-    text: ({ p }) => `The academic excellence scholarship needs a **semester GPA of at least 3.2** and **no failed courses** [1].` + (p ? `\n\nYour GPA is **${p.gpa}**, so you ${p.gpa >= 3.2 ? 'meet' : 'don’t yet meet'} the GPA requirement.` : ''),
-    next: () => [NX.request('rt-scholar', 'Apply for the scholarship')] },
-  { k: /summer/i, cites: [UQ.minLoad],
-    gap: { q: 'Can I register more than 25 credits in the summer term?', kb: 'kb-u-regs', why: 'Summer rules are still a draft' },
-    text: 'The Academic Regulations only set credit loads for **regular semesters**: at least 14 credits, with Faculty approval below that [1]. They don’t say how many credits you can take in the summer term.\n\nThe summer term rules are still a draft and haven’t been published, so I can’t give you a reliable answer yet.',
-    next: () => [NX.office('sp-aao', 'Ask Academic Affairs')] },
-  { k: /minimum (number of )?credits|credit load|how many credits|at least \d+ credits|tín chỉ|underload|fewer than \d+ credits/i, cites: [UQ.minLoad],
-    text: ({ p }) => `In a regular semester you must register for **at least 14 credits**. Going below that needs approval from your Faculty [1].` + (p ? `\n\nYou’re registered for **${p.credits} credits** this semester.` : '') },
-  { k: /scikit|sklearn|(use|using) (a |any )?(librar|package)|allowed to use|can (we|i) use/i, cites: [UQ.a1, UQ.lab2Scratch],
-    gap: { q: 'Can we use scikit-learn in Assignment 1?', kb: 'kb-u-ml', why: 'The assignment brief doesn’t say' },
-    text: 'The Assignment 1 brief doesn’t say whether you can use libraries such as scikit-learn [1]. It asks you to train a linear regression model on the house price data and report the RMSE on the test split [1].\n\nLab 2 told you to implement gradient descent from scratch with NumPy only [2], but that was an instruction for the lab, not a rule for the assignment.\n\nOnly the teaching team can decide this, so I won’t guess.',
-    next: ({ q }) => [NX.staff('sp-ml', q)] },
-  { k: /recap|lesson plan|lecture plan|prepare (a|my|the|for) (class|lecture)/i, cites: [UQ.bv, UQ.l2, UQ.l1, UQ.lambda, UQ.cv, UQ.bias0],
-    text: () => { const s = D.works?.find(w => w.id === 'w-quiz-w4')?.data?.stats; const pc = s?.attempts ? Math.round(s.byQuestion[1] * 100) : null;
-      return `Here’s a 15-minute recap of Week 4:\n\n- **0–3 min · Why regularize.** Start from the symptom: low training error but much higher validation error means high variance [1].\n- **3–8 min · L2 vs L1.** L2 adds λ‖w‖² and shrinks weights toward zero [2]; L1 can set weights exactly to zero, which selects features [3].\n- **8–12 min · Choosing λ.** A larger λ lowers variance but can raise bias [4]; pick it with cross-validation, never on the test set [5].\n- **12–15 min · Check.** Ask why the bias term w₀ isn’t regularized [6]` + (pc != null ? ` — only ${pc}% of the class got this right on the Week 4 quiz.` : '.'); },
-    next: () => studyNext('sp-ml', ['du-ml-w04']) },
-  { k: /bias|variance|regulari[sz]|overfit|underfit|\blambda\b|λ|ridge|lasso|\bl[12]\b/i, cites: [UQ.bv, UQ.l2, UQ.lambda, UQ.cv],
-    text: 'The bias–variance trade-off describes two ways a model can fail [1]:\n\n- **High bias** (underfitting): training and validation error are both high — the model is too simple [1].\n- **High variance** (overfitting): training error is low but validation error is much higher [1].\n\n**Example from Week 4:** a model with 2% training error and 19% validation error has high variance. Regularization helps: L2 adds λ‖w‖² to the loss and shrinks the weights [2].\n\nIncreasing λ reduces variance but can increase bias [3], so choose λ with k-fold cross-validation — never on the test set [4].',
-    next: () => studyNext('sp-ml', ['du-ml-w04']) },
-  { k: /linear regression|gradient descent|learning rate|\balpha\b|α|normal equation|feature scaling|\bmse\b/i, cites: [UQ.linreg, UQ.alpha, UQ.lab2Scale],
-    text: 'Linear regression predicts a number as a weighted sum of the features, ŷ = wᵀx, and is trained by minimizing the mean squared error [1].\n\nGradient descent finds the weights step by step. The **learning rate α** sets the step size: too large and it can overshoot and diverge, too small and it converges slowly [2].\n\nTip from Lab 2: standardize each feature to zero mean and unit variance before running gradient descent [3].',
-    next: () => studyNext('sp-ml', ['du-ml-w02', 'du-ml-lab2']) },
-  { k: /decision trees?|random forests?|\bgini\b|entropy|ensembles?|bagging|boosting|\bcart\b/i, cites: [UQ.gini, UQ.bagging, UQ.forest],
-    text: 'A **decision tree** splits the data on one feature at a time; CART picks each split by Gini impurity for classification [1].\n\nA single deep tree overfits easily. A **random forest** trains many trees, each on a bootstrap sample of the training data, and averages their predictions [2]. It also samples a subset of features at each split, which decorrelates the trees so averaging reduces variance more [3].',
-    next: () => studyNext('sp-ml', ['du-ml-w05']) },
-  { k: /neural|perceptron|backprop|activation|\brelu\b|sigmoid|hidden layer|\bmlp\b/i, cites: [UQ.unit, UQ.nonlin, UQ.backprop],
-    text: 'A neural network stacks layers of units. Each unit computes a weighted sum of its inputs and passes it through a non-linear activation such as ReLU [1].\n\nThe non-linearity matters: without it, any stack of layers collapses into a single linear model [2].\n\nTraining uses **backpropagation**, which applies the chain rule to get the gradient of the loss for every weight, from the output layer back [3].',
-    next: () => studyNext('sp-ml', ['du-ml-w06']) },
-  { k: /\bjoins?\b|subquer|\bsql\b/i, cites: [UQ.inner, UQ.left, UQ.lab3],
-    text: 'A join combines rows from two tables on a join condition [1].\n\n- **INNER JOIN** returns only the rows that have a match in both tables [1].\n- **LEFT JOIN** returns every row of the left table; the right table’s columns are NULL where there’s no match [2].\n\nFor Lab 3, use a LEFT JOIN to list every student, including those not enrolled in any course [3].',
-    next: () => studyNext('sp-db', ['du-db-w05', 'du-db-lab3']) },
-  { k: /normali[sz]ation|normal forms?|\b[123]nf\b|\bbcnf\b|functional dependenc/i, cites: [UQ.nf1, UQ.nf2, UQ.nf3, UQ.bcnf],
-    text: 'Normalization removes redundancy by splitting tables according to their functional dependencies [1]:\n\n- **1NF** — every attribute holds a single, atomic value [1].\n- **2NF** — 1NF, and every non-key attribute depends on the whole of each candidate key [2].\n- **3NF** — for every non-trivial dependency X → A, X is a superkey or A is part of a candidate key [3].\n- **BCNF** — stricter: X must always be a superkey [4].',
-    next: () => studyNext('sp-db', ['du-db-w07']) },
-  { k: /nafosted|\bgrants?\b|funding call|budget ceiling|research call/i, cites: [UQ.nafBudget, UQ.nafScope, UQ.nafDeadline, UQ.nafTpl],
-    text: 'The NAFOSTED 2027 basic research call:\n\n- **Budget:** up to **2.5 billion VND** per project [1].\n- **Duration:** up to **24 months** [2].\n- **Deadline:** submit through the NAFOSTED online system by **15 January 2027** [3].\n- **Fit:** applied AI for agriculture and the environment is a 2027 priority area [2].\n\nIn the proposal template, the background and significance section is limited to three pages [4].',
-    next: () => [NX.work('draft', 'Draft a proposal section', 'sp-agri', ['du-gr-naf', 'du-gr-tpl'])] },
-  { k: /calibrat/i, cites: [UQ.cal1, UQ.cal2, UQ.cal3, UQ.cal4],
-    text: 'The soil sensor calibration protocol in five steps:\n\n- **When:** calibrate each capacitive sensor before deployment and again every 30 days in the field [1].\n- **End points:** record raw readings in dry air and in water to set both ends of the scale [2].\n- **Samples:** take gravimetric samples at three moisture levels [3].\n- **Fit:** fit a linear calibration curve and accept the sensor only if R² ≥ 0.95 [3].\n- **Log:** record the sensor ID, date, temperature and fitted coefficients in the calibration sheet [4].',
-    next: () => [NX.work('draft', 'Draft a methods section', 'sp-agri', ['du-ag-proto'])] },
-  { k: /edge ai|irrigation|esp32|soil moisture|lorawan|\blora\b|microcontroller/i, cites: [UQ.p3Method, UQ.p3Result, UQ.p3Data, UQ.p4, UQ.p3Limit],
-    text: 'Two papers in the library cover low-power sensing in the field:\n\n- **Tran et al. 2024** run an 8-bit quantized CNN on an ESP32-S3 to classify soil moisture from capacitive sensor traces [1], reaching **92% accuracy at 38 mW** [2]. They logged 42 days of data on three plots [3].\n- **Le & Pham 2021** ran LoRaWAN nodes in flooded rice paddies for 14 months on two AA batteries, reporting every 15 minutes [4].\n\nTran et al. work on sensor time series, not images, so their results don’t carry over to leaf disease detection [5].',
-    next: () => [NX.work('review', 'Compare them in a literature review', 'sp-agri', ['du-ag-p3', 'du-ag-p4'])] },
-  { k: /transfer learning|\brice\b|leaf disease|crop disease|plant disease|(which|what) papers|papers? (in|from) (our|the) (lab|library)/i, cites: [UQ.p1Method, UQ.p1Result, UQ.p5Result, UQ.p2Transfer, UQ.p2Lab],
-    text: 'Two papers in the library use transfer learning for this task:\n\n- **Nguyen et al. 2024** fine-tune an ImageNet-pretrained MobileNetV3 on Mekong field images [1] and report **96.2% accuracy**, at 21 ms per image on a phone [2].\n- **Singh et al. 2023** use a ViT-B/16 and report **93.4% on field images**, down from 99.1% in the lab [3].\n\nThe Rahman & Lee survey notes that 71% of recent studies use transfer learning [4], but 68% evaluate only on lab images [5].',
-    next: () => [NX.work('review', 'Compare them in a literature review', 'sp-agri', ['du-ag-p1', 'du-ag-p5', 'du-ag-p2'])] },
+const FINX_TOPICS = [
+  { k: /(people|team|staff) (ask|asked)|asked (most|about)|common questions|questions (about|did|people)|confus/i, when: () => isAdmin() || mySpaces().some(s => isSpaceStaff(s)), live: askedLately },
+  { k: /(unmasked|pii|personal data|customer data).*(access|need|get|see|query)|(access|need|get|see|query).*(unmasked|pii|personal data|customer data)/i, cites: [FQ.masked, FQ.pii, FQ.piiDays],
+    text: ({ p }) => `Customer personal data is **masked by default** in every non-production environment [1], so most analysis doesn’t need special access.\n\nTo see unmasked data you need two things [2]:\n- an **approved PII access request**, and\n- the **Data privacy training**.\n\nThe request goes to Risk & Compliance with the purpose, the tables you need and an end date; access lasts **at most 30 days** [3].` + (p?.trainings ? `\n\nYour profile shows ${p.trainings.includes('Data privacy 2026') ? 'Data privacy 2026 completed, so you can send the request now' : 'no Data privacy training yet — complete it before you send the request'}.` : ''),
+    next: () => [NX.request('rt-pii', 'Request PII access'), openDoc('fx-sec-privacy', 'Open the data protection standard')] },
+  { k: /prod(uction)? access|access (to )?prod|break.?glass|just.?in.?time|\bjit\b/i, cites: [FQ.jit, FQ.secCoding, FQ.review],
+    text: ({ p }) => `Production access at Finx is **just in time**: you get it for **at most 8 hours**, and only with an **approved change ticket** [1].\n\nBefore your first request you must complete the **Secure Coding training** [2]. Access ends automatically when the window closes, and system owners review every access right each quarter [3].` + (p?.trainings ? `\n\n${p.trainings.includes('Secure coding 2026') ? 'Your profile shows **Secure coding 2026** completed, so you can request access now.' : 'Your profile doesn’t show the **Secure coding 2026** training yet — complete it first, or the request will be declined.'}` : '') + '\n\nSend the request to the IT Service Desk with the system, the duration and your change ticket.',
+    next: () => [NX.request('rt-prod', 'Request production access'), openDoc('fx-sec-access', 'Open the Access Control Policy')] },
+  { k: /access review|review (of )?access|revoke access/i, cites: [FQ.review, FQ.jit],
+    text: 'System owners review **every access right each quarter** and revoke access that is no longer needed [1]. Production access is never standing: it’s granted just in time for at most 8 hours [2].',
+    next: () => [openDoc('fx-sec-access', 'Open the Access Control Policy')] },
+  { k: /\bsbv\b|state bank|regulator|notify|notification|sev(erity)? ?1|declare (an )?incident|incident (response|process)/i, cites: [FQ.sev1, FQ.sbv, FQ.breach],
+    text: 'Two clocks start when an incident hits customers:\n\n- **Declare it:** a Severity 1 must be declared in **#incident within 15 minutes** of detection [1].\n- **Notify the SBV:** when **customer funds are affected**, Risk & Compliance notifies the State Bank of Vietnam **within 24 hours** [2].\n\nIf personal data is breached, the Ministry of Public Security must also be told within 72 hours under Decree 13/2023 [3]. You don’t send these notices yourself — Risk & Compliance drafts them and the CEO signs.',
+    next: () => [openDoc('fx-sec-incident', 'Open the Incident Response Plan')] },
+  { k: /time[sd]? ?outs?|gateway (is )?(down|slow|failing)|acquirer|fail ?over|\b504\b/i, cites: [FQ.timeout, FQ.sev1, FQ.failback],
+    text: 'Follow the gateway timeout runbook:\n\n- **Decide:** if the timeout rate is **above 2% for 5 minutes**, fail over card authorization to the **secondary acquirer** [1].\n- **Declare:** if customers can’t pay, it’s a Severity 1 — declare it in #incident within 15 minutes [2].\n- **Fail back** only after the primary acquirer confirms recovery and its health check has been green for 30 minutes [3].',
+    next: () => [openDoc('fx-pay-runbook', 'Open the runbook')] },
+  { k: /idempot|adr-?031|retr(y|ies) (a )?payment|double (debit|charge)|duplicate payment/i, cites: [FQ.idemHeader, FQ.idemReplay],
+    text: 'ADR-031 makes retries safe:\n\n- Every **POST to a payment API must carry an Idempotency-Key header** [1]. Clients create one key per payment and reuse it for every retry.\n- The gateway **stores the first response for 24 hours** and replays it for any retry with the same key [2], so a retry never debits the customer twice.',
+    next: () => [openDoc('fx-eng-adr031', 'Open ADR-031'), NX.work('draft', 'Draft an ADR from these sources', 'sp-cbm', ['fx-eng-adr031', 'fx-eng-adr027'])] },
+  { k: /ledger|adr-?027|event.?driven|kafka|pulsar|\bmsk\b|stream(ing)? platform/i, cites: [FQ.ledger],
+    text: 'ADR-027 sets the rule: **ledger balances are updated only by consuming events from the payments topic, never by direct writes** [1].\n\nThat’s why the streaming platform matters — the CBM team is comparing Confluent Cloud, self-hosted Pulsar and Amazon MSK on throughput, exactly-once support, operations effort, data residency and cost.',
+    next: () => [(D.works || []).some(w => w.id === 'w-review-stream') && hasModule('work') ? { label: 'Open the streaming evaluation', href: '/work/w-review-stream' } : null, openDoc('fx-eng-adr027', 'Open ADR-027')] },
+  { k: /cut.?off|napas|interbank|settle(ment)?|batch transfer|citad/i, cites: [FQ.napas, FQ.batch, FQ.holiday],
+    text: '- **NAPAS 247** interbank transfers settle **in real time, 24 hours a day** — there’s no cut-off [1].\n- **Batch transfers** submitted **after 15:30** settle on the **next business day** [2].\n\nDuring Tết and other public holidays only NAPAS 247 and internal transfers run; batches wait for the first business day after the holiday [3].',
+    next: () => [openDoc('fx-ops-cutoff', 'Open cut-off times')] },
+  { k: /dispute|chargeback/i, cites: [FQ.dispute],
+    text: 'A cardholder dispute must be **acknowledged within 2 business days** and **resolved within 45 days** [1]. Log it in the case tool with the transaction ID, and block the card if the customer reports fraud.',
+    next: () => [openDoc('fx-ops-dispute', 'Open the dispute procedure')] },
+  { k: /monthly active|active customer|\bmau\b|\bmac\b|how (do we|to) (define|count) (an? )?(active|customer)/i, cites: [FQ.mac, FQ.macTables],
+    text: 'A **monthly active customer** has **at least one customer-initiated financial transaction** in the calendar month — **logins alone don’t count** [1].\n\nTransfers, card and QR payments, bill payments and top-ups count; interest, fees and refunds don’t. Build reports on the certified tables: dashboards on raw login events won’t match board reporting [2].',
+    next: () => [openDoc('fx-data-mau', 'Open the metric definition')] },
+  { k: /(work|working) (fully )?(remote|from home|abroad)|remote.*(month|weeks|abroad|overseas)|(month|weeks).*(remote|from home)/i, cites: [FQ.office, FQ.officeException, FQ.remotePlace],
+    gap: { q: 'Can I work remotely from abroad for a few weeks?', kb: 'kb-fx-pol', why: 'The hybrid policy doesn’t cover working from outside Vietnam' },
+    text: 'The Hybrid Work Policy expects **three office days a week**, with Tuesday and Thursday as team days [1]. Your manager can approve a temporary change for health or family reasons for up to 4 weeks; longer needs People & Culture [2].\n\nIt says remote days are worked from a safe, private place **in Vietnam** [3], but it doesn’t say whether working from abroad can ever be approved — so I won’t guess. People & Culture can decide.' },
+  { k: /office days?|hybrid|work from (the )?office|team days?|days a week|wfh/i, cites: [FQ.office, FQ.officeException],
+    text: 'You work from the office **at least three days a week**; **Tuesday and Thursday are team days** [1]. Your team picks the third day together.\n\nFor health or family reasons your manager can approve a temporary change for up to 4 weeks [2].',
+    next: () => [openDoc('fx-pol-hybrid', 'Open the Hybrid Work Policy')] },
   { k: /\bdue\b|this week|next (7|seven) days|plan my week|coming up|upcoming|what.?s next|my deadlines|deadlines (this|next)/i, live: dueSoon },
 ];
 /** Answer tables by workspace (demo content). Workspaces without one use Northwind's. files:false = no generated spreadsheets/docs unless a topic allows it. */
-const TOPIC_TABLES = { 'ws-ute': { topics: UTE_TOPICS, files: false } };
+const TOPIC_TABLES = { 'ws-finx': { topics: FINX_TOPICS, files: false } };
 
 /** Keep only lines whose citations survive; renumber the rest. */
 function prune(text, cites, keep) {
@@ -308,7 +245,7 @@ function answer(q, scope = [], fileNames = [], space = null) {
   const table = TOPIC_TABLES[S.ws];
   const t = (table?.topics || TOPICS).find(x => x.k.test(q) && (!x.when || x.when()));
   if (t?.live) return t.live(q);
-  const ctx = { q, p: me().profile || null, aaoStaff: (D.spaces || []).some(s => s.type === 'office' && isSpaceStaff(s)) };
+  const ctx = { q, p: me().profile || null };
   const files = t?.files ?? table?.files;
   let text, cites, artifact = null; const extra = [];
   if (t?.from) { const src = CANON[t.from]; text = src.text; cites = src.citations; artifact = src.artifact || null; if (t.from === 'c2') extra.push({ kind: 'code', label: 'Analyzed the spreadsheet', detail: '2 steps' }); }

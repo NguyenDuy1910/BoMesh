@@ -86,6 +86,10 @@ class DocumentStorage(Protocol):
         max_bytes: int,
     ) -> StoredObject: ...
 
+    async def delete(self, key: str) -> None:
+        """Remove one object; a missing key is not an error."""
+        ...
+
     async def aclose(self) -> None: ...
 
 

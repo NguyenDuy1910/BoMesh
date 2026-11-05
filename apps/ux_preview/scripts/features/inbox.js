@@ -118,7 +118,7 @@
       pendingRequests().forEach(r => out.push(accessItem(r)));
       D.kbs.filter(k => !k.archived && !k.personal).forEach(kb => {
         const failed = docsIn(kb.id).filter(d => d.status === 'failed');
-        if (failed.length) out.push({ id: 'docs-' + kb.id, icon: 'file-text', tone: 'warn', title: `${plural(failed.length, 'document')} in ${kb.name} couldn’t be processed`, body: failed.map(d => d.name).join(', '), at: Math.max(...failed.map(d => d.updated)), to: `/knowledge/${kb.id}?tab=documents` });
+        if (failed.length) out.push({ id: 'docs-' + kb.id, icon: 'file-text', tone: 'warn', title: `${plural(failed.length, 'document')} in ${kb.name} couldn’t be published`, body: failed.map(d => d.name).join(', '), at: Math.max(...failed.map(d => d.updated)), to: '/documents?tab=all&life=attention' });
       });
       const gaps = D.gaps.filter(g => !g.dismissed);
       out.push({ id: 'a4', icon: 'sparkles', tone: 'info', title: `Weekly summary: ${fmtNum(D.usage.questions7)} questions, ${plural(gaps.length, 'knowledge gap')}`, body: gaps.length ? `Most asked without a good answer: “${[...gaps].sort((a, b) => b.n - a.n)[0].q}”` : 'Questions people asked and where knowledge fell short.', at: ago(2 * DAY), to: '/overview' });
@@ -136,6 +136,8 @@
       if (kbById('kb-eng')) out.push({ id: 'm2', icon: 'check-circle', tone: 'ok', title: 'You can now view Engineering Runbooks', body: 'Shared with Engineering by Tuan Le.', at: ago(5 * HOUR), to: '/knowledge/kb-eng' });
       if (convById('c9')) out.push({ id: 'm3', icon: 'message', tone: 'neu', title: 'Ben Walker shared a chat with you', body: '“SSO setup steps for customers”', at: ago(2 * DAY), to: '/chats' });
     }
+    // Document lifecycle: contributors hear about decisions on their submissions; reviewers about what waits for them.
+    out.push(...(X.contribNotices?.() || []), ...(X.reviewNotices?.() || []));
     const work = workItems();
     // An announcement posted with a new quiz says the same thing: keep the actionable quiz item.
     const quizAt = work.filter(i => i.cta === 'Start');

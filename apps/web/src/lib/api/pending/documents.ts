@@ -1,6 +1,6 @@
 /**
- * Local implementations of `document.move` (proposed `POST /documents/move`)
- * and `document.restore` (proposed `POST /documents/{document_id}/restore`).
+ * Local implementations of `document.move` (v2 `MoveItem`) and
+ * `document.restore` (v2 `UndeleteItem`).
  *
  * Both read real Documents and Collections to mirror authorization (reads
  * are allowed); neither writes to the server. A move is kept in this browser

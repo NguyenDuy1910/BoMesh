@@ -187,7 +187,6 @@ async def _run(args: argparse.Namespace) -> None:
         retrieved = await index.get_item_content(
             item_id,
             tenant_id=tenant_id,
-            collection_item_id=collection_item_id,
             limit=max(100, chunk_count),
         )
         expected_ids = {chunk.id for chunk in processed.chunks}
@@ -210,6 +209,7 @@ async def _run(args: argparse.Namespace) -> None:
                 limit=min(5, chunk_count),
                 tenant_id=tenant_id,
                 collection_item_ids=(collection_item_id,),
+                editable_collection_ids=(),
             )
             if not results:
                 raise RuntimeError("Hybrid search returned no active chunks")

@@ -10,9 +10,9 @@ from uuid import UUID
 from bomesh.agent import ModelContent, ResourceRef, ResourceResolver
 from bomesh.agent.models import AgentContext, CitationReferences, ToolResult
 from bomesh.agent.protocol import FunctionCallOutputItem, FunctionTool
+from bomesh.errors import NotFound, PermissionDenied
 from bomesh.services import (
     ArtifactValidationError,
-    AuthorizationError,
     DocumentNotFoundError,
 )
 
@@ -181,9 +181,9 @@ def safe_tool_failure(exc: Exception) -> ToolResult | None:
 
     if isinstance(exc, ArtifactValidationError):
         outcome = "invalid_input"
-    elif isinstance(exc, DocumentNotFoundError):
+    elif isinstance(exc, (DocumentNotFoundError, NotFound)):
         outcome = "not_found"
-    elif isinstance(exc, AuthorizationError):
+    elif isinstance(exc, PermissionDenied):
         outcome = "forbidden"
     else:
         return None

@@ -95,7 +95,8 @@
     if (A['rq-ask-staff']) A['rq-ask-staff']({ dataset: { space } });
     else { const t = questionType(spaceById(space)); go('/requests/new' + (t ? '?type=' + t.id : '')); }
   };
-  A['sp-upload'] = el => { const kb = el.dataset.kb; if (A['kb-upload']) A['kb-upload']({ dataset: { kb } }); else go('/knowledge/' + kb); };
+  /** Staff add materials through Contribute: a reviewer of the base publishes them. */
+  A['sp-upload'] = el => { const kb = el.dataset.kb; if (A['contribute']) A['contribute']({ dataset: { kb } }); else go('/knowledge/' + kb); };
 
   /* ═══════════════════════════ Spaces list ═══════════════════════════ */
   function spaceCard(sp) {
@@ -237,7 +238,7 @@
     if (visitor) return ask('tertiary') + (catalogOf(sp).length ? btn('New request', { v: 'primary', icon: 'plus', act: 'sp-request', data: { space: sp.id } }) : '');
     if (staff || (manage && !role)) return ask('tertiary') + newMenu('primary');
     const qt = questionType(sp);
-    return (qt ? btn('Ask the teaching team', { icon: 'message', act: 'sp-ask-staff', data: { space: sp.id } }) : sp.type === 'course' ? '' : newMenu('tertiary')) + ask('primary');
+    return (qt ? btn(sp.type === 'course' ? 'Ask the teaching team' : `Ask ${sp.name}`, { icon: 'message', act: 'sp-ask-staff', data: { space: sp.id } }) : sp.type === 'course' ? '' : newMenu('tertiary')) + ask('primary');
   }
   MENUS['sp-new'] = el => {
     const sp = spaceById(el.dataset.id); if (!sp) return [];
@@ -374,13 +375,13 @@
       const docs = matches.filter(d => d.kb === kb.id).sort((a, b) => b.updated - a.updated);
       const edit = canEditKb(kb), ids = docs.map(d => d.id);
       if (!docs.length && ui(uk).q) return '';
-      const headRow = `<div class="sp-mat__head">${X.kbMark ? X.kbMark(kb, 24) : ''}<a class="sp-mat__name truncate" href="#/knowledge/${kb.id}">${esc(kb.name)}</a><span class="t-sm muted none">${plural(docsIn(kb.id).length, 'document')}</span>${edit && editable.length > 1 ? `<span class="grow"></span>${btn('Add files', { v: 'ghost', size: 'sm', icon: 'upload', act: 'sp-upload', data: { kb: kb.id } })}` : ''}</div>`;
-      if (!docs.length) return `<div class="sp-mat">${headRow}${emptyState({ icon: 'files', title: 'No documents yet', desc: edit ? 'Add slides, readings or past papers.' : '', actions: edit ? btn('Add files', { icon: 'upload', act: 'sp-upload', data: { kb: kb.id } }) : '', compact: true, boxed: true })}</div>`;
+      const headRow = `<div class="sp-mat__head">${X.kbMark ? X.kbMark(kb, 24) : ''}<a class="sp-mat__name truncate" href="#/knowledge/${kb.id}">${esc(kb.name)}</a><span class="t-sm muted none">${plural(docsIn(kb.id).length, 'document')}</span>${edit && editable.length > 1 ? `<span class="grow"></span>${btn('Add documents', { v: 'ghost', size: 'sm', icon: 'upload', act: 'sp-upload', data: { kb: kb.id } })}` : ''}</div>`;
+      if (!docs.length) return `<div class="sp-mat">${headRow}${emptyState({ icon: 'files', title: 'No documents yet', desc: edit ? 'Add slides, readings or past papers. They’re published after review.' : '', actions: edit ? btn('Add documents', { icon: 'upload', act: 'sp-upload', data: { kb: kb.id } }) : '', compact: true, boxed: true })}</div>`;
       const rows = docs.map(d => `<tr class="table__row" data-act="go" data-to="/doc/${d.id}" tabindex="0" ${pick && ui(uk).sel?.[d.id] ? 'aria-selected="true"' : ''}>
         ${pick ? selCheck(uk, d.id, 'Select ' + d.name) : ''}
         <td class="table__cell table__cell--primary"><div class="row gap-12">${fileIcon(d.type)}<span class="cell-title truncate">${esc(d.name)}</span></div></td>
         <td class="table__cell sp-nowrap">${esc(rel(d.updated))}</td>
-        ${edit ? `<td class="table__cell">${status('doc', d.status)}</td>` : ''}
+        ${edit ? `<td class="table__cell">${lifeChip(d, 'sm')}</td>` : ''}
       </tr>`);
       return `<div class="sp-mat">${headRow}${table({ label: kb.name, head: (pick ? selAllCheck(uk, ids) : '') + th('Name') + th('Updated') + (edit ? th('Status') : ''), rows })}</div>`;
     };

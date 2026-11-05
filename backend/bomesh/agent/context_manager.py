@@ -131,6 +131,7 @@ class ContextManager:
             tool_names=tuple(
                 tool.name for tool in tools if isinstance(tool, FunctionTool)
             ),
+            workspace_instructions=turn.environment.agent_context.workspace_instructions,
             tools_enabled=tools_enabled,
         )
 
@@ -150,7 +151,7 @@ class ContextManager:
             step_index=step.step_index,
             settings=step.settings,
             sandbox_guidance=step.sandbox_guidance,
-            instructions=self._instructions(step.sandbox_guidance),
+            instructions=self._instructions(step.sandbox_guidance, step.workspace_instructions),
             input_items=self._selected_input_items(conversation),
             tools=tools,
             tools_enabled=step.tools_enabled,
@@ -245,10 +246,14 @@ class ContextManager:
         return tuple(content)
 
     @staticmethod
-    def _instructions(sandbox_guidance: str | None) -> str:
+    def _instructions(sandbox_guidance: str | None, workspace_instructions: str) -> str:
         """Static per conversation: never per-turn ids, paths or timestamps."""
 
         sections = [render_agent_base()]
+        if workspace_instructions:
+            sections.append(
+                f"<workspace_instructions>{escape(workspace_instructions)}</workspace_instructions>"
+            )
         if sandbox_guidance:
             sections.append(f"<sandbox>{escape(sandbox_guidance)}</sandbox>")
         sections.append(

@@ -17,15 +17,15 @@ from uuid import UUID
 import pytest
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from bomesh.services.integration_credential import IntegrationCredentialService
-from bomesh.services.item import ItemService
+from bomesh.services.ingestion.credentials import IntegrationCredentialService
+from bomesh.services.knowledge_items.item_store import artifact_collection_id, personal_collection_id
 
 TENANT = UUID("00000000-0000-0000-0000-000000000001")
 USER = UUID("d9dd5362-b584-45c7-8120-dcace0f36dfd")
 
 
 def test_a_users_personal_collection_keeps_its_id() -> None:
-    assert ItemService.upload_collection_id(TENANT, USER) == UUID(
+    assert personal_collection_id(TENANT, USER) == UUID(
         "a50ad8ae-338f-579a-8524-26de818ee71d"
     )
 
@@ -34,12 +34,8 @@ def test_derived_identities_keep_the_original_namespace() -> None:
     # Values computed from the pre-rename "bothesis:" names.
     from uuid import NAMESPACE_URL, uuid5
 
-    source = UUID("11111111-1111-1111-1111-111111111111")
-    assert ItemService.artifact_collection_id(TENANT, USER) == uuid5(
+    assert artifact_collection_id(TENANT, USER) == uuid5(
         NAMESPACE_URL, f"bothesis:artifact-collection:{TENANT}:{USER}"
-    )
-    assert ItemService.external_item_id(source, "page-42") == uuid5(
-        NAMESPACE_URL, f"bothesis:external-resource:{source}:page-42"
     )
 
 

@@ -20,6 +20,7 @@ from time import perf_counter
 from typing import Any
 from uuid import uuid4
 
+from bomesh.agent.citation_stream import parse_passage_name
 from bomesh.agent.models import AgentContext
 from bomesh.agent.protocol.content import DOCUMENT_CITATION_TYPE
 from bomesh.document_index import ContextualChunk, ItemIndex
@@ -175,7 +176,6 @@ class _Probe:
         return AgentContext(
             user_id=_BENCHMARK_USER,
             tenant_id=tenant_id,
-            roles=[],
             collection_item_ids=scope,
         )
 
@@ -316,7 +316,6 @@ class _Probe:
         context = AgentContext(
             user_id=_BENCHMARK_USER,
             tenant_id=self._tenant_id,
-            roles=[],
             collection_item_ids=self._scope,
             conversation_id=f"benchmark-{uuid4().hex}",
             request_id=f"benchmark-{uuid4().hex}",
@@ -459,10 +458,10 @@ def _citations(annotations: Sequence[Any]) -> list[dict[str, Any]]:
             if hasattr(annotation, "model_dump")
             else dict(annotation)
         )
-        if payload.get("type") == DOCUMENT_CITATION_TYPE and isinstance(
-            payload.get("citation"), dict
-        ):
-            citations.append(payload["citation"])
+        citation = payload.get("citation")
+        if payload.get("type") == DOCUMENT_CITATION_TYPE and isinstance(citation, dict):
+            item_id, chunk_id = parse_passage_name(citation["passage"])
+            citations.append({**citation, "item_id": item_id, "chunk_id": chunk_id})
     return citations
 
 

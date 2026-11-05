@@ -2,8 +2,8 @@
  * Local implementation of `platform.health_history`. Imported only by
  * `modules/platform/api.ts`.
  *
- * The proposed server keeps every periodic probe of `/platform/health`. Until
- * it does, this browser keeps the REAL health reports it has read (each time
+ * v2 `ListComponents` / `ListIncidents` serve component state and incidents
+ * from the server's own probes. Until they exist, this browser keeps the REAL health reports it has read (each time
  * someone opens or refreshes System health here) and derives the same answer
  * from them: per-day status, uptime and incidents. Nothing is invented: a day
  * nobody checked from this browser is `no_data`.
@@ -28,7 +28,7 @@ interface HistoryState {
 }
 
 const DAY = 86_400_000;
-/** The longest window the proposed endpoint serves. */
+/** The longest window the history screen reads. */
 const MAX_DAYS = 90;
 /** Enough for several checks a day over the longest window. */
 const MAX_CHECKS = 2_000;
@@ -138,7 +138,7 @@ export const pendingPlatformHealthHistory = {
     const history = authorize();
     const span = Math.min(Math.max(Math.trunc(days) || 30, 1), MAX_DAYS);
     const today = Date.now();
-    // UTC calendar days, oldest first, as the proposed endpoint reports them.
+    // UTC calendar days, oldest first.
     const dates = Array.from({ length: span }, (_, index) =>
       new Date(today - (span - 1 - index) * DAY).toISOString().slice(0, 10));
     const start = dates[0];

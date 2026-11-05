@@ -38,7 +38,7 @@ from docker.errors import APIError, DockerException, ImageNotFound, NotFound
 from bomesh.agent import ShellCommandResult, ShellRun
 from bomesh.agent.execution import MAX_SHELL_COMMANDS
 from bomesh.services import ArtifactValidationError
-from bomesh.services.sandbox_session import SandboxSessionService
+from bomesh.services.conversations.sandbox_session import SandboxSessionService
 from config import SandboxConfig
 
 _log = logging.getLogger(__name__)

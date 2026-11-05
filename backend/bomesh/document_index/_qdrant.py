@@ -145,6 +145,7 @@ class _QdrantBackend:
         queries: Sequence[tuple[str, list[float]]],
         tenant_id: str,
         collection_item_ids: Iterable[str],
+        editable_collection_ids: Iterable[str],
         limit: int,
         candidate_limit: int,
     ) -> list[Any]:
@@ -161,6 +162,7 @@ class _QdrantBackend:
             query_filter=self._access_filter(
                 tenant_id=tenant_id,
                 collection_item_ids=collection_item_ids,
+                editable_collection_ids=editable_collection_ids,
             ),
             limit=limit,
             candidate_limit=candidate_limit,
@@ -171,22 +173,18 @@ class _QdrantBackend:
         *,
         item_id: str,
         tenant_id: str,
-        collection_item_id: str,
         chunk_id: str | None,
         limit: int,
     ) -> list[Any]:
-        """Load indexed chunks for one authorized Item."""
+        """Load the live indexed chunks of one Item the caller was authorized for.
 
-        access_filter = self._access_filter(
-            tenant_id=tenant_id,
-            collection_item_ids=(collection_item_id,),
-        )
+        Fetched by ``item_id``, never by the payload's collection: PostgreSQL
+        decided access, so a lagging payload cannot hide content.
+        """
+
         must = [
-            *(access_filter.must or []),
-            qmodels.FieldCondition(
-                key="item_id",
-                match=qmodels.MatchValue(value=item_id),
-            ),
+            *self._live_filter(tenant_id),
+            qmodels.FieldCondition(key="item_id", match=qmodels.MatchValue(value=item_id)),
         ]
         if chunk_id:
             must.append(
@@ -202,6 +200,39 @@ class _QdrantBackend:
             with_vectors=False,
         )
         return list(points)
+
+    async def set_item_payload(
+        self, item_id: str, *, tenant_id: str, payload: dict[str, Any]
+    ) -> Any:
+        """Merge ``payload`` into every point of one Item, tombstoned ones included."""
+
+        return await self.set_payload(
+            payload=payload, points=self._item_filter(item_id, tenant_id=tenant_id)
+        )
+
+    async def count_item_points(self, item_id: str, *, tenant_id: str) -> int:
+        """Every point of one Item, tombstoned ones included."""
+
+        result = await self._maybe_await(
+            self.client.count(
+                collection_name=self.collection_name,
+                count_filter=self._item_filter(item_id, tenant_id=tenant_id),
+                exact=True,
+            )
+        )
+        return int(getattr(result, "count", 0) or 0)
+
+    async def delete_item_points(self, item_id: str, *, tenant_id: str) -> Any:
+        """Remove one Item's points for good (purge)."""
+
+        return await self._maybe_await(
+            self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=qmodels.FilterSelector(
+                    filter=self._item_filter(item_id, tenant_id=tenant_id)
+                ),
+            )
+        )
 
     async def set_payload(
         self,
@@ -224,20 +255,8 @@ class _QdrantBackend:
         *,
         tenant_id: str,
     ) -> Any:
-        return await self.set_payload(
-            payload={"is_deleted": True},
-            points=qmodels.Filter(
-                must=[
-                qmodels.FieldCondition(
-                    key="tenant_id",
-                    match=qmodels.MatchValue(value=tenant_id),
-                    ),
-                    qmodels.FieldCondition(
-                        key="item_id",
-                        match=qmodels.MatchValue(value=item_id),
-                    ),
-                ]
-            ),
+        return await self.set_item_payload(
+            item_id, tenant_id=tenant_id, payload={"is_deleted": True}
         )
 
     async def _search(
@@ -329,32 +348,70 @@ class _QdrantBackend:
 
     @staticmethod
     def _access_filter(
-        *, tenant_id: str, collection_item_ids: Iterable[str]
+        *,
+        tenant_id: str,
+        collection_item_ids: Iterable[str],
+        editable_collection_ids: Iterable[str],
     ) -> qmodels.Filter:
-        collections = sorted(
-            {
-                value.strip()
-                for value in collection_item_ids
-                if isinstance(value, str) and value.strip()
-            }
-        ) or [_NO_COLLECTION_ID]
+        """Readable collections, and ``published = true OR collection ∈ editable``.
+
+        ``must_not published = false`` keeps points written before the key
+        existed matching (``item_model.md`` §4.10).
+        """
+        collections = _ids(collection_item_ids) or [_NO_COLLECTION_ID]
+        editable = _ids(editable_collection_ids) or [_NO_COLLECTION_ID]
         return qmodels.Filter(
             must=[
-                qmodels.FieldCondition(
-                    key="is_deleted",
-                    match=qmodels.MatchValue(value=False),
-                ),
-                qmodels.FieldCondition(
-                    key="schema_version",
-                    match=qmodels.MatchValue(value=INDEX_SCHEMA_VERSION),
-                ),
-                qmodels.FieldCondition(
-                    key="tenant_id",
-                    match=qmodels.MatchValue(value=tenant_id),
-                ),
+                *_QdrantBackend._live_filter(tenant_id),
                 qmodels.FieldCondition(
                     key="collection_item_id",
                     match=qmodels.MatchAny(any=collections),
+                ),
+                qmodels.Filter(
+                    should=[
+                        qmodels.Filter(
+                            must_not=[
+                                qmodels.FieldCondition(
+                                    key="published",
+                                    match=qmodels.MatchValue(value=False),
+                                )
+                            ]
+                        ),
+                        qmodels.FieldCondition(
+                            key="collection_item_id",
+                            match=qmodels.MatchAny(any=editable),
+                        ),
+                    ]
+                ),
+            ]
+        )
+
+    @staticmethod
+    def _live_filter(tenant_id: str) -> list[qmodels.FieldCondition]:
+        return [
+            qmodels.FieldCondition(
+                key="is_deleted",
+                match=qmodels.MatchValue(value=False),
+            ),
+            qmodels.FieldCondition(
+                key="schema_version",
+                match=qmodels.MatchValue(value=INDEX_SCHEMA_VERSION),
+            ),
+            qmodels.FieldCondition(
+                key="tenant_id",
+                match=qmodels.MatchValue(value=tenant_id),
+            ),
+        ]
+
+    @staticmethod
+    def _item_filter(item_id: str, *, tenant_id: str) -> qmodels.Filter:
+        return qmodels.Filter(
+            must=[
+                qmodels.FieldCondition(
+                    key="tenant_id", match=qmodels.MatchValue(value=tenant_id)
+                ),
+                qmodels.FieldCondition(
+                    key="item_id", match=qmodels.MatchValue(value=item_id)
                 ),
             ]
         )
@@ -364,3 +421,9 @@ class _QdrantBackend:
         if inspect.isawaitable(value):
             return await value
         return value
+
+
+def _ids(values: Iterable[str]) -> list[str]:
+    return sorted(
+        {value.strip() for value in values if isinstance(value, str) and value.strip()}
+    )

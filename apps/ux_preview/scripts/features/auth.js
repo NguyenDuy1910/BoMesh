@@ -8,7 +8,7 @@
   DATA_KEYS.push('wsOpened');
 
   const GOOGLE = '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5a5.6 5.6 0 0 1-2.4 3.6v3h3.9c2.2-2.1 3.5-5.1 3.5-8.8z"/><path fill="#34A853" d="M12 24c3.2 0 6-1.1 7.9-2.9l-3.9-3c-1.1.7-2.4 1.2-4 1.2-3.1 0-5.7-2.1-6.7-4.9h-4v3.1A12 12 0 0 0 12 24z"/><path fill="#FBBC05" d="M5.3 14.4a7.2 7.2 0 0 1 0-4.7V6.6h-4a12 12 0 0 0 0 10.8l4-3z"/><path fill="#EA4335" d="M12 4.8c1.8 0 3.3.6 4.6 1.8l3.4-3.4A12 12 0 0 0 1.3 6.6l4 3.1c1-2.8 3.6-4.9 6.7-4.9z"/></svg>';
-  const brand = () => `<div class="brand au-brand"><span class="brand__mark">${ic('layers', 'i-sm')}</span>BoMesh</div>`;
+  const brand = () => `<div class="row au-brand"><div class="brand grow"><span class="brand__mark">${ic('layers', 'i-sm')}</span>BoMesh</div>${X.lang.picker()}</div>`;
   const signinUi = () => ui('auSignin', { id: '', pw: '', show: false, err: {}, busy: '' });
   const signupUi = () => ui('auSignup', { name: '', email: '', pw: '', show: false, terms: false, err: {}, busy: false });
   const wsUi = () => ui('auWs', { fresh: false, email: '', busy: false, checks: 0 });
@@ -56,7 +56,7 @@
         ${e.form ? `<div class="au-form-error">${alertBox('danger', e.form)}</div>` : ''}
         ${btn('Sign in', { v: 'primary', size: 'lg', full: true, act: 'au-signin', loading: s.busy === 'pw', disabled: busy })}
         <p class="au-foot">New to BoMesh? ${linkBtn('Create account', { href: '/signup' })}</p>
-        <p class="au-hint">Demo accounts, password <span class="mono">demo</span>: ${linkBtn(PERSONAS.member.email, { act: 'au-demo', data: { p: 'member' } })} · ${linkBtn(PERSONAS.student?.email || '', { act: 'au-demo', data: { p: 'student' } })}</p>
+        <p class="au-hint">Demo accounts, password <span class="mono">demo</span>: ${['member', 'engineer', 'lead', 'analyst', 'wsadmin'].filter(k => PERSONAS[k]).map(k => linkBtn(PERSONAS[k].email, { act: 'au-demo', data: { p: k } })).join(' · ')}</p>
       </div></main>
       <aside class="auth__aside au-aside">${proof()}</aside>
     </div>`;

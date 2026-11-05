@@ -29,6 +29,8 @@ OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
 LANGFUSE_DEFAULT_BASE_URL = "https://cloud.langfuse.com"
 AWS_S3_PROVIDER = "aws_s3"
 CLOUDFLARE_R2_PROVIDER = "cloudflare_r2"
+RUSTFS_PROVIDER = "rustfs"
+OBJECT_STORAGE_PROVIDERS = (AWS_S3_PROVIDER, CLOUDFLARE_R2_PROVIDER, RUSTFS_PROVIDER)
 
 
 def text(name: str, default: str) -> str:
@@ -146,7 +148,6 @@ class ServerConfig:
 class IdentityConfig:
     """Trust settings for resolving the caller at the HTTP boundary."""
 
-    allow_insecure_development_identity: bool = False
     jwt_secret: str | None = None
     jwt_issuer: str = "bomesh"
     jwt_audience: str = "bomesh-api"
@@ -158,9 +159,6 @@ class IdentityConfig:
     @classmethod
     def from_environment(cls) -> IdentityConfig:
         return cls(
-            allow_insecure_development_identity=boolean(
-                "BOMESH_ALLOW_INSECURE_DEV_IDENTITY"
-            ),
             jwt_secret=optional_text("BOMESH_AUTH_JWT_SECRET"),
             jwt_issuer=text("BOMESH_AUTH_JWT_ISSUER", "bomesh"),
             jwt_audience=text("BOMESH_AUTH_JWT_AUDIENCE", "bomesh-api"),
@@ -178,7 +176,7 @@ class IdentityConfig:
 
 @dataclass(frozen=True, slots=True)
 class ObjectStorageConfig:
-    """Durable document storage settings for AWS S3 or Cloudflare R2."""
+    """Durable document storage settings for AWS S3, Cloudflare R2, or RustFS."""
 
     provider: str = AWS_S3_PROVIDER
     bucket: str | None = None
@@ -195,9 +193,10 @@ class ObjectStorageConfig:
     max_pool_connections: int = 20
 
     def __post_init__(self) -> None:
-        if self.provider not in {AWS_S3_PROVIDER, CLOUDFLARE_R2_PROVIDER}:
+        if self.provider not in OBJECT_STORAGE_PROVIDERS:
             raise RuntimeError(
-                "BOMESH_OBJECT_STORAGE_PROVIDER must be aws_s3 or cloudflare_r2"
+                "BOMESH_OBJECT_STORAGE_PROVIDER must be one of: "
+                + ", ".join(OBJECT_STORAGE_PROVIDERS)
             )
 
     @property
@@ -236,6 +235,16 @@ class ObjectStorageConfig:
                     "BOMESH_R2_SECRET_ACCESS_KEY are required"
                 )
             return self.bucket
+        if self.provider == RUSTFS_PROVIDER:
+            if not self.bucket:
+                raise RuntimeError("BOMESH_OBJECT_STORAGE_BUCKET is required")
+            if not self.endpoint_url:
+                raise RuntimeError("BOMESH_S3_ENDPOINT_URL is required for RustFS")
+            if not (self.access_key_id and self.secret_access_key):
+                raise RuntimeError(
+                    "RUSTFS_ACCESS_KEY and RUSTFS_SECRET_KEY are required for RustFS"
+                )
+            return self.bucket
         if self.endpoint_url and not self.bucket:
             raise RuntimeError(
                 "BOMESH_S3_BUCKET is required when AWS S3 is configured"
@@ -264,6 +273,7 @@ class ObjectStorageConfig:
                     "BOMESH_R2_MAX_POOL_CONNECTIONS", default=20
                 ),
             )
+        rustfs = provider == RUSTFS_PROVIDER
         return cls(
             provider=provider,
             bucket=optional_text(
@@ -276,7 +286,14 @@ class ObjectStorageConfig:
                 "BOMESH_S3_ENDPOINT_URL", "BOMESH_OBJECT_STORAGE_ENDPOINT"
             ),
             public_endpoint_url=optional_text("BOMESH_S3_PUBLIC_ENDPOINT_URL"),
-            addressing_style=text("BOMESH_S3_ADDRESSING_STYLE", "auto"),
+            # RustFS has no virtual-host DNS; AWS S3 resolves the style itself.
+            addressing_style=text(
+                "BOMESH_S3_ADDRESSING_STYLE", "path" if rustfs else "auto"
+            ),
+            # The same pair the RustFS server reads, so the API and the
+            # container cannot drift apart. AWS S3 keeps boto3's credential chain.
+            access_key_id=optional_text("RUSTFS_ACCESS_KEY") if rustfs else None,
+            secret_access_key=optional_text("RUSTFS_SECRET_KEY") if rustfs else None,
             timeout_seconds=number("BOMESH_S3_TIMEOUT_SECONDS", default=20.0),
             max_pool_connections=integer(
                 "BOMESH_S3_MAX_POOL_CONNECTIONS", default=20
@@ -703,6 +720,62 @@ class IngestionRunConfig:
         )
 
 
+DEFAULT_ALLOWED_MIME_TYPES = (
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "text/plain",
+    "text/markdown",
+    "text/csv",
+    "text/html",
+    "application/zip",
+)
+DEFAULT_REJECTED_RETENTION_SECONDS = 30 * 24 * 3600
+
+
+@dataclass(frozen=True, slots=True)
+class IngestionPolicyConfig:
+    """The deployment's initial ``ingestionPolicies/default``.
+
+    The policy row is created from these values the first time it is read;
+    after that the platform console (``UpdateIngestionPolicy``) owns it.
+    """
+
+    allowed_mime_types: tuple[str, ...] = DEFAULT_ALLOWED_MIME_TYPES
+    max_file_size_bytes: int = DEFAULT_MAX_UPLOAD_BYTES
+    ocr_scanned_pdfs: bool = True
+    parse_spreadsheets: bool = True
+    rejected_retention_seconds: int = DEFAULT_REJECTED_RETENTION_SECONDS
+
+    @classmethod
+    def from_environment(cls) -> IngestionPolicyConfig:
+        mime_types = optional_text("BOMESH_INGESTION_POLICY_ALLOWED_MIME_TYPES")
+        return cls(
+            allowed_mime_types=(
+                tuple(value.strip() for value in mime_types.split(",") if value.strip())
+                if mime_types is not None
+                else DEFAULT_ALLOWED_MIME_TYPES
+            ),
+            max_file_size_bytes=_positive_integer(
+                "BOMESH_INGESTION_POLICY_MAX_FILE_SIZE_BYTES",
+                default=integer(
+                    "BOMESH_DOCUMENT_MAX_UPLOAD_BYTES", default=DEFAULT_MAX_UPLOAD_BYTES
+                ),
+            ),
+            ocr_scanned_pdfs=boolean(
+                "BOMESH_INGESTION_POLICY_OCR_SCANNED_PDFS", default=True
+            ),
+            parse_spreadsheets=boolean(
+                "BOMESH_INGESTION_POLICY_PARSE_SPREADSHEETS", default=True
+            ),
+            rejected_retention_seconds=_positive_integer(
+                "BOMESH_INGESTION_POLICY_REJECTED_RETENTION_SECONDS",
+                default=DEFAULT_REJECTED_RETENTION_SECONDS,
+            ),
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class OAuthClientConfig:
     """One provider's registered OAuth application."""
@@ -819,6 +892,7 @@ class AppConfig:
     observability: ObservabilityConfig = field(default_factory=ObservabilityConfig)
     worker: WorkerConfig = field(default_factory=WorkerConfig)
     ingestion_run: IngestionRunConfig = field(default_factory=IngestionRunConfig)
+    ingestion_policy: IngestionPolicyConfig = field(default_factory=IngestionPolicyConfig)
 
     @classmethod
     def from_environment(cls) -> AppConfig:
@@ -840,6 +914,7 @@ class AppConfig:
             observability=ObservabilityConfig.from_environment(),
             worker=WorkerConfig.from_environment(),
             ingestion_run=IngestionRunConfig.from_environment(),
+            ingestion_policy=IngestionPolicyConfig.from_environment(),
         )
 
 
@@ -866,6 +941,7 @@ __all__ = [
     "AppConfig",
     "ArtifactConfig",
     "IdentityConfig",
+    "IngestionPolicyConfig",
     "IngestionRunConfig",
     "IntegrationConfig",
     "IntegrationOAuthConfig",

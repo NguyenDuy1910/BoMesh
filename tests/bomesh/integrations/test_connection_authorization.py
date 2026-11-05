@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -46,8 +45,7 @@ def _pending(**overrides: Any) -> PendingAuthorization:
         "user_id": "22222222-2222-2222-2222-222222222222",
         "provider_key": "google",
         "connector_key": "google_drive",
-        "owner_type": "tenant",
-        "connection_id": None,
+        "connection_id": "33333333-3333-3333-3333-333333333333",
         "code_verifier": "verifier-value",
         "nonce": "nonce-value",
     }
@@ -70,7 +68,7 @@ def _atlassian() -> AtlassianConnectionProvider:
 class TestOAuthState:
     def test_round_trip_preserves_the_pending_authorization(self) -> None:
         codec = OAuthStateCodec(_SECRET)
-        pending = _pending(connection_id="33333333-3333-3333-3333-333333333333")
+        pending = _pending()
 
         assert codec.read(codec.issue(pending)) == pending
 
@@ -180,6 +178,21 @@ class TestGoogleProvider:
         assert provider.configured is False
         with pytest.raises(IntegrationConfigurationError):
             provider.authorization_url(state="ST", code_challenge="CH")
+
+    def test_a_platform_client_overrides_the_environment_one(self) -> None:
+        environment = GoogleConnectionProvider(
+            client_id="env-client", client_secret=None, redirect_uri="https://api/callback"
+        )
+
+        platform = environment.with_client("platform-client", "platform-secret")
+        partial = environment.with_client(None, "platform-secret")
+
+        assert environment.configured is False
+        assert platform.configured is True
+        assert "client_id=platform-client" in platform.authorization_url(
+            state="ST", code_challenge="CH"
+        )
+        assert partial.client_id == "env-client" and partial.has_client_secret
 
     @pytest.mark.parametrize(
         ("resource_type", "external_id", "expected"),
@@ -448,85 +461,6 @@ def _install_transport(
     monkeypatch.setattr(httpx.AsyncClient, "__init__", patched)
 
 
-def test_the_completion_page_cannot_be_injected_into() -> None:
-    """A provider's error text must not be able to close this script tag."""
-
-    from api.routers.connections import _completion_page
-
-    hostile = "</script><img src=x onerror=alert(1)>"
-    response = _completion_page(
-        "https://app.example", {"status": "error", "message": hostile}
-    )
-    body = response.body.decode()
-    literal = body.split("var message = ", 1)[1].split("; var target", 1)[0]
-
-    # Nothing in the payload reaches the document as markup...
-    assert "<img" not in body
-    assert body.count("</script>") == 1
-    # ...and the message still arrives intact at the opener.
-    assert json.loads(literal)["message"] == hostile
-    assert response.headers["Cache-Control"] == "no-store"
-
-
-def test_a_provider_error_reaches_the_reader_verbatim() -> None:
-    """An unapproved scope is fixable; "authorization failed" is not."""
-
-    from api.routers.connections import _provider_error
-
-    assert "read:confluence-content.all" in _provider_error(
-        "invalid_scope", "read:confluence-content.all is not configured for this app"
-    )
-    assert _provider_error("access_denied", None) == (
-        "The account owner declined this authorization."
-    )
-    assert "invalid_request" in _provider_error("invalid_request", None)
-    assert _provider_error(None, None).startswith("The provider did not")
-
-
-def test_the_completion_page_talks_to_exactly_one_origin() -> None:
-    """A wildcard target would hand the result to any page that opened it."""
-
-    body = _page_body("https://app.example")
-
-    assert '"https://app.example"' in body
-    assert '"*"' not in body
-
-
-def test_a_connection_says_whose_account_it_is_without_the_provider_id() -> None:
-    """The UI needs the account and whether it can be browsed; never the provider id."""
-
-    from api.routers import Connection
-    from api.routers._mapping import connection_payload
-
-    public = Connection.model_validate(
-        connection_payload(
-            {
-                "id": "7e32c2b9-8f15-46f8-920e-0ccddf6b1d8e",
-                "connector_key": "confluence",
-                "display_name": "Galaxy FinX",
-                "owner_type": "tenant",
-                "status": "connected",
-                "account": {
-                    "id": "atlassian-account-123",
-                    "label": "duy@company.com",
-                    "resource_id": "cloud-1",
-                    "resource_label": "Galaxy FinX",
-                },
-                "browsable": True,
-                "last_checked_at": "2026-09-28T15:00:00+00:00",
-                "created_at": "2026-09-28T14:00:00+00:00",
-                "updated_at": "2026-09-28T15:00:00+00:00",
-            }
-        )
-    ).model_dump(mode="json")
-
-    assert public["account"] == {"label": "duy@company.com", "resource_label": "Galaxy FinX"}
-    assert public["browsable"] is True
-    assert "atlassian-account-123" not in str(public)
-    assert "cloud-1" not in str(public)
-    assert public["last_checked_at"].startswith("2026-09-28T15:00:00")
-
-
 def test_a_selected_confluence_page_becomes_a_page_subtree_source() -> None:
     """A page picked in the browser must not be read as a space key."""
 
@@ -549,7 +483,3 @@ def test_a_selected_confluence_page_becomes_a_page_subtree_source() -> None:
     assert config("page", "page:12345") == {"page_id": "12345", "index_recursively": True}
 
 
-def _page_body(origin: str) -> str:
-    from api.routers.connections import _completion_page
-
-    return _completion_page(origin, {"status": "connected"}).body.decode()

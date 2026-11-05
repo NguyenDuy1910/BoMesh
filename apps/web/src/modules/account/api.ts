@@ -27,12 +27,12 @@ export interface NotificationPreferencesPatch {
   email?: Partial<EmailNotificationPreferences>;
 }
 
-/** API pending: `GET /me/notification-preferences` (self). */
+/** API pending: `GetUserPreferences` (`emailNotifications`; self). */
 export async function getNotificationPreferences(): Promise<NotificationPreferences> {
   return pendingApi("account.notification_prefs", () => pendingNotificationPreferences.getNotificationPreferences());
 }
 
-/** API pending: `PATCH /me/notification-preferences` (self). */
+/** API pending: `UpdateUserPreferences` (`emailNotifications`; self). */
 export async function updateNotificationPreferences(
   patch: NotificationPreferencesPatch,
 ): Promise<NotificationPreferences> {

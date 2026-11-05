@@ -44,14 +44,14 @@
   }
   /** Fictional-data marker for demo workspaces. */
   const demoChip = () => (isDemoWs() ? chip('Demo data', { size: 'sm', icon: 'info', tip: curWs().demo }) : '');
-  /** Knowledge area header: title, demo marker, section tabs (Discover · Browse · My library · Knowledge bases) and the page's actions. */
-  const HUB_TABS = [['discover', 'Discover', '/knowledge'], ['browse', 'Browse', '/knowledge/browse'], ['library', 'My library', '/knowledge/library'], ['bases', 'Knowledge bases', '/knowledge/bases']];
+  /** Knowledge area header: title, demo marker, section tabs (Browse · My library · Knowledge bases) and the page's actions. Discovery lives on Home. */
+  const HUB_TABS = [['browse', 'Browse', '/knowledge'], ['library', 'My library', '/knowledge/library'], ['bases', 'Knowledge bases', '/knowledge/bases']];
   function hubHeader(active, { actions = '', desc = '' } = {}) {
     const nav = `<nav class="tabs hub-tabs" aria-label="Knowledge sections"><div class="tabs__list">${HUB_TABS.map(([id, label, to]) => `<a class="tabs__tab" href="#${to}" ${id === active ? 'aria-current="page" aria-selected="true"' : 'aria-selected="false"'}>${esc(label)}</a>`).join('')}</div></nav>`;
     return pageHeader({ title: 'Knowledge', extra: demoChip(), desc, actions }) + `<div class="hub-nav">${nav}</div>`;
   }
-  /** Upload entry point for anyone who can add to a knowledge base (students: My files). */
-  const uploadBtn = (v = 'secondary') => (visibleKbs().some(canEditKb) ? btn('Upload', { v, icon: 'upload', act: 'kb-upload' }) : '');
+  /** Knowledge header entry point: Contribute (review before publishing) for contributors; otherwise upload to My files. */
+  const uploadBtn = (v = 'secondary') => (canContribute() ? btn('Contribute', { v, icon: 'upload', act: 'contribute' }) : visibleKbs().some(k => k.personal) ? btn('Upload', { v, icon: 'upload', act: 'contribute', data: { private: '1' } }) : '');
 
   /* ═══════════════ Row, card, table ═══════════════ */
   /** Rich list row. opts: q (highlight + snippet), act (default open), data, active, note (collection note), trail (extra HTML before save), select (uiKey for checkbox). */
@@ -153,6 +153,9 @@
       { sep: true },
       { label: 'Copy link', icon: 'link', run: () => A['res-copy-link']({ dataset: { id: d.id } }) },
       { label: 'Download', icon: 'download', run: () => X.downloadDocument?.(d) },
+      canContribute() && !kbById(d.kb)?.personal && (edit || isMine(d)) && { label: 'Submit a new version…', icon: 'upload', run: () => A['contribute']?.({ dataset: { versionOf: d.id } }) },
+      canReviewKb(kbById(d.kb)) && can('knowledge.manage') && { label: 'Manage in Documents', icon: 'files', run: () => go('/documents?tab=all&q=' + encodeURIComponent(d.name.replace(/\.[^.]+$/, ''))) },
+      isAdmin() && isPublishedStage(d) && !kbById(d.kb)?.personal && { label: isFeatured(d.id) ? 'Remove from Home' : 'Feature on Home', icon: 'sparkles', run: () => { const on = toggleFeatured(d.id); refresh(); toast(on ? `Featured on Home for everyone who can read it` : 'Removed from Home', { action: { label: 'Undo', run: () => { toggleFeatured(d.id); refresh(); } } }); } },
       ...(edit ? [
         { sep: true },
         { label: 'Edit details…', icon: 'pencil', run: () => A['res-edit']({ dataset: { id: d.id } }) },

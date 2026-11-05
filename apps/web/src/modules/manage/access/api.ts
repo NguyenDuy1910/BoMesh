@@ -1,6 +1,7 @@
 /**
- * People & access client functions whose API is still pending
- * (`backend/docs_design/api_contract.md`, "Proposed — UI built, API pending").
+ * People & access client functions whose API is still pending (target v2
+ * methods in `backend/docs_design/api_design.md` §4; see `operationIds` in
+ * `lib/api/pending.ts`).
  * The real IAM calls live in `directory.ts`; only this module may import the
  * local implementations under `lib/api/pending/`.
  */
@@ -9,7 +10,7 @@ import { pendingApi } from "@/lib/api/pending";
 import { pendingMemberRemoval } from "@/lib/api/pending/member-remove";
 import { invalidateApiData } from "@/lib/api/revision";
 
-/** A membership removed from the workspace (proposed `DELETE /users/{user_id}` response). */
+/** A membership removed from the workspace (what the v2 `DeleteMember` call ends). */
 export interface RemovedMember {
   user_id: string;
   email: string;
@@ -18,14 +19,14 @@ export interface RemovedMember {
   removed_by: string | null;
 }
 
-/** Remove someone from this workspace: proposed `DELETE /users/{user_id}` (`user.manage`; 409 for yourself or the last admin). */
+/** Remove someone from this workspace: v2 `DeleteMember` (`members.delete`; refused for yourself or the last admin). */
 export async function removeWorkspaceMember(userId: string): Promise<RemovedMember> {
   const removed = await pendingApi("workspace.member_remove", () => pendingMemberRemoval.remove(userId));
   invalidateApiData();
   return removed;
 }
 
-/** Undo a removal made in this browser. On the server, `POST /users` readmits a removed member. */
+/** Undo a removal made in this browser. On the server, v2 `CreateMember` readmits a removed member. */
 export async function restoreWorkspaceMember(userId: string): Promise<void> {
   await pendingApi("workspace.member_remove", () => pendingMemberRemoval.restore(userId));
   invalidateApiData();

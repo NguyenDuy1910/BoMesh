@@ -1,9 +1,9 @@
 /**
  * Workspace settings the API does not serve yet. The name is real
  * (`PATCH /workspaces/{workspace_id}` through the directory client); the web
- * address, brand colour and archive are pending
- * (`api_contract.md#proposed-workspace-url-code`, `#proposed-workspace-branding`,
- * `#proposed-workspace-archive`). Each write invalidates API data so the shell
+ * address, brand colour and archive are pending (target v2 methods
+ * `UpdateWorkspace`, `UpdateWorkspaceSettings` `branding.accentColor`, `ArchiveWorkspace`;
+ * `backend/docs_design/api_design.md` §4). Each write invalidates API data so the shell
  * and every open screen re-read what changed.
  */
 
@@ -49,24 +49,24 @@ export interface WorkspaceCodeUpdate {
   code: string;
 }
 
-/** API pending: `POST /workspaces/{workspace_id}/archive` (`tenant.manage`). */
+/** API pending: `ArchiveWorkspace` (`workspaces.archive`). */
 export async function archiveWorkspace(workspaceId: string, body: WorkspaceArchiveRequest): Promise<WorkspaceArchive> {
   const archive = await pendingApi("workspace.archive", () => pendingWorkspaceSettings.archiveWorkspace(workspaceId, body));
   invalidateApiData();
   return archive;
 }
 
-/** API pending: `status`/`archived_at` of `GET /workspaces/{workspace_id}`; null while active. */
+/** API pending: `state` `ARCHIVED` of `GetWorkspace`; null while active. */
 export async function getWorkspaceArchive(workspaceId: string): Promise<WorkspaceArchive | null> {
   return pendingApi("workspace.archive", () => pendingWorkspaceSettings.getWorkspaceArchive(workspaceId));
 }
 
-/** API pending: `settings.branding` of `GET /workspaces/{workspace_id}` (any member). */
+/** API pending: `branding.accentColor` of `GetWorkspaceSettings` (any member). */
 export async function getWorkspaceBranding(workspaceId: string): Promise<WorkspaceBranding> {
   return pendingApi("workspace.branding", () => pendingWorkspaceSettings.getWorkspaceBranding(workspaceId));
 }
 
-/** API pending: `PATCH /workspaces/{workspace_id}` `{ settings: { branding } }` (`tenant.manage`). */
+/** API pending: `UpdateWorkspaceSettings` `branding.accentColor` (`workspaces.updateSettings`). */
 export async function updateWorkspaceBranding(
   workspaceId: string,
   body: WorkspaceBrandingUpdate,
@@ -77,12 +77,12 @@ export async function updateWorkspaceBranding(
   return branding;
 }
 
-/** API pending: `code` of `GET /workspaces/{workspace_id}`, including a change not yet on the server. */
+/** API pending: `code` of `GetWorkspace`, including a change not yet on the server. */
 export async function getWorkspaceCode(workspaceId: string): Promise<WorkspaceCode> {
   return pendingApi("workspace.url_code", () => pendingWorkspaceSettings.getWorkspaceCode(workspaceId));
 }
 
-/** API pending: `PATCH /workspaces/{workspace_id}` `{ code }` (`tenant.manage`); 409 when taken, 422 when malformed. */
+/** API pending: `UpdateWorkspace` `code` (`workspaces.update`); 409 when taken, 422 when malformed. */
 export async function updateWorkspaceCode(workspaceId: string, body: WorkspaceCodeUpdate): Promise<WorkspaceCode> {
   const code = await pendingApi("workspace.url_code", () => pendingWorkspaceSettings.updateWorkspaceCode(workspaceId, body));
   invalidateApiData();

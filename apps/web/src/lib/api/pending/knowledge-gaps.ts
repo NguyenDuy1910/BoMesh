@@ -80,7 +80,7 @@ interface GapState {
 
 const HOUR = 3_600_000;
 
-/** The caller's dismissals, once the proposed contract's checks pass. */
+/** The caller's dismissals, once the v2 `knowledgeGaps.*` checks pass. */
 function authorizedStore(workspaceId: string) {
   const caller = pendingCaller(workspaceId);
   requirePendingPermission(caller, "tenant.manage", "You need permission to manage this workspace to see knowledge gaps.");

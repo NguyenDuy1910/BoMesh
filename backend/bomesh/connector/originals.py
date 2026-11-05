@@ -20,13 +20,19 @@ def original_key(
     connection_id: str,
     provider: str,
     external_id: str,
+    version: str | None,
     file_name: str,
 ) -> str:
-    """The object key of one source Document's original."""
+    """The object key of one provider version of a source Document's original.
+
+    Each provider version gets its own key, so a new version never overwrites
+    the object an older revision (or the published Document while a
+    REVIEW_FIRST candidate waits for review) still references.
+    """
 
     return (
         f"tenants/{_part(tenant_id)}/sources/{_part(connection_id)}/{provider}/"
-        f"{_part(external_id)}/{_part(file_name)}"
+        f"{_part(external_id)}/{_part(version or 'unversioned')}/{_part(file_name)}"
     )
 
 

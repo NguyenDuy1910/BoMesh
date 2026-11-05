@@ -1,6 +1,6 @@
 /* Research work kinds — registered into WORK_KINDS (core/workspace.js) and
    rendered by the generic Work shell (features/work.js).
-   review: literature review / evidence matrix (papers × criteria, every cell cited).
+   review: evidence matrix (sources × criteria, every cell cited).
    draft:  a grounded document draft with an editor, sources rail, revisions and versions.
    Prefixes: rv- (review), dr- (draft). */
 (() => {
@@ -23,7 +23,7 @@
       <blockquote class="rv-ev__quote"><mark class="evidence is-focus">${esc(c.quote)}</mark></blockquote>`;
   }
 
-  /** Paper metadata parsed from library names like "Nguyen et al. 2024 — Title.pdf". */
+  /** Source metadata; names like "Nguyen et al. 2024 — Title.pdf" are parsed into authors and year. */
   function paper(id) {
     const d = docById(id);
     if (!d) return { id, title: 'Document not available', authors: '', year: '', short: 'Unavailable', doc: null };
@@ -34,86 +34,62 @@
   }
   const paperDocs = sp => X.work.docsForSpace(sp).filter(d => d && !d.archived);
 
-  /* ═══════════════ Evidence bank (canned "retrieval" for the lab library) ═══════════════
-     BANK[doc][key] = [finding, page, quote]. Keys come from criterion labels (critKey). */
+  /* ═══════════════ Evidence bank (canned "retrieval" for curated libraries) ═══════════════
+     BANK[doc][key] = [finding, page, quote]. Keys come from criterion labels (critKey).
+     Finx: vendor evaluations for the event streaming platform (w-review-stream). */
+  const EVAL_METHOD = [2, 'We replayed 40 payment event types from production traffic at three times the 2026 Tết peak, with the same producers and consumers on every platform.'];
   const BANK = {
-    'du-ag-p1': {
-      method: ['Fine-tuned MobileNetV3 (ImageNet-pretrained).', 4, 'We fine-tune a MobileNetV3-Large pretrained on ImageNet, freezing the first 10 blocks.'],
-      data: ['4,800 field images, 5 rice diseases, Mekong Delta.', 5, 'The dataset contains 4,800 images of rice leaves collected in Can Tho and An Giang across five disease classes.'],
-      result: ['96.2% accuracy; 21 ms per image on a phone.', 9, 'The fine-tuned model reached 96.2% accuracy with 21 ms inference on a mid-range Android phone.'],
-      limit: ['Single season; no night or rain images.', 12, 'All images were taken in the dry season under daylight; performance in rain is untested.'],
-      hardware: ['Runs on a mid-range Android phone (TFLite).', 8, 'All latency measurements were taken on a Snapdragon 680 phone with on-device TensorFlow Lite inference.'],
-      field: ['Field images, but dry season and daylight only.', 5, 'Images were captured in farmers’ fields between 7:00 and 16:00 during the 2023 dry season.'],
-      cost: ['No extra hardware: uses farmers’ own phones.', 13, 'Because inference runs on phones farmers already own, deployment requires no additional hardware cost.'],
+    'fx-eng-eval-kafka': {
+      perf: ['180k msg/s at p99 42 ms.', 3, 'In our load test Confluent Cloud sustained 180,000 messages per second at a p99 latency of 42 ms.'],
+      eos: ['Yes — idempotent producers and transactions.', 4, 'Idempotent producers and transactions give exactly-once delivery between Kafka topics out of the box.'],
+      ops: ['Low: vendor runs brokers, upgrades and scaling.', 5, 'Brokers, upgrades and scaling are run by the vendor; our team only manages topics, ACLs and connectors.'],
+      res: ['No — nearest region is Singapore.', 6, 'The nearest Confluent Cloud region is Singapore; no region is available in Vietnam.'],
+      cost: ['≈ USD 1.26M over 3 years.', 7, 'The estimated three-year cost is USD 1.26 million, including support and private networking.'],
+      method: ['Load test replaying 40 payment event types.', ...EVAL_METHOD],
+      result: ['Best throughput and least ops work; residency open.', 8, 'Strongest on throughput and operations effort; data residency needs a cross-border transfer assessment before payment events can leave Vietnam.'],
+      limit: ['Data would leave Vietnam (Decree 13 assessment).', 6, 'Payment events contain customer account numbers, so hosting them outside Vietnam needs a cross-border transfer assessment under Decree 13/2023.'],
     },
-    'du-ag-p2': {
-      method: ['Survey of 120 studies (2015–2022).', 2, 'We review 120 peer-reviewed studies on deep learning for crop disease detection published between 2015 and 2022.'],
-      data: ['Mostly PlantVillage (lab images).', 14, '68% of the surveyed studies evaluate only on PlantVillage, whose images are taken on uniform backgrounds.'],
-      result: ['Transfer learning dominates (71%).', 9, 'Transfer learning dominates recent work: 71% of the studies fine-tune ImageNet-pretrained CNNs.'],
-      limit: ['Lab-to-field gap rarely measured.', 27, 'Few studies report accuracy on field images, so the lab-to-field gap remains largely unmeasured.'],
-      hardware: ['Only 9% of studies test on edge devices.', 21, 'Only 9% of the surveyed studies report inference on edge devices such as phones or single-board computers.'],
-      field: ['Field accuracy reported by 14% of studies.', 24, 'Only 14% of studies report accuracy on images taken under field conditions.'],
-      cost: ['Deployment cost discussed in under 10%.', 29, 'Deployment cost is discussed in fewer than one in ten studies.'],
+    'fx-eng-eval-pulsar': {
+      perf: ['150k msg/s at p99 55 ms.', 3, 'On six bare-metal brokers in our Ho Chi Minh City data center, Pulsar sustained 150,000 messages per second at a p99 latency of 55 ms.'],
+      eos: ['Partly — transactions only in Java clients.', 4, 'Exactly-once processing requires Pulsar transactions, which our client libraries support only for Java.'],
+      ops: ['High: about 2.5 FTE (BookKeeper, ZooKeeper).', 5, 'Running Pulsar needs BookKeeper and ZooKeeper clusters; we estimate 2.5 full-time engineers to operate it.'],
+      res: ['Yes — Finx data centers in Vietnam.', 6, 'All data stays in Finx\'s own data centers in Hanoi and Ho Chi Minh City.'],
+      cost: ['≈ USD 0.94M over 3 years incl. staff.', 7, 'Hardware, monitoring licences and staff time come to an estimated USD 0.94 million over three years.'],
+      method: ['Load test replaying 40 payment event types.', ...EVAL_METHOD],
+      result: ['Cheapest, keeps data in Vietnam; weakest exactly-once.', 8, 'Cheapest and the only option that keeps data in Vietnam, but our Go services would not get exactly-once processing and operations effort is the highest.'],
+      limit: ['Go services lack exactly-once; highest ops effort.', 4, 'Exactly-once processing requires Pulsar transactions, which our client libraries support only for Java.'],
     },
-    'du-ag-p3': {
-      method: ['Quantized CNN on ESP32-S3 for soil moisture.', 3, 'An 8-bit quantized CNN runs on an ESP32-S3 to classify soil moisture states from capacitive sensor traces.'],
-      data: ['42 days of sensor traces, 3 plots.', 5, 'Data were logged every 5 minutes for 42 days on three experimental plots.'],
-      result: ['92% accuracy at 38 mW.', 8, 'The model classified soil moisture states with 92% accuracy at 38 mW average power.'],
-      limit: ['Not a vision task; different sensor domain.', 10, 'Our approach targets sensor time series and does not address image-based disease detection.'],
-      hardware: ['ESP32-S3 node with capacitive sensors and LoRa.', 4, 'Each node combines an ESP32-S3 microcontroller, two capacitive soil moisture sensors and a LoRa radio.'],
-      field: ['Outdoor plots for 42 days, incl. heavy rain.', 6, 'The nodes ran unattended on three outdoor plots for 42 days, including six days of heavy rain.'],
-      cost: ['About USD 18 per node.', 9, 'The bill of materials per node is approximately USD 18.'],
-      energy: ['38 mW average; months on a small solar panel.', 8, 'Average power was 38 mW, allowing operation for several months with a small solar panel.'],
+    'fx-eng-eval-msk': {
+      perf: ['160k msg/s at p99 48 ms.', 3, 'A six-broker MSK cluster sustained 160,000 messages per second at a p99 latency of 48 ms.'],
+      eos: ['Yes — standard Kafka transactions.', 4, 'MSK runs open-source Apache Kafka, so idempotent producers and transactions work as in any Kafka cluster.'],
+      ops: ['Medium: AWS patches; we rebalance and upgrade.', 5, 'AWS patches brokers, but partition rebalancing, upgrades and capacity planning remain our responsibility.'],
+      res: ['No — nearest regions Singapore and Jakarta.', 6, 'AWS has no region in Vietnam; the nearest are Singapore and Jakarta.'],
+      cost: ['≈ USD 1.02M over 3 years (reserved).', 7, 'The estimated three-year cost is USD 1.02 million with reserved brokers.'],
+      method: ['Load test replaying 40 payment event types.', ...EVAL_METHOD],
+      result: ['Kafka semantics at lower cost; more ops work.', 8, 'A middle option: standard Kafka semantics at a lower cost than Confluent, with more operations work and the same residency question.'],
+      limit: ['Data would leave Vietnam (Decree 13 assessment).', 6, 'Payment events contain customer account numbers, so hosting them outside Vietnam needs a cross-border transfer assessment under Decree 13/2023.'],
     },
-    'du-ag-p4': {
-      method: ['Duty-cycled LoRaWAN network with adaptive sampling.', 3, 'We propose an adaptive sampling scheme that lowers the reporting rate when the water level changes slowly.'],
-      data: ['One season, 24 nodes over 6 ha of paddy.', 5, 'We deployed 24 sensor nodes across 6 hectares of paddy in Long An over one growing season.'],
-      result: ['Battery life up from 4 to 11 months.', 7, 'Adaptive sampling extended the expected battery life from 4 to 11 months with no loss of event detection.'],
-      limit: ['Sensing only; no on-device inference.', 8, 'The nodes only transmit raw readings; no inference is performed on the device.'],
-      hardware: ['STM32L0 + SX1276 LoRa nodes, one gateway.', 4, 'Nodes use an STM32L0 microcontroller and an SX1276 LoRa transceiver; a single gateway covers the site.'],
-      field: ['Flooded paddy through the monsoon; >97% delivery.', 6, 'Nodes operated through the monsoon season with packet delivery above 97%.'],
-      cost: ['USD 25 per node; USD 300 gateway.', 9, 'Each node costs about USD 25; the gateway costs about USD 300.'],
-      energy: ['0.9 mW average with adaptive sampling.', 7, 'Average consumption fell to 0.9 mW with adaptive sampling.'],
-    },
-    'du-ag-p5': {
-      method: ['ViT-B/16 with field-condition augmentation.', 5, 'We train a ViT-B/16 with augmentations that simulate occlusion, glare and motion blur.'],
-      data: ['PlantVillage + 3,100 field images.', 6, 'Training combines PlantVillage with 3,100 in-field images from India and Vietnam.'],
-      result: ['93.4% in the field vs 99.1% in the lab.', 11, 'Accuracy drops from 99.1% on lab images to 93.4% on field images.'],
-      limit: ['Too heavy for edge devices.', 14, 'The model needs 330 ms per image on a Jetson Nano, too slow for real-time use.'],
-      hardware: ['Jetson Nano and desktop GPU benchmarks.', 13, 'We benchmark inference on an NVIDIA Jetson Nano and a desktop RTX 3080.'],
-      field: ['Held-out field set with occlusion and glare.', 10, 'We evaluate separately on held-out field images with occlusion, glare and cluttered backgrounds.'],
-      energy: ['Jetson Nano in 10 W mode.', 13, 'All edge measurements use the Jetson Nano in its 10 W power mode.'],
-    },
-    'du-ag-p6': {
-      method: ['NIR-modified camera + NDVI/red-edge classifier.', 3, 'We convert a low-cost camera module by replacing its IR-cut filter, and classify blight from NDVI and red-edge features.'],
-      data: ['1,250 leaf images, 2 blight stages, Tien Giang.', 5, '1,250 leaf images were collected in Tien Giang covering healthy leaves and two stages of bacterial leaf blight.'],
-      result: ['Detects blight 4–6 days before visible symptoms.', 8, 'Multispectral features detected bacterial leaf blight 4–6 days before symptoms were visible in RGB images.'],
-      limit: ['Small dataset; needs a reference panel.', 11, 'Results depend on a reference panel for illumination correction, and the dataset is small.'],
-      hardware: ['Raspberry Pi 4 with a modified 12 MP camera.', 4, 'The imaging unit is a Raspberry Pi 4 with a modified 12 MP camera module.'],
-      field: ['Captured in the field with a grey panel in frame.', 6, 'All images were captured in the field with a grey reference panel in frame.'],
-      cost: ['About USD 60 per imaging unit.', 4, 'The complete imaging unit costs about USD 60, versus USD 3,000+ for commercial multispectral cameras.'],
-    },
-    'du-gr-naf': {
-      method: ['Funding call: basic research, up to 24 months.', 3, 'Priority areas for 2027 include applied artificial intelligence for agriculture and the environment. Projects may last up to 24 months.'],
-      cost: ['Budget cap VND 1.5 billion; equipment ≤ 30%.', 7, 'Budgets for basic research projects may not exceed VND 1.5 billion; equipment may account for at most 30% of the total.'],
-      limit: ['PI needs a PhD and 2 indexed papers in 5 years.', 5, 'Applicants must hold a doctoral degree and have at least two ISI/Scopus publications in the last five years.'],
+    'fx-eng-adr027': {
+      method: ['Ledger changes only through payment events.', 1, 'Ledger balances are updated only by consuming events from the payments topic, never by direct writes.'],
+      eos: ['Requires exactly-once or idempotent consumption.', 2, 'Ledger consumers must process each event exactly once, so the streaming platform must support exactly-once delivery or idempotent consumption.'],
     },
   };
   /* Extra passages the drafts cite (not matrix criteria). */
   const PASSAGES = {
-    'du-gr-naf': [[9, 'Proposals must include a budget justification for each cost item, linked to the planned activities.']],
-    'du-gr-tpl': [[2, 'Section B.1 Background and significance (max 2 pages): state the problem, the state of the art and the gap the project addresses.']],
-    'du-ag-data': [[1, 'UTE-RiceLeaf v2 contains 6,200 labelled rice leaf images from 14 farms, including 900 taken in rain.']],
-    'du-ml-syl': [[2, 'The midterm (30%) covers weeks 1–7 and is closed-book; one A4 page of handwritten notes is allowed.']],
+    'fx-eng-adr031': [[1, 'Every POST to a payment API must carry an Idempotency-Key header.'], [2, 'The gateway stores the first response for 24 hours and replays it for any retry with the same key.']],
   };
   const CRIT_KEYS = [
+    [/residency|region|sovereign|locali[sz]ation/i, 'res'],
+    [/throughput|latency|peak|scal(e|ability)/i, 'perf'],
+    [/exactly.?once|semantic|guarantee|delivery/i, 'eos'],
+    [/operat|effort|maintenance|support burden/i, 'ops'],
     [/method|approach|model|technique|architecture|algorithm|design/i, 'method'],
     [/data|sample|corpus/i, 'data'],
     [/result|accuracy|performance|finding|outcome|effect/i, 'result'],
-    [/limit|weakness|shortcoming|caveat|threat/i, 'limit'],
+    [/limit|weakness|shortcoming|caveat|threat|risk/i, 'limit'],
     [/hardware|device|edge|deploy|platform|compute/i, 'hardware'],
     [/field|real.?world|in.?situ|condition|robust|environment/i, 'field'],
-    [/cost|price|budget|afford/i, 'cost'],
+    [/cost|price|budget|afford|tco/i, 'cost'],
     [/energy|power|battery/i, 'energy'],
   ];
   const critKey = label => (CRIT_KEYS.find(([re]) => re.test(label)) || [])[1] || 'other';
@@ -131,7 +107,7 @@
     const p = (PASSAGES[doc] || []).find(e => e[0] === page);
     return p ? C(doc, page, p[1]) : C(doc, page, '');
   }
-  /** The finding for one paper × criterion: { text, cite } or { text, cite: null, none: true }. */
+  /** The finding for one source × criterion: { text, cite } or { text, cite: null, none: true }. */
   function finding(docId, label) {
     const k = critKey(label), b = BANK[docId], none = { text: 'Not reported', cite: null, none: true };
     if (b) { const e = b[k]; return e ? { text: e[0], cite: C(docId, e[1], e[2]) } : none; }
@@ -142,7 +118,7 @@
   /** "Replace finding": re-read the cited passage and restate it. */
   function restate(cell, label, docId) {
     const q = cell.cite?.quote;
-    if (!q) { const f = finding(docId, label); return f.none ? { ...f, text: 'Not reported in this paper.' } : f; }
+    if (!q) { const f = finding(docId, label); return f.none ? { ...f, text: 'Not reported in this source.' } : f; }
     let s = q.replace(/^(we|our|in this (paper|study),?|this (paper|study))\s+/i, '').replace(/\s+/g, ' ');
     s = s.split(/;|, (?:so|which|whose|and|but|allowing|freezing|while)\b/)[0].replace(/\.$/, '');
     if (s.length > 80) { const cut = Math.max(...[', ', ' on ', ' in ', ' for ', ' from ', ' at ', ' across ', ' with '].map(b => s.lastIndexOf(b, 80))); if (cut > 30) s = s.slice(0, cut); }
@@ -153,7 +129,7 @@
 
   /* ═══════════════ Review (evidence matrix) ═══════════════ */
   const DEFAULT_CRITERIA = ['Method', 'Dataset', 'Result', 'Limitations'];
-  const SUGGESTED_CRITERIA = ['Hardware', 'Field conditions', 'Cost', 'Energy use'];
+  const SUGGESTED_CRITERIA = ['Cost', 'Operations effort', 'Data residency', 'Risks'];
   const DEFAULT_IDS = { Method: 'method', Dataset: 'data', Result: 'result', Limitations: 'limit' };
   const critId = label => DEFAULT_IDS[label] || uid('c');
   const rvu = w => ui('rv:' + w.id, { pendingRows: {}, pendingCols: {}, synth: false, fresh: {} });
@@ -163,8 +139,8 @@
     const all = [...new Set([...DEFAULT_CRITERIA, ...SUGGESTED_CRITERIA, ...o.criteria])];
     const chips = all.map(l => `<button type="button" class="rv-chip" aria-pressed="${o.criteria.includes(l)}" data-act="rv-opt-crit" data-label="${esc(l)}">${o.criteria.includes(l) ? ic('check', 'i-sm') : ic('plus', 'i-sm')}${esc(l)}</button>`).join('');
     return `<div class="stack gap-16">
-      ${field({ id: 'rv-opt-new', label: 'Compare papers on', desc: 'Each criterion becomes a column. Every cell cites the passage it comes from.', control: `<div class="rv-chips" role="group" aria-label="Criteria">${chips}</div><div class="row gap-8 mt-8">${input({ id: 'rv-opt-new', bind: 'workNew.opts.critNew', value: o.critNew || '', placeholder: 'Add your own, e.g. Sample size', onEnter: 'rv-opt-crit-add', size: 'sm' })}${btn('Add', { size: 'sm', act: 'rv-opt-crit-add' })}</div>` })}
-      ${field({ id: 'rv-opt-max', label: 'Papers at most', control: seg({ value: o.maxPapers, options: [[4, '4'], [6, '6'], [8, '8']], act: 'rv-opt-max', label: 'Papers at most' }) })}
+      ${field({ id: 'rv-opt-new', label: 'Compare sources on', desc: 'Each criterion becomes a column. Every cell cites the passage it comes from.', control: `<div class="rv-chips" role="group" aria-label="Criteria">${chips}</div><div class="row gap-8 mt-8">${input({ id: 'rv-opt-new', bind: 'workNew.opts.critNew', value: o.critNew || '', placeholder: 'Add your own, e.g. Cost', onEnter: 'rv-opt-crit-add', size: 'sm' })}${btn('Add', { size: 'sm', act: 'rv-opt-crit-add' })}</div>` })}
+      ${field({ id: 'rv-opt-max', label: 'Sources at most', control: seg({ value: o.maxPapers, options: [[4, '4'], [6, '6'], [8, '8']], act: 'rv-opt-max', label: 'Sources at most' }) })}
     </div>`;
   }
   A['rv-opt-crit'] = el => { const o = ui('workNew').opts; const l = el.dataset.label; o.criteria = o.criteria.includes(l) ? o.criteria.filter(x => x !== l) : [...o.criteria, l]; refresh(); };
@@ -190,17 +166,19 @@
   function rvRender(w, ctx) {
     const d = w.data, u = rvu(w), can = ctx.canEdit;
     d.papers ??= []; d.criteria ??= []; d.cells ??= {};
-    const meta = `${plural(d.papers.length, 'paper')} · ${plural(d.criteria.length, 'criterion', 'criteria')}`;
-    const tools = can ? `<div class="row gap-8 wrap">${btn('Add paper', { icon: 'plus', size: 'sm', act: 'rv-add-paper', data: { w: w.id } })}${btn('Add criterion', { icon: 'plus', size: 'sm', act: 'rv-add-crit', data: { w: w.id } })}${btn(d.synthesis ? 'Update synthesis' : 'Synthesize', { v: 'secondary', icon: 'sparkles', size: 'sm', act: 'rv-synth', data: { w: w.id }, loading: u.synth, disabled: u.synth || !d.papers.length || !d.criteria.length })}</div>` : '';
+    // Seeded reviews may list sources and criteria only: read any missing cell from the evidence bank.
+    d.papers.forEach(p => { const row = (d.cells[p] ??= {}); d.criteria.forEach(c => { row[c.id] ??= finding(p, c.label); }); });
+    const meta = `${plural(d.papers.length, 'source')} · ${plural(d.criteria.length, 'criterion', 'criteria')}`;
+    const tools = can ? `<div class="row gap-8 wrap">${btn('Add source', { icon: 'plus', size: 'sm', act: 'rv-add-paper', data: { w: w.id } })}${btn('Add criterion', { icon: 'plus', size: 'sm', act: 'rv-add-crit', data: { w: w.id } })}${btn(d.synthesis ? 'Update synthesis' : 'Synthesize', { v: 'secondary', icon: 'sparkles', size: 'sm', act: 'rv-synth', data: { w: w.id }, loading: u.synth, disabled: u.synth || !d.papers.length || !d.criteria.length })}</div>` : '';
     return `<div class="rv">
       ${u.synth ? synthSkeleton() : d.synthesis ? synthCard(w, can) : ''}
       <div class="rv-bar"><span class="t-sm muted">${meta}</span>${tools}</div>
-      ${d.papers.length && d.criteria.length ? matrix(w, can, u) : emptyState({ icon: 'table', title: d.papers.length ? 'No criteria yet' : 'No papers yet', desc: d.papers.length ? 'Add what you want to compare, like Method or Result.' : 'Add papers from this space’s library to compare them.', actions: can ? btn(d.papers.length ? 'Add criterion' : 'Add paper', { v: 'primary', icon: 'plus', act: d.papers.length ? 'rv-add-crit' : 'rv-add-paper', data: { w: w.id } }) : '', boxed: true })}
+      ${d.papers.length && d.criteria.length ? matrix(w, can, u) : emptyState({ icon: 'table', title: d.papers.length ? 'No criteria yet' : 'No sources yet', desc: d.papers.length ? 'Add what you want to compare, like Cost or Risks.' : 'Add documents from this space’s knowledge to compare them.', actions: can ? btn(d.papers.length ? 'Add criterion' : 'Add source', { v: 'primary', icon: 'plus', act: d.papers.length ? 'rv-add-crit' : 'rv-add-paper', data: { w: w.id } }) : '', boxed: true })}
     </div>`;
   }
   function matrix(w, can, u) {
     const d = w.data;
-    const head = `<th class="table__column rv-col rv-col--paper" scope="col">Paper</th>` + d.criteria.map(c => `<th class="table__column rv-col" scope="col"><span class="rv-col__inner"><span class="truncate">${esc(c.label)}</span>${can ? iconBtn('more', `Options for ${c.label}`, { size: 'sm', menu: 'rv-col', data: { w: w.id, id: c.id } }) : ''}</span></th>`).join('');
+    const head = `<th class="table__column rv-col rv-col--paper" scope="col">Source</th>` + d.criteria.map(c => `<th class="table__column rv-col" scope="col"><span class="rv-col__inner"><span class="truncate">${esc(c.label)}</span>${can ? iconBtn('more', `Options for ${c.label}`, { size: 'sm', menu: 'rv-col', data: { w: w.id, id: c.id } }) : ''}</span></th>`).join('');
     const rows = d.papers.map(pid => {
       const pp = paper(pid), pending = u.pendingRows[pid];
       const lead = `<th class="table__cell rv-paper" scope="row"><div class="rv-paper__inner"><div class="grow" style="min-width:0"><a class="rv-paper__title clamp-2" href="#/doc/${esc(pid)}" title="${esc(pp.title)}">${esc(pp.title)}</a><div class="t-xs muted truncate">${esc(pp.authors)}${pp.year ? ' · ' + esc(pp.year) : ''}</div></div>${can ? iconBtn('more', `Options for ${pp.title}`, { size: 'sm', menu: 'rv-row', data: { w: w.id, id: pid } }) : ''}</div></th>`;
@@ -228,7 +206,7 @@
     const pp = paper(p.p), can = canEditWork(w);
     const finding = `<div class="t-label mb-8">${esc(crit.label)}</div><p class="rv-ev__finding">${p.busy ? `<span class="row gap-8 muted">${spinner()}Re-reading the passage…</span>` : esc(cell.text)}</p>${cell.replaced ? `<div class="t-xs muted mt-4">Replaced by you ${rel(cell.replaced)}</div>` : ''}`;
     const evidence = cell.cite ? `<div class="t-label mt-24 mb-8">Evidence</div>${evidenceBody(pp.doc, cell.cite)}`
-      : `<div class="mt-24">${alertBox('default', 'No passage found', `This paper doesn’t report ${esc(crit.label.toLowerCase())}. Check the document if you expected it.`)}</div>`;
+      : `<div class="mt-24">${alertBox('default', 'No passage found', `This source doesn’t report ${esc(crit.label.toLowerCase())}. Check the document if you expected it.`)}</div>`;
     const ref = cell.cite ? `“${cell.cite.quote}” — ${pp.parsed ? `${pp.authors} (${pp.year}), ` : ''}${pp.title}, p. ${cell.cite.page}` : '';
     return {
       title: pp.title, desc: `${esc(pp.authors)}${pp.year ? ' · ' + esc(pp.year) : ''}`, size: 'md',
@@ -247,15 +225,15 @@
     toast('Finding replaced', { action: { label: 'Undo', run: () => { cells[p.c] = prev; saveWork(w); refresh(); } } });
   };
 
-  /* Add paper */
+  /* Add source */
   A['rv-add-paper'] = el => openModal('rv-add-paper', { w: el.dataset.w });
   M['rv-add-paper'] = p => {
     const w = W(p.w); const sp = spaceById(w?.space);
     const docs = paperDocs(sp).filter(d => !w.data.papers.includes(d.id)).sort((a, b) => (/\b(19|20)\d\d\s+[—–-]/.test(b.name)) - (/\b(19|20)\d\d\s+[—–-]/.test(a.name)));
     return {
-      title: 'Add a paper', desc: sp ? `From ${esc(sp.name)}’s library` : 'From your library', size: 'md',
+      title: 'Add a source', desc: sp ? `From ${esc(sp.name)}’s knowledge` : 'From your knowledge', size: 'md',
       body: docs.length ? list(docs.map(d => { const pp = paper(d.id); return item({ lead: fileIcon(d.type), title: esc(pp.title), desc: esc([pp.parsed && pp.authors, pp.year, kbById(d.kb)?.name].filter(Boolean).join(' · ')), trail: d.status !== 'ready' ? status('doc', d.status) : ic('plus', 'muted'), act: 'rv-add-paper-pick', data: { w: w.id, id: d.id } }); }), 'list--plain')
-        : emptyState({ icon: 'files', title: 'Every paper is already in the matrix', desc: 'Add papers to the space’s library to compare more.', compact: true }),
+        : emptyState({ icon: 'files', title: 'Every source is already in the matrix', desc: 'Add documents to the space’s knowledge to compare more.', compact: true }),
       foot: btn('Cancel', { act: 'close-modal' }),
     };
   };
@@ -281,9 +259,9 @@
     const w = W(el.dataset.w), id = el.dataset.id; if (!w) return [];
     return [
       { label: 'Open document', icon: 'file-text', run: () => go('/doc/' + id) },
-      { label: 'Re-read this paper', icon: 'retry', run: async () => { const u = rvu(w); u.pendingRows[id] = true; refresh(); await sleep(900); w.data.cells[id] = Object.fromEntries(w.data.criteria.map(c => [c.id, finding(id, c.label)])); delete u.pendingRows[id]; flash(w, id); saveWork(w); refresh(); toast('Row refreshed from the paper'); } },
+      { label: 'Re-read this source', icon: 'retry', run: async () => { const u = rvu(w); u.pendingRows[id] = true; refresh(); await sleep(900); w.data.cells[id] = Object.fromEntries(w.data.criteria.map(c => [c.id, finding(id, c.label)])); delete u.pendingRows[id]; flash(w, id); saveWork(w); refresh(); toast('Row refreshed from the source'); } },
       { sep: true },
-      { label: 'Remove paper', icon: 'trash', danger: true, run: () => removePaper(w, id) },
+      { label: 'Remove source', icon: 'trash', danger: true, run: () => removePaper(w, id) },
     ];
   };
 
@@ -293,8 +271,8 @@
     const w = W(p.w); const f = getPath('rvCrit') || {}; const have = new Set(w.data.criteria.map(c => c.label.toLowerCase()));
     const sugg = SUGGESTED_CRITERIA.filter(s => !have.has(s.toLowerCase()));
     return {
-      title: 'Add a criterion', desc: 'A new column. Each paper is read for it and every cell is cited.', size: 'sm',
-      body: `${field({ id: 'rv-crit', label: 'Criterion', error: f.err, control: input({ id: 'rv-crit', bind: 'rvCrit.label', value: f.label, placeholder: 'e.g. Hardware', autofocus: true, onEnter: 'rv-add-crit-ok', invalid: !!f.err }) })}
+      title: 'Add a criterion', desc: 'A new column. Each source is read for it and every cell is cited.', size: 'sm',
+      body: `${field({ id: 'rv-crit', label: 'Criterion', error: f.err, control: input({ id: 'rv-crit', bind: 'rvCrit.label', value: f.label, placeholder: 'e.g. Security', autofocus: true, onEnter: 'rv-add-crit-ok', invalid: !!f.err }) })}
         ${sugg.length ? `<div class="row gap-8 wrap mt-12">${sugg.map(s => `<button type="button" class="rv-chip" data-act="rv-crit-sugg" data-label="${esc(s)}">${ic('plus', 'i-sm')}${esc(s)}</button>`).join('')}</div>` : ''}`,
       foot: btn('Cancel', { act: 'close-modal' }) + btn('Add column', { v: 'primary', act: 'rv-add-crit-ok' }),
     };
@@ -315,7 +293,7 @@
     scrollEnd(w);
     delete u.pendingCols[c.id]; flash(w, c.id); saveWork(w); refresh();
     const found = w.data.papers.filter(pid => !w.data.cells[pid][c.id].none).length;
-    toast(found ? `${label}: evidence in ${found} of ${plural(w.data.papers.length, 'paper')}` : `${label}: not reported in any paper`, { action: { label: 'Undo', run: () => removeCrit(w, c.id, true) } });
+    toast(found ? `${label}: evidence in ${found} of ${plural(w.data.papers.length, 'source')}` : `${label}: not reported in any source`, { action: { label: 'Undo', run: () => removeCrit(w, c.id, true) } });
   };
   function removeCrit(w, id, quiet) {
     const i = w.data.criteria.findIndex(c => c.id === id); if (i < 0) return;
@@ -335,30 +313,26 @@
   };
 
   /* Synthesis: consensus, disagreements, gaps — every sentence cited */
-  const AGRI_SYNTH = {
+  const CANNED_SYNTH = {
     consensus: [
-      ['Transfer learning from ImageNet-pretrained CNNs is the dominant approach to crop disease detection.', [['du-ag-p2', 9], ['du-ag-p1', 4]]],
-      ['Accuracy on clean lab images is consistently high, around 96–99%.', [['du-ag-p1', 9], ['du-ag-p5', 11]]],
-      ['Low-power edge hardware makes in-field sensing practical for months without mains power.', [['du-ag-p3', 8], ['du-ag-p4', 7]]],
+      ['All three platforms handle the load test at three times the Tết peak, between 150,000 and 180,000 messages per second.', [['fx-eng-eval-kafka', 3], ['fx-eng-eval-pulsar', 3], ['fx-eng-eval-msk', 3]]],
+      ['Both Kafka options give exactly-once delivery with idempotent producers and transactions, which ADR-027’s ledger consumers need.', [['fx-eng-eval-kafka', 4], ['fx-eng-eval-msk', 4]]],
     ],
     disagreements: [
-      ['Field accuracy: a phone CNN keeps 96.2% on field images, while a ViT drops from 99.1% in the lab to 93.4% in the field.', [['du-ag-p1', 9], ['du-ag-p5', 11]]],
-      ['Model size: ViTs cope better with occlusion and glare but need 330 ms per image on a Jetson Nano, against 21 ms for MobileNetV3 on a phone.', [['du-ag-p5', 14], ['du-ag-p1', 9]]],
-      ['Imaging: RGB models detect visible symptoms, while low-cost multispectral imaging flags blight 4–6 days earlier.', [['du-ag-p6', 8], ['du-ag-p1', 9]]],
+      ['Data residency: only self-hosted Pulsar keeps payment events in Vietnam; Confluent Cloud and MSK would run in Singapore.', [['fx-eng-eval-pulsar', 6], ['fx-eng-eval-kafka', 6], ['fx-eng-eval-msk', 6]]],
+      ['Operations effort runs opposite to cost: Pulsar is cheapest at USD 0.94M but needs about 2.5 engineers, while Confluent costs USD 1.26M with almost no broker work.', [['fx-eng-eval-pulsar', 7], ['fx-eng-eval-pulsar', 5], ['fx-eng-eval-kafka', 7], ['fx-eng-eval-kafka', 5]]],
     ],
     gaps: [
-      ['The lab-to-field gap is rarely measured: most studies evaluate only on PlantVillage.', [['du-ag-p2', 27], ['du-ag-p2', 14]]],
-      ['No study covers rainy-season or night conditions.', [['du-ag-p1', 12]]],
-      ['Multispectral detection depends on a reference panel and a small dataset; it is untested on phones.', [['du-ag-p6', 11]]],
-      ['Sensor networks and vision models are studied separately; none combines on-device inference with field sensing.', [['du-ag-p3', 10], ['du-ag-p4', 8]]],
+      ['No evaluation includes the Decree 13 cross-border transfer assessment that the cloud options need.', [['fx-eng-eval-kafka', 6], ['fx-eng-eval-msk', 6]]],
+      ['Pulsar’s exactly-once support for Go services is untested; the ledger consumers are written in Go.', [['fx-eng-eval-pulsar', 4]]],
     ],
   };
   function buildSynthesis(w) {
     const d = w.data, inSet = refs => refs.every(([doc]) => d.papers.includes(doc));
-    const canned = k => AGRI_SYNTH[k].filter(([, refs]) => inSet(refs)).map(([text, refs]) => ({ text, cites: refs.map(([doc, pg]) => quoteAt(doc, pg)) }));
+    const canned = k => CANNED_SYNTH[k].filter(([, refs]) => inSet(refs)).map(([text, refs]) => ({ text, cites: refs.map(([doc, pg]) => quoteAt(doc, pg)) }));
     const cellsFor = key => d.papers.map(p => { const c = d.criteria.find(x => critKey(x.label) === key); const cell = c && d.cells[p]?.[c.id]; return cell?.cite ? { p, cell, crit: c } : null; }).filter(Boolean);
     const generic = {
-      consensus: () => { const m = cellsFor('method'); const any = m.length ? m : d.papers.map(p => ({ p, cell: d.cells[p]?.[d.criteria[0].id], crit: d.criteria[0] })).filter(x => x.cell?.cite); return any.length > 1 ? [{ text: `${plural(any.length, 'paper')} report comparable evidence on ${any[0].crit.label.toLowerCase()}: ${any.slice(0, 3).map(x => `${paper(x.p).short} (${lc(x.cell.text)})`).join('; ')}.`, cites: any.slice(0, 3).map(x => x.cell.cite) }] : []; },
+      consensus: () => { const m = cellsFor('method'); const any = m.length ? m : d.papers.map(p => ({ p, cell: d.cells[p]?.[d.criteria[0].id], crit: d.criteria[0] })).filter(x => x.cell?.cite); return any.length > 1 ? [{ text: `${plural(any.length, 'source')} report comparable evidence on ${any[0].crit.label.toLowerCase()}: ${any.slice(0, 3).map(x => `${paper(x.p).short} (${lc(x.cell.text)})`).join('; ')}.`, cites: any.slice(0, 3).map(x => x.cell.cite) }] : []; },
       disagreements: () => { const r = cellsFor('result'); return r.length > 1 ? [{ text: `Reported results differ: ${paper(r[0].p).short} finds ${lc(r[0].cell.text)}, while ${paper(r[1].p).short} finds ${lc(r[1].cell.text)}.`, cites: [r[0].cell.cite, r[1].cell.cite] }] : []; },
       gaps: () => cellsFor('limit').slice(0, 3).map(x => ({ text: `${paper(x.p).short}: ${lc(x.cell.text)}.`, cites: [x.cell.cite] })),
     };
@@ -384,7 +358,7 @@
     const stale = s.sig !== synthSig(w);
     const col = (title, icon, items) => `<div class="rv-synth__col"><h3 class="rv-synth__title">${ic(icon, 'i-sm')}${title}</h3>${items.length ? `<ul class="rv-synth__list">${items.map(it => `<li>${esc(it.text)} ${it.cites.map(c => citeBtn(c, num(c))).join('')}</li>`).join('')}</ul>` : '<p class="t-sm muted">Nothing stands out in this matrix.</p>'}</div>`;
     const actions = can ? (stale ? btn('Update', { size: 'sm', icon: 'retry', act: 'rv-synth', data: { w: w.id } }) : '') + iconBtn('x', 'Remove synthesis', { size: 'sm', act: 'rv-synth-hide', data: { w: w.id } }) : '';
-    return `<section class="card rv-synth" aria-label="Synthesis"><div class="card__header"><span class="item-icon item-icon--accent" aria-hidden="true">${ic('sparkles')}</span><div class="grow"><h2 class="card__title">Synthesis</h2><p class="card__description">${stale ? 'The matrix changed since this was written.' : `From ${plural(w.data.papers.length, 'paper')} · ${rel(s.at)}`}</p></div><div class="row gap-4 none">${actions}</div></div>
+    return `<section class="card rv-synth" aria-label="Synthesis"><div class="card__header"><span class="item-icon item-icon--accent" aria-hidden="true">${ic('sparkles')}</span><div class="grow"><h2 class="card__title">Synthesis</h2><p class="card__description">${stale ? 'The matrix changed since this was written.' : `From ${plural(w.data.papers.length, 'source')} · ${rel(s.at)}`}</p></div><div class="row gap-4 none">${actions}</div></div>
       <div class="rv-synth__grid">${col('Consensus', 'check-circle', s.consensus)}${col('Disagreements', 'git-compare', s.disagreements)}${col('Gaps', 'target', s.gaps)}</div></section>`;
   }
 
@@ -392,18 +366,21 @@
   function rvActions(w, ctx) {
     const sp = spaceById(w.space);
     const canDraft = !!w.data?.papers?.length && (w.owner === me().id || !!spaceRole(sp) || !sp);
-    return btn('Export CSV', { icon: 'download', act: 'rv-csv', data: { w: w.id } }) + (canDraft ? btn('Draft related work', { v: 'primary', icon: 'pencil', act: 'rv-draft', data: { w: w.id } }) : '');
+    return btn('Export CSV', { icon: 'download', act: 'rv-csv', data: { w: w.id } }) + (canDraft ? btn('Draft from this review', { v: 'primary', icon: 'pencil', act: 'rv-draft', data: { w: w.id } }) : '');
   }
   function csvRows(w) {
     const d = w.data;
-    return [['Paper', 'Authors', 'Year', ...d.criteria.map(c => c.label)], ...d.papers.map(p => { const pp = paper(p); return [pp.title, pp.authors, pp.year, ...d.criteria.map(c => { const cell = d.cells[p]?.[c.id]; return !cell ? '' : cell.cite ? `${cell.text} (p. ${cell.cite.page})` : cell.text; })]; })];
+    return [['Source', 'Authors', 'Year', ...d.criteria.map(c => c.label)], ...d.papers.map(p => { const pp = paper(p); return [pp.title, pp.authors, pp.year, ...d.criteria.map(c => { const cell = d.cells[p]?.[c.id]; return !cell ? '' : cell.cite ? `${cell.text} (p. ${cell.cite.page})` : cell.text; })]; })];
   }
   A['rv-csv'] = el => { const w = W(el.dataset.w); if (!w) return; saveCsv(withExt(w.title, '.csv'), csvRows(w), 'Matrix exported as CSV'); audit('Exported review', w.title); };
   A['rv-draft'] = el => {
     const w = W(el.dataset.w); if (!w) return;
-    const title = 'Related work — ' + w.title.replace(/\s*[—–-]\s*evidence matrix$/i, '');
-    const opts = { type: 'litreview', tone: 'formal', length: 'medium', fromReview: w.id };
-    X.work.create({ kind: 'draft', workflow: 'draft', title, space: w.space, sources: [...w.data.papers], options: opts });
+    // A decision record when the review has architecture decisions as context, else an evidence summary.
+    const sources = [...new Set([...w.data.papers, ...(w.sources || [])])].filter(id => docById(id));
+    const type = defaultType(spaceById(w.space), sources) === 'decision' ? 'decision' : 'litreview';
+    const title = `${typeLabel(type)} — ${w.title.replace(/\s*[—–-]\s*(evidence matrix|evaluation)$/i, '')}`;
+    const opts = { type, tone: 'formal', length: 'medium', fromReview: w.id };
+    X.work.create({ kind: 'draft', workflow: 'draft', title, space: w.space, sources, options: opts });
   };
   function rvExportHtml(w) {
     const rows = csvRows(w);
@@ -425,26 +402,26 @@
     render: rvRender,
     after: rvAfter,
     actions: rvActions,
-    summary: w => `${plural(w.data?.papers?.length || 0, 'paper')} · ${plural(w.data?.criteria?.length || 0, 'criterion', 'criteria')}${w.data?.synthesis ? ' · synthesized' : ''}`,
+    summary: w => `${plural(w.data?.papers?.length || 0, 'source')} · ${plural(w.data?.criteria?.length || 0, 'criterion', 'criteria')}${w.data?.synthesis ? ' · synthesized' : ''}`,
     exportHtml: rvExportHtml,
     exportLines: rvExportLines,
   };
 
   /* ═══════════════ Draft (grounded document) ═══════════════ */
   const DRAFT_TYPES = [
-    ['proposal', 'Proposal section', 'Background, objectives and fit with a funding call.'],
-    ['litreview', 'Literature review section', 'Related work that compares your papers.'],
-    ['announcement', 'Announcement', 'A clear notice for a course or group.'],
-    ['letter', 'Recommendation letter', 'Grounded in the person’s work you select.'],
+    ['decision', 'Decision record', 'Context, options, decision and consequences — like an ADR.'],
+    ['proposal', 'Proposal', 'Background, objectives and a plan grounded in your sources.'],
+    ['litreview', 'Evidence summary', 'What your sources say, compared side by side.'],
+    ['announcement', 'Announcement', 'A clear notice for a team, project or course.'],
     ['email', 'Email', 'A short message that summarises your sources.'],
   ];
   const typeLabel = t => (DRAFT_TYPES.find(x => x[0] === t) || DRAFT_TYPES[0])[1];
   const TONES = [['formal', 'Formal'], ['neutral', 'Neutral'], ['friendly', 'Friendly']];
   const LENGTHS = [['short', 'Short'], ['medium', 'Medium'], ['long', 'Long']];
-  const isGrantDoc = d => /nafosted|grant|funding|call|proposal template/i.test(d?.name || '');
+  const isAdr = d => /^ADR-\d+/i.test(d?.name || '');
   const drType = w => w.data?.type || defaultType(spaceById(w.space), w.sources || []);
   function defaultType(sp, docs) {
-    if (docs.some(id => isGrantDoc(docById(id)))) return 'proposal';
+    if (docs.some(id => isAdr(docById(id)))) return 'decision';
     if (sp?.type === 'course') return 'announcement';
     if (sp?.type === 'research' || sp?.type === 'project') return 'litreview';
     return 'email';
@@ -473,17 +450,15 @@
   }
   const greet = (tone, who) => `${({ formal: 'Dear', neutral: 'Hello', friendly: 'Hi' })[tone] || 'Hello'} ${who},`;
   const signoff = tone => ({ formal: 'Yours sincerely,', neutral: 'Best regards,', friendly: 'Thanks,' })[tone] || 'Best regards,';
-  /** Per-paper related-work sentences for the lab library (used by proposals and literature reviews). */
+  /** Hand-written sentences for curated sources (Finx architecture library); other sources are summarised from the evidence bank. */
   const LIT = {
-    'du-ag-p2': ['Rahman and Lee surveyed 120 studies and found that transfer learning from ImageNet-pretrained CNNs dominates the field', ['du-ag-p2', 9], ', yet 68% of them evaluate only on PlantVillage lab images', ['du-ag-p2', 14], '.'],
-    'du-ag-p1': ['Nguyen et al. fine-tuned MobileNetV3 on 4,800 field images from Can Tho and An Giang and reached 96.2% accuracy at 21 ms per image on a phone', ['du-ag-p1', 9], ', although all images come from a single dry season', ['du-ag-p1', 12], '.'],
-    'du-ag-p5': ['Singh et al. showed that a ViT-B/16 trained with field-condition augmentation falls from 99.1% accuracy in the lab to 93.4% in the field', ['du-ag-p5', 11], ' and needs 330 ms per image on a Jetson Nano', ['du-ag-p5', 14], '.'],
-    'du-ag-p6': ['Ho et al. built a USD 60 multispectral imaging unit that detects bacterial leaf blight 4–6 days before visible symptoms', ['du-ag-p6', 8], ', but it relies on a reference panel and a small dataset', ['du-ag-p6', 11], '.'],
-    'du-ag-p3': ['On the sensing side, Tran et al. ran an 8-bit quantized CNN on an ESP32-S3 at 38 mW', ['du-ag-p3', 8], ', though for soil moisture rather than images', ['du-ag-p3', 10], '.'],
-    'du-ag-p4': ['Le and Pham extended LoRaWAN node battery life from 4 to 11 months with adaptive sampling', ['du-ag-p4', 7], ', but their nodes perform no on-device inference', ['du-ag-p4', 8], '.'],
+    'fx-eng-adr027': ['ADR-027 requires that ledger balances change only by consuming events from the payments topic, never by direct writes', ['fx-eng-adr027', 1], ', so every ledger consumer must process each event exactly once', ['fx-eng-adr027', 2], '.'],
+    'fx-eng-adr031': ['ADR-031 makes every payment POST carry an Idempotency-Key header', ['fx-eng-adr031', 1], ', and the gateway replays the first response for 24 hours on any retry', ['fx-eng-adr031', 2], '.'],
+    'fx-eng-eval-kafka': ['Confluent Cloud sustained 180,000 messages per second at a p99 of 42 ms', ['fx-eng-eval-kafka', 3], ' with the vendor running the brokers', ['fx-eng-eval-kafka', 5], ', but it has no region in Vietnam', ['fx-eng-eval-kafka', 6], '.'],
+    'fx-eng-eval-pulsar': ['Self-hosted Pulsar keeps all data in Finx data centers', ['fx-eng-eval-pulsar', 6], ' at the lowest three-year cost', ['fx-eng-eval-pulsar', 7], ', but exactly-once processing works only for Java clients', ['fx-eng-eval-pulsar', 4], '.'],
+    'fx-eng-eval-msk': ['Amazon MSK reached 160,000 messages per second', ['fx-eng-eval-msk', 3], ' with standard Kafka transactions', ['fx-eng-eval-msk', 4], ', while rebalancing, upgrades and capacity planning stay with us', ['fx-eng-eval-msk', 5], '.'],
   };
-  const VISION = ['du-ag-p2', 'du-ag-p1', 'du-ag-p5', 'du-ag-p6'], SENSING = ['du-ag-p3', 'du-ag-p4'];
-  /** A sentence about any paper: lab sentence, else built from review cells or evidence. */
+  /** A sentence about any source: curated sentence, else built from review cells or evidence. */
   function paperSentence(id, review) {
     if (LIT[id]) return LIT[id];
     const pp = paper(id);
@@ -496,36 +471,38 @@
     parts.push('.');
     return parts;
   }
-  function relatedWork(papers, wr, { review, length = 'medium', heading = 'Related work' } = {}) {
-    const vis = VISION.filter(p => papers.includes(p)), sen = SENSING.filter(p => papers.includes(p)), rest = papers.filter(p => !VISION.includes(p) && !SENSING.includes(p) && docById(p) && !isGrantDoc(docById(p)));
+  function relatedWork(papers, wr, { review, length = 'medium', heading = 'What the sources say' } = {}) {
+    const srcs = papers.filter(p => docById(p));
     let h = `<h2>${esc(heading)}</h2>`;
-    const paras = [];
-    if (vis.length) paras.push((vis.length > 1 ? 'Deep learning has made image-based crop disease detection accurate on curated data. ' : '') + vis.map(p => wr.say(paperSentence(p, review))).join(' '));
-    if (sen.length) paras.push(sen.map(p => wr.say(paperSentence(p, review))).join(' '));
-    if (rest.length) paras.push(rest.map(p => wr.say(paperSentence(p, review))).join(' '));
     const keep = length === 'short' ? 1 : length === 'long' ? 9 : 3;
-    paras.slice(0, keep).forEach(p => (h += `<p>${p}</p>`));
-    const gapRefs = [['du-ag-p1', 12], ['du-ag-p2', 27], ['du-ag-p4', 8]].filter(([d]) => papers.includes(d));
-    if (gapRefs.length && (vis.length || sen.length)) h += `<p>${wr.say(['Taken together, these studies leave the lab-to-field gap open: no work evaluates disease detection in rainy-season conditions on low-cost hardware', ...gapRefs.slice(0, 2), '. Our work targets this gap.'])}</p>`;
-    else if (rest.length) { const lims = rest.map(p => { const f = finding(p, 'Limitations'); return f.cite ? f : null; }).filter(Boolean).slice(0, 2); if (lims.length) h += `<p>${wr.say(['Across these sources, the main open questions concern ', lc(lims[0].text), lims[0].cite, ...(lims[1] ? ['; and ', lc(lims[1].text), lims[1].cite] : []), '.'])}</p>`; }
+    srcs.slice(0, keep).forEach(p => (h += `<p>${wr.say(paperSentence(p, review))}</p>`));
+    const lims = srcs.map(p => { const f = finding(p, 'Limitations'); return f.cite ? f : null; }).filter(Boolean).slice(0, 2);
+    if (lims.length) h += `<p>${wr.say(['Across these sources, the main open questions concern ', lc(lims[0].text), lims[0].cite, ...(lims[1] ? ['; and ', lc(lims[1].text), lims[1].cite] : []), '.'])}</p>`;
     return h;
   }
   const GEN = {
+    decision({ docs, o, wr, review }) {
+      const adrs = docs.filter(id => isAdr(docById(id))), options = (review ? review.data.papers : docs).filter(id => !isAdr(docById(id)));
+      const ledger = docs.includes('fx-eng-adr027') && !review; // the ledger-split decision; reviews decide between their options
+      let h = '<h2>Status</h2><p>Proposed</p><h2>Context</h2>';
+      h += adrs.length ? adrs.map(id => `<p>${wr.say(paperSentence(id, review))}</p>`).join('') : `<p>${options.slice(0, 1).map(id => wr.say(paperSentence(id, review))).join('') || 'Describe the problem this decision solves.'}</p>`;
+      if (ledger) h += '<p>Today one ledger service both posts entries and serves balance queries. Peak traffic on the query side slows posting, and every deploy touches both.</p>';
+      if (options.length) h += `<h2>Options considered</h2><ul>${options.slice(0, o.length === 'short' ? 2 : 4).map(id => `<li>${wr.say(paperSentence(id, review))}</li>`).join('')}</ul>`;
+      h += '<h2>Decision</h2>' + (ledger
+        ? `<p>${wr.say(['Split the ledger into a posting service, the only consumer of payment events', ['fx-eng-adr027', 1], ', and a balance query service with its own read model. Both keep the idempotency rules of ADR-031', ...(docs.includes('fx-eng-adr031') ? [['fx-eng-adr031', 1]] : []), '.'])}</p>`
+        : `<p>We will choose the option that best meets ${review ? 'the review criteria: ' + esc(review.data.criteria.map(c => lc(c.label)).join(', ')) : 'our criteria'}. The evidence for each option is cited above; open questions are settled before the decision is accepted.</p>`);
+      if (o.length !== 'short') h += ledger
+        ? '<h2>Consequences</h2><ul><li>Each service can be deployed and scaled on its own.</li><li>Balance reads become eventually consistent; the delay must be monitored.</li><li>Runbooks, dashboards and on-call ownership need updating before rollout.</li></ul>'
+        : '<h2>Consequences</h2><ul><li>Teams build on the chosen option from the next quarter.</li><li>Runbooks, dashboards and on-call ownership are updated before rollout.</li><li>The decision is revisited if a criterion changes, for example a new cloud region or a cost increase.</li></ul>';
+      return h;
+    },
     proposal({ sp, docs, o, wr, review }) {
-      const call = docs.find(id => id === 'du-gr-naf') || docs.find(id => isGrantDoc(docById(id)));
-      const papers = docs.filter(id => !isGrantDoc(docById(id)));
-      const agri = papers.some(p => LIT[p]);
-      let h = '<h2>Background and significance</h2>';
-      h += agri ? `<p>Rice diseases cost Mekong Delta farmers an estimated 10–15% of yield each season, and most detection still happens by eye, after symptoms spread. ${[papers.includes('du-ag-p2') && wr.say(LIT['du-ag-p2'])].filter(Boolean).join(' ')}</p>`
-        : `<p>${esc(sp?.name || 'Our group')} works on a problem where practice has moved faster than evidence. ${papers.slice(0, 1).map(p => wr.say(paperSentence(p, review))).join('')}</p>`;
-      const rest = papers.filter(p => p !== 'du-ag-p2');
+      let h = '<h2>Background</h2>';
+      h += `<p>${esc(sp?.name || 'Our team')} proposes the work below. ${docs.slice(0, 1).map(p => wr.say(paperSentence(p, review))).join('')}</p>`;
+      const rest = docs.slice(1);
       if (rest.length) h += `<p>${rest.slice(0, o.length === 'short' ? 1 : 3).map(p => wr.say(paperSentence(p, review))).join(' ')}</p>`;
-      if (agri) h += `<p>${wr.say(['Field accuracy is far less studied than lab accuracy', ...(papers.includes('du-ag-p2') ? [['du-ag-p2', 27]] : papers.includes('du-ag-p1') ? [['du-ag-p1', 12]] : []), '. The proposed project closes this gap with rainy-season data, phone-based inference and low-cost multispectral imaging.'])}</p>`;
-      if (o.length !== 'short') {
-        h += '<h3>Objectives</h3><ol><li>Build a rice leaf dataset that covers rainy-season and low-light conditions.</li><li>Train models that keep field accuracy above 90% while running on a farmer’s phone.</li><li>Test whether low-cost multispectral imaging can flag disease before symptoms are visible.</li></ol>';
-        if (call) h += `<h3>Fit with the call</h3><p>${wr.say(BANK[call] ? ['The call prioritizes applied AI for agriculture and funds projects of up to 24 months', [call, 3], '. Our 24-month plan stays within the budget cap', [call, 7], '.'] : [`The project matches the priorities of ${docById(call).name.replace(/\.[^.]+$/, '')}`, quoteAt(call, 1).quote ? [call, 1] : finding(call, 'Method').cite || [call, 1], '.'])}</p>`;
-      }
-      if (o.length === 'long') h += '<h3>Expected outcomes</h3><ul><li>An open dataset of field images with rainy-season coverage.</li><li>A phone app for early warning, piloted with two cooperatives.</li><li>Two journal papers and one master’s thesis.</li></ul>';
+      if (o.length !== 'short') h += '<h3>Objectives</h3><ol><li>State the problem and how we will measure success.</li><li>Deliver the smallest useful change first.</li><li>Review results with stakeholders and decide the next step.</li></ol>';
+      if (o.length === 'long') h += '<h3>Expected outcomes</h3><ul><li>A working change in production, with dashboards and a runbook.</li><li>A short write-up of what we learned.</li></ul>';
       return h;
     },
     litreview({ docs, o, wr, review }) {
@@ -533,62 +510,32 @@
       return relatedWork(papers, wr, { review, length: o.length });
     },
     announcement({ sp, docs, o, wr }) {
-      const ev = (D.events || []).filter(e => e.space === sp?.id && e.at > Date.now()).sort((a, b) => a.at - b.at).find(e => e.kind === 'exam') || (D.events || []).filter(e => e.space === sp?.id && e.at > Date.now()).sort((a, b) => a.at - b.at)[0];
-      const title = ev ? `${ev.title.replace(/ · .*/, '')}: what to review` : `Update for ${sp?.name || 'the group'}`;
-      let h = `<h2>${esc(title)}</h2><p>${esc(greet(o.tone, sp?.type === 'course' ? 'class' : 'all'))}</p>`;
-      h += ev ? `<p>${esc(`${ev.title.replace(/ · .*/, '')} is on ${fmtDate(ev.at)}${ev.title.includes('·') ? ' in ' + ev.title.split('·').pop().trim() : ''}.`)} ${docs.includes('du-ml-syl') ? wr.say(['It covers weeks 1–7 and is closed-book; you may bring one A4 page of handwritten notes', ['du-ml-syl', 2], '.']) : 'Here is what to focus on.'}</p>`
-        : '<p>Here is what you need to know this week.</p>';
-      const items = docs.filter(id => id !== 'du-ml-syl').slice(0, o.length === 'short' ? 2 : o.length === 'long' ? 6 : 4).map(id => {
-        const n = COURSE_NOTES[id]; if (n) return `<li>${wr.say([n[0], C(id, n[1], n[2]), '.'])}</li>`;
-        const d = docById(id); const b = BANK[id] && finding(id, 'Result');
-        return `<li>${b?.cite ? wr.say([`${paper(id).title}: ${lc(b.text)}`, b.cite, '.']) : esc(`Review ${d?.name.replace(/\.[^.]+$/, '') || 'the material'}.`)}</li>`;
+      const ev = (D.events || []).filter(e => e.space === sp?.id && e.at > Date.now()).sort((a, b) => a.at - b.at)[0];
+      const title = ev ? `${ev.title.replace(/ · .*/, '')}: what to know` : `Update for ${sp?.name || 'the team'}`;
+      let h = `<h2>${esc(title)}</h2><p>${esc(greet(o.tone, 'all'))}</p>`;
+      h += ev ? `<p>${esc(`${ev.title.replace(/ · .*/, '')} is on ${fmtDate(ev.at)}.`)} Here is what to focus on.</p>` : '<p>Here is what you need to know this week.</p>';
+      const items = docs.slice(0, o.length === 'short' ? 2 : o.length === 'long' ? 6 : 4).map(id => {
+        const d = docById(id); const b = finding(id, 'Result');
+        return `<li>${b?.cite ? wr.say([`${paper(id).title}: ${lc(b.text)}`, b.cite, '.']) : esc(`Read ${d?.name.replace(/\.[^.]+$/, '') || 'the material'}.`)}</li>`;
       });
       if (items.length) h += `<ul>${items.join('')}</ul>`;
-      if (o.length !== 'short') h += `<p>${o.tone === 'friendly' ? 'Questions? Ask in the course space — the teaching team reads every one.' : 'If anything is unclear, send your question to the teaching team from the course space.'}</p>`;
+      if (o.length !== 'short') h += `<p>${o.tone === 'friendly' ? `Questions? Ask in ${sp?.name || 'the space'} — we read every one.` : `If anything is unclear, send your question to ${sp?.name || 'the team'}.`}</p>`;
       h += `<p>${esc(signoff(o.tone))}<br>${esc(me().name)}</p>`;
       return h;
     },
-    letter({ docs, o, wr }) {
-      const linh = docs.includes('du-ag-p6');
-      const who = linh ? 'Bùi Gia Linh' : '[Candidate name]';
-      let h = `<p>${esc(o.tone === 'friendly' ? 'Dear colleagues,' : 'Dear Admissions Committee,')}</p>`;
-      h += `<p>I am pleased to recommend ${esc(who)} for graduate study. I have worked with ${linh ? 'Linh' : 'the candidate'} for two years in our ${esc(docs.some(d => docById(d)?.kb === 'kb-u-agri') ? 'Smart Agriculture Lab' : 'group')}, where I supervise ${linh ? 'her' : 'their'} field work.</p>`;
-      if (linh) h += `<p>${wr.say(['Linh designed a USD 60 multispectral imaging unit from off-the-shelf parts', ['du-ag-p6', 4], ' and showed that it detects bacterial leaf blight 4–6 days before symptoms are visible', ['du-ag-p6', 8], '. ', 'She was candid about its limits — a small dataset and the need for a reference panel', ['du-ag-p6', 11], ' — which is the kind of judgement I look for in a researcher.'])}</p>`;
-      else { const src = docs.map(id => { const f = finding(id, 'Result'); return f.cite ? f : null; }).filter(Boolean)[0]; h += `<p>${src ? wr.say([`Their work shows real results: ${lc(src.text)}`, src.cite, '.']) : 'Their work is careful, independent and well documented.'}</p>`; }
-      if (o.length !== 'short') h += `<p>${esc(who === '[Candidate name]' ? 'The candidate' : 'Linh')} works independently, communicates clearly with farmers and engineers alike, and finishes what they start.${o.length === 'long' ? ' In lab meetings they routinely help junior members debug experiments and write up results.' : ''}</p>`;
-      h += `<p>I recommend ${esc(who)} without reservation.</p><p>${esc(signoff(o.tone))}<br>${esc(me().name)}<br>${esc(me().role || '')}</p>`;
-      return h;
-    },
     email({ sp, docs, o, wr }) {
-      const pi = sp?.members?.find(m => spaceType(sp.type).staff.includes(m.role) && m.user !== me().id);
-      const piName = pi ? (D.members.find(x => x.id === pi.user)?.name || 'team') : 'team';
-      const first = piName.split(' ').pop();
-      const call = docs.find(id => isGrantDoc(docById(id)));
-      let h = `<p><b>Subject:</b> ${esc(call ? 'NAFOSTED draft — background section ready for comments' : `Summary of ${plural(docs.length, 'source')} for ${sp?.name || 'the team'}`)}</p><p>${esc(greet(o.tone, first))}</p>`;
-      h += call ? `<p>${wr.say(['The background and significance section is drafted. It follows the template’s structure — problem, state of the art, gap', ...(docs.includes('du-gr-tpl') ? [['du-gr-tpl', 2]] : []), ' — and fits the call’s priority on applied AI for agriculture', [call, 3], '.'])}</p>`
-        : `<p>Here is a short summary of what I read.</p>`;
-      const pts = docs.filter(id => !isGrantDoc(docById(id))).slice(0, o.length === 'short' ? 1 : o.length === 'long' ? 4 : 2).map(id => { const f = finding(id, 'Result'); const pp = paper(id); return f.cite ? `<li>${wr.say([`${pp.short}: ${lc(f.text)}`, f.cite])}</li>` : ''; }).filter(Boolean);
+      const lead = sp?.members?.find(m => spaceType(sp.type).staff.includes(m.role) && m.user !== me().id);
+      const leadName = lead ? (D.members.find(x => x.id === lead.user)?.name || 'team') : 'team';
+      const first = leadName.split(' ').pop();
+      let h = `<p><b>Subject:</b> ${esc(`Summary of ${plural(docs.length, 'source')} for ${sp?.name || 'the team'}`)}</p><p>${esc(greet(o.tone, first))}</p><p>Here is a short summary of what I read.</p>`;
+      const pts = docs.slice(0, o.length === 'short' ? 1 : o.length === 'long' ? 4 : 2).map(id => { if (LIT[id]) return `<li>${wr.say(LIT[id])}</li>`; const f = finding(id, 'Result'); const pp = paper(id); return f.cite ? `<li>${wr.say([`${pp.short}: ${lc(f.text)}`, f.cite])}</li>` : ''; }).filter(Boolean);
       if (pts.length) h += `<ul>${pts.join('')}</ul>`;
-      h += `<p>${o.tone === 'friendly' ? 'Could you take a look this week? Happy to walk through it at lab meeting.' : 'I would be grateful for your comments before the internal deadline.'}</p><p>${esc(signoff(o.tone))}<br>${esc(me().name)}</p>`;
+      h += `<p>${o.tone === 'friendly' ? 'Could you take a look this week? Happy to walk through it.' : 'I would be grateful for your comments this week.'}</p><p>${esc(signoff(o.tone))}<br>${esc(me().name)}</p>`;
       return h;
     },
-  };
-  const COURSE_NOTES = {
-    'du-ml-w04': ['Regularization: know how λ trades variance for bias', 18, 'Increasing λ reduces variance but can increase bias; choose λ on a validation set.'],
-    'du-ml-w03': ['Logistic regression: the sigmoid output and the cross-entropy loss', 12, 'Logistic regression passes wᵀx through the sigmoid and is trained by minimizing the cross-entropy loss.'],
-    'du-ml-w05': ['Decision trees and random forests: why feature sampling decorrelates the trees', 27, 'Sampling a subset of features at each split decorrelates the trees, so averaging them reduces variance.'],
-    'du-ml-w02': ['Gradient descent: what a too-large learning rate does', 18, 'If α is too large gradient descent can overshoot and diverge; if it is too small, convergence is slow.'],
-    'du-ml-w07': ['Model evaluation: tune with cross-validation, never on the test set', 9, 'Hold out a test set once; tune hyper-parameters with k-fold cross-validation on the training data only.'],
-    'du-ml-w06': ['Neural networks: forward pass and backpropagation', 14, 'Backpropagation applies the chain rule layer by layer to compute the gradient of the loss with respect to every weight.'],
-    'du-ml-a1': ['Assignment 1: report RMSE on the held-out set', 2, 'Report RMSE on the held-out test set and explain your choice of features.'],
-    'du-db-w05': ['SQL joins: inner vs outer joins and correlated subqueries', 12, 'An outer join keeps unmatched rows from one side and fills the missing columns with NULL.'],
-    'du-db-w07': ['Normalization: decompose to BCNF and check that joins are lossless', 21, 'A decomposition to BCNF is always lossless but may not preserve all functional dependencies.'],
-    'du-db-w03': ['Relational algebra: selection, projection and joins', 8, 'Selection filters rows, projection keeps columns, and a natural join matches tuples on shared attributes.'],
-    'du-db-lab3': ['Lab 3: submit all join queries in one .sql file', 1, 'Submit all queries in a single .sql file named with your student ID.'],
-    'du-db-syl': ['Grading: labs 20%, midterm 30%, final 50%', 1, 'Assessment: labs 20%, midterm exam 30%, final exam 50%.'],
   };
   function drGenerate(ctx) {
-    const sp = spOf(ctx.space), o = { type: 'proposal', tone: 'formal', length: 'medium', ...(ctx.options || {}) };
+    const sp = spOf(ctx.space), o = { type: 'email', tone: 'formal', length: 'medium', ...(ctx.options || {}) };
     const docs = idsOf(ctx.sources).filter(id => docById(id));
     const review = o.fromReview ? W(o.fromReview) : null;
     const wr = writer();
@@ -620,7 +567,7 @@
     const toolbar = can ? `<div class="dr-toolbar" role="toolbar" aria-label="Formatting">${tool('Heading', 'heading')}${tool('B', 'bold', { tip: 'Bold', cls: 'strong' })}${tool('', 'bullets', { icon: 'list', tip: 'Bulleted list' })}${tool('', 'undo', { icon: 'undo', tip: 'Undo' })}<span class="grow"></span><span class="dr-saved" id="dr-saved" aria-live="polite">${ic('check', 'i-sm')}Saved</span></div>` : '';
     const review = w.reviewRequestedAt && w.status === 'ready' ? alertBox('accent', 'Ready for review', `Sent to the space’s staff ${rel(w.reviewRequestedAt)}.`, '', { icon: 'send' }) : '';
     const type = drType(w);
-    const quick = (type === 'proposal' ? ['Shorter', 'More formal', 'Add budget justification'] : type === 'announcement' || type === 'email' ? ['Shorter', 'Friendlier', 'More formal'] : ['Shorter', 'Longer', 'More formal']);
+    const quick = (type === 'proposal' ? ['Shorter', 'More formal', 'Add a cost breakdown'] : type === 'decision' ? ['Shorter', 'Longer', 'Add a rollout timeline'] : type === 'announcement' || type === 'email' ? ['Shorter', 'Friendlier', 'More formal'] : ['Shorter', 'Longer', 'More formal']);
     const ask = can ? `<div class="dr-ask">
         ${u.hint ? `<div class="t-xs muted mb-8">${esc(u.hint)}</div>` : ''}
         <div class="dr-ask__chips">${quick.map(q => `<button type="button" class="rv-chip" data-act="dr-ask" data-w="${w.id}" data-q="${esc(q)}" ${u.busy ? 'disabled' : ''}>${esc(q)}</button>`).join('')}</div>
@@ -691,17 +638,12 @@
       return mapText(html, map);
     }],
     [/friend|casual|warm|less formal|informal/i, 'Friendlier', (w, html) => mapText(html, [[/\bDear\b/g, 'Hi'], [/\bYours sincerely,/g, 'Thanks,'], [/\bdo not\b/g, 'don’t'], [/\bcannot\b/g, 'can’t'], [/\bI would be grateful for your comments\b/g, 'Let me know what you think'], [/\bIf anything is unclear, send your question to the teaching team from the course space\./g, 'Questions? Ask in the course space — we read every one.']])],
-    [/budget/i, 'Budget justification', (w, html) => {
-      const wr = reuse(w); const call = (w.sources || []).find(id => id === 'du-gr-naf') || (w.sources || []).find(id => isGrantDoc(docById(id)));
-      const items = '<ul><li><b>Personnel (55%)</b> — two research assistants for 24 months to collect and label field images.</li><li><b>Equipment (25%)</b> — 10 phones, 4 multispectral imaging units and 6 sensor nodes.</li><li><b>Field work (12%)</b> — travel to partner farms in Can Tho, An Giang and Tien Giang across two seasons.</li><li><b>Dissemination (8%)</b> — open-access fees and a workshop for cooperatives.</li></ul>';
-      const p = call === 'du-gr-naf' ? wr.say(['Each cost item is linked to a planned activity, as the call requires', ['du-gr-naf', 9], '. The total stays under the VND 1.5 billion cap, with equipment at 25% against the 30% limit', ['du-gr-naf', 7], '.']) : 'Each cost item below is linked to a planned activity and kept to the minimum needed.';
-      return { html: html + `<h3>Budget justification</h3><p>${p}</p>${items}`, cites: wr.cites };
-    }],
-    [/timeline|schedule|milestone|work ?plan/i, 'Timeline', (w, html) => html + '<h3>Timeline</h3><ul><li><b>Months 1–6</b> — rainy-season data collection and labelling.</li><li><b>Months 7–12</b> — model training and on-phone evaluation.</li><li><b>Months 13–18</b> — multispectral pilot with two cooperatives.</li><li><b>Months 19–24</b> — analysis, papers and open dataset release.</li></ul>'],
-    [/objective|aim|goal/i, 'Objectives', (w, html) => /<h3>Objectives<\/h3>/.test(html) ? html : html + '<h3>Objectives</h3><ol><li>State the problem in measurable terms.</li><li>Test the approach on real field data.</li><li>Share data and results openly.</li></ol>'],
+    [/budget|cost/i, 'Cost breakdown', (w, html) => html + '<h3>Cost breakdown</h3><p>Each cost item below is linked to a planned activity and kept to the minimum needed.</p><ul><li><b>People (60%)</b> — engineering time for build and rollout.</li><li><b>Infrastructure (25%)</b> — environments, licences and monitoring.</li><li><b>Contingency (15%)</b> — held by the project owner.</li></ul>'],
+    [/timeline|schedule|milestone|work ?plan|rollout/i, 'Timeline', (w, html) => html + '<h3>Timeline</h3><ul><li><b>Weeks 1–2</b> — agree scope, owners and success measures.</li><li><b>Weeks 3–6</b> — build and test in staging.</li><li><b>Weeks 7–8</b> — staged rollout with monitoring.</li><li><b>Week 9</b> — review results and close out.</li></ul>'],
+    [/objective|aim|goal/i, 'Objectives', (w, html) => /<h3>Objectives<\/h3>/.test(html) ? html : html + '<h3>Objectives</h3><ol><li>State the problem in measurable terms.</li><li>Test the approach with real traffic in staging.</li><li>Share results and decisions openly.</li></ol>'],
     [/long|expand|detail|elaborate/i, 'Longer', (w, html) => {
       const wr = reuse(w); const used = new Set(w.data.cites.map(c => c.doc));
-      const extra = (w.sources || []).filter(id => !isGrantDoc(docById(id))).sort((a, b) => used.has(a) - used.has(b)).slice(0, 2).map(id => wr.say(paperSentence(id))).join(' ');
+      const extra = (w.sources || []).filter(id => docById(id)).sort((a, b) => used.has(a) - used.has(b)).slice(0, 2).map(id => wr.say(paperSentence(id))).join(' ');
       return { html: html + (extra ? `<p>${extra}</p>` : '<p>Each point above draws on the selected sources; the full evidence is listed in the Sources panel.</p>'), cites: wr.cites };
     }],
   ];
@@ -787,7 +729,7 @@
     title: ctx => {
       const sp = spOf(ctx?.space), o = ctx?.options || {}, docs = idsOf(ctx?.sources);
       const t = o.type || defaultType(sp, docs);
-      if (t === 'proposal' && docs.includes('du-gr-naf')) return 'NAFOSTED 2027 — Background & significance';
+      if (t === 'decision' && docs.includes('fx-eng-adr027')) return 'ADR — Ledger service design';
       return `${typeLabel(t)}${sp ? ' — ' + sp.name : ''}`;
     },
     generate: drGenerate,

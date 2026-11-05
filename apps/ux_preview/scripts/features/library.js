@@ -1,7 +1,8 @@
-/* My library (/knowledge/library?tab=saved|recent|files|collections|views)
+/* My library (/knowledge/library?tab=saved|recent|contributions|files|collections|views)
    and one collection (/knowledge/collections/:id): the personal side of
-   Knowledge — saved resources, recent reads, My files, collections and saved
-   Browse views. Uses X.res (resources.js) and core/catalog.js. Prefix: lib-, col-. */
+   Knowledge — saved resources, recent reads, your contributions and where they
+   stand, My files, collections and saved Browse views. Uses X.res (resources.js),
+   X.ctb + DR['ctb'] (contribute.js), core/catalog.js and core/lifecycle.js. Prefix: lib-, col-. */
 (() => {
   'use strict';
 
@@ -15,19 +16,65 @@
   const libHref = tab => '/knowledge/library?tab=' + tab;
 
   /* ═══════════════ My library ═══════════════ */
-  const TABS = [['saved', 'Saved'], ['recent', 'Recent'], ['files', 'My files'], ['collections', 'Collections'], ['views', 'Saved views']];
+  const TABS = [['saved', 'Saved'], ['recent', 'Recent'], ['contributions', 'Contributions'], ['files', 'My files'], ['collections', 'Collections'], ['views', 'Saved views']];
   const SAVED_SORTS = { saved: 'Recently saved', updated: 'Recently updated', title: 'Title A–Z' };
 
   P.library = ({ query }) => {
     crumbs([{ label: 'Knowledge', to: '/knowledge' }, { label: 'My library' }]);
-    const kb = personalKb();
-    const counts = { saved: savedResources().length, recent: recentResources().length, files: kb ? docsIn(kb.id).length : 0, collections: visibleCollections().length, views: myViews().length };
-    const list = TABS.filter(([id]) => id !== 'files' || kb).map(([id, label]) => ({ id, label, count: counts[id] }));
+    const kb = personalKb(), ctb = myContributions();
+    const counts = { saved: savedResources().length, recent: recentResources().length, contributions: ctb.length, files: kb ? docsIn(kb.id).length : 0, collections: visibleCollections().length, views: myViews().length };
+    const shown = { files: !!kb, contributions: canContribute() || ctb.length > 0 };
+    const list = TABS.filter(([id]) => shown[id] ?? true).map(([id, label]) => ({ id, label, count: counts[id], alert: id === 'contributions' && ctb.some(d => stageOf(d) === 'changes') }));
     const tab = list.some(t => t.id === query.tab) ? query.tab : 'saved';
-    const head = X.res.hubHeader('library', { actions: btn('New collection', { v: 'primary', icon: 'plus', act: 'col-new' }) });
-    const body = { saved: savedTab, recent: recentTab, files: filesTab, collections: collectionsTab, views: viewsTab }[tab](kb);
+    const contribute = canContribute() ? btn('Contribute', { v: 'secondary', icon: 'upload', act: 'contribute' }) : '';
+    const head = X.res.hubHeader('library', { actions: contribute + btn('New collection', { v: 'primary', icon: 'plus', act: 'col-new' }) });
+    const body = { saved: savedTab, recent: recentTab, contributions: contributionsTab, files: filesTab, collections: collectionsTab, views: viewsTab }[tab](kb);
     return `<div class="page lib">${head}<div class="page-tabs">${tabs(list, tab, '/knowledge/library')}</div>${body}</div>`;
   };
+  /** ?open=<id> (inbox, reader "Track") opens that contribution once, then leaves the address clean. */
+  AFTER.library = ({ query }) => {
+    if (query.tab !== 'contributions' || !query.open) return;
+    const id = query.open, q = { ...query }; delete q.open;
+    history.replaceState(null, '', '#' + S.cur.path + '?' + new URLSearchParams(q).toString());
+    S.cur.query = q;
+    if (docById(id)) openDrawer('ctb', { id });
+  };
+
+  /* ── Contributions: what you shared, where it stands, what to do next ── */
+  const CTB_GROUPS = [['all', 'All', null], ['changes', 'Needs your action', ['changes']], ['review', 'In review', ['analyzing', 'review']],
+    ['published', 'Published', ['published', 'publishing', 'queued', 'merged', 'failed', 'update', 'stored']], ['rejected', 'Not approved', ['rejected']]];
+  function ctbAction(d) {
+    const key = lifecycleOf(d).key, data = { id: d.id };
+    if (key === 'changes') return btn('Revise', { v: 'secondary', size: 'sm', icon: 'pencil', act: 'ctb-revise', data });
+    if (key === 'analyzing' || key === 'review') return btn('Withdraw', { v: 'ghost', size: 'sm', act: 'ctb-withdraw', data });
+    if (key === 'rejected') return btn('Remove', { v: 'ghost', size: 'sm', act: 'ctb-withdraw', data });
+    if (CTB_GROUPS[3][2].includes(key)) return btn('Open', { v: 'ghost', size: 'sm', act: 'ctb-doc', data: { id: d.mergedInto || d.id } });
+    return '';
+  }
+  function contributionsTab() {
+    const uk = 'libCtb', u = ui(uk, { seg: 'all' });
+    const all = myContributions();
+    const group = CTB_GROUPS.find(g => g[0] === u.seg) || CTB_GROUPS[0];
+    const rows = all.filter(d => (!group[2] || group[2].includes(lifecycleOf(d).key)) && matchesQ(uk, d.name, kbById(d.kb)?.name));
+    const contribute = canContribute() ? btn('Contribute', { v: 'primary', icon: 'upload', act: 'contribute' }) : '';
+    const empty = () => emptyState({ icon: 'upload', title: 'No contributions yet', desc: 'Share a document with your team. A reviewer checks it before it’s published.', actions: contribute, boxed: true });
+    return gate({
+      loading: () => skelRows(4), empty,
+      ok: () => {
+        if (!all.length) return empty();
+        const n = key => all.filter(d => CTB_GROUPS.find(g => g[0] === key)[2].includes(lifecycleOf(d).key)).length;
+        const opts = CTB_GROUPS.map(([id, label]) => [id, id === 'changes' && n('changes') ? `${label} (${n('changes')})` : label]);
+        const toolbar = `<div class="toolbar lib-ctb-bar"><div class="lib-ctb-seg">${seg({ value: group[0], options: opts, act: 'lib-ctb-seg', label: 'Show' })}</div>${searchField({ uiKey: uk, placeholder: 'Search contributions' })}</div>`;
+        if (!rows.length) return toolbar + noMatches(uk, ['seg'], 'contributions');
+        return toolbar + list(rows.map(d => item({
+          lead: fileIcon(d.type), title: esc(d.name), titleExtra: lifeChip(d, 'sm'),
+          desc: `<span class="lib-ctb__desc"><span class="lib-ctb__kb">${esc(kbById(d.kb)?.name || '—')}</span>${dot}<span class="truncate">${esc(X.ctb.eventLine(d))}</span></span>`,
+          trail: ctbAction(d), act: 'ctb-open', data: { id: d.id }, cls: 'lib-ctb',
+        })), 'lib-list');
+      },
+    });
+  }
+  A['lib-ctb-seg'] = el => { ui('libCtb').seg = el.dataset.value; refresh(); };
 
   /* ── Saved ── */
   function savedTab() {
@@ -37,7 +84,7 @@
     let rows = all.filter(d => !toks.length || scoreRes(d, toks) > 0);
     if (u.sort === 'updated') rows = [...rows].sort((a, b) => b.updated - a.updated);
     else if (u.sort === 'title') rows = [...rows].sort((a, b) => a.name.localeCompare(b.name));
-    const empty = () => emptyState({ icon: 'bookmark', title: 'Nothing saved yet', desc: 'Save resources you come back to. They stay here.', actions: btn('Browse knowledge', { v: 'primary', href: '/knowledge/browse' }), boxed: true });
+    const empty = () => emptyState({ icon: 'bookmark', title: 'Nothing saved yet', desc: 'Save resources you come back to. They stay here.', actions: btn('Browse knowledge', { v: 'primary', href: '/knowledge' }), boxed: true });
     const ids = new Set(all.map(d => d.id)); const sel = selIds(uk).filter(id => ids.has(id));
     const toolbar = `<div class="toolbar">${searchField({ uiKey: uk, placeholder: 'Search saved' })}<div class="toolbar__end">${btn(SAVED_SORTS[u.sort] || SAVED_SORTS.saved, { v: 'ghost', size: 'sm', icon: 'sort', menu: 'lib-sort', aria: `aria-label="Sort: ${esc(SAVED_SORTS[u.sort])}"` })}</div></div>`;
     return gate({
@@ -87,7 +134,7 @@
   function filesTab(kb) {
     const uk = 'libFiles';
     const all = kb ? docsIn(kb.id).sort((a, b) => b.updated - a.updated) : [];
-    const upload = btn('Upload', { v: 'primary', icon: 'upload', act: 'kb-upload', data: { kb: kb?.id || '' } });
+    const upload = btn('Upload', { v: 'primary', icon: 'upload', act: 'contribute', data: { private: '1' } });
     const empty = () => emptyState({ icon: 'upload', title: 'No files yet', desc: 'Upload notes or drafts to ask about them. Only you can see them.', actions: upload, boxed: true });
     const rows = all.filter(d => matchesQ(uk, d.name));
     return gate({
@@ -95,8 +142,10 @@
       ok: () => {
         if (!all.length) return empty();
         const process = d => (['pending', 'failed', 'outdated'].includes(d.status) ? btn('Process', { v: 'ghost', size: 'sm', icon: 'play', act: 'lib-process', data: { id: d.id } }) : '');
-        return `<div class="toolbar">${searchField({ uiKey: uk, placeholder: 'Search my files' })}<span class="t-sm muted row gap-4">${ic('lock', 'i-sm')}Only you can see these</span><div class="toolbar__end">${btn('Upload', { icon: 'upload', act: 'kb-upload', data: { kb: kb.id } })}</div></div>`
-          + (rows.length ? X.res.rows(rows, d => ({ trail: process(d) })) : noMatches(uk, [], 'files'));
+        const canShare = canContribute() && contributionTargets().length > 0;
+        const share = d => (canShare ? btn('Share as knowledge…', { v: 'ghost', size: 'sm', icon: 'share', act: 'ctb-share', data: { id: d.id }, cls: 'lib-share', aria: 'aria-label="Share as knowledge"' }) : '');
+        return `<div class="toolbar">${searchField({ uiKey: uk, placeholder: 'Search my files' })}<span class="t-sm muted row gap-4">${ic('lock', 'i-sm')}Only you can see these</span><div class="toolbar__end">${btn('Upload', { icon: 'upload', act: 'contribute', data: { private: '1' } })}</div></div>`
+          + (rows.length ? X.res.rows(rows, d => ({ trail: process(d) + share(d) })) : noMatches(uk, [], 'files'));
       },
     });
   }
@@ -133,7 +182,7 @@
   }
   function viewsTab() {
     const all = myViews();
-    const empty = () => emptyState({ icon: 'filter', title: 'No saved views', desc: 'In Browse, save a search and its filters to come back to it.', actions: btn('Go to Browse', { v: 'primary', href: '/knowledge/browse' }), boxed: true });
+    const empty = () => emptyState({ icon: 'filter', title: 'No saved views', desc: 'In Browse, save a search and its filters to come back to it.', actions: btn('Go to Browse', { v: 'primary', href: '/knowledge' }), boxed: true });
     return gate({
       loading: () => skelRows(3), empty,
       ok: () => all.length ? list(all.map(v => item({
@@ -144,7 +193,7 @@
     });
   }
   const viewById = id => myViews().find(v => v.id === id);
-  A['lib-view-open'] = el => { const v = viewById(el.dataset.id); if (v) go('/knowledge/browse' + (v.query ? '?' + v.query : '')); };
+  A['lib-view-open'] = el => { const v = viewById(el.dataset.id); if (v) go('/knowledge' + (v.query ? '?' + v.query : '')); };
   MENUS['lib-view'] = el => {
     const v = viewById(el.dataset.id); if (!v) return [];
     return [

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Seed local full-access accounts through identity and RBAC services."""
+"""Seed local full-access accounts through the identity services and IAM policies."""
 
 from __future__ import annotations
 
@@ -21,15 +21,12 @@ load_dotenv(BACKEND_ROOT.parent / ".env", override=False)
 
 from bomesh.db.engine import get_session_factory, transaction_scope
 from bomesh.db.models import Tenant
-from bomesh.services import (
-    ACTIVE_STATUS,
-    PLATFORM_ADMIN_ROLE,
-    TENANT_ADMIN_ROLE,
-    IdentityNotFoundError,
-)
-from bomesh.services.identity_access.identity_store import IdentityStoreService
-from bomesh.services.identity_access.passwords import PasswordCredentialService
-from bomesh.services.identity_access.role_assignments import RoleAssignmentService
+from bomesh.iam.authorizer import Authorizer, WorkspaceRef
+from bomesh.iam.policy import WORKSPACE_ADMIN, PolicyStore, set_platform_role
+from bomesh.iam.sync import sync_catalog
+from bomesh.services import ACTIVE_STATUS, IdentityNotFoundError
+from bomesh.services.identity.identity_store import IdentityStoreService
+from bomesh.services.identity.passwords import PasswordCredentialService
 
 
 DEFAULT_PASSWORD = "19102003"
@@ -91,8 +88,8 @@ async def seed_accounts(*, password: str, reset_password: bool) -> list[dict[str
     factory = get_session_factory()
     async with transaction_scope(factory) as session:
         identity = IdentityStoreService(session)
-        assignments = RoleAssignmentService(session)
-        await identity.sync_system_roles()
+        policies = PolicyStore(session, Authorizer(factory))
+        await sync_catalog(session)
         tenants = await _active_tenants(session, identity)
         results: list[dict[str, object]] = []
 
@@ -103,8 +100,8 @@ async def seed_accounts(*, password: str, reset_password: bool) -> list[dict[str
                 user = await identity.get_user_by_email(
                     account.email, include_inactive=True
                 )
-                if not user.status:
-                    await identity.set_user_status(user.id, True)
+                if user.status != ACTIVE_STATUS:
+                    await identity.set_user_status(user.id, ACTIVE_STATUS)
                 if reset_password:
                     user.password_hash = PasswordCredentialService.hash(password)
                     await session.flush()
@@ -118,14 +115,14 @@ async def seed_accounts(*, password: str, reset_password: bool) -> list[dict[str
                 )
                 created = True
 
-            await assignments.ensure_platform_role(user.id, PLATFORM_ADMIN_ROLE)
+            await set_platform_role(session, user.id, "roles/platformAdmin")
             for tenant in tenants:
                 await identity.assign_membership(user.id, tenant.id)
-                await assignments.ensure_tenant_role(
-                    user_id=user.id,
-                    tenant_id=tenant.id,
-                    role_code=TENANT_ADMIN_ROLE,
-                    created_by_user_id=user.id,
+                await policies.add_binding(
+                    WorkspaceRef(tenant.id),
+                    WORKSPACE_ADMIN,
+                    f"user:{user.id}",
+                    created_by=user.id,
                 )
             results.append(
                 {
@@ -150,7 +147,7 @@ async def _main() -> None:
             password_state = "created"
         print(
             f"{result['email']}: {password_state}; "
-            f"platform_admin + tenant_admin in {result['workspace_count']} workspace(s)"
+            f"platformAdmin + workspaceAdmin in {result['workspace_count']} workspace(s)"
         )
 
 

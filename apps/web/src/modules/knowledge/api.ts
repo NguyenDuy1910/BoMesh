@@ -89,7 +89,7 @@ export interface LocalDocumentMove {
   moved_at: string;
 }
 
-/** API pending: `POST /documents/move` (`collection.update` on source and target). */
+/** API pending: `MoveItem` (`items.move` on the source, `items.create` on the destination). */
 export async function moveDocuments(body: DocumentMoveRequest): Promise<DocumentMoveResult> {
   return pendingApi("document.move", () => pendingDocuments.moveDocuments(body));
 }
@@ -103,7 +103,7 @@ export function listLocalDocumentMoves(): LocalDocumentMove[] {
   return pendingDocuments.listLocalDocumentMoves();
 }
 
-/** API pending: `POST /documents/{document_id}/restore` (`collection.update`). */
+/** API pending: `UndeleteItem` (`items.undelete`). */
 export async function restoreDocument(documentId: string): Promise<ContractDocument> {
   return pendingApi("document.restore", () => pendingDocuments.restoreDocument(documentId));
 }
@@ -118,9 +118,9 @@ export interface CollectionGeneralAccess {
 }
 
 /**
- * API pending: `PUT /collections/{collection_id}/access/workspace/{workspace_id}`
- * `{ role: "viewer" }` for `workspace`, `DELETE` of that grant for
- * `restricted` (`collection.share`).
+ * API pending: `SetItemIamPolicy` on the root collection — `workspaceMembers`
+ * bound to `roles/collectionViewer` for `workspace`, that binding removed for
+ * `restricted` (`items.setIamPolicy`).
  */
 export async function setCollectionGeneralAccess(
   collectionId: string,
@@ -155,7 +155,7 @@ export interface DiscoverableCollectionPage {
   total: number;
 }
 
-/** API pending: `GET /collections?visibility=discoverable` (`knowledge.read`). */
+/** API pending: `ListItems` (`parentItem=""`, `showLocked`) — discoverable root collections. */
 export async function listDiscoverableCollections(): Promise<DiscoverableCollectionPage> {
   return pendingApi("collection.discovery", () => pendingCollections.listDiscoverable());
 }

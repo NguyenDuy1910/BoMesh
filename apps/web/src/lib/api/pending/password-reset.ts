@@ -1,6 +1,6 @@
 /**
- * Local implementation of `auth.password_reset` (proposed
- * `POST /auth/password-resets`, `POST /auth/password-resets/{token}/complete`).
+ * Local implementation of `auth.password_reset` (v2 `SendPasswordReset`,
+ * `ResetPassword`).
  *
  * No email can be sent from the browser, so the reset link a real server
  * would email is written to the developer console instead. Nothing here

@@ -2,44 +2,49 @@
 /* Prototype controls — outside the product. Demo workspace, persona, forced
    page state, theme, device width, end-to-end journeys, design system and
    data reset. */
-const DEMO_WORKSPACES = [['ws-northwind', 'Northwind'], ['ws-ute', 'UTE Campus']];
+const DEMO_WORKSPACES = [['ws-northwind', 'Northwind'], ['ws-finx', 'Finx']];
 const JOURNEYS = [
   { ws: 'ws-northwind', who: 'member', title: 'Sign in and ask a question', run: () => { S.signedIn = false; go('/signin'); } },
+  { ws: 'ws-northwind', who: 'member', title: 'Start from the knowledge-first Home', run: () => go('/home') },
   { ws: 'ws-northwind', who: 'member', title: 'Verify where an answer came from', run: () => goThen('/chat/c1', () => A['cite-open']?.({ dataset: { msg: 'm2', n: '1' } })) },
-  { ws: 'ws-northwind', who: 'member', title: 'Find verified sales material', run: () => go('/knowledge/browse?topic=d-sales&trust=verified') },
+  { ws: 'ws-northwind', who: 'member', title: 'Find verified sales material', run: () => go('/knowledge?topic=d-sales&trust=verified') },
   { ws: 'ws-northwind', who: 'member', title: 'Request access to restricted knowledge', run: () => go('/knowledge/bases') },
+  { ws: 'ws-northwind', who: 'member', title: 'Contribute a document and track it', run: () => goThen('/knowledge', () => A['contribute']?.()) },
+  { ws: 'ws-northwind', who: 'member', title: 'Revise a document a reviewer sent back', run: () => go('/knowledge/library?tab=contributions&open=d-sub-2') },
   { ws: 'ws-northwind', who: 'member', title: 'First-run product tour', run: () => X.startTour?.() },
   { ws: 'ws-northwind', who: 'admin', title: 'Create a knowledge base and add files', run: () => goThen('/knowledge/bases', () => A['kb-create']?.()) },
-  { ws: 'ws-northwind', who: 'admin', title: 'Merge a duplicate document', run: () => go('/knowledge-health?tab=duplicates') },
+  { ws: 'ws-northwind', who: 'admin', title: 'Review and publish submissions', run: () => go('/documents?tab=review') },
+  { ws: 'ws-northwind', who: 'admin', title: 'Merge a duplicate document', run: () => go('/documents?tab=quality&seg=duplicates') },
   { ws: 'ws-northwind', who: 'admin', title: 'Connect a source', run: () => goThen('/sources', () => A['src-connect']?.()) },
   { ws: 'ws-northwind', who: 'admin', title: 'Fix a failed sync', run: () => go('/overview') },
   { ws: 'ws-northwind', who: 'admin', title: 'Approve an access request', run: () => go('/people?tab=requests') },
   { ws: 'ws-northwind', who: 'admin', title: 'Add people and set their role', run: () => goThen('/people', () => A['member-add']?.()) },
   { ws: 'ws-northwind', who: 'admin', title: 'Turn on Spaces for Northwind', run: () => go('/settings?tab=setup') },
-  { ws: 'ws-ute', who: 'student', title: 'Discover knowledge for my courses', run: () => go('/knowledge') },
-  { ws: 'ws-ute', who: 'student', title: 'Find a regulation, read it and ask about it', run: () => go('/knowledge/browse?q=withdraw') },
-  { ws: 'ws-ute', who: 'student', title: 'Find theses for my topic and save them', run: () => go('/knowledge/browse?topic=t-ml&kind=thesis') },
-  { ws: 'ws-ute', who: 'student', title: 'Revise from a course collection', run: () => go('/knowledge/collections/col-u-mlprep') },
-  { ws: 'ws-ute', who: 'student', title: 'See what’s due and take the Week 4 quiz', run: () => go('/home') },
-  { ws: 'ws-ute', who: 'student', title: 'Make a study guide from lecture slides', run: () => go('/work/new?workflow=study-guide&space=sp-ml') },
-  { ws: 'ws-ute', who: 'student', title: 'Check a rule, then withdraw from a course', run: () => go('/chat/cu1') },
-  { ws: 'ws-ute', who: 'student', title: 'Ask the teaching team', run: () => go('/space/sp-ml') },
-  { ws: 'ws-ute', who: 'student', title: 'Track my requests', run: () => go('/requests') },
-  { ws: 'ws-ute', who: 'lecturer', title: 'Curate the midterm reading list', run: () => go('/knowledge/collections/col-u-mlprep') },
-  { ws: 'ws-ute', who: 'lecturer', title: 'Link a resource to another course', run: () => go('/doc/du-ml-lab2') },
-  { ws: 'ws-ute', who: 'lecturer', title: 'Build and publish a quiz', run: () => go('/work/new?workflow=quiz&space=sp-ml') },
-  { ws: 'ws-ute', who: 'lecturer', title: 'Answer student questions', run: () => go('/requests?tab=queue') },
-  { ws: 'ws-ute', who: 'lecturer', title: 'See how the class did on a quiz', run: () => go('/work/w-quiz-w4') },
-  { ws: 'ws-ute', who: 'researcher', title: 'Read a paper with AI beside it', run: () => go('/doc/du-ag-p1') },
-  { ws: 'ws-ute', who: 'researcher', title: 'Compare papers in a literature review', run: () => go('/work/w-review-agri') },
-  { ws: 'ws-ute', who: 'researcher', title: 'Start a review from the lab library', run: () => go('/work/new?workflow=review&space=sp-agri') },
-  { ws: 'ws-ute', who: 'researcher', title: 'Draft a grant proposal section', run: () => go('/work/w-draft-naf') },
-  { ws: 'ws-ute', who: 'staff', title: 'Work the Academic Affairs queue', run: () => go('/requests?tab=queue') },
-  { ws: 'ws-ute', who: 'staff', title: 'Keep regulations verified and tagged', run: () => go('/knowledge-health') },
-  { ws: 'ws-ute', who: 'staff', title: 'Close a knowledge gap students hit', run: () => go('/overview') },
-  { ws: 'ws-ute', who: 'staff', title: 'Configure the workspace template', run: () => go('/settings?tab=setup') },
+  { ws: 'ws-finx', who: 'engineer', title: 'Start from Home: explore, search or ask', run: () => go('/home') },
+  { ws: 'ws-finx', who: 'engineer', title: 'Ask how to get production access, then request it', run: () => go('/chat/fx-c1') },
+  { ws: 'ws-finx', who: 'engineer', title: 'Request production access (rules checked first)', run: () => go('/requests/new?type=rt-prod') },
+  { ws: 'ws-finx', who: 'engineer', title: 'Read an architecture decision with AI beside it', run: () => go('/doc/fx-eng-adr031') },
+  { ws: 'ws-finx', who: 'engineer', title: 'Browse Banking Operations procedures', run: () => go('/knowledge?topic=d-ops') },
+  { ws: 'ws-finx', who: 'engineer', title: 'Share a guide for review', run: () => goThen('/home', () => A['contribute']?.()) },
+  { ws: 'ws-finx', who: 'engineer', title: 'Fix a contribution the lead sent back', run: () => go('/knowledge/library?tab=contributions&open=fx-sub-10') },
+  { ws: 'ws-finx', who: 'engineer', title: 'Draft ADR-042 from earlier decisions', run: () => go('/work/w-draft-adr042') },
+  { ws: 'ws-finx', who: 'lead', title: 'Review contributions to Payments Platform', run: () => go('/documents?tab=review') },
+  { ws: 'ws-finx', who: 'lead', title: 'Compare event streaming platforms', run: () => go('/work/w-review-stream') },
+  { ws: 'ws-finx', who: 'lead', title: 'Curate the payments on-call kit', run: () => go('/knowledge/collections/col-fx-oncall') },
+  { ws: 'ws-finx', who: 'analyst', title: 'Find how a metric is defined', run: () => go('/knowledge?topic=t-metrics') },
+  { ws: 'ws-finx', who: 'analyst', title: 'Ask about active customers', run: () => go('/chat/fx-c3') },
+  { ws: 'ws-finx', who: 'analyst', title: 'Request production access without the training', run: () => go('/requests/new?type=rt-prod') },
+  { ws: 'ws-finx', who: 'wsadmin', title: 'Feature trusted documents on Home', run: () => go('/home') },
+  { ws: 'ws-finx', who: 'wsadmin', title: 'Publish an updated procedure as a new version', run: () => go('/documents?tab=review&sel=fx-sub-4') },
+  { ws: 'ws-finx', who: 'wsadmin', title: 'Approve a topic the assistant proposed', run: () => go('/documents?tab=topics') },
+  { ws: 'ws-finx', who: 'wsadmin', title: 'Fix a document that couldn’t be published', run: () => go('/documents?tab=all&life=attention') },
+  { ws: 'ws-finx', who: 'wsadmin', title: 'Keep policies verified and tagged', run: () => go('/documents?tab=quality') },
+  { ws: 'ws-finx', who: 'wsadmin', title: 'Work the Risk & Compliance queue', run: () => go('/requests?tab=queue') },
+  { ws: 'ws-finx', who: 'wsadmin', title: 'Close a knowledge gap people hit', run: () => go('/overview') },
+  { ws: 'ws-finx', who: 'wsadmin', title: 'Configure the workspace', run: () => go('/settings?tab=setup') },
   { ws: 'ws-northwind', who: 'operator', title: 'Create a workspace for a customer', run: () => goThen('/p/workspaces', () => A['pws-create']?.()) },
   { ws: 'ws-northwind', who: 'operator', title: 'Investigate degraded processing', run: () => go('/p/health') },
+  { ws: 'ws-northwind', who: 'operator', title: 'Check indexing health without seeing content', run: () => go('/p/indexing') },
 ];
 const personaLabel = k => PERSONAS[k]?.label || k;
 function setPersona(p) {
@@ -59,7 +64,8 @@ function renderProto() {
     ${personasForWs(S.ws).map(v => pb(personaLabel(v), 'proto-persona', { value: v, pressed: S.persona === v })).join('')}
     <span class="proto__sep"></span>
     ${pb(stateable ? ({ live: 'Live', loading: 'Loading', empty: 'Empty', error: 'Error' })[S.navLoading ? 'loading' : S.pageState] : 'State', '', { menu: 'proto-state', icon: 'layers' })}
-    ${pb('', '', { menu: 'proto-appearance', icon: resolvedTheme() === 'dark' ? 'moon' : 'sun', tip: 'Theme and background' })}
+    ${pb('', '', { menu: 'proto-appearance', icon: 'palette', tip: 'Mode and theme' })}
+    ${pb(S.lang.toUpperCase(), 'lang-toggle', { icon: 'globe', tip: 'Interface language (English / Tiếng Việt)' })}
     ${pb('', 'proto-device', { value: 'desktop', icon: 'monitor', pressed: S.device === 'desktop', tip: 'Desktop' })}
     ${pb('', 'proto-device', { value: 'tablet', icon: 'tablet', pressed: S.device === 'tablet', tip: 'Tablet (834 px)' })}
     ${pb('', 'proto-device', { value: 'phone', icon: 'smartphone', pressed: S.device === 'phone', tip: 'Phone (390 px)' })}
@@ -78,10 +84,9 @@ MENUS['proto-state'] = () => {
   return [{ section: 'Force page state' }, ...[['live', 'Live data'], ['loading', 'Loading'], ['empty', 'Empty'], ['error', 'Error']].map(([v, l]) => ({ label: l, checked: S.pageState === v && !S.navLoading, run: () => { S.pageState = v; S.navLoading = false; refresh(); } }))];
 };
 MENUS['proto-appearance'] = () => [
-  { section: 'Mode' },
-  ...[['light', 'Light', 'sun'], ['dark', 'Dark', 'moon'], ['system', 'Match system', 'monitor']].map(([v, l, i]) => ({ label: l, icon: i, checked: S.theme === v, run: () => setTheme(v) })),
-  { sep: true },
-  ...MENUS.bg(),
+  ...X.appearance.menuItems(),
+  { section: 'Quick themes' },
+  ...['bomesh', 'heroui', 'ocean', 'forest', 'midnight', 'lavender', 'sunset', 'graphite'].map(themeById).map(t => ({ html: `<span class="i theme-dot" style="background:${accentColor(t)}" aria-hidden="true"></span><span class="grow">${esc(t.label)}</span>`, checked: S.look.theme === t.id, run: () => A['look-theme']({ dataset: { value: t.id } }) })),
 ];
 A['proto-device'] = el => {
   S.device = el.dataset.value; const f = $('#frame');

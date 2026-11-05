@@ -21,10 +21,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Protocol, runtime_checkable
 
-#: Ownership of a Connection. ``user`` acts as one person; ``tenant`` is the
-#: shared workspace account whose knowledge every member may already query.
-OwnerType = str
-
 #: What a provider grant can be used for. A capability is the pairing of a
 #: provider with one connector runtime, which is why Confluence and Jira can be
 #: two capabilities of a single Atlassian authorization.
@@ -156,9 +152,8 @@ class PendingAuthorization:
     user_id: str
     provider_key: str
     connector_key: str
-    owner_type: OwnerType
-    #: Set when re-authorizing an existing Connection instead of adding one.
-    connection_id: str | None
+    #: The Connection the grant completes; it exists (AUTHORIZING) before consent.
+    connection_id: str
     code_verifier: str = field(repr=False, default="")
     #: Opaque value echoed back to the browser so the opener can match it.
     nonce: str = ""
@@ -174,6 +169,23 @@ class ConnectionProvider(Protocol):
     @property
     def configured(self) -> bool:
         """Whether this deployment can actually run this provider's flow."""
+
+    @property
+    def client_id(self) -> str | None:
+        """The OAuth client this provider authorizes as."""
+
+    @property
+    def has_client_secret(self) -> bool:
+        """Whether the OAuth client's secret is known."""
+
+    def with_client(
+        self, client_id: str | None, client_secret: str | None
+    ) -> ConnectionProvider:
+        """A copy using this OAuth client; ``None`` keeps the deployment's value.
+
+        The platform console may override the client configured in the
+        environment (``platform_connector_settings``).
+        """
 
     def authorization_url(self, *, state: str, code_challenge: str) -> str:
         """Build the provider consent URL for one pending authorization."""
@@ -249,7 +261,6 @@ __all__ = [
     "IntegrationConfigurationError",
     "IntegrationError",
     "IntegrationUnavailableError",
-    "OwnerType",
     "PendingAuthorization",
     "ProviderAccount",
     "ProviderCapability",

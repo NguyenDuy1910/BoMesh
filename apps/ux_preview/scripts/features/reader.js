@@ -3,7 +3,10 @@
    passage and search highlights, and a right rail: Ask (answers in place from
    the document's own passages and cites them), About (details, versions,
    provenance) and Related (resources, collections, conversations).
-   Rendition model: X.docModel (documents.js). Shared pieces: X.res (resources.js).
+   Documents that aren't published (submissions, changes requested, not approved,
+   unpublished) open as a preview for their contributor and the base's reviewers
+   only: lifecycle, who can see it, Track / Revise / Review — no Ask, save or collect.
+   Rendition model: X.docModel (documents.js). Shared pieces: X.res (resources.js), X.ctb (contribute.js).
    Prefix: rdr-. */
 (() => {
   'use strict';
@@ -264,9 +267,84 @@
   function noAccess(doc, kb) {
     const role = kbRole(kb);
     crumbs([{ label: 'Knowledge', to: '/knowledge' }, { label: 'Not available' }]);
-    if (role === null) return unavailable('This document isn’t available', 'It may have been removed, or it isn’t shared with you.', btn('Go to Browse', { v: 'primary', href: '/knowledge/browse' }));
+    if (role === null) return unavailable('This document isn’t available', 'It may have been removed, or it isn’t shared with you.', btn('Go to Browse', { v: 'primary', href: '/knowledge' }));
     const pending = D.requests.find(r => r.kb === kb.id && r.user === me().id && r.status === 'pending');
     return unavailable('You don’t have access to this document', `It’s in ${esc(kb.name)}, which is restricted.`, pending ? chip('Access requested', { tone: 'warning', icon: 'clock' }) : btn('Request access', { v: 'primary', icon: 'lock', act: 'kb-request', data: { kb: kb.id } }));
+  }
+  /* ═══════════════ Canvas pieces ═══════════════ */
+  function pagesHtml(m, pageCount, isSheet) {
+    if (isSheet) return m.pages.map(p => `<div class="${cx('doc-page', p.cls)}">${p.html}</div>`).join('');
+    let h = '', prev = 0;
+    m.pages.forEach(p => { if (p.no > prev + 1) h += `<div class="doc-gap">${p.no - 1 === prev + 1 ? `Page ${prev + 1}` : `Pages ${prev + 1}–${p.no - 1}`}</div>`; h += `<div class="${cx('doc-page', p.cls)}" data-page="${p.no}">${p.html}</div><div class="doc-page-no">Page ${p.no} of ${pageCount}</div>`; prev = p.no; });
+    if (pageCount > prev) h += `<div class="doc-gap">${prev + 1 === pageCount ? `Page ${pageCount}` : `Pages ${prev + 1}–${pageCount}`}</div>`;
+    return h;
+  }
+  const skelPage = () => `<div class="doc-page" aria-busy="true" aria-label="Loading"><div class="stack gap-12"><span class="skeleton skeleton--title" style="width:55%"></span>${[92, 86, 95, 70, 0, 40, 90, 84, 60].map(w => w ? `<span class="skeleton skeleton--line" style="width:${w}%"></span>` : '<span style="height:12px"></span>').join('')}</div></div>`;
+  const railSkel = () => `<div class="stack gap-12">${[80, 64, 92, 50].map(w => `<span class="skeleton skeleton--line" style="width:${w}%"></span>`).join('')}</div>`;
+  function notAvailable() {
+    crumbs([{ label: 'Knowledge', to: '/knowledge' }, { label: 'Not available' }]);
+    return `<div class="rdr-msg">${emptyState({ icon: 'file', title: 'This document isn’t available', desc: 'It may have been archived or removed.', actions: btn('Go to Browse', { v: 'primary', href: '/knowledge' }), boxed: true })}</div>`;
+  }
+
+  /* ═══════════════ Submissions: seen only by the contributor and the base's reviewers ═══════════════ */
+  /** Not published (in review, changes requested, not approved, unpublished, merged): a preview with its
+      lifecycle and who can see it. No Ask, no saving or collecting — it isn't knowledge yet. */
+  function submissionView(doc, kb, query) {
+    const u = rdrUi(), l = lifecycleOf(doc), st = stageOf(doc), sub = doc.submission || {}, mine = isMine(doc);
+    const reviewer = canReviewKb(kb) && can('knowledge.manage');
+    const track = X.ctb?.href(doc.id) || '/knowledge/library?tab=contributions';
+    crumbs(mine || !reviewer
+      ? [{ label: 'Knowledge', to: '/knowledge' }, { label: 'My library', to: '/knowledge/library?tab=contributions' }, { label: doc.name }]
+      : [{ label: 'Documents', to: '/documents?tab=review' }, { label: doc.name }]);
+    const preview = !['zip', 'png', 'jpg', 'jpeg'].includes(doc.type);
+    const m = preview ? docModel(doc) : null;
+    const isSheet = !!m?.pages.some(p => p.cls === 'doc-page--sheet');
+    const pageCount = Math.max(doc.pages || 1, ...(m?.pages.map(p => p.no) || [1]));
+    const open = railOpen(u), k = kindMeta(res(doc).kind);
+    const back = `<button type="button" class="link-button rdr-back" data-act="rdr-back">${ic('arrow-left', 'i-sm')}Back</button>`;
+    const meta = [esc(k.label), esc(kb.name), esc(mine ? 'Contributed by you' : `Contributed by ${contributorName(doc)}`), sub.at && `<span title="${esc(fmtDateTime(sub.at))}">Submitted ${esc(rel(sub.at).replace(/^(Just now|Yesterday)$/, s => s.toLowerCase()))}</span>`, preview && !isSheet && plural(pageCount, 'page')].filter(Boolean).join(dot);
+    const main = reviewer && st === 'review' ? btn('Review', { v: 'primary', icon: 'check-check', href: `/documents?tab=review&sel=${doc.id}` })
+      : mine && st === 'changes' ? btn('Revise', { v: 'primary', icon: 'pencil', href: track })
+        : '';
+    const actions = main + (mine ? btn('Track', { v: main ? 'secondary' : 'primary', icon: 'history', href: track, cls: main ? 'rdr-wide' : '' }) : '')
+      + iconBtn('download', 'Download', { act: 'doc-dl', data: { id: doc.id }, cls: 'rdr-wide' })
+      + iconBtn('panel-right', open ? 'Hide panel' : 'Show panel', { act: 'rdr-rail', aria: `aria-pressed="${open}"` });
+    const head = `<header class="rdr-head">${back}
+      <div class="rdr-head__row">${fileIcon(doc.type, 'lg')}<div class="rdr-head__main"><div class="rdr-head__title-row"><h1 class="rdr-head__title" title="${esc(doc.name)}">${esc(doc.name)}</h1>${lifeChip(doc)}${X.res.demoChip()}</div><div class="rdr-head__meta">${meta}</div></div>
+        <div class="rdr-head__actions">${actions}</div></div></header>`;
+
+    /* Banner: why only some people can see it, and what happens next */
+    const lastOf = kind => [...(sub.events || [])].reverse().find(e => e.kind === kind);
+    const byName = e => (e?.by === me().id ? 'You' : e?.by ? actorName(e.by) : 'A reviewer');
+    const quote = e => (e?.text ? `<blockquote class="rdr-sub-quote">${esc(e.text)}</blockquote>` : '');
+    const audience = `Only ${mine ? 'you' : esc(contributorName(doc))} and the reviewers of ${esc(kb.name)} can see it.`;
+    let banner;
+    if (st === 'review') banner = alertBox('accent', l.key === 'analyzing' ? 'In review · the assistant is reading it' : 'In review', `${audience} It isn’t searchable yet.`, '', { icon: 'eye-off' });
+    else if (st === 'changes') { const e = lastOf('changes'); banner = alertBox('warning', `${byName(e)} asked for changes`, quote(e) + `${audience} It isn’t searchable yet.`); }
+    else if (st === 'rejected') { const e = lastOf('rejected'); banner = alertBox('danger', 'Not approved', quote(e) + `It won’t be published. ${audience}`); }
+    else if (st === 'unpublished') { const e = lastOf('unpublished'); banner = alertBox('default', 'Unpublished', quote(e) + `${byName(e)} removed it from search and answers. ${audience}`, '', { icon: 'eye-off' }); }
+    else if (st === 'merged') { const o = docById(doc.mergedInto); banner = alertBox('success', 'Published as a new version', o ? `It replaced the earlier version of “${esc(o.name)}”. This is the file as it was submitted.` : 'It replaced the earlier version.', o && canOpenRes(o) ? btn('Open current version', { size: 'sm', href: '/doc/' + o.id }) : ''); }
+    else banner = alertBox('default', l.label, `${esc(l.desc)} ${audience}`);
+
+    const canvas = gate({
+      ok: () => (m ? pagesHtml(m, pageCount, isSheet) : `<div class="doc-state">${emptyState({ icon: 'file', title: 'This file can’t be previewed', desc: 'Download it to view.', actions: btn('Download', { icon: 'download', act: 'doc-dl', data: { id: doc.id } }) })}</div>`),
+      loading: skelPage,
+      empty: () => `<div class="doc-state">${emptyState({ icon: 'file', title: 'Nothing to show', desc: 'This document has no readable content yet.' })}</div>`,
+      error: () => errorState({ title: 'This document didn’t load' }),
+    });
+    const orig = sub.versionOf ? docById(sub.versionOf) : null;
+    const about = () => railSec('Contribution', kv([
+      ['Status', lifeChip(doc, 'sm')],
+      ['Knowledge base', esc(kb.name)],
+      ['Contributed by', esc(mine ? 'You' : contributorName(doc))],
+      sub.at && ['Submitted', esc(fmtDateTime(sub.at))],
+      orig && ['New version of', canOpenRes(orig) ? `<a class="link" href="#/doc/${orig.id}">${esc(orig.name)}</a>` : esc(orig.name)],
+      ['File', `${esc((doc.type || 'file').toUpperCase())} · ${fmtSize(doc.size || 0)}`],
+    ])) + railSec('History', X.ctb ? X.ctb.timeline(doc, { compact: true }) : '');
+    const railBody = gate({ ok: about, empty: about, loading: railSkel, error: () => errorState({ boxed: false }) });
+    const rail = open ? `<aside class="rdr-rail" aria-label="Document panel"><div class="rdr-rail__head">${tabs([{ id: 'about', label: 'About' }], 'about', '', { act: 'rdr-tab' })}${iconBtn('x', 'Close panel', { size: 'sm', act: 'rdr-rail' })}</div>
+      <div class="rdr-rail__body" id="rdr-rail-body" data-keep-scroll>${railBody}</div></aside><div class="rdr-scrim" data-act="rdr-rail" aria-hidden="true"></div>` : '';
+    return `<div class="rdr rdr--sub">${head}<div class="${cx('rdr-body', open && 'has-rail')}"><div class="rdr-canvas" id="rdr-scroll" data-keep-scroll><div class="rdr-banners">${banner}</div>${canvas}</div>${rail}</div></div>`;
   }
 
   /* ═══════════════ Page ═══════════════ */
@@ -274,9 +352,11 @@
   P.docViewer = ({ params, query }) => {
     lastNeedles = [];
     const doc = docById(params.id), kb = doc && kbById(doc.kb);
-    if (!doc || doc.archived || !kb || kb.archived) {
-      crumbs([{ label: 'Knowledge', to: '/knowledge' }, { label: 'Not available' }]);
-      return `<div class="rdr-msg">${emptyState({ icon: 'file', title: 'This document isn’t available', desc: 'It may have been archived or removed.', actions: btn('Go to Browse', { v: 'primary', href: '/knowledge/browse' }), boxed: true })}</div>`;
+    if (!doc || doc.archived || !kb || kb.archived) return notAvailable();
+    if (!canOpenRes(doc)) {
+      if (canSeeDoc(doc)) return submissionView(doc, kb, query);
+      // Submissions and unpublished documents don't exist for anyone else: no title, no base.
+      if (!isPublishedStage(doc)) return notAvailable();
     }
     if (!canReadKb(kb)) return noAccess(doc, kb);
     const u = rdrUi(), r = res(doc), edit = canEditKb(kb), readable = isSearchable(doc);
@@ -329,17 +409,9 @@
     const banners = trustBanner || verBanner ? `<div class="rdr-banners">${verBanner}${trustBanner}</div>` : '';
 
     /* Canvas */
-    const pagesHtml = () => {
-      if (isSheet) return m.pages.map(p => `<div class="${cx('doc-page', p.cls)}">${p.html}</div>`).join('');
-      let h = '', prev = 0;
-      m.pages.forEach(p => { if (p.no > prev + 1) h += `<div class="doc-gap">${p.no - 1 === prev + 1 ? `Page ${prev + 1}` : `Pages ${prev + 1}–${p.no - 1}`}</div>`; h += `<div class="${cx('doc-page', p.cls)}" data-page="${p.no}">${p.html}</div><div class="doc-page-no">Page ${p.no} of ${pageCount}</div>`; prev = p.no; });
-      if (pageCount > prev) h += `<div class="doc-gap">${prev + 1 === pageCount ? `Page ${pageCount}` : `Pages ${prev + 1}–${pageCount}`}</div>`;
-      return h;
-    };
-    const skel = () => `<div class="doc-page" aria-busy="true" aria-label="Loading"><div class="stack gap-12"><span class="skeleton skeleton--title" style="width:55%"></span>${[92, 86, 95, 70, 0, 40, 90, 84, 60].map(w => w ? `<span class="skeleton skeleton--line" style="width:${w}%"></span>` : '<span style="height:12px"></span>').join('')}</div></div>`;
     const canvas = gate({
-      ok: () => (readable ? pagesHtml() : notReady(doc, kb, edit)),
-      loading: skel,
+      ok: () => (readable ? pagesHtml(m, pageCount, isSheet) : notReady(doc, kb, edit)),
+      loading: skelPage,
       empty: () => `<div class="doc-state">${emptyState({ icon: 'file', title: 'Nothing to show', desc: 'This document has no readable content yet.' })}</div>`,
       error: () => errorState({ title: 'This document didn’t load' }),
     });
@@ -352,7 +424,7 @@
     /* Rail */
     const tabItems = [readable && { id: 'ask', label: 'Ask' }, { id: 'about', label: 'About' }, { id: 'related', label: 'Related' }].filter(Boolean);
     const paneBody = () => (u.tab === 'ask' ? askPane(doc) : u.tab === 'related' ? relatedPane(doc) : aboutPane(doc, query));
-    const railBody = gate({ ok: paneBody, empty: paneBody, loading: () => `<div class="stack gap-12">${[80, 64, 92, 50].map(w => `<span class="skeleton skeleton--line" style="width:${w}%"></span>`).join('')}</div>`, error: () => errorState({ boxed: false }) });
+    const railBody = gate({ ok: paneBody, empty: paneBody, loading: railSkel, error: () => errorState({ boxed: false }) });
     const composer = u.tab === 'ask' && readable ? `<div class="rdr-composer">${input({ id: 'rdr-ask-q', bind: `rdrAsk-${doc.id}.q`, value: askUi(doc.id).q, placeholder: 'Ask about this document', onEnter: 'rdr-ask-send' })}${btn('', { v: 'primary', icon: 'send', tip: 'Ask', act: 'rdr-ask-send', disabled: askUi(doc.id).thread.some(x => x.pending) })}</div>` : '';
     const rail = open ? `<aside class="rdr-rail" aria-label="Document panel"><div class="rdr-rail__head">${tabs(tabItems, u.tab, '', { act: 'rdr-tab' })}${iconBtn('x', 'Close panel', { size: 'sm', act: 'rdr-rail' })}</div>
       <div class="rdr-rail__body" id="rdr-rail-body" data-keep-scroll>${railBody}</div>${composer}</aside><div class="rdr-scrim" data-act="rdr-rail" aria-hidden="true"></div>` : '';
@@ -390,7 +462,7 @@
   /* ═══════════════ Actions ═══════════════ */
   const curDoc = () => docById(S.cur?.params?.id);
   const jump = id => { const sc = $('#rdr-scroll'), h = document.getElementById(id); if (!sc || !h) return; sc.scrollTo({ top: sc.scrollTop + h.getBoundingClientRect().top - sc.getBoundingClientRect().top - 24, behavior: 'smooth' }); };
-  A['rdr-back'] = () => go(origin || '/knowledge/browse');
+  A['rdr-back'] = () => go(origin || '/knowledge');
   A['rdr-hit'] = el => { rdrUi().hit += +el.dataset.dir; refresh(); };
   A['rdr-clear'] = () => setQuery({ q: '', page: '' });
   A['rdr-outline'] = () => { const u = rdrUi(); u.outline = !u.outline; refresh(); };

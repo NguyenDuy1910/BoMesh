@@ -20,6 +20,7 @@ from bomesh.knowledge import CitationResolver
 _PartKey = tuple[int, int]
 _CITATION_PREFIX = "[[cite:"
 _MAX_MARKER_LENGTH = 256
+_MAX_EXCERPT_LENGTH = 280
 
 
 class CitationProjection:
@@ -35,9 +36,11 @@ class CitationProjection:
         self,
         evidence: Mapping[str, Evidence],
         *,
+        workspace_id: str,
         references: CitationReferences | None = None,
     ) -> None:
         self._evidence = evidence
+        self._workspace_id = workspace_id
         self._references = references or CitationReferences()
         self._buffers: dict[_PartKey, str] = {}
         self._text: dict[_PartKey, list[str]] = {}
@@ -156,6 +159,7 @@ class CitationProjection:
         annotations = self._annotations.setdefault(key, [])
         annotation = _document_citation(
             self._evidence[evidence_id],
+            workspace_id=self._workspace_id,
             number=number,
             start=start,
             end=start + len(marker),
@@ -201,15 +205,18 @@ class CitationProjection:
 def _document_citation(
     evidence: Evidence,
     *,
+    workspace_id: str,
     number: int,
     start: int,
     end: int,
 ) -> Annotation:
     """Build the one BoMesh annotation type from an evidence record.
 
-    Everything here is canonical retrieval metadata. Short-lived preview URLs
-    are deliberately absent: the client resolves those per click through the
-    authorized knowledge API, so no occurrence carries a preview payload.
+    The cited passage is named ``workspaces/{w}/items/{item}/passages/{passage}``
+    (``GetPassage``), its document ``workspaces/{w}/items/{item}``. Everything
+    here is canonical retrieval metadata; short-lived preview URLs are
+    deliberately absent: the client resolves those per click through the
+    authorized knowledge API.
     """
 
     locator = evidence.citation.model_dump(mode="json", exclude_none=True)
@@ -218,12 +225,12 @@ def _document_citation(
         if evidence.source is not None
         else None
     )
-    internal_url = CitationResolver.internal_path(evidence.item_id, evidence.chunk_id)
     original_url = (
         CitationResolver.original_url(evidence.source, evidence.citation)
         if evidence.source is not None
         else None
     )
+    item = f"workspaces/{workspace_id}/items/{evidence.item_id}"
     return {
         "type": DOCUMENT_CITATION_TYPE,
         "start_index": start,
@@ -232,15 +239,32 @@ def _document_citation(
             "id": evidence.id,
             "reference": evidence.id,
             "number": number,
-            "item_id": evidence.item_id,
-            "chunk_id": evidence.chunk_id,
+            "passage": f"{item}/passages/{evidence.chunk_id}",
+            "item": item,
             "title": evidence.title,
+            "excerpt": _excerpt(evidence.content),
             **locator,
             "source": source,
-            "internal_url": internal_url,
             "original_url": original_url,
         },
     }
+
+
+def parse_passage_name(name: str) -> tuple[str, str]:
+    """``(item ID, passage ID)`` of ``workspaces/{w}/items/{item}/passages/{passage}``."""
+
+    head, separator, passage = name.partition("/passages/")
+    parts = head.split("/")
+    if not separator or not passage or len(parts) != 4 or parts[2] != "items":
+        raise ValueError(f"not a passage name: {name!r}")
+    return parts[3], passage
+
+
+def _excerpt(content: str) -> str:
+    text = " ".join(content.split())
+    if len(text) <= _MAX_EXCERPT_LENGTH:
+        return text
+    return f"{text[:_MAX_EXCERPT_LENGTH].rstrip()}…"
 
 
 def _process_citation_buffer(
@@ -287,4 +311,4 @@ def _process_citation_buffer(
     return emitted, ""
 
 
-__all__ = ["CitationProjection"]
+__all__ = ["CitationProjection", "parse_passage_name"]

@@ -15,10 +15,10 @@ from bomesh.knowledge import (
     KnowledgeRetriever,
     RetrievalContext,
 )
-from bomesh.observability import NoopTracer, TraceSerializer, TraceSpan, Tracer
+from bomesh.observability import NoopTracer, Tracer, TraceSerializer, TraceSpan
 from bomesh.services.agent_runtime import (
-    AgentKnowledgeSearchResult,
     MAX_KNOWLEDGE_SEARCH_QUERY_CHARACTERS,
+    AgentKnowledgeSearchResult,
 )
 
 _EMPTY_CONTENT = "No matching access-permitted enterprise documents were found."

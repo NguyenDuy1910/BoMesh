@@ -23,68 +23,25 @@ class ConversationMessage:
 
 
 @dataclass(frozen=True, slots=True)
-class ConversationArtifact:
-    """A durable artifact revision reference owned by ArtifactService."""
-
-    id: str
-    title: str
-    file_name: str
-    mime_type: str
-    revision: int
-    size_bytes: int
-    updated_at: str
-    source_document_id: str | None = None
-    content: str | None = None
-    content_truncated: bool = False
-
-    @classmethod
-    def from_payload(cls, payload: Mapping[str, Any]) -> ConversationArtifact:
-        """Build the reference an artifact service payload describes."""
-
-        source_document_id = payload.get("source_document_id")
-        return cls(
-            id=str(payload["id"]),
-            title=str(payload["title"]),
-            file_name=str(payload["file_name"]),
-            mime_type=str(payload["mime_type"]),
-            revision=int(payload["revision"]),
-            size_bytes=int(payload["size_bytes"]),
-            updated_at=str(payload["updated_at"]),
-            source_document_id=(
-                str(source_document_id) if source_document_id else None
-            ),
-        )
-
-    def annotation_payload(self) -> dict[str, Any]:
-        """The client-facing description; never the content."""
-
-        return {
-            "id": self.id,
-            "title": self.title,
-            "file_name": self.file_name,
-            "mime_type": self.mime_type,
-            "revision": self.revision,
-            "size_bytes": self.size_bytes,
-            "updated_at": self.updated_at,
-        }
-
-
-@dataclass(frozen=True, slots=True)
 class AgentContext:
-    """The authenticated scope for a single agent request."""
+    """The authenticated scope for a single agent request.
+
+    ``tenant_id`` is the workspace ID: citations name their passages
+    ``workspaces/{tenant_id}/items/{item}/passages/{passage}``.
+    ``collection_item_ids`` are the collection subtrees retrieval may search.
+    ``workspace_instructions`` is the workspace's assistant guidance; it is
+    static per workspace, so it stays part of the cached instruction prefix.
+    """
 
     user_id: str
     tenant_id: str
-    roles: list[str]
     collection_item_ids: tuple[str, ...] = ()
     conversation_id: str | None = None
     request_id: str | None = None
     history: tuple[ConversationMessage, ...] = ()
     allowed_tool_names: tuple[str, ...] | None = None
-    trace_step: int | None = None
-    retrieval_round: int = 0
-    retrieval_query_count: int = 0
     resources: tuple["ResourceRef", ...] = ()
+    workspace_instructions: str = ""
     model_extra_body: Mapping[str, Any] | None = None
 
 
@@ -117,6 +74,11 @@ class CitationReferences:
         self._references[identity] = assigned
         self._documents[assigned] = item_id
         return assigned
+
+    def document_ids(self) -> tuple[str, ...]:
+        """Every document retrieval returned this turn, in first-retrieval order."""
+
+        return tuple(dict.fromkeys(self._documents.values()))
 
     def number(self, reference: str) -> int:
         """Return the reader-facing number of a reference's document, by first use."""
@@ -181,7 +143,6 @@ class ToolObservation:
 __all__ = [
     "AgentContext",
     "CitationReferences",
-    "ConversationArtifact",
     "ConversationMessage",
     "Evidence",
     "ToolObservation",

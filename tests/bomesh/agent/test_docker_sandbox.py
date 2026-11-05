@@ -14,6 +14,7 @@ import sys
 import tarfile
 import time
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
@@ -27,9 +28,9 @@ from docker.errors import NotFound
 
 from bomesh.agent import ResourceRef, ShellCommandResult, ShellRun
 from bomesh.agent.tools.run_shell import _render
+from bomesh.iam import Authorizer, Principal, WorkspaceAccess
 from bomesh.services import (
     ArtifactValidationError,
-    AuthContext,
     SandboxManifestResource,
     SandboxMaterializedFile,
     SandboxSessionState,
@@ -39,7 +40,7 @@ from bomesh.services.agent_runtime.sandbox_workspace import (
     SandboxWorkspace,
     sandbox_path,
 )
-from bomesh.services.artifact import WorkspaceSource
+from bomesh.services.artifacts.artifact_store import GeneratedArtifact, WorkspaceSource
 from config import SandboxConfig
 
 
@@ -193,13 +194,13 @@ class FakeSessions:
     def _conversation_of(self, session_id: UUID) -> UUID:
         return next(key for key, row in self.active_rows.items() if row.id == session_id)
 
-    async def active(self, _: AuthContext, *, conversation_id: UUID, provider: str):
+    async def active(self, _: WorkspaceAccess, *, conversation_id: UUID, provider: str):
         return self.active_rows.get(conversation_id)
 
-    async def recoverable(self, _: AuthContext, *, conversation_id: UUID, provider: str):
+    async def recoverable(self, _: WorkspaceAccess, *, conversation_id: UUID, provider: str):
         return self.expired_rows.get(conversation_id)
 
-    async def ensure(self, _: AuthContext, *, conversation_id: UUID, provider: str):
+    async def ensure(self, _: WorkspaceAccess, *, conversation_id: UUID, provider: str):
         if conversation_id not in self.active_rows:
             self.active_rows[conversation_id] = SandboxSessionState(
                 id=uuid4(), provider=provider, status="active"
@@ -207,7 +208,7 @@ class FakeSessions:
         return self.active_rows[conversation_id]
 
     async def bind_container(
-        self, _: AuthContext, *, session_id: UUID, container_id: str, replaces: str | None
+        self, _: WorkspaceAccess, *, session_id: UUID, container_id: str, replaces: str | None
     ):
         conversation = self._conversation_of(session_id)
         row = self.active_rows[conversation]
@@ -218,7 +219,7 @@ class FakeSessions:
 
     async def record_materialization(
         self,
-        _: AuthContext,
+        _: WorkspaceAccess,
         *,
         session_id: UUID,
         container_id: str,
@@ -235,7 +236,7 @@ class FakeSessions:
         return row
 
     async def record_resource(
-        self, _: AuthContext, *, session_id: UUID, resource: SandboxManifestResource
+        self, _: WorkspaceAccess, *, session_id: UUID, resource: SandboxManifestResource
     ):
         conversation = self._conversation_of(session_id)
         row = self.active_rows[conversation]
@@ -264,32 +265,26 @@ class FakeArtifacts:
         self.sources = sources or {}
         self.generated: list[dict[str, Any]] = []
 
-    async def source_file(self, _: AuthContext, document_id: UUID) -> WorkspaceSource:
+    async def source_file(self, _: WorkspaceAccess, document_id: UUID) -> WorkspaceSource:
         return self.sources[str(document_id)]
 
-    async def record_generated(self, _: AuthContext, **fields: Any) -> dict[str, object]:
+    async def record_generated(self, _: WorkspaceAccess, **fields: Any) -> GeneratedArtifact:
         self.generated.append(fields)
-        return {
-            "id": str(UUID(int=44)),
-            "title": fields["file_name"],
-            "file_name": fields["file_name"].rsplit("/", 1)[-1],
-            "mime_type": fields["mime_type"],
-            "size_bytes": len(fields["data"]),
-            "revision": len(self.generated),
-            "updated_at": "2026-10-15T00:00:00Z",
-        }
+        return GeneratedArtifact(
+            artifact_id=UUID(int=44),
+            name=f"workspaces/{UUID(int=1)}/artifacts/{UUID(int=44)}",
+            display_name=fields["file_name"],
+            file_name=fields["file_name"].rsplit("/", 1)[-1],
+            mime_type=fields["mime_type"],
+            revision=len(self.generated),
+            size_bytes=len(fields["data"]),
+            update_time=datetime(2026, 10, 15, tzinfo=UTC),
+        )
 
 
-def _access() -> AuthContext:
-    return AuthContext(
-        user_id=uuid4(),
-        email="owner@example.com",
-        display_name=None,
-        tenant_id=uuid4(),
-        permission_codes=("knowledge.read",),
-        group_ids=(),
-        role_codes=("member",),
-    )
+def _access() -> WorkspaceAccess:
+    # The fakes below never consult the authorizer, so it has no database.
+    return WorkspaceAccess(Principal(uuid4()), uuid4(), Authorizer(None))  # type: ignore[arg-type]
 
 
 async def _started(
@@ -323,7 +318,6 @@ def _workspace(
     return SandboxWorkspace(
         access=_access(),
         conversation_id=conversation_id,
-        request_id="r" * 32,
         sandbox=sandbox,
         sessions=sessions,  # type: ignore[arg-type]
         artifacts=artifacts or FakeArtifacts(),  # type: ignore[arg-type]
@@ -571,21 +565,26 @@ async def test_export_reads_a_home_file_and_rejects_oversized_or_missing_ones() 
     try:
         workspace = _workspace(sandbox, sessions, conversation, artifacts)
         with pytest.raises(ArtifactValidationError, match="no files yet"):
-            await workspace.promote_file("report.csv", summary="Saved")
+            await workspace.promote_file("report.csv", summary="Saved", source_ids=())
         await workspace.run_commands(("true",), timeout_seconds=None)
         container = docker.containers.get(sessions.active_rows[conversation].container_id)
         container.files["out/report.csv"] = b"month,total\n"
         container.files["big.bin"] = b"0" * 2_048
 
-        exported = await workspace.promote_file("~/out/report.csv", summary="Saved")
+        source = uuid4()
+        exported = await workspace.promote_file(
+            "~/out/report.csv", summary="Saved", source_ids=(str(source), "ref_9", str(source))
+        )
 
         assert artifacts.generated[0]["data"] == b"month,total\n"
+        # The documents the turn read become the file's sources (non-ids dropped).
+        assert artifacts.generated[0]["source_ids"] == (source,)
         assert exported.name == "report.csv"
         assert workspace.artifacts == (exported,)
         with pytest.raises(ArtifactValidationError, match="export limit"):
-            await workspace.promote_file("big.bin", summary="Saved")
+            await workspace.promote_file("big.bin", summary="Saved", source_ids=())
         with pytest.raises(ArtifactValidationError, match="does not exist"):
-            await workspace.promote_file("missing.csv", summary="Saved")
+            await workspace.promote_file("missing.csv", summary="Saved", source_ids=())
     finally:
         await sandbox.aclose()
 
@@ -638,7 +637,7 @@ async def test_real_docker_claim_run_python_and_export() -> None:
             timeout_seconds=30,
         )
         first_call_seconds = time.monotonic() - started
-        exported = await workspace.promote_file("out.csv", summary="Saved")
+        exported = await workspace.promote_file("out.csv", summary="Saved", source_ids=())
         again = await _workspace(sandbox, sessions, conversation, artifacts).run_commands(
             ("cat out.csv",), timeout_seconds=None
         )

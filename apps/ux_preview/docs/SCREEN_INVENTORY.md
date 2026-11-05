@@ -6,14 +6,15 @@ Routes are hash routes (`ux-preview.html#/knowledge`). **Primary** is the one do
 
 | Route | Purpose | Primary | Also | Notes |
 | --- | --- | --- | --- | --- |
-| `/signin` | Authenticate | Sign in | Continue with Google, show password, Forgot password, Create account, demo fill-in | Email or username + password `demo`; generic error on failure; aside shows one grounded-answer example (hidden on phones) |
+| `/signin` | Authenticate | Sign in | Continue with Google, show password, Forgot password, Create account, demo fill-in | Email or username + password `demo`; generic error on failure; aside shows one grounded-answer example (hidden on phones). All auth pages have a language picker next to the logo |
 | `/signup` | Create an account | Create account | Sign in instead (prefills email) | Name, work email, password strength meter + rules, terms; duplicate-email error; new accounts land on "No workspace yet" |
 | `/workspaces` | Choose the active workspace | Open workspace | Search (> 3), Platform console (operators), Sign out | Sorted by last opened |
 
-## Member — `features/chat.js`, `chat-files.js`, `conversations.js`, `inbox.js`, `search.js`
+## Member — `features/home.js`, `chat.js`, `chat-files.js`, `conversations.js`, `inbox.js`, `search.js`
 
 | Route / surface | Purpose | Primary | Also | Notes |
 | --- | --- | --- | --- | --- |
+| `/home` | Knowledge-first landing (core, every workspace; first sidebar item and the post-sign-in route) | Ask (hero box) | Search → Browse; scope (whole workspace, a knowledge base or a space); suggested questions → cited answer; Explore knowledge switcher Topics · Knowledge bases · Collections (topic card → Browse filtered by topic); Featured knowledge (admin-curated, cards with first-page thumbnails, topped up with popular verified documents; Manage for admins); Recently published + Recommended for you (with reasons); Pick up where you left off (recent documents, conversations, my contributions, one review line for reviewers, up to 3 Up next when Spaces is on) | Design: [HOME.md](HOME.md). Skeleton while loading; forced Empty explains there is no published knowledge yet |
 | `/chat` | Start a conversation | Send | Scope (knowledge bases you can read), attach, starters | Welcome and starters come from the published assistant settings |
 | `/chat/:id` | Read and continue a grounded conversation | Send follow-up | Copy, retry (variants), feedback with reason, download answer, Share, rename, delete, Stop | Work steps (respect preference), inline citations, source chips; unreadable evidence replaces the answer with a no-access message |
 | Citation panel | Verify a claim | Open document | Prev/next, copy citation | Side panel; overlays below 1024 px |
@@ -26,12 +27,11 @@ Routes are hash routes (`ux-preview.html#/knowledge`). **Primary** is the one do
 
 ## Knowledge — `features/resources.js` (shared), `hub.js`, `library.js`, `knowledge.js`, `reader.js`, `documents.js`; model `core/catalog.js`
 
-Concept and IA: [KNOWLEDGE_HUB.md](KNOWLEDGE_HUB.md). Every Knowledge page shares one header (title, *Demo data* chip in demo workspaces, section tabs Discover · Browse · My library · Knowledge bases).
+Concept and IA: [KNOWLEDGE_HUB.md](KNOWLEDGE_HUB.md). Every Knowledge page shares one header (title, *Demo data* chip in demo workspaces, section tabs Browse · My library · Knowledge bases). Discovery (topics, collections, featured, recent) lives on Home.
 
 | Route / surface | Purpose | Primary | Also | Notes |
 | --- | --- | --- | --- | --- |
-| `/knowledge` (Discover) | Start finding knowledge | Search (large box → Browse) | Type shortcuts with counts, Jump back in (recent), From your spaces (Spaces on) or Recently updated, Browse by topic (domain → topic with counts), Collections, Upload, New collection | No metrics. Forced Empty offers Upload / Browse |
-| `/knowledge/browse` | One catalog for search and filters | Open resource | Facets (Saved views, Topic tree, Space, Type, Owner, Source, Knowledge base, Trust, Updated, Format, Language) with disjunctive counts; list / table / grid; sort; removable filter chips; Save view; Ask about these results; preview panel | The URL is the state (`q, topic, space, kind, owner, src, kb, trust, upd, fmt, lang, saved, sort, view, sel`). Preview panel ≥ 1200 px; facets become a Filters drawer ≤ 1023 px. Accent-insensitive search with snippets. Locked bases appear only as a note linking to Knowledge bases |
+| `/knowledge` (Browse) | One catalog for search and filters | Open resource | Facets (Saved views, Topic tree, Space, Type, Owner, Source, Knowledge base, Trust, Updated, Format, Language) with disjunctive counts; list / table / grid; sort; removable filter chips; Save view; Ask about these results; preview panel | The URL is the state (`q, topic, space, kind, owner, src, kb, trust, upd, fmt, lang, saved, sort, view, sel`); legacy `/knowledge/browse` redirects here. Preview panel ≥ 1200 px; facets become a Filters drawer ≤ 1023 px. Accent-insensitive search with snippets. Locked bases appear only as a note linking to Knowledge bases |
 | `/knowledge/library` | My knowledge | New collection | Tabs: Saved (search, sort, bulk add to collection / remove) · Recent (Today / This week / Earlier, clear with Undo) · My files (upload, process) · Collections (yours, shared with you) · Saved views (open, rename, delete with Undo) | Per user, per workspace |
 | `/knowledge/collections/:id` | Use a curated reading list | Ask about this collection | Use in… (workflow with all items), Edit (name, description, sharing), Edit items (reorder, notes, remove with Undo, Add resources from the catalog), Copy link, Duplicate, Archive with Undo | Sharing: only me / a space I run / everyone (admins). Items the viewer can't open show only as a count |
 | `/knowledge/bases` | Governed homes and access | Create knowledge base (managers) | Search, access filter, sort, Request access on locked bases | My files first; restricted bases visible but locked |
@@ -39,19 +39,19 @@ Concept and IA: [KNOWLEDGE_HUB.md](KNOWLEDGE_HUB.md). Every Knowledge page share
 | Request access | Ask for Viewer/Editor | Send request | — | Reason required; card becomes Pending |
 | `/knowledge/:id?tab=documents` (Resources) | One base's resources | Ask (Add files for editors) | Readers: resource list with search, sort, paging, Browse with filters. Editors: inventory table with status/type filters, bulk process/move/archive, processing alerts | Header shows owner unit, topics, access, space |
 | `…?tab=sources` · `…?tab=access` · `…?tab=settings` | Sources feeding the base · who can see it · identity and archive | Connect source · Share · Save | Source drawer; general access, roles, requests; typed archive with Undo | Managers / owners only; last owner protected |
-| Upload dialog | Add files to the inventory | Upload | Browse, drop, samples, destination | Documents arrive Waiting; toast offers Process now |
-| Document drawer | Editors: inspect one file's processing | Open | Process/Reprocess, Replace file, download, archive | Failure reason with its fix |
+| Contribute dialog | Share a document (or keep it private) | Submit for review | Drop / browse / samples with type and size validation, Share as knowledge vs Keep private in My files, knowledge base ("Let the assistant suggest" or a base), optional note; new-version mode with required "What changed?" | Upload progress, then Analyzing → In review; toast Track (or Review now for reviewers of that base). Nothing is published without review |
+| `/knowledge/library?tab=contributions` | Track what I shared | Row's action (Revise · Withdraw · Open · Remove) | Filters All · Needs your action · In review · Published · Not approved, search; contribution drawer with lifecycle, timeline, the reviewer's messages, the assistant's suggestions, revise form (new file + what changed) | `?open=<id>` opens the drawer; Inbox notices for changes requested, not approved, approved, published |
 | `/doc/:id` (Reader) | Read, understand and use a resource | Ask (in-place) | Save, Add to collection, Use in… (workflows), download, outline, rail tabs Ask · About · Related, ask/copy a selection, prev/next highlight | Trust and demo chips; banner only for Review due / changed at source / older version (`?v=`). Ask answers cite passages that highlight in the page; Continue in chat. About = type, topics, spaces, owner, base, source path, trust, version history, language, who can see it. Related = similar resources, collections that include it, conversations that cite it. `?q=&page=&from=` keeps chat citation deep links. Not-ready, no-access (Request access) and not-found states |
-| Shared resource actions | Act on any resource anywhere | — | Save, Add to collection (pick or create), Ask about it, Use in…, Copy link, Download; editors: Edit details (title, type, topics, owner, language, summary), Link to spaces, Mark as verified, Archive | One row/card/table component and one ⋯ menu everywhere |
+| Shared resource actions | Act on any resource anywhere | — | Save, Add to collection (pick or create), Ask about it, Use in…, Copy link, Download; editors: Edit details (title, type, topics, owner, language, summary), Link to spaces, Mark as verified, Archive; admins: Feature on Home / Remove from Home | One row/card/table component and one ⋯ menu everywhere |
 
-## Workspace admin — `features/overview.js`, `sources.js`, `connections.js`, `governance.js`, `people.js`, `assistant.js`, `activity.js`, `settings.js`
+## Workspace admin — `features/overview.js`, `curation.js`, `governance.js`, `sources.js`, `connections.js`, `people.js`, `assistant.js`, `activity.js`, `settings.js`
 
 | Route / surface | Purpose | Primary | Also | Notes |
 | --- | --- | --- | --- | --- |
-| `/overview` | What needs me | Each attention item's fix | KPI cards (link to their pages), 30-day questions chart, knowledge gaps (Add files, dismiss with Undo) | "Everything is running" when nothing needs attention |
-| `/sources?tab=sources` | Keep knowledge in sync | Connect source | Sync now, Pause/Resume, Edit schedule, Disconnect; alerts with Reconnect / Sync now / Process all | Sync registers documents as Waiting; processing is explicit (schedules sync then process) |
-| Connect source wizard | Create a source | Continue → Connect | Back, request unavailable apps | App → Account → Content (tri-state tree) → Destination + schedule |
-| Source drawer | Manage one source | Sync now / Process | Cancel, account switch, schedule form, recent syncs, disconnect | Shows waiting-to-process count |
+| `/overview` | What needs me | Each attention item's fix | Documents waiting for review, documents that couldn't be published, re-verification due, syncs, access requests; KPI cards (link to their pages), 30-day questions chart, knowledge gaps (Contribute, dismiss with Undo) | "Everything is running" when nothing needs attention |
+| `/sources?tab=sources` | Keep knowledge in sync | Connect source | Sync now, Pause/Resume, Edit schedule, publishing policy (Publish automatically / Send to review first), Disconnect; alerts with Reconnect / Sync now / Publish all waiting | Sync registers documents; trusted sources wait to publish, review-policy sources send new and changed files to the review queue |
+| Connect source wizard | Create a source | Continue → Connect | Back, request unavailable apps | App → Account → Content (tri-state tree) → Destination + schedule + publishing policy (default Send to review first) |
+| Source drawer | Manage one source | Sync now / Publish | Cancel, account switch, schedule form, publishing policy with Undo, recent syncs, disconnect | Shows waiting-to-publish count |
 | `/sources?tab=history` | Investigate syncs | Open run | Source/status filters | Run drawer: counts, steps, failures, Retry failed |
 | `/connections` | Manage connected accounts | Connect account | Reconnect, Test connection, Disconnect | Secrets never shown; disconnect pauses dependent sources |
 | Reconnect dialog | Restore an expired account | Sign in | Cancel | Dependent sources resume syncing |
@@ -66,27 +66,28 @@ Concept and IA: [KNOWLEDGE_HUB.md](KNOWLEDGE_HUB.md). Every Knowledge page share
 | `/activity?tab=signins` | Investigate sign-ins | Export CSV | Method/status filters | Rows open the member drawer |
 | `/settings?tab=general` | Workspace identity | Save (savebar) | Copy workspace ID | Address validation and broken-links warning |
 | `/settings?tab=danger` | Request archive | Archive workspace | Cancel request | Typed workspace code; `Preview` chip |
-| `/knowledge-health` | Keep knowledge trustworthy (owners see their bases, admins all) | Row fix (Verify / Reprocess / Add topic / Compare) | Tabs Review (expired, changed at source, never verified; Ask owner to review; bulk verify) · Details (missing topic/owner/summary; Add topic, Suggest topics, bulk apply) · Duplicates (compare drawer, keep one and archive the other with references repointed, Not duplicates) · Topics (admins add/rename/archive unused topics and domains) | One summary sentence, no metric cards; nav badge = stale + duplicates; Overview links here when reviews are due |
+| `/documents?tab=review` | Decide on submissions (reviewers: owners of the target base; admins all) | Approve & publish | Queue (search; All · Flagged · New versions · From sources; base filter; select for bulk) + detail: note to reviewers, first-page preview, Open full preview, the assistant's type / topics / proposed topics / knowledge base (who will see it) / summary, flags (Compare duplicate, publish as new version, personal data, format); Request changes · Decline (message required, quick replies) | Auto-advance, Undo, J/K; bulk approve skips personal-data items; phones show list then full-screen detail |
+| `/documents?tab=all` | Every curated document's lifecycle | Row fix (Publish now · Retry · Replace file · Publish again) | Filters lifecycle / base / source / type, search, sort, bulk Publish · Unpublish · Archive; drawer with timeline, details and actions by state | Alert when documents couldn't be published |
+| `/documents?tab=quality` | Keep published knowledge trustworthy | Row fix (Verify · Republish · Add topic · Compare) | Segments: Due for re-verification · Missing details · Possible duplicates | Legacy `/knowledge-health` lands here |
+| `/documents?tab=topics` | Own the taxonomy | Accept (proposed topic) | Proposed by the assistant (rename, choose domain, Accept / Merge into… / Dismiss, linked submissions); domains and topics with published and in-review counts; add, rename, archive unused | Admins only change topics; reviewers read-only |
 | `/settings?tab=setup` | Configure the workspace for its domain | Template / module switches | Space types, AI workflows, reset to defaults | Changes apply to navigation immediately, with Undo; module routes show a "not on" page when off |
 
-## Campus modules — `features/home.js`, `spaces.js`, `work.js`, `work-learning.js`, `work-research.js`, `requests.js` (module-gated; on in UTE Campus)
+## Optional modules — `features/spaces.js`, `work.js`, `work-learning.js`, `work-research.js`, `requests.js` (module-gated; on in Finx Workspace)
 
 | Route / surface | Purpose | Primary | Also | Notes |
 | --- | --- | --- | --- | --- |
-| `/home` | Start the day | Ask (box with context select) | Workflow quick starts, Start a request, Up next with one action each, Continue, Needs you (staff) | Up next = events + unattempted quizzes + requests needing reply + queue items |
-| `/spaces` | Find my courses, groups and offices | Create space (knowledge managers/admins) | Tabs Mine + one per space type; request to join (research); send a request (offices) | Courses are enrolment-driven |
-| `/space/:id` | Work inside one context | Ask about this course/space (members); New (staff); New request (office visitors) | Ask the teaching team, tabs Overview · Materials · Work · Questions/Requests (staff) · People · Settings | Announcements, Up next, workflow cards, request catalog |
+| `/spaces` | Find my teams, projects and offices | Create space (knowledge managers/admins) | Tabs Mine + one per space type; request to join; send a request (offices) | Space types come from the workspace (Finx: team, project, office) |
+| `/space/:id` | Work inside one context | Ask about this space (members); New (staff); New request (office visitors) | Ask <space name> (escalate a question to the space's staff), tabs Overview · Materials · Work · Questions/Requests (staff) · People · Settings | Announcements, Up next, workflow cards, request catalog |
 | `/work` | My AI-made work | New (workflow menu) | Search, type/space filters, Mine / Shared with me | Empty state explains each workflow |
 | `/work/new` | Make something from materials | Generate | Stepper: workflow → materials (space docs, search, select all) → options + title | Prefill from `workflow`, `space`, `docs` |
-| `/work/:id` quiz (staff) | Build and assess | Publish to the course | Edit/regenerate/remove/add questions; Results (per-question, hardest first, Explain in class) | Publish creates the course event and notifies students |
-| `/work/:id` quiz (student) | Take and learn | Start quiz → Submit | Result with explanations and sources; Make a study guide on what I missed; Ask the teaching team | Practice quizzes give instant feedback |
-| `/work/:id` study guide | Revise from the actual slides | Practice quiz from this | Regenerate, shorter/simpler with Undo, download | Every section cites its source |
-| `/work/:id` literature review | Compare papers with evidence | Draft related work | Add paper, add criterion, synthesize, cell evidence drawer, export CSV | Sticky paper column; horizontal scroll |
+| `/work/:id` evidence review | Compare options with evidence | Draft from this review | Add source, add criterion, synthesize, cell evidence drawer, export CSV | Sticky source column; horizontal scroll (Finx: event streaming platforms → Decision record) |
 | `/work/:id` draft | Write grounded documents | Mark ready for review | Formatting, autosave, Ask for changes, versions with restore, sources rail, download | Citations stay linked |
 | `/requests` | Track and handle requests | New request | My requests; Queue (staff) with SLA, filters, assign | Needs-reply and overdue emphasis |
-| `/requests/new` | Ask an office or teaching team | Send request | Catalog; rule check with citations against the student's record; form validation | Failing hard rules block sending and offer "Ask the office instead" |
-| `/requests/:id` | Resolve one request | Reply (requester) / Approve · Ask for information · Decline · Answer (staff) | Withdraw, assign, add answer to course FAQ | FAQ answers become cited knowledge and close matching gaps |
-| Ask the teaching team dialog | Escalate a course question | Send question | Includes what the assistant already found | Lands in the course's Questions queue |
+| `/requests/new` | Ask an office or team | Send request | Catalog; rule check with policy citations against the requester's profile (e.g. `has` Secure coding training before production access); form validation | Failing hard rules block sending and offer "Ask the office instead" |
+| `/requests/:id` | Resolve one request | Reply (requester) / Approve · Ask for information · Decline · Answer (staff) | Withdraw, assign, add answer to the space FAQ | FAQ answers become cited knowledge and close matching gaps |
+| Ask <space> dialog | Escalate a question to a space's staff | Send question | Includes what the assistant already found | Lands in the space's Questions queue |
+
+The Campus template additionally offers study guides and quizzes (`work-learning.js`); no demo workspace uses it.
 
 ## Platform operator — `features/platform.js` (every page carries a `Preview` chip)
 
@@ -95,6 +96,7 @@ Concept and IA: [KNOWLEDGE_HUB.md](KNOWLEDGE_HUB.md). Every Knowledge page share
 | `/p/workspaces` | Operate workspaces | Create workspace | KPIs, search, status filter, drawer (usage, admins, open, copy URL, suspend/reactivate) | New workspace: Setting up → Active |
 | `/p/users` | Accounts across workspaces | Open user | Role/status filters, drawer (memberships, platform admin switch, suspend) | Cannot change your own account |
 | `/p/connectors` | Connector availability | Configure / Enable | Demand list for unavailable connectors | Disabling confirms |
+| `/p/indexing` | Indexing health without content access | Pause / Resume, Retry failed | Per-workspace queue, published 24 h, failure rate, median time, status; workspace drawer with error classes; errors by class; recent jobs (id, workspace, type, size, step, error class); platform policies (types, size, OCR, spreadsheets, review required (locked), retention) with savebar | Banner: job metadata only. Nav badge = degraded + paused workspaces |
 | `/p/usage` | Demand by workspace | Export CSV | 7/30/90 days, sortable table with share of total | — |
 | `/p/audit` | Cross-workspace events | Export CSV | Search, window, workspace and outcome filters, event drawer | — |
 | `/p/health` | Service health and impact | Refresh | Expandable service notes, AI capabilities (deployment setting names, read-only), incidents | Banner when degraded |
@@ -106,16 +108,17 @@ Concept and IA: [KNOWLEDGE_HUB.md](KNOWLEDGE_HUB.md). Every Knowledge page share
 | Sidebar | Navigation | Workspace switcher + search, member destinations, Manage (permission-filtered), Recent conversations, account button; off-canvas below 1024 px |
 | Topbar | Location | Sidebar toggle, breadcrumbs, page-provided actions |
 | Command palette (⌘K) | Search and act | Ask, conversations, resources (catalog search), Browse for the query, collections, knowledge bases, people, spaces, work, pages, actions (incl. New collection), See all results |
-| Account menu / Preferences | Personal settings | Name, theme (light/dark/system), background (Green/Neutral/Slate/Violet/Sand), show work steps, email notifications |
+| Account menu / Preferences | Personal settings | Name, appearance (mode + current theme, opens the Appearance drawer), language (English / Tiếng Việt, applies at once), show work steps, email notifications; the account menu also lists Language |
+| Appearance drawer | Personal theme for the whole app | Mode; gallery of 18 named themes; customize accent (18 swatches + custom hue), background tint, corner radius, font; Reset to BoMesh. Clear backdrop: the app re-themes live behind it |
 | Toasts, confirm, tooltips | Feedback | Undo where reversible; typed confirmation where destructive |
-| Prototype bar | Review controls (outside the product) | Persona, forced state, theme and background, device width, journeys, design system, reset |
+| Prototype bar | Review controls (outside the product) | Persona, forced state, mode and quick themes, interface language (EN/VI), device width, journeys, design system, reset |
 | `/design` | Living design-system gallery | Rendered with the same builders as the product |
 
 ## Mock data
 
 Northwind (Enterprise): two member workspaces (+6 platform-only), three personas, 15 members, 4 roles, 7 groups, 7 knowledge bases (one restricted and locked for members, one hidden), ~100 documents in every processing state with topics (People, Sales, Product, Finance, Legal, Engineering), verification, one duplicate, 2 collections, saved/recent/views for the member, 2 connected accounts (one expired), 4 sources, sync history, 3 pending access requests, audit events, sign-ins, 9 conversations (two fully grounded, one with a generated spreadsheet), knowledge gaps, platform users, connectors, AI capabilities and services.
 
-UTE Campus (`data/ute.js`, `data/knowledge.js`, all fictional and marked *Demo data*): four personas (student, lecturer, researcher, Academic Affairs admin), 14 members, 5 roles, 5 groups, 12 knowledge bases, ~190 resources from six source systems (Google Drive regulations, Moodle LMS syllabi for 38 courses and IT3090 files, DSpace theses, SharePoint open courseware for two faculties, ute.edu.vn notices incl. Vietnamese, lab papers), a 6-domain / 23-topic taxonomy, verification with expired and changed-at-source items, 3 duplicate pairs, 5 collections, saved/recent/views per persona, 5 spaces (2 courses, 1 lab, 2 offices), 8 events, 5 works, 8 request types, 11 requests, 6 conversations, knowledge gaps.
+Finx Workspace (`data/finx.js`, `data/knowledge.js`, `data/contributions.js`, all fictional and marked *Demo data*; see [FINX_WORKSPACE.md](FINX_WORKSPACE.md)): four personas (Engineer, Lead, Analyst, Admin), 16 members, 4 roles, 6 groups, 9 knowledge bases (one restricted and locked, one personal), about 250 documents from Confluence, SharePoint, Google Drive and GitHub sources, a 6-domain / 27-topic taxonomy, verification with expired and changed-at-source items, 3 duplicate pairs, featured documents for Home, 5 collections, saved/recent/views per persona, 5 spaces (2 teams, 1 project, 2 offices), 8 events, 3 works (one evidence review, two drafts), 4 request types and 8 requests, 8 conversations, contribution queue seeds, knowledge gaps.
 
 Workspace-owned data is stored per workspace; changes persist in `localStorage` until reset.
 

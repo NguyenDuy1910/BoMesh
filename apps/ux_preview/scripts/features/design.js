@@ -45,8 +45,8 @@
     const shadows = `<div class="ds-tiles">${['surface-shadow', 'field-shadow', 'overlay-shadow'].map(s => `<div class="ds-tile"><span class="ds-shadow" style="box-shadow:var(--${s})"></span><span class="mono t-xs">--${s}</span></div>`).join('')}</div>`;
     const spacing = `<div class="ds-space">${[2, 4, 6, 8, 12, 16, 20, 24, 32].map(n => `<div class="ds-space__row"><span class="mono t-xs">.gap-${n}</span><span class="ds-space__bar" style="width:${n * 4}px"></span><span class="t-xs muted">${n}px</span></div>`).join('')}</div>`;
     return section('Foundations', `<div class="stack gap-16">
-      ${demo('Background', `<p class="muted t-sm mb-12">HeroUI “Base”: every neutral (canvas, surfaces, borders, text) takes the chosen hue and tint. Accent, status and evidence colors don’t change.</p>${bgPicker('ds-bg', true)}`)}
-      ${demo('Color tokens', `${alertBox('default', '', `Values for the <strong>${resolvedTheme()}</strong> theme and <strong>${esc(BACKGROUNDS.find(b => b[0] === S.bg)?.[1] || '')}</strong> background, read live from CSS. Components only use these tokens.`)}${colors}`)}
+      ${demo('Theme', `<p class="muted t-sm mb-12">One personal theme changes the whole interface: accent (buttons, links, focus, selection), base tint (canvas, surfaces, borders, text), radius and font — the HeroUI Theme Builder dimensions. Status and evidence colors stay fixed.</p>${X.appearance.gallery()}<div class="mt-12">${btn('Customize', { icon: 'palette', act: 'look-open' })}</div>`)}
+      ${demo('Color tokens', `${alertBox('default', '', `Values for the <strong>${resolvedTheme()}</strong> mode and the <strong>${esc(themeLabel())}</strong> theme, read live from CSS. Components only use these tokens.`)}${colors}`)}
       ${demo('Typography', type)}
       <div class="grid cols-2">${demo('Radius', radius)}${demo('Shadows', shadows)}</div>
       ${demo('Spacing', spacing)}
@@ -223,7 +223,6 @@
 
   /* ── Actions ── */
   A['ds-theme'] = () => setTheme(resolvedTheme() === 'dark' ? 'light' : 'dark');
-  A['ds-bg'] = el => setBackground(el.dataset.value);
   A['ds-jump'] = el => document.getElementById(el.dataset.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   A['ds-press'] = el => toast(`“${el.dataset.label || 'Button'}” pressed`, { tone: 'accent', duration: 1800 });
   A['ds-load'] = async () => { const d = ds(); if (d.loading) return; d.loading = true; refresh(); await sleep(1200); d.loading = false; refresh(); toast('Changes saved'); };

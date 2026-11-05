@@ -1,10 +1,31 @@
-/* Knowledge health (features/governance.js): review, details, duplicates, topics. */
+/* Manage → Documents: Quality and Topics tabs (features/governance.js). */
 
 .kh-min { min-width: 0; }
 .kh .table__cell--primary { width: 100%; max-width: 0; min-width: 240px; }
 .kh .table__cell--actions { width: 1%; white-space: nowrap; }
 .kh-reason { white-space: nowrap; }
 .kh-owner { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 220px; }
+
+/* Quality: one summary sentence, then the check switcher */
+.gov-summary { margin: 0 0 12px; font-size: 14px; line-height: 20px; color: var(--muted); }
+.gov-summary--quiet { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.gov-summary--quiet .i { flex: none; }
+.gov-seg { margin-bottom: 12px; max-width: 100%; overflow-x: auto; }
+
+/* Topics: proposed by the assistant */
+.gov-props { display: flex; flex-direction: column; gap: 8px; }
+.gov-prop { display: flex; align-items: flex-start; gap: 16px; padding: 12px 16px; border-radius: var(--radius-2xl); background: var(--surface); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); min-width: 0; }
+.gov-prop__main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.gov-prop__title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.gov-prop__fields { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; min-width: 0; }
+.gov-prop__fields > .item-icon { margin-bottom: 4px; }
+.gov-prop__fields .field { flex: 0 1 220px; min-width: 160px; }
+.gov-prop__docs { display: flex; align-items: center; gap: 6px 12px; flex-wrap: wrap; min-width: 0; }
+.gov-prop__from { flex: none; }
+.gov-prop__doc { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 320px; font-size: 13px; line-height: 18px; }
+.gov-prop__acts { display: flex; align-items: center; gap: 6px; flex: none; padding-top: 22px; }
+.gov-counts { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+.gov-inreview { color: var(--accent); }
 
 /* Details: gap chips + topic suggestions */
 .kh-gaps { width: 260px; min-width: 220px; }
@@ -47,6 +68,8 @@
 .kh-edit__row .input { flex: 1 1 auto; min-width: 0; }
 
 @container app (max-width: 1023px) {
+  .gov-prop { flex-direction: column; gap: 12px; }
+  .gov-prop__acts { padding-top: 0; flex-wrap: wrap; }
   .kh-domains { grid-template-columns: minmax(0, 1fr); }
   .kh .table__cell--primary { min-width: 220px; }
 }
@@ -60,6 +83,10 @@
   .kh-dup-dates { display: none; }
 }
 @container app (max-width: 679px) {
+  .gov-prop { padding: 12px; }
+  .gov-prop__fields .field { flex-basis: 100%; }
+  .gov-prop__doc { max-width: 100%; }
+  .gov-prop__fields > .item-icon { display: none; }
   .kh-topic { padding-left: 12px; }
   .kh-domain__head { flex-wrap: wrap; padding-left: 12px; }
   .kh-edit__row { flex-wrap: wrap; }

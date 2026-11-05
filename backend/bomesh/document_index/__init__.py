@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from typing import Any, Protocol, TypeAlias, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -39,6 +40,9 @@ class IndexingContext(BaseModel):
     parent_item_id: str | None = None
     document_type: str = Field(min_length=1)
     connector_key: str = Field(min_length=1)
+    #: ``items.publication_state == published``; readers without
+    #: ``items.update`` on the collection never get unpublished points.
+    published: bool = True
 
     @field_validator(
         "tenant_id",
@@ -152,6 +156,23 @@ class EmbeddingService(Protocol):
     async def embed_query(self, query: str) -> list[float]: ...
 
 
+@dataclass(frozen=True, slots=True)
+class ItemPayloadState:
+    """The access fields of one Document's points, re-applied after a move,
+    (un)publish or (un)delete (``item_model.md`` §4.10)."""
+
+    collection_item_id: str
+    published: bool
+    is_deleted: bool
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "collection_item_id": self.collection_item_id,
+            "published": self.published,
+            "is_deleted": self.is_deleted,
+        }
+
+
 class ItemContentIndex(Protocol):
     """Read-only, storage-neutral search boundary consumed by knowledge."""
 
@@ -162,8 +183,11 @@ class ItemContentIndex(Protocol):
         limit: int,
         tenant_id: str,
         collection_item_ids: tuple[str, ...],
+        editable_collection_ids: tuple[str, ...],
     ) -> list[ContextualChunk]:
-        """Return every query's fused candidates within the supplied access scope."""
+        """Every query's fused candidates: points of ``collection_item_ids``
+        that are published, or lie in ``editable_collection_ids``. A pre-filter
+        only; callers re-check every hit in PostgreSQL."""
 
 
 from .index import ItemIndex
@@ -184,6 +208,7 @@ __all__ = [
     "IndexProgress",
     "IndexingContext",
     "ItemContentIndex",
+    "ItemPayloadState",
     "ItemIndex",
     "SemanticContextualizer",
     "build_contextual_chunks",

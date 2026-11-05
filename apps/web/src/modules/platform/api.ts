@@ -1,11 +1,13 @@
 /**
  * The platform console's client.
  *
- * Real reads (`/platform/workspaces`, `/users`, `/audit-logs`, `/health`) go
+ * Real reads (legacy `/platform/workspaces`, `/users`, `/audit-logs`, `/health`) go
  * through `workspaceDirectoryApi.platform`; this module composes them into what
- * the console screens show. Everything else is proposed in `api_contract.md`
- * ("Proposed — UI built, API pending", anchors `proposed-platform-*`) and is
- * answered by the pending layer until the backend exists. While a pending
+ * the console screens show. Everything else is pending: the target v2 methods
+ * (Workspaces, Users, Connectors, Components, Incidents, AuditEvents in
+ * `backend/docs_design/api_design.md`) are the `operationIds` of each
+ * `platform.*` key in `lib/api/pending.ts`, and the pending layer answers
+ * until the backend exists. While a pending
  * feature is on, the list readers merge the REAL rows with what this browser
  * changed, so a screen shows one list: rows that exist only here carry
  * `source: "local"`, rows whose status was changed here `changed_locally`.
@@ -37,7 +39,7 @@ export type PlatformWorkspaceStatus = "active" | "suspended";
 /**
  * A workspace row: the server's, or one created in this browser.
  *
- * The documented `GET /platform/workspaces` row is `Workspace` (id, code, name,
+ * The legacy `GET /platform/workspaces` row is `Workspace` (id, code, name,
  * status, settings); owner, counts and dates are filled in only where the
  * server sends them, so every one of them is optional here.
  */
@@ -159,7 +161,7 @@ export function listPlatformConnectors(): Promise<PlatformConnector[]> {
   return pendingApi("platform.connectors", () => pendingPlatformConnectors.list());
 }
 
-/** Turn availability on or off, or save the OAuth client. Proposed permission `platform.connector.manage`. */
+/** Turn availability on or off, or save the OAuth client. v2 `UpdateConnector` / `EnableConnector` / `DisableConnector` (`connectors.update`, `connectors.enable`). */
 export async function updatePlatformConnector(key: string, body: PlatformConnectorUpdate): Promise<PlatformConnector> {
   const updated = await pendingApi("platform.connectors", () => pendingPlatformConnectors.update(key, body));
   invalidateApiData();

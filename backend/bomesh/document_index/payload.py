@@ -41,6 +41,7 @@ class _IndexedChunk(BaseModel):
     schema_version: int = INDEX_SCHEMA_VERSION
     tenant_id: str = Field(min_length=1)
     is_deleted: bool = False
+    published: bool = True
 
     collection_item_id: str = Field(min_length=1)
     item_id: str = Field(min_length=1)
@@ -87,6 +88,7 @@ class _IndexedChunk(BaseModel):
     ) -> _IndexedChunk:
         return cls(
             tenant_id=context.tenant_id,
+            published=context.published,
             collection_item_id=context.collection_item_id,
             item_id=chunk.item_id,
             chunk_id=chunk.id,

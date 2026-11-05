@@ -63,6 +63,7 @@ def test_access_filter_is_tenant_collection_lifecycle_and_schema_scoped() -> Non
     query_filter = _QdrantBackend._access_filter(
         tenant_id="tenant-1",
         collection_item_ids=("collection-2", "collection-1", "collection-2"),
+        editable_collection_ids=("collection-2",),
     )
 
     assert query_filter.must == [
@@ -78,12 +79,28 @@ def test_access_filter_is_tenant_collection_lifecycle_and_schema_scoped() -> Non
             key="collection_item_id",
             match=qmodels.MatchAny(any=["collection-1", "collection-2"]),
         ),
+        # published = true OR collection ∈ editable; points without the key match.
+        qmodels.Filter(
+            should=[
+                qmodels.Filter(
+                    must_not=[
+                        qmodels.FieldCondition(
+                            key="published", match=qmodels.MatchValue(value=False)
+                        )
+                    ]
+                ),
+                qmodels.FieldCondition(
+                    key="collection_item_id",
+                    match=qmodels.MatchAny(any=["collection-2"]),
+                ),
+            ]
+        ),
     ]
 
 
 def test_empty_collection_scope_fails_closed_inside_the_tenant() -> None:
     query_filter = _QdrantBackend._access_filter(
-        tenant_id="tenant-1", collection_item_ids=()
+        tenant_id="tenant-1", collection_item_ids=(), editable_collection_ids=()
     )
     condition = (query_filter.must or [])[3]
     assert isinstance(condition, qmodels.FieldCondition)
@@ -120,6 +137,7 @@ async def test_hybrid_search_uses_scoped_dense_bm25_and_rrf() -> None:
         queries=[("doanh thu quý II", [0.1, 0.2]), ("lợi nhuận", [0.3, 0.4])],
         tenant_id="tenant-1",
         collection_item_ids=("collection-1",),
+        editable_collection_ids=(),
         limit=3,
         candidate_limit=20,
     )

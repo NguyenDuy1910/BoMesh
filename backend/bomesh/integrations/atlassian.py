@@ -8,6 +8,7 @@ a connector, not a second authorization for the same account.
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
@@ -90,6 +91,22 @@ class AtlassianConnectionProvider:
     @property
     def configured(self) -> bool:
         return bool(self._client_id and self._client_secret and self._redirect_uri)
+
+    @property
+    def client_id(self) -> str | None:
+        return self._client_id
+
+    @property
+    def has_client_secret(self) -> bool:
+        return bool(self._client_secret)
+
+    def with_client(
+        self, client_id: str | None, client_secret: str | None
+    ) -> AtlassianConnectionProvider:
+        configured = copy.copy(self)
+        configured._client_id = client_id or self._client_id
+        configured._client_secret = client_secret or self._client_secret
+        return configured
 
     def authorization_url(self, *, state: str, code_challenge: str) -> str:
         client_id, _, redirect_uri = self._client()
@@ -191,13 +208,10 @@ class AtlassianConnectionProvider:
             }
         return {"space": resource.external_id}
 
-    def site_config(self, cloud_id: str) -> dict[str, Any]:
-        """Connection config that points the Confluence runtime at one site."""
+    def site_config(self, cloud_id: str) -> dict[str, str]:
+        """Connection config that points the Confluence runtime at one Cloud site."""
 
-        return {
-            "wiki_base": f"{self._api_url}/ex/confluence/{cloud_id}/wiki",
-            "is_cloud": True,
-        }
+        return {"wiki_base": f"{self._api_url}/ex/confluence/{cloud_id}/wiki"}
 
     # -- Internals ----------------------------------------------------------
 

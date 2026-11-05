@@ -1,7 +1,6 @@
 /**
  * Format conversion for `artifact.export_formats`, done in the browser while
- * `GET /artifacts/{artifact_id}/revisions/{revision}/export?format=` is
- * pending. Every output is a real file of the requested type:
+ * `ExportArtifact` is pending. Every output is a real file of the requested type:
  *
  * - `csv`: a CSV revision as is; otherwise the tables of the revision
  *   (Markdown tables, or the sheets of a spreadsheet's preview), one after

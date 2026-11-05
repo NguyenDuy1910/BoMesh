@@ -28,4 +28,6 @@ dependencies = [
     "pypdfium2>=5,<6",
     "atlassian-python-api>=5.0.3,<6",
     "docker>=7,<8",
+    "croniter>=6.2.4",
+    "python-docx>=1.2,<2",
 ]

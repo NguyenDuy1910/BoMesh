@@ -34,6 +34,7 @@
 .rdr-outline__link.is-on { color: var(--foreground); font-weight: 500; background: var(--default); }
 .rdr-canvas { flex: 1 1 auto; min-width: 0; overflow: auto; padding: 28px; background: var(--surface-secondary); }
 .rdr-banners { max-width: 760px; margin: 0 auto 16px; display: flex; flex-direction: column; gap: 8px; }
+.rdr-sub-quote { margin: 4px 0 6px; padding: 6px 10px; border-left: 2px solid var(--border-secondary); border-radius: 0 var(--radius-lg) var(--radius-lg) 0; background: color-mix(in oklab, var(--surface) 60%, transparent); color: var(--foreground); white-space: pre-line; }
 
 /* ───── Rail ───── */
 .rdr-rail { flex: none; width: 360px; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--separator); background: var(--surface); animation: slidein var(--dur) var(--ease-out-fluid); }

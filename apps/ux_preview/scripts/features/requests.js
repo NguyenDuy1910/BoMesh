@@ -1,8 +1,8 @@
 /* Requests (/requests, /requests/new, /requests/:id) — people ask offices and
-   teaching teams for things; staff work one queue within an SLA. Before a
-   request is sent the assistant checks the rules that apply (each with its
-   citation). A staff answer to a course question can become course FAQ
-   knowledge. Requests live in D.requestTypes / D.svcRequests (data/ute.js). */
+   teams for things; staff work one queue within an SLA. Before a request is
+   sent the assistant checks the rules that apply (each with its citation).
+   A staff answer to a question can become FAQ knowledge. Requests live in
+   D.requestTypes / D.svcRequests (workspace seed data). */
 (() => {
   'use strict';
 
@@ -49,36 +49,20 @@
   const slaUsual = t => t.sla <= 1 ? 'Usually the next working day' : `Usually ${t.sla} working days`;
   const clip = (s, n) => { s = String(s || '').replace(/\s+/g, ' ').trim(); if (s.length <= n) return s; const cut = s.slice(0, n); return cut.slice(0, Math.max(cut.lastIndexOf(' '), n - 12)).replace(/[\s,;:.–—-]+$/, '') + '…'; };
   /** "Ask the teaching team" vs "Ask the office", by space type. */
-  /** Copy can speak of offices and teaching teams only where those space types exist. */
-  const campusy = () => spaceTypeIds().some(t => t === 'office' || t === 'course');
   const teamWord = sp => sp?.type === 'course' ? 'the teaching team' : sp?.type === 'office' ? 'the office' : 'the team';
 
   /** Colored space tile — Home owns X.spaceMark; this is the fallback while it loads. */
   const mark = (sp, size = 32) => X.spaceMark?.(sp, size) || `<span class="rq-mark" style="--rq-c:${esc(sp?.color || '#4F5865')};width:${size}px;height:${size}px" aria-hidden="true">${ic(spaceType(sp?.type).icon, size < 32 ? 'i-sm' : '')}</span>`;
 
-  /** Course label for a stored course code. */
-  function courseLabel(code, requester) {
-    const c = (personaOf(requester)?.profile?.courses || PERSONAS.student?.profile?.courses || []).find(x => x[0] === code);
-    if (c) return `${c[0]} · ${c[1]}`;
-    const sp = (D.spaces || []).find(s => s.code === code);
-    return sp ? `${sp.code} · ${sp.name}` : String(code ?? '');
-  }
-  /** Courses the caller can pick in a request: their study plan, else the course spaces they attend. */
-  function courseOptions() {
-    const p = me().profile;
-    if (p?.courses?.length) return p.courses.map(([code, name, cr]) => [code, `${code} · ${name} (${plural(cr, 'credit')})`]);
-    return mySpaces().filter(s => s.type === 'course' && !isSpaceStaff(s) && s.code).map(s => [s.code, `${s.code} · ${s.name}`]);
-  }
-  function fmtField(fd, v, r) {
+  function fmtField(fd, v) {
     if (v == null || v === '') return '<span class="muted">—</span>';
-    if (fd.type === 'course') return esc(courseLabel(v, r.requester));
     return esc(String(v)).replace(/\n/g, '<br>');
   }
 
   /* ═══════════════ Status, SLA, list row ═══════════════ */
   /** Status chip as the viewer should read it (requester vs staff wording). */
   function requestStatus(r) {
-    if (r.status === 'needs_info' && r.requester !== me().id) return chip(['course', 'office'].includes(spaceById(r.space)?.type) ? 'Waiting for student' : 'Waiting for reply', { tone: 'warning', dot: true });
+    if (r.status === 'needs_info' && r.requester !== me().id) return chip(spaceById(r.space)?.type === 'course' ? 'Waiting for student' : 'Waiting for reply', { tone: 'warning', dot: true });
     if (r.status === 'completed' && isQ(r)) return chip('Answered', { tone: 'success', variant: 'tertiary', dot: true });
     return status('svc', r.status);
   }
@@ -91,7 +75,7 @@
   /** SLA for staff: due in / overdue / paused while waiting for the requester. */
   function sla(r) {
     if (!isOpen(r)) return { text: 'Closed ' + relIn(r.updated), tone: 'muted' };
-    if (r.status === 'needs_info') return { text: 'Paused', tone: 'muted', tip: 'The clock stops while you wait for the student' };
+    if (r.status === 'needs_info') return { text: 'Paused', tone: 'muted', tip: 'The clock stops while you wait for the requester' };
     const d = r.due - Date.now();
     if (d < 0) return { text: 'Overdue ' + span(-d), tone: 'danger' };
     return { text: 'Due in ' + span(d), tone: d < DAY ? 'warning' : '' };
@@ -161,7 +145,7 @@
     if (!kb) return {};
     const q = String(r.fields?.question || '').trim();
     const name = 'FAQ — ' + fileNameSafe(clip(q.replace(/[?.!\s]+$/, ''), 72)) + '.md';
-    const doc = mkDoc(kb.id, uid('du-faq'), name, { addedBy: me().name, updated: Date.now(), status: 'ready', pages: 1, size: 900 + answer.length * 2, passages: 2 });
+    const doc = mkDoc(kb.id, uid('faq'), name, { addedBy: me().name, updated: Date.now(), status: 'ready', pages: 1, size: 900 + answer.length * 2, passages: 2 });
     doc.faq = { q, a: answer, req: r.id };
     D.docs.unshift(doc); kb.updated = Date.now();
     const gi = (D.gaps || []).findIndex(g => g.kb === kb.id && similar(g.q, q));
@@ -236,7 +220,7 @@
   };
 
   function mineView(rows) {
-    const empty = () => emptyState({ icon: 'clipboard', boxed: true, title: 'No requests yet', desc: campusy() ? 'Withdraw from a course, get a transcript or ask a teaching team. The assistant checks the rules before you send.' : 'Ask a team for something they handle. The assistant checks the rules before you send.', actions: btn('New request', { v: 'primary', icon: 'plus', href: '/requests/new' }) });
+    const empty = () => emptyState({ icon: 'clipboard', boxed: true, title: 'No requests yet', desc: 'Ask a team or office for something they handle. The assistant checks the rules before you send.', actions: btn('New request', { v: 'primary', icon: 'plus', href: '/requests/new' }) });
     return gate({
       loading: () => skelRows(4), empty,
       ok: () => {
@@ -254,7 +238,7 @@
     });
   }
 
-  const OPEN_STATUS_OPTS = [['submitted', 'Submitted'], ['in_review', 'In review'], ['needs_info', 'Waiting for student'], ['approved', 'Approved']];
+  const OPEN_STATUS_OPTS = [['submitted', 'Submitted'], ['in_review', 'In review'], ['needs_info', 'Waiting for reply'], ['approved', 'Approved']];
   const DONE_STATUS_OPTS = [['completed', 'Done'], ['declined', 'Declined'], ['withdrawn', 'Withdrawn']];
   function queueView(q) {
     const u = ui('rqQ', { view: 'open', sel: {} });
@@ -267,7 +251,7 @@
     const typeOpts = types().filter(t => spaces.some(s => s.id === t.space)).map(t => [t.id, t.question ? `${t.name} · ${spaceById(t.space)?.code || spaceById(t.space)?.name}` : t.name]);
     const counts = { open: q.filter(isOpen).length, done: q.length - q.filter(isOpen).length };
     const toolbar = `<div class="toolbar">${seg({ value: u.view, options: [['open', `Open · ${counts.open}`], ['done', `Done · ${counts.done}`]], act: 'rq-q-view', label: 'Show' })}
-      ${searchField({ uiKey: 'rqQ', placeholder: 'Search by student, ID or request' })}
+      ${searchField({ uiKey: 'rqQ', placeholder: 'Search by person, ID or request' })}
       ${spaces.length > 1 ? filterButton('Space', 'rqQ', 'space', spaces.map(s => [s.id, s.name])) : ''}
       ${filterButton('Status', 'rqQ', 'status', u.view === 'done' ? DONE_STATUS_OPTS : OPEN_STATUS_OPTS)}
       ${typeOpts.length > 1 ? filterButton('Type', 'rqQ', 'type', typeOpts) : ''}
@@ -275,7 +259,7 @@
       ${live ? `<span class="toolbar__end t-sm muted num">${plural(rows.length, 'request')}</span>` : ''}</div>`;
     const empty = () => u.view === 'done'
       ? emptyState({ icon: 'archive', boxed: true, title: 'Nothing closed yet', desc: 'Requests you approve, decline or answer move here.' })
-      : emptyState({ icon: 'check-circle', tone: 'success', boxed: true, title: 'Your queue is clear', desc: campusy() ? 'New requests and student questions for your spaces show up here.' : 'New requests for your spaces show up here.' });
+      : emptyState({ icon: 'check-circle', tone: 'success', boxed: true, title: 'Your queue is clear', desc: 'New requests and questions for your spaces show up here.' });
     return toolbar + gate({
       empty,
       ok: () => {
@@ -325,7 +309,7 @@
     crumbs([{ label: 'Requests', to: '/requests' }, { label: 'New request' }]);
     const groups = catalogGroups();
     const shown = groups.map(g => ({ sp: g.sp, list: g.list.filter(t => matchesQ('rqCat', t.name, t.desc, g.sp.name, g.sp.code)) })).filter(g => g.list.length);
-    const head = pageHeader({ title: 'New request', desc: campusy() ? 'Ask an office or your teaching team. The assistant checks the rules before you send.' : 'Ask a team for something they handle. The assistant checks the rules before you send.' });
+    const head = pageHeader({ title: 'New request', desc: 'Ask a team or office for something they handle. The assistant checks the rules before you send.' });
     const empty = () => emptyState({ icon: 'clipboard', boxed: true, title: 'No one takes requests here yet', desc: isAdmin() ? 'Offices and teams add request types in their space settings.' : 'When an office or team starts taking requests, you’ll find them here.', actions: btn('Back to requests', { href: '/requests' }) });
     const body = gate({
       loading: () => skelRows(6), empty,
@@ -356,29 +340,19 @@
         return left > 0 ? { ...base, state: 'pass', detail: `${capital(span(left))} left to send it` }
           : { ...base, state: 'fail', detail: `The deadline passed ${rel(c.at).toLowerCase()}.`, consequence: 'The office can’t accept this request after the deadline. Ask them whether an exception applies to you.' };
       }
-      case 'minCredits': {
-        if (!p) return { ...base, state: 'info', detail: 'The office checks this for you.' };
-        const course = (p.courses || []).find(x => x[0] === vals.course);
-        if (!course) return { ...base, state: 'wait', detail: 'Choose a course below to check this.' };
-        const after = p.credits - course[2];
-        return after >= c.min ? { ...base, state: 'pass', detail: `${p.credits} → ${after} credits after dropping ${course[0]}` }
-          : { ...base, state: 'warn', detail: `${p.credits} → ${after} credits after dropping ${course[0]}, below the minimum of ${c.min}.`, consequence: 'You can still send it: the office forwards it to the Faculty for approval, so it may take longer.' };
+      case 'has': {
+        if (!p) return { ...base, state: 'info', detail: 'The team checks this for you.' };
+        const v = p[c.key], ok = Array.isArray(v) ? v.includes(c.value) : v === c.value;
+        return ok ? { ...base, state: 'pass', detail: `Completed: ${c.value}` }
+          : { ...base, state: 'fail', detail: `Your profile doesn’t show ${c.value} yet.`, consequence: `Complete it first: ${c.fix || c.value}. Then send this request.` };
       }
-      case 'minYear':
-        if (!p) return { ...base, state: 'info', detail: 'The office checks this for you.' };
-        return p.year >= c.min ? { ...base, state: 'pass', detail: `You’re in year ${p.year} (${p.cohort || 'current cohort'})` }
-          : { ...base, state: 'fail', detail: 'You haven’t completed a semester yet.', consequence: 'This request is only possible after your first semester.' };
-      case 'minGpa':
-        if (!p) return { ...base, state: 'info', detail: 'The office checks this for you.' };
-        return p.gpa >= c.min ? { ...base, state: 'pass', detail: `Your GPA is ${p.gpa.toFixed(2)}` }
-          : { ...base, state: 'fail', detail: `Your GPA is ${p.gpa.toFixed(2)}, below ${c.min}.`, consequence: 'An application below the minimum isn’t accepted.' };
       default: return { ...base, state: 'info', detail: '' };
     }
   }
   const CHECK_UI = { pass: ['check-circle', 'Met'], warn: ['alert', 'Needs attention'], fail: ['x-circle', 'Not met'], info: ['info', 'Good to know'], wait: ['circle-dashed', 'Not checked yet'] };
   function citeBtn(c, n) {
     const d = docById(c.doc);
-    return `<button type="button" class="cite" data-act="rq-quote" ${dataAttrs({ doc: c.doc, page: c.page, q: c.quote })} aria-label="Source ${n}: ${esc(d?.name || 'regulation')}${c.page ? ', page ' + c.page : ''}">${n}</button>`;
+    return `<button type="button" class="cite" data-act="rq-quote" ${dataAttrs({ doc: c.doc, page: c.page, q: c.quote })} aria-label="Source ${n}: ${esc(d?.name || 'source')}${c.page ? ', page ' + c.page : ''}">${n}</button>`;
   }
   function checkLines(results) {
     let n = 0;
@@ -389,16 +363,13 @@
   }
 
   function formState(t, query) {
-    const key = [t.id, query.course, query.space, query.q].map(x => x || '').join('|');
+    const key = [t.id, query.space, query.q].map(x => x || '').join('|');
     let f = S.ui.rqNew;
     if (f && f.key === key) return f;
     f = S.ui.rqNew = { key, type: t.id, vals: {}, errs: {}, phase: t.checks?.length ? 'checking' : 'done', conv: query.conv || '' };
-    const courseCodes = courseOptions().map(o => o[0]);
-    const fromSpace = spaceById(query.space)?.type === 'course' ? spaceById(query.space).code : '';
     t.fields.forEach(fd => {
       let v = ['type', 'space', 'conv', 'q'].includes(fd.id) ? '' : String(query[fd.id] ?? '');
       if (fd.type === 'select' && !fd.options.includes(v)) v = '';
-      if (fd.type === 'course') { v = query.course || fromSpace || ''; if (!courseCodes.includes(v)) v = ''; }
       if (fd.id === 'question' && !v) v = query.q || '';
       if (fd.type === 'number' && !v) v = String(fd.min || 1);
       f.vals[fd.id] = v;
@@ -409,7 +380,7 @@
     const e = {};
     t.fields.forEach(fd => {
       const v = String(vals[fd.id] ?? '').trim();
-      if (fd.required && !v) e[fd.id] = fd.type === 'course' ? 'Choose a course.' : fd.type === 'select' ? 'Choose an option.' : fd.id === 'reason' ? 'Add a reason. A sentence is enough.' : fd.id === 'question' ? 'Write your question.' : 'This field is required.';
+      if (fd.required && !v) e[fd.id] = fd.type === 'select' ? 'Choose an option.' : fd.id === 'reason' ? 'Add a reason. A sentence is enough.' : fd.id === 'question' ? 'Write your question.' : 'This field is required.';
       else if (fd.type === 'number' && v) {
         const n = Number(v);
         if (!Number.isInteger(n) || (fd.min != null && n < fd.min) || (fd.max != null && n > fd.max)) e[fd.id] = `Enter a whole number from ${fd.min ?? 0} to ${fd.max ?? 99}.`;
@@ -420,7 +391,6 @@
   function fieldControl(fd, f) {
     const id = 'rq-f-' + fd.id, bind = 'rqNew.vals.' + fd.id, v = f.vals[fd.id] ?? '', invalid = !!f.errs[fd.id];
     const aria = invalid ? `aria-invalid="true" aria-describedby="${id}-err"` : '';
-    if (fd.type === 'course') return select({ id, bind, value: v, change: 'rq-new-change', options: [['', 'Choose a course'], ...courseOptions()], attrs: aria });
     if (fd.type === 'select') return select({ id, bind, value: v, change: 'rq-new-change', options: [['', 'Choose…'], ...fd.options.map(o => [o, o])], attrs: aria });
     if (fd.type === 'number') return input({ id, bind, value: v, type: 'number', attrs: `min="${fd.min ?? 0}" max="${fd.max ?? 99}" inputmode="numeric" style="max-width:140px" data-input="rq-new-input"`, invalid });
     if (fd.type === 'textarea') return textarea({ id, bind, value: v, rows: fd.id === 'question' ? 5 : 3, placeholder: fd.placeholder || '', invalid, attrs: 'data-input="rq-new-input"' });
@@ -439,7 +409,7 @@
     let checkCard = '';
     if (checks.length) {
       const body = f.phase !== 'done'
-        ? `<div class="rq-checking" role="status">${spinner()}<span>Checking regulations…</span></div><div class="stack gap-12 mt-4" aria-hidden="true">${checks.map((_, i) => `<span class="skeleton skeleton--line" style="width:${[78, 62, 70][i % 3]}%"></span>`).join('')}</div>`
+        ? `<div class="rq-checking" role="status">${spinner()}<span>Checking the rules…</span></div><div class="stack gap-12 mt-4" aria-hidden="true">${checks.map((_, i) => `<span class="skeleton skeleton--line" style="width:${[78, 62, 70][i % 3]}%"></span>`).join('')}</div>`
         : checkLines(results) + (failing.length ? `<div class="mt-12">${alertBox('danger', 'You can’t send this request', `${capital(teamWord(sp))} can still tell you what’s possible, for example whether an exception applies.`, btn(`Ask ${teamWord(sp)} instead`, { v: 'secondary', size: 'sm', icon: 'message', act: 'rq-ask-instead', data: { type: t.id } }))}</div>` : '');
       checkCard = card(body, { title: 'Before you send', desc: f.phase === 'done' ? 'The assistant checked the rules that apply to you. Select a number to read the source.' : '', icon: itemIcon('shield-check', 'accent', 'sm'), cls: 'rq-checkcard' });
     }
@@ -465,7 +435,7 @@
     if (!S.cur.query.type || !f || f.phase !== 'checking' || f.timer) return;
     f.timer = setTimeout(() => { delete f.timer; if (S.ui.rqNew !== f) return; f.phase = 'done'; if (S.cur.r.page === 'requestNew') refresh(); }, 1100);
   };
-  /** Editing a field clears its error; the course also re-runs the credit check. */
+  /** Editing a field clears its error; a select change re-renders so checks see the new value. */
   const clearErr = el => { const f = S.ui.rqNew, k = el.id.replace(/^rq-f-/, ''); if (f?.errs?.[k]) { delete f.errs[k]; return true; } return false; };
   A['rq-new-change'] = el => { clearErr(el); refresh(); };
   A['rq-new-input'] = el => { if (clearErr(el)) refresh(); };
@@ -646,11 +616,10 @@
     let person = '';
     if (staff && !isReq) {
       const m = memberById(r.requester), p = personaOf(r.requester)?.profile;
-      const sid = p?.studentId || (/^\d+@/.test(m?.email || '') ? m.email.split('@')[0] : '');
-      const program = p ? `${p.program} · ${p.cohort}` : (m?.groups || []).map(g => groupById(g)?.name).filter(Boolean).join(', ');
+      const team = p?.team || (m?.groups || []).map(g => groupById(g)?.name).filter(Boolean).join(', ');
       const others = all().filter(x => x.requester === r.requester && x.id !== r.id && isOpen(x) && staffOf(x)).length;
       person = card(`<div class="rq-person">${avatar(personName(r.requester), 'lg')}<div class="grow" style="min-width:0"><div class="medium truncate">${esc(personName(r.requester))}</div><div class="t-sm muted truncate">${esc(m?.email || '')}</div></div></div>
-        ${kv([sid && ['Student ID', `<span class="num">${esc(sid)}</span>`], program && ['Program', esc(program)], others && ['Other open', plural(others, 'request')]])}`, { title: 'Requester', cls: 'rq-side-card' });
+        ${kv([team && ['Team', esc(team)], others && ['Other open', plural(others, 'request')]])}`, { title: 'Requester', cls: 'rq-side-card' });
     }
     const checks = r.checks?.length ? card(checkLines(r.checks), { title: 'Checked before sending', desc: `The assistant checked these rules${r.checkedAt ? ' on ' + esc(fmtDateTime(r.checkedAt)) : ''}.`, cls: 'rq-side-card' }) : '';
     return details + person + checks;
@@ -738,7 +707,7 @@
   A['rq-decline-ok'] = el => {
     const r = reqById(el.dataset.id), f = ui('rqDecline'); if (!r) return;
     const text = String(f.text || '').trim();
-    if (!text) { f.err = 'Add a reason so the student knows what to do next.'; refreshLayer(); $('#rq-decline-text')?.focus(); return; }
+    if (!text) { f.err = 'Add a reason so the requester knows what to do next.'; refreshLayer(); $('#rq-decline-text')?.focus(); return; }
     const s = snap(r);
     post(r, text, 'declined', { status: 'declined' });
     audit('Declined a request', r);

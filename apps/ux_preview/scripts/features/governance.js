@@ -1,15 +1,15 @@
-/* Knowledge health (/knowledge-health) — where owners and admins keep the
-   catalog trustworthy: verification cycles (Review), metadata quality
-   (Details), duplicates and the topic taxonomy. Scope: resources in the
-   knowledge bases the caller can edit (admins: all). Sync and indexing stay
-   in Sources. Reader pages never show any of this.
-   Exports: X.khealthCount(), X.khReview(). Actions: kh-*. Menus: kh-review,
-   kh-topic, kh-dup. Drawer: kh-dup. Model: core/catalog.js. */
+/* Manage → Documents: Quality and Topics tabs (rendered inside P.documentsAdmin).
+   Quality keeps published documents trustworthy: re-verification cycles, missing details
+   and possible duplicates. Topics is the workspace taxonomy plus the assistant's proposed
+   topics (only workspace admins accept, merge or dismiss them). Scope: published documents
+   in the knowledge bases the caller can edit (admins: all).
+   Exports: X.gov = { quality({query}), topics({query}), qualityCount(), proposalCount() },
+   X.khReview(). Actions: kh-*, gov-*. Menus: kh-review, kh-topic, kh-dup, gov-prop-merge.
+   Drawer: kh-dup. Models: core/catalog.js, core/lifecycle.js. */
 (() => {
   'use strict';
 
-  const BASE = '/knowledge-health';
-  const TABS = ['review', 'details', 'duplicates', 'topics'];
+  const SEGS = ['reverify', 'details', 'duplicates'];
   function audit(action, target) {
     D.audit.unshift({ id: uid('ev'), at: Date.now(), actor: me().id, action, type: 'Knowledge', target, outcome: 'success', ip: '10.4.12.30', device: 'Chrome on macOS' });
   }
@@ -17,9 +17,10 @@
   const ownerOf = d => res(d).owner || 'the knowledge base owner';
   /** Keep a selection bucket in step with rows that still exist (rows are derived and vanish once fixed). */
   function pruneSel(u, valid) { Object.keys(u.sel || {}).forEach(id => { if (!valid.has(id)) delete u.sel[id]; }); }
+  const live = () => S.pageState === 'live' && !S.navLoading;
 
   /* ═══════════════ Signals ═══════════════ */
-  /** Resources the caller looks after: editable, non-personal knowledge bases. */
+  /** Published documents the caller looks after: editable, non-personal knowledge bases. */
   const scope = () => readableResources().filter(d => { const kb = kbById(d.kb); return kb && !kb.personal && canEditKb(kb); });
 
   const REASONS = {
@@ -27,7 +28,7 @@
     expired: { label: 'Verification expired', icon: 'clock', rank: 1 },
     never: { label: 'Never verified', icon: 'circle-dashed', rank: 2 },
   };
-  /** { d, reason, note, due } when a resource needs an owner's attention, else null. */
+  /** { d, reason, note, due } when a document needs an owner's attention, else null. */
   function reviewItem(d) {
     const t = trustOf(d);
     if (t.state === 'review') return { d, reason: d.status === 'outdated' ? 'source' : 'expired', note: t.note, due: t.due || null };
@@ -40,77 +41,80 @@
   const GAPS = { topic: { label: 'No topic', icon: 'tag', noun: 'a topic' }, owner: { label: 'No owner', icon: 'user', noun: 'an owner' }, summary: { label: 'No summary', icon: 'note', noun: 'a summary' } };
   const detailItems = (pool = scope()) => pool.map(d => ({ d, gaps: metadataGaps(d) })).filter(x => x.gaps.length);
 
-  /** Resources per topic and per domain (distinct resources), over what the caller can read. */
+  /** Published documents per topic and per domain (distinct, over what the caller can read) and submissions in review the assistant tagged with it. */
   function topicCounts() {
-    const byTopic = new Map(), byDomain = new Map();
+    const byTopic = new Map(), byDomain = new Map(), rv = new Map(), rvDomain = new Map();
+    const add = (m, id) => m.set(id, (m.get(id) || 0) + 1);
     readableResources().forEach(d => {
       const doms = new Set();
-      res(d).topics.forEach(id => { byTopic.set(id, (byTopic.get(id) || 0) + 1); doms.add(topicById(id)?.parent || id); });
-      doms.forEach(id => byDomain.set(id, (byDomain.get(id) || 0) + 1));
+      res(d).topics.forEach(id => { add(byTopic, id); doms.add(topicById(id)?.parent || id); });
+      doms.forEach(id => add(byDomain, id));
     });
-    return { topic: id => byTopic.get(id) || 0, domain: id => byDomain.get(id) || 0 };
+    reviewQueue().forEach(d => {
+      const ids = (aiOf(d).topics || []).map(t => t.id), doms = new Set(ids.map(id => topicById(id)?.parent || id));
+      ids.forEach(id => add(rv, id)); doms.forEach(id => add(rvDomain, id));
+    });
+    return { topic: id => byTopic.get(id) || 0, domain: id => byDomain.get(id) || 0, review: id => rv.get(id) || 0, reviewDomain: id => rvDomain.get(id) || 0 };
   }
 
   X.khReview = () => (can('knowledge.manage') ? reviewItems() : []);
-  /** Nav badge: what has gone stale (expired or changed at the source) plus possible duplicates. "Never verified" is backlog, not an alert. */
-  X.khealthCount = () => (can('knowledge.manage') ? reviewItems().filter(x => x.reason !== 'never').length + duplicateCandidates().length : 0);
+  /** What has gone stale (expired or changed at the source) plus possible duplicates. "Never verified" is backlog, not an alert. */
+  const qualityCount = () => (can('knowledge.manage') ? reviewItems().filter(x => x.reason !== 'never').length + duplicateCandidates().length : 0);
+  const proposalCount = () => (canManageTaxonomy() ? openProposals().length : 0);
 
-  /* ═══════════════ Page ═══════════════ */
+  /* ═══════════════ Quality tab ═══════════════ */
   function summary(pool, rv, dt, dp) {
-    if (!pool.length) return 'You don’t look after any knowledge bases yet.';
+    if (!pool.length) return 'You don’t look after any published documents yet.';
     const kbs = new Set(pool.map(d => d.kb)).size;
-    if (!rv.length && !dt.length && !dp.length) return esc(`${plural(pool.length, 'resource')} across ${plural(kbs, 'knowledge base')} — all verified, described and unique.`);
-    return esc(`${plural(rv.length, 'resource')} due for review, ${fmtNum(dt.length)} missing details and ${plural(dp.length, 'possible duplicate')} across ${plural(kbs, 'knowledge base')} you look after.`);
+    if (!rv.length && !dt.length && !dp.length) return esc(`${plural(pool.length, 'published document')} across ${plural(kbs, 'knowledge base')} — all verified, described and unique.`);
+    return esc(`${plural(rv.length, 'document')} due for re-verification, ${fmtNum(dt.length)} missing details and ${plural(dp.length, 'possible duplicate')} across ${plural(kbs, 'knowledge base')} you look after.`);
   }
-
-  P.khealth = ({ query }) => {
-    const tab = TABS.includes(query.tab) ? query.tab : 'review';
-    const live = S.pageState === 'live' && !S.navLoading;
-    const pool = scope(), rv = reviewItems(pool), dt = detailItems(pool), dp = duplicateCandidates();
-    const topics = (D.topics || []).filter(t => t.parent && !t.archived).length;
-    const head = pageHeader({ title: 'Knowledge health', extra: X.res.demoChip(), desc: live ? summary(pool, rv, dt, dp) : '' });
-    const nav = `<div class="page-tabs">${tabs([
-      { id: 'review', label: 'Review', count: live ? rv.length : null },
-      { id: 'details', label: 'Details', count: live ? dt.length : null },
-      { id: 'duplicates', label: 'Duplicates', count: live ? dp.length : null },
-      { id: 'topics', label: 'Topics', count: live ? topics : null },
-    ], tab, BASE)}</div>`;
-    const body = gate({
+  function quality({ query = {} } = {}) {
+    return gate({
       loading: () => skelRows(6),
-      error: () => errorState({ title: 'Knowledge health didn’t load' }),
-      empty: () => emptyState({ icon: 'shield-check', tone: 'success', title: 'All knowledge is healthy', desc: 'Nothing is due for review, missing details or duplicated.', boxed: true }),
-      ok: () => (tab === 'review' ? tabReview(rv) : tab === 'details' ? tabDetails(dt) : tab === 'duplicates' ? tabDups(dp) : tabTopics()),
+      error: () => errorState({ title: 'Quality checks didn’t load' }),
+      empty: () => emptyState({ icon: 'shield-check', tone: 'success', title: 'Every document is in good shape', desc: 'Nothing is due for re-verification, missing details or duplicated.', boxed: true }),
+      ok: () => {
+        const pool = scope(), rv = reviewItems(pool), dt = detailItems(pool), dp = duplicateCandidates();
+        const counts = { reverify: rv.length, details: dt.length, duplicates: dp.length };
+        const want = query.seg === 'review' ? 'reverify' : query.seg;
+        const s = SEGS.includes(want) ? want : SEGS.find(k => counts[k]) || 'reverify';
+        const control = seg({ value: s, act: 'gov-seg', label: 'Quality checks', options: [['reverify', `Due for re-verification · ${fmtNum(rv.length)}`], ['details', `Missing details · ${fmtNum(dt.length)}`], ['duplicates', `Possible duplicates · ${fmtNum(dp.length)}`]] });
+        const body = s === 'reverify' ? tabReview(rv) : s === 'details' ? tabDetails(dt) : tabDups(dp);
+        return `<div class="kh gov"><p class="gov-summary">${summary(pool, rv, dt, dp)}</p><div class="gov-seg">${control}</div>${body}</div>`;
+      },
     });
-    return `<div class="page kh">${head}${nav}${body}</div>`;
-  };
+  }
+  A['gov-seg'] = el => { const v = el.dataset.value; ['khReview', 'khDetails'].forEach(k => { if (S.ui[k]) { S.ui[k].page = 1; S.ui[k].sel = {}; } }); if (S.cur?.r.page === 'documentsAdmin') setQuery({ tab: 'quality', seg: v }); else go(`/documents?tab=quality&seg=${v}`); };
 
-  /* ═══════════════ Review ═══════════════ */
+  /* ── Due for re-verification ── */
   function tabReview(all) {
     const u = ui('khReview', { kb: '', reason: '', sel: {} });
-    if (!all.length) return emptyState({ icon: 'shield-check', tone: 'success', title: 'Nothing is due for review', desc: 'Every resource you look after is verified and current.', boxed: true });
+    if (!all.length) return emptyState({ icon: 'shield-check', tone: 'success', title: 'Nothing is due for re-verification', desc: 'Every document you look after is verified and current.', boxed: true });
     pruneSel(u, new Set(all.map(x => x.d.id)));
     const kbOpts = [...new Map(all.map(x => [x.d.kb, kbName(x.d)])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
     const reasonOpts = Object.entries(REASONS).filter(([k]) => all.some(x => x.reason === k)).map(([k, r]) => [k, r.label]);
     const sources = all.some(x => x.reason === 'source') && can('source.manage') ? `<div class="toolbar__end">${linkBtn('Sync status in Sources', { href: '/sources', icon: 'arrow-up-right' })}</div>` : '';
-    const toolbar = `<div class="toolbar">${searchField({ uiKey: 'khReview', placeholder: 'Search resources' })}${filterButton('Knowledge base', 'khReview', 'kb', kbOpts)}${filterButton('Reason', 'khReview', 'reason', reasonOpts)}${clearFilters('khReview', ['kb', 'reason'])}${sources}</div>`;
+    const toolbar = `<div class="toolbar">${searchField({ uiKey: 'khReview', placeholder: 'Search documents' })}${filterButton('Knowledge base', 'khReview', 'kb', kbOpts)}${filterButton('Reason', 'khReview', 'reason', reasonOpts)}${clearFilters('khReview', ['kb', 'reason'])}${sources}</div>`;
     let rows = all.filter(x => (!u.kb || x.d.kb === u.kb) && (!u.reason || x.reason === u.reason) && matchesQ('khReview', x.d.name, res(x.d).owner, kbName(x.d)));
     rows = applySort(rows, 'khReview', { name: x => x.d.name.toLowerCase(), due: x => x.due || 9e15 });
-    if (!rows.length) return toolbar + noMatches('khReview', ['kb', 'reason'], 'resources');
+    if (!rows.length) return toolbar + noMatches('khReview', ['kb', 'reason'], 'documents');
     const page = paginate(rows, 'khReview', 20);
-    const head = selAllCheck('khReview', page.map(x => x.d.id)) + sortHead('Resource', 'name', 'khReview') + th('Reason') + th('Owner') + sortHead('Due', 'due', 'khReview') + th('<span class="sr-only">Actions</span>', 'table__column--actions');
+    const head = selAllCheck('khReview', page.map(x => x.d.id)) + sortHead('Document', 'name', 'khReview') + th('Reason') + th('Owner') + sortHead('Due', 'due', 'khReview') + th('<span class="sr-only">Actions</span>', 'table__column--actions');
     const bulk = bulkBar('khReview', btn('Verify selected', { v: 'ghost', size: 'sm', icon: 'shield-check', act: 'kh-verify-sel' }) + btn('Ask owners', { v: 'ghost', size: 'sm', icon: 'send', act: 'kh-ask-sel' }));
-    return toolbar + table({ label: 'Due for review', head, rows: page.map(reviewRow), foot: pager(rows.length, 'khReview', 20) }) + bulk;
+    return toolbar + table({ label: 'Due for re-verification', head, rows: page.map(reviewRow), foot: pager(rows.length, 'khReview', 20) }) + bulk;
   }
   function dueCell(x) {
     if (!x.due) return '<span class="muted">—</span>';
     const late = x.due < Date.now(), days = Math.max(1, Math.round(Math.abs(Date.now() - x.due) / DAY));
     return `<div class="stack"><span class="${late ? 'text-warning medium' : ''} res-nowrap">${esc(fmtDate(x.due))}</span><span class="cell-sub res-nowrap">${late ? `${plural(days, 'day')} overdue` : esc(relFuture(x.due))}</span></div>`;
   }
+  const canRepublish = () => can('ingestion.run');
   function primaryAction(x) {
     const d = x.d;
     if (x.reason !== 'source') return btn('Verify', { size: 'sm', icon: 'shield-check', act: 'res-verify', data: { id: d.id } });
-    const ok = can('ingestion.run');
-    return btn('Reprocess', { size: 'sm', icon: 'refresh', act: 'kh-reprocess', data: { id: d.id }, disabled: !ok || d.status === 'processing', tip: ok ? '' : 'Ask someone who can run syncs' });
+    const ok = canRepublish();
+    return btn('Republish', { size: 'sm', icon: 'refresh', act: 'kh-reprocess', data: { id: d.id }, disabled: !ok || d.status === 'processing', tip: ok ? 'Publish the version that changed at the source' : 'Ask someone who can run syncs' });
   }
   function reviewRow(x) {
     const d = x.d, R = REASONS[x.reason];
@@ -128,15 +132,15 @@
     return [
       { label: 'Open', icon: 'file-text', run: () => go('/doc/' + d.id) },
       x.reason !== 'source' && { label: 'Mark as verified', icon: 'shield-check', run: () => A['res-verify']({ dataset: { id: d.id } }) },
-      x.reason === 'source' && { label: 'Reprocess', icon: 'refresh', disabled: !can('ingestion.run') || d.status === 'processing', run: () => A['kh-reprocess']({ dataset: { id: d.id } }) },
+      x.reason === 'source' && { label: 'Republish', icon: 'refresh', disabled: !canRepublish() || d.status === 'processing', run: () => A['kh-reprocess']({ dataset: { id: d.id } }) },
       { label: d.reviewRequested ? 'Ask owner again' : 'Ask owner to review', icon: 'send', run: () => askOwners([d]) },
       { sep: true },
       { label: 'Edit details…', icon: 'pencil', run: () => A['res-edit']({ dataset: { id: d.id } }) },
     ].filter(Boolean);
   };
   A['kh-reprocess'] = el => {
-    const d = docById(el.dataset.id); if (!d || !X.res.canEditRes(d) || !can('ingestion.run')) return;
-    if (X.processDocs) X.processDocs([d], { msg: `Reprocessing ${d.name}` });
+    const d = docById(el.dataset.id); if (!d || !X.res.canEditRes(d) || !canRepublish()) return;
+    if (X.processDocs) X.processDocs([d], { msg: `Republishing ${d.name}` });
     else go('/sources');
   };
   function askOwners(docs) {
@@ -144,7 +148,7 @@
     const at = Date.now(), prev = docs.map(d => [d, d.reviewRequested]);
     const owners = [...new Set(docs.map(ownerOf))];
     docs.forEach(d => { d.reviewRequested = at; });
-    audit(docs.length === 1 ? 'Asked the owner to review a resource' : `Asked owners to review ${plural(docs.length, 'resource')}`, docs.length === 1 ? `${docs[0].name} → ${owners[0]}` : owners.join(', '));
+    audit(docs.length === 1 ? 'Asked the owner to review a document' : `Asked owners to review ${plural(docs.length, 'document')}`, docs.length === 1 ? `${docs[0].name} → ${owners[0]}` : owners.join(', '));
     ui('khReview').sel = {}; refresh();
     toast(owners.length === 1 ? `Sent to ${owners[0]}` : `Sent to ${plural(owners.length, 'owner')}`, { action: { label: 'Undo', run: () => { prev.forEach(([d, v]) => { if (v) d.reviewRequested = v; else delete d.reviewRequested; }); refresh(); } } });
   }
@@ -153,32 +157,32 @@
   A['kh-verify-sel'] = () => {
     const picked = selectedReview(), docs = picked.filter(x => x.reason !== 'source').map(x => x.d).filter(X.res.canEditRes);
     const skipped = picked.length - docs.length;
-    if (!docs.length) { toast('Reprocess resources that changed at the source before verifying them', { tone: 'accent' }); return; }
+    if (!docs.length) { toast('Republish documents that changed at the source before verifying them', { tone: 'accent' }); return; }
     const prev = docs.map(d => [d, d.verify ? { ...d.verify } : null]), at = Date.now();
     docs.forEach(d => { d.verify = { state: 'verified', by: me().name, at, due: at + 180 * DAY }; });
-    audit(docs.length === 1 ? 'Verified a resource' : `Verified ${plural(docs.length, 'resource')}`, docs.length === 1 ? docs[0].name : [...new Set(docs.map(kbName))].join(', '));
+    audit(docs.length === 1 ? 'Verified a document' : `Verified ${plural(docs.length, 'document')}`, docs.length === 1 ? docs[0].name : [...new Set(docs.map(kbName))].join(', '));
     ui('khReview').sel = {}; refresh();
-    toast(`Verified ${plural(docs.length, 'resource')} until ${fmtDate(at + 180 * DAY)}${skipped ? ` · ${skipped} changed at the source need reprocessing first` : ''}`, { action: { label: 'Undo', run: () => { prev.forEach(([d, v]) => { if (v) d.verify = v; else delete d.verify; }); refresh(); } } });
+    toast(`Verified ${plural(docs.length, 'document')} until ${fmtDate(at + 180 * DAY)}${skipped ? ` · ${skipped} changed at the source need republishing first` : ''}`, { action: { label: 'Undo', run: () => { prev.forEach(([d, v]) => { if (v) d.verify = v; else delete d.verify; }); refresh(); } } });
   };
 
-  /* ═══════════════ Details (metadata quality) ═══════════════ */
+  /* ── Missing details (metadata quality) ── */
   function tabDetails(all) {
     const u = ui('khDetails', { gap: '', kb: '', sel: {}, sug: {} });
-    if (!all.length) return emptyState({ icon: 'check-circle', tone: 'success', title: 'Every resource is described', desc: 'Resources you look after all have a topic, an owner and a summary.', boxed: true });
+    if (!all.length) return emptyState({ icon: 'check-circle', tone: 'success', title: 'Every document is described', desc: 'Documents you look after all have a topic, an owner and a summary.', boxed: true });
     pruneSel(u, new Set(all.map(x => x.d.id)));
     const counts = Object.fromEntries(Object.keys(GAPS).map(g => [g, all.filter(x => x.gaps.includes(g)).length]));
-    if (!u.gap) u.gap = Object.keys(GAPS).find(g => counts[g]) || 'all';
-    const gapOpts = [...Object.keys(GAPS).filter(g => counts[g] || g === u.gap).map(g => [g, `${GAPS[g].label} · ${fmtNum(counts[g])}`]), ['all', `All · ${fmtNum(all.length)}`]];
+    if (u.gap && !GAPS[u.gap]) u.gap = '';
+    const gapOpts = Object.keys(GAPS).filter(g => counts[g] || g === u.gap).map(g => [g, `${GAPS[g].label} · ${fmtNum(counts[g])}`]);
     const kbOpts = [...new Map(all.map(x => [x.d.kb, kbName(x.d)])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
-    const toolbar = `<div class="toolbar">${seg({ value: u.gap, options: gapOpts, act: 'kh-gap', label: 'Missing' })}${searchField({ uiKey: 'khDetails', placeholder: 'Search resources' })}${filterButton('Knowledge base', 'khDetails', 'kb', kbOpts)}${clearFilters('khDetails', ['kb'])}</div>`;
-    let rows = all.filter(x => (u.gap === 'all' || x.gaps.includes(u.gap)) && (!u.kb || x.d.kb === u.kb) && matchesQ('khDetails', x.d.name, kbName(x.d)));
+    const toolbar = `<div class="toolbar">${searchField({ uiKey: 'khDetails', placeholder: 'Search documents' })}${filterButton('Missing', 'khDetails', 'gap', gapOpts)}${filterButton('Knowledge base', 'khDetails', 'kb', kbOpts)}${clearFilters('khDetails', ['gap', 'kb'])}</div>`;
+    let rows = all.filter(x => (!u.gap || x.gaps.includes(u.gap)) && (!u.kb || x.d.kb === u.kb) && matchesQ('khDetails', x.d.name, kbName(x.d)));
     rows = applySort(rows, 'khDetails', { name: x => x.d.name.toLowerCase(), updated: x => x.d.updated });
     if (!rows.length) {
-      if (u.q || u.kb) return toolbar + noMatches('khDetails', ['kb'], 'resources');
-      return toolbar + emptyState({ icon: 'check-circle', tone: 'success', title: `Every resource has ${GAPS[u.gap]?.noun || 'its details'}`, boxed: true, compact: true });
+      if (u.q || u.kb) return toolbar + noMatches('khDetails', ['gap', 'kb'], 'documents');
+      return toolbar + emptyState({ icon: 'check-circle', tone: 'success', title: `Every document has ${GAPS[u.gap]?.noun || 'its details'}`, boxed: true, compact: true });
     }
     const page = paginate(rows, 'khDetails', 20);
-    const head = selAllCheck('khDetails', page.map(x => x.d.id)) + sortHead('Resource', 'name', 'khDetails') + th('Missing') + sortHead('Updated', 'updated', 'khDetails', 'table__column--hide-sm') + th('<span class="sr-only">Actions</span>', 'table__column--actions');
+    const head = selAllCheck('khDetails', page.map(x => x.d.id)) + sortHead('Document', 'name', 'khDetails') + th('Missing') + sortHead('Updated', 'updated', 'khDetails', 'table__column--hide-sm') + th('<span class="sr-only">Actions</span>', 'table__column--actions');
     const bulk = bulkBar('khDetails', btn('Apply topic', { v: 'ghost', size: 'sm', icon: 'tag', iconRight: 'chevron-down', menu: 'kh-topic', data: { ids: selIds('khDetails').join(',') } }));
     return toolbar + table({ label: 'Missing details', head, rows: page.map(x => detailRow(x, u)), foot: pager(rows.length, 'khDetails', 20) }) + bulk;
   }
@@ -202,18 +206,17 @@
       <td class="table__cell table__cell--hide-sm muted res-nowrap" title="${esc(fmtDateTime(d.updated))}">${rel(d.updated)}</td>
       <td class="table__cell table__cell--actions"><div class="row gap-4 none">${actions}</div></td></tr>`;
   }
-  A['kh-gap'] = el => { const u = ui('khDetails'); u.gap = el.dataset.value; u.page = 1; u.sel = {}; refresh(); };
 
-  /** Add a topic to resources (keeps any topics they inherit from their knowledge base). */
+  /** Add a topic to documents (keeps any topics they inherit from their knowledge base). */
   function applyTopic(ids, tid) {
     const docs = ids.map(docById).filter(d => d && X.res.canEditRes(d) && !res(d).topics.includes(tid));
     if (!docs.length) { toast(`Already tagged with “${topicName(tid)}”`, { tone: 'accent' }); return; }
     const prev = docs.map(d => [d, d.topics ? [...d.topics] : undefined]);
     docs.forEach(d => { d.topics = [...res(d).topics, tid]; });
     const u = ui('khDetails'); u.sel = {}; docs.forEach(d => { if (u.sug) delete u.sug[d.id]; });
-    audit(docs.length === 1 ? 'Added a topic to a resource' : `Added a topic to ${plural(docs.length, 'resource')}`, `${topicName(tid)} → ${docs.length === 1 ? docs[0].name : plural(docs.length, 'resource')}`);
+    audit(docs.length === 1 ? 'Added a topic to a document' : `Added a topic to ${plural(docs.length, 'document')}`, `${topicName(tid)} → ${docs.length === 1 ? docs[0].name : plural(docs.length, 'document')}`);
     refresh();
-    toast(docs.length === 1 ? `Added “${topicName(tid)}” to ${docs[0].name}` : `Added “${topicName(tid)}” to ${plural(docs.length, 'resource')}`, { action: { label: 'Undo', run: () => { prev.forEach(([d, t]) => { if (t) d.topics = t; else delete d.topics; }); refresh(); } } });
+    toast(docs.length === 1 ? `Added “${topicName(tid)}” to ${docs[0].name}` : `Added “${topicName(tid)}” to ${plural(docs.length, 'document')}`, { action: { label: 'Undo', run: () => { prev.forEach(([d, t]) => { if (t) d.topics = t; else delete d.topics; }); refresh(); } } });
   }
   MENUS['kh-topic'] = el => {
     const ids = (el.dataset.ids || '').split(',').filter(Boolean); if (!ids.length) return [];
@@ -222,7 +225,7 @@
     return tree.flatMap(dm => [{ section: dm.name }, ...dm.children.map(t => ({ label: t.name, icon: 'tag', run: () => applyTopic(ids, t.id) }))]);
   };
 
-  /** Mock tagging: topics whose words share a stem with the title or the resource type. */
+  /** Mock tagging: topics whose words share a stem with the title or the document type. */
   function suggestTopics(d) {
     const title = tokens(d.name.replace(/\.[a-z0-9]+$/i, '')).filter(w => w.length >= 4);
     const kind = tokens(kindMeta(res(d).kind).label).filter(w => w.length >= 4);
@@ -239,11 +242,11 @@
   A['kh-sug-close'] = el => { delete ui('khDetails').sug[el.dataset.id]; refresh(); };
   A['kh-sug-accept'] = el => applyTopic([el.dataset.id], el.dataset.topic);
 
-  /* ═══════════════ Duplicates ═══════════════ */
+  /* ── Possible duplicates ── */
   const pairByKey = key => duplicateCandidates().find(p => p.key === key);
   function tabDups(pairs) {
-    if (!pairs.length) return emptyState({ icon: 'copy', tone: 'success', title: 'No duplicates found', desc: 'Each resource you look after appears once.', boxed: true });
-    const head = th('Resources') + th('Reason') + th('Updated', 'table__column--hide-sm') + th('<span class="sr-only">Actions</span>', 'table__column--actions');
+    if (!pairs.length) return emptyState({ icon: 'copy', tone: 'success', title: 'No duplicates found', desc: 'Each document you look after appears once.', boxed: true });
+    const head = th('Documents') + th('Reason') + th('Updated', 'table__column--hide-sm') + th('<span class="sr-only">Actions</span>', 'table__column--actions');
     return table({ label: 'Possible duplicates', head, rows: pairs.map(dupRow) });
   }
   const dupSide = (d, tag) => `<div class="kh-dup-doc">${fileIcon(d.type, 'sm')}<div class="kh-min"><div class="cell-title truncate" title="${esc(d.name)}">${esc(d.name)}</div><div class="cell-sub truncate">${tag} · ${esc(kbName(d))}</div></div></div>`;
@@ -265,7 +268,7 @@
   };
   A['kh-dup-open'] = el => openDrawer('kh-dup', { key: el.dataset.key });
 
-  /** Who points at a resource: collections (names only when the caller can see them), saved lists and recent reads. */
+  /** Who points at a document: collections (names only when the caller can see them), saved lists and recent reads. */
   function refsOf(d) {
     const cols = (D.collections || []).filter(c => !c.archived && (c.items || []).some(i => i.doc === d.id));
     const seen = cols.filter(canSeeCollection);
@@ -285,7 +288,7 @@
       <div class="kh-cmp__top">${chip(`${keep ? 'Keep' : 'Archive'} · ${newer ? 'newer' : 'older'}`, { size: 'sm', tone: keep ? 'success' : 'default', icon: keep ? 'check' : 'archive' })}<span class="grow"></span>${keep ? '' : btn('Keep this one', { v: 'ghost', size: 'sm', act: 'kh-dup-swap', data: { key } })}${btn('Open', { v: 'ghost', size: 'sm', icon: 'arrow-up-right', href: '/doc/' + d.id })}</div>
       <div class="row gap-12">${fileIcon(d.type)}<div class="grow kh-min"><div class="kh-cmp__title">${esc(d.name)}</div><div class="t-xs muted">Updated ${esc(fmtDate(d.updated))}</div></div></div>
       <div class="kh-cmp__block"><h3 class="t-label">Details</h3>${X.res.details(d)}</div>
-      <div class="kh-cmp__block"><h3 class="t-label">Opening text</h3>${excerpt ? `<p class="kh-cmp__text">${esc(excerpt)}</p>` : '<p class="t-sm muted">No text yet. It hasn’t been processed.</p>'}</div>
+      <div class="kh-cmp__block"><h3 class="t-label">Opening text</h3>${excerpt ? `<p class="kh-cmp__text">${esc(excerpt)}</p>` : '<p class="t-sm muted">No text yet. It hasn’t been published.</p>'}</div>
       <div class="kh-cmp__block"><h3 class="t-label">Referenced by</h3>${refs.length ? `<ul class="kh-refs">${refs.join('')}</ul>` : '<p class="t-sm muted">Nothing points to it.</p>'}</div>
     </section>`;
   }
@@ -345,51 +348,163 @@
   function dismiss(key) {
     const p = pairByKey(key); if (!p) return;
     (D.dupDismissed ??= []).push(key);
-    audit('Marked resources as not duplicates', `${p.keep.name} · ${p.dup.name}`);
+    audit('Marked documents as not duplicates', `${p.keep.name} · ${p.dup.name}`);
     if (S.drawer?.name === 'kh-dup') S.drawer = null;
     refresh();
     toast('Marked as not duplicates', { action: { label: 'Undo', run: () => { D.dupDismissed = (D.dupDismissed || []).filter(k => k !== key); refresh(); } } });
   }
 
-  /* ═══════════════ Topics (taxonomy) ═══════════════ */
-  function tabTopics() {
-    const u = ui('khTopics', { edit: '', name: '', err: '' }), admin = isAdmin(), n = topicCounts();
-    const all = D.topics || [], domains = all.filter(t => !t.parent && !t.archived);
-    const live = all.filter(t => t.parent && !t.archived).length;
-    const toolbar = `<div class="toolbar"><span class="t-sm muted">${esc(`${plural(live, 'topic')} in ${plural(domains.length, 'domain')}`)}${admin ? '' : ' · Only workspace admins can change topics'}</span>${admin ? `<div class="toolbar__end">${btn('Add domain', { size: 'sm', icon: 'plus', act: 'kh-domain-add', disabled: u.edit === 'new:' })}</div>` : ''}</div>`;
-    const blocks = domains.map(dm => domainBlock(dm, all.filter(t => t.parent === dm.id && (admin || !t.archived)), n, u, admin));
+  /* ═══════════════ Topics tab ═══════════════ */
+  function topics() {
+    return gate({
+      loading: () => skelRows(6),
+      error: () => errorState({ title: 'Topics didn’t load' }),
+      empty: () => emptyState({ icon: 'tag', title: 'No topics yet', desc: canManageTaxonomy() ? 'Add a domain, then the topics people browse by.' : 'A workspace admin can add topics.', boxed: true }),
+      ok: () => {
+        const n = topicCounts();
+        return `<div class="kh gov"><p class="gov-summary gov-summary--quiet">${ic('info', 'i-sm')}<span>Topics describe what documents are about. Types (Policy, Syllabus…) describe what they are.</span></p>${proposalsHtml()}${taxonomyHtml(n)}</div>`;
+      },
+    });
+  }
+
+  /* ── Proposed by the assistant ── */
+  /** Every open proposal, so reviewers see what's pending even when admins decide. Proposals come from all open
+      submissions (names only); document titles are listed only for documents the caller can see. */
+  const visibleProposals = () => { D.docs.filter(d => !d.archived && stageOf(d) === 'review' && !d.ai).forEach(aiOf); return openProposals(); };
+  const domains = () => (D.topics || []).filter(t => !t.parent && !t.archived);
+  function propForm(p) {
+    const all = ui('govProp', {});
+    return (all[p.id] ??= { name: p.name, parent: p.parent && topicById(p.parent) && !topicById(p.parent).archived ? p.parent : '__new', dname: p.name, err: '' });
+  }
+  function propDocs(p) {
+    const docs = (p.docs || []).map(docById).filter(Boolean), seen = docs.filter(canSeeDoc), hidden = docs.length - seen.length;
+    const link = d => {
+      const href = stageOf(d) === 'review' ? `/documents?tab=review&sel=${d.id}` : `/documents?tab=all&sel=${d.id}`;
+      return `<a class="gov-prop__doc link" href="#${esc(href)}" title="${esc(d.name)}">${fileIcon(d.type, 'sm')}<span class="truncate">${esc(d.name)}</span></a>`;
+    };
+    const from = seen.length ? `Suggested by ${plural(docs.length, 'document')}` : `Suggested by ${plural(docs.length, 'document')} in knowledge bases you don’t review`;
+    return `<div class="gov-prop__docs"><span class="t-xs muted gov-prop__from">${esc(from)}</span>${seen.map(link).join('')}${hidden && seen.length ? `<span class="t-xs muted">${esc(`+${hidden} you can’t see`)}</span>` : ''}</div>`;
+  }
+  function propCard(p, admin) {
+    const head = `<span class="item-icon item-icon--accent item-icon--sm" aria-hidden="true">${ic('sparkles')}</span>`;
+    if (!admin) {
+      const dom = p.parent && topicById(p.parent);
+      return `<article class="gov-prop"><div class="gov-prop__main"><div class="gov-prop__title">${head}<span class="medium truncate">${esc(p.name)}</span><span class="t-sm muted truncate">${dom ? `in ${esc(dom.name)}` : 'New domain'}</span></div>${propDocs(p)}</div></article>`;
+    }
+    const f = propForm(p), id = esc(p.id);
+    const opts = [...domains().map(d => [d.id, d.name]), ['__new', 'New domain…']];
+    const nameF = field({ id: `gov-pn-${id}`, label: 'Topic name', error: f.err, control: input({ id: `gov-pn-${id}`, bind: `govProp.${p.id}.name`, value: f.name, size: 'sm', invalid: !!f.err, onEnter: 'gov-prop-accept', attrs: `maxlength="60" data-id="${id}"` }) });
+    const domF = field({ id: `gov-pd-${id}`, label: 'Domain', control: select({ id: `gov-pd-${id}`, bind: `govProp.${p.id}.parent`, value: f.parent, options: opts, change: 'gov-prop-domain', size: 'sm' }) });
+    const newF = f.parent === '__new' ? field({ id: `gov-pdn-${id}`, label: 'New domain name', control: input({ id: `gov-pdn-${id}`, bind: `govProp.${p.id}.dname`, value: f.dname, size: 'sm', attrs: 'maxlength="60"' }) }) : '';
+    const acts = btn('Accept', { v: 'primary', size: 'sm', icon: 'check', act: 'gov-prop-accept', data: { id: p.id } })
+      + btn('Merge into…', { size: 'sm', iconRight: 'chevron-down', menu: 'gov-prop-merge', data: { id: p.id } })
+      + btn('Dismiss', { v: 'ghost', size: 'sm', act: 'gov-prop-dismiss', data: { id: p.id } });
+    return `<article class="gov-prop"><div class="gov-prop__main"><div class="gov-prop__fields">${head}${nameF}${domF}${newF}</div>${propDocs(p)}</div><div class="gov-prop__acts">${acts}</div></article>`;
+  }
+  function proposalsHtml() {
+    const list = visibleProposals(); if (!list.length) return '';
+    const admin = canManageTaxonomy();
+    return section('Proposed by the assistant', `<div class="gov-props">${list.map(p => propCard(p, admin)).join('')}</div>`, {
+      desc: admin ? 'Accepting adds the topic and tags the documents that suggested it.' : 'Only workspace admins change topics.',
+      actions: chip(fmtNum(list.length), { size: 'sm', tone: 'accent' }),
+    });
+  }
+  /** Snapshot of everything a proposal decision touches (Undo). */
+  function propSnap(p) {
+    return { topics: [...(D.topics || [])], p: { ...p, docs: [...(p.docs || [])] }, docs: (p.docs || []).map(docById).filter(Boolean).map(d => [d, snapDoc(d)]) };
+  }
+  function propUndo(p, snap, msg) {
+    return { label: 'Undo', run: () => {
+      D.topics = snap.topics;
+      Object.keys(p).forEach(k => delete p[k]); Object.assign(p, snap.p);
+      snap.docs.forEach(([d, s]) => restoreDoc(d, s));
+      audit('Undid a topic decision', p.name); refresh(); toast(msg, { tone: 'accent' });
+    } };
+  }
+  const propOf = el => { const p = proposalById(el.dataset.id || el.closest?.('[data-id]')?.dataset.id); return p && p.status === 'open' ? p : null; };
+  A['gov-prop-domain'] = () => refresh();
+  A['gov-prop-accept'] = el => {
+    const p = propOf(el); if (!p || !canManageTaxonomy()) return;
+    const f = propForm(p), name = (f.name || '').trim().replace(/\s+/g, ' ');
+    const newDom = f.parent === '__new' || !topicById(f.parent), dname = (f.dname || '').trim().replace(/\s+/g, ' ') || name;
+    const fail = msg => { f.err = msg; refresh(); requestAnimationFrame(() => $(`#gov-pn-${p.id}`)?.focus()); };
+    if (!name) return fail('Enter a name.');
+    if (!newDom && (D.topics || []).some(t => !t.archived && t.parent === f.parent && fold(t.name) === fold(name))) return fail(`${topicName(f.parent)} already has “${name}”. Merge into it instead.`);
+    if (newDom && domains().some(d => fold(d.name) === fold(dname))) return fail(`A domain called “${dname}” already exists. Pick it from the list.`);
+    const snap = propSnap(p);
+    let parent = newDom ? null : f.parent;
+    if (newDom) { const dm = { id: uid('d'), name: dname }; D.topics.push(dm); parent = dm.id; }
+    const t = acceptProposal(p, { name, parent });
+    if (!t) { D.topics = snap.topics; return; }
+    delete S.ui.govProp?.[p.id];
+    const n = snap.docs.length;
+    refresh();
+    toast(`Added “${t.name}” to ${topicName(parent)}${n ? ` · ${plural(n, 'document')} tagged` : ''}`, { action: propUndo(p, snap, `“${name}” removed`) });
+  };
+  A['gov-prop-dismiss'] = el => {
+    const p = propOf(el); if (!p || !canManageTaxonomy()) return;
+    const snap = propSnap(p);
+    dismissProposal(p); delete S.ui.govProp?.[p.id]; refresh();
+    toast(`Dismissed “${p.name}”`, { action: propUndo(p, snap, `“${p.name}” is proposed again`) });
+  };
+  MENUS['gov-prop-merge'] = el => {
+    const p = propOf(el); if (!p || !canManageTaxonomy()) return [];
+    const tree = topicTree().filter(dm => dm.children.length);
+    if (!tree.length) return [{ label: 'No topics yet', disabled: true }];
+    return tree.flatMap(dm => [{ section: dm.name }, ...dm.children.map(t => ({ label: t.name, icon: 'tag', run: () => {
+      const snap = propSnap(p);
+      mergeProposal(p, t.id); delete S.ui.govProp?.[p.id]; refresh();
+      toast(`Merged “${p.name}” into ${t.name}${snap.docs.length ? ` · ${plural(snap.docs.length, 'document')} tagged` : ''}`, { action: propUndo(p, snap, `“${p.name}” is proposed again`) });
+    } }))]);
+  };
+
+  /* ── Taxonomy editor ── */
+  function taxonomyHtml(n) {
+    const u = ui('khTopics', { edit: '', name: '', err: '' }), admin = canManageTaxonomy();
+    const all = D.topics || [], doms = all.filter(t => !t.parent && !t.archived);
+    const liveN = all.filter(t => t.parent && !t.archived).length;
+    const add = admin ? btn('Add domain', { size: 'sm', icon: 'plus', act: 'kh-domain-add', disabled: u.edit === 'new:' }) : '';
+    const desc = esc(`${plural(liveN, 'topic')} in ${plural(doms.length, 'domain')}`) + (admin ? '' : ' · Only workspace admins change topics.');
+    const blocks = doms.map(dm => domainBlock(dm, all.filter(t => t.parent === dm.id && (admin || !t.archived)), n, u, admin));
     if (u.edit === 'new:') blocks.push(`<section class="kh-domain"><div class="kh-domain__head">${editor(u, 'Domain name')}</div></section>`);
-    if (!blocks.length) return toolbar + emptyState({ icon: 'tag', title: 'No topics yet', desc: admin ? 'Add a domain, then the topics people browse by.' : 'A workspace admin can add topics.', actions: admin ? btn('Add domain', { v: 'primary', icon: 'plus', act: 'kh-domain-add' }) : '', boxed: true });
-    return toolbar + `<div class="kh-domains">${blocks.join('')}</div>`;
+    const body = blocks.length ? `<div class="kh-domains">${blocks.join('')}</div>`
+      : emptyState({ icon: 'tag', title: 'No topics yet', desc: admin ? 'Add a domain, then the topics people browse by.' : 'A workspace admin can add topics.', actions: admin ? btn('Add domain', { v: 'primary', icon: 'plus', act: 'kh-domain-add' }) : '', boxed: true });
+    return section('Topics', body, { desc, actions: add });
   }
   function editor(u, label) {
     return `<div class="kh-edit"><div class="kh-edit__row">${input({ id: 'kh-topic-name', bind: 'khTopics.name', value: u.name, size: 'sm', onEnter: 'kh-topic-save', invalid: !!u.err, attrs: `maxlength="60" aria-label="${esc(label)}"`, placeholder: label })}${btn('Save', { size: 'sm', v: 'primary', act: 'kh-topic-save' })}${btn('Cancel', { size: 'sm', v: 'ghost', act: 'kh-topic-cancel' })}</div>${u.err ? `<div class="field-error" id="kh-topic-name-err" role="alert">${ic('alert-circle')}<span>${esc(u.err)}</span></div>` : ''}</div>`;
   }
-  const countLink = (id, count) => (count ? `<a class="kh-count link" href="#${catalogHref({ filters: { topic: [id] } })}">${plural(count, 'resource')}</a>` : '<span class="kh-count muted">Unused</span>');
-  function domainBlock(dm, topics, n, u, admin) {
+  /** "12 published · 2 in review" — published links to Browse, in review to the queue. */
+  function countLinks(id, pub, rv) {
+    const a = pub ? `<a class="kh-count link" href="#${catalogHref({ filters: { topic: [id] } })}">${esc(`${fmtNum(pub)} published`)}</a>` : '';
+    const b = rv ? `<a class="kh-count link gov-inreview" href="#/documents?tab=review">${esc(`${fmtNum(rv)} in review`)}</a>` : '';
+    return a || b ? `<span class="gov-counts">${[a, b].filter(Boolean).join('<span class="kh-count muted" aria-hidden="true">·</span>')}</span>` : '<span class="kh-count muted">Unused</span>';
+  }
+  function domainBlock(dm, list, n, u, admin) {
     const head = u.edit === dm.id ? editor(u, 'Domain name')
-      : `<h3 class="kh-domain__name">${esc(dm.name)}</h3>${countLink(dm.id, n.domain(dm.id))}<span class="grow"></span>${admin ? iconBtn('pencil', 'Rename domain', { size: 'sm', act: 'kh-topic-rename', data: { id: dm.id } }) + btn('Add topic', { size: 'sm', v: 'ghost', icon: 'plus', act: 'kh-topic-add', data: { id: dm.id } }) : ''}`;
-    const rows = topics.map(t => {
+      : `<h3 class="kh-domain__name">${esc(dm.name)}</h3>${countLinks(dm.id, n.domain(dm.id), n.reviewDomain(dm.id))}<span class="grow"></span>${admin ? iconBtn('pencil', 'Rename domain', { size: 'sm', act: 'kh-topic-rename', data: { id: dm.id } }) + btn('Add topic', { size: 'sm', v: 'ghost', icon: 'plus', act: 'kh-topic-add', data: { id: dm.id } }) : ''}`;
+    const rows = list.map(t => {
       if (u.edit === t.id) return `<li class="kh-topic">${editor(u, 'Topic name')}</li>`;
-      const c = n.topic(t.id);
+      const c = n.topic(t.id), r = n.review(t.id);
       if (t.archived) return `<li class="kh-topic is-archived">${ic('archive', 'i-sm muted')}<span class="grow truncate">${esc(t.name)}</span>${chip('Archived', { size: 'sm' })}${btn('Restore', { size: 'sm', v: 'ghost', act: 'kh-topic-restore', data: { id: t.id } })}</li>`;
-      const archive = c
-        ? `<span class="kh-tipwrap" data-tip="${esc(`Used by ${plural(c, 'resource')}. Move them to another topic first.`)}" tabindex="0">${btn('', { v: 'ghost', size: 'sm', icon: 'archive', muted: true, disabled: true, aria: 'aria-label="Archive topic"' })}</span>`
+      const used = c + r;
+      const archive = used
+        ? `<span class="kh-tipwrap" data-tip="${esc(`Used by ${plural(used, 'document')}. Move them to another topic first.`)}" tabindex="0">${btn('', { v: 'ghost', size: 'sm', icon: 'archive', muted: true, disabled: true, aria: 'aria-label="Archive topic"' })}</span>`
         : iconBtn('archive', 'Archive topic', { size: 'sm', act: 'kh-topic-archive', data: { id: t.id } });
       const acts = admin ? `<span class="kh-topic__acts">${iconBtn('pencil', 'Rename topic', { size: 'sm', act: 'kh-topic-rename', data: { id: t.id } })}${archive}</span>` : '';
-      return `<li class="kh-topic">${ic('tag', 'i-sm muted')}<span class="grow truncate kh-topic__name">${esc(t.name)}</span>${countLink(t.id, c)}${acts}</li>`;
+      return `<li class="kh-topic">${ic('tag', 'i-sm muted')}<span class="grow truncate kh-topic__name">${esc(t.name)}</span>${countLinks(t.id, c, r)}${acts}</li>`;
     });
     if (u.edit === 'new:' + dm.id) rows.push(`<li class="kh-topic">${editor(u, 'Topic name')}</li>`);
     return `<section class="kh-domain"><div class="kh-domain__head">${head}</div>${rows.length ? `<ul class="kh-topics">${rows.join('')}</ul>` : '<p class="kh-domain__empty t-sm muted">No topics yet.</p>'}</section>`;
   }
   const focusEditor = () => requestAnimationFrame(() => { const el = $('#kh-topic-name'); if (el) { el.focus(); el.select?.(); } });
-  function startEdit(edit, name = '') { if (!isAdmin()) return; Object.assign(ui('khTopics'), { edit, name, err: '' }); refresh(); focusEditor(); }
+  function startEdit(edit, name = '') { if (!canManageTaxonomy()) return; Object.assign(ui('khTopics'), { edit, name, err: '' }); refresh(); focusEditor(); }
   A['kh-domain-add'] = () => startEdit('new:');
   A['kh-topic-add'] = el => startEdit('new:' + el.dataset.id);
   A['kh-topic-rename'] = el => { const t = topicById(el.dataset.id); if (t) startEdit(t.id, t.name); };
   A['kh-topic-cancel'] = () => { Object.assign(ui('khTopics'), { edit: '', name: '', err: '' }); refresh(); };
   A['kh-topic-save'] = () => {
-    if (!isAdmin()) return;
+    if (!canManageTaxonomy()) return;
     const u = ui('khTopics'), name = (u.name || '').trim().replace(/\s+/g, ' ');
     const isNew = u.edit.startsWith('new:'), cur = isNew ? null : topicById(u.edit);
     if (!isNew && !cur) return A['kh-topic-cancel']();
@@ -409,17 +524,20 @@
     const last = parent ? D.topics.map(x => x.parent === parent || x.id === parent).lastIndexOf(true) : D.topics.length - 1;
     D.topics.splice(last + 1, 0, t);
     audit(parent ? 'Added a topic' : 'Added a domain', parent ? `${name} → ${topicName(parent)}` : name); refresh();
-    toast(parent ? `Added “${name}” to ${topicName(parent)}` : `Added the domain “${name}”`, { action: { label: 'Undo', run: () => { if (topicCounts().topic(t.id)) t.archived = true; else D.topics = D.topics.filter(x => x !== t); refresh(); } } });
+    toast(parent ? `Added “${name}” to ${topicName(parent)}` : `Added the domain “${name}”`, { action: { label: 'Undo', run: () => { const c = topicCounts(); if (c.topic(t.id) || c.review(t.id)) t.archived = true; else D.topics = D.topics.filter(x => x !== t); refresh(); } } });
   };
   A['kh-topic-archive'] = el => {
-    const t = topicById(el.dataset.id); if (!t || !isAdmin() || topicCounts().topic(t.id)) return;
+    const t = topicById(el.dataset.id); if (!t || !canManageTaxonomy()) return;
+    const c = topicCounts(); if (c.topic(t.id) || c.review(t.id)) return;
     t.archived = true; audit('Archived a topic', t.name); refresh();
     toast(`Archived “${t.name}”`, { action: { label: 'Undo', run: () => { delete t.archived; refresh(); } } });
   };
   A['kh-topic-restore'] = el => {
-    const t = topicById(el.dataset.id); if (!t || !isAdmin()) return;
+    const t = topicById(el.dataset.id); if (!t || !canManageTaxonomy()) return;
     delete t.archived; audit('Restored a topic', t.name); refresh(); toast(`Restored “${t.name}”`);
   };
   const prevEsc = A['esc-page'];
-  A['esc-page'] = () => { if (S.cur?.r.page === 'khealth' && S.ui.khTopics?.edit) { A['kh-topic-cancel'](); return true; } return prevEsc ? prevEsc() : false; };
+  A['esc-page'] = () => { if (S.cur?.r.page === 'documentsAdmin' && S.ui.khTopics?.edit) { A['kh-topic-cancel'](); return true; } return prevEsc ? prevEsc() : false; };
+
+  X.gov = { quality, topics, qualityCount, proposalCount };
 })();

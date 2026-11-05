@@ -93,7 +93,7 @@ class RecordingSession(Session):
 
 
 def _context(*, allowed: tuple[str, ...] | None = ("knowledge_search",)) -> AgentContext:
-    return AgentContext(user_id="user", tenant_id="tenant", roles=[], allowed_tool_names=allowed)
+    return AgentContext(user_id="user", tenant_id="tenant", allowed_tool_names=allowed)
 
 
 def _turn(context: AgentContext, user_turn: UserTurn | None = None) -> TurnContext:
@@ -210,7 +210,6 @@ async def test_context_manager_replays_a_plain_recency_window_in_order() -> None
     context = AgentContext(
         user_id="user",
         tenant_id="tenant",
-        roles=[],
         history=(
             ConversationMessage(role="user", content="Oldest question."),
             ConversationMessage(role="assistant", content="Oldest answer."),
@@ -387,6 +386,7 @@ async def test_step_context_is_immutable_and_model_input_is_materialized_per_ste
         "sandbox_guidance",
         "resources",
         "tool_names",
+        "workspace_instructions",
         "tools_enabled",
     )
     assert first.turn_id == turn.id
@@ -432,7 +432,6 @@ async def test_step_selects_only_explicit_or_user_relevant_resources() -> None:
     context = AgentContext(
         user_id="user",
         tenant_id="tenant",
-        roles=[],
         resources=(relevant, unrelated),
     )
     session = _session(ScriptedResponsesTransport([]), ToolRegistry())

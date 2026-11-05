@@ -17,46 +17,57 @@ retrieval step: `agent_base` states the policy without naming tools, and the
 
 ## Conversation state
 
-The server owns conversation history. `POST /agent/chat` carries only the new
-message, `conversation_id`, scope and attachments; there is no `history`
-field (api_contract.md). Before each turn `ChatService` loads, concurrently
-and each in its own transaction, the Collection scope, the conversation's
-referenced resources, this turn's attachments and its history, then stores the
-user message (`ConversationService.start_turn`) and streams.
+The server owns conversation history. A Conversation
+(`workspaces/{w}/conversations/{c}`, owner-private) is created with
+`CreateConversation` (the client may choose the ID with `conversationId`) and
+carries `scope {collections[], spaces[]}`; collections are searched as whole
+subtrees. Each turn is `ConverseConversation` with `{message, attachments[],
+replaceFromMessage}` (`api_design.md` §7); there is no history field.
+`attachments[]` are names of readable DOCUMENT items; uploads are first
+`CreateItem` with `purpose: CONVERSATION_ATTACHMENT` in the caller's PERSONAL
+collection. An attachment or scope entry the caller cannot read is
+`PERMISSION_DENIED`. Before each turn the conversation service re-checks the
+scope (collections plus the collections of `scope.spaces`, or every readable
+collection when the scope is empty) and the attachments, and reads the
+workspace's assistant settings (`instructions` and `answerLength` become the
+static `<workspace_instructions>` section; `capabilities.fileWork` off hides
+the sandbox tools). `ChatService` then loads, concurrently and each in its
+own transaction, the conversation's referenced resources, this turn's
+attachments and its history, stores the user message
+(`ConversationService.start_turn`) and streams the reply.
 
+- **One reply, one response.** The agent samples once per step (a tool round
+  is a step), but the SSE stream is one OpenResponses response: a single
+  `response.created` whose `metadata.message` names the assistant message,
+  the steps' items, deltas, annotations and tool activity with
+  `output_index` continuing across steps, and one terminal event sent after
+  the message is stored — `response.completed` (state `COMPLETED`),
+  `response.incomplete` (the model stopped early; `INTERRUPTED`) or
+  `response.failed` (`FAILED`, `error` is a `google.rpc.Status`). A client
+  that disconnects leaves the partial answer stored as `INTERRUPTED`.
 - **History is answered, active turns.** `ConversationService.history` reads
-  `messages` with `status = 'active'` in sequence order, pairs each answer
-  with its question and skips questions that never got an answer (stopped,
-  failed, still streaming). It is bounded by `BOMESH_MAX_HISTORY_MESSAGES`
-  and reaches the agent as `AgentContext.history`. A conversation id the
-  server has never seen is a new conversation; one owned by someone else is
-  `404`.
-- **`replace_from_turn` replaces, never deletes.** It is the zero-based index
-  of an active user turn (every accepted question counts, answered or not).
-  History and referenced resources are read up to that turn; `start_turn`
-  then, under the conversation row lock, marks that user message and every
-  later message `superseded` (`superseded_at` set) and stores the new message
-  after them. A value above the active user turn count is `422`; equal to it
-  appends. Superseded messages stay for lineage (and the activity dashboard's
-  question count) but never reach model context or `referenced_resources`.
+  active messages in sequence order, pairs each completed answer with its
+  question and skips questions that never got one (stopped, failed, still
+  streaming). It is bounded by `BOMESH_MAX_HISTORY_MESSAGES` and reaches the
+  agent as `AgentContext.history`. A conversation owned by someone else is
+  `PERMISSION_DENIED`.
+- **`replaceFromMessage` replaces, never deletes.** It names an active user
+  message of the conversation. History and referenced resources are read up
+  to that message; `start_turn` then, under the conversation row lock, marks
+  it and every later message superseded and stores the new message after
+  them. Superseded messages stay for lineage (and the activity dashboard's
+  question count) but never reach model context, `ListMessages` or
+  referenced resources.
 - **A late answer stays out.** `finish_turn` names the question it answers;
   if a retry superseded that question while the answer streamed, the answer is
   stored superseded too.
-- **The conversation id is on the stream.** Clients generate
-  `conversation_id`; when one is omitted the server generates it, and every
-  event carrying a `response` snapshot (first `response.created`) reports it
-  as `response.metadata.conversation_id`.
 - **Stateless provider.** OpenRouter rejects `store`/`previous_response_id`,
   so each model request resends the loaded history in full (shaped for
   prompt caching below); no provider-side conversation state exists.
-- **Known limits.** Clients count turns from their local thread. The web
-  client counts every earlier question, so a question whose request was
-  rejected before its stream started (which the server never stored) shifts
-  later indexes by one; Flutter skips questions whose answer never received a
-  `response` snapshot. Retries made before server-owned history (when every
-  retry appended a turn) also misalign old conversations. In the web client,
-  picking an older answer variant and continuing still continues from the
-  latest attempt: the server keeps only the newest attempt of a turn.
+- **Messages are readable later.** `ListMessages` / `GetMessage` return
+  `role`, `text`, `citations[]`, `artifacts[]`, `state` (`COMPLETED`,
+  `INTERRUPTED`, `FAILED`) and `feedback`; ratings go through
+  `SubmitMessageFeedback` and feed knowledge gaps.
 
 ## Request shaping and caching
 
@@ -140,11 +151,13 @@ Evidence → bounded context → citable source references
   (`BOMESH_QUERY_EMBEDDING_CACHE_SIZE`, default 512, `0` disables it), so a
   repeated or retried search skips the embedding round trip. Ingestion
   embeddings never use it.
-- **Authorization first.** The access filter is applied inside Qdrant before
+- **Authorization first.** Retrieval follows `item_model.md` §4.10 and §6:
+  only DOCUMENT items the caller can read now, inside the conversation scope
+  (collection subtrees by `ancestors`, item links never widen it), and only
+  their indexed revision. The access filter is applied inside Qdrant before
   any candidate exists and re-checked before ranking; the reranker and the
   agent only see permitted chunks.
-- `KnowledgeQueryService` (`/knowledge` search API) uses the same retriever with
-  a single query.
+- `SearchItems` uses the same retriever with a single query.
 
 ## Sandbox shell work (`run_shell`, `materialize_sandbox_resource`, `export_sandbox_file`)
 
@@ -226,7 +239,12 @@ the same with every model provider; no provider container or file API is used.
   characters are refused before any Docker call. The file is read with
   `get_archive`, must be a regular file no larger than
   `BOMESH_ARTIFACT_MAX_CONTENT_BYTES`, and is recorded through
-  `ArtifactService.record_generated`; its artifact joins the manifest.
+  `ArtifactService.record_generated` as an Artifact (`kind: FILE`,
+  `workspaces/{w}/artifacts/{a}`, linked to the conversation); its artifact
+  joins the manifest. The file may hold anything the turn saw, so its
+  `sourceItems` are the documents retrieval returned in the turn, the turn's
+  attachments and every resource materialized into the sandbox (the ones
+  the caller can read); a SPACE audience is then checked against them.
 - **Clients see what ran.** The `run_shell` `function_call` (its `commands`
   argument) and its `function_call_output` (the JSON above) are the one
   canonical shell record for the model, the web and the Flutter client; no
@@ -247,72 +265,80 @@ the same with every model provider; no provider container or file API is used.
 
 ## Flutter conversation client
 
-Flutter consumes the existing `POST /api/v1/agent/chat` OpenResponses SSE stream;
-it does not replace tool selection or the intelligent agent loop with a client
-workflow. The message, attachment IDs, selected collection IDs and the
-client-generated `conversation_id` are sent under the active bearer session;
-history is not (the server owns it, see "Conversation state"). The server
-remains the authority for visibility and grounded citations.
+Flutter consumes the `ConverseConversation` OpenResponses SSE stream; it does
+not replace tool selection or the intelligent agent loop with a client
+workflow. The message, attachment item names and `replaceFromMessage` are
+sent under the active bearer session; scope lives on the Conversation and
+history is not sent (see "Conversation state"). The server remains the
+authority for visibility and grounded citations.
 
 - SSE decoding supports fragmented UTF-8, multiline data, event sequencing,
   tool/reasoning activity, artifact revisions and terminal failures.
 - Stop closes the client stream. Retry drops the answer and every later
-  message and re-asks the question with `replace_from_turn` = its index among
-  earlier questions the server accepted (a question counts once its answer
-  received a `response` snapshot). "Edit question" only refills the composer;
-  sending it appends a new turn. Incomplete responses restored after a restart
-  are shown as interrupted rather than still running.
-- Device-local conversations support search, title changes, pins and deletion.
-  Storage is isolated by account and workspace; it is not cross-device
-  conversation synchronization. Helpful/not-helpful ratings are also
-  device-local.
-- The composer keeps search scope (`collection_ids`) as its own visible chip,
-  separate from attachments. Starting a chat from a knowledge base, document,
-  passage or search result pre-fills scope, attachment or draft and never sends
-  automatically.
-- Existing documents are references, not disposable uploads. Removing a chat
-  never deletes a referenced Knowledge document. Owned conversation uploads are
-  removed only when no saved conversation still references them.
+  message and re-asks the question with `replaceFromMessage` = that question.
+  "Edit question" only refills the composer; sending it appends a new turn.
+  Incomplete responses are shown as interrupted rather than still running.
+- Conversations are server resources: List, search, `displayName`, `pinned`
+  and Delete/Undelete go through the Conversation methods and follow the
+  user across devices.
+- The composer keeps search scope (`scope.collections`, `scope.spaces`) as
+  its own visible chip, separate from attachments. Starting a chat from a
+  root collection, document, passage or search result pre-fills scope,
+  attachment or draft and never sends automatically.
+- Existing documents are references, not disposable uploads. Deleting a
+  conversation never deletes an attached Item. Conversation uploads in the
+  PERSONAL collection are removed only when no conversation still references
+  them.
 - Citations use evidence amber, are grouped by document, and open a source
-  sheet that pages through cited passages; "Open at passage" uses the canonical
-  document focus endpoint. Generated artifacts open Preview / Changes / History
-  over real revisions: Changes compares full text, or original previews for
-  binary files (no generated binary diff). Download is signed per request;
-  saving to Knowledge publishes the latest revision.
+  sheet that pages through cited passages; "Open at passage" uses
+  `GetPassage`. Artifacts open Preview / Changes / History over their
+  revisions: Changes compares full text, or original previews for binary
+  files (no generated binary diff). Download is `ExportArtifact` or
+  `GetArtifact?alt=media`; `PublishArtifact` publishes the current revision
+  as a new DOCUMENT item.
+
+Implementation status: the Flutter client still calls the removed legacy routes and keeps
+conversations, titles, pins and ratings device-local per account and workspace.
 
 ## Web conversation client
 
 The web chat (`/chat`, `/chat/[conversationId]`, `/chats`) uses the same SSE
-stream and keeps its displayed conversations device-local, isolated by
-account and workspace; the UI says so and never implies cross-device history.
-The model context is the server's copy ("Conversation state"); the browser
-never sends history.
+stream and lists conversations through the Conversation resource. The model
+context is the server's copy ("Conversation state"); the browser never sends
+history.
 
 - **An answer keeps streaming across pages.** The live answer belongs to the
   client chat runtime, not to the page, so moving between chats or to the chat
-  list does not stop it. A turn saved while still streaming (the tab closed)
-  is restored as interrupted.
+  list does not stop it. A turn left streaming (the tab closed) is restored as
+  interrupted.
 - **Work line.** Built only from the turn's items and runtime facts: function
   calls the runtime started (a `run_shell` call with its output is a shell
   run), and the turn's start/finish time. On save the live runtime activity is
   settled into a small `workLog` (tool, outcome, result count) so a restored
   answer still says what ran. "Show how answers were found" off hides it.
 - **Retry and variants.** Retry is a new request for the same question —
-  again, with "more detail" / "shorter" appended to the sent text, or with no
-  `collection_ids` ("Search all knowledge") — sent with `replace_from_turn` =
-  the number of earlier questions in the thread, so the server supersedes the
-  previous attempt. Earlier attempts stay on the message as variants (‹ 1/2 ›);
-  feedback is per attempt and kept locally. Continuing after selecting an
-  older variant still continues from the latest attempt on the server.
+  again, with "more detail" / "shorter" appended to the sent text, or after
+  clearing the conversation scope ("Search all knowledge") — sent with
+  `replaceFromMessage` = that question, so the server supersedes the previous
+  attempt. Earlier attempts stay on the message as variants (‹ 1/2 ›);
+  feedback is per attempt. Continuing after selecting an older variant still
+  continues from the latest attempt on the server.
 - **Editing a question** replaces its answer and drops every later message,
   after a confirmation when later messages exist; it and "Answer it now" (an
-  unanswered question) send `replace_from_turn` the same way.
-- **Partial access.** Cited documents of saved answers are re-checked
-  (`GET /documents/{id}`); citations the reader can no longer open are
-  dropped with a lock hint, and an answer built only from such documents is
-  hidden behind a "you can't access this" call-out.
-- **Sharing** a chat is proposed (`chat.share`, api_contract.md): the link
-  carries a snapshot; recipients only see sources they can open.
+  unanswered question) send `replaceFromMessage` the same way.
+- **Partial access.** Citations of stored answers are re-checked on read;
+  citations the reader can no longer open are dropped with a lock hint, and
+  an answer built only from such documents is hidden behind a "you can't
+  access this" call-out.
+- **Sharing** a chat is a Share (`conversations/{c}/shares/{s}`, audience
+  `WORKSPACE` or `PEOPLE`, one live share per conversation). Its snapshot is
+  taken from stored turns and re-filtered on every read: turns and citations
+  the reader cannot open now are withheld. Artifacts are shared separately
+  through their own `audience`, and their reads likewise withhold content
+  whose sources the reader cannot open.
+
+Implementation status: the web client still calls the removed legacy routes, keeps
+conversations and feedback device-local and has no sharing.
 
 ## Citations in an answer
 
@@ -322,7 +348,8 @@ never sends history.
   (`CitationReferences`). Several passages of one file are one source: they
   share its number, and a passage cited right after another of the same file
   adds no second visible marker — its annotation points at the marker already
-  shown. Every annotation still carries its own `chunk_id`.
+  shown. Every annotation still carries its own passage name
+  (`workspaces/{w}/items/{item}/passages/{passage}`).
 - **Clients group by document.** The sources list shows each cited document
   once and keeps its cited passages; the source panel opens at the clicked
   passage and steps through the others. Answers saved before per-document

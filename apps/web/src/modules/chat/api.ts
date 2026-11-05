@@ -270,9 +270,9 @@ export interface ArtifactRevision {
   size_bytes: number;
   created_at: string | null;
   download_url: string | null;
-  /** The revision this one restored (proposed `artifact.manual_revision`); absent or null otherwise. */
+  /** The revision this one restored (pending `artifact.manual_revision`); absent or null otherwise. */
   restored_from?: number | null;
-  /** Who made it (proposed with `artifact.manual_revision`): the agent or a person; absent until the server reports it. */
+  /** Who made it (pending with `artifact.manual_revision`): the agent or a person; absent until the server reports it. */
   author?: "assistant" | "user" | null;
 }
 
@@ -398,7 +398,7 @@ export interface ArtifactUpdate {
 
 export type ArtifactExportFormat = "csv" | "pdf" | "md";
 
-/** API pending: `POST /artifacts/{artifact_id}/revisions` (artifact owner). */
+/** API pending: `CommitArtifact`, or `RollbackArtifact` for a restore (artifact owner). */
 export async function createArtifactRevision(
   artifactId: string,
   body: ArtifactRevisionCreate,
@@ -407,9 +407,8 @@ export async function createArtifactRevision(
 }
 
 /**
- * API pending (part of `artifact.manual_revision`): `DELETE
- * /artifacts/{artifact_id}/revisions/{revision}` — the Undo after a hand edit
- * or restore. Only the current revision, only one a person made.
+ * API pending (part of `artifact.manual_revision`): `DeleteArtifactRevision`
+ * — the Undo after a hand edit or restore. Only the current revision, only one a person made.
  */
 export async function deleteArtifactRevision(artifactId: string, revision: number): Promise<void> {
   return pendingApi("artifact.manual_revision", () => pendingArtifacts.deleteArtifactRevision(artifactId, revision));
@@ -436,7 +435,7 @@ export function applyLocalArtifactChanges(detail: ArtifactDetail): ArtifactDetai
 /** Fired on `window` after a file is renamed in this browser. */
 export const ARTIFACT_RENAMED_EVENT = "bomesh:artifact-renamed";
 
-/** API pending: `PATCH /artifacts/{artifact_id}` `{ title }` (artifact owner). */
+/** API pending: `UpdateArtifact` `displayName` (artifact owner). */
 export async function renameArtifact(artifactId: string, body: ArtifactUpdate): Promise<ArtifactDetail> {
   const renamed = await pendingApi("artifact.rename", () => pendingArtifacts.renameArtifact(artifactId, body));
   window.dispatchEvent(new Event(ARTIFACT_RENAMED_EVENT));
@@ -451,7 +450,7 @@ export function localArtifactTitle(artifactId: string): string | null {
   return pendingArtifacts.localArtifactTitle(artifactId);
 }
 
-/** API pending: `GET /artifacts/{artifact_id}/revisions/{revision}/export?format=` (artifact read). */
+/** API pending: `ExportArtifact` (`mimeType`, `revision`; artifact readers). */
 export async function exportArtifactRevision(
   artifactId: string,
   revision: number,
@@ -487,7 +486,7 @@ export type SharedConversationSource =
   | (ConversationShareSource & { available: true })
   | { number: number; available: false };
 
-/** A shared chat as its recipient reads it (`GET /conversation-shares/{share_id}`). */
+/** A shared chat as its recipient reads it (`GetShare`). */
 export interface SharedConversation {
   id: string;
   title: string;
@@ -528,7 +527,7 @@ export interface ConversationShare {
   revoked_at: string | null;
 }
 
-/** API pending: `POST /conversations/{conversation_id}/shares` (conversation owner). */
+/** API pending: `CreateShare` (conversation owner). */
 export async function createConversationShare(
   conversationId: string,
   body: ConversationShareCreate,
@@ -536,20 +535,20 @@ export async function createConversationShare(
   return pendingApi("chat.share", () => pendingConversationShares.createConversationShare(conversationId, body));
 }
 
-/** API pending: `GET /conversations/{conversation_id}/shares` — active links (conversation owner). */
+/** API pending: `ListShares` — active links (conversation owner). */
 export async function listConversationShares(conversationId: string): Promise<ConversationShare[]> {
   return pendingApi("chat.share", () => pendingConversationShares.listConversationShares(conversationId));
 }
 
 /**
- * API pending: `GET /conversation-shares/{share_id}` — the snapshot, for a
+ * API pending: `GetShare` — the snapshot, for a
  * workspace member (`workspace` audience) or a listed person (`people`).
  */
 export async function getConversationShare(shareId: string): Promise<SharedConversation> {
   return pendingApi("chat.share", () => pendingConversationShares.getConversationShare(shareId));
 }
 
-/** API pending: `DELETE /conversations/{conversation_id}/shares/{share_id}` (conversation owner). */
+/** API pending: `DeleteShare` (conversation owner). */
 export async function revokeConversationShare(conversationId: string, shareId: string): Promise<void> {
   return pendingApi("chat.share", () => pendingConversationShares.revokeConversationShare(conversationId, shareId));
 }

@@ -37,6 +37,7 @@ from bomesh.knowledge import (
     EvidenceContextBuilder,
     ItemKnowledgeRetriever,
     KnowledgeRetriever,
+    ReadScope,
     SemanticReranker,
     source_reference,
 )
@@ -44,7 +45,6 @@ from bomesh.knowledge import (
 CONTEXT = AgentContext(
     user_id="user-1",
     tenant_id="tenant-1",
-    roles=[],
     collection_item_ids=("collection-1",),
 )
 
@@ -75,10 +75,11 @@ def _chunk(
     integration_connection_id: str = "connection-1",
     collection_item_id: str = "collection-1",
     score: float = 0.91,
+    item_id: str = "doc-1",
 ) -> ContextualChunk:
     return ContextualChunk(
         id=chunk_id,
-        item_id="doc-1",
+        item_id=item_id,
         chunk_index=0,
         content_type="text",
         chunk_text="Employees receive 20 days of annual leave.",
@@ -136,13 +137,10 @@ def _evidence(chunk: ContextualChunk) -> Evidence:
 EVIDENCE = _evidence(DOCUMENT)
 
 
-def test_citation_resolver_builds_internal_and_native_targets() -> None:
+def test_citation_resolver_builds_native_targets() -> None:
     citation = CitationInfo(anchor="replication")
     source = DOCUMENT.source
 
-    assert CitationResolver.internal_path("item:kafka", "item:kafka:12") == (
-        "/knowledge/documents/item%3Akafka?chunk=item%3Akafka%3A12"
-    )
     assert CitationResolver.original_url(source, citation) == (
         "https://knowledge.example/leave-policy#replication"
     )
@@ -198,6 +196,33 @@ class BlockingRetriever(KnowledgeRetriever):
         return []
 
 
+class StubAccess:
+    """The PostgreSQL side of retrieval: readable/editable collections and the hit re-check.
+
+    ``visible_items`` is what the re-check admits (``None``: every hit).
+    """
+
+    def __init__(
+        self, *, visible_items: set[str] | None = None, editable: tuple[str, ...] = ()
+    ) -> None:
+        self.visible_items = visible_items
+        self.editable = editable
+        self.rechecked: list[list[str]] = []
+
+    async def scope(self, ctx: AgentContext) -> ReadScope:
+        async def recheck(item_ids: Sequence[str]) -> frozenset[str]:
+            self.rechecked.append(list(item_ids))
+            return frozenset(
+                item_id
+                for item_id in item_ids
+                if self.visible_items is None or item_id in self.visible_items
+            )
+
+        return ReadScope(
+            readable=ctx.collection_item_ids, editable=self.editable, recheck=recheck
+        )
+
+
 class StubDocumentIndex:
     def __init__(
         self,
@@ -216,6 +241,7 @@ class StubDocumentIndex:
         limit: int,
         tenant_id: str,
         collection_item_ids: tuple[str, ...],
+        editable_collection_ids: tuple[str, ...],
     ) -> list[ContextualChunk]:
         if self.events is not None:
             self.events.append("index")
@@ -225,6 +251,7 @@ class StubDocumentIndex:
                 "limit": limit,
                 "tenant_id": tenant_id,
                 "collection_item_ids": collection_item_ids,
+                "editable_collection_ids": editable_collection_ids,
             }
         )
         return self.documents
@@ -285,13 +312,14 @@ class StubIndexBackend:
         queries: Sequence[tuple[str, list[float]]],
         tenant_id: str,
         collection_item_ids: tuple[str, ...],
+        editable_collection_ids: tuple[str, ...],
         limit: int,
         candidate_limit: int,
     ) -> list[object]:
         self.calls.append(
             (
                 list(queries),
-                (tenant_id, collection_item_ids),
+                (tenant_id, collection_item_ids, editable_collection_ids),
                 limit,
                 candidate_limit,
             )
@@ -335,6 +363,7 @@ async def test_item_index_search_embeds_and_rebuilds_contextual_chunks() -> None
         limit=3,
         tenant_id="tenant-1",
         collection_item_ids=("collection-1",),
+        editable_collection_ids=("collection-1",),
     )
 
     assert embedder.queries == ["annual leave", "carry over"]
@@ -342,7 +371,7 @@ async def test_item_index_search_embeds_and_rebuilds_contextual_chunks() -> None
     assert backend.calls == [
         (
             [("annual leave", [0.1, 0.2]), ("carry over", [0.1, 0.2])],
-            ("tenant-1", ("collection-1",)),
+            ("tenant-1", ("collection-1",), ("collection-1",)),
             3,
             20,
         )
@@ -365,28 +394,21 @@ async def test_item_index_search_embeds_and_rebuilds_contextual_chunks() -> None
 
 
 @pytest.mark.asyncio
-async def test_collection_scoped_retrieval_filters_before_reranking() -> None:
+async def test_hits_are_rechecked_before_reranking() -> None:
+    """The index only pre-filters: a hit the re-check rejects never reaches the agent."""
+
     events: list[str] = []
-    visible = _chunk(chunk_id="visible", collection_item_id="collection-7", score=0.5)
-    wrong_collection = _chunk(
-        chunk_id="wrong-collection",
-        collection_item_id="collection-8",
-        score=0.99,
-    )
-    index = StubDocumentIndex(
-        [wrong_collection, visible],
-        events=events,
-    )
+    visible = _chunk(chunk_id="visible", item_id="doc-visible", score=0.5)
+    stale = _chunk(chunk_id="stale", item_id="doc-unpublished", score=0.99)
+    index = StubDocumentIndex([stale, visible], events=events)
+    access = StubAccess(visible_items={"doc-visible"}, editable=("collection-7",))
     reranker = RecordingReranker(events)
     retriever = ItemKnowledgeRetriever(
-        index,
-        reranker=reranker,
-        reranking_enabled=True,
+        index, access=access, reranker=reranker, reranking_enabled=True
     )
     context = AgentContext(
         user_id="person@example.test",
         tenant_id="tenant-1",
-        roles=["analyst"],
         collection_item_ids=("collection-7",),
     )
 
@@ -398,8 +420,10 @@ async def test_collection_scoped_retrieval_filters_before_reranking() -> None:
             "limit": 20,
             "tenant_id": "tenant-1",
             "collection_item_ids": ("collection-7",),
+            "editable_collection_ids": ("collection-7",),
         }
     ]
+    assert access.rechecked == [["doc-unpublished", "doc-visible"]]
     assert events == ["index", "rerank"]
     assert reranker.calls == [[visible]]
     assert results == [_evidence(visible)]
@@ -413,7 +437,9 @@ async def test_retrieval_ranks_every_query_together_in_one_rerank() -> None:
     events: list[str] = []
     index = StubDocumentIndex([DOCUMENT], events=events)
     reranker = RecordingReranker(events)
-    retriever = ItemKnowledgeRetriever(index, reranker=reranker, reranking_enabled=True)
+    retriever = ItemKnowledgeRetriever(
+        index, access=StubAccess(), reranker=reranker, reranking_enabled=True
+    )
 
     await retriever.search(
         ["annual leave", "carry over", "Annual  leave"], limit=3, ctx=CONTEXT
@@ -430,6 +456,7 @@ async def test_retrieval_returns_nothing_when_the_reranker_finds_nothing_relevan
 
     retriever = ItemKnowledgeRetriever(
         StubDocumentIndex([DOCUMENT]),
+        access=StubAccess(),
         reranker=NothingRelevantReranker(),  # type: ignore[arg-type]
         reranking_enabled=True,
     )
@@ -449,12 +476,11 @@ async def test_document_index_retriever_validates_before_search_or_reranking(
     events: list[str] = []
     index = StubDocumentIndex([DOCUMENT], events=events)
     retriever = ItemKnowledgeRetriever(
-        index, reranker=RecordingReranker(events), reranking_enabled=True
+        index, access=StubAccess(), reranker=RecordingReranker(events), reranking_enabled=True
     )
     context = AgentContext(
         user_id="user-1",
         tenant_id="tenant-1",
-        roles=[],
         collection_item_ids=(),
     )
 
@@ -470,11 +496,10 @@ async def test_document_index_retriever_requires_a_tenant_even_for_empty_scope()
     None
 ):
     index = StubDocumentIndex([DOCUMENT])
-    retriever = ItemKnowledgeRetriever(index)
+    retriever = ItemKnowledgeRetriever(index, access=StubAccess())
     context = AgentContext(
         user_id="user-1",
         tenant_id="   ",
-        roles=[],
         collection_item_ids=("collection-1",),
     )
 
@@ -487,11 +512,10 @@ async def test_document_index_retriever_requires_a_tenant_even_for_empty_scope()
 @pytest.mark.asyncio
 async def test_collection_retrieval_remains_tenant_scoped() -> None:
     index = StubDocumentIndex([DOCUMENT])
-    retriever = ItemKnowledgeRetriever(index)
+    retriever = ItemKnowledgeRetriever(index, access=StubAccess())
     context = AgentContext(
         user_id="admin-1",
         tenant_id="tenant-1",
-        roles=["developer"],
         collection_item_ids=("collection-1",),
     )
 
@@ -514,6 +538,7 @@ async def test_item_index_rejects_a_missing_tenant_scope() -> None:
             limit=3,
             tenant_id="",
             collection_item_ids=("collection-1",),
+            editable_collection_ids=(),
         )
 
     assert backend.calls == []
@@ -792,6 +817,7 @@ async def test_reranking_failure_falls_back_to_candidate_order() -> None:
     index = StubDocumentIndex([first, second])
     retriever = ItemKnowledgeRetriever(
         index,
+        access=StubAccess(),
         reranker=FailingReranker(),  # type: ignore[arg-type]
         candidate_count=7,
         reranking_enabled=True,
@@ -832,6 +858,7 @@ async def test_rerank_timeout_keeps_the_fused_candidates() -> None:
     reranker = SlowReranker()
     retriever = ItemKnowledgeRetriever(
         StubDocumentIndex([first, second]),
+        access=StubAccess(),
         reranker=reranker,  # type: ignore[arg-type]
         reranking_enabled=True,
         rerank_timeout_seconds=0.01,
@@ -850,6 +877,7 @@ async def test_reranking_is_off_by_default_and_uses_fused_order() -> None:
     second = _chunk(chunk_id="second", score=0.9)
     retriever = ItemKnowledgeRetriever(
         StubDocumentIndex([first, second], events=events),
+        access=StubAccess(),
         reranker=RecordingReranker(events),
     )
 
@@ -864,7 +892,12 @@ async def test_repeated_query_reuses_the_cached_query_embedding() -> None:
     backend = StubIndexBackend()
     embedder = StubEmbedder()
     index = ItemIndex(backend=backend, embedder=embedder)  # type: ignore[arg-type]
-    scope = {"limit": 3, "tenant_id": "tenant-1", "collection_item_ids": ("collection-1",)}
+    scope = {
+        "limit": 3,
+        "tenant_id": "tenant-1",
+        "collection_item_ids": ("collection-1",),
+        "editable_collection_ids": (),
+    }
 
     await index.search_item_content(["annual leave"], **scope)  # type: ignore[arg-type]
     await index.search_item_content(["  annual   leave "], **scope)  # type: ignore[arg-type]
@@ -882,7 +915,12 @@ async def test_query_embedding_cache_is_bounded_and_can_be_disabled() -> None:
     bounded = ItemIndex(
         backend=StubIndexBackend(), embedder=embedder, query_embedding_cache_size=1  # type: ignore[arg-type]
     )
-    scope = {"limit": 3, "tenant_id": "tenant-1", "collection_item_ids": ("collection-1",)}
+    scope = {
+        "limit": 3,
+        "tenant_id": "tenant-1",
+        "collection_item_ids": ("collection-1",),
+        "editable_collection_ids": (),
+    }
     for query in ("annual leave", "carry over", "annual leave"):
         await bounded.search_item_content([query], **scope)  # type: ignore[arg-type]
     assert embedder.queries == ["annual leave", "carry over", "annual leave"]
@@ -921,7 +959,9 @@ async def test_retrieval_assigns_stable_source_references_to_evidence() -> None:
     """
 
     other = _chunk(chunk_id="chunk-2", score=0.4)
-    retriever = ItemKnowledgeRetriever(StubDocumentIndex([DOCUMENT, other]))
+    retriever = ItemKnowledgeRetriever(
+        StubDocumentIndex([DOCUMENT, other]), access=StubAccess()
+    )
 
     first = await retriever.search(["annual leave"], limit=2, ctx=CONTEXT)
     second = await retriever.search(["annual leave"], limit=2, ctx=CONTEXT)
@@ -1017,7 +1057,7 @@ def test_adjacent_passages_of_one_document_show_one_marker() -> None:
     }
     for reference in evidence:
         evidence[reference] = replace(evidence[reference], id=reference)
-    projection = CitationProjection(evidence, references=references)
+    projection = CitationProjection(evidence, workspace_id="ws-1", references=references)
     delta = ResponseOutputTextDeltaEvent(
         item_id="msg", output_index=0, content_index=0,
         delta="Codes [[cite:ref_1]] [[cite:ref_2]][[cite:ref_3]] end.",
@@ -1031,6 +1071,8 @@ def test_adjacent_passages_of_one_document_show_one_marker() -> None:
     assert text == "Codes [1] [2] end."
     annotations = [event.annotation for event in projected if isinstance(event, ResponseOutputTextAnnotationAddedEvent)]
     # Both passages of doc-1 stay cited, and both point at the one visible [1].
-    assert [(a["citation"]["chunk_id"], text[a["start_index"]:a["end_index"]]) for a in annotations] == [
-        ("chunk-1", "[1]"), ("chunk-2", "[1]"), ("chunk-9", "[2]"),
+    assert [(a["citation"]["passage"], text[a["start_index"]:a["end_index"]]) for a in annotations] == [
+        ("workspaces/ws-1/items/doc-1/passages/chunk-1", "[1]"),
+        ("workspaces/ws-1/items/doc-1/passages/chunk-2", "[1]"),
+        ("workspaces/ws-1/items/doc-2/passages/chunk-9", "[2]"),
     ]

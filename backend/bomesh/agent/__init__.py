@@ -212,7 +212,11 @@ class SandboxRuntime(Protocol):
         self, resource: ResourceRef
     ) -> SandboxMaterialization: ...
 
-    async def promote_file(self, file_name: str, *, summary: str) -> SandboxArtifact: ...
+    async def promote_file(
+        self, file_name: str, *, summary: str, source_ids: tuple[str, ...]
+    ) -> SandboxArtifact:
+        """Export a file; ``source_ids`` are the documents the turn read or found."""
+        ...
 
     @property
     def artifacts(self) -> tuple[SandboxArtifact, ...]:
@@ -387,6 +391,8 @@ class StepContext:
     sandbox_guidance: str | None
     resources: tuple[ResourceRef, ...]
     tool_names: tuple[str, ...]
+    # Static per workspace: the workspace's assistant guidance.
+    workspace_instructions: str = ""
     # False once a turn's tool limits are reached: the tools stay declared
     # (stable request prefix) but the model is told not to call them.
     tools_enabled: bool = True

@@ -7,7 +7,7 @@
 /** Member destinations, filtered by workspace modules. */
 function memberNav() {
   return [
-    hasModule('home') ? { id: 'home', label: 'Home', icon: 'home', to: '/home' } : { id: 'chat', label: 'New chat', icon: 'message-plus', to: '/chat' },
+    { id: 'home', label: 'Home', icon: 'home', to: '/home' },
     { id: 'inbox', label: 'Inbox', icon: 'inbox', to: '/inbox', count: () => X.inboxUnread?.() || 0 },
     hasModule('work') && { id: 'work', label: 'Work', icon: 'sparkles', to: '/work' },
     hasModule('requests') && { id: 'requests', label: 'Requests', icon: 'clipboard', to: '/requests', count: () => X.requestsBadge?.() || 0 },
@@ -17,9 +17,9 @@ function memberNav() {
 }
 const MANAGE_NAV = [
   { id: 'overview', label: 'Overview', icon: 'home', to: '/overview', perm: 'tenant.manage' },
+  { id: 'documents', label: 'Documents', icon: 'files', to: '/documents', perm: 'knowledge.manage', count: () => X.docsBadge?.() || 0 },
   { id: 'sources', label: 'Sources', icon: 'refresh', to: '/sources', perm: 'source.manage', count: () => D.sources.filter(s => ['failed', 'reconnect'].includes(s.status)).length, alert: true },
   { id: 'connections', label: 'Connections', icon: 'plug', to: '/connections', perm: 'source.manage', count: () => D.accounts.filter(a => a.status === 'expired' || a.status === 'error').length, alert: true },
-  { id: 'khealth', label: 'Knowledge health', icon: 'shield-check', to: '/knowledge-health', perm: 'knowledge.manage', count: () => X.khealthCount?.() || 0 },
   { id: 'people', label: 'People', icon: 'users', to: '/people', perm: 'user.manage', count: () => pendingRequests().length },
   { id: 'assistant', label: 'Assistant', icon: 'sparkles', to: '/assistant', perm: 'tenant.manage' },
   { id: 'activity', label: 'Activity', icon: 'activity', to: '/activity', perm: 'audit.read' },
@@ -29,6 +29,7 @@ const PLATFORM_NAV = [
   { id: 'p-workspaces', label: 'Workspaces', icon: 'building', to: '/p/workspaces' },
   { id: 'p-users', label: 'Users', icon: 'users', to: '/p/users' },
   { id: 'p-connectors', label: 'Connectors', icon: 'plug', to: '/p/connectors' },
+  { id: 'p-indexing', label: 'Indexing', icon: 'database', to: '/p/indexing', count: () => X.pIndexAlerts?.() || 0, alert: true },
   { id: 'p-usage', label: 'Usage', icon: 'chart', to: '/p/usage' },
   { id: 'p-audit', label: 'Audit log', icon: 'activity', to: '/p/audit' },
   { id: 'p-health', label: 'System health', icon: 'server', to: '/p/health', count: () => D.pServices.filter(s => s.status !== 'operational').length, alert: true },
@@ -90,9 +91,8 @@ MENUS.me = () => [
   { html: `${avatar(me().name, 'lg')}<span class="stack grow" style="min-width:0"><span class="medium truncate">${esc(me().name)}</span><span class="t-xs muted truncate">${esc(me().role)}</span></span>`, run: () => openModal('prefs') },
   { sep: true },
   { label: 'Preferences', icon: 'settings', run: () => openModal('prefs') },
-  { section: 'Appearance' },
-  ...[['light', 'Light', 'sun'], ['dark', 'Dark', 'moon'], ['system', 'Match system', 'monitor']].map(([v, l, i]) => ({ label: l, icon: i, checked: S.theme === v, run: () => setTheme(v) })),
-  { html: `<span class="i" style="border-radius:50%;background:${bgSwatch(S.bg)};box-shadow:inset 0 0 0 1px var(--border)"></span><span class="grow">Background</span><span class="menu-item__meta">${esc(BACKGROUNDS.find(b => b[0] === S.bg)?.[1] || '')}</span>`, run: () => reopenMenu('[data-menu="me"]', 'bg') },
+  ...X.appearance.menuItems(),
+  X.lang.menuItem(),
   { sep: true },
   { label: 'Keyboard shortcuts', icon: 'command', run: () => openModal('shortcuts') },
   X.startTour && S.cur.r.mode !== 'platform' && { label: 'Product tour', icon: 'route', run: () => X.startTour() },
@@ -108,8 +108,8 @@ M.prefs = () => {
     title: 'Preferences', size: 'lg',
     body: `${field({ id: 'pref-name', label: 'Display name', control: input({ id: 'pref-name', bind: 'prefs.name', value: f.name }) })}
       ${field({ id: 'pref-email', label: 'Email', desc: 'Managed by your sign-in provider.', control: input({ id: 'pref-email', value: me().email, attrs: 'readonly' }) })}
-      <div class="field"><span class="label">Theme</span>${seg({ value: S.theme, options: [['light', 'Light', 'sun'], ['dark', 'Dark', 'moon'], ['system', 'System', 'monitor']], act: 'pref-theme', label: 'Theme' })}</div>
-      <div class="field"><span class="label" id="pref-bg-label">Background</span>${bgPicker('pref-bg', true)}<div class="description">Tints the canvas, surfaces and text. Buttons, status and citation colors stay the same.</div></div>
+      <div class="field"><span class="label">Appearance</span><div class="pref-look">${X.appearance.dot()}<span class="grow"><span class="medium">${esc(themeLabel())}</span><span class="t-xs muted" style="display:block">${esc(X.appearance.detail())}</span></span>${btn('Change', { size: 'sm', icon: 'palette', act: 'look-open' })}</div></div>
+      ${X.lang.field()}
       <div class="mt-16">${switchRow({ title: 'Show how answers were found', desc: 'Show the searches and analysis steps above each answer.', on: f.steps, act: 'pref-steps' })}</div>
       <h3 class="t-subheading mt-16">Email notifications</h3>
       ${isAdmin() ? notif('syncs', 'A source stops syncing', 'So knowledge doesn’t go stale unnoticed.') + notif('requests', 'Someone requests access', 'For knowledge bases you own.') : ''}
@@ -118,13 +118,6 @@ M.prefs = () => {
     foot: btn('Cancel', { act: 'close-modal' }) + btn('Save', { v: 'primary', act: 'pref-save' }),
   };
 };
-A['pref-theme'] = el => setTheme(el.dataset.value);
-A['pref-bg'] = el => setBackground(el.dataset.value);
-/** Background preset picker (shared by Preferences and the account menu). */
-function bgPicker(act, labelled = false) { return swatchPicker({ value: S.bg, options: BACKGROUNDS.map(([id, l]) => [id, l, bgSwatch(id)]), act, label: 'Background', labelled }); }
-MENUS.bg = () => [{ section: 'Background' }, ...BACKGROUNDS.map(([id, l]) => ({ html: `<span class="i" style="border-radius:50%;background:${bgSwatch(id)};box-shadow:inset 0 0 0 1px var(--border)"></span><span class="grow">${esc(l)}</span>`, checked: S.bg === id, run: () => setBackground(id) }))];
-/** Open another menu at the same trigger (a one-level submenu without nesting). */
-function reopenMenu(triggerSel, name) { const t = $(triggerSel); if (t) setTimeout(() => openMenu(t, MENUS[name](t), name), 0); }
 A['pref-steps'] = () => { const f = ui('prefs'); f.steps = !f.steps; refreshLayer(); };
 A['pref-notif'] = el => { const n = ui('prefs').notif; n[el.dataset.k] = !n[el.dataset.k]; refreshLayer(); };
 A['pref-save'] = () => { const name = ui('prefs').name.trim(); if (!name) { toast('Enter a display name.', { tone: 'danger' }); return; } PERSONAS[S.persona].name = name; persist(); closeModal(); refresh(); toast('Preferences saved'); };

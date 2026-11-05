@@ -1,4 +1,4 @@
-"""Deterministic Temporal workflows: one Ingestion Run, one Source sync.
+"""Deterministic Temporal workflows: one Ingestion Run, one Source sync, one maintenance pass.
 
 Orchestration only. Every state a person sees is written by the Activities
 into Postgres; the workflows decide what runs next, how much runs at once, and
@@ -8,6 +8,7 @@ what happens when something stops.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from datetime import timedelta
 
 from temporalio import workflow
@@ -15,10 +16,12 @@ from temporalio.common import RetryPolicy
 from temporalio.exceptions import ActivityError, ApplicationError, CancelledError
 
 from bomesh.services.workflow import (
+    BEGIN_SCHEDULED_SYNC_ACTIVITY,
     CREATE_SCHEDULED_RUN_ACTIVITY,
     FAIL_BATCH_ACTIVITY,
     FINISH_RUN_ACTIVITY,
     INGESTION_RUN_WORKFLOW_NAME,
+    MAINTENANCE_WORKFLOW_NAME,
     PLAN_BATCHES_ACTIVITY,
     PROCESS_BATCH_ACTIVITY,
     PROVIDER_REJECTED_FAILURE_TYPE,
@@ -109,7 +112,7 @@ class IngestionRunWorkflow:
             if stop_reason:
                 await self._finish(input.run_id, "failed", stop_reason[0])
             else:
-                await self._finish(input.run_id, "completed")
+                await self._finish(input.run_id, "succeeded")
         except asyncio.CancelledError:
             for task in in_flight:
                 task.cancel()
@@ -184,16 +187,26 @@ class IngestionRunWorkflow:
 
 @workflow.defn(name=SOURCE_SYNC_WORKFLOW_NAME)
 class SourceSyncWorkflow:
-    """Sync one Source's inventory; a scheduled sync then processes what is pending."""
+    """Run one sync row of a Source; a schedule firing opens its row, then processes."""
 
     @workflow.run
     async def run(self, input: SourceSyncInput) -> None:
+        sync_id = input.sync_id
+        if sync_id is None:
+            sync_id = await workflow.execute_activity(
+                BEGIN_SCHEDULED_SYNC_ACTIVITY, input, **_BOOKKEEPING
+            )
+            if sync_id is None:
+                # The Source cannot sync now, or a sync is already running.
+                return
         await workflow.execute_activity(
             SYNC_SOURCE_ACTIVITY,
-            input,
+            dataclasses.replace(input, sync_id=sync_id),
             start_to_close_timeout=timedelta(hours=8),
             heartbeat_timeout=timedelta(minutes=2),
             cancellation_type=workflow.ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
+            # A retry resumes the same RUNNING row after a lost worker; a sync
+            # that failed was recorded as FAILED and is not retried.
             retry_policy=RetryPolicy(
                 initial_interval=timedelta(seconds=5),
                 backoff_coefficient=2.0,
@@ -207,4 +220,18 @@ class SourceSyncWorkflow:
             )
 
 
-__all__ = ["IngestionRunWorkflow", "SourceSyncWorkflow"]
+@workflow.defn(name=MAINTENANCE_WORKFLOW_NAME)
+class MaintenanceWorkflow:
+    """One Schedule firing: run the index-upkeep Activity named by ``activity_name``."""
+
+    @workflow.run
+    async def run(self, activity_name: str) -> int:
+        return await workflow.execute_activity(
+            activity_name,
+            result_type=int,
+            start_to_close_timeout=timedelta(minutes=10),
+            retry_policy=RetryPolicy(maximum_attempts=3),
+        )
+
+
+__all__ = ["IngestionRunWorkflow", "MaintenanceWorkflow", "SourceSyncWorkflow"]

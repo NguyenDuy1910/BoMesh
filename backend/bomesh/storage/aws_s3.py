@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -21,19 +22,38 @@ from . import (
 _NOT_FOUND_CODES = frozenset({"404", "NoSuchKey", "NotFound"})
 _AWS_S3_PROVIDER = "aws_s3"
 _CLOUDFLARE_R2_PROVIDER = "cloudflare_r2"
-_STORAGE_PROVIDERS = frozenset({_AWS_S3_PROVIDER, _CLOUDFLARE_R2_PROVIDER})
+_RUSTFS_PROVIDER = "rustfs"
+
+
+@dataclass(frozen=True, slots=True)
+class _EndpointProvider:
+    """S3-compatible service reachable only through an explicit endpoint."""
+
+    label: str
+    signing_region: str
+
+
+# Endpoint providers have no AWS virtual-host DNS, so they always use
+# path-style addressing and sign SigV4 with the region the service expects.
+_ENDPOINT_PROVIDERS: dict[str, _EndpointProvider] = {
+    _CLOUDFLARE_R2_PROVIDER: _EndpointProvider("Cloudflare R2", "auto"),
+    _RUSTFS_PROVIDER: _EndpointProvider("RustFS", "us-east-1"),
+}
+_STORAGE_PROVIDERS = frozenset({_AWS_S3_PROVIDER, *_ENDPOINT_PROVIDERS})
 
 
 class S3DocumentStorage:
-    """Store raw binaries in AWS S3, MinIO, or Cloudflare R2 through boto3.
+    """Store raw binaries in AWS S3, MinIO, Cloudflare R2, or RustFS via boto3.
 
-    Both providers expose the S3 API, so object operations and presigning stay
-    in this one adapter. AWS S3 uses the standard boto3 credential chain. R2
-    uses its account endpoint, path-style addressing, ``auto`` as its signing
-    region, and an R2 API-token access-key pair. Local MinIO deliberately uses
-    the AWS S3 branch with its endpoint URL, path-style addressing, and the
-    same standard credential chain. Passing ``client`` keeps the adapter
-    independently testable.
+    Every provider exposes the S3 API, so object operations and presigning stay
+    in this one adapter. AWS S3 uses the standard boto3 credential chain.
+    Endpoint providers (R2, RustFS) require an endpoint URL and path-style
+    addressing, and default to their SigV4 signing region: ``auto`` for R2,
+    ``us-east-1`` for RustFS. R2 uses an R2 API-token access-key pair; RustFS
+    uses its ``RUSTFS_ACCESS_KEY``/``RUSTFS_SECRET_KEY`` pair. Local MinIO
+    deliberately uses the AWS S3 branch with its endpoint URL, path-style
+    addressing, and the same standard credential chain. Passing ``client``
+    keeps the adapter independently testable.
     """
 
     def __init__(
@@ -65,12 +85,15 @@ class S3DocumentStorage:
             access_key_id,
             secret_access_key,
         )
-        if normalized_provider == _CLOUDFLARE_R2_PROVIDER:
+        endpoint_provider = _ENDPOINT_PROVIDERS.get(normalized_provider)
+        if endpoint_provider is not None:
             if normalized_endpoint is None:
-                raise ValueError("Cloudflare R2 requires an endpoint URL")
+                raise ValueError(f"{endpoint_provider.label} requires an endpoint URL")
             if normalized_addressing_style != "path":
-                raise ValueError("Cloudflare R2 requires path-style addressing")
-            normalized_region = normalized_region or "auto"
+                raise ValueError(
+                    f"{endpoint_provider.label} requires path-style addressing"
+                )
+            normalized_region = normalized_region or endpoint_provider.signing_region
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be greater than zero")
         if max_pool_connections < 1:
@@ -336,17 +359,24 @@ class S3DocumentStorage:
         except BotoCoreError as exc:
             raise ObjectStorageError("S3 object read failed") from exc
 
-    def _read_sync(self, key: str, max_bytes: int) -> bytes:
-        metadata = self._client.head_object(Bucket=self._bucket, Key=key)
-        size_bytes = int(metadata.get("ContentLength", -1))
-        if size_bytes < 0:
-            raise ObjectStorageError("S3 did not return an object size")
-        if size_bytes > max_bytes:
-            raise ObjectStorageError(
-                f"raw document exceeds the {max_bytes} byte read limit"
+    async def delete(self, key: str) -> None:
+        """Remove one object; a key that is already gone is not an error."""
+
+        normalized_key = _object_key(key)
+        try:
+            await asyncio.to_thread(
+                self._client.delete_object,
+                Bucket=self._bucket,
+                Key=normalized_key,
             )
-        response = self._client.get_object(Bucket=self._bucket, Key=key)
-        body = response["Body"]
+        except ClientError as exc:
+            if not _is_not_found(exc):
+                raise ObjectStorageError("S3 object delete failed") from exc
+        except BotoCoreError as exc:
+            raise ObjectStorageError("S3 object delete failed") from exc
+
+    def _read_sync(self, key: str, max_bytes: int) -> bytes:
+        _, body = self._get_bounded(key, max_bytes)
         try:
             content = body.read(max_bytes + 1)
         finally:
@@ -363,14 +393,7 @@ class S3DocumentStorage:
         path: Path,
         max_bytes: int,
     ) -> StoredObject:
-        metadata = self._client.head_object(Bucket=self._bucket, Key=key)
-        stored = _stored_object(metadata)
-        if stored.size_bytes > max_bytes:
-            raise ObjectStorageError(
-                f"raw document exceeds the {max_bytes} byte read limit"
-            )
-        response = self._client.get_object(Bucket=self._bucket, Key=key)
-        body = response["Body"]
+        stored, body = self._get_bounded(key, max_bytes)
         written = 0
         try:
             with path.open("wb") as destination:
@@ -394,6 +417,27 @@ class S3DocumentStorage:
             etag=stored.etag,
             version_id=stored.version_id,
         )
+
+    def _get_bounded(self, key: str, max_bytes: int) -> tuple[StoredObject, Any]:
+        """Open one GET and enforce the read limit before any body byte moves.
+
+        GET response headers carry the same size, type, and ETag as HEAD, so
+        one round trip both validates and streams the object. An oversized
+        body is closed unread.
+        """
+
+        response = self._client.get_object(Bucket=self._bucket, Key=key)
+        body = response["Body"]
+        try:
+            stored = _stored_object(response)
+            if stored.size_bytes > max_bytes:
+                raise ObjectStorageError(
+                    f"raw document exceeds the {max_bytes} byte read limit"
+                )
+        except BaseException:
+            body.close()
+            raise
+        return stored, body
 
     async def aclose(self) -> None:
         clients = [self._client] if self._signer is self._client else [self._client, self._signer]
@@ -460,7 +504,7 @@ def _provider(value: str) -> str:
 def _addressing_style(value: str | None, *, provider: str) -> str:
     normalized = _optional_string(value)
     if normalized is None:
-        return "path" if provider == _CLOUDFLARE_R2_PROVIDER else "auto"
+        return "path" if provider in _ENDPOINT_PROVIDERS else "auto"
     if normalized not in {"auto", "path", "virtual"}:
         raise ValueError("addressing_style must be auto, path, or virtual")
     return normalized

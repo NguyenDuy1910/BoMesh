@@ -15,7 +15,6 @@ from temporalio.client import (
     ScheduleActionStartWorkflow,
     ScheduleAlreadyRunningError,
     ScheduleDescription,
-    ScheduleIntervalSpec,
     ScheduleOverlapPolicy,
     SchedulePolicy,
     ScheduleSpec,
@@ -39,12 +38,6 @@ from bomesh.services.workflow import (
     source_sync_workflow_id,
 )
 from bomesh.services.workflow.client import TemporalClientProvider
-
-_OVERLAP_POLICIES = {
-    "skip": ScheduleOverlapPolicy.SKIP,
-    "queue": ScheduleOverlapPolicy.BUFFER_ONE,
-    "replace": ScheduleOverlapPolicy.CANCEL_OTHER,
-}
 
 
 class TemporalWorkflowService:
@@ -98,9 +91,9 @@ class TemporalWorkflowService:
     # -- Source syncs --------------------------------------------------------
 
     async def start_source_sync(
-        self, source_id: UUID | str, tenant_id: UUID | str, *, process: bool
+        self, source_id: UUID | str, tenant_id: UUID | str, *, sync_id: UUID | str
     ) -> bool:
-        """Start one sync of a Source; ``False`` when one is already running."""
+        """Run the Source's RUNNING sync row ``sync_id``; ``False`` when a sync already runs."""
 
         if await self._schedule_is_running(str(source_id)):
             return False
@@ -109,7 +102,7 @@ class TemporalWorkflowService:
             await client.start_workflow(
                 SOURCE_SYNC_WORKFLOW_NAME,
                 SourceSyncInput(
-                    source_id=str(source_id), tenant_id=str(tenant_id), process=process
+                    source_id=str(source_id), tenant_id=str(tenant_id), sync_id=str(sync_id)
                 ),
                 id=source_sync_workflow_id(str(source_id)),
                 task_queue=self._settings.task_queue,
@@ -133,7 +126,10 @@ class TemporalWorkflowService:
     async def upsert_schedule(
         self, source_id: UUID | str, tenant_id: UUID | str, values: dict[str, Any]
     ) -> dict[str, Any]:
-        """Create or replace a Source's schedule: each firing syncs, then processes."""
+        """Create or replace a Source's schedule (``cron_expression``, ``timezone``, ``enabled``).
+
+        Each firing opens a SCHEDULED sync, then processes what it left pending.
+        """
 
         schedule = self._schedule(str(source_id), str(tenant_id), values)
         schedule_id = ingestion_schedule_id(str(source_id))
@@ -230,30 +226,9 @@ class TemporalWorkflowService:
         return bool(description.info.running_actions)
 
     def _schedule(self, source_id: str, tenant_id: str, values: dict[str, Any]) -> Schedule:
-        schedule_type = str(values.get("schedule_type") or "cron").strip().casefold()
         expression = str(values.get("cron_expression") or "").strip()
         if not expression:
             raise ValueError("schedule expression is required")
-        if schedule_type == "cron":
-            spec = ScheduleSpec(
-                cron_expressions=[expression],
-                time_zone_name=(str(values.get("timezone") or "UTC").strip()),
-            )
-        elif schedule_type == "interval":
-            try:
-                seconds = int(expression)
-            except ValueError as exc:
-                raise ValueError("interval schedule expression must be seconds") from exc
-            if seconds < 1:
-                raise ValueError("interval schedule must be positive")
-            spec = ScheduleSpec(
-                intervals=[ScheduleIntervalSpec(every=timedelta(seconds=seconds))]
-            )
-        else:
-            raise ValueError("schedule_type must be cron or interval")
-        overlap = str(values.get("overlap_policy") or "skip").strip().casefold()
-        if overlap not in _OVERLAP_POLICIES:
-            raise ValueError("unsupported overlap policy")
         enabled = values.get("enabled", True)
         if not isinstance(enabled, bool):
             raise ValueError("schedule enabled must be a boolean")
@@ -265,9 +240,12 @@ class TemporalWorkflowService:
                 task_queue=self._settings.task_queue,
                 static_summary=f"Scheduled sync of source {source_id}",
             ),
-            spec=spec,
+            spec=ScheduleSpec(
+                cron_expressions=[expression],
+                time_zone_name=str(values.get("timezone") or "UTC").strip(),
+            ),
             policy=SchedulePolicy(
-                overlap=_OVERLAP_POLICIES[overlap],
+                overlap=ScheduleOverlapPolicy.SKIP,
                 catchup_window=timedelta(minutes=5),
                 pause_on_failure=False,
             ),
@@ -278,37 +256,17 @@ class TemporalWorkflowService:
 def _schedule_payload(description: ScheduleDescription) -> dict[str, Any]:
     schedule = description.schedule
     spec = schedule.spec
-    if spec.intervals:
-        schedule_type = "interval"
-        expression = str(round(spec.intervals[0].every.total_seconds()))
-    else:
-        schedule_type = "cron"
-        expression = spec.cron_expressions[0] if spec.cron_expressions else ""
-    overlap = {
-        ScheduleOverlapPolicy.SKIP: "skip",
-        ScheduleOverlapPolicy.BUFFER_ONE: "queue",
-        ScheduleOverlapPolicy.CANCEL_OTHER: "replace",
-    }.get(schedule.policy.overlap, schedule.policy.overlap.name.casefold())
     return {
         "id": description.id,
-        "schedule_type": schedule_type,
-        "cron_expression": expression,
+        "cron_expression": spec.cron_expressions[0] if spec.cron_expressions else "",
         "timezone": spec.time_zone_name,
         "enabled": not schedule.state.paused,
         "paused": schedule.state.paused,
-        "overlap_policy": overlap,
         "next_run_at": (
             description.info.next_action_times[0].isoformat()
             if description.info.next_action_times
             else None
         ),
-        "last_run_at": (
-            description.info.recent_actions[-1].scheduled_at.isoformat()
-            if description.info.recent_actions
-            else None
-        ),
-        "num_actions": description.info.num_actions,
-        "num_actions_skipped_overlap": description.info.num_actions_skipped_overlap,
     }
 
 

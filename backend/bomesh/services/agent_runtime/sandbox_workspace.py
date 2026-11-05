@@ -13,14 +13,15 @@ from bomesh.agent import (
     SandboxMaterialization,
     ShellRun,
 )
+from bomesh.errors import NotFound, PermissionDenied
+from bomesh.iam import WorkspaceAccess
 from bomesh.services import (
     ArtifactValidationError,
-    AuthContext,
-    AuthorizationError,
     DocumentNotFoundError,
     SandboxManifestResource,
     SandboxMaterializedFile,
     SandboxSessionState,
+    timestamp,
 )
 from bomesh.services.agent_runtime.docker_sandbox import (
     PROVIDER,
@@ -29,8 +30,8 @@ from bomesh.services.agent_runtime.docker_sandbox import (
     SandboxContainerGone,
 )
 from bomesh.services.agent_runtime.sandbox_renditions import renditions
-from bomesh.services.artifact import ArtifactService
-from bomesh.services.sandbox_session import SandboxSessionService
+from bomesh.services.artifacts.artifact_store import ArtifactService
+from bomesh.services.conversations.sandbox_session import SandboxSessionService
 
 _log = logging.getLogger(__name__)
 
@@ -46,9 +47,8 @@ class SandboxWorkspace:
     def __init__(
         self,
         *,
-        access: AuthContext,
+        access: WorkspaceAccess,
         conversation_id: UUID,
-        request_id: str,
         sandbox: DockerSandbox,
         sessions: SandboxSessionService,
         artifacts: ArtifactService,
@@ -56,7 +56,6 @@ class SandboxWorkspace:
     ) -> None:
         self._access = access
         self._conversation_id = conversation_id
-        self._request_id = request_id
         self._sandbox = sandbox
         self._sessions = sessions
         self._artifacts = artifacts
@@ -118,8 +117,15 @@ class SandboxWorkspace:
             ),
         )
 
-    async def promote_file(self, file_name: str, *, summary: str) -> SandboxArtifact:
-        """Export one sandbox file into the durable artifact lifecycle."""
+    async def promote_file(
+        self, file_name: str, *, summary: str, source_ids: tuple[str, ...]
+    ) -> SandboxArtifact:
+        """Export one sandbox file into the durable artifact lifecycle.
+
+        Its sources are ``source_ids`` (what the turn retrieved or was given)
+        plus every resource materialized into the sandbox: the file may be
+        built from any of them.
+        """
 
         requested_name = sandbox_path(file_name)
         container_id = await self._existing_container()
@@ -141,40 +147,49 @@ class SandboxWorkspace:
         artifact = await self._artifacts.record_generated(
             self._access,
             conversation_id=self._conversation_id,
-            request_id=self._request_id,
             file_name=requested_name,
             mime_type=mime_type,
             data=data,
             summary=summary,
+            source_ids=self._sources(source_ids),
         )
-        artifact_id = str(artifact["id"])
-        revision = artifact.get("revision")
-        if not isinstance(revision, int) or revision < 1:
-            raise RuntimeError("artifact service returned an invalid revision")
-        size_bytes = artifact.get("size_bytes")
+        artifact_id = str(artifact.artifact_id)
         self._state = await self._sessions.record_resource(
             self._access,
             session_id=self._bound_state().id,
             resource=SandboxManifestResource(
                 resource_id=artifact_id,
-                name=str(artifact["file_name"]),
-                mime_type=str(artifact["mime_type"]),
-                size_bytes=size_bytes if isinstance(size_bytes, int) else None,
+                name=artifact.file_name,
+                mime_type=artifact.mime_type,
+                size_bytes=artifact.size_bytes,
             ),
         )
-        updated_at = artifact.get("updated_at")
         exported = SandboxArtifact(
             id=artifact_id,
-            title=str(artifact["title"]),
-            name=str(artifact["file_name"]),
-            mime_type=str(artifact["mime_type"]),
-            revision=revision,
-            size_bytes=size_bytes if isinstance(size_bytes, int) else 0,
-            updated_at=updated_at if isinstance(updated_at, str) else None,
+            title=artifact.display_name,
+            name=artifact.file_name,
+            mime_type=artifact.mime_type,
+            revision=artifact.revision,
+            size_bytes=artifact.size_bytes,
+            updated_at=timestamp(artifact.update_time),
         )
         # One entry per file, first-exported order, carrying its newest revision.
         self._exported[artifact_id] = exported
         return exported
+
+    def _sources(self, source_ids: tuple[str, ...]) -> tuple[UUID, ...]:
+        materialized = (
+            tuple(file.resource_id for file in self._state.materialized_files)
+            if self._state is not None
+            else ()
+        )
+        sources: list[UUID] = []
+        for value in dict.fromkeys((*source_ids, *materialized)):
+            try:
+                sources.append(UUID(value))
+            except ValueError:
+                continue
+        return tuple(sources)
 
     # -- Container binding ----------------------------------------------------
 
@@ -253,7 +268,12 @@ class SandboxWorkspace:
                         size_bytes=resource.size_bytes,
                     ),
                 )
-            except (ArtifactValidationError, AuthorizationError, DocumentNotFoundError):
+            except (
+                ArtifactValidationError,
+                DocumentNotFoundError,
+                NotFound,
+                PermissionDenied,
+            ):
                 # Deleted or no longer readable: it simply does not come back.
                 _log.info("sandbox rebuild skipped resource %s", resource.resource_id)
 

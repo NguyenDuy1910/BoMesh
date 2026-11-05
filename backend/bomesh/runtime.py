@@ -12,16 +12,14 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import AppConfig, get_config
-
 from bomesh.agent import Agent, SessionConfiguration
 from bomesh.agent.tools import ToolRegistry
-from bomesh.agent.tools.knowledge_search import KnowledgeSearch
+from bomesh.agent.tools.export_sandbox_file import ExportSandboxFile
 from bomesh.agent.tools.inspect_resource import InspectResource
+from bomesh.agent.tools.knowledge_search import KnowledgeSearch
 from bomesh.agent.tools.materialize_resource import MaterializeResource
 from bomesh.agent.tools.materialize_sandbox_resource import MaterializeSandboxResource
 from bomesh.agent.tools.read_resource import ReadResource
-from bomesh.agent.tools.export_sandbox_file import ExportSandboxFile
 from bomesh.agent.tools.run_shell import RunShell
 from bomesh.agent.transports.openai import OpenAITransport
 from bomesh.agent.transports.openrouter import OpenRouterTransport
@@ -30,41 +28,35 @@ from bomesh.connector.processing import DoclingProcessor, PdfVision
 from bomesh.db.engine import LazySessionFactory, SessionFactory
 from bomesh.document_index import ItemIndex, SemanticContextualizer
 from bomesh.health import HealthService, HealthSettings
-from bomesh.knowledge import ItemKnowledgeRetriever, SemanticReranker
-from bomesh.observability import create_tracer
+from bomesh.iam.authorizer import Authorizer, WorkspaceAccess
 from bomesh.integrations.atlassian import AtlassianConnectionProvider
 from bomesh.integrations.google import GoogleConnectionProvider
 from bomesh.integrations.oauth_state import OAuthStateCodec
 from bomesh.integrations.registry import ConnectionProviderRegistry
-from bomesh.services.workspace_control_plane import WorkspaceControlPlaneService
-from bomesh.services.integration_authorization import (
-    IntegrationAuthorizationService,
-)
-from bomesh.services.integration_lifecycle import IntegrationLifecycleService
-from bomesh.services.identity_access.auth import AuthenticationService
-from bomesh.services.identity_access.google import GoogleIdentityVerifier
-from bomesh.services.artifact import ArtifactService
-from bomesh.services import AuthContext
-from bomesh.services.chat import ChatService
-from bomesh.services.conversation import ConversationService
-from bomesh.services.document_presentation import DocumentPresenter
-from bomesh.services.documents import DocumentService
-from bomesh.services.item_ingestion import ItemIngestionService
-from bomesh.services.archive_expansion import ArchiveExpansionService
-from bomesh.services.knowledge_query import KnowledgeQueryService
-from bomesh.services.knowledge_view import KnowledgeViewService
-from bomesh.services.preview import KnowledgePreview
-from bomesh.services.agent_runtime.item_resource_resolver import ItemResourceResolver
-from bomesh.services.agent_runtime.docker_sandbox import DockerSandbox
-from bomesh.services.agent_runtime.sandbox_workspace import SandboxWorkspace
-from bomesh.services.sandbox_session import SandboxSessionService
-from bomesh.services.stored_file_content import StoredFileContentService
-from bomesh.services.ingestion import IngestionRunService
-from bomesh.services.source_sync import SourceSyncService
-from bomesh.services.workflow.service import TemporalWorkflowService
+from bomesh.knowledge import ItemKnowledgeRetriever, ItemReadAccess, SemanticReranker
+from bomesh.observability import create_tracer
 from bomesh.services import current_processing_version
-from bomesh.services.identity_access.jwt_tokens import JwtTokenService
+from bomesh.services.agent_runtime.docker_sandbox import DockerSandbox
+from bomesh.services.agent_runtime.item_resource_resolver import ItemResourceResolver
+from bomesh.services.agent_runtime.sandbox_workspace import SandboxWorkspace
+from bomesh.services.artifacts.artifact_store import ArtifactService
+from bomesh.services.conversations.chat import ChatService
+from bomesh.services.conversations.sandbox_session import SandboxSessionService
+from bomesh.services.conversations.turn_store import ConversationService
+from bomesh.services.identity.access_session import AccessSessionService
+from bomesh.services.identity.auth import AuthenticationService
+from bomesh.services.identity.google import GoogleIdentityVerifier
+from bomesh.services.identity.jwt_tokens import JwtTokenService
+from bomesh.services.ingestion.oauth_flow import IntegrationAuthorizationService
+from bomesh.services.ingestion.run_engine import IngestionRunService
+from bomesh.services.ingestion.source_sync import SourceSyncService
+from bomesh.services.knowledge_items.archive_expansion import ArchiveExpansionService
+from bomesh.services.knowledge_items.file_content import StoredFileContentService
+from bomesh.services.knowledge_items.indexing import ItemIngestionService
+from bomesh.services.knowledge_items.preview import KnowledgePreview
+from bomesh.services.workflow.service import TemporalWorkflowService
 from bomesh.storage import S3DocumentStorage
+from config import AppConfig, get_config
 
 
 class AppRuntime:
@@ -76,10 +68,8 @@ class AppRuntime:
         self._storage: Any | None = None
         self._index: ItemIndex | None = None
         self._preview: KnowledgePreview | None = None
-        self._presenter: DocumentPresenter | None = None
         self._workflows: TemporalWorkflowService | None = None
         self._ingestion: ItemIngestionService | None = None
-        self._documents: DocumentService | None = None
         self._conversations: ConversationService | None = None
         self._artifacts: ArtifactService | None = None
         self._agent: Agent | None = None
@@ -114,51 +104,6 @@ class AppRuntime:
             sandbox_runtime=self._sandbox_workspace,
         )
 
-    def knowledge_query_service(self) -> KnowledgeQueryService:
-        return KnowledgeQueryService(
-            self.sessions(),
-            retriever=self.knowledge_retriever(),
-        )
-
-    def knowledge_view_service(self) -> KnowledgeViewService:
-        return KnowledgeViewService(
-            self.sessions(),
-            index=self.item_index(),
-            presenter=self.document_presenter(),
-        )
-
-    def document_service(self) -> DocumentService:
-        """The one Document lifecycle: adding data registers pending Documents."""
-
-        if self._documents is None:
-            upload = self._config.upload
-            self._documents = DocumentService(
-                self.sessions(),
-                object_storage=self.object_storage(),
-                ingestion=self.ingestion_service(),
-                presenter=self.document_presenter(),
-                max_upload_bytes=upload.max_upload_bytes,
-                upload_url_seconds=upload.upload_url_seconds,
-            )
-        return self._documents
-
-    def workspace_control_plane_service(self) -> WorkspaceControlPlaneService:
-        return WorkspaceControlPlaneService(
-            self.sessions(),
-            vector_index=self._config.vector_index,
-            processing_version=self.processing_version(),
-        )
-
-    def integration_lifecycle_service(self) -> IntegrationLifecycleService:
-        return IntegrationLifecycleService(
-            self.sessions(),
-            workflows=self.workflow_service(),
-            integration=self._config.integration,
-            providers=self.connection_providers(),
-            authorization=self.integration_authorization_service(),
-            processing_version=self.processing_version(),
-        )
-
     def ingestion_run_service(self) -> IngestionRunService:
         """Every processing trigger — manual, API, scheduled — creates a run here."""
 
@@ -184,7 +129,6 @@ class AppRuntime:
     def integration_authorization_service(self) -> IntegrationAuthorizationService:
         oauth = self._config.integration.oauth
         return IntegrationAuthorizationService(
-            self.connection_providers(),
             state=OAuthStateCodec(oauth.state_secret),
             client_origin=oauth.client_origin,
         )
@@ -239,13 +183,30 @@ class AppRuntime:
         )
 
     def authentication_service(self, session: AsyncSession) -> AuthenticationService:
-        """Build a request-scoped authentication workflow from durable identity state."""
+        """Sign-in credential verification inside the caller's transaction."""
 
         return AuthenticationService(
             session,
-            tokens=self.jwt_token_service(),
             platform_admin_emails=self._config.identity.platform_admin_emails,
         )
+
+    def access_session_service(self, session: AsyncSession) -> AccessSessionService:
+        """Issue, authenticate and end access sessions inside the caller's transaction."""
+
+        return AccessSessionService(session, self.jwt_token_service())
+
+    def authorizer_factory(self) -> Authorizer:
+        """A fresh request-scoped :class:`Authorizer` (memoized for one request only)."""
+
+        return Authorizer(self.sessions())
+
+    def request_hash_secret(self) -> bytes:
+        """The deployment key ``request_idempotency.request_hash`` is keyed with."""
+
+        secret = self._config.identity.jwt_secret
+        if not secret:
+            raise RuntimeError("BOMESH_AUTH_JWT_SECRET is required")
+        return secret.encode()
 
     # -- Shared collaborators ----------------------------------------------
 
@@ -274,17 +235,6 @@ class AppRuntime:
             )
         return self._google_identity
 
-    def document_presenter(self) -> DocumentPresenter:
-        if self._presenter is None:
-            self._presenter = DocumentPresenter(
-                processing_version=self.processing_version(),
-                object_storage=self.object_storage,
-                preview=self.knowledge_preview(),
-                citation_url_seconds=self._config.upload.citation_url_seconds,
-                preview_url_seconds=self._config.preview.url_seconds,
-            )
-        return self._presenter
-
     def workflow_service(self) -> TemporalWorkflowService:
         if self._workflows is None:
             self._workflows = TemporalWorkflowService()
@@ -298,12 +248,11 @@ class AppRuntime:
     def artifact_service(self) -> ArtifactService:
         if self._artifacts is None:
             artifact = self._config.artifact
-            # Storage and documents are resolved lazily: the agent is composed
+            # Storage is resolved lazily: the agent is composed
             # at startup, while object storage is only required by a request.
             self._artifacts = ArtifactService(
                 self.sessions(),
                 object_storage=self.object_storage,
-                documents=self.document_service,
                 preview=self.knowledge_preview,
                 stored_content=self.stored_file_content,
                 max_content_bytes=artifact.max_content_bytes,
@@ -455,6 +404,7 @@ class AppRuntime:
             )
             self._retriever = ItemKnowledgeRetriever(
                 self.item_index(),
+                access=ItemReadAccess(self.sessions()),
                 reranker=reranker,
                 candidate_count=retrieval.hybrid_candidate_limit,
                 reranking_enabled=retrieval.reranking_enabled,
@@ -525,7 +475,7 @@ class AppRuntime:
         await self.sandbox().start()
 
     def _sandbox_workspace(
-        self, access: AuthContext, conversation_id: UUID, request_id: str
+        self, access: WorkspaceAccess, conversation_id: UUID
     ) -> SandboxWorkspace | None:
         """Build a request-scoped workspace only while the sandbox is available."""
 
@@ -535,7 +485,6 @@ class AppRuntime:
         return SandboxWorkspace(
             access=access,
             conversation_id=conversation_id,
-            request_id=request_id,
             sandbox=sandbox,
             sessions=self.sandbox_session_service(),
             artifacts=self.artifact_service(),
@@ -543,8 +492,14 @@ class AppRuntime:
         )
 
     async def aclose(self) -> None:
-        """Release every client this runtime opened."""
+        """Release every client this runtime opened.
 
+        Running artifact generations settle first, while storage and the index
+        are still open.
+        """
+
+        if self._artifacts is not None:
+            await self._artifacts.aclose()
         if self._sandbox is not None:
             await self._sandbox.aclose()
         if self._index is not None:
@@ -577,10 +532,13 @@ class AppRuntime:
             )
         return S3DocumentStorage(
             bucket=bucket,
+            provider=storage.provider,
             region=storage.region,
             endpoint_url=storage.endpoint_url,
             public_endpoint_url=storage.public_endpoint_url,
             addressing_style=storage.addressing_style,
+            access_key_id=storage.access_key_id,
+            secret_access_key=storage.secret_access_key,
             timeout_seconds=storage.timeout_seconds,
             max_pool_connections=storage.max_pool_connections,
         )

@@ -1,18 +1,38 @@
-"""Aggregate readiness checks for the services used by BoMesh chat."""
+"""Probe the services BoMesh depends on, record the history and name the platform components.
+
+- :class:`HealthService` probes every dependency once (no user workload).
+- :class:`HealthRecorder` writes each probe to ``platform_health_checks``
+  (kept :data:`HISTORY_RETENTION`); the Operations interface derives
+  ``components`` and ``incidents`` from that history.
+- :func:`platform_components` is the fixed component catalog, configured
+  from the deployment settings.
+"""
 
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from time import perf_counter
 from typing import Literal
 from urllib.parse import quote
 
 import httpx
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import delete
 
+from bomesh.db.engine import SessionFactory, transaction_scope
+from bomesh.db.models import PlatformHealthCheck
 from bomesh.document_index import DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME
+from config.env_config import AppConfig
+
+log = logging.getLogger(__name__)
+
+#: Probe history older than this is deleted when new probes are recorded.
+HISTORY_RETENTION = timedelta(days=90)
+#: Default interval between two recorded probes.
+PROBE_INTERVAL_SECONDS = 60.0
 
 ServiceStatus = Literal["healthy", "unhealthy", "not_configured"]
 AggregateStatus = Literal["healthy", "degraded", "unhealthy"]
@@ -458,4 +478,116 @@ def _duration_ms(started_at: float) -> int:
     return round((perf_counter() - started_at) * 1_000)
 
 
-__all__ = ["HealthReport", "HealthService", "HealthSettings", "ServiceHealth"]
+ComponentKind = Literal["SERVICE", "AI_MODEL"]
+
+
+@dataclass(frozen=True, slots=True)
+class ComponentSpec:
+    """One platform component (``components/{id}``) and the probe that checks it."""
+
+    id: str
+    display_name: str
+    kind: ComponentKind
+    probe: str
+    configured: bool
+    setting: str | None = None
+    model: str | None = None
+
+
+def platform_components(config: AppConfig) -> tuple[ComponentSpec, ...]:
+    """The components of this deployment; ``probe`` is the :class:`ServiceHealth` name."""
+    model = config.model
+    index = config.vector_index
+    observability = config.observability
+    chat_setting = "OPENROUTER_MODEL" if model.agent_provider == "openrouter" else "OPENAI_MODEL"
+    return (
+        ComponentSpec("api", "API", "SERVICE", probe="api", configured=True),
+        ComponentSpec(
+            "vector-index",
+            "Vector index",
+            "SERVICE",
+            probe="qdrant",
+            configured=bool(index.url and index.collection),
+            setting="QDRANT_URL",
+        ),
+        ComponentSpec(
+            "chat-model",
+            "Chat model",
+            "AI_MODEL",
+            probe="openai_chat",
+            configured=bool(model.chat_model),
+            setting=chat_setting,
+            model=model.chat_model,
+        ),
+        ComponentSpec(
+            "embedding-model",
+            "Embedding model",
+            "AI_MODEL",
+            probe="openrouter_embeddings",
+            configured=bool(model.embedding_model),
+            setting="EMBEDDING_MODEL",
+            model=model.embedding_model,
+        ),
+        ComponentSpec(
+            "observability",
+            "Observability",
+            "SERVICE",
+            probe="langfuse",
+            configured=bool(
+                observability.langfuse_public_key or observability.langfuse_secret_key
+            ),
+            setting="LANGFUSE_PUBLIC_KEY",
+        ),
+    )
+
+
+class HealthRecorder:
+    """Probe periodically and append each service's result to ``platform_health_checks``."""
+
+    def __init__(self, health: HealthService, sessions: SessionFactory) -> None:
+        self._health = health
+        self._sessions = sessions
+
+    async def record(self) -> HealthReport:
+        """Probe once, store one row per service and prune expired history."""
+        report = await self._health.check()
+        async with transaction_scope(self._sessions) as session:
+            session.add_all(
+                PlatformHealthCheck(
+                    checked_at=report.checked_at,
+                    service=service.name,
+                    status=service.status,
+                    error_category=service.error_category,
+                    latency_ms=service.latency_ms,
+                )
+                for service in report.services
+            )
+            await session.execute(
+                delete(PlatformHealthCheck).where(
+                    PlatformHealthCheck.checked_at < report.checked_at - HISTORY_RETENTION
+                )
+            )
+        return report
+
+    async def run(self, interval_seconds: float = PROBE_INTERVAL_SECONDS) -> None:
+        """Record forever (until cancelled); a failed round is logged and retried."""
+        while True:
+            try:
+                await self.record()
+            except Exception:  # noqa: BLE001 - the next round retries
+                log.warning("platform health could not be recorded", exc_info=True)
+            await asyncio.sleep(interval_seconds)
+
+
+__all__ = [
+    "HISTORY_RETENTION",
+    "PROBE_INTERVAL_SECONDS",
+    "ComponentKind",
+    "ComponentSpec",
+    "HealthRecorder",
+    "HealthReport",
+    "HealthService",
+    "HealthSettings",
+    "ServiceHealth",
+    "platform_components",
+]
