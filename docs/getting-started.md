@@ -28,9 +28,9 @@ make init
 `make init` performs the complete local bootstrap:
 
 1. Creates the root `.env` when missing.
-2. Writes local dependency endpoints and enables the backend's local development identity.
-3. Starts PostgreSQL, Qdrant, MinIO, Temporal, and the Temporal UI.
-4. Creates the configured MinIO bucket.
+2. Writes local dependency endpoints, generates the RustFS credentials once, and enables the backend's local development identity.
+3. Starts PostgreSQL, Qdrant, RustFS, Temporal, and the Temporal UI.
+4. Creates the configured private RustFS bucket and its browser CORS rule.
 5. Rebuilds PostgreSQL from the current SQLAlchemy models.
 6. Seeds a deterministic local administrator and membership.
 7. Recreates the derived Qdrant collection with dense and BM25 vectors.
@@ -75,10 +75,9 @@ Start the WebUI in a separate terminal:
 bun run web
 ```
 
-The WebUI loads its public configuration from the same root `.env`. The API
-accepts the development identity only while
-`BOMESH_ALLOW_INSECURE_DEV_IDENTITY=true`; it is not an authentication
-mechanism for deployment.
+The WebUI loads its public configuration from the same root `.env`. Every API
+request authenticates with a bearer access token (`auth_contract.md`); there is
+no development identity header.
 
 ## Local service endpoints
 
@@ -89,7 +88,7 @@ mechanism for deployment.
 | OpenAPI | `http://127.0.0.1:8000/docs` |
 | Health | `http://127.0.0.1:8000/health` |
 | Qdrant | `http://127.0.0.1:6333` |
-| MinIO console | `http://127.0.0.1:9001` |
+| RustFS S3 API | `http://127.0.0.1:9000` (console off; see [Operations](operations.md#object-storage)) |
 | Temporal UI | `http://127.0.0.1:8080` |
 
 ## Useful reset boundaries
@@ -111,7 +110,7 @@ development administrator without recreating Qdrant.
 Use `make reset-all` after changing the data design or Qdrant schema. It resets
 the application and Temporal databases plus the derived vector collection,
 applies the current SQLAlchemy schema, and restores the administrator. It does
-not delete raw MinIO objects.
+not delete raw RustFS objects.
 
 For the ownership implications of these resets, see
 [Architecture](architecture.md) and [Data schema](data.schema.md).

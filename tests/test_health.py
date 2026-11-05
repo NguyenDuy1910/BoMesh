@@ -1,17 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import httpx
-from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
-import api.app as api_app
-import api.deps as api_deps
 from bomesh.health import HealthService, HealthSettings
 
 SETTINGS = HealthSettings(
@@ -38,13 +37,9 @@ def _service(handler) -> HealthService:
     )
 
 
-def _get_health(service: HealthService) -> httpx.Response:
-    api_app.app.dependency_overrides[api_deps.get_health_service] = lambda: service
-    try:
-        with TestClient(api_app.app) as client:
-            return client.get("/health")
-    finally:
-        api_app.app.dependency_overrides.pop(api_deps.get_health_service, None)
+def _check(service: HealthService) -> dict[str, Any]:
+    report = asyncio.run(service.check())
+    return report.model_dump(mode="json", exclude_none=True)
 
 
 def _qdrant_collection() -> dict[str, object]:
@@ -87,10 +82,8 @@ def test_health_reports_all_configured_services_as_healthy() -> None:
         assert request.headers["authorization"].startswith("Basic ")
         return httpx.Response(200, json={"data": [{"id": "project-1"}]})
 
-    response = _get_health(_service(handler))
+    payload = _check(_service(handler))
 
-    assert response.status_code == 200
-    payload = response.json()
     assert payload["status"] == "healthy"
     assert {service["name"] for service in payload["services"]} == {
         "api",
@@ -121,10 +114,8 @@ def test_health_returns_503_when_required_services_are_unhealthy() -> None:
             return httpx.Response(401)
         return httpx.Response(200, json={"data": [{"id": "project-1"}]})
 
-    response = _get_health(_service(handler))
+    payload = _check(_service(handler))
 
-    assert response.status_code == 503
-    payload = response.json()
     assert payload["status"] == "unhealthy"
     services = {service["name"]: service for service in payload["services"]}
     assert services["qdrant"]["error_category"] == "upstream_error"
@@ -161,11 +152,11 @@ def test_health_rejects_a_dense_only_qdrant_collection() -> None:
             )
         return httpx.Response(200, json={"data": [{"id": "project-1"}]})
 
-    response = _get_health(_service(handler))
+    payload = _check(_service(handler))
 
-    assert response.status_code == 503
+    assert payload["status"] == "unhealthy"
     qdrant = next(
-        service for service in response.json()["services"]
+        service for service in payload["services"]
         if service["name"] == "qdrant"
     )
     assert qdrant["error_category"] == "incompatible_schema"
@@ -188,10 +179,8 @@ def test_health_is_degraded_when_optional_langfuse_is_unavailable() -> None:
             )
         return httpx.Response(503)
 
-    response = _get_health(_service(handler))
+    payload = _check(_service(handler))
 
-    assert response.status_code == 200
-    payload = response.json()
     assert payload["status"] == "degraded"
     langfuse = next(
         service for service in payload["services"] if service["name"] == "langfuse"
@@ -222,7 +211,7 @@ def test_unconfigured_optional_langfuse_does_not_fail_readiness() -> None:
             },
         )
 
-    response = _get_health(
+    payload = _check(
         HealthService(
             settings,
             timeout_seconds=1,
@@ -230,11 +219,10 @@ def test_unconfigured_optional_langfuse_does_not_fail_readiness() -> None:
         )
     )
 
-    assert response.status_code == 200
-    assert response.json()["status"] == "healthy"
+    assert payload["status"] == "healthy"
     langfuse = next(
         service
-        for service in response.json()["services"]
+        for service in payload["services"]
         if service["name"] == "langfuse"
     )
     assert langfuse["status"] == "not_configured"

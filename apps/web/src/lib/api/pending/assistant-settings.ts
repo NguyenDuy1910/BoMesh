@@ -1,9 +1,9 @@
 /**
- * Local implementation of `workspace.assistant_settings` (proposed
- * `GET`/`PATCH /workspaces/{workspace_id}/assistant-settings`).
+ * Local implementation of `workspace.assistant_settings` (v2
+ * `GetWorkspaceAssistant` / `UpdateWorkspaceAssistant`).
  *
  * Settings belong to the workspace, so the store is workspace-wide (not per
- * account). Reads need membership; writes need `tenant.manage`, as proposed.
+ * account). Reads need membership; writes need `tenant.manage` (v2 `workspaces.updateAssistant`).
  */
 import { ApiError } from "@/lib/api/request";
 import { pendingCaller, pendingStore, requirePendingPermission, type PendingCaller } from "@/lib/api/pending";

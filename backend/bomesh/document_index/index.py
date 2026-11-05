@@ -16,6 +16,7 @@ from bomesh.document_index import (
     EmbeddingService,
     IndexingContext,
     IndexProgress,
+    ItemPayloadState,
 )
 from bomesh.document_index._qdrant import _QdrantBackend
 from bomesh.document_index.payload import (
@@ -117,8 +118,13 @@ class ItemIndex:
         limit: int,
         tenant_id: str,
         collection_item_ids: tuple[str, ...],
+        editable_collection_ids: tuple[str, ...],
     ) -> list[ContextualChunk]:
-        """Return the fused candidates of every query, within the access scope."""
+        """Return the fused candidates of every query, within the access scope.
+
+        A point matches when its collection is in ``collection_item_ids`` and
+        it is published or its collection is in ``editable_collection_ids``.
+        """
 
         normalized_queries = [" ".join(query.split()) for query in queries]
         if not normalized_queries or not all(normalized_queries):
@@ -138,6 +144,7 @@ class ItemIndex:
             queries=list(zip(normalized_queries, vectors, strict=True)),
             tenant_id=normalized_tenant_id,
             collection_item_ids=collection_item_ids,
+            editable_collection_ids=editable_collection_ids,
             limit=limit,
             candidate_limit=max(limit, self._candidate_limit),
         )
@@ -148,24 +155,16 @@ class ItemIndex:
         item_id: str,
         *,
         tenant_id: str,
-        collection_item_id: str,
         chunk_id: str | None = None,
         limit: int = 100,
     ) -> list[ContextualChunk]:
-        """Return indexed chunks for one Item, ordered by source position."""
+        """The live chunks of one Item the caller was authorized for, in source order."""
 
-        normalized_item_id = _required_text(item_id, "item_id")
-        normalized_tenant_id = _required_text(tenant_id, "tenant_id")
-        normalized_collection_id = _required_text(
-            collection_item_id, "collection_item_id"
-        )
         if limit < 1:
             raise ValueError("limit must be at least one")
-
         points = await self._backend.get_item_points(
-            item_id=normalized_item_id,
-            tenant_id=normalized_tenant_id,
-            collection_item_id=normalized_collection_id,
+            item_id=_required_text(item_id, "item_id"),
+            tenant_id=_required_text(tenant_id, "tenant_id"),
             chunk_id=chunk_id,
             limit=limit,
         )
@@ -180,6 +179,33 @@ class ItemIndex:
         """Tombstone all indexed content for one Item."""
 
         await self._backend.tombstone_item_points(
+            _required_text(item_id, "item_id"),
+            tenant_id=_required_text(tenant_id, "tenant_id"),
+        )
+
+    async def apply_item_payload(
+        self, item_id: str, *, tenant_id: str, state: ItemPayloadState
+    ) -> None:
+        """Re-apply the access fields of one Document's points (no re-embedding)."""
+
+        await self._backend.set_item_payload(
+            _required_text(item_id, "item_id"),
+            tenant_id=_required_text(tenant_id, "tenant_id"),
+            payload=state.to_payload(),
+        )
+
+    async def count_item_content(self, item_id: str, *, tenant_id: str) -> int:
+        """How many points one Item has, tombstoned ones included."""
+
+        return await self._backend.count_item_points(
+            _required_text(item_id, "item_id"),
+            tenant_id=_required_text(tenant_id, "tenant_id"),
+        )
+
+    async def purge_item_content(self, item_id: str, *, tenant_id: str) -> None:
+        """Delete one Item's points for good."""
+
+        await self._backend.delete_item_points(
             _required_text(item_id, "item_id"),
             tenant_id=_required_text(tenant_id, "tenant_id"),
         )

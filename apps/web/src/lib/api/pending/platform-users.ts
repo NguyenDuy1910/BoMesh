@@ -18,7 +18,7 @@ type UserOverrides = Record<string, PlatformUserUpdate & { updated_at: string }>
 
 function authorize() {
   const caller = pendingCaller(null);
-  // Mirrors the proposed `platform.user.manage`, which no session holds yet.
+  // Mirrors v2 `users.update` / `users.suspend`, which no session holds yet.
   requirePendingPlatformPermission(caller, "platform.user.read", "You need platform permission to manage accounts.");
   const store = pendingStore<UserOverrides>("platform.user_admin", caller.accountId, null, () => ({}));
   return { caller, store };

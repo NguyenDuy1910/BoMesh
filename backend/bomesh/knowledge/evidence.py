@@ -1,23 +1,12 @@
 """Provider-neutral navigation targets for grounded citations."""
 
-from urllib.parse import quote, urlsplit, urlunsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from bomesh.connector.protocol import CitationInfo, SourceIdentity
 
 
 class CitationResolver:
-    """Resolve a citation into an internal viewer path or native source URL."""
-
-    @staticmethod
-    def internal_path(item_id: str, chunk_id: str) -> str:
-        normalized_item_id = item_id.strip()
-        normalized_chunk_id = chunk_id.strip()
-        if not normalized_item_id or not normalized_chunk_id:
-            raise ValueError("item_id and chunk_id are required")
-        return (
-            f"/knowledge/documents/{quote(normalized_item_id, safe='')}"
-            f"?chunk={quote(normalized_chunk_id, safe='')}"
-        )
+    """Resolve a citation into its native source URL (the passage name is the internal target)."""
 
     @staticmethod
     def original_url(source: SourceIdentity, citation: CitationInfo) -> str | None:

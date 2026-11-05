@@ -41,6 +41,12 @@ class ExportSandboxFile(Tool):
             artifact = await sandbox.promote_file(
                 str(invocation.payload.arguments["file_name"]),
                 summary="Exported from the conversation sandbox.",
+                # The file may hold anything the turn retrieved or was given:
+                # those documents are its sources (the audience check uses them).
+                source_ids=(
+                    *invocation.references.document_ids(),
+                    *(resource.id for resource in invocation.turn.user_turn.resources),
+                ),
             )
         except ArtifactValidationError as exc:
             return ToolResult(

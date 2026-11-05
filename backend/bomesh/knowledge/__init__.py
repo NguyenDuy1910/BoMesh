@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
@@ -11,12 +11,35 @@ from bomesh.document_index import ContextualChunk
 
 
 class RetrievalContext(Protocol):
-    """Minimum authenticated scope required by knowledge retrieval."""
+    """Who searches, in which workspace, over which collections (and their subtrees).
+
+    The retriever resolves what the user may read in PostgreSQL itself;
+    ``collection_item_ids`` only narrows it.
+    """
 
     tenant_id: str
     user_id: str
-    roles: list[str]
     collection_item_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ReadScope:
+    """What one caller may retrieve: the index pre-filter and the hit re-check.
+
+    ``readable`` and ``editable`` are collection IDs (published points of
+    readable collections, and every point of editable ones); ``recheck``
+    returns the subset of item IDs the visibility rule admits right now.
+    """
+
+    readable: tuple[str, ...]
+    editable: tuple[str, ...]
+    recheck: Callable[[Sequence[str]], Awaitable[frozenset[str]]]
+
+
+class ReadAccess(Protocol):
+    """Resolves a :class:`ReadScope` from the authoritative store (PostgreSQL)."""
+
+    async def scope(self, ctx: RetrievalContext) -> ReadScope: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +107,7 @@ class ContextBuilder(Protocol):
     def build(self, evidence: Sequence[Evidence]) -> EvidenceContext: ...
 
 
+from .access import ItemReadAccess
 from .context_builder import EvidenceContextBuilder
 from .evidence import CitationResolver
 from .retriever import ItemKnowledgeRetriever, source_reference
@@ -96,7 +120,10 @@ __all__ = [
     "EvidenceContext",
     "EvidenceContextBuilder",
     "ItemKnowledgeRetriever",
+    "ItemReadAccess",
     "KnowledgeRetriever",
+    "ReadAccess",
+    "ReadScope",
     "Reranker",
     "RetrievalContext",
     "SemanticReranker",

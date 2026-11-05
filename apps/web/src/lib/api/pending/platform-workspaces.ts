@@ -24,7 +24,7 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function authorizedStore() {
   const caller = pendingCaller(null);
-  // Mirrors the proposed `platform.tenant.manage`, which no session holds yet.
+  // Mirrors v2 `workspaces.create` / `workspaces.suspend`, which no session holds yet.
   requirePendingPlatformPermission(caller, "platform.tenant.read", "You need platform permission to manage workspaces.");
   return pendingStore<WorkspaceAdminState>("platform.workspace_admin", caller.accountId, null, () => ({ created: [], status: {} }));
 }

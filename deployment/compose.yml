@@ -96,15 +96,78 @@ services:
       - "${TEMPORAL_UI_PORT:-8080}:8080"
     restart: unless-stopped
 
+  # Raw document storage. Private by default: the bucket has no public policy,
+  # the S3 API binds to loopback unless RUSTFS_API_BIND widens it, and the
+  # console is disabled and loopback-only. Credentials have no default.
+  rustfs:
+    image: rustfs/rustfs:${RUSTFS_VERSION:-1.0.4}
+    command: ["/data"]
+    environment:
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:?set RUSTFS_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:?set RUSTFS_SECRET_KEY}
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_CONSOLE_ADDRESS: ":9001"
+      RUSTFS_CONSOLE_ENABLE: ${RUSTFS_CONSOLE_ENABLE:-false}
+    ports:
+      - "${RUSTFS_API_BIND:-127.0.0.1}:${RUSTFS_API_PORT:-9000}:9000"
+      - "127.0.0.1:${RUSTFS_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      # A named volume by default; set RUSTFS_DATA_DIR to an SSD path owned by
+      # uid 10001 to keep objects on a host directory instead.
+      - ${RUSTFS_DATA_DIR:-rustfs_data}:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:9000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  # Idempotent: creates the private bucket once and (re)applies the CORS rule
+  # browsers need to use signed preview, download, and upload URLs. Reuses the
+  # server image for its curl, which signs S3 requests with SigV4.
+  rustfs-init:
+    image: rustfs/rustfs:${RUSTFS_VERSION:-1.0.4}
+    depends_on:
+      rustfs:
+        condition: service_healthy
+    environment:
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:?set RUSTFS_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:?set RUSTFS_SECRET_KEY}
+      RUSTFS_BUCKET: ${RUSTFS_BUCKET:-bomesh}
+      RUSTFS_REGION: ${RUSTFS_REGION:-us-east-1}
+      # Comma-separated web origins; `*` matches MinIO's former default.
+      RUSTFS_CORS_ALLOWED_ORIGINS: ${RUSTFS_CORS_ALLOWED_ORIGINS:-*}
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        s3() {
+          curl -fsS --aws-sigv4 "aws:amz:$$RUSTFS_REGION:s3" \
+            --user "$$RUSTFS_ACCESS_KEY:$$RUSTFS_SECRET_KEY" "$$@"
+        }
+        bucket="http://rustfs:9000/$$RUSTFS_BUCKET"
+        s3 -o /dev/null -I "$$bucket" 2>/dev/null || s3 -o /dev/null -X PUT "$$bucket"
+        origins=""
+        set -f  # `*` is an origin, not a glob
+        for origin in $$(echo "$$RUSTFS_CORS_ALLOWED_ORIGINS" | tr ',' ' '); do
+          origins="$$origins<AllowedOrigin>$$origin</AllowedOrigin>"
+        done
+        s3 -o /dev/null -X PUT -H "Content-Type: application/xml" "$$bucket?cors" \
+          --data-binary "<CORSConfiguration><CORSRule>$$origins<AllowedMethod>GET</AllowedMethod><AllowedMethod>HEAD</AllowedMethod><AllowedMethod>PUT</AllowedMethod><AllowedHeader>*</AllowedHeader><ExposeHeader>ETag</ExposeHeader><ExposeHeader>Content-Length</ExposeHeader><ExposeHeader>Content-Range</ExposeHeader><ExposeHeader>Accept-Ranges</ExposeHeader><MaxAgeSeconds>3600</MaxAgeSeconds></CORSRule></CORSConfiguration>"
+        echo "RustFS bucket $$RUSTFS_BUCKET is ready."
+
+  # Legacy MinIO, kept only to read objects written before the RustFS switch.
+  # Start it with `--profile minio`; `make storage-migrate-minio` copies its
+  # bucket into RustFS. Host ports moved off 9000/9001, which RustFS owns.
   minio:
+    profiles: ["minio"]
     image: minio/minio:latest
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-bomesh}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-bomesh-local}
     ports:
-      - "${MINIO_API_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+      - "127.0.0.1:${MINIO_API_PORT:-9100}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9101}:9001"
     volumes:
       - minio_data:/data
     healthcheck:
@@ -114,22 +177,32 @@ services:
       retries: 12
     restart: unless-stopped
 
-  minio-init:
+  # Non-destructive copy: objects are added or overwritten in RustFS, never
+  # removed from MinIO, and ETag/content type survive (`--preserve`).
+  minio-migrate:
+    profiles: ["minio"]
     image: minio/mc:latest
     depends_on:
       minio:
+        condition: service_healthy
+      rustfs:
         condition: service_healthy
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-bomesh}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-bomesh-local}
       MINIO_BUCKET: ${MINIO_BUCKET:-bomesh}
-    entrypoint: ["/bin/sh", "-c"]
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:?set RUSTFS_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:?set RUSTFS_SECRET_KEY}
+      RUSTFS_BUCKET: ${RUSTFS_BUCKET:-bomesh}
+    entrypoint: ["/bin/sh", "-ec"]
     command:
-      - >-
-        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" &&
-        mc mb --ignore-existing "local/$$MINIO_BUCKET"
+      - |
+        mc alias set minio http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null
+        mc alias set rustfs http://rustfs:9000 "$$RUSTFS_ACCESS_KEY" "$$RUSTFS_SECRET_KEY" >/dev/null
+        mc mirror --preserve "minio/$$MINIO_BUCKET" "rustfs/$$RUSTFS_BUCKET"
 
 volumes:
   postgres_data:
   qdrant_storage:
+  rustfs_data:
   minio_data:

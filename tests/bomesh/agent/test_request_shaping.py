@@ -104,7 +104,6 @@ def _context(
     return AgentContext(
         user_id="user",
         tenant_id="tenant",
-        roles=[],
         conversation_id=CONVERSATION_ID,
         history=history,
         resources=resources,

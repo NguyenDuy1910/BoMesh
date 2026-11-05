@@ -165,7 +165,11 @@ async def test_the_streaming_and_non_streaming_paths_reject_a_manual_stream_flag
 
 
 @pytest.mark.asyncio
-async def test_a_missing_model_is_rejected_before_any_request() -> None:
+async def test_a_missing_model_is_rejected_before_any_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("OPENROUTER_MODEL", raising=False)
+
     def handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover
         raise AssertionError("no request should be sent")
 
@@ -181,7 +185,9 @@ async def test_a_missing_model_is_rejected_before_any_request() -> None:
         await transport.stream_response(input="hi")
 
 
-def test_an_api_key_is_required() -> None:
+def test_an_api_key_is_required(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
     with pytest.raises(ValueError, match="OpenRouter API key is required"):
         OpenRouterTransport(api_key="")
 

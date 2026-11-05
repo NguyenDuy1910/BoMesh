@@ -11,7 +11,7 @@ from sqlalchemy import select
 from bomesh.db.engine import SessionFactory, transaction_scope
 from bomesh.db.models import Item
 from bomesh.document_index import ContextualChunk, ItemIndex
-from bomesh.services.identity_access.authorization import AuthorizationService
+from bomesh.iam import Authorizer
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,27 +40,24 @@ async def indexed_documents(
                     Item.tenant_id == tenant,
                     Item.item_type == "document",
                     Item.index_status == "ready",
-                    Item.status != "deleted",
                     Item.deleted_at.is_(None),
                 )
                 .order_by(Item.id)
             )
         ).all()
-        authorization = AuthorizationService(session)
-        documents: list[CorpusDocument] = []
-        for row in rows:
-            collection_id = await authorization.governing_collection_id(
-                row.id, tenant_id=tenant
-            )
-            if collection_id in wanted:
-                documents.append(
-                    CorpusDocument(
-                        item_id=str(row.id),
-                        title=row.title,
-                        mime_type=row.mime_type,
-                        collection_item_id=str(collection_id),
-                    )
+    authorizer = Authorizer(sessions)
+    documents: list[CorpusDocument] = []
+    for row in rows:
+        collection_id = await authorizer.governing_collection(row.id)
+        if collection_id in wanted:
+            documents.append(
+                CorpusDocument(
+                    item_id=str(row.id),
+                    title=row.title,
+                    mime_type=row.mime_type,
+                    collection_item_id=str(collection_id),
                 )
+            )
     return documents
 
 
@@ -72,7 +69,6 @@ async def tenant_collection_ids(sessions: SessionFactory, *, tenant_id: str) -> 
             select(Item.id).where(
                 Item.tenant_id == UUID(tenant_id),
                 Item.item_type == "collection",
-                Item.status != "deleted",
                 Item.deleted_at.is_(None),
             )
         )

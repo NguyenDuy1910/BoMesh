@@ -6,16 +6,16 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from bomesh.db.engine import transaction_scope
 from bomesh.agent import ModelContent, ResourceRef
 from bomesh.agent.protocol import InputImage
+from bomesh.db.engine import transaction_scope
+from bomesh.iam import WorkspaceAccess
 from bomesh.services import (
-    AuthContext,
     DocumentNotFoundError,
     DocumentProcessingError,
     StoredFileContent,
 )
-from bomesh.services.item import ItemService
+from bomesh.services.knowledge_items.item_store import ItemService
 
 
 class ItemResourceResolver:
@@ -25,7 +25,7 @@ class ItemResourceResolver:
         self,
         session_factory: async_sessionmaker[AsyncSession],
         *,
-        access: AuthContext,
+        access: WorkspaceAccess,
         content: StoredFileContent,
         max_read_characters: int,
     ) -> None:

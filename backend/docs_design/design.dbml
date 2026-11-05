@@ -1,23 +1,49 @@
-// BoMesh canonical knowledge architecture.
-// PostgreSQL owns durable domain state. Raw bytes live in S3/R2. Retrieval
-// chunks, embeddings, and BM25 representation live in Qdrant.
+// BoMesh canonical schema design (unified Item model; rationale in
+// item_model.md and database_architecture.md, API in api_design.md +
+// openapi.yaml). backend/bomesh/db/models/ implements all of it, including
+// every CHECK and trigger the notes promise (models/triggers.py).
+// There are no SQL migration files: databases are created from the models
+// (`make db-reset`); see database_architecture.md, "Schema changes".
+// PostgreSQL owns durable domain state. Raw bytes live in S3-compatible object
+// storage (RustFS, R2, S3). Retrieval chunks, embeddings and BM25 live in Qdrant.
+//
+// Resource IDs: a resource whose Create takes a client-chosen `{resource}Id`
+// keeps its API ID in `code` (immutable, unique within its parent). When the
+// client omits it the server writes `r` + the 32 hex digits of the row uuid,
+// which matches every client ID pattern: groups, roles, topics,
+// reading_lists, integration_connections, ingestion_sources, conversations,
+// spaces, request_types. Every other resource ID is the row uuid (or the
+// referenced item/member ID where the API says so).
+// etag = updated_at of the row unless a note says otherwise; purgeTime =
+// deleted_at + the retention of that resource (30 days); both are computed.
+// Computed read models, no storage: workspace overview, member home, usage
+// summaries, audit summaries, knowledge gaps (except decisions), components
+// and incidents (from platform_health_checks), IAM policies (from
+// role_assignments). Exports are operations rows plus an object.
+
+// ───────────────────────────────────────────────────────────────────────────
+// Identity
+// ───────────────────────────────────────────────────────────────────────────
 
 // Durable human identity only. Session lifecycle, device state, token
 // revocation, and expiry never live on this row.
 Table users {
   id uuid [pk]
   username varchar(64) [note: 'Optional local-login identifier; normalized lowercase; unique by lower(username) when present']
-  email varchar(255) [not null, unique]
+  email varchar(255) [not null, unique, note: 'Immutable after create']
   password_hash varchar(256) [note: 'Scrypt password hash; plaintext is never stored']
   display_name varchar(255)
-  status boolean [not null, default: true]
-  preferences jsonb [not null, default: `{}`]
-  last_login_at timestamptz
+  status varchar(16) [not null, default: 'active', note: 'active | suspended (User.state). Suspension revokes every active access_session']
+  preferences jsonb [not null, default: `{}`, note: 'UserPreferences: {language_code, show_work_steps, appearance {mode, theme, accent_color, background_tint, corner_radius, font}, email_notifications {source_failures, access_requests, contribution_updates, review_queue, request_updates, cited_document_changes, weekly_summary}, last_workspace_id}']
+  last_active_at timestamptz [note: 'User.lastActiveTime; touched (throttled, at most once a minute) by authenticated requests together with access_sessions.last_seen_at']
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
   indexes {
     username [unique, note: 'Implemented as partial unique lower(username) index; NULL usernames are allowed']
+    (status, created_at)
+    last_active_at
   }
+  Note: 'User.platformRole is computed from platform-scope role_assignments (platformAdmin = ADMIN, platformOperator = OPERATOR, none = NONE); there is no column.'
 }
 
 // Durable mapping from an external identity provider to one human User.
@@ -43,21 +69,18 @@ Table auth_identities {
   }
 }
 
-// One logical access session for one User in one tenant context. Token rotation
-// or a tenant switch creates a child session instead of changing the session
-// subject in place.
+// One logical access session of one User. No tenant and no active
+// workspace; every workspace is explicit in the resource name and authorized
+// per request. Token rotation creates a child session.
 Table access_sessions {
   id uuid [pk]
-  tenant_id uuid [not null, note: 'Active tenant context; the User must hold an active membership in it']
-  user_id uuid [note: 'Required for every active session; nullable only for retired historical rows']
-  auth_identity_id uuid [note: 'External identity used to establish this user session; null for legacy/internal authentication']
-  kind varchar(24) [not null, note: 'user. `guest` is a retired historical value kept only for lineage; add a typed subject FK before adding another kind']
-  authentication_method varchar(32) [not null, note: 'oidc | saml | password | internal; anonymous appears only on retired historical rows']
+  user_id uuid [not null]
+  auth_identity_id uuid [note: 'External identity used to establish this session; null for password authentication']
+  authentication_method varchar(32) [not null, note: 'password | oidc | saml | internal. API Session.authenticationMethod: password = PASSWORD; oidc through an auth_identity with provider_key google = GOOGLE']
   assurance_level varchar(16) [not null, default: 'aal0', note: 'aal0 | aal1 | aal2']
-  status varchar(16) [not null, default: 'active', note: 'active | superseded | revoked | expired']
+  status varchar(16) [not null, default: 'active', note: 'active | superseded | revoked | expired. API state: active = ACTIVE, every other value = ENDED']
   token_version int [not null, default: 1, note: 'Increment to invalidate every token issued for this session']
-  parent_session_id uuid [note: 'Previous session when this row results from token rotation or a tenant switch; multiple child sessions are allowed for concurrent renewal attempts']
-  transition_reason varchar(32) [note: 'token_rotation | tenant_switch; null for an initial session']
+  parent_session_id uuid [note: 'Previous session when this row results from token rotation; multiple children are allowed for concurrent renewal attempts']
   expires_at timestamptz [not null]
   idle_expires_at timestamptz
   last_seen_at timestamptz
@@ -68,50 +91,78 @@ Table access_sessions {
   updated_at timestamptz [not null]
   indexes {
     (user_id, status)
+    (user_id, created_at)
     (auth_identity_id, status)
-    (tenant_id, kind, status)
     parent_session_id
     (status, expires_at)
     (status, idle_expires_at)
   }
-  Note: 'Checks enforce: kind = user OR status <> active (access_session_guest_is_retired), and the validation trigger rejects any new row whose kind is not user; a user session has user_id set and a non-anonymous method; when set, auth_identity_id must belong to user_id; parent_session_id and transition_reason are both null or both set; token_rotation preserves subject and tenant while tenant_switch may change the tenant but not the User; non-active status requires ended_at; only active, unexpired sessions may authorize requests. The historical subject-shape check is retained so retired guest rows stay valid.'
+  Note: 'Checks: when set, auth_identity_id belongs to user_id; a rotated child keeps user_id, authentication_method and auth_identity_id of its parent; non-active status requires ended_at; only active, unexpired sessions authorize requests. A CreateSession requestId replay returns the same session and increments token_version to mint a fresh token, because tokens are never stored.'
 }
+
+// Single-use reset links; only a hash of the token is kept.
+Table password_reset_tokens {
+  id uuid [pk]
+  user_id uuid [not null]
+  token_hash varchar(128) [not null, unique, note: 'SHA-256 of the emailed token; the token itself is never stored']
+  expires_at timestamptz [not null, note: 'created_at + 30 minutes']
+  used_at timestamptz [note: 'Set once on completion; a used token is invalid']
+  requested_ip inet
+  created_at timestamptz [not null]
+  indexes { (user_id, created_at) }
+  Note: 'Completing a reset sets users.password_hash, sets used_at, and revokes every active access_session of the user.'
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Workspaces, people, authorization
+// ───────────────────────────────────────────────────────────────────────────
 
 Table tenants {
-  id uuid [pk]
-  code varchar(64) [not null, unique]
-  name varchar(255) [not null]
-  status varchar(16) [not null, default: 'active']
-  settings jsonb [not null, default: `{}`]
-  created_at timestamptz [not null]
-  updated_at timestamptz [not null]
-  Note: 'Tenants are private. Access is granted only through tenant_memberships plus role_assignments; there is no public or anonymous tenant access.'
-}
-
-// A named permission bundle. tenant_id is null for platform-defined roles,
-// which is how platform capability exists without a second role table.
-Table roles {
-  id uuid [pk]
-  tenant_id uuid [note: 'Null for a platform-defined (system) role']
-  code varchar(64) [not null]
-  display_name varchar(255) [not null]
-  scope_type varchar(16) [not null, note: 'platform | tenant | collection']
-  is_system boolean [not null, default: false]
-  status varchar(16) [not null, default: 'active']
+  id uuid [pk, note: 'Workspace ID (name and uid)']
+  code varchar(64) [not null, unique, note: 'Workspace.code: the mutable web address; never the resource ID']
+  name varchar(255) [not null, note: 'Workspace.displayName']
+  template varchar(16) [not null, default: 'enterprise', note: 'enterprise | campus; set on create']
+  demo boolean [not null, default: false, note: 'set on create']
+  status varchar(16) [not null, default: 'active', note: 'creating | active | suspended | archived. creating while the CreateWorkspace operation runs']
+  ingestion_paused_at timestamptz [note: 'Workspace.ingestionState is PAUSED while set: no ingestion run and no source sync starts']
+  settings jsonb [not null, default: `{}`, note: 'WorkspaceSettings {modules {spaces, work, requests}, branding {accent_color}, space_types [{key, display_name, icon, enabled}], workflows [{key, enabled}], document_types [{key, display_name}], default_publishing_policy, reverification_duration} plus archive {archived_at, archived_by_user_id}. Read whole with the tenant row; the settings etag is a hash of this document']
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
   indexes {
-    (tenant_id, code) [unique, note: 'NULLS NOT DISTINCT, so a tenant cannot reuse a system role code']
-    (scope_type, status)
+    (status, created_at)
   }
-  Note: 'A system role has no tenant; a tenant-defined role is always tenant-scoped.'
+  Note: 'Tenants are private. Access is granted only through tenant_memberships plus role_assignments; there is no public or anonymous tenant access. Workspace.memberCount is computed from active tenant_memberships.'
 }
 
-Table permissions {
-  code varchar(64) [pk]
-  description text [not null]
-  scope_types text[] [not null, default: `{}`, note: 'Role scopes allowed to carry this permission']
+// A named permission bundle. tenant_id is null for predefined roles, which is
+// how platform capability exists without a second role table.
+Table roles {
+  id uuid [pk]
+  tenant_id uuid [note: 'Null for a predefined (platform-defined) role']
+  code varchar(64) [not null, note: 'API role ID: roles/{code} for predefined roles (workspaceAdmin, workspaceMember, collectionOwner, collectionEditor, collectionViewer, spaceLead, spaceStaff, spaceMember, platformAdmin, platformOperator) or workspaces/{workspace}/roles/{code} for custom roles']
+  display_name varchar(255) [not null]
+  description text
+  scope_type varchar(16) [not null, note: 'platform | tenant | collection | space. Predefined: platformAdmin, platformOperator = platform; workspaceAdmin, workspaceMember = tenant; collection* = collection; space* = space. Custom roles are tenant and may be bound at tenant, collection or space scope of their own tenant']
+  is_system boolean [not null, default: false]
+  deleted_at timestamptz [note: 'Role.state DELETED (custom roles only); :undelete clears it. Assignments of a deleted role stop authorizing but are kept, so undelete restores them']
   created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  indexes {
+    (tenant_id, code) [unique, note: 'NULLS NOT DISTINCT, so a tenant cannot reuse a predefined role code']
+    scope_type
+  }
+  Note: 'A predefined role has no tenant and is synced from code with its role_permissions; a tenant-defined role is always a custom role of that tenant. A custom role cannot include a permission whose custom_roles_supported is false or that the caller lacks (service).'
+}
+
+// The permission catalog: one row per x-permission value.
+Table permissions {
+  code varchar(64) [pk, note: '`<collection>.<method>` exactly as in x-permission, e.g. items.get, items.setIamPolicy, spaces.join, requests.approve']
+  title varchar(255) [not null, note: 'Permission.title']
+  description text [not null]
+  scope_types text[] [not null, default: `{}`, note: 'Scopes at which a grant confers it: platform | tenant | collection | space']
+  custom_roles_supported boolean [not null, default: true, note: 'Permission.customRolesSupported']
+  created_at timestamptz [not null]
+  Note: 'Synced from code (PERMISSION_CATALOG) with the predefined roles at db-reset and startup. A grant at scope S confers only the permissions of its role whose scope_types contain S; tenant grants also reach every collection and space of the tenant.'
 }
 
 Table role_permissions {
@@ -121,53 +172,58 @@ Table role_permissions {
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
   indexes { (role_id, permission_code) [pk] }
-  Note: 'Revoking a permission tombstones the row. Every authorization read excludes deleted_at rows; re-adding the same permission reactivates its row.'
+  Note: 'Role.includedPermissions. Revoking a permission tombstones the row. Every authorization read excludes deleted_at rows; re-adding the same permission reactivates its row.'
 }
 
 // WHO holds WHICH ROLE at WHICH SCOPE. The only authorization grant there is.
-// Principal (user | group) and scope (platform | tenant | collection) are
-// exclusive arcs of real foreign keys, so PostgreSQL checks every reference.
+// Principal (user | group | all_members) and scope (platform | tenant |
+// collection | space) are exclusive arcs of real foreign keys.
 Table role_assignments {
   id uuid [pk]
-  user_id uuid [note: 'Exactly one of user_id and group_id is set']
+  user_id uuid [note: 'Exactly one of user_id, group_id and all_members is set']
   group_id uuid
+  all_members boolean [not null, default: false, note: 'principal workspaceMembers: with item_id set, every active member of the item tenant holds role_id (collectionViewer only) on that Collection ("general access")']
   role_id uuid [not null]
   tenant_id uuid [note: 'Set for a tenant-scoped grant']
-  item_id uuid [note: 'Set for a Collection-scoped grant; both null means platform']
+  item_id uuid [note: 'Set for a Collection-scoped grant']
+  space_id uuid [note: 'set for a space-scoped grant. At most one of tenant_id, item_id and space_id is set; none means platform']
   created_by_user_id uuid
   deleted_at timestamptz
-  created_at timestamptz [not null]
+  created_at timestamptz [not null, note: 'For a space grant of a user: SpaceMember.joinTime is the earliest live created_at']
   updated_at timestamptz [not null]
   indexes {
-    (user_id, group_id, tenant_id, item_id, role_id) [unique, note: 'NULLS NOT DISTINCT, partial while deleted_at is null']
+    (user_id, group_id, all_members, tenant_id, item_id, space_id, role_id) [unique, note: 'NULLS NOT DISTINCT, partial while deleted_at is null']
     (user_id, tenant_id)
     (group_id, tenant_id)
     item_id
+    (space_id, user_id) [note: 'space members and callerRole']
     role_id
   }
-  Note: 'A trigger enforces that the Role scope matches the assignment scope, that a tenant-defined Role is never assigned outside its tenant, that a group principal belongs to the scope tenant, and that a user principal is a member of it.'
+  Note: 'A trigger enforces that the Role scope matches the assignment scope (a custom role may be bound at tenant, collection or space scope of its own tenant), that a tenant-defined Role is never assigned outside its tenant, that a group principal belongs to the scope tenant, that a user principal is an active member of it, that all_members grants are Collection-scoped collectionViewer only, that space grants have a user principal (space members are people) on a live space, and that a personal Collection carries only its owner grant. Policy etags are a hash of the live bindings of the scope. LAST_ADMIN and LAST_SPACE_LEAD are checked by the service under a lock on the scope row.'
 }
 
 // Identity membership only. It answers "does this user belong to this tenant",
 // never "what may they do" - that is a role assignment.
 Table tenant_memberships {
-  user_id uuid [not null]
+  user_id uuid [not null, note: 'The member ID equals the user ID']
   tenant_id uuid [not null]
-  status varchar(16) [not null, default: 'active']
-  joined_at timestamptz
-  deleted_at timestamptz
+  status varchar(16) [not null, default: 'active', note: 'active | suspended (Member.state)']
+  joined_at timestamptz [note: 'Member.joinTime']
+  last_active_at timestamptz [note: 'Member.lastActiveTime; touched (throttled) by authenticated requests in this workspace, since sessions carry no tenant']
+  deleted_at timestamptz [note: 'DeleteMember ends the membership; a later CreateMember reactivates the row']
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
   indexes {
     (user_id, tenant_id) [pk]
     (tenant_id, status)
   }
+  Note: 'Member.roles and Member.groups are computed from role_assignments and group_memberships.'
 }
 
 Table groups {
   id uuid [pk]
   tenant_id uuid [not null]
-  code varchar(64) [not null]
+  code varchar(64) [not null, note: 'API group ID']
   display_name varchar(255) [not null]
   description text
   status varchar(16) [not null, default: 'active']
@@ -178,11 +234,12 @@ Table groups {
     (tenant_id, code) [unique]
     (tenant_id, status)
   }
+  Note: 'Group.memberCount is computed from live group_memberships.'
 }
 
 Table group_memberships {
   group_id uuid [not null]
-  user_id uuid [not null]
+  user_id uuid [not null, note: 'Membership ID = member ID']
   status varchar(16) [not null, default: 'active']
   joined_at timestamptz
   deleted_at timestamptz
@@ -195,53 +252,304 @@ Table group_memberships {
   }
 }
 
+// AIP-155 requestId. One row per successful idempotent write, inserted in
+// the transaction of that write.
+Table request_idempotency {
+  id uuid [pk]
+  user_id uuid [note: 'Authenticated caller; null for the public methods CreateUser and CreateSession']
+  request_id uuid [not null, note: 'Client requestId']
+  method varchar(64) [not null, note: 'operationId, e.g. CreateItem, PublishArtifact']
+  parent text [not null, note: 'Resource name the method was called on, e.g. workspaces/{w} or workspaces/{w}/artifacts/{a}']
+  request_hash bytea [not null, note: 'HMAC-SHA-256 (deployment key) of the canonical request: method, path, query without requestId, and JSON body. Keyed so a body with a password or token is not an offline-crackable hash']
+  result_name text [not null, note: 'Canonical resource name of the result: the created resource or operations/{operation}']
+  created_at timestamptz [not null]
+  expires_at timestamptz [not null, note: 'created_at + 24 hours; a scheduled job deletes expired rows, after which the requestId is new again']
+  indexes {
+    (user_id, request_id) [unique, note: 'NULLS NOT DISTINCT']
+    expires_at
+  }
+  Note: 'A retry whose method, parent and request_hash match returns result_name re-read and re-authorized for the caller (an Operation, or the resource as it is now). Any mismatch is INVALID_ARGUMENT reason REQUEST_ID_REUSED. Failed requests roll back and leave no row, so a retry executes again; validateOnly never records. Concurrent duplicates serialize on the unique index; the loser re-reads the winner row.'
+}
+
+// Google.longrunning.Operation (operations/{operation}).
+Table operations {
+  id uuid [pk]
+  user_id uuid [not null, note: 'The caller who started it; Get/List/:cancel are own-only']
+  tenant_id uuid [note: 'Workspace it acts in; null for platform operations (exportUsage, platform audit export). CreateWorkspace stores the new tenant']
+  verb varchar(64) [not null, note: 'metadata.verb: createWorkspace | exportAuditEvents | exportUsage | createArtifact | reviseArtifact']
+  target text [not null, note: 'metadata.target resource name, e.g. workspaces/{w} or workspaces/{w}/artifacts/{a}']
+  progress_percent smallint [not null, default: 0]
+  cancel_requested_at timestamptz [note: 'metadata.cancelRequested; :cancel sets it and signals the workflow']
+  finished_at timestamptz [note: 'metadata.endTime; done = finished_at IS NOT NULL']
+  error jsonb [note: 'User-safe google.rpc.Status when it failed or was cancelled']
+  result_name text [note: 'Resource name of the response: the Workspace or the Artifact, re-read and filtered for the caller']
+  result_object_key text [note: 'Exports: object key of the CSV; downloadUri is signed per read']
+  result_expires_at timestamptz [note: 'Exports: WorkspaceExportResponse.expireTime; the object is deleted after it']
+  created_at timestamptz [not null, note: 'metadata.createTime']
+  expires_at timestamptz [not null, note: 'Retention: finished operations are deleted 30 days after finished_at']
+  indexes {
+    (user_id, created_at)
+    (user_id, verb, created_at)
+    (user_id, target)
+    expires_at
+  }
+  Note: 'The Temporal workflow ID is derived from the operation ID; no Temporal state is stored. The method permission is checked on target when the operation is created; reads are own-only. The response is computed from result_name or result_object_key.'
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Knowledge (Items)
+// ───────────────────────────────────────────────────────────────────────────
+
 Table items {
   id uuid [pk]
   tenant_id uuid [not null]
-  item_type varchar(16) [not null, note: 'collection | document']
-  parent_item_id uuid
-  parent_relation varchar(32) [note: 'contains | child | attachment | embedded']
-  document_type varchar(64) [note: 'Required only for Documents; semantic, not provider identity']
+  item_type varchar(16) [not null, note: 'collection | document; immutable']
+  parent_item_id uuid [note: 'Null only for root Collections; changed only by a move']
+  parent_relation varchar(32) [note: 'contains when the parent is a Collection; child | attachment when the parent is a Document (source sync only). embedded is dropped (never written)']
+  document_type varchar(64) [note: 'Required only for Documents; semantic, not provider identity; a key of tenants.settings.document_types']
   title text [not null]
   mime_type varchar(255)
   size_bytes bigint
-  storage_key text [note: 'Durable object key only; no raw bytes']
-  metadata jsonb [not null, default: `{}`, note: 'Uploads: purpose, file_name, storage, archive lineage. Connector Items: file_name, source (provider identity: provider, connector_id, external_id, external_version, etag, url) and connector metadata. Processing writes preview and processing signature; never a run record']
-  inherit_access boolean [not null, default: true, note: 'Only a Collection may end inheritance; a Document always inherits']
-  status varchar(16) [not null, default: 'pending', note: 'Raw resource lifecycle: pending | processing | ready | failed | unsupported | deleted']
+  storage_key text [note: 'Durable object key of the current revision (item_revisions); no raw bytes']
+  space_id uuid [note: 'collection.space, Collections only. Space.collections, conversation scope spaces and SPACE reading lists resolve through it']
+  metadata jsonb [not null, default: `{}`, note: 'Typed keys only (item_model.md §5). Collection: system_kind (personal_uploads | conversation_artifacts), description, discoverable, accepts_contributions. Document: purpose, file_name, storage, archive, source, preview, summary, language, owner_user_id, verification, merged_into. Topics are item_topics, the space is space_id. Never a run record']
+  inherit_access boolean [not null, default: true, note: 'Only a Collection may end inheritance; a Document always inherits. A root Collection stores false (it is always an access boundary)']
+  status varchar(16) [not null, default: 'pending', note: 'content availability only: pending | ready | failed (Collections: ready). Deletion is deleted_at, never a status value. Artifacts: pending = GENERATING, ready = ACTIVE, failed = FAILED']
+  publication_state varchar(16) [note: 'Documents only, not null for them: published | unpublished. Null for Collections. Who in the governing Collection sees the Document; independent of review, content and indexing']
   index_status varchar(16) [note: 'Document-only processing state: pending | processing | ready | failed | unsupported. Adding data sets pending; only an Ingestion Run moves it further']
   processed_version text [note: 'processing_version() of the configuration the current index was built with; ready AND processed_version <> current = outdated']
+  indexed_revision_number int [note: 'item_revisions.revision_number the current chunks, passages and citations were built from; null until indexed']
+  payload_dirty_at timestamptz [note: 'set in the same transaction as a move, publish, unpublish, delete or undelete; cleared when the Qdrant payload (collection_item_id, published, is_deleted) has been re-applied. A scheduled job retries dirty rows']
   created_by_user_id uuid
-  deleted_at timestamptz
+  deleted_at timestamptz [note: 'The tombstone. A subtree delete stamps every live descendant with the same value, so undelete restores exactly that cohort']
   created_at timestamptz [not null]
-  updated_at timestamptz [not null]
+  updated_at timestamptz [not null, note: 'Also the optimistic-concurrency token behind the API etag']
   indexes {
     tenant_id
     parent_item_id
     (tenant_id, status)
+    (tenant_id, parent_item_id) [note: 'partial WHERE deleted_at IS NULL; children listing and root listing (parent_item_id IS NULL)']
+    space_id [note: 'partial WHERE space_id IS NOT NULL']
+    payload_dirty_at [note: 'partial WHERE payload_dirty_at IS NOT NULL']
   }
-  Note: 'Only Collections may be roots. Parent and parent_relation are both null or both set; self-parenting is rejected. Collection children are allowed only under Collections. Document children may be Documents. Database constraints/triggers enforce same-tenant parentage, prevent cycles, and reject Document -> Collection. Only Collections carry role assignments, so only a Collection may set inherit_access to false. Raw readiness and index readiness are independent.'
+  Note: 'Only Collections may be roots. Parent and parent_relation are both null or both set; self-parenting is rejected. Collection children are allowed only under Collections. Document children may be Documents (source sync). Database constraints/triggers enforce same-tenant parentage, a live parent, no cycles (also on move), no Document -> Collection, and parent_relation consistent with the parent type, publication_state set exactly for Documents, inherit_access = false on roots, and space_id only on Collections with a space of the same tenant. Only Collections carry role assignments, so only a Collection may set inherit_access to false. Content, publication and index states are independent.'
 }
 
-Table artifact_revisions {
+// Renamed from artifact_revisions. Immutable content versions of every
+// Document Item: uploads, source versions, approved new revisions, rollbacks
+// and artifacts (whose Items live in a system Collection).
+Table item_revisions {
   id uuid [pk]
-  item_id uuid [not null, note: 'Canonical artifact Item; its storage_key points to the current revision']
-  revision_number int [not null, note: 'Starts at 1 and is unique per Item']
-  storage_key text [not null, note: 'Immutable revision object key']
+  item_id uuid [not null, note: 'A Document Item; its storage_key equals the newest live revision storage_key']
+  revision_number int [not null, note: 'Starts at 1 and is unique per Item; the API revision ID']
+  storage_key text [not null, note: 'Immutable object key. A rollback or an approved revision may reuse an existing key; objects are never copied, and a purge deletes an object only when no revision of a non-purged Item references the key. An EVIDENCE_REVIEW revision object is the JSON snapshot of options, criteria, cells and synthesis']
   mime_type varchar(255) [not null]
   size_bytes bigint [not null]
-  summary text
-  conversation_id uuid
-  request_id varchar(64)
+  summary text [note: 'Change summary shown in version history']
+  contribution_id uuid [note: 'the approved Contribution that produced this revision']
+  external_version text [note: 'provider version for a source-synced revision']
+  restored_from int [note: 'revision_number of the same Item a rollback reused']
+  author varchar(16) [note: 'artifacts only, not null for them: assistant | user (ArtifactRevision.author); creator = created_by_user_id for user revisions']
   created_by_user_id uuid
   exports jsonb [not null, default: `{}`, note: 'Derived outputs of this immutable revision; `preview` is its document-viewer manifest (document_viewer.md)']
-  deleted_at timestamptz
+  deleted_at timestamptz [note: 'Artifacts: DeleteArtifactRevision (newest user revision within 10 minutes)']
   created_at timestamptz [not null]
   indexes {
     (item_id, revision_number) [unique]
-    (conversation_id, deleted_at)
   }
-  Note: 'Revisions are append-only; deleting an artifact revision is a tombstone.'
+  Note: 'Revisions are append-only; deleting a revision is a tombstone. A trigger rejects revisions of Collection Items.'
+}
+
+// The review workflow of a candidate Document. Its own identity and
+// lifecycle; it never changes who may read anything except that reviewers may
+// open the candidate while the contribution is open.
+Table contributions {
+  id uuid [pk]
+  tenant_id uuid [not null]
+  item_id uuid [not null, note: 'Candidate Document: in the contributor personal Collection (member) or unpublished in the source target Collection (source)']
+  kind varchar(16) [not null, note: 'new_document | new_revision']
+  origin varchar(16) [not null, note: 'member | source']
+  target_item_id uuid [note: 'Target Collection; null = reviewers pick (assistant suggests). new_revision: always the governing Collection of replaces_item_id, set by the server']
+  replaces_item_id uuid [note: 'new_revision only: the published Document that gains the revision']
+  contributor_user_id uuid [note: 'Set exactly for origin member']
+  ingestion_source_id uuid [note: 'Set exactly for origin source']
+  note text
+  change_summary text
+  external_version text [note: 'origin source + new_revision: the provider version under review; one open contribution per (replaces_item_id, external_version)']
+  suggestions jsonb [not null, default: `{}`, note: '{document_type, collection_id, summary, document_type_confidence, topics_confidence, proposed_topics_confidence, collection_confidence, summary_confidence}. The suggested and proposed topics themselves are contribution_topics']
+  flags jsonb [not null, default: `[]`, note: '[{flag: duplicate | new_revision | personal_data | unsearchable_format, related_item_id}]']
+  state varchar(24) [not null, default: 'analyzing', note: 'analyzing | in_review | changes_requested | approved | rejected | withdrawn']
+  decided_by_user_id uuid
+  decision_note text
+  decided_at timestamptz
+  deleted_at timestamptz
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  indexes {
+    (tenant_id, state, created_at)
+    (target_item_id, state)
+    (contributor_user_id, state)
+    (ingestion_source_id, state)
+    item_id [unique, note: 'Partial while state in (analyzing, in_review, changes_requested) and deleted_at is null: one open contribution per candidate']
+  }
+  Note: 'Approval moves/publishes the candidate or appends a revision of replaces_item_id in one transaction, and copies the approved topics into item_topics. It never starts an Ingestion Run. Timeline events are audit_logs rows (resource_type contribution). audienceSummary is computed. Same-tenant references are trigger-checked.'
+}
+
+// The workspace taxonomy (DOMAIN and TOPIC). Documents reference topics
+// through item_topics, contributions through contribution_topics.
+Table topics {
+  id uuid [pk]
+  tenant_id uuid [not null]
+  code varchar(64) [not null, note: 'API topic ID']
+  kind varchar(16) [not null, note: 'domain | topic']
+  parent_topic_id uuid [note: 'Topic kind only: a domain of the same tenant']
+  display_name varchar(255) [not null]
+  description text
+  icon varchar(64)
+  color varchar(32)
+  state varchar(16) [not null, default: 'active', note: 'proposed | active | rejected. DELETED is deleted_at']
+  created_by_user_id uuid [note: 'Null for a topic the assistant proposed']
+  deleted_at timestamptz [note: 'DeleteTopic (only when no item_topics or contribution_topics row uses it) and MergeTopic; :undelete clears']
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  indexes {
+    (tenant_id, code) [unique]
+    (tenant_id, state, kind)
+    parent_topic_id
+  }
+  Note: 'A trigger enforces same-tenant parent_topic_id, parent kind = domain, and parent_topic_id null for domains. evidence, documentCount and inReviewCount are computed per caller from contribution_topics and item_topics.'
+}
+
+// Document.topics. One row per (Document, topic) tag.
+Table item_topics {
+  item_id uuid [not null, note: 'A Document Item']
+  topic_id uuid [not null, note: 'An active topic of the item tenant']
+  created_by_user_id uuid
+  created_at timestamptz [not null]
+  indexes {
+    (item_id, topic_id) [pk]
+    (topic_id, item_id)
+  }
+  Note: 'A trigger enforces same tenant and item_type = document. UpdateItem document.topics replaces the set; MergeTopic moves rows to the target topic (deduplicated) in one statement. Filters (document.topics) and facets join this table to the readable hits.'
+}
+
+// Topics an assistant analysis suggested (existing) or proposed (new
+// PROPOSED topic) for a contribution.
+Table contribution_topics {
+  contribution_id uuid [not null]
+  topic_id uuid [not null]
+  relation varchar(16) [not null, note: 'suggested | proposed. AcceptTopic turns proposed rows into suggested ones']
+  created_at timestamptz [not null]
+  indexes {
+    (contribution_id, topic_id) [pk]
+    (topic_id, relation)
+  }
+  Note: 'A trigger enforces same tenant. Topic.evidence = contributions with a proposed row the caller may see.'
+}
+
+// Curated, ordered references ("reading lists"; Home "featured" is the
+// tenant's one featured list). References never grant access.
+Table reading_lists {
+  id uuid [pk]
+  tenant_id uuid [not null]
+  code varchar(64) [not null, note: 'API reading list ID; featured is reserved for the featured list']
+  owner_user_id uuid [not null]
+  kind varchar(16) [not null, default: 'standard', note: 'standard | featured (one per tenant)']
+  title varchar(255) [not null]
+  description text
+  audience varchar(16) [not null, default: 'private', note: 'private | space | workspace']
+  space_id uuid [note: 'Set exactly for audience space; a space of the same tenant']
+  deleted_at timestamptz
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  indexes {
+    (tenant_id, code) [unique]
+    (tenant_id, owner_user_id, deleted_at)
+    (tenant_id, audience)
+    space_id
+    (tenant_id, kind) [unique, note: 'Partial WHERE kind = featured']
+  }
+  Note: 'itemCount and hiddenItemCount are computed per caller.'
+}
+
+// Shortcut of an existing Document inside another Collection (one
+// canonical Item, no copied object or embedding). Not hierarchy, never a grant.
+Table item_links {
+  id uuid [pk]
+  tenant_id uuid [not null]
+  collection_item_id uuid [not null, note: 'Container: a live Collection of the tenant, never the conversation_artifacts system Collection']
+  target_item_id uuid [not null, note: 'A Document of the same tenant; never a Collection (no cycles), never a conversation attachment, never the container own canonical child']
+  created_by_user_id uuid
+  deleted_at timestamptz [note: 'Tombstone. A container subtree delete stamps its links with the cohort deleted_at; moving the target into the container tombstones the link']
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  indexes {
+    (collection_item_id, target_item_id) [unique, note: 'Partial WHERE deleted_at IS NULL; the API link ID is the target item ID']
+    target_item_id
+    tenant_id
+  }
+  Note: 'A trigger enforces same-tenant container and target, container item_type = collection, target item_type = document, and target.parent_item_id <> collection_item_id. Reads show a link only when the caller can read both the container and the target. Links never affect parentItem, ancestors, subtree search, conversation scope, ingestion selection or inherited access.'
+}
+
+// A member's saved and recently opened Items. References only; reads
+// re-check access and resolve metadata.merged_into to the merge target.
+Table saved_items {
+  tenant_id uuid [not null]
+  user_id uuid [not null]
+  item_id uuid [not null]
+  created_at timestamptz [not null]
+  indexes {
+    (tenant_id, user_id, item_id) [pk]
+    (tenant_id, user_id, created_at)
+    item_id
+  }
+}
+
+Table recent_items {
+  tenant_id uuid [not null]
+  user_id uuid [not null]
+  item_id uuid [not null]
+  viewed_at timestamptz [not null]
+  indexes {
+    (tenant_id, user_id, item_id) [pk]
+    (tenant_id, user_id, viewed_at)
+    item_id
+  }
+}
+
+// Members/{member}/savedSearches. A stored SearchItems request; it never
+// stores results, so every run re-authorizes.
+Table saved_searches {
+  id uuid [pk]
+  tenant_id uuid [not null]
+  user_id uuid [not null, note: 'Owner; self-only resource']
+  display_name varchar(255) [not null]
+  query text
+  filter text [note: 'AIP-160 SearchItems filter as written; validated on write']
+  order_by varchar(255)
+  layout varchar(16) [not null, default: 'list', note: 'list | table | grid']
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  indexes {
+    (tenant_id, user_id, display_name)
+    (tenant_id, user_id, updated_at)
+  }
+  Note: 'Hard delete (no undelete). The owner must be a member of the tenant (service).'
+}
+
+Table reading_list_entries {
+  reading_list_id uuid [not null]
+  item_id uuid [not null, note: 'Document or Collection Item of the list tenant; never copied']
+  note text
+  position int [not null]
+  added_by_user_id uuid [not null]
+  created_at timestamptz [not null]
+  indexes {
+    (reading_list_id, item_id) [pk]
+    (reading_list_id, position)
+    item_id
+  }
+  Note: 'Reads re-check the caller access to every Item; unreadable entries are omitted and counted.'
 }
 
 Table citations {
@@ -267,65 +575,55 @@ Table item_uploads {
   item_id uuid [pk, note: 'Must reference a Document Item']
   tenant_id uuid [not null]
   owner_user_id uuid [not null]
-  idempotency_key varchar(128) [not null]
   status varchar(16) [not null, default: 'pending', note: 'pending | available | failed']
   error_code varchar(128)
   uploaded_at timestamptz
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
-  indexes { (tenant_id, owner_user_id, idempotency_key) [unique] }
-  Note: 'Uploads require an authenticated owner; private upload ownership always comes from the active User.'
+  indexes { (tenant_id, owner_user_id, status) }
+  Note: 'Uploads require an authenticated owner; private upload ownership always comes from the active User. CreateItem retries are deduplicated by request_idempotency (the legacy idempotency_key is gone).'
 }
 
-Table message_items {
-  message_id uuid [not null]
-  item_id uuid [not null]
-  relation_type varchar(16) [not null]
-  position int [not null, default: 0]
-  deleted_at timestamptz
-  created_at timestamptz [not null]
-  indexes {
-    (message_id, item_id, relation_type) [pk]
-    (message_id, deleted_at)
-    item_id
-  }
-}
+// ───────────────────────────────────────────────────────────────────────────
+// Ingestion
+// ───────────────────────────────────────────────────────────────────────────
 
 Table integration_connections {
   id uuid [pk]
   tenant_id uuid [not null]
+  code varchar(64) [not null, note: 'API connection ID']
   connector_key varchar(64) [not null]
-  owner_type varchar(16) [not null, default: 'tenant', note: 'user | tenant']
-  owner_user_id uuid
+  owner_user_id uuid [note: 'Connection.owner: set for a personal connection; null = workspace-owned']
   display_name varchar(255) [not null]
   provider_account_id varchar(255) [note: 'Provider account identifier; unique with provider resource while active']
-  provider_account_label varchar(255)
+  provider_account_label varchar(255) [note: 'Connection.account.displayName']
   provider_resource_id varchar(255) [note: 'Provider resource a grant is bound to, if any']
-  provider_resource_label varchar(255)
+  provider_resource_label varchar(255) [note: 'Connection.account.resourceLabel']
   scopes text[] [not null, default: `{}`, note: 'Scopes actually granted by the provider']
   config jsonb [not null, default: `{}`, note: 'Non-secret connection/runtime configuration']
-  status varchar(32) [not null, default: 'draft', note: 'draft | connected | expired | reauth_required | revoked | error | disconnected']
+  status varchar(32) [not null, default: 'authorizing', note: 'authorizing | active | reauthorization_required | failed']
   status_detail text
   expires_at timestamptz
   connected_at timestamptz
-  disconnected_at timestamptz
-  last_checked_at timestamptz
+  last_checked_at timestamptz [note: 'Connection.lastCheckTime']
   created_by_user_id uuid
   deleted_at timestamptz
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
   indexes {
+    (tenant_id, code) [unique]
     (tenant_id, connector_key, status)
     (owner_user_id, status)
     (tenant_id, display_name) [unique]
-    (tenant_id, connector_key, owner_type, owner_user_id, provider_account_id, provider_resource_id) [unique, note: 'Partial unique while deleted_at is null and provider_account_id is not null']
+    (tenant_id, connector_key, owner_user_id, provider_account_id, provider_resource_id) [unique, note: 'NULLS NOT DISTINCT; partial unique while deleted_at is null and provider_account_id is not null']
   }
+  Note: 'authorizationUri is computed on read from the connector OAuth client and a sealed, signed state token (OAuthStateCodec, PKCE verifier inside); nothing is stored. apiToken and OAuth grants are integration_credentials.'
 }
 
 Table integration_credentials {
   id uuid [pk]
   integration_connection_id uuid [not null, unique]
-  credential_type varchar(64) [not null]
+  credential_type varchar(64) [not null, note: 'oauth_grant | api_token']
   encrypted_payload text [not null]
   expires_at timestamptz
   key_version varchar(64)
@@ -335,28 +633,55 @@ Table integration_credentials {
 
 Table ingestion_sources {
   id uuid [pk]
+  tenant_id uuid [not null, note: 'scope of the API source ID; equals the connection and target Collection tenant (trigger)']
+  code varchar(64) [not null, note: 'API source ID']
   integration_connection_id uuid [not null]
-  target_item_id uuid [not null, note: 'Must reference an Item with item_type=collection']
+  target_item_id uuid [not null, note: 'Must reference an Item with item_type=collection; immutable']
   display_name varchar(255)
-  resource_type varchar(64) [note: 'Provider resource kind, for example folder or shared_drive']
-  external_resource_id text [note: 'Provider resource identifier; unique per active connection and resource type']
+  resource_type varchar(64) [note: 'externalResource.type: provider resource kind, for example folder or shared_drive; immutable']
+  external_resource_id text [note: 'externalResource.resourceId; unique per active connection and resource type; immutable']
+  external_resource_label varchar(255) [note: 'externalResource.displayName']
   config jsonb [not null, default: `{}`, note: 'Connector-owned external scope']
-  sync_mode varchar(16) [not null, default: 'manual', note: 'manual | scheduled']
-  status varchar(32) [not null, default: 'ready', note: 'ready | paused | failed | connection_required | disabled']
-  status_detail text
-  last_synced_at timestamptz [note: 'When the latest sync finished']
-  last_sync_status varchar(16) [note: 'running | succeeded | failed; null until the first sync']
-  last_sync_error text [note: 'User-safe reason the latest sync failed']
-  last_sync_summary jsonb [not null, default: `{}`, note: '{added, updated, removed, failed} Documents of the latest sync']
+  sync_checkpoint jsonb [note: 'Connector-owned opaque incremental cursor (e.g. the Google Drive changes token); null = the next sync lists everything. Advanced only by a sync without failures; cleared when config is replaced']
+  schedule_cron varchar(128) [note: 'schedule.cron; null = manual syncs only']
+  schedule_time_zone varchar(64) [note: 'schedule.timeZone (IANA); set exactly with schedule_cron']
+  next_sync_at timestamptz [note: 'next scheduled sync, recomputed from the schedule after every sync and on update; null when unscheduled or paused']
+  publishing_policy varchar(16) [not null, default: 'auto_publish', note: 'auto_publish | review_first; defaults to tenants.settings.default_publishing_policy. review_first lands new files unpublished with a source Contribution, and a changed published file as an unpublished candidate with a new_revision Contribution']
+  paused_at timestamptz [note: ':pause sets, :resume clears']
   created_by_user_id uuid
   deleted_at timestamptz
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
   indexes {
-    (integration_connection_id, status)
-    (target_item_id, status)
+    (tenant_id, code) [unique]
+    (integration_connection_id, deleted_at)
+    (target_item_id, deleted_at)
+    next_sync_at [note: 'Partial WHERE next_sync_at IS NOT NULL AND paused_at IS NULL AND deleted_at IS NULL: the scheduler scan']
     (integration_connection_id, resource_type, external_resource_id) [unique, note: 'Partial unique while deleted_at is null and external_resource_id is not null']
   }
+  Note: 'Source.state is computed: PAUSED when paused_at is set; else REAUTHORIZATION_REQUIRED when the connection status is reauthorization_required; else FAILED when the latest ingestion_syncs row failed; else ACTIVE. lastSync is the latest sync; pendingDocumentCount and inReviewCount are computed. A trigger enforces same-tenant connection and target Collection.'
+}
+
+// Sources/{source}/syncs. One row per sync execution; the history page.
+Table ingestion_syncs {
+  id uuid [pk]
+  ingestion_source_id uuid [not null]
+  trigger_type varchar(16) [not null, note: 'manual | scheduled | creation']
+  status varchar(16) [not null, default: 'running', note: 'running | succeeded | failed']
+  added_count int [not null, default: 0]
+  updated_count int [not null, default: 0]
+  removed_count int [not null, default: 0]
+  failed_count int [not null, default: 0]
+  failures jsonb [not null, default: `[]`, note: '[{external_id, display_name, message}] user-safe; at most 100, failed_count holds the total']
+  error jsonb [note: 'User-safe google.rpc.Status when the sync as a whole failed']
+  created_by_user_id uuid [note: 'Manual syncs only']
+  started_at timestamptz [not null]
+  finished_at timestamptz
+  indexes {
+    (ingestion_source_id, started_at)
+    ingestion_source_id [unique, note: 'Partial WHERE status = running: one running sync per source']
+  }
+  Note: 'Replaces the legacy last_sync_* columns of ingestion_sources. sources/-/syncs reads the tenant sources first, then their syncs by (ingestion_source_id, started_at). A sync only registers, updates or tombstones Items; it never processes them.'
 }
 
 Table external_resources {
@@ -386,12 +711,13 @@ Table external_resources {
 Table ingestion_runs {
   id uuid [pk]
   tenant_id uuid [not null]
-  trigger_type varchar(16) [not null, note: 'manual | scheduled | api']
-  scope jsonb [not null, default: `{}`, note: 'The selection as asked: {selected_documents, collection_id, source_id, states, retry_of_run_id}']
-  status varchar(16) [not null, default: 'queued', note: 'queued | running | completed | failed | cancelled. completed allows failed items; failed means the run itself stopped']
+  trigger_type varchar(16) [not null, note: 'manual | api | schedule | platform_retry']
+  scope jsonb [not null, default: `{}`, note: 'IngestionRun.selector as asked: {item_ids (<= 1000), ancestor_item_id, source_id, states}']
+  status varchar(16) [not null, default: 'queued', note: 'queued | running | succeeded | failed | cancelled. succeeded allows failed tasks; failed means the run itself stopped']
   configuration jsonb [not null, default: `{}`, note: 'Fixed at creation: processing_version, models, batch_max_items, batch_max_bytes, parallelism']
   item_count int [not null, default: 0]
-  error text [note: 'User-safe reason the run as a whole stopped']
+  retry_of_run_id uuid [note: 'IngestionRun.retryOf; a run of the same tenant']
+  error jsonb [note: 'user-safe google.rpc.Status when the run as a whole stopped']
   created_by_user_id uuid [note: 'Null for scheduled runs']
   started_at timestamptz
   finished_at timestamptz
@@ -400,18 +726,22 @@ Table ingestion_runs {
   indexes {
     (tenant_id, created_at)
     (tenant_id, status)
+    retry_of_run_id
   }
+  Note: 'IngestionRun.counts are computed from ingestion_run_items (per caller visibility).'
 }
 
 // Execution history of one Document in one run. The Document (items) stays
 // the one persistent identity; it participates in many runs.
 Table ingestion_run_items {
   run_id uuid [not null]
-  item_id uuid [not null, note: 'A Document Item of the run\'s tenant (service-validated)']
-  status varchar(16) [not null, default: 'queued', note: 'queued | running | succeeded | failed | skipped | cancelled']
+  item_id uuid [not null, note: 'A Document Item of the run\'s tenant (service-validated); the task ID']
+  status varchar(16) [not null, default: 'queued', note: 'queued | running | succeeded | failed | cancelled']
   batch_number int [note: 'Assigned by the run planner; null until planned']
-  phases jsonb [not null, default: `[]`, note: '[{phase, started_at, finished_at, done, total}]']
-  error text [note: 'User-safe reason this Document was not processed']
+  phases jsonb [not null, default: `[]`, note: '[{phase, state, started_at, finished_at, done, total}]; IngestionTask.phase is the last entry']
+  error jsonb [note: 'user-safe google.rpc.Status why this Document was not processed']
+  error_class varchar(64) [note: 'provider-neutral failure category (timeout, rate_limited, unsupported_format, provider_refused, …); never a raw message']
+  revision_number int [note: 'item revision this task processed, recorded at start. A finish whose revision or governing Collection changed meanwhile leaves index_status pending and marks the payload dirty']
   chunk_count int
   started_at timestamptz
   finished_at timestamptz
@@ -425,25 +755,59 @@ Table ingestion_run_items {
   }
 }
 
+// IngestionPolicies/{ingestionPolicy}; only `default` exists.
+Table ingestion_policies {
+  code varchar(64) [pk, note: 'API ID; only default']
+  allowed_mime_types text[] [not null, default: `{}`]
+  max_file_size_bytes bigint [not null]
+  ocr_scanned_pdfs boolean [not null, default: true]
+  parse_spreadsheets boolean [not null, default: true]
+  rejected_retention_duration interval [not null, note: 'How long candidates of rejected contributions are kept before purge']
+  updated_by_user_id uuid
+  updated_at timestamptz [not null]
+  Note: 'The default row is created from deployment configuration (BOMESH_INGESTION_POLICY_*) on first read; the API owns it afterwards. contributionReviewRequired is always true and not stored.'
+}
+
+// Deployment-wide connector settings; secrets encrypted and write-only.
+Table platform_connector_settings {
+  connector_key varchar(64) [pk, note: 'Registry key, e.g. google_drive; the API connector ID']
+  display_name varchar(255) [note: 'catalog override; null = registry default']
+  description text [note: 'catalog override; null = registry default']
+  available boolean [not null, default: true, note: 'false = Connector.state DISABLED: stops new connections and syncs; documents stay searchable']
+  oauth_client_id varchar(512)
+  oauth_client_secret_encrypted bytea [note: 'Encrypted with the integration encryption key; never returned (responses expose secretConfigured only)']
+  updated_by_user_id uuid
+  updated_at timestamptz [not null]
+  Note: 'No row = registry defaults and deployment environment configuration. authenticationType and UNSUPPORTED come from the registry; workspaceCount and requestCount are computed.'
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Assistant
+// ───────────────────────────────────────────────────────────────────────────
+
 Table conversations {
   id uuid [pk]
   tenant_id uuid [not null]
-  owner_user_id uuid [note: 'Owning User; required while status is active']
-  created_by_session_id uuid [not null, note: 'Immutable creation lineage; must be a user session of owner_user_id']
-  title varchar(512)
+  code varchar(64) [not null, note: 'API conversation ID (client-chosen conversationId or server-generated, see header)']
+  owner_user_id uuid [not null, note: 'Owning User; conversations are owner-private']
+  created_by_session_id uuid [not null, note: 'Immutable creation lineage; a session of owner_user_id']
+  title varchar(512) [note: 'displayName']
+  pinned boolean [not null, default: false]
+  scope_collection_ids uuid[] [not null, default: `{}`, note: 'scope.collections: Collection Items of the tenant (subtrees); re-checked on every read and turn']
+  scope_space_ids uuid[] [not null, default: `{}`, note: 'scope.spaces: spaces of the tenant; resolved through items.space_id on every turn']
   summary text
   summary_updated_at timestamptz
-  state jsonb [not null, default: `{}`]
-  status varchar(16) [not null, default: 'active']
+  state jsonb [not null, default: `{}`, note: 'Agent working state; never exposed']
   last_message_at timestamptz
+  deleted_at timestamptz [note: 'soft delete; :undelete clears; replaces status']
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
   indexes {
+    (tenant_id, code) [unique]
+    (tenant_id, owner_user_id, last_message_at)
     (tenant_id, owner_user_id, updated_at)
-    (tenant_id, created_by_session_id, updated_at)
-    (tenant_id, status)
   }
-  Note: 'Check conversation_owner_required enforces owner_user_id IS NOT NULL OR status <> active. Reads require owner_user_id to equal the active User. A trigger enforces creator-session tenant consistency, a user creator session, and owner_user_id = the creator session user. Legacy guest-owned conversations were tombstoned with status deleted.'
+  Note: 'Reads require owner_user_id to equal the caller. A trigger enforces that the creator session belongs to owner_user_id and the owner holds an active tenant_membership in tenant_id when the row is inserted (sessions carry no tenant); every scope_collection_ids entry is a Collection of tenant_id and every scope_space_ids entry a space of tenant_id. A deleted conversation stops resolving its shares.'
 }
 
 Table sandbox_sessions {
@@ -469,17 +833,112 @@ Table messages {
   id uuid [pk]
   conversation_id uuid [not null]
   role varchar(16) [not null]
-  content text [not null]
-  metadata jsonb [not null, default: `{}`]
+  content text [not null, note: 'Message.text']
+  metadata jsonb [not null, default: `{}`, note: 'citations [{item_id, chunk_id, page}] and turn details']
   sequence_number bigint [not null]
   status varchar(16) [not null, default: 'active', note: 'active | superseded']
-  superseded_at timestamptz [note: 'Set when a retry or edit (replace_from_turn) replaced this message']
+  generation_state varchar(16) [not null, default: 'completed', note: 'Message.state: completed | interrupted | failed (user messages: completed)']
+  feedback_rating varchar(16) [note: 'helpful | unhelpful; assistant messages only; null = no feedback (RATING_UNSPECIFIED clears all feedback columns)']
+  feedback_reason varchar(64)
+  feedback_comment text
+  feedback_at timestamptz [note: 'feedback.createTime']
+  superseded_at timestamptz [note: 'Set when a retry or edit (replaceFromMessage) replaced this message']
   created_at timestamptz [not null]
   indexes {
     (conversation_id, sequence_number) [unique]
     (conversation_id, status, sequence_number)
+    (feedback_rating, feedback_at) [note: 'partial WHERE feedback_rating IS NOT NULL: knowledge gaps (RATED_UNHELPFUL)']
   }
-  Note: 'Server-owned conversation history. Only active messages feed model context and conversation references. A retry/edit marks the replaced user message and every later message superseded instead of deleting them. Check message_status_is_valid: status IN (active, superseded) and superseded_at IS NOT NULL exactly when superseded.'
+  Note: 'Server-owned conversation history. Only active messages feed model context and conversation references. A retry/edit marks the replaced user message and every later message superseded instead of deleting them. Check message_status_is_valid: status IN (active, superseded) and superseded_at IS NOT NULL exactly when superseded. Feedback is set only on role assistant. Message.artifacts are message_items rows with relation_type artifact.'
+}
+
+Table message_items {
+  message_id uuid [not null]
+  item_id uuid [not null]
+  relation_type varchar(16) [not null, note: 'attachment | artifact']
+  position int [not null, default: 0]
+  deleted_at timestamptz
+  created_at timestamptz [not null]
+  indexes {
+    (message_id, item_id, relation_type) [pk]
+    (message_id, deleted_at)
+    item_id
+  }
+}
+
+// Workspaces/{w}/artifacts. The content is a Document Item (with
+// item_revisions) in the tenant's hidden conversation_artifacts system
+// Collection; this row is its typed Artifact facet. Artifact ID = item ID.
+Table artifacts {
+  item_id uuid [pk, note: 'A Document Item in the conversation_artifacts system Collection; displayName = items.title, mimeType = items.mime_type, state from items.status and deleted_at']
+  kind varchar(24) [not null, note: 'file | draft | evidence_review | study_guide | quiz']
+  owner_user_id uuid [not null]
+  conversation_id uuid [note: 'Conversation that produced it, if any']
+  space_id uuid [note: 'Artifact.space; required for audience space']
+  audience varchar(16) [not null, default: 'private', note: 'private | space']
+  evidence_review jsonb [note: 'evidence_review only: {options [{key, display_name, description}], criteria [{key, display_name, description}], synthesis, synthesis_citations [{item_id, chunk_id}]}; cells are evidence_review_cells']
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null, note: 'Artifact etag']
+  indexes {
+    (owner_user_id, created_at)
+    (space_id, audience)
+    conversation_id
+  }
+  Note: 'Checks: evidence_review set exactly for kind evidence_review; space_id set when audience = space. A trigger enforces that item_id is a Document in the conversation_artifacts Collection, and that conversation and space belong to the item tenant. The current revision is the newest live item_revisions row; hiddenSourceCount is computed per reader.'
+}
+
+// Artifact.sourceItems, fixed at creation.
+Table artifact_source_items {
+  artifact_item_id uuid [not null]
+  item_id uuid [not null, note: 'A Document Item of the same tenant; re-checked for every reader']
+  position int [not null]
+  indexes {
+    (artifact_item_id, item_id) [pk]
+    item_id
+  }
+  Note: 'A trigger enforces same tenant. The audience space check (AUDIENCE_CANNOT_READ_SOURCES) and the per-reader withholding read these rows.'
+}
+
+// One cell of an EVIDENCE_REVIEW matrix (option x criterion). Cells are
+// generated in parallel and regenerated one by one (:revise cells[]).
+Table evidence_review_cells {
+  artifact_item_id uuid [not null]
+  option_key varchar(64) [not null]
+  criterion_key varchar(64) [not null]
+  state varchar(16) [not null, default: 'generating', note: 'generating | supported | partial | not_found | failed']
+  summary text
+  citations jsonb [not null, default: `[]`, note: '[{item_id, chunk_id, page}]; a cell citing an item the reader cannot read is withheld']
+  updated_at timestamptz [not null]
+  indexes {
+    (artifact_item_id, option_key, criterion_key) [pk]
+  }
+  Note: 'Removing an option or criterion deletes its cells. Each revision freezes the whole matrix in its revision object; a rollback rewrites these rows from that object.'
+}
+
+// A share stores its own snapshot of a conversation; sources are re-filtered
+// per reader on every read.
+Table conversation_shares {
+  id uuid [pk]
+  tenant_id uuid [not null]
+  conversation_id uuid [not null]
+  owner_user_id uuid [not null]
+  audience varchar(16) [not null, note: 'workspace | people']
+  title varchar(512) [not null, note: 'snapshot.displayName']
+  snapshot jsonb [not null, note: '{messages: [{role, content, source_item_ids, citations}]}; at most 500 messages; snapshotTime = created_at']
+  message_count int [not null]
+  revoked_at timestamptz [note: 'DeleteShare; creating a new share for the same conversation revokes the previous one']
+  created_at timestamptz [not null]
+  indexes {
+    (tenant_id, owner_user_id, conversation_id)
+    conversation_id [unique, note: 'Partial WHERE revoked_at IS NULL: one live share per conversation']
+  }
+  Note: 'Share.uri is computed from the share ID.'
+}
+
+Table conversation_share_recipients {
+  share_id uuid [not null]
+  user_id uuid [not null, note: 'Member of the share tenant; only for audience = people']
+  indexes { (share_id, user_id) [pk] }
 }
 
 Table memories {
@@ -506,56 +965,258 @@ Table memories {
   }
 }
 
-Table approval_requests {
-  id uuid [pk]
+// One row per workspace; no row = product defaults.
+Table workspace_assistant_settings {
+  tenant_id uuid [pk]
+  instructions text [not null, note: '<= 2000 characters']
+  answer_length varchar(16) [not null, default: 'balanced', note: 'concise | balanced | detailed']
+  capabilities jsonb [not null, default: `{"web_search": false, "file_work": true, "charts": true}`]
+  welcome_message varchar(60) [not null]
+  starter_prompts jsonb [not null, default: `[]`, note: '[{title <= 40, prompt <= 160, role_ids []}]; at most 3 per role; empty role_ids = every member']
+  updated_by_user_id uuid
+  updated_at timestamptz [not null, note: 'WorkspaceAssistant etag']
+  Note: 'Knowledge search is always on and is not stored.'
+}
+
+// Knowledge gaps are computed from user messages and answer feedback; only an
+// administrator decision is stored (:dismiss or a resolving :answer inserts,
+// :reopen deletes).
+Table knowledge_gap_decisions {
   tenant_id uuid [not null]
-  requester_user_id uuid [not null]
-  request_type varchar(32) [not null, note: 'resource_access | plugin_installation']
-  target_id varchar(512) [not null, note: 'Item UUID for resource_access; connector key for plugin_installation']
-  requested_role_id uuid [note: 'Required for resource_access: the Collection Role approving will assign']
-  details jsonb [not null, default: `{}`, note: 'Type-specific data only']
-  reason text
-  status varchar(16) [not null, default: 'pending', note: 'pending | approved | denied | cancelled']
-  decided_by_user_id uuid
-  decision_note text
-  decided_at timestamptz
-  deleted_at timestamptz
+  gap_key varchar(128) [not null, note: 'Stable key of the normalized question cluster; also the public gap ID']
+  state varchar(16) [not null, note: 'dismissed | resolved']
+  resolved_by_item_id uuid [note: 'resolved only: the Document AnswerRequest published']
+  decided_by_user_id uuid [not null]
+  decided_at timestamptz [not null]
+  indexes { (tenant_id, gap_key) [pk] }
+  Note: 'Replaces knowledge_gap_dismissals. question, askCount, lastAskTime, reason and suggestedCollection are computed; a resolved gap asked again after decided_at reads OPEN.'
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Collaboration (spaces, requests)
+// ───────────────────────────────────────────────────────────────────────────
+
+// Workspaces/{w}/spaces. Membership and roles are space-scoped
+// role_assignments (spaceLead, spaceStaff, spaceMember); there is no second
+// membership table.
+Table spaces {
+  id uuid [pk, note: 'Space uid']
+  tenant_id uuid [not null]
+  code varchar(64) [not null, note: 'API space ID']
+  display_name varchar(255) [not null]
+  space_type varchar(64) [not null, note: 'A key of tenants.settings.space_types (service-validated)']
+  description text
+  join_policy varchar(16) [not null, default: 'invite', note: 'open | request | invite']
+  created_by_user_id uuid
+  deleted_at timestamptz [note: 'Soft delete; :undelete clears. Children stay and are hidden with the space']
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
   indexes {
-    (tenant_id, status, created_at)
-    (requester_user_id, status)
-    (request_type, target_id)
-    (tenant_id, requester_user_id, request_type, target_id) [unique, note: 'Partial unique while status=pending and deleted_at is null']
+    (tenant_id, code) [unique]
+    (tenant_id, deleted_at)
+    (tenant_id, space_type)
   }
+  Note: 'memberCount, callerRole and collections are computed from role_assignments (space_id) and items.space_id. SpaceMember rows are the users with a live space-scoped grant; DeleteSpaceMember and :leave tombstone those grants.'
+}
+
+// Spaces/{s}/materials. A reference to an Item; never grants access.
+Table space_materials {
+  id uuid [pk]
+  space_id uuid [not null]
+  item_id uuid [not null, note: 'Document or Collection Item of the space tenant']
+  note text
+  added_by_user_id uuid [not null]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  indexes {
+    (space_id, item_id) [unique]
+    (space_id, created_at)
+    item_id
+  }
+  Note: 'A trigger enforces same tenant. Hard delete. Reads omit materials whose item the caller cannot read.'
+}
+
+Table space_announcements {
+  id uuid [pk]
+  space_id uuid [not null]
+  title varchar(255) [not null]
+  body text
+  pinned boolean [not null, default: false]
+  author_user_id uuid [not null]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  indexes {
+    (space_id, pinned, created_at)
+  }
+  Note: 'Hard delete.'
+}
+
+Table space_events {
+  id uuid [pk]
+  space_id uuid [not null]
+  title varchar(255) [not null]
+  start_at timestamptz [not null]
+  end_at timestamptz [note: 'Check end_at >= start_at']
+  location varchar(255)
+  description text
+  created_by_user_id uuid
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  indexes {
+    (space_id, start_at)
+  }
+  Note: 'Hard delete.'
+}
+
+// Spaces/{s}/requestTypes. The form and eligibility rules of SERVICE
+// requests in a space.
+Table request_types {
+  id uuid [pk]
+  space_id uuid [not null]
+  code varchar(64) [not null, note: 'API request type ID']
+  display_name varchar(255) [not null]
+  description text
+  fields jsonb [not null, default: `[]`, note: '[{key, display_name, type, required, options}]; validated on write']
+  rules jsonb [not null, default: `[]`, note: '[{condition (CEL), severity, message, policy_citation_item_id}]; CEL compiled on write']
+  sla_duration interval [note: 'Sets requests.due_at at creation']
+  deleted_at timestamptz [note: 'Soft delete; :undelete clears; requests keep their reference']
+  created_by_user_id uuid
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  indexes {
+    (space_id, code) [unique]
+    (space_id, deleted_at)
+  }
+}
+
+// Every ask-and-decide flow except contribution review. Replaces
+// approval_requests.
+Table requests {
+  id uuid [pk]
+  tenant_id uuid [not null]
+  kind varchar(24) [not null, note: 'service | question | collection_access | space_membership | connector']
+  request_type_id uuid [note: 'service only']
+  space_id uuid [note: 'service, question, space_membership: the decision resource']
+  collection_item_id uuid [note: 'collection_access only: the Collection asked for; the decision resource']
+  connector_key varchar(64) [note: 'connector only: registry key of the requested connector; the decision resource']
+  requested_role_id uuid [note: 'collection_access: collectionViewer | collectionEditor; space_membership: spaceMember; null otherwise']
+  granted_role_id uuid [note: 'Role actually granted by :approve (equal to or lower than requested_role_id)']
+  title varchar(255)
+  fields jsonb [not null, default: `{}`, note: 'Struct keyed by request type field key']
+  question text
+  assistant_context jsonb [note: '{answer, citations [{item_id, chunk_id, page}]} copied from the caller-owned sourceMessage at creation; citations re-checked per reader']
+  eligibility jsonb [note: '{outcome: pass | warn, results [{condition, severity, message, policy_citation_item_id}]} evaluated at creation; BLOCK never persists']
+  requester_user_id uuid [not null]
+  assignee_user_id uuid
+  state varchar(16) [not null, default: 'open', note: 'open | needs_info | approved | denied | answered | withdrawn | closed']
+  due_at timestamptz [note: 'created_at + request_types.sla_duration; null without an SLA']
+  faq_item_id uuid [note: 'Document published by :answer with publishToCollection']
+  decided_by_user_id uuid
+  decided_at timestamptz
+  closed_at timestamptz [note: 'Request.closeTime: first time the request reached approved, denied, answered, withdrawn or closed']
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null, note: 'Request etag']
+  indexes {
+    (tenant_id, state, created_at)
+    (tenant_id, requester_user_id, state)
+    (tenant_id, assignee_user_id, state)
+    (space_id, state, created_at)
+    (collection_item_id, state)
+    (connector_key, state)
+    (tenant_id, due_at) [note: 'Partial WHERE state IN (open, needs_info) AND due_at IS NOT NULL: overdue filter and dueTime ordering']
+    (tenant_id, requester_user_id, kind, collection_item_id, space_id, connector_key) [unique, note: 'NULLS NOT DISTINCT; partial WHERE state IN (open, needs_info) AND kind IN (collection_access, space_membership, connector): one open ask per requester and decision resource']
+  }
+  Note: 'Checks: exactly the kind-specific references are set (service: request_type_id + space_id; question: space_id; space_membership: space_id + requested_role_id; collection_access: collection_item_id + requested_role_id; connector: connector_key). A trigger enforces same-tenant space, request type (of that space), Collection (item_type collection), faq item and requester/assignee membership. overdue = due_at < now() AND state IN (open, needs_info) (computed). Decisions, answers and send-backs are also request_messages rows.'
+}
+
+Table request_messages {
+  id uuid [pk]
+  request_id uuid [not null]
+  author_user_id uuid [not null]
+  text text [not null]
+  internal boolean [not null, default: false, note: 'Staff-only note: visible to and posted by holders of requests.get on the decision resource; never to the requester']
+  created_at timestamptz [not null]
+  indexes {
+    (request_id, created_at)
+  }
+  Note: 'Append-only. A requester message on a needs_info request returns it to open in the same transaction.'
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Notifications and operations
+// ───────────────────────────────────────────────────────────────────────────
+
+// One row per recipient, created by the event that causes it and only for
+// recipients allowed to read its subject. Product notices fan out per member.
+Table notifications {
+  id uuid [pk]
+  tenant_id uuid [not null]
+  recipient_user_id uuid [not null]
+  kind varchar(32) [not null, note: 'contribution_reviewed | request_updated | item_published | source_failed | connection_reconnect | access_request | product_notice | …']
+  subject_type varchar(32) [note: 'item | contribution | request | ingestion_source | integration_connection | space']
+  subject_id uuid [note: 'Notification.target is the resource name derived from subject_type and subject_id']
+  title varchar(255) [not null]
+  body text [not null]
+  read_at timestamptz [note: 'read = read_at IS NOT NULL']
+  deleted_at timestamptz [note: 'Dismissed (soft delete; :undelete clears)']
+  created_at timestamptz [not null]
+  indexes {
+    (recipient_user_id, tenant_id, read_at, created_at)
+    (subject_type, subject_id)
+  }
+  Note: 'per-recipient rows only; notification_reads (broadcast read state) is gone because dismissal and undelete are per member.'
 }
 
 // A null tenant_id is a platform-scoped action, which belongs to no workspace.
 Table audit_logs {
   id uuid [pk]
   tenant_id uuid
-  actor_user_id uuid
+  actor_user_id uuid [note: 'Null = system']
   actor_session_id uuid [note: 'Execution session for authenticated actions']
-  action varchar(96) [not null]
-  resource_type varchar(32) [not null]
-  resource_id varchar(512)
-  outcome varchar(16) [not null, default: 'success']
-  details jsonb [not null, default: `{}`]
+  category varchar(16) [not null, note: 'knowledge | files | sources | people | settings | spaces | requests | sign_in']
+  action varchar(96) [not null, note: 'e.g. items.publish']
+  resource_type varchar(32) [not null, note: 'Builds the fixed description template with action']
+  target_name text [note: 'canonical resource name acted on (AuditEvent.target); replaces resource_id']
+  outcome varchar(16) [not null, default: 'succeeded', note: 'succeeded | failed']
+  ip_address inet
+  details jsonb [not null, default: `{}`, note: 'Structured action data (contribution timeline messages); never exposed to platform callers']
   created_at timestamptz [not null]
   indexes {
     (tenant_id, created_at)
+    (tenant_id, category, created_at)
     (tenant_id, action, created_at)
     (actor_user_id, created_at)
     (actor_session_id, created_at)
+    (target_name, created_at)
     created_at
   }
+  Note: 'Append-only. description is computed from action and resource_type. A sign-in writes one platform row (tenant_id null) and one sign_in row per active membership of the user, since sessions carry no workspace.'
 }
 
-Ref: access_sessions.tenant_id > tenants.id
+// One row per service per periodic health probe; components and incidents
+// are derived on read.
+Table platform_health_checks {
+  id uuid [pk]
+  checked_at timestamptz [not null]
+  service varchar(64) [not null, note: 'Component name, e.g. openai_chat']
+  status varchar(16) [not null, note: 'healthy | degraded | unhealthy | not_configured']
+  error_category varchar(64) [note: 'Category only (timeout, connection_failed…); never a raw message']
+  latency_ms integer
+  indexes {
+    (service, checked_at)
+  }
+  Note: 'Kept 90 days.'
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// References
+// ───────────────────────────────────────────────────────────────────────────
+
 Ref: access_sessions.user_id > users.id
 Ref: access_sessions.auth_identity_id > auth_identities.id
 Ref: access_sessions.parent_session_id > access_sessions.id
 Ref: auth_identities.user_id > users.id
+Ref: password_reset_tokens.user_id > users.id
 Ref: roles.tenant_id > tenants.id
 Ref: role_permissions.role_id > roles.id
 Ref: role_permissions.permission_code > permissions.code
@@ -564,39 +1225,82 @@ Ref: role_assignments.group_id > groups.id
 Ref: role_assignments.role_id > roles.id
 Ref: role_assignments.tenant_id > tenants.id
 Ref: role_assignments.item_id > items.id
+Ref: role_assignments.space_id > spaces.id
 Ref: role_assignments.created_by_user_id > users.id
 Ref: tenant_memberships.user_id > users.id
 Ref: tenant_memberships.tenant_id > tenants.id
 Ref: groups.tenant_id > tenants.id
 Ref: group_memberships.group_id > groups.id
 Ref: group_memberships.user_id > users.id
+Ref: request_idempotency.user_id > users.id
+Ref: operations.user_id > users.id
+Ref: operations.tenant_id > tenants.id
 
 Ref: items.tenant_id > tenants.id
 Ref: items.parent_item_id > items.id
+Ref: items.space_id > spaces.id
 Ref: items.created_by_user_id > users.id
-Ref: artifact_revisions.item_id > items.id
-Ref: artifact_revisions.conversation_id > conversations.id
-Ref: artifact_revisions.created_by_user_id > users.id
+Ref: item_revisions.item_id > items.id
+Ref: item_revisions.created_by_user_id > users.id
+Ref: item_revisions.contribution_id > contributions.id
+Ref: contributions.tenant_id > tenants.id
+Ref: contributions.item_id > items.id
+Ref: contributions.target_item_id > items.id
+Ref: contributions.replaces_item_id > items.id
+Ref: contributions.contributor_user_id > users.id
+Ref: contributions.ingestion_source_id > ingestion_sources.id
+Ref: contributions.decided_by_user_id > users.id
+Ref: topics.tenant_id > tenants.id
+Ref: topics.parent_topic_id > topics.id
+Ref: topics.created_by_user_id > users.id
+Ref: item_topics.item_id > items.id
+Ref: item_topics.topic_id > topics.id
+Ref: item_topics.created_by_user_id > users.id
+Ref: contribution_topics.contribution_id > contributions.id
+Ref: contribution_topics.topic_id > topics.id
+Ref: reading_lists.tenant_id > tenants.id
+Ref: reading_lists.owner_user_id > users.id
+Ref: reading_lists.space_id > spaces.id
+Ref: reading_list_entries.reading_list_id > reading_lists.id
+Ref: reading_list_entries.item_id > items.id
+Ref: reading_list_entries.added_by_user_id > users.id
+Ref: item_links.tenant_id > tenants.id
+Ref: item_links.collection_item_id > items.id
+Ref: item_links.target_item_id > items.id
+Ref: item_links.created_by_user_id > users.id
+Ref: saved_items.tenant_id > tenants.id
+Ref: saved_items.user_id > users.id
+Ref: saved_items.item_id > items.id
+Ref: recent_items.tenant_id > tenants.id
+Ref: recent_items.user_id > users.id
+Ref: recent_items.item_id > items.id
+Ref: saved_searches.tenant_id > tenants.id
+Ref: saved_searches.user_id > users.id
 Ref: citations.item_id > items.id
 Ref: item_uploads.item_id - items.id
 Ref: item_uploads.tenant_id > tenants.id
 Ref: item_uploads.owner_user_id > users.id
-Ref: message_items.message_id > messages.id
-Ref: message_items.item_id > items.id
 
 Ref: integration_connections.tenant_id > tenants.id
 Ref: integration_connections.owner_user_id > users.id
 Ref: integration_connections.created_by_user_id > users.id
 Ref: integration_credentials.integration_connection_id - integration_connections.id
+Ref: ingestion_sources.tenant_id > tenants.id
 Ref: ingestion_sources.integration_connection_id > integration_connections.id
 Ref: ingestion_sources.target_item_id > items.id
 Ref: ingestion_sources.created_by_user_id > users.id
+Ref: ingestion_syncs.ingestion_source_id > ingestion_sources.id
+Ref: ingestion_syncs.created_by_user_id > users.id
 Ref: external_resources.item_id > items.id
 Ref: external_resources.ingestion_source_id > ingestion_sources.id
 Ref: ingestion_runs.tenant_id > tenants.id
+Ref: ingestion_runs.retry_of_run_id > ingestion_runs.id
 Ref: ingestion_runs.created_by_user_id > users.id
 Ref: ingestion_run_items.run_id > ingestion_runs.id
 Ref: ingestion_run_items.item_id > items.id
+Ref: ingestion_policies.updated_by_user_id > users.id
+Ref: platform_connector_settings.updated_by_user_id > users.id
+
 Ref: conversations.tenant_id > tenants.id
 Ref: conversations.owner_user_id > users.id
 Ref: conversations.created_by_session_id > access_sessions.id
@@ -604,187 +1308,56 @@ Ref: sandbox_sessions.tenant_id > tenants.id
 Ref: sandbox_sessions.conversation_id > conversations.id
 Ref: sandbox_sessions.user_id > users.id
 Ref: messages.conversation_id > conversations.id
+Ref: message_items.message_id > messages.id
+Ref: message_items.item_id > items.id
+Ref: artifacts.item_id - items.id
+Ref: artifacts.owner_user_id > users.id
+Ref: artifacts.conversation_id > conversations.id
+Ref: artifacts.space_id > spaces.id
+Ref: artifact_source_items.artifact_item_id > artifacts.item_id
+Ref: artifact_source_items.item_id > items.id
+Ref: evidence_review_cells.artifact_item_id > artifacts.item_id
+Ref: conversation_shares.tenant_id > tenants.id
+Ref: conversation_shares.conversation_id > conversations.id
+Ref: conversation_shares.owner_user_id > users.id
+Ref: conversation_share_recipients.share_id > conversation_shares.id
+Ref: conversation_share_recipients.user_id > users.id
 Ref: memories.tenant_id > tenants.id
 Ref: memories.user_id > users.id
 Ref: memories.conversation_id > conversations.id
 Ref: memories.source_message_id > messages.id
+Ref: workspace_assistant_settings.tenant_id - tenants.id
+Ref: workspace_assistant_settings.updated_by_user_id > users.id
+Ref: knowledge_gap_decisions.tenant_id > tenants.id
+Ref: knowledge_gap_decisions.resolved_by_item_id > items.id
+Ref: knowledge_gap_decisions.decided_by_user_id > users.id
 
-Ref: approval_requests.tenant_id > tenants.id
-Ref: approval_requests.requester_user_id > users.id
-Ref: approval_requests.decided_by_user_id > users.id
-Ref: approval_requests.requested_role_id > roles.id
+Ref: spaces.tenant_id > tenants.id
+Ref: spaces.created_by_user_id > users.id
+Ref: space_materials.space_id > spaces.id
+Ref: space_materials.item_id > items.id
+Ref: space_materials.added_by_user_id > users.id
+Ref: space_announcements.space_id > spaces.id
+Ref: space_announcements.author_user_id > users.id
+Ref: space_events.space_id > spaces.id
+Ref: space_events.created_by_user_id > users.id
+Ref: request_types.space_id > spaces.id
+Ref: request_types.created_by_user_id > users.id
+Ref: requests.tenant_id > tenants.id
+Ref: requests.request_type_id > request_types.id
+Ref: requests.space_id > spaces.id
+Ref: requests.collection_item_id > items.id
+Ref: requests.requested_role_id > roles.id
+Ref: requests.granted_role_id > roles.id
+Ref: requests.requester_user_id > users.id
+Ref: requests.assignee_user_id > users.id
+Ref: requests.faq_item_id > items.id
+Ref: requests.decided_by_user_id > users.id
+Ref: request_messages.request_id > requests.id
+Ref: request_messages.author_user_id > users.id
+
+Ref: notifications.tenant_id > tenants.id
+Ref: notifications.recipient_user_id > users.id
 Ref: audit_logs.tenant_id > tenants.id
 Ref: audit_logs.actor_user_id > users.id
 Ref: audit_logs.actor_session_id > access_sessions.id
-
-// ───────────────────────────────────────────────────────────────────────────
-// Proposed — UI built, API pending (api_contract.md, same-named section).
-// Commented out on purpose: not migrated, not in openapi.yaml. Uncomment and
-// migrate only when the matching endpoint is implemented.
-// ───────────────────────────────────────────────────────────────────────────
-//
-// auth.password_reset — single-use reset links; only a hash of the token is kept.
-// Table password_reset_tokens {
-//   id uuid [pk]
-//   user_id uuid [not null]
-//   token_hash varchar(128) [not null, unique, note: 'SHA-256 of the emailed token; the token itself is never stored']
-//   expires_at timestamptz [not null, note: 'created_at + 30 minutes']
-//   used_at timestamptz [note: 'Set once on completion; a used token is invalid']
-//   requested_ip inet
-//   created_at timestamptz [not null]
-//   indexes { (user_id, created_at) }
-//   Note: 'Completing a reset sets users.password_hash, sets used_at, and revokes every active access_session of the user.'
-// }
-// Ref: password_reset_tokens.user_id > users.id
-//
-// artifact.manual_revision — provenance of a revision made by restoring another.
-// artifact_revisions.restored_from int [note: 'revision_number of the same item_id this revision copied; null for agent or hand-edited revisions. Hand-made revisions set created_by_user_id and leave request_id null']
-// ArtifactRevision.author (API) is derived, not stored: 'assistant' when request_id is set, 'user' otherwise. Undo (DELETE …/revisions/{n}) removes only the current 'user' revision younger than 10 minutes.
-//
-// chat.share — conversations are device-local, so a share stores its own snapshot.
-// Table conversation_shares {
-//   id uuid [pk]
-//   tenant_id uuid [not null]
-//   conversation_id uuid [not null, note: 'Client conversation id; the conversation itself is not synced']
-//   owner_user_id uuid [not null]
-//   audience varchar(16) [not null, note: 'workspace | people']
-//   title varchar(512) [not null]
-//   snapshot jsonb [not null, note: '{messages: [{role, content, source_document_ids}]}; at most 500 messages. Sources are filtered per recipient on read']
-//   message_count int [not null]
-//   revoked_at timestamptz
-//   created_at timestamptz [not null]
-//   indexes {
-//     (tenant_id, owner_user_id, conversation_id)
-//   }
-// }
-// Table conversation_share_recipients {
-//   share_id uuid [not null]
-//   user_id uuid [not null, note: 'Member of the share tenant; only for audience = people']
-//   indexes { (share_id, user_id) [pk] }
-// }
-// Ref: conversation_shares.tenant_id > tenants.id
-// Ref: conversation_shares.owner_user_id > users.id
-// Ref: conversation_share_recipients.share_id > conversation_shares.id
-// Ref: conversation_share_recipients.user_id > users.id
-//
-// document.restore — restore reverses the Document tombstone on items.
-// items: restore sets status back to the value it had before deletion and clears
-// deleted_at, within a 30-day retention window after which the tombstone is purged.
-// Proposed column: items.status_before_delete varchar(16) [note: 'Raw status at deletion; null while live'].
-// Citations tombstoned with the Document are reactivated (citations.deleted_at cleared);
-// if the index cannot be restored, index_status is set to pending for a new run.
-//
-// collection.general_access — "everyone in the workspace can view" a Collection.
-// role_assignments gains the workspace as a principal: proposed column
-// role_assignments.all_members boolean [not null, default: false, note: 'With item_id set and user_id/group_id null: every active member of tenant_id holds role_id (collection_viewer only) on that Collection']
-// (the exactly-one-principal check becomes user_id | group_id | all_members). Collection reads expose it as general_access.
-// collection.discovery — a read projection; no storage.
-//
-// workspace.assistant_settings — one row per workspace.
-// Table workspace_assistant_settings {
-//   tenant_id uuid [pk]
-//   instructions text [not null, note: '<= 2000 characters']
-//   answer_length varchar(16) [not null, default: 'balanced', note: 'concise | balanced | detailed']
-//   capabilities jsonb [not null, default: `{"web_search": false, "file_work": true, "charts": true}`]
-//   welcome_message varchar(60) [not null]
-//   starter_prompts jsonb [not null, default: `[]`, note: '<= 3 {title <= 40, prompt <= 160}']
-//   updated_by_user_id uuid
-//   updated_at timestamptz [not null]
-//   Note: 'Knowledge search is always on and is not stored. No row = product defaults.'
-// }
-// Ref: workspace_assistant_settings.tenant_id - tenants.id
-// Ref: workspace_assistant_settings.updated_by_user_id > users.id
-//
-// workspace.branding — tenants.settings.branding = {accent: indigo|teal|ocean|plum|graphite, updated_at}.
-// workspace.archive — tenants.status gains 'archived' (with settings.archive = {archived_at, archived_by_user_id}).
-//
-// account.notification_prefs — users.preferences.notifications =
-//   {email: {source_sync_failures, access_requests, cited_document_changes, weekly_summary}, updated_at}
-//   (booleans, default true; account-wide, not per workspace).
-//
-// analytics.knowledge_gaps — gaps are computed from user messages and answer
-// feedback (no stored list); only an administrator's dismissal is persisted.
-// Table knowledge_gap_dismissals {
-//   tenant_id uuid [not null]
-//   gap_key varchar(128) [not null, note: 'Stable key of the normalized question cluster; also the public gap_id']
-//   dismissed_by_user_id uuid [not null]
-//   dismissed_at timestamptz [not null]
-//   indexes { (tenant_id, gap_key) [pk] }
-//   Note: 'Undo deletes the row. A dismissed gap stays hidden from GET unless include_dismissed=true.'
-// }
-// Ref: knowledge_gap_dismissals.tenant_id > tenants.id
-// Ref: knowledge_gap_dismissals.dismissed_by_user_id > users.id
-//
-// audit.export — no storage: the file is read from audit_logs with the list's filters.
-//
-// notifications.inbox — one row per recipient; created by the event that causes it
-// (failed sync, connection needing reauthorization, approval request created/decided)
-// and only for recipients allowed to read its subject.
-// Table notifications {
-//   id uuid [pk]
-//   tenant_id uuid [note: 'Null for product notices addressed across workspaces']
-//   recipient_user_id uuid [note: 'Null for a product notice shown to every member (with read state in notification_reads)']
-//   kind varchar(32) [not null, note: 'product_notice | source_failed | connection_reconnect | access_request | access_request_pending | access_request_approved | access_request_denied']
-//   subject_type varchar(32) [note: 'ingestion_source | integration_connection | approval_request | item']
-//   subject_id uuid
-//   title varchar(255) [not null]
-//   body text [not null]
-//   href varchar(512) [not null, note: 'App route, never an absolute URL']
-//   read_at timestamptz [note: 'Per-recipient rows only']
-//   created_at timestamptz [not null]
-//   indexes {
-//     (recipient_user_id, tenant_id, read_at, created_at)
-//     (subject_type, subject_id)
-//   }
-// }
-// Table notification_reads {
-//   notification_id uuid [not null]
-//   user_id uuid [not null]
-//   read_at timestamptz [not null]
-//   indexes { (notification_id, user_id) [pk] }
-//   Note: 'Read state of broadcast product notices (recipient_user_id null).'
-// }
-// Ref: notifications.tenant_id > tenants.id
-// Ref: notifications.recipient_user_id > users.id
-// Ref: notification_reads.notification_id > notifications.id
-// Ref: notification_reads.user_id > users.id
-//
-// platform.workspace_admin — no new table. POST creates tenants (code unique,
-// ^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$) plus the owner's tenant_membership and
-// workspace-admin role_assignment (or a pending invitation when the email has no
-// user yet). PATCH sets tenants.status active | suspended; access_sessions in a
-// suspended tenant stop authorizing. New permission code platform.tenant.manage.
-//
-// platform.user_admin — no new table. is_platform_admin is a role_assignment of the
-// platform admin role (roles.tenant_id null); account suspension is users.status
-// (false = suspended), which also revokes active access_sessions. Self-changes are
-// rejected. New permission code platform.user.manage.
-//
-// platform.connectors — deployment-wide connector settings; secrets encrypted and write-only.
-// Table platform_connector_settings {
-//   connector_key varchar(64) [pk, note: 'Registry key, e.g. google_drive']
-//   available boolean [not null, default: true, note: 'False stops new connections and syncs; documents stay searchable']
-//   oauth_client_id varchar(512)
-//   oauth_client_secret_encrypted bytea [note: 'Encrypted with the integration encryption key; never returned (responses expose has_secret only)']
-//   updated_by_user_id uuid
-//   updated_at timestamptz [not null]
-//   Note: 'No row = registry defaults and deployment environment configuration. New permission code platform.connector.manage.'
-// }
-// Ref: platform_connector_settings.updated_by_user_id > users.id
-//
-// platform.capabilities — no storage: read from deployment configuration and health probes.
-// platform.usage — no new table: aggregated from messages, access_sessions and ingestion_run_items.
-//
-// platform.health_history — one row per service per periodic /platform/health probe.
-// Table platform_health_checks {
-//   id uuid [pk]
-//   checked_at timestamptz [not null]
-//   service varchar(64) [not null, note: 'Health service name, e.g. openai_chat']
-//   status varchar(16) [not null, note: 'healthy | degraded | unhealthy | not_configured']
-//   error_category varchar(64) [note: 'Category only (timeout, connection_failed…); never a raw message']
-//   latency_ms integer
-//   indexes {
-//     (service, checked_at)
-//   }
-//   Note: 'Kept 90 days. Daily status, uptime and incidents are derived on read.'
-// }

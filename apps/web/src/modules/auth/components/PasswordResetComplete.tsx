@@ -22,7 +22,7 @@ interface Errors {
 
 /**
  * The page an emailed reset link opens: a new password with its rules and a
- * confirmation. Success ends every session of the account (proposed contract),
+ * confirmation. Success ends every session of the account (v2 `ResetPassword`),
  * so the next step is signing in. API pending (`auth.password_reset`).
  */
 export function PasswordResetComplete({ token }: { token: string }) {

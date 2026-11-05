@@ -1,11 +1,15 @@
 """Shared contracts and configuration for Temporal orchestration.
 
-Two workflows run on the ingestion task queue. ``IngestionRunWorkflow``
+Three workflows run on the ingestion task queue. ``IngestionRunWorkflow``
 processes one Ingestion Run's snapshot of Documents in bounded batches;
 ``SourceSyncWorkflow`` syncs one Source's inventory and, when scheduled, then
-creates a run for what the sync left pending. Postgres holds every run, item
-and sync state; Temporal only orchestrates. This module stays free of
-database-backed imports so the workflow sandbox can pass it through.
+creates a run for what the sync left pending; ``MaintenanceWorkflow`` runs one
+periodic index-upkeep Activity, started by a Schedule: ``payload-reconciliation``
+(every minute) re-applies the index payloads of Items that moved, changed
+publication or were (un)deleted, and ``deleted-item-purge`` (hourly) purges
+Items deleted beyond their retention. Postgres holds every run, item and sync
+state; Temporal only orchestrates. This module stays free of database-backed
+imports so the workflow sandbox can pass it through.
 """
 
 from __future__ import annotations
@@ -22,8 +26,20 @@ PLAN_BATCHES_ACTIVITY = "bomesh.ingestion_run.plan_batches"
 PROCESS_BATCH_ACTIVITY = "bomesh.ingestion_run.process_batch"
 FAIL_BATCH_ACTIVITY = "bomesh.ingestion_run.fail_batch"
 FINISH_RUN_ACTIVITY = "bomesh.ingestion_run.finish"
+BEGIN_SCHEDULED_SYNC_ACTIVITY = "bomesh.source_sync.begin_scheduled"
 SYNC_SOURCE_ACTIVITY = "bomesh.source_sync.sync"
 CREATE_SCHEDULED_RUN_ACTIVITY = "bomesh.source_sync.create_scheduled_run"
+MAINTENANCE_WORKFLOW_NAME = "bomesh.maintenance"
+RECONCILE_PAYLOADS_ACTIVITY = "bomesh.maintenance.reconcile_payloads"
+PURGE_DELETED_ITEMS_ACTIVITY = "bomesh.maintenance.purge_deleted_items"
+#: The Schedule (and workflow ID) of the periodic payload reconciliation.
+PAYLOAD_RECONCILIATION_SCHEDULE_ID = "payload-reconciliation"
+#: Dirty Items whose payload one firing re-applies.
+PAYLOAD_RECONCILIATION_LIMIT = 500
+#: The Schedule (and workflow ID) of the periodic purge of deleted Items.
+DELETED_ITEM_PURGE_SCHEDULE_ID = "deleted-item-purge"
+#: Deleted Items one firing purges.
+DELETED_ITEM_PURGE_LIMIT = 100
 #: The failure type a ``process_batch`` raises when the model provider refused
 #: the key, credit or model: the run stops instead of retrying.
 PROVIDER_REJECTED_FAILURE_TYPE = "ModelProviderRejected"
@@ -112,7 +128,7 @@ class FailBatchInput:
 
 @dataclass(frozen=True, slots=True)
 class FinishRunInput:
-    """``outcome``: completed, failed or cancelled; ``error`` explains a failed run."""
+    """``outcome``: succeeded, failed or cancelled; ``error`` explains a failed run."""
 
     run_id: str
     outcome: str
@@ -121,10 +137,17 @@ class FinishRunInput:
 
 @dataclass(frozen=True, slots=True)
 class SourceSyncInput:
-    """Sync one Source; ``process`` then creates a run for what is pending."""
+    """Run one sync of a Source.
+
+    ``sync_id`` names the RUNNING ``ingestion_syncs`` row a manual or creation
+    sync opened before starting the workflow; a schedule firing has none and
+    opens its own (trigger ``scheduled``). ``process`` then creates an
+    Ingestion Run for what the sync left pending (schedule firings only).
+    """
 
     source_id: str
     tenant_id: str
+    sync_id: str | None = None
     process: bool = False
 
 
@@ -165,14 +188,22 @@ def _environment_boolean(name: str, *, default: bool = False) -> bool:
 
 
 __all__ = [
+    "BEGIN_SCHEDULED_SYNC_ACTIVITY",
     "CREATE_SCHEDULED_RUN_ACTIVITY",
+    "DELETED_ITEM_PURGE_LIMIT",
+    "DELETED_ITEM_PURGE_SCHEDULE_ID",
     "FAIL_BATCH_ACTIVITY",
     "FINISH_RUN_ACTIVITY",
     "INGESTION_RUN_WORKFLOW_NAME",
     "INGESTION_TASK_QUEUE",
+    "MAINTENANCE_WORKFLOW_NAME",
+    "PAYLOAD_RECONCILIATION_LIMIT",
+    "PAYLOAD_RECONCILIATION_SCHEDULE_ID",
     "PLAN_BATCHES_ACTIVITY",
     "PROCESS_BATCH_ACTIVITY",
     "PROVIDER_REJECTED_FAILURE_TYPE",
+    "PURGE_DELETED_ITEMS_ACTIVITY",
+    "RECONCILE_PAYLOADS_ACTIVITY",
     "SOURCE_SYNC_WORKFLOW_NAME",
     "START_RUN_ACTIVITY",
     "SYNC_SOURCE_ACTIVITY",

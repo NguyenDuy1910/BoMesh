@@ -1,6 +1,6 @@
 /**
- * Local implementation of `account.notification_prefs` (proposed
- * `GET`/`PATCH /me/notification-preferences`). Preferences belong to the
+ * Local implementation of `account.notification_prefs` (v2
+ * `GetUserPreferences` / `UpdateUserPreferences`, `emailNotifications`). Preferences belong to the
  * account, not a workspace, so the store is per account and workspace-free.
  */
 import { ApiError } from "@/lib/api/request";

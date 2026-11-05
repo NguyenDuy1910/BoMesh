@@ -3,9 +3,9 @@
  * `/access-sessions`, `/workspaces/{id}/activity`; read in `activity-log.ts`);
  * only the file is pending.
  *
- * Proposed contract: `GET /audit-logs/export?format=csv`
- * (`api_contract.md#proposed-audit-export`). Until it exists the pending layer
- * builds the same file in the browser from the real audit list.
+ * Target v2 method: `ExportAuditEvents` (`backend/docs_design/api_design.md`,
+ * §4 AuditEvent). Until it exists the pending layer builds the same file in
+ * the browser from the real audit list.
  */
 
 import { pendingApi } from "@/lib/api/pending";

@@ -49,12 +49,12 @@ export const ASSISTANT_LIMITS = {
   starterPrompt: 160,
 } as const;
 
-/** API pending: `GET /workspaces/{workspace_id}/assistant-settings` (any member). */
+/** API pending: `GetWorkspaceAssistant` (any member). */
 export async function getAssistantSettings(workspaceId: string): Promise<AssistantSettings> {
   return pendingApi("workspace.assistant_settings", () => pendingAssistant.getAssistantSettings(workspaceId));
 }
 
-/** API pending: `PATCH /workspaces/{workspace_id}/assistant-settings` (`tenant.manage`). */
+/** API pending: `UpdateWorkspaceAssistant` (`workspaces.updateAssistant`). */
 export async function updateAssistantSettings(
   workspaceId: string,
   patch: AssistantSettingsPatch,

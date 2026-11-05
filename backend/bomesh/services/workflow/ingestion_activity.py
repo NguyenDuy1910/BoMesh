@@ -1,9 +1,10 @@
-"""Side-effecting Temporal Activities of Ingestion Runs and Source syncs.
+"""Side-effecting Temporal Activities of Ingestion Runs, Source syncs and index upkeep.
 
 They only orchestrate the services that own each step: ``IngestionRunService``
 keeps run and item state, ``ItemIngestionService`` processes one Document,
-``ArchiveExpansionService`` turns an archive into Documents, and
-``SourceSyncService`` syncs a Source's inventory.
+``ArchiveExpansionService`` turns an archive into Documents,
+``SourceSyncService`` syncs a Source's inventory, and the index-upkeep jobs
+(re-applying dirty payloads, purging deleted Items) belong to KnowledgeItems.
 """
 
 from __future__ import annotations
@@ -15,30 +16,46 @@ from contextlib import suppress
 from typing import Any
 from uuid import UUID
 
-import httpx
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
-from bomesh.document_index import EmbeddingRejectedError
+from bomesh.document_index import EmbeddingRejectedError, ItemIndex
+from bomesh.errors import StatusCode
 from bomesh.services import (
-    ConnectionAuthorizationRequiredError,
-    ControlPlaneNotFoundError,
-    ControlPlaneValidationError,
     DocumentNotFoundError,
     DocumentProcessingError,
+    DocumentUnavailableError,
     InvalidDocumentStateError,
 )
-from bomesh.services.archive_expansion import ArchiveExpansionService
-from bomesh.services.ingestion import IngestionRunService, NothingToProcessError
-from bomesh.services.item_ingestion import ItemIngestionService, PhaseRecorder, failure_message
-from bomesh.services.source_sync import SourceSyncService
+from bomesh.services.ingestion.run_engine import (
+    CONTENT_UNAVAILABLE,
+    INTERNAL,
+    PROVIDER_REFUSED,
+    UNSUPPORTED_FORMAT,
+    IngestionRunService,
+)
+from bomesh.services.ingestion.source_sync import SourceSyncService
+from bomesh.services.knowledge_items.archive_expansion import ArchiveExpansionService
+from bomesh.services.knowledge_items.indexing import (
+    ItemIngestionService,
+    PhaseRecorder,
+    failure_message,
+    reconcile_dirty_payloads,
+)
+from bomesh.services.knowledge_items.purge import purge_deleted_items
 from bomesh.services.workflow import (
+    BEGIN_SCHEDULED_SYNC_ACTIVITY,
     CREATE_SCHEDULED_RUN_ACTIVITY,
+    DELETED_ITEM_PURGE_LIMIT,
     FAIL_BATCH_ACTIVITY,
     FINISH_RUN_ACTIVITY,
+    PAYLOAD_RECONCILIATION_LIMIT,
     PLAN_BATCHES_ACTIVITY,
     PROCESS_BATCH_ACTIVITY,
     PROVIDER_REJECTED_FAILURE_TYPE,
+    PURGE_DELETED_ITEMS_ACTIVITY,
+    RECONCILE_PAYLOADS_ACTIVITY,
     START_RUN_ACTIVITY,
     SYNC_SOURCE_ACTIVITY,
     FailBatchInput,
@@ -49,6 +66,7 @@ from bomesh.services.workflow import (
     RunStart,
     SourceSyncInput,
 )
+from bomesh.storage import DocumentStorage
 
 log = logging.getLogger(__name__)
 
@@ -62,15 +80,6 @@ _DOCUMENT_ERRORS = (
     DocumentProcessingError,
     DocumentNotFoundError,
     InvalidDocumentStateError,
-    ValueError,
-)
-#: Sync failures retrying cannot fix: configuration, identity, or a removed Source.
-_PERMANENT_SYNC_ERRORS = (
-    ConnectionAuthorizationRequiredError,
-    ControlPlaneNotFoundError,
-    ControlPlaneValidationError,
-    InvalidDocumentStateError,
-    PermissionError,
     ValueError,
 )
 
@@ -161,7 +170,12 @@ class IngestionRunActivities:
                 exc,
             )
             await self._runs.record_item_outcome(
-                run_id, item_id, status="failed", error=message, phases=recorder.close()
+                run_id,
+                item_id,
+                status="failed",
+                error=message,
+                error_class=PROVIDER_REFUSED,
+                phases=recorder.close(),
             )
             # Every other Document would be refused the same way: stop the run.
             raise ApplicationError(
@@ -175,6 +189,7 @@ class IngestionRunActivities:
                 item_id,
                 status="failed",
                 error=failure_message(exc),
+                error_class=_error_class(exc),
                 phases=recorder.close(),
             )
             return
@@ -228,7 +243,13 @@ class IngestionRunActivities:
 
     @activity.defn(name=FINISH_RUN_ACTIVITY)
     async def finish_run(self, input: FinishRunInput) -> None:
-        await self._runs.finish(UUID(input.run_id), outcome=input.outcome, error=input.error)
+        # The only reason a run stops on its own is the model provider refusing it.
+        error = (
+            {"code": int(StatusCode.FAILED_PRECONDITION), "message": input.error}
+            if input.error is not None
+            else None
+        )
+        await self._runs.finish(UUID(input.run_id), outcome=input.outcome, error=error)
 
 
 class SourceSyncActivities:
@@ -238,18 +259,21 @@ class SourceSyncActivities:
         self._sync = sync
         self._runs = runs
 
+    @activity.defn(name=BEGIN_SCHEDULED_SYNC_ACTIVITY)
+    async def begin_scheduled_sync(self, input: SourceSyncInput) -> str | None:
+        """Open the firing's RUNNING sync row; ``None`` skips the firing."""
+        sync_id = await self._sync.begin_scheduled_sync(UUID(input.source_id))
+        return str(sync_id) if sync_id is not None else None
+
     @activity.defn(name=SYNC_SOURCE_ACTIVITY)
     async def sync_source(self, input: SourceSyncInput) -> None:
+        """Run the sync row; a failure is already recorded on it, so it is not retried."""
+        if input.sync_id is None:
+            raise ApplicationError("a sync needs its sync row", non_retryable=True)
         heartbeat = asyncio.create_task(_heartbeat(lambda: {"phase": "syncing"}))
         try:
-            await self._sync.sync(UUID(input.source_id))
-        except httpx.HTTPStatusError as exc:
-            raise ApplicationError(
-                str(exc),
-                type="ConnectorHTTPError",
-                non_retryable=exc.response.status_code in {400, 401, 403, 404, 422},
-            ) from exc
-        except _PERMANENT_SYNC_ERRORS as exc:
+            await self._sync.sync(UUID(input.sync_id))
+        except Exception as exc:
             raise ApplicationError(str(exc), type=type(exc).__name__, non_retryable=True) from exc
         finally:
             await _stop(heartbeat)
@@ -258,17 +282,52 @@ class SourceSyncActivities:
     async def create_scheduled_run(self, input: SourceSyncInput) -> str | None:
         """Process what the scheduled sync left pending; nothing pending is not an error."""
 
-        try:
-            run = await self._runs.create_run(
-                None,
-                trigger="scheduled",
-                tenant_id=UUID(input.tenant_id),
-                source_id=UUID(input.source_id),
-                states=["pending", "outdated"],
-            )
-        except NothingToProcessError:
-            return None
-        return str(run["id"])
+        run_id = await self._runs.create_scheduled_run(
+            UUID(input.tenant_id), UUID(input.source_id)
+        )
+        return str(run_id) if run_id is not None else None
+
+
+class MaintenanceActivities:
+    """The index-upkeep Activities ``MaintenanceWorkflow`` runs on a Schedule.
+
+    Each runs one bounded pass and returns how many Items it handled.
+    """
+
+    def __init__(
+        self,
+        sessions: async_sessionmaker[AsyncSession],
+        *,
+        index: ItemIndex,
+        storage: DocumentStorage,
+    ) -> None:
+        self._sessions = sessions
+        self._index = index
+        self._storage = storage
+
+    @activity.defn(name=RECONCILE_PAYLOADS_ACTIVITY)
+    async def reconcile_payloads(self) -> int:
+        """Re-apply the index payloads of Items changed since they were indexed."""
+        return await reconcile_dirty_payloads(
+            self._sessions, self._index, limit=PAYLOAD_RECONCILIATION_LIMIT
+        )
+
+    @activity.defn(name=PURGE_DELETED_ITEMS_ACTIVITY)
+    async def purge_deleted_items(self) -> int:
+        """Purge Items deleted beyond their retention (points, revisions, unshared objects)."""
+        return await purge_deleted_items(
+            self._sessions, self._index, self._storage, limit=DELETED_ITEM_PURGE_LIMIT
+        )
+
+
+def _error_class(exc: BaseException) -> str:
+    """The provider-neutral ``errorClass`` of a Document's own failure."""
+
+    if isinstance(exc, (DocumentUnavailableError, DocumentNotFoundError, InvalidDocumentStateError)):
+        return CONTENT_UNAVAILABLE
+    if isinstance(exc, DocumentProcessingError):
+        return UNSUPPORTED_FORMAT
+    return INTERNAL
 
 
 async def _heartbeat(details: Callable[[], Any]) -> None:
@@ -283,4 +342,8 @@ async def _stop(task: asyncio.Task[None]) -> None:
         await task
 
 
-__all__ = ["IngestionRunActivities", "SourceSyncActivities"]
+__all__ = [
+    "IngestionRunActivities",
+    "MaintenanceActivities",
+    "SourceSyncActivities",
+]

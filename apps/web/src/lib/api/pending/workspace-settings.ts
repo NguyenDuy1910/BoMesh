@@ -1,8 +1,8 @@
 /**
- * Local implementations of `workspace.archive` (proposed
- * `POST /workspaces/{workspace_id}/archive`), `workspace.branding` (proposed
- * `settings.branding` on `GET`/`PATCH /workspaces/{workspace_id}`) and
- * `workspace.url_code` (proposed `code` on `PATCH /workspaces/{workspace_id}`).
+ * Local implementations of `workspace.archive` (v2 `ArchiveWorkspace`),
+ * `workspace.branding` (v2 `branding.accentColor` on `GetWorkspaceSettings` /
+ * `UpdateWorkspaceSettings`) and `workspace.url_code` (v2 `code` on
+ * `UpdateWorkspace`).
  *
  * All three are workspace-wide, so their stores are not per account.
  * Archiving here only records the request in this browser, and a changed web

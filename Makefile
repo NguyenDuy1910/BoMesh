@@ -3,7 +3,10 @@ SHELL := /bin/bash
 .NOTPARALLEL:
 
 COMPOSE_FILE := deployment/compose.yml
-COMPOSE := docker compose -f $(COMPOSE_FILE)
+# Compose reads RustFS settings from the root .env, so the API and the storage
+# container share one credential pair. Empty values fall back to Compose.
+ROOT_ENV = $$(sed -n 's/^$(1)=//p' .env 2>/dev/null | tail -n 1)
+COMPOSE = RUSTFS_ACCESS_KEY="$(call ROOT_ENV,RUSTFS_ACCESS_KEY)" RUSTFS_SECRET_KEY="$(call ROOT_ENV,RUSTFS_SECRET_KEY)" RUSTFS_API_BIND="$(call ROOT_ENV,RUSTFS_API_BIND)" RUSTFS_BUCKET="$(LOCAL_S3_BUCKET)" docker compose -f $(COMPOSE_FILE)
 
 LOCAL_DATABASE_URL ?= postgresql+asyncpg://bomesh:bomesh@127.0.0.1:5432/bomesh
 LOCAL_QDRANT_URL ?= http://127.0.0.1:6333
@@ -33,7 +36,7 @@ MODE ?= debug
 FLUTTER_RUN_FLAGS ?=
 FLUTTER_RUN := $(FLUTTER) run --$(MODE) --no-pub --dart-define-from-file=env/$(APP_ENV).json $(FLUTTER_RUN_FLAGS)
 
-.PHONY: help init reset-all config services _temporal-reset db-init db-seed db-seed-accounts qdrant-init status app-deps app-run app-web app-devices _app-env
+.PHONY: help init reset-all config services storage-migrate-minio _temporal-reset db-init db-seed db-seed-accounts qdrant-init status app-deps app-run app-web app-devices _app-env
 
 help: ## Show available local-development commands.
 	@echo "BoMesh local development"
@@ -45,7 +48,7 @@ init: reset-all ## Initialize the complete local BoMesh environment.
 	@echo "BoMesh local environment is ready."
 	@echo "  API:       http://127.0.0.1:8000"
 	@echo "  Qdrant:    $(LOCAL_QDRANT_URL)/dashboard"
-	@echo "  MinIO:     http://127.0.0.1:9001"
+	@echo "  RustFS:    $(LOCAL_S3_ENDPOINT) (console disabled; RUSTFS_CONSOLE_ENABLE=true enables 127.0.0.1:9001)"
 	@echo "  Temporal:  $(LOCAL_TEMPORAL_UI)"
 	@echo "  Tenant ID: $(DEV_TENANT_ID)"
 	@echo "  User ID:   $(DEV_USER_ID)"
@@ -55,7 +58,7 @@ init: reset-all ## Initialize the complete local BoMesh environment.
 reset-all: _temporal-reset db-reset db-seed-accounts qdrant-init status ## Reset all databases and Qdrant, apply the current design, and seed full-access test accounts.
 	@echo "PostgreSQL, Temporal, and Qdrant reset is complete."
 
-config: ## Create the root environment file and enforce local dependency endpoints.
+config: ## Create the root environment file, enforce local endpoints, and default storage to local RustFS.
 	@set -euo pipefail
 	@if [[ ! -f .env ]]; then cp backend/.env.example .env; fi
 	@update_env() { \
@@ -76,6 +79,9 @@ config: ## Create the root environment file and enforce local dependency endpoin
 		awk -v old="$$old" -v new="$$new" 'index($$0, old) == 1 { $$0 = new substr($$0, length(old) + 1) } { print }' "$$file" > "$$temp_file"; \
 		mv "$$temp_file" "$$file"; \
 	}; \
+	set_default() { \
+		grep -q "^$$2=" "$$1" || update_env "$$1" "$$2" "$$3"; \
+	}; \
 	rename_prefix .env BOTHESIS_ BOMESH_; \
 	rename_prefix .env NEXT_PUBLIC_BOTHESIS_ NEXT_PUBLIC_BOMESH_; \
 	update_env .env DATABASE_URL "$(LOCAL_DATABASE_URL)"; \
@@ -85,13 +91,17 @@ config: ## Create the root environment file and enforce local dependency endpoin
 	update_env .env BOMESH_TEMPORAL_TARGET "$(LOCAL_TEMPORAL_TARGET)"; \
 	update_env .env BOMESH_TEMPORAL_NAMESPACE default; \
 	update_env .env BOMESH_TEMPORAL_TLS false; \
-	update_env .env BOMESH_OBJECT_STORAGE_PROVIDER aws_s3; \
-	update_env .env BOMESH_OBJECT_STORAGE_BUCKET "$(LOCAL_S3_BUCKET)"; \
-	update_env .env BOMESH_S3_ENDPOINT_URL "$(LOCAL_S3_ENDPOINT)"; \
-	update_env .env BOMESH_S3_ADDRESSING_STYLE path; \
-	update_env .env BOMESH_S3_REGION us-east-1; \
-	update_env .env AWS_ACCESS_KEY_ID bomesh; \
-	update_env .env AWS_SECRET_ACCESS_KEY bomesh-local; \
+	set_default .env BOMESH_OBJECT_STORAGE_PROVIDER rustfs; \
+	set_default .env BOMESH_OBJECT_STORAGE_BUCKET "$(LOCAL_S3_BUCKET)"; \
+	set_default .env BOMESH_S3_ENDPOINT_URL "$(LOCAL_S3_ENDPOINT)"; \
+	set_default .env BOMESH_S3_ADDRESSING_STYLE path; \
+	set_default .env BOMESH_S3_REGION us-east-1; \
+	rustfs_access_key="$$(sed -n 's/^RUSTFS_ACCESS_KEY=//p' .env | tail -n 1)"; \
+	rustfs_secret_key="$$(sed -n 's/^RUSTFS_SECRET_KEY=//p' .env | tail -n 1)"; \
+	if [[ -z "$$rustfs_access_key" ]]; then update_env .env RUSTFS_ACCESS_KEY bomesh; fi; \
+	if [[ ! "$$rustfs_secret_key" =~ ^[A-Za-z0-9_-]{32,}$$ ]]; then \
+		update_env .env RUSTFS_SECRET_KEY "$$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')"; \
+	fi; \
 	integration_key="$$(sed -n 's/^BOMESH_INTEGRATION_ENCRYPTION_KEY=//p' .env | tail -n 1)"; \
 	legacy_plugin_key="$$(sed -n 's/^BOMESH_PLUGIN_ENCRYPTION_KEY=//p' .env | tail -n 1)"; \
 	legacy_connector_key="$$(sed -n 's/^BOMESH_CONNECTOR_ENCRYPTION_KEY=//p' .env | tail -n 1)"; \
@@ -107,14 +117,17 @@ config: ## Create the root environment file and enforce local dependency endpoin
 	fi; \
 	remove_env .env BOMESH_PLUGIN_ENCRYPTION_KEY; \
 	remove_env .env BOMESH_CONNECTOR_ENCRYPTION_KEY; \
-	update_env .env BOMESH_ALLOW_INSECURE_DEV_IDENTITY true; \
+	remove_env .env BOMESH_ALLOW_INSECURE_DEV_IDENTITY; \
 	remove_env .env BOMESH_PUBLIC_TENANT_CODE; \
 	remove_env .env BOMESH_GUEST_SESSION_EXPIRES_IN_SECONDS
 	@echo "Configured the root environment file."
 
-services: config ## Start PostgreSQL, Qdrant, object storage, and Temporal.
+services: config ## Start PostgreSQL, Qdrant, Temporal, and local RustFS unless BOMESH_S3_ENDPOINT_URL names a remote store.
 	@set -euo pipefail
-	@$(COMPOSE) up -d postgres qdrant minio temporal temporal-admin-tools temporal-ui
+	@s3_endpoint="$(call ROOT_ENV,BOMESH_S3_ENDPOINT_URL)"; \
+	local_storage=""; \
+	if [[ "$$s3_endpoint" == "$(LOCAL_S3_ENDPOINT)" ]]; then local_storage=rustfs; fi; \
+	$(COMPOSE) up -d postgres qdrant $$local_storage temporal temporal-admin-tools temporal-ui
 	@for attempt in {1..30}; do \
 		if $(COMPOSE) exec -T postgres sh -c 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"' >/dev/null 2>&1; then break; fi; \
 		if [[ $$attempt -eq 30 ]]; then echo "PostgreSQL did not become ready." >&2; exit 1; fi; \
@@ -125,14 +138,21 @@ services: config ## Start PostgreSQL, Qdrant, object storage, and Temporal.
 		if [[ $$attempt -eq 30 ]]; then echo "Qdrant did not become ready." >&2; exit 1; fi; \
 		sleep 1; \
 	done
-	@for attempt in {1..30}; do \
-		if curl --fail --silent --max-time 2 "$(LOCAL_S3_ENDPOINT)/minio/health/ready" >/dev/null; then break; fi; \
-		if [[ $$attempt -eq 30 ]]; then echo "Object storage did not become ready." >&2; exit 1; fi; \
+	@s3_endpoint="$(call ROOT_ENV,BOMESH_S3_ENDPOINT_URL)"; \
+	for attempt in {1..30}; do \
+		if curl --fail --silent --max-time 2 "$$s3_endpoint/health" >/dev/null; then break; fi; \
+		if [[ $$attempt -eq 30 ]]; then echo "Object storage at $$s3_endpoint did not become ready." >&2; exit 1; fi; \
 		sleep 1; \
-	done
-	@$(COMPOSE) run --rm minio-init >/dev/null
+	done; \
+	if [[ "$$s3_endpoint" == "$(LOCAL_S3_ENDPOINT)" ]]; then $(COMPOSE) run --rm rustfs-init >/dev/null; fi
 	@$(COMPOSE) run --rm temporal-init >/dev/null
 	@echo "PostgreSQL, Qdrant, object storage, and Temporal are accepting connections."
+
+storage-migrate-minio: services ## Copy the legacy MinIO bucket into RustFS without deleting MinIO objects.
+	@set -euo pipefail
+	@$(COMPOSE) --profile minio run --rm minio-migrate
+	@$(COMPOSE) --profile minio stop minio >/dev/null
+	@echo "Copied MinIO objects into RustFS; the minio_data volume is unchanged."
 
 _temporal-reset: services
 	@set -euo pipefail
@@ -142,20 +162,20 @@ _temporal-reset: services
 	@$(COMPOSE) run --rm temporal-init >/dev/null
 	@echo "Temporal persistence is reset."
 
-db-init: services ## Apply the current database design and the permission/system-role catalogs.
+db-init: services ## Apply the current database design and the IAM catalog (permissions, predefined roles).
 	@set -euo pipefail
 	@$(COMPOSE) exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"' >/dev/null
-	@cd backend && DATABASE_URL="$(LOCAL_DATABASE_URL)" uv run python -c 'import asyncio; from bomesh.db.engine import get_engine, get_session_factory; from bomesh.db.models import Base; from bomesh.services.identity_access.identity_store import IdentityStoreService; exec("async def initialize():\n    engine = get_engine()\n    async with engine.begin() as connection:\n        await connection.run_sync(Base.metadata.create_all)\n    async with get_session_factory()() as session:\n        async with session.begin():\n            await IdentityStoreService(session).sync_system_roles()\n    await engine.dispose()") ; asyncio.run(initialize())'
-	@echo "PostgreSQL schema, permissions, and system roles are initialized."
+	@cd backend && DATABASE_URL="$(LOCAL_DATABASE_URL)" uv run python -c 'import asyncio; from bomesh.db.engine import get_engine, get_session_factory; from bomesh.db.models import Base; from bomesh.iam.sync import sync_catalog; exec("async def initialize():\n    engine = get_engine()\n    async with engine.begin() as connection:\n        await connection.run_sync(Base.metadata.create_all)\n    async with get_session_factory()() as session:\n        async with session.begin():\n            await sync_catalog(session)\n    await engine.dispose()") ; asyncio.run(initialize())'
+	@echo "PostgreSQL schema, permissions, and predefined roles are initialized."
 
 db-seed: services ## Create or refresh the deterministic local admin identity.
 	@set -euo pipefail
 	@tenant_id="$$( $(COMPOSE) exec -T postgres sh -c 'psql -Atq -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "$$1"' _ "INSERT INTO tenants (id, code, name, status, settings) VALUES ('$(DEV_TENANT_ID)', '$(DEV_TENANT_CODE)', 'BoMesh Local', 'active', '{}'::jsonb) ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, status = 'active', updated_at = now() RETURNING id" )"; \
-	user_id="$$( $(COMPOSE) exec -T postgres sh -c 'psql -Atq -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "$$1"' _ "INSERT INTO users (id, email, display_name, status, preferences) VALUES ('$(DEV_USER_ID)', '$(DEV_USER_EMAIL)', 'Local Administrator', true, '{}'::jsonb) ON CONFLICT (email) DO UPDATE SET display_name = EXCLUDED.display_name, status = true, updated_at = now() RETURNING id" )"; \
+	user_id="$$( $(COMPOSE) exec -T postgres sh -c 'psql -Atq -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "$$1"' _ "INSERT INTO users (id, email, display_name, status, preferences) VALUES ('$(DEV_USER_ID)', '$(DEV_USER_EMAIL)', 'Local Administrator', 'active', '{}'::jsonb) ON CONFLICT (email) DO UPDATE SET display_name = EXCLUDED.display_name, status = 'active', updated_at = now() RETURNING id" )"; \
 	$(COMPOSE) exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "$$1"' _ "INSERT INTO tenant_memberships (user_id, tenant_id, status, joined_at, deleted_at) VALUES ('$$user_id', '$$tenant_id', 'active', now(), NULL) ON CONFLICT (user_id, tenant_id) DO UPDATE SET status = 'active', deleted_at = NULL" >/dev/null; \
-	$(COMPOSE) exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "$$1"' _ "INSERT INTO role_assignments (id, user_id, role_id, tenant_id) SELECT '$(DEV_TENANT_ADMIN_ASSIGNMENT_ID)', '$$user_id', role.id, '$$tenant_id' FROM roles role WHERE role.is_system AND role.code = 'tenant_admin' ON CONFLICT DO NOTHING" >/dev/null; \
+	$(COMPOSE) exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "$$1"' _ "INSERT INTO role_assignments (id, user_id, role_id, tenant_id) SELECT '$(DEV_TENANT_ADMIN_ASSIGNMENT_ID)', '$$user_id', role.id, '$$tenant_id' FROM roles role WHERE role.is_system AND role.code = 'workspaceAdmin' ON CONFLICT DO NOTHING" >/dev/null; \
 	if [[ "$(DEV_USER_IS_PLATFORM_ADMIN)" == "true" ]]; then \
-		$(COMPOSE) exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "$$1"' _ "INSERT INTO role_assignments (id, user_id, role_id) SELECT '$(DEV_PLATFORM_ADMIN_ASSIGNMENT_ID)', '$$user_id', role.id FROM roles role WHERE role.is_system AND role.code = 'platform_admin' ON CONFLICT DO NOTHING" >/dev/null; \
+		$(COMPOSE) exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "$$1"' _ "INSERT INTO role_assignments (id, user_id, role_id) SELECT '$(DEV_PLATFORM_ADMIN_ASSIGNMENT_ID)', '$$user_id', role.id FROM roles role WHERE role.is_system AND role.code = 'platformAdmin' ON CONFLICT DO NOTHING" >/dev/null; \
 	fi; \
 	echo "Local admin identity is ready: $$user_id"
 

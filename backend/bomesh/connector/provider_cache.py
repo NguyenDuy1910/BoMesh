@@ -43,7 +43,7 @@ class PostgresProviderFileCache:
             metadata = await session.scalar(
                 select(Item.metadata_).where(
                     Item.id == document_id,
-                    Item.status != "deleted",
+                    Item.deleted_at.is_(None),
                 )
             )
         if not isinstance(metadata, Mapping):
@@ -91,7 +91,7 @@ class PostgresProviderFileCache:
             document = await session.scalar(
                 select(Item).where(Item.id == document_id).with_for_update()
             )
-            if document is None or document.status == "deleted":
+            if document is None or document.deleted_at is not None:
                 return
             metadata = dict(document.metadata_)
             provider_cache = dict(metadata.get("provider_cache") or {})

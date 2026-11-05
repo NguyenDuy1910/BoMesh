@@ -2,11 +2,10 @@
  * Overview data the API does not serve yet.
  *
  * Knowledge gaps are questions people asked that knowledge could not answer
- * well. The proposed contract is `GET /workspaces/{workspace_id}/knowledge-gaps`
- * and `PATCH /workspaces/{workspace_id}/knowledge-gaps/{gap_id}`
- * (`api_contract.md#proposed-analytics-knowledge-gaps`); until it exists the
- * pending layer answers, so swapping in the real request changes only the
- * bodies below.
+ * well. The target v2 methods are `ListKnowledgeGaps`, `DismissKnowledgeGap`
+ * and `ReopenKnowledgeGap` (`backend/docs_design/api_design.md`, §4
+ * KnowledgeGap); until they exist the pending layer answers, so swapping in
+ * the real request changes only the bodies below.
  */
 
 import { invalidateApiData } from "@/lib/api/revision";
@@ -18,7 +17,7 @@ export type KnowledgeGapWindow = "7d" | "30d";
 /** Why the question counts as a gap. The screen words it; the API never sends prose. */
 export type KnowledgeGapReason = "not_covered" | "outdated" | "rated_unhelpful";
 
-/** One unanswered question (proposed `KnowledgeGap`). */
+/** One unanswered question (v2 `KnowledgeGap`). */
 export interface KnowledgeGap {
   id: string;
   question: string;

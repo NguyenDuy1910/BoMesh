@@ -2,9 +2,9 @@
  * Local implementation of `workspace.member_remove`. Imported only by
  * `modules/manage/access/api.ts`.
  *
- * The proposed `DELETE /users/{user_id}` tombstones the membership
- * (`tenant_memberships.deleted_at`); `POST /users` already readmits a removed
- * member with the roles given. Until the route exists, a removal is recorded
+ * v2 `DeleteMember` ends the membership (the account is untouched);
+ * `CreateMember` readmits a removed member with the roles given. Until the
+ * method exists, a removal is recorded
  * in this browser for the whole workspace and the member is hidden here only:
  * the server still lets them in. The guard rules mirror the contract — never
  * yourself, never the last member who can run the workspace.
@@ -70,7 +70,7 @@ export const pendingMemberRemoval = {
     return removal;
   },
 
-  /** Undo a local removal. On the server the same person is readmitted through `POST /users`. */
+  /** Undo a local removal. On the server the same person is readmitted through `CreateMember`. */
   async restore(userId: string): Promise<void> {
     const { store } = authorize();
     store.update((removals) => {

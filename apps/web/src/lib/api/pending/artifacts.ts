@@ -1,8 +1,8 @@
 /**
  * Local implementations of `artifact.manual_revision`
- * (proposed `POST /artifacts/{artifact_id}/revisions`), `artifact.rename`
- * (proposed `PATCH /artifacts/{artifact_id}`) and `artifact.export_formats`
- * (proposed `GET /artifacts/{artifact_id}/revisions/{revision}/export`).
+ * (v2 `CommitArtifact`, `RollbackArtifact`, `DeleteArtifactRevision`),
+ * `artifact.rename` (v2 `UpdateArtifact`) and `artifact.export_formats`
+ * (v2 `ExportArtifact`).
  *
  * Real artifacts are read (to mirror authorization and number revisions);
  * nothing is written to the server. Hand-made revisions and titles are kept

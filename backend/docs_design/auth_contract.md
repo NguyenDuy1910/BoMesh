@@ -1,197 +1,176 @@
-# Authentication API Contract
+# Authentication and Identity Contract
 
-Status: implemented resource contract shared by web and Flutter clients.
+Status: target contract (`/api/v1`, OpenAPI tag Identity) shared by web and
+Flutter clients. Method catalogue: `api_design.md` §3; schemas:
+`openapi.yaml`.
+
+Implementation status: sign-in throttling (`429`) is not implemented, and no
+mail transport is configured, so password-reset emails are not sent.
 
 ## Multi-tenant access
 
-Every request is made by an authenticated User. A User reaches a workspace
-(tenant) only through an active `tenant_memberships` row plus
-`role_assignments` in that workspace; platform permissions are a separate scope
-and never grant workspace data access by themselves. There is no anonymous
-session and no public-workspace access.
+Every request is made by an authenticated User. There is no anonymous or guest
+session and no public-workspace access. A User reaches a workspace only as an
+ACTIVE Member (`workspaces/{workspace}/members/{member}`) whose IAM bindings
+grant the needed permission. Platform roles (`platformRole` `OPERATOR`,
+`ADMIN`) are a separate scope and never grant workspace data access by
+themselves.
 
-## Resource model
+Sessions carry no workspace. The workspace is explicit in every resource name
+(`workspaces/{workspace}/...`), and membership plus permission are checked on
+every request against that name. A request for a workspace where the caller is
+not an active member is denied (`403`); there is no fallback workspace.
 
-Authentication mechanisms create one durable `Session`. Mechanism names do not
-become URL namespaces.
+## Identity and session separation
 
-| Method | Path | Security | Resource operation |
-| --- | --- | --- | --- |
-| POST | `/api/v1/auth/accounts` | public | Create Account and issue first Session |
-| POST | `/api/v1/auth/sessions` | public | Create Session from typed method variant |
-| GET | `/api/v1/auth/session` | bearer | Read current Session context |
-| PATCH | `/api/v1/auth/session` | bearer | Change active workspace state |
-| DELETE | `/api/v1/auth/session` | bearer | Invalidate current Session |
+- **User** `users/{user}`: the account (`email`, `username`, `displayName`,
+  `state` `ACTIVE`/`SUSPENDED`, `platformRole`). `users/me` names the caller.
+- **auth_identities**: credentials bound to a User, keyed by
+  (`issuer`, `subject`): the local password identity and one row per external
+  provider (Google today). An identity is never addressed by email alone.
+- **Session** `sessions/{session}`: one sign-in (`user`,
+  `authenticationMethod` `PASSWORD`/`GOOGLE`, `expireTime`, `lastSeenTime`,
+  `state` `ACTIVE`/`ENDED`). `sessions/current` names the session of the
+  presented token.
 
-No `/auth/password`, `/auth/google`, or `/auth/guest-sessions` routes remain in
-the final contract; the guest route was removed with anonymous access. No
-password reset routes are added because current product has no recovery
-lifecycle.
+Sign-in mechanisms all create a Session; mechanism names never become URL
+namespaces.
 
-## Account creation
+| Method | Auth | Purpose |
+| --- | --- | --- |
+| CreateUser | public | Sign up; `validateOnly` checks email/username only |
+| CreateSession | public | Sign in with a typed credential |
+| GetSession / ListSessions | own | Read current or own sessions |
+| DeleteSession | own | Sign out (`sessions/current`) or end another own session |
+| GetUser / UpdateUser | self or platform | Read/update `users/me` (`displayName`, `username`) |
+| GetUserPreferences / UpdateUserPreferences | self | `users/me/preferences`, including `lastWorkspace` |
+| SendPasswordReset | public | Email a reset link |
+| ResetPassword | public | Consume `resetToken`, set `newPassword` |
 
-`POST /api/v1/auth/accounts` accepts:
+Platform account administration (ListUsers, SuspendUser, ActivateUser,
+LookupUser) is listed in `api_design.md` §3.
 
-```json
-{
-  "email": "user@example.com",
-  "password": "...",
-  "username": "analyst",
-  "display_name": "Example User"
-}
-```
+## Sign-up
 
-`email` is the canonical local credential identifier for account creation.
-Password sign-in accepts either the account email or the optional username;
-exactly one identifier is required. Account creation returns `201` and the
-same `AuthSession` shape as login. `409` uses `ACCOUNT_ALREADY_EXISTS`; `422` uses
-`VALIDATION_ERROR`.
+CreateUser takes `email`, `password` and optional `username`, `displayName`.
+The server assigns the ID and returns the User in `ACTIVE`; it does not sign
+the caller in, the client follows with CreateSession. Email or username in use
+returns `409 ALREADY_EXISTS` (`EMAIL_ALREADY_USED` / `USERNAME_ALREADY_USED`);
+invalid input `400 INVALID_ARGUMENT`; throttling `429` (target; not implemented yet).
 
 ## Session creation
 
-`POST /api/v1/auth/sessions` uses `CreateSessionRequest`, a discriminated
-`oneOf` union with `method`:
+CreateSession accepts only `credential`, a closed union:
 
 ```json
-{ "method": "password", "email": "user@example.com", "password": "..." }
-```
-
-Username sign-in is also supported for accounts that have one:
-
-```json
-{ "method": "password", "username": "analyst", "password": "..." }
+{ "credential": { "password": { "email": "user@example.com", "password": "..." } } }
 ```
 
 ```json
-{ "method": "google", "credential": "provider-issued-token" }
+{ "credential": { "password": { "username": "analyst", "password": "..." } } }
 ```
-
-The only variants are `password` and `google`; any other `method` (including
-the removed `guest`) returns `422 VALIDATION_ERROR`. Each variant has a closed,
-concrete schema. No arbitrary `credentials` map is accepted. Future OIDC
-providers add a typed variant and provider strategy behind this route; they do
-not add a provider-specific route.
-
-All variants return `AuthSession`. Password and provider failures return generic
-`401 INVALID_CREDENTIALS` without revealing whether account or credential was
-wrong. Session creation and account creation are fully public (`security: []`)
-and ignore any bearer token; there is no session-upgrade path.
-
-`AuthSession` and `CurrentSession` always carry a non-null `user_id`; there is
-no `session_kind` field. Tokens that do not resolve to a User are rejected.
-
-## Current session lifecycle
-
-`GET /auth/session` resolves identity from the bearer token and returns
-`CurrentSession`. It never accepts `user_id`, `workspace_id`, roles, or
-permissions from the caller.
-
-`PATCH /auth/session` accepts only:
 
 ```json
-{ "active_workspace_id": "uuid" }
+{ "credential": { "google": { "idToken": "provider-issued-token" } } }
 ```
 
-Server validates that the User has an active membership in the target
-workspace, creates the replacement session context, and returns `AuthSession`.
-A workspace without membership returns `403`; there is no public fallback.
-Internal `tenant_id` and JWT claim `active_tenant_id` stay behind the API
-boundary.
+Exactly one of `email`/`username` is required for password sign-in. No
+arbitrary credential map is accepted. Further OIDC/SSO providers add a typed
+`credential` variant and a server-side provider strategy that resolves an
+`auth_identities` row by issuer and subject; they never add a provider route.
+Google tokens are verified against the configured audience; clients never
+embed a provider secret.
 
-`DELETE /auth/session` resolves the bearer session and tombstones/revokes it;
-response is `204`. No physical business data is deleted.
+The response is the Session with `accessToken`, returned only in this
+response and never readable again (GetSession/ListSessions omit it). Wrong
+credentials return `401 UNAUTHENTICATED` reason `INVALID_CREDENTIALS`, the same
+whether or not the account exists; a suspended account returns
+`400 FAILED_PRECONDITION` reason `USER_SUSPENDED`; throttling `429` (target;
+not implemented yet). Public
+methods ignore any bearer token; there is no session-upgrade path.
 
-## OpenAPI and error rules
+## Token handling, expiry and revocation
 
-- Global OpenAPI security is bearer JWT.
-- Account/session creation explicitly uses `security: []`.
-- Current-session GET/PATCH/DELETE require bearer security.
-- Auth errors use shared `{code, message, request_id, details}` envelope.
-- Stable auth codes: `INVALID_CREDENTIALS`, `SESSION_EXPIRED`,
-  `ACCOUNT_ALREADY_EXISTS`, `ACCOUNT_DISABLED`, `TOO_MANY_ATTEMPTS`.
+- The bearer token resolves to an ACTIVE, unexpired Session of an ACTIVE User;
+  anything else is `401 UNAUTHENTICATED`. Identity is never taken from caller
+  input (no user, workspace, role or permission headers or body fields).
+- Sessions expire at `expireTime`. There is no refresh method; an expired
+  session requires a new CreateSession.
+- DeleteSession ends the session (`ACTIVE` → `ENDED`) and revokes its token. It
+  returns the ended Session; sessions end softly and stay readable. Ending an
+  already ENDED session is `400 FAILED_PRECONDITION`; another user's session is
+  `403`.
+- SuspendUser and ResetPassword end every session of the account.
+- Removing or suspending a Member does not end sessions; the next request for
+  that workspace fails the per-request membership check.
 
-## Flutter session boundary
+## Password reset
 
-The Flutter client sends only `Authorization: Bearer ...`; development identity
-headers and compiled-in user/workspace identifiers are not supported. The access
-token is persisted with platform secure storage, namespaced by API origin.
-Startup and foreground resume revalidate it with `GET /auth/session`.
+SendPasswordReset always returns Empty whether or not the email belongs to an
+account (no enumeration). ResetPassword consumes a single-use, expiring
+`resetToken`; an invalid, used or expired token returns
+`400 FAILED_PRECONDITION` reason `RESET_TOKEN_INVALID`; weak passwords
+`400 INVALID_ARGUMENT`. Both are to be throttled (`429`, not implemented yet).
 
-There is no refresh-token endpoint. Token expiry or a `401` for the current
-token clears the authenticated UI; a late response for a replaced token cannot
-invalidate the new session. Workspace changes use the replacement token returned
-by `PATCH`, discard open resource routes, and recreate the workspace-scoped HTTP
-client. Pending work cannot send a newly selected workspace's credentials.
+## Workspace selection
 
-Conversation caches are separate by account and workspace. No unscoped legacy
-cache is imported. Unauthenticated clients show the sign-in/register screen;
-they never create a session automatically. Sign-out revokes the session and
-clears local credentials even when the server cannot be reached; offline
-revocation failure is reported, not represented as confirmed server revocation.
+After sign-in the client calls ListWorkspaces (workspaces the caller is a
+member of). It opens `lastWorkspace` from GetUserPreferences when still listed;
+otherwise one membership enters directly and several show a chooser. Choosing
+a workspace is a client navigation plus UpdateUserPreferences
+(`lastWorkspace`); it issues no new token. UpdateUserPreferences rejects a
+`lastWorkspace` the caller does not belong to with `400 INVALID_ARGUMENT`.
+GetMember on `workspaces/{workspace}/members/me` and
+TestWorkspaceIamPermissions give the caller's membership and permissions for
+navigation.
 
-Google login passes the provider-issued ID credential through the same session
-endpoint. The web client initializes the page-global Google Identity client
-once and uses Google's rendered popup button without opting into the optional
-FedCM button flow. Native client IDs, authorized web origins, callback schemes
-and backend audience configuration must match the deployed application;
-Flutter does not embed a provider secret.
+## Error rules
 
-The web product shell has one sidebar, defined once in
-`apps/web/src/lib/navigation.ts`. It is presentation over the session's
-permissions, never an authorization layer. Every member sees New chat, Inbox,
-Search and Knowledge. The Manage section lists only the items the caller may
-open: Overview (`tenant.read` and `tenant.manage`), Sources (`source.manage` or
-`ingestion.read`), People & access (`user.manage`, `role.manage`,
-`group.manage` or `access.manage`), Assistant setup (`tenant.manage`),
-Activity (`audit.read`) and Settings (`tenant.manage`). A caller with any
-`platform.*.read` grant in `platform_permissions` can open the Platform
-console, where the same sidebar lists Workspaces, Connectors, AI capabilities
-and Usage (`platform.tenant.read`), Users (`platform.user.read`), Audit log
-(`platform.audit.read`) and System health (`platform.health.read`). Items
-backed by an API that is still pending are hidden when that feature is turned
-off. An address the caller may not open renders a no-access page. Legacy
-`/app`, `/library` and `/workspace-control/*` addresses redirect permanently to
-their `/chat`, `/knowledge`, `/manage/*` and `/platform/*` successors.
+- Global OpenAPI security is bearer; CreateUser, CreateSession,
+  SendPasswordReset and ResetPassword declare `security: []`.
+- Errors use the shared error envelope (canonical code plus `reason`);
+  stable reasons: `INVALID_CREDENTIALS`, `USER_SUSPENDED`,
+  `EMAIL_ALREADY_USED`, `USERNAME_ALREADY_USED`, `RESET_TOKEN_INVALID`.
 
-The Flutter app follows `apps/ux_preview/ux-preview.html`: Chat, Knowledge and
-Inbox are always present, and Manage appears only when the session holds a
-workspace management permission. All are presentation over the session's
-permissions, never an authorization layer. Manage sections follow these codes:
-Overview (`tenant.read` and `tenant.manage`); Sources
-(`ingestion.read`/`ingestion.run`/`source.manage`); People & access
-(`user.manage`/`group.manage`/`role.manage`/`access.manage`, plus request
-review with `source.manage`); Activity (`audit.read`); Settings
-(`tenant.manage`). Knowledge management is in place on each knowledge base and
-uses the Collection's effective `permissions` (workspace and resource grants
-already combined by the server); it does not add a Manage entry. The Platform
-console is a separate scope opened from the account sheet and requires any
-`platform.*.read` in `platform_permissions`. After sign-in, a person with more
-than one membership chooses a workspace (`PATCH /auth/session`) before
-workspace resources mount; one membership enters directly. Every request is
-still authorized by the API.
+## Client session boundary
 
-Inbox on mobile is a projection over existing authorized reads, not the
-proposed `notifications.inbox` API: own and reviewable `GET
-/approval-requests`, and, with `source.manage`, failing `GET /sources` and
-`GET /connections`. Each item opens the place where it is resolved. Read
-markers are stored on the device, scoped by API origin, account and
-workspace; there is no push, email or cross-device read state.
+Clients send only `Authorization: Bearer ...`; development identity headers
+and compiled-in user/workspace identifiers are not supported. Flutter persists
+the token in platform secure storage, namespaced by API origin, and revalidates
+it with GetSession (`sessions/current`) on startup and foreground resume.
+
+A `401` for the current token clears the authenticated UI; a late response for
+a replaced token cannot invalidate a newer session. Switching workspace
+discards open resource routes and workspace-scoped caches; pending work for the
+previous workspace keeps addressing that workspace by name and is authorized
+on its own. Conversation and other local caches are separated by account and
+workspace. Unauthenticated clients show sign-in/sign-up and never create a
+session automatically. Sign-out calls DeleteSession and clears local
+credentials even when the server is unreachable; an offline failure is
+reported, not shown as confirmed revocation.
+
+The web client initializes the page-global Google Identity client once and
+uses Google's rendered popup button without the optional FedCM button flow.
+Native client IDs, authorized web origins, callback schemes and the backend
+audience must match the deployed application.
+
+Navigation (web sidebar, Flutter Manage section, Platform console) is
+presentation over the caller's permissions from TestWorkspaceIamPermissions
+and `platformRole`, never an authorization layer; every request is still
+authorized by the API. Addresses the caller may not open render a no-access
+page.
 
 ## Local full-access test accounts
 
 `backend/script/seed_account.py` is an idempotent local-development utility,
-not an HTTP API. It synchronizes platform-defined roles, creates the sample
-administrator accounts `admin1@gamil.com`, `admin2@gamil.com`, and
-`admin3@gamil.com` (usernames `sample-admin-1..3`) when absent, grants each
-`platform_admin`, and grants each a membership plus `tenant_admin` in every
-active workspace. This combines platform administration with workspace data
-access without weakening the normal separation of those scopes.
+not an API. It creates the sample administrator accounts `admin1@gamil.com`,
+`admin2@gamil.com` and `admin3@gamil.com` (usernames `sample-admin-1..3`) when
+absent, gives each platform administration, and makes each a workspace admin
+member of every active workspace. This combines platform administration with
+workspace data access without weakening the separation of those scopes.
 
-New accounts use the script's default password (`DEFAULT_PASSWORD`) unless
-`--password` is supplied. Re-running the script preserves existing passwords;
-`--reset-password` is required to change them. If no active workspace exists,
-it creates one with code `FinxWorkspace` (`DEFAULT_WORKSPACE_CODE`) so the
-accounts can establish an active authenticated workspace through membership.
+New accounts use `DEFAULT_PASSWORD` unless `--password` is supplied; re-runs
+preserve passwords unless `--reset-password` is given. If no active workspace
+exists, it creates one with code `DEFAULT_WORKSPACE_CODE`. `make reset-all`
+runs this seeder after database initialization.
 
-The complete local reset command, `make reset-all`, runs this seeder after
-database initialization.

@@ -16,13 +16,13 @@ The architecture follows five rules:
 2. **Authorization before exposure.** Workspace and resource permissions are applied before content reaches retrieval, reranking, or the agent.
 3. **Clear data ownership.** PostgreSQL owns business state, object storage owns original bytes, and Qdrant owns a rebuildable search projection.
 4. **Inventory is separate from processing.** Upload and source sync register pending Documents; only an explicit Ingestion Run parses and indexes them.
-5. **Thin transport boundaries.** HTTP handlers validate and map requests; application services own use cases, authorization, transactions, and infrastructure coordination.
+5. **Thin transport boundaries.** HTTP handlers (`api/v1` routers with `api/dto` models) validate and map requests; the services packages (one per domain in `bomesh/services`) own use cases, authorization, transactions, and infrastructure coordination.
 
 ## 2. Architecture drivers
 
 | Driver | Architectural response |
 | --- | --- |
-| Enterprise isolation | Every business request is bound to an authenticated user and active workspace. |
+| Enterprise isolation | Every business request is bound to an authenticated user and to the workspace named in its resource path (`workspaces/{workspace}/…`). |
 | Permission-aware retrieval | Tenant and Collection filters are applied in vector search and checked again before evidence is exposed. |
 | Grounded answers | Retrieved chunks preserve source lineage and become verifiable citation annotations. |
 | Source independence | Provider-specific behavior remains behind connector adapters; knowledge and agent components consume canonical Documents and chunks. |
@@ -40,7 +40,7 @@ The architecture follows five rules:
 | Web client | Next.js 16, React 19, TypeScript | Browser product experience |
 | Mobile client | Flutter, Dart | Mobile product experience |
 | Terminal client | Textual | API-based terminal interface |
-| Object storage | S3-compatible storage, Cloudflare R2 or MinIO | Original documents, artifacts and preview assets |
+| Object storage | S3-compatible storage: RustFS (local and single-server), AWS S3 or Cloudflare R2 | Original documents, artifacts and preview assets |
 | Document processing | Docling, PDFium, optional configured vision model | Canonical conversion, structure, chunks and provenance |
 | Search | Qdrant dense vectors and BM25 sparse vectors | Permission-filtered hybrid retrieval projection |
 | Workflow | Temporal | Ingestion and source-sync orchestration |
@@ -53,7 +53,7 @@ The architecture follows five rules:
 flowchart LR
     C["Clients<br/>Web · Flutter · TUI"] -->|"REST / SSE + Bearer JWT"| API["FastAPI API boundary"]
     API --> AUTH["Identity and authorization"]
-    AUTH --> SVC["Application services"]
+    AUTH --> SVC["Services<br/>bomesh/services/&lt;domain&gt;"]
 
     SVC --> KN["Knowledge and retrieval"]
     SVC --> ING["Connector and ingestion"]
@@ -61,7 +61,7 @@ flowchart LR
     SVC --> PRE["Preview and artifacts"]
 
     SVC --> PG[("PostgreSQL<br/>durable business state")]
-    ING --> OBJ[("S3 / R2 / MinIO<br/>original bytes")]
+    ING --> OBJ[("RustFS / S3 / R2<br/>original bytes")]
     PRE --> OBJ
     ING --> TEMP["Temporal<br/>orchestration"]
     ING --> QD[("Qdrant<br/>derived search projection")]
@@ -76,8 +76,8 @@ flowchart LR
 | Layer | Responsibility |
 | --- | --- |
 | Client | Presentation, local interaction state, stream rendering and API invocation |
-| API boundary | Authentication hand-off, request validation, DTO mapping, stable errors and SSE transport |
-| Application services | Use cases, effective permission checks, transaction boundaries and cross-capability coordination |
+| API boundary (`api/v1` routers + `api/dto`) | Authentication hand-off, request validation, DTO mapping, stable errors and SSE transport |
+| Services (`bomesh/services/<domain>`, one package per domain with its engine code) | Use cases, effective permission checks, transaction boundaries and cross-capability coordination |
 | Domain capabilities | Identity/access, knowledge, connectors, ingestion, indexing, retrieval, agent, preview and artifacts |
 | Infrastructure adapters | PostgreSQL, object storage, Qdrant, Temporal, model providers and enterprise source APIs |
 
@@ -87,16 +87,16 @@ A composition root creates shared infrastructure clients from typed configuratio
 
 ### 5.1 Client and API scope
 
-BoMesh exposes versioned product APIs under the /api/v1 base path and an unversioned /health endpoint. Web, mobile, and terminal clients use the same authenticated boundary. Grounded chat is streamed with Server-Sent Events using the OpenResponses event model.
+BoMesh exposes versioned product APIs under the /api/v1 base path (contract: `backend/docs_design/openapi.yaml`) and an unversioned /health endpoint. The terminal client uses it; the web and mobile clients still call the removed legacy routes and are migrated next. Grounded chat is streamed with Server-Sent Events using the OpenResponses event model.
 
-The public contract uses resource-oriented concepts such as Sessions, Workspaces, Collections, Documents, Connections, Sources, Ingestion Runs, Artifacts, Users, Groups, Roles, and Approval Requests. Internal identifiers for workflows, storage keys, vector points, and providers do not become public resource identities.
+The public contract uses resource-oriented (Google AIP) concepts such as Sessions, Workspaces, Items (collections are Items with `itemType: COLLECTION`), Conversations, Connections, Sources, Ingestion Runs, Users, Groups, and Roles. Internal identifiers for workflows, storage keys, vector points, and providers do not become public resource identities.
 
 ### 5.2 Identity and access scope
 
 Authorization is separated into four concerns:
 
 - **Authentication:** who the caller is, resolved from a durable access session and bearer token.
-- **Workspace RBAC:** which capabilities the caller has inside the active workspace.
+- **Workspace RBAC:** which capabilities the caller has inside the workspace named in the request path.
 - **Resource ACL:** which Collections and Documents the caller may access through direct or inherited user/group grants.
 - **Platform permission:** cross-workspace administration, separate from workspace data access.
 
@@ -236,7 +236,7 @@ The local and deployable runtime consists of:
 - Temporal ingestion worker process.
 - PostgreSQL database.
 - Qdrant vector/search service.
-- S3-compatible object storage; MinIO is used locally.
+- S3-compatible object storage; RustFS is used locally and on a single server.
 - Temporal server and optional Temporal UI.
 - External model providers and enterprise connector APIs.
 - Next.js web application and optional Flutter clients.

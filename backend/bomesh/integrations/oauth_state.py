@@ -50,7 +50,6 @@ class OAuthStateCodec:
             "user_id": pending.user_id,
             "provider_key": pending.provider_key,
             "connector_key": pending.connector_key,
-            "owner_type": pending.owner_type,
             "connection_id": pending.connection_id,
             "code_verifier": pending.code_verifier,
             "nonce": pending.nonce or secrets.token_urlsafe(16),
@@ -94,8 +93,7 @@ class OAuthStateCodec:
                 user_id=_required(payload, "user_id"),
                 provider_key=_required(payload, "provider_key"),
                 connector_key=_required(payload, "connector_key"),
-                owner_type=_required(payload, "owner_type"),
-                connection_id=_optional(payload, "connection_id"),
+                connection_id=_required(payload, "connection_id"),
                 code_verifier=_required(payload, "code_verifier"),
                 nonce=_required(payload, "nonce"),
             )
@@ -121,15 +119,6 @@ def _required(payload: dict[str, Any], name: str) -> str:
     value = payload.get(name)
     if not isinstance(value, str) or not value:
         raise ValueError(f"authorization state field is missing: {name}")
-    return value
-
-
-def _optional(payload: dict[str, Any], name: str) -> str | None:
-    value = payload.get(name)
-    if value is None:
-        return None
-    if not isinstance(value, str) or not value:
-        raise ValueError(f"authorization state field is invalid: {name}")
     return value
 
 

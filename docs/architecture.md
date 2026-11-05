@@ -25,7 +25,8 @@ workspace (tenant) only through an active `tenant_memberships` row plus
 separate scope. Workspaces have no public visibility. Token rotation and
 workspace switches are session transitions, not mutations of `users`.
 
-`backend/main.py` is the FastAPI boundary. It defines routes, validates HTTP
+`backend/api` is the FastAPI boundary (mounted by `backend/main.py`):
+`api/v1` routers and `api/dto` request/response models. It validates HTTP
 input, resolves simple request identity, calls a service, and returns an HTTP
 response. It does not own SQLAlchemy sessions, transactions, connector
 orchestration, document transformation, or application decisions.
@@ -34,7 +35,7 @@ orchestration, document transformation, or application decisions.
 
 | Package | Responsibility |
 | --- | --- |
-| `services` | Application use cases, authorization at service boundaries, transactions, and persistence coordination. |
+| `services` | One package per domain (`identity`, `workspaces`, `knowledge_items`, `ingestion`, `conversations`, …) owning its use cases and engine code: authorization at service boundaries, transactions, and persistence coordination. Layering: API (`api/v1` + `api/dto`) → services → persistence/infrastructure. |
 | `connector` | Provider adapters, source hierarchy, source ACL normalization, Docling processing, chunks, citations, and scope checkpoints. |
 | `document_index` | Contextual chunk construction, embedding, payload projection, and Qdrant writes. |
 | `preview` | Derived knowledge-asset rendering, versioned preview manifests, and short-lived preview URLs. |
@@ -47,7 +48,7 @@ orchestration, document transformation, or application decisions.
 
 ```text
 PostgreSQL         durable application truth
-S3 / R2 / MinIO    original raw bytes
+RustFS / S3 / R2   original raw bytes
 Preview            derived WebP presentation assets
 Docling            document conversion and chunking
 Qdrant             derived searchable chunk projection

@@ -147,7 +147,7 @@ export function PlatformUsersPage() {
     },
     {
       id: "role",
-      // `is_platform_admin` is a proposed field (`platform.user_admin`); the server does not send it yet.
+      // `is_platform_admin` is pending (`platform.user_admin`, v2 `User.platformRole`); the server does not send it yet.
       header: <span className="inline-flex items-center gap-2">Platform role <PreviewTag /></span>,
       width: 210,
       cell: (user) => user.is_platform_admin

@@ -17,7 +17,6 @@ import asyncio
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any
 from uuid import UUID
 
 from dotenv import load_dotenv
@@ -33,9 +32,9 @@ from config import get_config
 from bomesh.db.engine import transaction_scope
 from bomesh.db.models import Item
 from bomesh.runtime import AppRuntime
-from bomesh.services.item import ItemService
-from bomesh.services.preview import KnowledgePreview
-from bomesh.services.stored_file_content import StoredFileContentService
+from bomesh.services.knowledge_items.item_store import ItemService
+from bomesh.services.knowledge_items.preview import KnowledgePreview
+from bomesh.services.knowledge_items.file_content import StoredFileContentService
 
 
 def _parse_args() -> argparse.Namespace:
@@ -80,7 +79,6 @@ async def _documents(
         .where(
             Item.item_type == "document",
             Item.deleted_at.is_(None),
-            Item.status != "deleted",
             Item.storage_key.is_not(None),
             Item.index_status == "ready",
         )

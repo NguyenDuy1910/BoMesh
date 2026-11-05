@@ -1,8 +1,8 @@
 /**
- * Local implementations of `collection.general_access` (proposed
- * `PUT|DELETE /collections/{id}/access/workspace/{workspace_id}`, plus
- * `general_access` on Collection reads) and `collection.discovery` (proposed
- * `GET /collections?visibility=discoverable`).
+ * Local implementations of `collection.general_access` (v2
+ * `GetItemIamPolicy` / `SetItemIamPolicy` with the `workspaceMembers`
+ * principal on a root collection) and `collection.discovery` (v2 `ListItems`
+ * with `parentItem=""` and `showLocked`).
  *
  * Both read real Collections and approval requests to mirror authorization
  * and never write to the server. General access is kept per workspace in this

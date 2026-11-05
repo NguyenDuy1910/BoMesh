@@ -1,4 +1,10 @@
-"""Permission-scoped retrieval policy over indexed Item content."""
+"""Permission-scoped retrieval policy over indexed Item content.
+
+PostgreSQL decides, the index pre-filters (``item_model.md`` §4.10): the
+readable and editable collections are computed per search, the index returns
+only points of readable collections that are published or editable, and every
+hit is re-checked against the visibility rule before any text is returned.
+"""
 
 from __future__ import annotations
 
@@ -7,9 +13,8 @@ import inspect
 import logging
 from collections.abc import Sequence
 from hashlib import sha256
-
 from bomesh.document_index import ContextualChunk, ItemContentIndex
-from bomesh.knowledge import Evidence, Reranker, RetrievalContext
+from bomesh.knowledge import Evidence, ReadAccess, Reranker, RetrievalContext
 
 log = logging.getLogger(__name__)
 
@@ -21,6 +26,7 @@ class ItemKnowledgeRetriever:
         self,
         index: ItemContentIndex,
         *,
+        access: ReadAccess,
         reranker: Reranker | None = None,
         candidate_count: int = 20,
         reranking_enabled: bool = False,
@@ -31,6 +37,7 @@ class ItemKnowledgeRetriever:
         if rerank_timeout_seconds <= 0:
             raise ValueError("rerank_timeout_seconds must be greater than zero")
         self._index = index
+        self._access = access
         self._reranker = reranker
         self._candidate_count = candidate_count
         self._reranking_enabled = reranking_enabled
@@ -49,19 +56,23 @@ class ItemKnowledgeRetriever:
         tenant_id = _validate_tenant_id(ctx.tenant_id)
         if not ctx.collection_item_ids:
             return []
+        scope = await self._access.scope(ctx)
+        if not scope.readable:
+            return []
         chunks = await self._index.search_item_content(
             normalized_queries,
             limit=max(limit, self._candidate_count),
             tenant_id=tenant_id,
-            collection_item_ids=ctx.collection_item_ids,
+            collection_item_ids=scope.readable,
+            editable_collection_ids=scope.editable,
         )
-        allowed_collections = set(ctx.collection_item_ids)
-        visible = [
-            chunk for chunk in chunks if chunk.collection_item_id in allowed_collections
-        ]
-        if not visible:
+        if not chunks:
             return []
-        ranked = await self._rank(visible, queries=normalized_queries, limit=limit)
+        visible = await scope.recheck([chunk.item_id for chunk in chunks])
+        allowed = [chunk for chunk in chunks if chunk.item_id in visible]
+        if not allowed:
+            return []
+        ranked = await self._rank(allowed, queries=normalized_queries, limit=limit)
         return [_evidence_from_chunk(chunk) for chunk in ranked]
 
     async def _rank(

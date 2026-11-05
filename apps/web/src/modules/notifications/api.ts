@@ -1,9 +1,9 @@
 /**
  * The inbox: what changed that the signed-in person should look at.
  *
- * Proposed contract: `GET /notifications`, `PATCH /notifications/{id}`,
- * `POST /notifications/read-all` (`api_contract.md#proposed-notifications-inbox`).
- * Until it exists the pending layer answers with product notices plus items
+ * Target v2 methods: `ListNotifications`, `UpdateNotification`,
+ * `MarkNotificationsRead` (`backend/docs_design/api_design.md`). Until they
+ * exist the pending layer answers with product notices plus items
  * derived from real state the caller can already read (sources that stopped
  * syncing, accounts that need reconnecting, access requests).
  */

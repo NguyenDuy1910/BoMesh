@@ -19,7 +19,7 @@ async def main() -> None:
 
     import uvicorn
 
-    from api.app import app
+    from api.app import create_app
     from config import get_config
 
     server_config = get_config().server
@@ -38,7 +38,7 @@ async def main() -> None:
         start_new_session=True,  # Ctrl-C reaches the API; the supervisor stops the worker.
     )
     server = uvicorn.Server(
-        uvicorn.Config(app, host=server_config.host, port=server_config.port)
+        uvicorn.Config(create_app(), host=server_config.host, port=server_config.port)
     )
     api_task = asyncio.create_task(server.serve())
     worker_task = asyncio.create_task(worker.wait())

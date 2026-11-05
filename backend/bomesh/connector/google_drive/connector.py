@@ -194,6 +194,7 @@ class GoogleDriveConnector(BaseSourceConnector):
         stored = await self._store_original(
             data=content,
             file_id=source.external_id,
+            version=source.external_version,
             file_name=file_name,
             content_type=content_type,
         )
@@ -387,6 +388,7 @@ class GoogleDriveConnector(BaseSourceConnector):
         *,
         data: bytes,
         file_id: str,
+        version: str | None,
         file_name: str,
         content_type: str,
     ) -> StorageObject:
@@ -398,6 +400,7 @@ class GoogleDriveConnector(BaseSourceConnector):
                 connection_id=self._connector_id,
                 provider=SourceProvider.GOOGLE_DRIVE.value,
                 external_id=file_id,
+                version=version,
                 file_name=file_name,
             ),
             file_name=file_name,

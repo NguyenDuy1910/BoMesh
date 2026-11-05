@@ -99,12 +99,12 @@ export interface PasswordResetCompleted {
   status: "completed";
 }
 
-/** API pending: `POST /auth/password-resets` (public). */
+/** API pending: `SendPasswordReset` (public). */
 export async function requestPasswordReset(body: PasswordResetRequest): Promise<PasswordResetAccepted> {
   return pendingApi("auth.password_reset", () => pendingPasswordReset.requestPasswordReset(body));
 }
 
-/** API pending: `POST /auth/password-resets/{token}/complete` (public). */
+/** API pending: `ResetPassword` (public). */
 export async function completePasswordReset(
   token: string,
   body: PasswordResetCompletion,

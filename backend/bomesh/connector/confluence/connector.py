@@ -338,12 +338,13 @@ class ConfluenceConnector(
             else "default"
         )
 
-    def _original_key(self, external_id: str, file_name: str) -> str:
+    def _original_key(self, external_id: str, version: str | None, file_name: str) -> str:
         return original_key(
             tenant_id=self._tenant_id(),
             connection_id=self._connector_id(),
             provider=SourceProvider.CONFLUENCE.value,
             external_id=external_id,
+            version=version,
             file_name=file_name,
         )
 
@@ -584,7 +585,7 @@ class ConfluenceConnector(
             file_name = _page_file_name(page_title, page_id)
             original = store_original(
                 self._storage,
-                key=self._original_key(stable_id, file_name),
+                key=self._original_key(stable_id, source.external_version, file_name),
                 file_name=file_name,
                 content_type="text/html",
                 data=html.encode("utf-8"),
@@ -640,7 +641,11 @@ class ConfluenceConnector(
             attachment,
             page_id,
             storage=self._storage,
-            storage_key=self._original_key(stable_att_id, attachment_title),
+            storage_key=self._original_key(
+                stable_att_id,
+                str(attachment.get("version", {}).get("number") or "") or None,
+                attachment_title,
+            ),
         )
         if original is None:
             return None

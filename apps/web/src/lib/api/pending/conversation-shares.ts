@@ -1,8 +1,6 @@
 /**
- * Local implementation of `chat.share` (proposed
- * `POST /conversations/{conversation_id}/shares`,
- * `GET /conversations/{conversation_id}/shares`,
- * `DELETE /conversations/{conversation_id}/shares/{share_id}`).
+ * Local implementation of `chat.share` (v2 `CreateShare`, `ListShares`,
+ * `GetShare`, `DeleteShare`).
  *
  * Conversations live on the device that had them, so a share carries a
  * snapshot of the messages for the server to keep. Here the share and its
@@ -92,7 +90,7 @@ export function revokeConversationShare(conversationId: string, shareId: string)
 const STORE_PREFIX = "bomesh.pending.chat.share.";
 
 /**
- * `GET /conversation-shares/{share_id}`. The server finds the share by id
+ * `GetShare`. The server finds the share by id
  * and checks the audience; here every account's share store in this browser
  * is searched, so a link opens only in the browser that made it. A share the
  * caller may not open is 404, like an unknown or revoked one, so ids can't

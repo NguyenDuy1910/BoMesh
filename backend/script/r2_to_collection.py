@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
-"""Load the crawled R2 corpus into one workspace Collection, file by file.
+"""Load the crawled R2 corpus into one workspace collection, file by file.
 
 ``ute_lib.py`` mirrors website files into R2 under ``R2_PREFIX``. This script
-creates one ``knowledge`` Document per object through the public Document API
-(``POST /api/v1/collections/{collection_id}/documents``, multipart). Adding a
-Document never processes it: every file lands pending. With ``--process`` the
-script then starts ONE Ingestion Run for the Collection's pending Documents
-(``POST /api/v1/ingestion-runs``), which parses, chunks, contextualizes,
-embeds, indexes and cites them. No archive is built; authorization, limits and
-lifecycle are the API's own.
+creates one KNOWLEDGE document Item per object under a COLLECTION Item through
+the media upload (``CreateItemMedia``,
+``POST /upload/api/v1/workspaces/{w}/items``, multipart ``metadata`` + ``file``).
+Creating a document never processes it: every file lands PENDING. With
+``--process`` the script then starts ONE Ingestion Run over the collection's
+PENDING and OUTDATED documents (``CreateIngestionRun`` with
+``selector.ancestor``), which parses, chunks, contextualizes, embeds, indexes
+and cites them. No archive is built; authorization, limits and lifecycle are
+the API's own.
 
-Re-running is safe: each Document's ``Idempotency-Key`` derives from its R2
-path, so a file already created is replayed (``200``), not duplicated, and a
-file whose bytes changed since is reported as a conflict.
+Re-running is safe: each document's ``requestId`` (AIP-155) derives from its R2
+path, so a file already created is replayed, not duplicated, and a file whose
+bytes changed since is reported as a conflict (``REQUEST_ID_REUSED``).
 
     cd backend
     uv run python script/r2_to_collection.py --dry-run
@@ -20,23 +22,24 @@ file whose bytes changed since is reported as a conflict.
 
 Reads R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET and
 R2_PREFIX (default ``raw``) from the root ``.env``, like ``ute_lib.py``. The
-API account needs Collection write access in its active workspace (and
-``knowledge.manage`` when the Collection does not exist yet; ``ingestion.run``
-for ``--process``). ``manifest.csv`` maps every R2 key to its Document and
-source URL; ``skipped.csv`` says why an object was left out.
+account needs ``items.create`` on the collection (workspace admin when the root
+collection does not exist yet) and ``ingestionRuns.create`` for ``--process``.
+``manifest.csv`` maps every R2 key to its Item and source URL; ``skipped.csv``
+says why an object was left out.
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
-import hashlib
+import json
 import mimetypes
 import os
 import sys
 import threading
 import time
 import unicodedata
+import uuid
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -66,7 +69,7 @@ _RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 DEFAULT_OUTPUT = BACKEND_ROOT.parent / ".cache" / "r2-knowledge"
 MANIFEST_FIELDS = [
     "r2_key", "path", "name", "size_bytes", "source_url",
-    "result", "document_id", "error",
+    "result", "item", "error",
 ]
 
 
@@ -105,13 +108,17 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--token", default=os.getenv("BOMESH_TOKEN"), help="Bearer token instead of a password"
     )
-    parser.add_argument("--workspace-id", help="Switch the session to this workspace first")
+    parser.add_argument(
+        "--workspace-id",
+        default=os.getenv("BOMESH_WORKSPACE"),
+        help="Target workspace ID (default: BOMESH_WORKSPACE, else the caller's only workspace)",
+    )
     target = parser.add_mutually_exclusive_group()
-    target.add_argument("--collection-id", help="Existing workspace Collection")
+    target.add_argument("--collection-id", help="Existing COLLECTION item ID")
     target.add_argument(
         "--collection-title",
         default="UTE Knowledge",
-        help="Collection to use, created when absent (default: %(default)s)",
+        help="Root collection to use, created when absent (default: %(default)s)",
     )
     parser.add_argument(
         "--max-upload-mb",
@@ -126,7 +133,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--process",
         action="store_true",
-        help="After loading, start one Ingestion Run for the Collection's pending documents",
+        help="After loading, start one Ingestion Run for the collection's pending documents",
     )
     return parser.parse_args()
 
@@ -232,9 +239,10 @@ def _content_type(file_name: str) -> str:
     return (guessed or "application/octet-stream").casefold()
 
 
-def _idempotency_key(bucket: str, path: str) -> str:
-    digest = hashlib.sha256(f"{bucket}/{path}".encode()).hexdigest()
-    return f"r2-{digest}"
+def _request_id(bucket: str, path: str) -> str:
+    """A stable AIP-155 ``requestId`` for one R2 file."""
+
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"r2://{bucket}/{path}"))
 
 
 # -- API -----------------------------------------------------------------------
@@ -242,23 +250,27 @@ def _idempotency_key(bucket: str, path: str) -> str:
 
 class ApiError(RuntimeError):
     def __init__(self, response: httpx.Response) -> None:
+        self.reason = ""
         try:
-            body = response.json()
-            detail = body.get("message") or body.get("detail") or body
-        except ValueError:
+            error = response.json().get("error") or {}
+            detail = error.get("message") or error
+            for entry in error.get("details") or []:
+                self.reason = self.reason or entry.get("reason", "")
+        except (ValueError, AttributeError):
             detail = response.text[:300]
         super().__init__(f"HTTP {response.status_code}: {detail}")
         self.status_code = response.status_code
 
 
 class BoMeshApi:
-    """The few public endpoints this script needs, as one authenticated caller."""
+    """The few API methods this script needs, as one authenticated caller."""
 
     def __init__(self, base_url: str, *, email: str | None, password: str | None, token: str | None):
-        self._http = httpx.Client(base_url=base_url.rstrip("/") + "/api/v1", timeout=300)
+        self._http = httpx.Client(base_url=base_url.rstrip("/"), timeout=300)
         self._credentials = (email, password) if email and password else None
         self._token = token
         self._lock = threading.Lock()
+        self.workspace = ""
         if self._token is None:
             if self._credentials is None:
                 raise SystemExit("give --email and --password, or --token")
@@ -268,26 +280,26 @@ class BoMeshApi:
         self._http.close()
 
     def _sign_in(self) -> None:
+        """``CreateSession`` with the password credential."""
+
         assert self._credentials is not None
         email, password = self._credentials
         response = self._http.post(
-            "/auth/sessions", json={"method": "password", "email": email, "password": password}
+            "/api/v1/sessions",
+            json={"credential": {"password": {"email": email, "password": password}}},
         )
         if response.status_code != 200:
             raise ApiError(response)
-        self._token = response.json()["access_token"]
+        self._token = response.json()["accessToken"]
 
-    def request(
-        self, method: str, url: str, *, headers: dict[str, str] | None = None, **kwargs: Any
-    ) -> httpx.Response:
+    def request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         """Send once, re-signing in on an expired session.
 
-        Reads and idempotency-keyed writes are also retried on transient
-        failures; a plain create is not, so a retry cannot duplicate it.
+        Reads and ``requestId`` writes are also retried on transient failures;
+        a plain create is not, so a retry cannot duplicate it.
         """
 
-        headers = dict(headers or {})
-        retryable = method in {"GET", "PUT", "PATCH"} or "Idempotency-Key" in headers
+        retryable = method == "GET" or "requestId" in (kwargs.get("params") or {})
         attempts = _ATTEMPTS if retryable else 1
         signed_in_again = False
         attempt = 0
@@ -296,7 +308,7 @@ class BoMeshApi:
             token = self._token
             try:
                 response = self._http.request(
-                    method, url, headers={**headers, "Authorization": f"Bearer {token}"}, **kwargs
+                    method, url, headers={"Authorization": f"Bearer {token}"}, **kwargs
                 )
             except httpx.TransportError:
                 if attempt >= attempts:
@@ -321,68 +333,91 @@ class BoMeshApi:
             raise ApiError(response)
         return response.json()
 
-    def use_workspace(self, workspace_id: str) -> None:
-        session = self.json("PATCH", "/auth/session", json={"active_workspace_id": workspace_id})
-        self._token = session["access_token"]
+    def use_workspace(self, workspace_id: str | None) -> None:
+        """Target ``workspace_id``, else the caller's only workspace (``ListWorkspaces``)."""
+
+        if not workspace_id:
+            workspaces = self.json("GET", "/api/v1/workspaces", params={"pageSize": 2})
+            names = [workspace["name"] for workspace in workspaces.get("workspaces", [])]
+            if len(names) != 1:
+                raise SystemExit("give --workspace-id: the account is not in exactly one workspace")
+            workspace_id = names[0].removeprefix("workspaces/")
+        self.workspace = f"workspaces/{workspace_id}"
 
     def collection(self, *, collection_id: str | None, title: str) -> dict[str, Any]:
-        """The target Collection: by id, else the active one titled ``title`` or a new one."""
+        """The target COLLECTION: by ID, else the root titled ``title`` or a new one."""
 
+        items = f"/api/v1/{self.workspace}/items"
         if collection_id:
-            return self.json("GET", f"/collections/{collection_id}")
-        page = self.json("GET", "/collections", params={"search": title, "page_size": 100})
-        for collection in page["items"]:
-            if collection["title"] == title and collection["status"] == "active":
-                return collection
+            return self.json("GET", f"{items}/{collection_id}")
+        quoted = json.dumps(title, ensure_ascii=False)
+        page = self.json(
+            "GET",
+            items,
+            params={
+                "filter": f'itemType = COLLECTION AND parentItem = "" AND displayName = {quoted}',
+                "pageSize": 1,
+            },
+        )
+        if page.get("items"):
+            return page["items"][0]
         return self.json(
             "POST",
-            "/collections",
-            json={"title": title, "description": "UTE website knowledge crawled into R2"},
+            items,
+            json={
+                "itemType": "COLLECTION",
+                "displayName": title,
+                "collection": {"description": "UTE website knowledge crawled into R2"},
+            },
         )
 
     def create_document(
-        self, collection_id: str, source: SourceObject, data: bytes, idempotency_key: str
-    ) -> tuple[str, dict[str, Any]]:
-        response = self.request(
-            "POST",
-            f"/collections/{collection_id}/documents",
-            headers={"Idempotency-Key": idempotency_key},
-            data={"purpose": "knowledge"},
-            files={"file": (source.name, data, _content_type(source.name))},
-        )
-        if response.status_code not in {200, 201}:
-            raise ApiError(response)
-        return ("created" if response.status_code == 201 else "replayed"), response.json()
+        self, collection: str, source: SourceObject, data: bytes, request_id: str
+    ) -> dict[str, Any]:
+        """``CreateItemMedia``: one KNOWLEDGE document with its bytes."""
 
-    def process_collection(self, collection_id: str) -> dict[str, Any]:
-        """Start one run for the Collection's pending and outdated Documents."""
+        content_type = _content_type(source.name)
+        metadata = {
+            "itemType": "DOCUMENT",
+            "displayName": source.name,
+            "parentItem": collection,
+            "document": {"mimeType": content_type, "purpose": "KNOWLEDGE"},
+        }
+        return self.json(
+            "POST",
+            f"/upload/api/v1/{self.workspace}/items",
+            params={"requestId": request_id},
+            data={"metadata": json.dumps(metadata, ensure_ascii=False)},
+            files={"file": (source.name, data, content_type)},
+        )
+
+    def process_collection(self, collection: str) -> dict[str, Any]:
+        """``CreateIngestionRun`` for the collection's PENDING and OUTDATED documents."""
 
         return self.json(
             "POST",
-            "/ingestion-runs",
-            json={"collection_id": collection_id, "states": ["pending", "outdated"]},
+            f"/api/v1/{self.workspace}/ingestionRuns",
+            json={"selector": {"ancestor": collection, "states": ["PENDING", "OUTDATED"]}},
         )
-
 
 # -- Run -----------------------------------------------------------------------
 
 
 def _load_one(
-    r2: Any, bucket: str, api: BoMeshApi, collection_id: str, source: SourceObject
+    r2: Any, bucket: str, api: BoMeshApi, collection: str, source: SourceObject
 ) -> dict[str, Any]:
     row: dict[str, Any] = {
         "r2_key": source.key, "path": source.path, "name": source.name,
         "size_bytes": source.size, "source_url": "", "result": "failed",
-        "document_id": "", "error": "",
+        "item": "", "error": "",
     }
     try:
         data, row["source_url"] = _download(r2, bucket, source)
-        result, body = api.create_document(
-            collection_id, source, data, _idempotency_key(bucket, source.path)
-        )
-        row.update(result=result, document_id=body["document"]["id"])
+        item = api.create_document(collection, source, data, _request_id(bucket, source.path))
+        row.update(result="loaded", item=item["name"])
     except ApiError as exc:
-        row.update(result="conflict" if exc.status_code == 409 else "failed", error=str(exc))
+        conflict = exc.reason == "REQUEST_ID_REUSED" or exc.status_code == 409
+        row.update(result="conflict" if conflict else "failed", error=str(exc))
     except Exception as exc:  # noqa: BLE001 - one file never stops the run
         row["error"] = f"{type(exc).__name__}: {exc}"
     return row
@@ -424,10 +459,9 @@ def main() -> int:
 
     api = BoMeshApi(args.api, email=args.email, password=args.password, token=args.token)
     try:
-        if args.workspace_id:
-            api.use_workspace(args.workspace_id)
+        api.use_workspace(args.workspace_id)
         collection = api.collection(collection_id=args.collection_id, title=args.collection_title)
-        print(f"collection {collection['title']!r} ({collection['id']})")
+        print(f"collection {collection['displayName']!r} ({collection['name']})")
 
         # Written row by row, so an interrupted run still records what it did.
         with (
@@ -437,18 +471,19 @@ def main() -> int:
             writer = csv.DictWriter(manifest, fieldnames=MANIFEST_FIELDS)
             writer.writeheader()
             loaded = pool.map(
-                lambda source: _load_one(r2, bucket, api, collection["id"], source), files
+                lambda source: _load_one(r2, bucket, api, collection["name"], source), files
             )
             for index, row in enumerate(loaded, start=1):
                 writer.writerow(row)
                 manifest.flush()
                 results[row["result"]] += 1
-                detail = row["document_id"] or row["error"]
+                detail = row["item"] or row["error"]
                 print(f"[{index:4d}/{len(files)}] {row['result']:8s} {row['path']}  {detail}")
         if args.process:
             try:
-                run = api.process_collection(collection["id"])
-                print(f"ingestion run {run['id']}: {run['counts']['total']} documents queued")
+                run = api.process_collection(collection["name"])
+                counts = run.get("counts") or {}
+                print(f"ingestion run {run['name']}: {counts.get('totalCount', 0)} documents queued")
             except ApiError as exc:
                 print(f"no ingestion run started: {exc}")
     finally:

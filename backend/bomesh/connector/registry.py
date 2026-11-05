@@ -1,4 +1,4 @@
-"""Registry for provider-neutral connector implementations."""
+"""The platform connector catalog: implemented connectors and catalog-only entries."""
 
 from __future__ import annotations
 
@@ -41,25 +41,51 @@ class ConnectorRegistry:
 
     @classmethod
     def default(cls) -> ConnectorRegistry:
-        """Return the process's built-in connector registrations."""
+        """Return the process's built-in connector catalog.
+
+        Confluence and Google Drive are implemented and authorized through their
+        provider's OAuth flow; a Confluence site can instead be connected with
+        an API token and its ``wiki_base`` (plus the account ``username`` for
+        Cloud basic auth). SharePoint, Notion and Slack are catalog-only:
+        listed so the platform can show demand for them, never connectable.
+        """
 
         return cls(
             (
                 ConnectorDefinition(
                     key="confluence",
                     display_name="Confluence",
-                    authentication_type="credentials",
-                    # A site API token can read spaces and pages directly, so
-                    # resources are browsable without a provider sign-in.
-                    capabilities=("knowledge_ingestion", "resource_discovery"),
+                    description="Spaces and pages of an Atlassian Confluence Cloud site.",
+                    authentication_type="oauth",
                     factory=cls._confluence_factory,
+                    accepts_api_token=True,
+                    config_keys=frozenset({"wiki_base", "username"}),
+                    required_config_keys=frozenset({"wiki_base"}),
                 ),
                 ConnectorDefinition(
                     key="google_drive",
                     display_name="Google Drive",
+                    description="Folders and shared drives of a Google account.",
                     authentication_type="oauth",
-                    capabilities=("knowledge_ingestion",),
                     factory=cls._google_drive_factory,
+                ),
+                ConnectorDefinition(
+                    key="sharepoint",
+                    display_name="SharePoint",
+                    description="Microsoft SharePoint sites and document libraries.",
+                    authentication_type="oauth",
+                ),
+                ConnectorDefinition(
+                    key="notion",
+                    display_name="Notion",
+                    description="Pages and databases of a Notion workspace.",
+                    authentication_type="oauth",
+                ),
+                ConnectorDefinition(
+                    key="slack",
+                    display_name="Slack",
+                    description="Channels of a Slack workspace.",
+                    authentication_type="oauth",
                 ),
             )
         )
@@ -91,7 +117,14 @@ class ConnectorRegistry:
             StaticCredentialsProvider(
                 tenant_id=str(config.get("_tenant_id") or "default"),
                 provider_key=str(config.get("_integration_connection_id") or "confluence"),
-                credentials=dict(credentials),
+                # An OAuth grant brings a bearer ``access_token``; an API-token
+                # connection stores ``api_token`` and keeps the account name
+                # in its non-secret config.
+                credentials={
+                    "access_token": credentials.get("access_token"),
+                    "confluence_access_token": credentials.get("api_token"),
+                    "confluence_username": config.get("username"),
+                },
             )
         )
         page_id = str(config.get("page_id") or "").strip()

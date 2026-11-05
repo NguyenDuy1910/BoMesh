@@ -18,21 +18,106 @@ Before making any meaningful code change, inspect:
 backend/docs_design
 ```
 
-This directory is the architectural source of truth for the project.
-
-It includes design decisions for:
+This directory is the architectural source of truth. It describes the target
+architecture only:
 
 ```text
-OpenAPI contract
-Database / DBML
-Conversation and LLM agent loop
-Authentication contract
-RBAC / authorization
+api_design.md             resource model, AIP rules, methods, permissions (canonical API)
+openapi.yaml              machine-readable API contract; wins on field-level details
+item_model.md             Item domain: collections, documents, links, contributions,
+                          revisions, authorization invariants, workflows, refactor plan
+design.dbml               canonical PostgreSQL schema
+database_architecture.md  persistence principles and the schema-change policy
+auth_contract.md          authentication and sessions
+conversation_loop.md      conversation and LLM agent loop
+document_contract.md      document upload, formats, archives, content lifecycle
+document_viewer.md        reader rendition and citation geometry
+evaluation.md             retrieval and answer evaluation
 ```
+
+The backend implements this design: it serves the contract under `/api/v1`
+(routers in `backend/api/v1`, DTOs in `backend/api/dto`). The clients
+`apps/web` and `apps/mobile` still call the removed legacy routes and are
+migrated next. Where code and design differ, the design wins;
+the remaining gaps are recorded as "Implementation status" notes in the design
+files. There is no legacy design document: do not recreate legacy contracts,
+endpoint inventories or migration plans.
 
 Always use the current documents in `docs_design` to understand the intended behavior before changing the implementation.
 
 Do not design a competing architecture when the source of truth already defines one.
+
+---
+
+## API design rules
+
+These rules are binding for every API change. Details and AIP references are
+in `api_design.md` §1.
+
+1. **Google AIP is the standard.** Resource names (`workspaces/{workspace}/items/{item}`),
+   plural lowerCamelCase collection IDs, references as resource-name strings.
+   Standard methods only: Get, List, Create, Update (`PATCH` + `updateMask`),
+   Delete. Everything else is a custom method `POST {name}:verb` (or `GET` when
+   read-only). No `PUT`. Base path `/api/v1`.
+2. **Name APIs after domain resources**, never after screens, features, callers
+   or roles. One concept has exactly one resource; reuse it with fields or
+   `kind` instead of adding a parallel resource. Tags are interfaces:
+   Identity, Workspaces, Library, Knowledge, Ingestion, Assistant,
+   Collaboration, Operations.
+3. **JSON follows the proto3 mapping**: lowerCamelCase fields, UPPER_SNAKE
+   enums, int64 as strings, RFC 3339 times, output-only fields `readOnly`,
+   input-only fields `writeOnly`. `state` is output-only and changes through
+   state-transition methods.
+4. **Lists** use `pageSize`/`pageToken`, AIP-160 `filter`, `orderBy`,
+   `showDeleted`. **Writes** use `requestId` for idempotency, `validateOnly`
+   where useful, and `etag` for concurrency. Soft-deleted resources have
+   `:undelete`. Long work returns an `Operation` with `x-operation-info`.
+5. **Errors** are `google.rpc.Status` with an `ErrorInfo` reason. A resource
+   the caller cannot read answers exactly like an absent one; illegal
+   transitions are `FAILED_PRECONDITION`.
+6. **Authorization is declared per method**: `x-permission: <collection>.<method>`
+   (IAM style), plus `x-authorization` for ownership rules. `none` is allowed
+   only for self, public and operation-polling methods. Roles are granted by
+   IAM policies on workspaces, collections and spaces.
+7. **New endpoints are designed only in `openapi.yaml` + `api_design.md`.**
+8. **Validate every contract change**:
+   `cd backend && uv run python -m pytest ../tests/docs_design`.
+
+## Domain model rules (Item)
+
+Details are in `item_model.md`.
+
+1. Collections and documents share one identity: the `items` table and the
+   `workspaces/{workspace}/items/{item}` resource. Never add separate
+   document, collection or knowledge-base tables or resources.
+2. Every Item has exactly one canonical parent. Showing an Item elsewhere is
+   a reference: item links (documents only), reading lists, saved/recent
+   items, space materials. References never grant access and never copy
+   objects or embeddings.
+3. Deletion, content, publication and indexing are four independent document
+   states. Review state lives on `contributions`. Approval never starts
+   ingestion; processing is always an explicit ingestion run.
+4. "Readable" always means the visibility rule in `item_model.md` §6. Every
+   derived surface (lists, search, facets, counts, home, shares, artifacts,
+   tasks) re-checks it in PostgreSQL; the search index is only a pre-filter.
+5. Content versions live in `item_revisions`; stored objects are never copied
+   and are purged only when no live revision references them.
+
+## Database schema rules
+
+1. `design.dbml` is the schema design; the `backend/bomesh/db/models/`
+   package implements all of it, including its CHECKs and triggers.
+2. There are no SQL migration files. Databases are created from the models
+   (`make db-reset`). A data-preserving upgrade script is written only when a
+   persistent environment must keep its data; it is reviewed with the change
+   and deleted after it runs. Do not add a migrations directory or framework
+   without an explicit decision.
+3. Every new table or column needs a justification (limitation, alternatives,
+   impact) in `item_model.md` §5 or `database_architecture.md`. Prefer
+   targeted columns over new tables; no table without its own identity and
+   lifecycle.
+4. Validate `design.dbml` after every change:
+   `npx -p @dbml/cli dbml2sql --postgres backend/docs_design/design.dbml`.
 
 ---
 
@@ -52,13 +137,12 @@ Use:
 
 ```text
 apps/ux_preview/ux-preview.html
-apps/ux_preview/styles/ux-preview.css
-apps/ux_preview/scripts/ux-preview.js
+apps/ux_preview/styles/
+apps/ux_preview/scripts/        (core, data, features, i18n)
 → the single reviewable UX preview for web and mobile
 
-apps/ux_preview/ux-refactor-plan.md
-apps/ux_preview/knowledge-management-ux-plan.md
-→ implementation and domain-flow notes
+apps/ux_preview/docs/
+→ product flows, screen inventory and domain-flow notes
 ```
 
 Every direct product-code change under `apps/web/` or `apps/mobile/` MUST first
@@ -109,13 +193,9 @@ After editing code:
 3. Update the corresponding file(s) in `backend/docs_design`.
 4. Ensure documentation and implementation describe the same final system.
 
-Never leave:
-
-```text
-code != docs_design
-```
-
-after completing a task.
+Never leave `docs_design` describing anything other than the intended system.
+When code implements part of the design, delete the matching
+"Implementation status" note in the same change.
 
 ---
 
@@ -124,25 +204,23 @@ after completing a task.
 For HTTP/API work:
 
 ```text
-OpenAPI contract
+openapi.yaml + api_design.md
     ↓
-API boundary
+API (/api/v1: routers + api/dto)
     ↓
-Application service
+Service (bomesh/services/<domain>)
     ↓
-Domain / persistence / infrastructure
+persistence / infrastructure
 ```
 
 The API contract is the source of truth for public behavior.
 
 When implementing a new or changed endpoint:
 
-* follow the existing OpenAPI contract;
-* use resource-oriented REST APIs;
-* keep request/response DTOs typed;
-* keep routers thin;
+* follow `openapi.yaml` and the API design rules above;
+* keep request/response DTOs typed and routers thin;
 * do not expose infrastructure implementation details;
-* update the OpenAPI design document when the contract intentionally changes.
+* change the contract first when it intentionally changes.
 
 Do not preserve a legacy API merely because old services were built around it.
 
@@ -152,7 +230,7 @@ Refactor the implementation toward the canonical contract.
 
 ## Database rule
 
-Use the DBML/database design in `docs_design` as the source of truth for persisted domain concepts and relationships.
+Use `design.dbml` as the source of truth for persisted domain concepts and relationships.
 
 Before changing:
 
@@ -171,9 +249,9 @@ check the DB design first.
 If the implementation requires a legitimate database design change:
 
 ```text
-update DB design
+design.dbml
 +
-migration/model
+bomesh/db/models/
 +
 affected service code
 ```
@@ -272,11 +350,16 @@ one canonical resource/lifecycle service
 
 over services based on caller or screen.
 
+Each domain is one package in `bomesh/services/` (for example
+`services/knowledge_items`, `services/ingestion`, `services/conversations`)
+that owns the domain's use cases and its engine code. There is no separate
+application/use-case layer.
+
 Good:
 
 ```text
-CollectionService
-DocumentService
+ItemService
+ContributionService
 ItemIngestionService
 ConnectionService
 SourceService
@@ -411,7 +494,7 @@ Examples:
 
 ```text
 API change
-→ API-level test + contract verification
+→ API-level test + `tests/docs_design` contract checks
 
 retrieval change
 → permission filtering + citation verification
@@ -470,11 +553,9 @@ Remaining decisions, if any
 The final state must satisfy:
 
 ```text
-docs_design
-    ==
-implemented architecture
-    ==
-runtime behavior
+docs_design            == intended architecture
+implemented behavior   == docs_design, except gaps recorded as
+                          "Implementation status" notes
 ```
 
 ---
@@ -489,7 +570,8 @@ read docs_design first
 → make the smallest coherent change
 → remove obsolete code when replaced
 → verify the affected path
-→ update docs_design to match the final implementation
+→ update docs_design to match the final design (and drop resolved
+  "Implementation status" notes)
 ```
 
 Do not create a new architectural direction silently.

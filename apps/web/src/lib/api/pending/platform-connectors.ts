@@ -9,7 +9,7 @@
  * the catalogue's implemented connectors stand in. Usage counts are seeded.
  *
  * A client secret is validated and then dropped: only `has_secret` is kept,
- * here as on the proposed server, so no secret is ever read back.
+ * as `oauthClient.secretConfigured` on v2 `Connector`, so no secret is ever read back.
  */
 
 import { ApiError } from "@/lib/api/request";
@@ -32,7 +32,7 @@ const FALLBACK_OAUTH: Record<string, true> = { google_drive: true, confluence: t
 
 function authorize() {
   const caller = pendingCaller(null);
-  // Mirrors the proposed `platform.connector.manage`, which no session holds yet.
+  // Mirrors v2 `connectors.update` / `connectors.enable`, which no session holds yet.
   requirePendingPlatformPermission(caller, "platform.tenant.read", "You need platform permission to manage connectors.");
   const store = pendingStore<ConnectorState>("platform.connectors", caller.accountId, null, () => ({}));
   return { caller, store };

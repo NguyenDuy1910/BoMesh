@@ -53,12 +53,24 @@ repeats ("row, column = value").
 `ConnectorPipeline` consumes `ItemChange` values and hands Item registrations
 and removals to a `ConnectorRegistrationSink`; `SourceSyncService`
 (`bomesh.services.source_sync`) is that sink. A Document is registered with its
-stored original and is `pending` when it is new or its version, etag or
-original changed; an unchanged Document keeps its processing state, and a
-version already registered is not downloaded again. A removed Document is
-tombstoned with its index content and citations. One change that fails does
-not stop the others; checkpoints advance only when the complete scope
-succeeds, and registration is idempotent so retries are safe.
+stored original (one object key per provider version, so a new version never
+overwrites an object an older revision still references) and is `pending`
+when it is new or its version, etag or original changed; an unchanged Document
+keeps its processing state, and a version already registered is not downloaded
+again. A removed Document is tombstoned with its index content and citations.
+One change that fails does not stop the others, and registration is
+idempotent so retries are safe. Under a `REVIEW_FIRST` source a new file lands
+unpublished with a SOURCE contribution, and a changed published file becomes an
+unpublished candidate Document with a `new_revision` contribution (one open per
+document and provider version).
+
+Each Source keeps the connector's checkpoint in
+`ingestion_sources.sync_checkpoint`: a sync starts from it (validated with the
+connector's `checkpoint_model`), and stores `PipelineResult.checkpoint` only
+when the sync finished without failures (`checkpoint_advanced`). Incremental
+connectors such as Google Drive (Changes API) therefore report deletions.
+Replacing a Source's `config` clears the checkpoint, so the next sync lists
+the whole Source again. Each sync is recorded as one `ingestion_syncs` row.
 
 ## Retrieval projection
 

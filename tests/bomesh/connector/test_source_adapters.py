@@ -165,14 +165,11 @@ async def test_integration_factory_adapts_confluence_to_the_async_contract(
     connector = ConnectorRegistry._confluence_factory(
         {
             "wiki_base": "https://example.atlassian.net/wiki",
-            "is_cloud": True,
+            "username": "person@example.test",
             "space": "RISK",
         },
         {},
-        {
-            "confluence_username": "person@example.test",
-            "confluence_access_token": "secret",
-        },
+        {"api_token": "secret"},
     )
     storage = object()
 
@@ -285,7 +282,7 @@ async def test_confluence_sync_stores_page_and_attachment_originals_without_pars
     assert isinstance(page_item, DocumentItem)
     assert page_item.document_kind == DocumentKind.PAGE
     assert page_item.content == []
-    page_key = "tenants/tenant-1/sources/conn-1/confluence/confluence%3A%3A42/Risk%20policy.html"
+    page_key = "tenants/tenant-1/sources/conn-1/confluence/confluence%3A%3A42/2/Risk%20policy.html"
     assert page_item.original is not None
     assert page_item.original.key == page_key
     assert page_item.original.content_type == "text/html"
@@ -300,7 +297,7 @@ async def test_confluence_sync_stores_page_and_attachment_originals_without_pars
     assert attachment_item.metadata["file_name"] == "risk.pdf"
     attachment_key = (
         "tenants/tenant-1/sources/conn-1/confluence/"
-        "confluence%3A%3A42%3A%3Aatt%3A%3A9/risk.pdf"
+        "confluence%3A%3A42%3A%3Aatt%3A%3A9/1/risk.pdf"
     )
     assert attachment_item.original is not None
     assert attachment_item.original.key == attachment_key
@@ -366,7 +363,7 @@ async def test_google_drive_stores_the_downloaded_original_without_parsing(
     assert item.content == []
     assert item.document_kind == DocumentKind.PDF
     assert item.source.external_version == "7"
-    key = "tenants/tenant-1/sources/conn-1/google_drive/f1/Policy.pdf"
+    key = "tenants/tenant-1/sources/conn-1/google_drive/f1/7/Policy.pdf"
     assert item.original is not None
     assert item.original.key == key
     assert item.original.size_bytes == len(b"%PDF-original")

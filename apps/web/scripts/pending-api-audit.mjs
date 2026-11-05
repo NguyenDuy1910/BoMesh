@@ -7,7 +7,8 @@
  *   3. a component renders <PreviewTag> next to the feature (it names the key or
  *      imports one of the key's client functions);
  *   4. its entry points are gated with usePendingFeature/isPendingFeatureEnabled;
- *   5. backend/docs_design/api_contract.md has the proposed contract anchor.
+ *   5. it names at least one operationId, and each one exists in
+ *      backend/docs_design/openapi.yaml.
  * And globally: only owning api.ts files (and pending files themselves) import
  * lib/api/pending/*; no component reads process.env for pending configuration.
  *
@@ -18,7 +19,8 @@ import { join, relative } from "node:path";
 
 const root = new URL("..", import.meta.url).pathname;
 const src = join(root, "src");
-const contract = readFileSync(join(root, "../../backend/docs_design/api_contract.md"), "utf8");
+const openapi = readFileSync(join(root, "../../backend/docs_design/openapi.yaml"), "utf8");
+const operationIds = new Set([...openapi.matchAll(/^\s*operationId:\s*(\w+)\s*$/gm)].map(([, id]) => id));
 const registry = readFileSync(join(src, "lib/api/pending.ts"), "utf8");
 
 function walk(dir, out = []) {
@@ -31,16 +33,17 @@ function walk(dir, out = []) {
 }
 const files = walk(src).map((path) => ({ path, rel: relative(src, path), text: readFileSync(path, "utf8") }));
 
-const features = [...registry.matchAll(/key:\s*"([\w.]+)",[\s\S]*?module:\s*"([^"]+)",[\s\S]*?docsAnchor:\s*"([^"]+)"/g)]
-  .map(([, key, module, anchor]) => ({ key, module, anchor }));
+const features = [...registry.matchAll(/key:\s*"([\w.]+)",[\s\S]*?module:\s*"([^"]+)",[\s\S]*?operationIds:\s*\[([^\]]*)\]/g)]
+  .map(([, key, module, ids]) => ({ key, module, ids: [...ids.matchAll(/"(\w+)"/g)].map(([, id]) => id) }));
 
 const problems = [];
 if (features.length === 0) problems.push("PENDING_FEATURES could not be parsed");
+if (operationIds.size === 0) problems.push("backend/docs_design/openapi.yaml has no operationId lines");
 
 const isPendingInternal = (rel) => rel === "lib/api/pending.ts" || rel.startsWith("lib/api/pending/") || rel === "lib/config/pending.ts";
 const isApiModule = (rel) => /(^|\/)api\.ts$/.test(rel);
 
-for (const { key, module, anchor } of features) {
+for (const { key, module, ids } of features) {
   const owner = files.find((file) => file.rel === module);
   if (!owner) {
     problems.push(`${key}: registered module ${module} does not exist`);
@@ -63,7 +66,10 @@ for (const { key, module, anchor } of features) {
   if (!files.some((file) => !isPendingInternal(file.rel) && new RegExp(`(usePendingFeature|isPendingFeatureEnabled)\\(\\s*"${key.replace(".", "\\.")}"`).test(file.text))) {
     problems.push(`${key}: entry points are not gated with usePendingFeature("${key}")`);
   }
-  if (!contract.includes(`id="${anchor}"`)) problems.push(`${key}: api_contract.md has no anchor id="${anchor}"`);
+  if (ids.length === 0) problems.push(`${key}: operationIds is empty`);
+  for (const id of ids) {
+    if (!operationIds.has(id)) problems.push(`${key}: openapi.yaml has no operationId ${id}`);
+  }
 }
 
 for (const file of files) {
