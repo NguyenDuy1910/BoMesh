@@ -7,7 +7,7 @@
 
 /* ═══════════════════════════ Data scopes ═══════════════════════════ */
 const WS_DATA_KEYS = new Set(['roles', 'groups', 'members', 'knownAccounts', 'kbs', 'docs', 'accounts', 'sources', 'runs', 'requests', 'audit', 'signins', 'usage', 'convs', 'assistant', 'gaps', 'artifacts',
-  'spaces', 'events', 'works', 'requestTypes', 'svcRequests', 'topics', 'collections', 'views', 'saved', 'recent', 'dupDismissed', 'topicProposals', 'featured']);
+  'spaces', 'events', 'works', 'requestTypes', 'svcRequests', 'topics', 'collections', 'views', 'saved', 'recent', 'dupDismissed', 'topicProposals', 'featured', 'projects']);
 const DB = { global: {}, ws: {} };
 let DATA_SEEDING = null;            // workspace being seeded by a data file
 const activeWsId = () => DATA_SEEDING || (typeof S !== 'undefined' && S.ws) || 'ws-northwind';
@@ -221,6 +221,14 @@ D.convs = [
   { id: 'c8', title: 'Vendor security review checklist', at: ago(12 * DAY), scope: [], messages: [] },
   { id: 'c9', title: 'SSO setup steps for customers', at: ago(16 * DAY), scope: ['kb-product'], messages: [] },
 ];
+/* Projects: folders for AI conversations, with references to Knowledge documents (never copies). Seeded ones are shared demo
+   folders (no owner), like the seeded conversations; ones people create are theirs. */
+D.projects = [
+  { id: 'pj-acme', name: 'Acme renewal', created: ago(9 * DAY), docs: [] },
+  { id: 'pj-travel', name: 'Travel & expenses', created: ago(20 * DAY), docs: ['d-hr-travel', 'd-fin-approvals'] },
+  { id: 'pj-vendor', name: 'Q4 vendor review', created: ago(14 * DAY), docs: [] },
+];
+[['c1', 'pj-travel'], ['c2', 'pj-travel'], ['c4', 'pj-acme'], ['c6', 'pj-acme'], ['c8', 'pj-vendor']].forEach(([c, p]) => { D.convs.find(x => x.id === c).project = p; });
 D.assistant = {
   instructions: 'You are Northwind’s internal assistant. Answer from company knowledge first and cite every factual claim. If the knowledge does not cover a question, say so and suggest who to ask. Keep answers short and use our product names exactly.',
   style: 'balanced', citations: true, caps: { search: true, analyze: true, files: true },

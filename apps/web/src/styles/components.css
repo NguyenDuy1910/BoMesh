@@ -1,0 +1,463 @@
+/*
+ * Kit component styles.
+ *
+ * Part 1 tunes HeroUI v3 (whose layered component CSS ships `.button`, `.chip`,
+ * `.card`, `.table__*`, `.modal__*`, `.drawer__*`, …) to the preview's look,
+ * through HeroUI's own variables wherever it exposes one and small unlayered
+ * overrides where it does not. Part 2 ports the preview component rules
+ * (apps/ux_preview/styles/components.css) whose classes HeroUI does not ship;
+ * class names are kept so page CSS copied from the preview keeps working.
+ *
+ * Overlays (modal, drawer, popover, toast, tooltip) render in portals outside
+ * the `@container app` root, so their responsive rules use media queries.
+ */
+
+/* ═════════════ Part 1 — HeroUI tuning ═════════════ */
+
+:root {
+  /* Preview tooltips open after 350 ms and close at once. */
+  --tooltip-delay: 350ms;
+  --tooltip-close-delay: 0ms;
+}
+
+/* Dark fields carry a 1 px inset outline instead of the light theme's shadow (preview `inset 0 0 0 1px`); an inset
+   shadow, unlike a border, keeps fields at the light theme's height. */
+[data-theme="dark"] {
+  --field-border: var(--border);
+  --field-shadow: inset 0 0 0 1px var(--border);
+}
+
+/* Input-group prefix/suffix sit inside the field with no separator (HeroUI draws one from the field border width). */
+.input-group__prefix, .input-group__suffix { border-inline: none; }
+
+/* Focus ring (HeroUI status-focused) on the product's own interactive rows/cards. */
+.item__hit:focus-visible, .card--action:focus-visible, .filter-button:focus-visible, .link-button:focus-visible, .tip-trigger:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 var(--ring-offset-width) var(--background), 0 0 0 calc(var(--ring-offset-width) + 2px) var(--focus);
+}
+
+/* Button — sizes sm 32 / md 36 / lg 40 at every width (HeroUI grows to 40/36/44 on touch widths). */
+.button { height: 36px; line-height: 20px; flex: none; }
+.button--sm { height: 32px; padding-inline: 12px; font-size: 13px; }
+.button--lg { height: 40px; padding-inline: 20px; font-size: 15px; }
+.button--icon-only { width: 36px; padding: 0; }
+.button--icon-only.button--sm { width: 32px; }
+.button--icon-only.button--lg { width: 40px; }
+.button svg:not([data-slot="spinner"] svg) { width: 16px; height: 16px; margin-block: 0; }
+.button--outline { box-shadow: inset 0 0 0 1px var(--border); }
+.button--ghost.button--muted { --button-fg: var(--muted); }
+@media (hover: hover) { .button--ghost.button--muted:hover { --button-fg: var(--foreground); } }
+
+/* Fields — 14/20 text (36 px inputs) at every width, as in the preview (HeroUI uses 16/24 below `sm`). */
+.input, .input-group__input, .textarea, .search-field__input, .select__value, .autocomplete__value, .number-field__input {
+  font-size: 14px;
+  line-height: 20px;
+}
+
+/* Link-styled inline button (preview `linkBtn`). */
+.link-button { display: inline-flex; align-items: center; gap: 4px; color: var(--accent-soft-foreground); font-weight: 500; border-radius: var(--radius-sm); }
+.link-button:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+/* Chip — 20 px tall pill; quiet tertiary; outline; status dot. */
+.chip { gap: 4px; line-height: 16px; }
+.chip svg { width: 12px; height: 12px; flex: none; }
+.chip--sm { padding: 0 6px; font-size: 11px; }
+.chip--lg { padding: 4px 12px; font-size: 13px; }
+.chip--tertiary:not(.chip--outline) { padding-inline: 0; }
+.chip--tertiary.chip--default:not(.chip--outline) { --chip-fg: var(--muted); }
+.chip--outline { --chip-bg: transparent; box-shadow: inset 0 0 0 1px var(--border); }
+.chip__dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+.chip--live .chip__dot { animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.35; } }
+.tip-trigger { display: inline-flex; border-radius: var(--radius-2xl); }
+
+/* Card — 16 px radius, 1 px border in dark mode. */
+.card { border-radius: var(--radius-2xl); background: var(--surface); color: var(--surface-foreground); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); min-width: 0; }
+.card--secondary, .card--transparent { box-shadow: none; }
+.card--secondary { background: var(--surface-secondary); }
+.card--tertiary { background: var(--surface-tertiary); }
+.card--transparent { background: transparent; }
+.card__title { font-weight: 600; }
+.card__description { font-size: 13px; line-height: 18px; }
+.card--action { cursor: pointer; text-align: left; color: inherit; transition: background-color var(--dur-fast), transform var(--dur) var(--ease-out); }
+@media (hover: hover) { .card--action:hover { background: var(--surface-hover); } }
+.card--action:active { transform: scale(0.995); }
+.card--lg { padding: 24px; gap: 16px; }
+/* Preview card header (`icon · .grow(title, description) · actions`) is a row; HeroUI's
+   Card.Header with Title/Description as direct children keeps its stacked column. */
+.card__header:has(> .grow) { flex-direction: row; align-items: flex-start; gap: 12px; min-width: 0; }
+
+/* Alert — 16 px radius; `alert--soft` tints the surface by tone. */
+.alert { gap: 12px; border-radius: var(--radius-2xl); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); min-width: 0; }
+.alert__indicator { padding: 4px 0 0; }
+.alert__title { font-weight: 500; }
+.alert__description { font-size: 13px; line-height: 18px; }
+.alert__actions { flex: none; display: flex; gap: 8px; align-items: center; align-self: center; }
+.alert--soft { box-shadow: none; }
+.alert--soft.alert--accent { background: var(--accent-soft); }
+.alert--soft.alert--success { background: var(--success-soft); }
+.alert--soft.alert--warning { background: var(--warning-soft); }
+.alert--soft.alert--danger { background: var(--danger-soft); }
+.alert--soft.alert--default { background: var(--surface-secondary); }
+@container app (max-width: 679px) { .alert { flex-wrap: wrap; } .alert__actions { width: 100%; padding-left: 28px; flex-wrap: wrap; } }
+
+/* Fields — preview label weight; `.field` stacks a label, control and help/error (preview form rows). */
+.label { font-size: 13px; line-height: 18px; font-weight: 500; }
+/* Labels keep their colour when the field is invalid (preview: only the control and the error turn red). */
+.label.label--invalid, [data-invalid=true] > .label { color: var(--foreground); }
+.label__req { color: var(--danger); }
+.field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+/* Read-only values (e.g. the account email) sit on the secondary surface, flat (preview `.input[readonly]`). */
+.input[readonly], .input[readonly]:hover { background: var(--surface-secondary); box-shadow: none; }
+.field + .field { margin-top: 16px; }
+.field-error { display: flex; align-items: center; gap: 4px; padding: 0; font-size: 12px; line-height: 16px; color: var(--danger-soft-foreground); }
+.field-error .i { width: 12px; height: 12px; }
+/* HeroUI hides `.field-error` until FieldError sets [data-visible]; the preview's own `.field-error` rows are always shown. */
+.field-error:not([data-slot="field-error"]) { height: auto; opacity: 1; }
+/* HeroUI FieldError gets the preview's leading alert-circle icon. */
+.field-error[data-slot="field-error"]::before {
+  content: ""; flex: none; align-self: flex-start; width: 12px; height: 12px; margin-top: 2px; background: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cline x1='12' x2='12' y1='8' y2='12'/%3E%3Cline x1='12' x2='12.01' y1='16' y2='16'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+/* Switch (default size) — preview 40×24 track with a 20 px thumb. */
+.switch:not(.switch--sm):not(.switch--lg) .switch__control { width: 40px; height: 24px; }
+.switch:not(.switch--sm):not(.switch--lg) .switch__thumb { width: 20px; height: 20px; --switch-thumb-offset: calc(100% - 24px); }
+
+/* Checkbox / Radio — preview 18 px controls with a visible border while unselected. */
+.checkbox__control { width: 18px; height: 18px; border-radius: 6px; }
+.checkbox:not([data-selected="true"]):not([data-indeterminate="true"]) .checkbox__control,
+.radio:not([data-selected]) .radio__control { box-shadow: var(--field-shadow), inset 0 0 0 1px var(--border-secondary); }
+.radio__control { width: 18px; height: 18px; border-radius: 50%; }
+/* HeroUI paints the unselected indicator as a full-size surface disc that hides the control's ring (preview: ring visible). */
+.radio:not([data-selected]) .radio__indicator::before { background: transparent; }
+.checkbox__content { gap: 10px; font-weight: 400; }
+
+/* Search field (SearchInput) — 320 px toolbar width; sm = 32 px. */
+.search-input { width: 100%; max-width: 320px; min-width: 0; }
+.search-input--full { max-width: none; }
+.search-input .search-field__group { width: 100%; }
+.search-input--sm .search-field__group { height: 32px; font-size: 13px; }
+.search-input--sm .search-field__input { font-size: 13px; }
+
+/* Tabs — natural-width tabs; secondary = 40 px underline tabs, left aligned. */
+.section-tabs { min-width: 0; max-width: 100%; }
+.section-tabs .tabs__tab { width: auto; gap: 6px; flex: none; }
+.section-tabs--primary > .tabs__list-container { width: fit-content; max-width: 100%; }
+.section-tabs--secondary .tabs__list { gap: 4px; }
+.section-tabs--secondary .tabs__tab { height: 40px; padding-inline: 12px; }
+/* Preview tabs clip and scroll by touch/keyboard; HeroUI's overlay chevrons cover the last tab on phones. */
+.section-tabs .tabs__list-container__scroll-prev, .section-tabs .tabs__list-container__scroll-next { display: none; }
+.tabs__count { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tabs__badge { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: var(--radius-full); background: var(--accent); color: var(--accent-foreground); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* Count badge (preview `.badge`) — plain spans only; HeroUI's Badge sets data-slot="badge" and keeps its own look. */
+.badge:not([data-slot]) { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: var(--radius-full); background: var(--default); color: var(--default-foreground); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; flex: none; }
+.badge--accent:not([data-slot]) { background: var(--accent); color: var(--accent-foreground); }
+.badge--danger:not([data-slot]) { background: var(--danger); color: var(--danger-foreground); }
+.badge-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; }
+
+/* Segmented (ToggleButtonGroup) — gray track, raised selected segment (preview `.toggle-group`). */
+.segmented { padding: 3px; gap: 2px; border-radius: var(--radius-3xl); background: var(--default); flex: none; }
+.segmented .toggle-button {
+  --toggle-button-bg: transparent; --toggle-button-bg-hover: transparent; --toggle-button-bg-pressed: transparent;
+  --toggle-button-fg: var(--muted);
+  --toggle-button-bg-selected: var(--segment); --toggle-button-bg-selected-hover: var(--segment); --toggle-button-bg-selected-pressed: var(--segment);
+  --toggle-button-fg-selected: var(--segment-foreground);
+  height: 28px; padding: 0 12px; gap: 6px; border-radius: var(--radius-3xl) !important; font-size: 13px;
+}
+.segmented .toggle-button.toggle-button--icon-only { width: 34px; padding: 0; }
+@media (hover: hover) { .segmented .toggle-button:not([data-selected="true"]):hover { color: var(--foreground); } }
+.segmented .toggle-button[data-selected="true"] { box-shadow: var(--surface-shadow); }
+.segmented--full { display: flex; width: 100%; }
+.segmented--full .toggle-button { flex: 1; }
+
+/* Avatar (UserAvatar) — round, preview sizes xs 20 · sm 24 · md 32 · lg 40 · xl 56. */
+.user-avatar { --avatar-radius: 9999px; --avatar-size: 32px; width: var(--avatar-size); height: var(--avatar-size); }
+.user-avatar .avatar__fallback { font-size: 12px; font-weight: 600; letter-spacing: 0; }
+.user-avatar.avatar--soft .avatar__fallback--default { background: var(--default); color: var(--default-foreground); }
+.user-avatar--xs { --avatar-size: 20px; } .user-avatar--xs .avatar__fallback { font-size: 9px; }
+.user-avatar--sm { --avatar-size: 24px; } .user-avatar--sm .avatar__fallback { font-size: 10px; }
+.user-avatar--lg { --avatar-size: 40px; } .user-avatar--lg .avatar__fallback { font-size: 14px; }
+.user-avatar--xl { --avatar-size: 56px; } .user-avatar--xl .avatar__fallback { font-size: 18px; }
+
+/* Skeleton — preview surface. */
+.skeleton { border-radius: var(--radius-md); }
+.skeleton--line { height: 12px; }
+.skeleton--title { height: 20px; }
+.skeleton--circle { border-radius: 50%; }
+
+/* Empty state (HeroUI EmptyState root, preview anatomy). */
+.empty-state { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 48px 24px; gap: 4px; color: var(--foreground); }
+.empty-state__icon { width: 44px; height: 44px; border-radius: var(--radius-xl); display: grid; place-items: center; background: var(--default); color: var(--muted); margin-bottom: 12px; }
+.empty-state__icon--danger { background: var(--danger-soft); color: var(--danger-soft-foreground); }
+.empty-state__icon--success { background: var(--success-soft); color: var(--success-soft-foreground); }
+.empty-state__icon--accent { background: var(--accent-soft); color: var(--accent-soft-foreground); }
+.empty-state__title { font-size: 15px; line-height: 22px; font-weight: 600; }
+.empty-state__description { font-size: 13px; line-height: 20px; color: var(--muted); max-width: 380px; }
+.empty-state__actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; justify-content: center; }
+.empty-state--boxed { background: var(--surface); border-radius: var(--radius-2xl); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); }
+.empty-state--compact { padding: 28px 16px; }
+
+/* Table — preview primary table: no column separators, sort icons, selected tint. */
+.table__column { white-space: nowrap; }
+.table__column::after { content: none; }
+.table__column--num, .table__cell--num { text-align: right; }
+.table__column--check, .table__cell--check { width: 44px; padding-right: 0; }
+.table__column--actions, .table__cell--actions { width: 56px; text-align: right; padding-left: 0; }
+.table__sort { display: inline-flex; justify-content: flex-start; gap: 4px; }
+.table__sort svg { width: 12px; height: 12px; opacity: 0.6; }
+.table__column[aria-sort]:not([aria-sort="none"]) { color: var(--foreground); }
+.table__column--num .table__sort { justify-content: flex-end; }
+.table__row--action { cursor: pointer; }
+@media (hover: hover) { .table__row--action:hover .table__cell { background: color-mix(in oklab, var(--surface-hover) 60%, var(--surface)); } }
+.table__row[data-selected="true"] .table__cell { background: color-mix(in oklab, var(--accent) 7%, var(--surface)); }
+.table__cell .cell-title { font-weight: 500; }
+.table__cell .cell-sub { font-size: 12px; line-height: 16px; color: var(--muted); }
+.table-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 4px 0; font-size: 13px; color: var(--muted); }
+.table-foot.pagination { flex-direction: row; gap: 12px; }
+.table-foot .pagination__summary { font-size: 13px; align-self: center; }
+.table-foot .pagination__content { gap: 8px; align-self: center; }
+@container app (max-width: 760px) {
+  /* Rows become compact cards: checkbox · primary cell · actions, then the
+     remaining cells wrap underneath as muted metadata. */
+  .table--stack .table__header { display: none; }
+  .table--stack .table__content, .table--stack .table__body { display: block; width: 100%; }
+  .table--stack .table__row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 12px 16px; background: var(--surface); border-bottom: 1px solid var(--separator); }
+  .table--stack .table__row:last-child { border-bottom: 0; }
+  .table--stack .table__cell { display: block; padding: 0; border: 0; background: transparent !important; border-radius: 0 !important; width: auto; }
+  .table--stack .table__cell--check { order: 0; }
+  .table--stack .table__cell--primary { order: 1; flex: 1 1 calc(100% - 120px); min-width: 0; }
+  .table--stack .table__cell--actions { order: 2; }
+  .table--stack .table__cell:not(.table__cell--primary):not(.table__cell--check):not(.table__cell--actions) { order: 3; font-size: 12px; color: var(--muted); text-align: left; }
+  .table--stack .table__cell[data-label]::before { content: attr(data-label) " "; color: var(--muted); }
+  .table--stack .table__cell--hide-sm { display: none; }
+  .table--stack.table-root { padding: 0; background: transparent; }
+  .table--stack .table__scroll-container { overflow: hidden; border-radius: var(--radius-2xl); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); }
+}
+
+/* Dropdown menu — preview `.menu` (16 px radius) and item metrics; filter menu counts and trailing check. */
+.dropdown__popover { border-radius: var(--radius-2xl); }
+.menu-item { min-height: 36px; border-radius: var(--radius-xl); font-size: 14px; }
+.menu-item > svg.i { color: var(--muted); }
+/* HeroUI colors only `[data-slot="label"]`; our `<Label>` renders `.label`, so tint the whole item. */
+.menu-item--danger, .menu-item--danger .label { color: var(--danger); }
+.menu-item--danger > svg.i { color: currentColor; }
+.filter-menu__count { margin-left: auto; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.menu-item:has(.filter-menu__check) { padding-inline-start: 10px; }
+.filter-menu__check { position: static; translate: none; margin-left: auto; color: var(--accent-soft-foreground); }
+.filter-menu__count + .filter-menu__check { margin-left: 0; }
+
+/* Overlays — headings 16/24 semibold, body text in foreground (paragraphs opt into `.muted`). */
+.modal__heading, .alert-dialog__heading, .drawer__heading { font-size: 16px; line-height: 24px; font-weight: 600; }
+.modal__body, .alert-dialog__body, .drawer__body { color: var(--foreground); }
+/* Overlay close (×) — preview ghost icon button: no resting fill, gray on hover. */
+.close-button--default { background: transparent; }
+@media (hover: hover) { .close-button--default:hover, .close-button--default[data-hovered="true"] { background: var(--default); } }
+.modal__close-trigger, .drawer__close-trigger, .alert-dialog__close-trigger { top: 12px; inset-inline-end: 12px; width: 32px; height: 32px; }
+/* Preview modal rhythm: 20 px top/bottom, 16 px from the heading to the content, 20 px from the content to the
+   actions (HeroUI: 24 px padding, 11 px and 23 px). The body keeps HeroUI's 3 px focus-ring padding. */
+.modal__dialog { padding: 20px 24px; }
+.modal__body { margin-top: 13px; }
+.modal__footer { margin-top: 17px; }
+.modal__close-trigger { top: 14px; }
+/* HeroUI also sets `modal__dialog--md` by default, so the product sizes need the doubled class. */
+.modal__dialog.modal__dialog--sm, .alert-dialog__dialog--sm { max-width: 380px; }
+.modal__dialog--md { max-width: 440px; }
+.modal__dialog--lg { max-width: 600px; }
+.modal__dialog.modal__dialog--xl { max-width: 880px; }
+/* Drawer (placement right) — floating sheet 8 px from the edges, 24 px radius; sizes md 480 · lg 720 · xl 960. */
+.drawer__dialog[data-placement="right"] {
+  width: min(480px, calc(100vw - 16px)); max-width: none; height: calc(100% - 16px); margin: 8px;
+  border-radius: var(--radius-3xl); padding: 0; overflow: hidden;
+}
+.drawer__dialog[data-placement="right"].drawer__dialog--lg { width: min(720px, calc(100vw - 16px)); }
+.drawer__dialog[data-placement="right"].drawer__dialog--xl { width: min(960px, calc(100vw - 16px)); }
+.drawer__dialog[data-placement="right"] > .drawer__header { gap: 2px; padding: 20px 56px 16px 20px; border-bottom: 1px solid var(--separator); }
+.drawer__dialog[data-placement="right"] > .drawer__body { margin: 0; padding: 20px; }
+.drawer__dialog[data-placement="right"] > .drawer__footer { padding: 12px 20px; border-top: 1px solid var(--separator); flex-wrap: wrap; }
+.drawer__description, .modal__description { font-size: 13px; line-height: 18px; color: var(--muted); margin-top: 2px; }
+.modal__header:has(> .modal__description) { gap: 0; }
+.drawer__section + .drawer__section { margin-top: 24px; }
+.drawer__section-title { font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 8px; }
+.drawer__footer-start, .modal__footer-start { margin-right: auto; }
+@media (max-width: 679px) {
+  .drawer__dialog[data-placement="right"] { width: 100%; height: 94vh; margin: 6vh 0 0; border-radius: var(--radius-3xl) var(--radius-3xl) 0 0; }
+  .modal__footer .button, .alert-dialog__footer .button { flex: 1; }
+}
+
+/* Toast — 16 px radius overlay card; tone icons. */
+.toast { border-radius: var(--radius-2xl); background: var(--overlay); color: var(--overlay-foreground); }
+.toast .toast__title { color: var(--overlay-foreground); font-weight: 400; }
+.toast__icon--success { color: var(--success-soft-foreground); }
+.toast__icon--danger { color: var(--danger-soft-foreground); }
+.toast__icon--accent { color: var(--accent-soft-foreground); }
+.toast__icon--warning { color: var(--warning-soft-foreground); }
+
+/* Tooltip — preview size. */
+.tooltip { max-width: 260px; padding: 6px 10px; font-size: 12px; line-height: 16px; word-break: normal; }
+
+/* Kbd — preview key cap: 20 px, 11 px medium text. */
+.kbd { height: 20px; padding: 0 6px; border-radius: 6px; font-size: 11px; font-weight: 500; }
+
+/* ═════════════ Part 2 — product components (preview classes) ═════════════ */
+
+/* Field extras (preview `field()`): "(optional)" after a label, character counter beside the description */
+.label__opt { color: var(--muted); font-weight: 400; }
+.counter { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* KPI card */
+.stat { gap: 8px; }
+.stat__label { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; font-weight: 500; }
+.stat__icon { display: grid; place-items: center; width: 28px; height: 28px; border-radius: var(--radius-lg); background: var(--default); color: var(--default-foreground); flex: none; }
+.stat__icon--accent { background: var(--accent-soft); color: var(--accent-soft-foreground); }
+.stat__icon--warning { background: var(--warning-soft); color: var(--warning-soft-foreground); }
+.stat__icon--danger { background: var(--danger-soft); color: var(--danger-soft-foreground); }
+.stat__icon--success { background: var(--success-soft); color: var(--success-soft-foreground); }
+.stat__value { font-size: 24px; line-height: 32px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.stat__meta { font-size: 12px; line-height: 16px; color: var(--muted); }
+
+/* Lists (ListBox composition) */
+.list { display: flex; flex-direction: column; background: var(--surface); border-radius: var(--radius-2xl); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); overflow: hidden; }
+.list--plain { background: transparent; box-shadow: none; border-radius: 0; overflow: visible; }
+.item { display: flex; align-items: center; gap: 12px; padding: 12px 16px; min-width: 0; text-align: left; width: 100%; color: inherit; position: relative; }
+.list > .item + .item, .list > * + .item { border-top: 1px solid var(--separator); }
+.list--plain > .item { padding: 10px 0; }
+.item--action { cursor: pointer; transition: background-color var(--dur-fast); }
+@media (hover: hover) { .item--action:hover { background: var(--surface-hover); } }
+.list--plain > .item--action:hover { background: transparent; }
+.item__hit { position: absolute; inset: 0; z-index: 0; border-radius: inherit; }
+.item__lead { flex: none; display: grid; place-items: center; }
+.item__body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.item--action .item__lead, .item--action .item__body, .item--action .item__meta { pointer-events: none; }
+.item--action .item__body a, .item--action .item__body button { pointer-events: auto; position: relative; z-index: 1; }
+.item__title { font-weight: 500; min-width: 0; display: flex; align-items: center; gap: 8px; }
+.item__desc { font-size: 13px; line-height: 18px; color: var(--muted); min-width: 0; }
+.item__meta { font-size: 12px; color: var(--muted); flex: none; white-space: nowrap; }
+.item__trail { flex: none; display: flex; align-items: center; gap: 8px; position: relative; z-index: 1; }
+.item--unread .item__title::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; }
+.item-icon { width: 36px; height: 36px; border-radius: var(--radius-xl); display: grid; place-items: center; background: var(--default); color: var(--default-foreground); flex: none; }
+.item-icon--sm { width: 28px; height: 28px; border-radius: var(--radius-lg); }
+.item-icon--accent { background: var(--accent-soft); color: var(--accent-soft-foreground); }
+.item-icon--success { background: var(--success-soft); color: var(--success-soft-foreground); }
+.item-icon--warning { background: var(--warning-soft); color: var(--warning-soft-foreground); }
+.item-icon--danger { background: var(--danger-soft); color: var(--danger-soft-foreground); }
+
+/* Description list */
+.kv { display: grid; grid-template-columns: minmax(96px, max-content) minmax(0, 1fr); gap: 10px 24px; font-size: 14px; }
+.kv__row { display: contents; }
+.kv dt { color: var(--muted); }
+.kv dd { min-width: 0; overflow-wrap: anywhere; }
+
+/* Brand marks */
+.ws-mark { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: var(--radius-lg); background: var(--accent); color: var(--accent-foreground); font-weight: 600; font-size: 13px; flex: none; }
+.file-icon { display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: var(--radius-lg); font-size: 9px; font-weight: 700; letter-spacing: 0.02em; flex: none; background: var(--fi-bg); color: var(--fi-fg); }
+.file-icon--sm { width: 24px; height: 24px; font-size: 7px; border-radius: 6px; }
+.file-icon--lg { width: 40px; height: 40px; font-size: 10px; border-radius: var(--radius-xl); }
+.file-icon--pdf { --fi-bg: var(--danger-soft); --fi-fg: var(--danger-soft-foreground); }
+.file-icon--doc { --fi-bg: color-mix(in oklab, oklch(62% 0.16 255) 15%, transparent); --fi-fg: oklch(50% 0.15 255); }
+.file-icon--sheet { --fi-bg: var(--success-soft); --fi-fg: var(--success-soft-foreground); }
+.file-icon--slide { --fi-bg: var(--warning-soft); --fi-fg: var(--warning-soft-foreground); }
+.file-icon--text { --fi-bg: var(--default); --fi-fg: var(--muted); }
+[data-theme="dark"] .file-icon--doc { --fi-fg: oklch(78% 0.11 255); }
+.app-icon { display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: var(--radius-lg); background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); flex: none; }
+.app-icon--lg { width: 40px; height: 40px; border-radius: var(--radius-xl); }
+.app-icon--sm { width: 24px; height: 24px; border-radius: 6px; }
+.app-icon__lucide { color: var(--muted); stroke-width: 1.75; }
+.app-icon__ink { fill: var(--foreground); }
+
+/* Switch row */
+.switch.switch-row { display: flex; flex-direction: row; align-items: stretch; width: 100%; padding: 12px 0; }
+.switch-row + .switch-row { border-top: 1px solid var(--separator); }
+.switch-row .switch__content { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: row; align-items: flex-start; justify-content: space-between; gap: 16px; font-weight: 400; cursor: pointer; }
+.switch-row__text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.switch-row .switch__content .description { margin: 0; font-size: 12px; line-height: 16px; color: var(--muted); }
+.switch-row .switch__control { flex: none; margin-top: 0; }
+.switch-row .switch__content .label { font-weight: 500; cursor: inherit; }
+/* Preview `.switch:disabled`: only the control dims; the row's text stays readable. */
+.switch.switch-row[data-disabled=true] { opacity: 1; }
+/* HeroUI's `[data-disabled] .label` / description dimming sits in a later layer; keep the text at full strength. */
+.switch.switch-row[data-disabled=true] .switch-row__text > * { opacity: 1 !important; }
+.switch.switch-row[data-disabled=true] .switch__control { opacity: var(--disabled-opacity); }
+
+/* Choice cards (RadioGroup card composition) */
+.choice-group { display: grid; gap: 8px; }
+.radio.choice { display: flex; flex-direction: row; align-items: stretch; padding: 0; margin: 0; border-radius: var(--radius-xl); background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); position: relative; transition: box-shadow var(--dur-fast), background-color var(--dur-fast); }
+.choice:hover { background: var(--surface-hover); }
+.choice:has([aria-checked="true"]), .choice[data-selected] { box-shadow: inset 0 0 0 2px var(--accent); background: color-mix(in oklab, var(--accent) 4%, var(--surface)); }
+.choice:has([data-focus-visible="true"]) { box-shadow: inset 0 0 0 2px var(--accent), 0 0 0 4px var(--accent-soft); }
+.choice__content.radio__content { display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 12px; font-weight: 400; }
+.choice__content .radio__control { margin-top: 2px; }
+.choice__title { display: block; font-weight: 500; }
+.choice__desc { display: block; font-size: 12px; line-height: 16px; color: var(--muted); margin-top: 2px; }
+
+/* Collection toolbar (filters row) — a plain div, not HeroUI's role="toolbar" Toolbar. */
+div.toolbar:not([role="toolbar"]) { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; min-width: 0; width: auto; }
+.toolbar__end { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.filter-button { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: var(--radius-3xl); font-size: 13px; font-weight: 500; color: var(--muted); box-shadow: inset 0 0 0 1px var(--border); background: transparent; white-space: nowrap; transition: background-color var(--dur-fast), color var(--dur-fast); }
+.filter-button:hover { background: var(--default-soft); color: var(--foreground); }
+.filter-button.is-set { background: var(--accent-soft); color: var(--accent-soft-foreground); box-shadow: none; }
+.filter-button svg { width: 14px; height: 14px; }
+
+/* Bulk selection bar */
+.bulk-bar { position: sticky; bottom: 16px; z-index: var(--z-sticky); display: flex; align-items: center; gap: 8px; width: fit-content; max-width: calc(100% - 16px); margin: 12px auto 0; padding: 6px 6px 6px 16px; border-radius: var(--radius-3xl); background: var(--foreground); color: var(--background); box-shadow: var(--overlay-shadow); animation: rise var(--dur) var(--ease-out); flex-wrap: wrap; }
+.bulk-bar .button--ghost { --button-fg: var(--background); --button-bg-hover: color-mix(in oklab, var(--background) 14%, transparent); }
+.bulk-bar__count { font-size: 13px; font-weight: 500; margin-right: 8px; }
+
+/* Skeleton rows (table placeholder) */
+.skeleton-rows__body { margin-top: 36px; border-radius: var(--radius-2xl); background: var(--surface); }
+.skeleton-rows__row { display: flex; align-items: center; gap: 12px; padding: 14px 16px; }
+.skeleton-rows__row + .skeleton-rows__row { border-top: 1px solid var(--separator); }
+.skeleton-rows__lead { width: 32px; height: 32px; border-radius: 8px; flex: none; }
+
+/* Charts */
+.chart { width: 100%; display: block; }
+.chart__bar { fill: var(--accent); }
+.chart__bar--dim { fill: color-mix(in oklab, var(--accent) 35%, transparent); }
+.sparkline { --spark: var(--accent); }
+.sparkline--success { --spark: var(--success); }
+.sparkline--warning { --spark: var(--warning); }
+.sparkline--danger { --spark: var(--danger); }
+.sparkline__area { fill: color-mix(in oklab, var(--spark) 12%, transparent); }
+.sparkline__line { fill: none; stroke: var(--spark); stroke-width: 1.5; }
+.chart-legend { display: flex; gap: 12px; font-size: 12px; color: var(--muted); }
+.chart-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.chart-legend i { width: 8px; height: 8px; border-radius: 50%; background: var(--c, var(--accent)); }
+
+/* Command palette (rendered by the shell on HeroUI Modal + Autocomplete.Filter + ListBox) — preview `.palette`:
+   620 px sheet 12vh from the top, 56 px borderless search row, scrolling results, key hints. */
+.modal__container.palette-container { padding: 12vh 12px 12px; }
+.modal__dialog.palette { width: min(620px, calc(100vw - 24px)); max-width: none; max-height: 70vh; padding: 0; gap: 0; display: flex; flex-direction: column; border-radius: var(--radius-3xl); overflow: hidden; }
+.textfield.palette__input { flex-direction: row; flex: none; }
+.palette__input .input { flex: 1 1 auto; height: 100%; min-width: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; outline: none; font-size: 16px; }
+.palette__list { flex: 1 1 auto; min-height: 0; }
+@media (max-width: 679px) {
+  .modal__container.palette-container { padding-top: 8px; }
+  .modal__dialog.palette { max-height: calc(100dvh - 16px); }
+}
+.palette__input { display: flex; align-items: center; gap: 10px; padding: 0 16px; height: 56px; border-bottom: 1px solid var(--separator); color: var(--muted); }
+.palette__input input { flex: 1; border: 0; background: transparent; font-size: 16px; color: var(--foreground); height: 100%; min-width: 0; }
+.palette__input input:focus { outline: none; }
+.palette__list { overflow-y: auto; padding: 6px; }
+.palette__group { padding: 10px 10px 4px; font-size: 12px; font-weight: 500; color: var(--muted); }
+.palette__item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 8px 10px; border-radius: var(--radius-xl); text-align: left; font-size: 14px; }
+.palette__item .i { color: var(--muted); }
+/* The highlighted result is the one ↵ opens: a fill, no focus ring (preview `aria-selected`). */
+.palette__item[aria-selected="true"], .palette__item[data-focused="true"] { background: var(--default); box-shadow: none; outline: none; }
+.palette__item-meta { margin-left: auto; font-size: 12px; color: var(--muted); flex: none; max-width: 40%; }
+.palette__foot { display: flex; gap: 16px; padding: 8px 16px; border-top: 1px solid var(--separator); font-size: 12px; color: var(--muted); }
+
+/* Citation marker (evidence) — the one non-HeroUI semantic, kept constant. */
+.cite { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; margin: 0 1px; border-radius: 6px; background: var(--evidence); color: var(--foreground); font-size: 11px; font-weight: 600; vertical-align: 1px; cursor: pointer; line-height: 1; font-variant-numeric: tabular-nums; transition: background-color var(--dur-fast); }
+.cite:hover, .cite[aria-pressed="true"] { background: var(--evidence-strong); }
+mark.evidence { background: var(--evidence); color: inherit; border-radius: 3px; padding: 1px 0; box-shadow: 0 0 0 2px var(--evidence); }
+mark.evidence.is-focus { background: var(--evidence-strong); box-shadow: 0 0 0 2px var(--evidence-strong); }
+
+/* Shared motion (preview keyframes; page CSS animates with these names). */
+.table__row--new .table__cell { animation: rowflash 1.6s var(--ease-out); }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } }
+@keyframes fade { from { opacity: 0; } }
+@keyframes pop { from { opacity: 0; transform: scale(0.96) translateY(4px); } }
+@keyframes slidein { from { transform: translateX(32px); opacity: 0; } }
+@keyframes sheetup { from { transform: translateY(40px); opacity: 0; } }
+@keyframes rowflash { 0% { background: var(--accent-soft); } }

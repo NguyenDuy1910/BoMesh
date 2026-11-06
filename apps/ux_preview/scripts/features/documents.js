@@ -494,6 +494,70 @@
         ['Banking Operations', 154, 158, '+3%', 'Lâm Bảo Ngọc'], ['Risk & Compliance', 88, 102, '+16%', 'Võ Thị Lan'], ['IT & Workplace', 96, 94, '−2%', 'Huỳnh Minh Quân'], ['Marketing', 210, 230, '+10%', 'Đỗ Phương Thảo'],
       ], ['FY2027 operating budget plan — draft for the Board, confidential. Totals exclude capitalized software.'], ['Plan', 'Headcount', 'Assumptions'], 'Draft v4 · Finance');
     }),
+    /* Northwind product documentation: what a Browse preview should be able to tell apart. */
+    'd-prod-3': () => build(b => {
+      b.page(1).title('API Reference — Orders', 'Product Documentation · REST API v2')
+        .h('Overview').p('Create, read and cancel orders. All requests use OAuth 2.0 bearer tokens; amounts are in minor units.')
+        .h('Endpoints').ul(['GET /v2/orders — list orders; filter by status, customer and created date.', 'GET /v2/orders/{id} — one order with its lines and payments.', 'POST /v2/orders — create an order; send an Idempotency-Key header.', 'POST /v2/orders/{id}:cancel — cancel an order before fulfilment.']);
+      b.page(2).h('Order object').table(['Field', 'Type', 'Notes'], [['id', 'string', 'ord_ prefix'], ['status', 'enum', 'DRAFT, PLACED, PAID, FULFILLED, CANCELLED'], ['total', 'integer', 'Minor units, e.g. 1999 = USD 19.99'], ['lines', 'array', 'Up to 500 lines']])
+        .h('Errors').p('400 for invalid fields, 404 for unknown orders, 409 when an order can no longer be cancelled.');
+    }),
+    'd-prod-4': () => build(b => {
+      b.page(1).title('API Reference — Webhooks', 'Product Documentation · REST API v2')
+        .h('Overview').p('Northwind calls your HTTPS endpoint when something changes, so you don’t have to poll.')
+        .h('Events').ul(['order.placed — a customer placed an order.', 'order.paid — payment was captured.', 'order.cancelled — the order was cancelled.', 'invoice.issued — an invoice PDF is ready.']);
+      b.page(2).h('Signatures').p('Every request carries a Northwind-Signature header: an HMAC-SHA256 of the body with your endpoint secret. Reject requests older than five minutes.')
+        .h('Retries').p('Non-2xx responses are retried with exponential backoff for 24 hours, then the event is marked failed in the Admin Console.');
+    }),
+    'd-prod-5': () => build(b => {
+      b.page(1).title('Data Retention Spec', 'Product Documentation · Security & compliance')
+        .h('Overview').p('How long the Northwind platform keeps each kind of customer data, and how deletion works.')
+        .h('Retention periods').table(['Data', 'Kept for'], [['Order and invoice records', '10 years'], ['Audit logs', '7 years'], ['Deleted workspace data', '30 days, then purged'], ['Backups', '35 days, encrypted']]);
+      b.page(2).h('Deletion requests').p('Admins can delete a customer’s personal data from the Admin Console. Deletion finishes within 30 days and is recorded in the audit log.');
+    }),
+    'd-prod-6': () => build(b => {
+      b.page(1).title('SSO Setup Guide', 'Product Documentation · Admin & setup')
+        .h('Overview').p('Let people sign in with your identity provider: Okta, Microsoft Entra ID or Google Workspace (SAML 2.0).')
+        .h('Steps').ul(['In the Admin Console, open Security → Single sign-on.', 'Upload your identity provider’s metadata XML.', 'Map the email attribute and, optionally, groups to roles.', 'Test with one account, then turn on Enforce SSO.']);
+      b.page(2).h('Troubleshooting').p('“User not provisioned” means the email in the assertion doesn’t match a Northwind account. Check the attribute mapping.');
+    }),
+    'd-prod-7': () => build(b => {
+      b.page(1).title('Admin Console Guide', 'Product Documentation · Admin & setup')
+        .h('What you can do').ul(['Invite people and assign roles.', 'Turn on SSO and two-step verification.', 'Download invoices and change your plan.', 'Export the audit log.'])
+        .h('Who can use it').p('Owners and Admins. Billing admins see only Billing.');
+    }),
+    'd-prod-8': () => build(b => {
+      b.page(1).title('Mobile App FAQ', 'Product Documentation · iOS and Android')
+        .h('Questions').ul(['Does the app work offline? — You can view recent orders offline; changes sync when you reconnect.', 'Which versions are supported? — iOS 16+ and Android 11+.', 'Can I use SSO? — Yes, the app uses your workspace’s sign-in.', 'How do I turn off notifications? — Settings → Notifications in the app.']);
+    }),
+    'd-prod-9': () => build(b => {
+      b.page(1).title('Integration Guide — SAP', 'Product Documentation · SAP S/4HANA')
+        .h('Overview').p('Sync customers, orders and invoices between Northwind and SAP S/4HANA every 15 minutes.')
+        .h('Steps').ul(['Create a technical user in SAP with the BAPI_SALESORDER roles.', 'In the Admin Console, add the SAP connection with its host and client number.', 'Map Northwind order statuses to SAP document types.', 'Run a test sync with one customer.']);
+      b.page(2).h('Limits').p('Up to 50,000 orders a day. Larger volumes need the batch connector.');
+    }),
+    'd-prod-11': () => build(b => {
+      b.page(1).title('Rate Limits', 'Product Documentation · REST API v2')
+        .h('Overview').p('Limits apply per API key and protect the platform for every customer.')
+        .h('Limits by plan').table(['Plan', 'Requests per minute', 'Burst'], [['Starter', '600', '100'], ['Business', '3,000', '500'], ['Enterprise', '10,000', '2,000']])
+        .h('When you hit a limit').p('You get 429 Too Many Requests with a Retry-After header. Back off and retry; don’t retry in a tight loop.');
+    }),
+    'd-prod-12': () => build(b => {
+      b.page(1).title('Error Codes', 'Product Documentation · REST API v2')
+        .h('Overview').p('Errors return a JSON body with a code, a message and the request ID to quote to support.')
+        .h('Common codes').table(['Code', 'Meaning'], [['INVALID_ARGUMENT', 'A field is missing or malformed'], ['NOT_FOUND', 'The resource doesn’t exist or you can’t see it'], ['FAILED_PRECONDITION', 'The resource is in the wrong state'], ['RESOURCE_EXHAUSTED', 'Rate limit reached; see Retry-After']]);
+    }),
+    'd-prod-13': () => build(b => {
+      b.page(1).title('Architecture Overview', 'Product Documentation · Platform')
+        .h('Overview').p('The Northwind platform is a set of services behind one API gateway, hosted in two AWS regions.')
+        .h('Components').ul(['API gateway — authentication, rate limits and routing.', 'Orders and billing services — PostgreSQL, one database per service.', 'Event bus — Kafka; webhooks and integrations read from it.', 'Search — OpenSearch, rebuilt from events.']);
+      b.page(2).h('Availability').p('99.95% monthly uptime target; failover to the second region within 15 minutes.');
+    }),
+    'd-prod-14': () => build(b => {
+      b.page(1).title('Roadmap H2', 'Product Documentation · Planned, subject to change')
+        .h('Overview').p('What we plan to ship from July to December. Dates are targets, not commitments.')
+        .h('Planned').ul(['Partial refunds from the Admin Console (Q3).', 'Webhooks v2 with event replay (Q3).', 'Native SAP Business One connector (Q4).', 'Usage-based billing for Enterprise (Q4).']);
+    }),
   };
   const GENERIC = {
     'kb-hr': n => [['Purpose', [`This policy sets out how ${n} works at Northwind and what employees can expect.`]], ['Who this applies to', ['All employees of Northwind Group and its subsidiaries, including part-time staff. Contractors follow the terms in their statement of work.']], ['How it works', null, ['Read this policy before making plans that depend on it.', 'Your manager approves requests in the People portal.', 'People Ops reviews exceptions within five working days.']], ['Questions', ['Contact People Ops at people@northwind.com or open a request in the People portal.']]],

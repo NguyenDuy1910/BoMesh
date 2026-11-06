@@ -1,71 +1,42 @@
-import { AlertCircle, AlertTriangle, CheckCircle2, Info } from "lucide-react";
+"use client";
 
-import { cn } from "@/lib/cn";
+import { Alert } from "@heroui/react";
+import { AlertCircle, AlertTriangle, CheckCircle2, Info, type LucideIcon } from "lucide-react";
+import clsx from "clsx";
+import type { ReactNode } from "react";
+import type { Tone } from "./StatusChip";
 
-export type CalloutTone = "info" | "ok" | "warn" | "err" | "neutral";
+const TONE_ICON: Record<Tone, LucideIcon> = { default: Info, accent: Info, success: CheckCircle2, warning: AlertTriangle, danger: AlertCircle };
 
-interface CalloutProps {
-  /** Defaults to `info`. Status tones only — evidence amber is reserved for citations. */
-  tone?: CalloutTone;
-  title?: React.ReactNode;
-  children?: React.ReactNode;
-  /** Buttons at the right; at most one should be primary on the page. */
-  actions?: React.ReactNode;
-  /** Replaces the tone's icon. */
-  icon?: React.ReactNode;
+export interface CalloutProps {
+  tone?: Tone;
+  title?: ReactNode;
+  description?: ReactNode;
+  /** The fix for the problem, as one or two buttons. */
+  actions?: ReactNode;
+  /** Overrides the tone's icon. */
+  icon?: LucideIcon;
+  /** Tinted background (default). `false` renders the surface-card look. */
+  soft?: boolean;
   className?: string;
 }
 
-const toneClass: Record<CalloutTone, { box: string; icon: string }> = {
-  info: {
-    box: "border-[var(--status-info-border)] bg-[var(--status-info-bg)]",
-    icon: "text-[var(--status-info-text)]",
-  },
-  ok: {
-    box: "border-[var(--status-success-border)] bg-[var(--status-success-bg)]",
-    icon: "text-[var(--status-success-text)]",
-  },
-  warn: {
-    box: "border-[var(--status-warning-border)] bg-[var(--status-warning-bg)]",
-    icon: "text-[var(--status-warning-text)]",
-  },
-  err: {
-    box: "border-[var(--status-danger-border)] bg-[var(--status-danger-bg)]",
-    icon: "text-[var(--status-danger-text)]",
-  },
-  neutral: {
-    box: "border-[var(--border-subtle)] bg-[var(--surface-subtle)]",
-    icon: "text-[var(--text-tertiary)]",
-  },
-};
-
-const toneIcon: Record<CalloutTone, React.ReactNode> = {
-  info: <Info />,
-  ok: <CheckCircle2 />,
-  warn: <AlertTriangle />,
-  err: <AlertCircle />,
-  neutral: <Info />,
-};
-
-/** A message about the region it sits in: attention, outcome or context. */
-export function Callout({ tone = "info", title, children, actions, icon, className }: CalloutProps) {
+/**
+ * Inline alert (preview `alertBox()`, HeroUI Alert): one alert per problem, with its fix as the action.
+ * Danger alerts are announced (`role="alert"`), others are polite status.
+ */
+export function Callout({ tone = "default", title, description, actions, icon, soft = true, className }: CalloutProps) {
+  const Icon = icon ?? TONE_ICON[tone];
   return (
-    <div
-      className={cn(
-        "flex items-start gap-3 rounded-[var(--radius-lg)] border px-3.5 py-3 text-[var(--text-primary)]",
-        toneClass[tone].box,
-        className,
-      )}
-      role={tone === "err" ? "alert" : "status"}
-    >
-      <span aria-hidden="true" className={cn("mt-px inline-flex shrink-0 [&_svg]:h-4 [&_svg]:w-4", toneClass[tone].icon)}>
-        {icon ?? toneIcon[tone]}
-      </span>
-      <div className="min-w-0 flex-1 text-[length:var(--text-size-body)]">
-        {title && <div className="font-semibold">{title}</div>}
-        {children && <div className={cn(title && "mt-0.5 text-[var(--text-secondary)]")}>{children}</div>}
-      </div>
-      {actions && <div className="flex shrink-0 flex-wrap items-center gap-2 self-center">{actions}</div>}
-    </div>
+    <Alert status={tone} className={clsx(soft && "alert--soft", className)} role={tone === "danger" ? "alert" : "status"}>
+      <Alert.Indicator>
+        <Icon className="i" aria-hidden />
+      </Alert.Indicator>
+      <Alert.Content>
+        {title ? <Alert.Title>{title}</Alert.Title> : null}
+        {description ? <Alert.Description>{description}</Alert.Description> : null}
+      </Alert.Content>
+      {actions ? <div className="alert__actions">{actions}</div> : null}
+    </Alert>
   );
 }

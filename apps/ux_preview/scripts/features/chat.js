@@ -9,9 +9,9 @@
 let run = null;    // active stream: { conv, msg, stop }
 let stick = true;  // keep the thread pinned to the bottom while streaming
 const cui = () => { const u = ui('chat', { panel: null, open: {}, edit: null, editText: '' }); u.open ??= {}; return u; };
-/** Composer state per place: 'home' or a conversation id (drafts never leak between threads). */
+/** Composer state per place: 'home', 'proj:<project id>' or a conversation id (drafts never leak between threads). */
 function composer(key) { const all = ui('composer'); const c = (all[key] ??= { draft: '', files: [], scope: [], space: null }); c.draft ??= ''; c.files ??= []; c.scope ??= []; c.space ??= null; return c; }
-const composerKey = () => S.cur?.r.page === 'chatThread' ? S.cur.params.id : 'home';
+const composerKey = () => S.cur?.r.page === 'chatThread' ? S.cur.params.id : S.cur?.r.page === 'project' ? 'proj:' + S.cur.params.id : 'home';
 function findMsg(id) { for (const conv of D.convs) { const m = conv.messages.find(x => x.id === id); if (m) return { conv, m }; } return {}; }
 const canDoc = d => !!d && canReadKb(kbById(d.kb));
 const visCites = m => (m.citations || []).filter(c => canDoc(docById(c.doc)));
@@ -328,7 +328,7 @@ function md(text, ctx) {
 
 /* ═══════════════ Composer ═══════════════ */
 /** What the composer searches: the open conversation, or the home composer. Both carry scope (knowledge base ids) and space (context). */
-function scopeHolder() { const conv = S.cur?.r.page === 'chatThread' && convById(S.cur.params.id); if (conv) { conv.scope ??= []; return conv; } return composer('home'); }
+function scopeHolder() { const conv = S.cur?.r.page === 'chatThread' && convById(S.cur.params.id); if (conv) { conv.scope ??= []; return conv; } return composer(composerKey()); }
 const readableKbsOf = sp => (sp?.kbs || []).filter(id => canReadKb(kbById(id)));
 /** Spaces offered as a scope: mine, with knowledge I can read. */
 const scopeSpaces = () => hasModule('spaces') ? mySpaces().filter(sp => readableKbsOf(sp).length) : [];
@@ -559,7 +559,8 @@ P.chatThread = ({ params }) => {
   }
   ensureSeed(conv); conv.scope ??= []; settleStale(conv);
   const sp = holderSpace(conv);
-  crumbs(sp ? [{ label: 'Spaces', to: '/spaces' }, { label: sp.name, to: '/space/' + sp.id }, { label: conv.title }] : [{ label: 'Conversations', to: '/chats' }, { label: conv.title }]);
+  const proj = X.projects?.of(conv);
+  crumbs(sp ? [{ label: 'Spaces', to: '/spaces' }, { label: sp.name, to: '/space/' + sp.id }, { label: conv.title }] : proj ? [{ label: proj.name, to: '/project/' + proj.id }, { label: conv.title }] : [{ label: 'Conversations', to: '/chats' }, { label: conv.title }]);
   topbarActions(btn('Share', { v: 'ghost', size: 'sm', icon: 'share', act: 'chat-share', data: { id: conv.id } }) + iconBtn('more', 'More', { size: 'sm', menu: 'chat-more', data: { id: conv.id } }));
   const u = cui(); const panel = u.panel?.conv === conv.id ? u.panel : null;
   const streaming = run?.conv === conv.id;
@@ -648,8 +649,9 @@ function ask(conv, q, files = []) {
   stream(conv, am, fail);
   return am;
 }
-function start(q, { scope = [], files = [], space = null } = {}) {
-  const conv = { id: uid('c'), owner: me().id, title: makeTitle(q), at: Date.now(), scope, ...(space ? { space } : {}), messages: [] };
+/** Start a conversation. project: the project it belongs to (its Knowledge references are attached to the first question). */
+function start(q, { scope = [], files = [], space = null, project = null } = {}) {
+  const conv = { id: uid('c'), owner: me().id, title: makeTitle(q), at: Date.now(), scope, ...(space ? { space } : {}), ...(project ? { project } : {}), messages: [] };
   D.convs.unshift(conv); cui().panel = null;
   ask(conv, q, files);
   return conv;
@@ -661,6 +663,11 @@ A['chat-send'] = () => {
   const files = c.files.filter(f => f.ready).map(({ name, type, kind, doc }) => ({ name, type, kind, doc }));
   c.draft = ''; c.files = [];
   if (key === 'home') { const scope = c.scope.filter(id => canReadKb(kbById(id))); const space = holderSpace(c)?.id || null; c.scope = []; c.space = null; start(q, { scope, space, files }); }
+  else if (key.startsWith('proj:')) {
+    const pid = key.slice(5), scope = c.scope.filter(id => canReadKb(kbById(id))), space = holderSpace(c)?.id || null;
+    const refs = (X.projects?.refs(pid) || []).filter(f => !files.some(x => x.doc === f.doc));
+    start(q, { scope, space, project: X.projects?.byId(pid) ? pid : null, files: [...refs, ...files] });
+  }
   else ask(convById(key), q, files);
 };
 A['chat-starter'] = el => { composer('home').draft = el.dataset.prompt; A['chat-send'](); };
@@ -769,6 +776,7 @@ A['chat-request'] = el => {
 /* Thread more menu → rename / delete live in conversations.js */
 MENUS['chat-more'] = el => [
   { label: 'Rename', icon: 'pencil', run: () => A['conv-rename']?.({ dataset: { id: el.dataset.id } }) },
+  ...(X.projects?.moveItems(convById(el.dataset.id)) || []),
   { sep: true },
   { label: 'Delete conversation', icon: 'trash', danger: true, run: () => A['conv-delete']?.({ dataset: { id: el.dataset.id } }) },
 ];
@@ -854,6 +862,6 @@ window.addEventListener('hashchange', () => setTimeout(() => tourAt != null && t
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && tourAt != null && !S.modal && !S.menu && !S.palette) { e.stopPropagation(); tourClose(); focusComposer(); } }, true);
 
 /* Internal API shared with chat-files.js and conversations.js */
-X.chat = { findMsg, answer, plain, makeTitle, cui, composer, composerKey, canDoc, visCites, normFile, mineKb, isMine, paint, focusComposer, ensureSeed, lastLine, ask, CLAIMS,
+X.chat = { findMsg, answer, plain, makeTitle, cui, composer, composerKey, composerHtml, afterComposer, canDoc, visCites, normFile, mineKb, isMine, paint, focusComposer, ensureSeed, lastLine, ask, CLAIMS,
   busy: () => !!run, streamingIn: id => run?.conv === id, stopIfIn: id => { if (run?.conv === id) run.stop = true; } };
 })();

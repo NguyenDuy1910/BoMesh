@@ -4,7 +4,7 @@
 
 BoMesh is a context-aware AI workspace: people get answers they can trust from their organisation's own knowledge, then finish the work that follows — with permissions and citations throughout. Administrators keep knowledge connected and governed; platform operators run the deployment.
 
-One platform serves different domains through **workspace templates**. A template switches optional **modules** on (Spaces, Work, Requests), defines the **space types** people organise around and the **AI workflows** offered. Admins can override modules, space types and workflows per workspace (Settings → Workspace setup). Home, Knowledge, Inbox and Conversations are core in every template; Home is the knowledge-first landing ([HOME.md](HOME.md)) and the **Knowledge Hub** is the same everywhere ([KNOWLEDGE_HUB.md](KNOWLEDGE_HUB.md)). The Campus template (courses, research groups, offices) is available on the platform but has no demo workspace. The prototype ships two workspaces:
+One platform serves different domains through **workspace templates**. A template switches optional **modules** on (Spaces, Work, Requests), defines the **space types** people organise around and the **AI workflows** offered. Admins can override modules, space types and workflows per workspace (Settings → Workspace setup). Home, Knowledge and Projects are core in every template: **Home helps people start** ([HOME.md](HOME.md)), **Knowledge helps them discover** ([KNOWLEDGE_HUB.md](KNOWLEDGE_HUB.md)) and **Projects help them organise and continue** AI work (below). The Campus template (courses, research groups, offices) is available on the platform but has no demo workspace. The prototype ships two workspaces:
 
 | Workspace | Template | What it shows |
 | --- | --- | --- |
@@ -46,26 +46,26 @@ All behavior is local mock data; nothing reaches a backend.
 Sign in · Create account · Choose workspace
 
 Workspace (sidebar; items marked * appear when the module is on)
-├── Home ────────────── Search/ask (scope, suggested questions) · Explore knowledge · Featured · Recently published · Recommended · Pick up where you left off
-├── Chat (/chat) ──────── Conversation ── Citation panel · File panel · Share
-├── Inbox
-├── Work* ────────────── New (workflow → materials → options) · Evidence review · Draft (Campus template adds study guide and quizzes)
-├── Requests* ────────── My requests · Queue · New (catalog → rule check → form) · Request thread
+├── Home ────────────── Ask or find (one box, scope, suggestions) · Pick up where you left off · Worth knowing · Start here / Recommended · Explore by topic
 ├── Knowledge ────────── Browse (catalog, /knowledge) · My library (Saved · Recent · Contributions · My files · Collections · Saved views) · Knowledge bases · Contribute
 │                        └── Collection · Knowledge base (Resources · Sources · Access · Settings) · Reader (Ask · About · Related)
-├── Conversations
-├── Search (⌘K palette → full results page)
+├── Work* ────────────── New (workflow → materials → options) · Evidence review · Draft (Campus template adds study guide and quizzes)
+├── Requests* ────────── My requests · Queue · New (catalog → rule check → form) · Request thread
+├── Projects ─────────── + New project · folders (expand → their chats · New chat) · ⋯ Rename · Delete
+│                        └── Project (/project/:id): composer · Knowledge references · Chats
+├── Recent ───────────── conversations in no project (⋯ Rename · Move to project · Delete) · All → /chats
 ├── Spaces* ──────────── Space: Overview · Materials · Work · Questions/Requests · People · Settings
-├── Manage (admins)
-│   ├── Overview
-│   ├── Sources ──────── Sources · Sync history
-│   ├── Connections
-│   ├── Documents ─────── Review · All documents · Quality · Topics (reviewers see the bases they own; admins all)
-│   ├── People ───────── Members · Groups · Roles · Requests
-│   ├── Assistant
-│   ├── Activity ─────── Changes · Sign-ins
-│   └── Settings ─────── General · Workspace setup · Danger zone
-└── Recent conversations (when Spaces is off)
+└── Manage (admins)
+    ├── Overview
+    ├── Sources ──────── Sources · Sync history
+    ├── Connections
+    ├── Documents ─────── Review · All documents · Quality · Topics (reviewers see the bases they own; admins all)
+    ├── People ───────── Members · Groups · Roles · Requests
+    ├── Assistant
+    ├── Activity ─────── Changes · Sign-ins
+    └── Settings ─────── General · Workspace setup · Danger zone
+
+Not in the sidebar, one ⌘K away: Chat (/chat, /chat/:id) · All conversations (/chats) · Inbox (/inbox) · Search results
 
 Platform console (operators): Workspaces · Users · Connectors · Usage · Audit log · System health
 Prototype only: Design system (#/design)
@@ -78,7 +78,12 @@ Finx journeys (policy → request, evidence review, decision draft, office queue
 ## Journeys
 
 ### 1. Sign in and ask
-Sign in (email or username + password, or Google) → choose a workspace when you belong to several → Home → type in the hero and *Ask* (optionally narrowing the scope) or pick a suggested question, or start a chat from ⌘K → the answer streams with work steps, inline citations and source chips → follow up in the same thread. A new conversation appears in Conversations and under *Pick up where you left off*.
+Sign in (email or username + password, or Google) → choose a workspace when you belong to several → Home → type in the box and *Ask AI* (optionally narrowing the scope) or pick a suggested question, or start a chat from ⌘K → the answer streams with work steps, inline citations and source chips → follow up in the same thread. A new conversation appears in the sidebar's **Recent**; file it into a project from its ⋯ menu when it belongs to ongoing work.
+
+### 1b. Organise AI work in projects
+Sidebar → **Projects +** → name only → the project opens: one composer (*New chat in …*), **Knowledge** references added from Knowledge (up to 10; attached to every new chat in the project, never copied, access rules still apply) and its **Chats**. Folders expand and collapse in the sidebar to show their chats and *New chat*; ⋯ renames or deletes a project (its chats move back to Recent, Undo restores). Any conversation's ⋯ (sidebar, thread topbar, All conversations) moves it to a project, to a new project, or back to Recent. A conversation appears once: in its project or in Recent. Starting from Home never asks for a project.
+
+*Backend alignment:* projects are prototype-only. The API has no project resource and conversations carry no project; production needs a contract change (`openapi.yaml` + `api_design.md`) before clients build it.
 
 ### 2. Verify an answer
 Citation marker or source chip → side panel with the exact passage, document, knowledge base and page, previous/next citation, copy → Open document → the viewer scrolls to and highlights the passage, steps through matches, and links back to the conversation.
@@ -87,10 +92,10 @@ Citation marker or source chip → side panel with the exact passage, document, 
 Attach files (validated: ≤ 5, ≤ 100 MB, blocked types refused) or add from knowledge → ask for a spreadsheet or a draft → the answer includes a file card → the file panel shows Preview, Changes and History → edit in place or ask for changes (each is a new version) → restore any version → download (CSV, Word, PDF, Markdown).
 
 ### 4. Find, read and keep knowledge
-Home (search → Browse; topic card → Browse filtered by that topic; featured, recently published or recommended document → Reader) or Knowledge → Browse: combine topic, space, type, owner, source, base, trust, updated, format and language; counts update as you filter; save the view → preview → Reader: read with the outline, *Ask* about the document in place (answers cite passages that highlight on the page), check *About* (source path, trust, versions, who can see it) and *Related* → Save, Add to collection, or *Use in…* a workflow. Everything lands in My library. Restricted bases stay visible only as bases → Request access (role + reason) → Pending → the admin approves from Inbox, Overview or People.
+Home (type in the box → Find documents opens Knowledge with the query, Ask AI starts a cited answer, a suggested document opens the Reader; a topic shortcut → Knowledge filtered by that topic; Worth knowing or a recommended document → Reader) or Knowledge → Browse: pick a topic shortcut or open Filters to combine topic, space, type, owner, source, base, trust, updated, format and language; save the view → quick preview → Reader: read with the outline, *Ask* about the document in place (answers cite passages that highlight on the page), check *About* (source path, trust, versions, who can see it) and *Related* → Save, Add to collection, or *Use in…* a workflow. Everything lands in My library. Restricted bases stay visible only as bases → Request access (role + reason) → Pending → the admin approves from Inbox, Overview or People.
 
 ### 5. Curate and keep knowledge healthy
-Collections: create from any resource or the library, order and annotate items, share with a space you run or (admins) everyone, add resources from the catalog; viewers who can't open an item see only a count. Admins choose *Feature on Home* from a document's ⋯ menu (or Manage on Home's Featured section). Resource owners edit details (type, topics, owner, language, summary), link resources to further spaces and mark them verified. Manage → Documents → Quality shows what's due for re-verification or changed at the source, what's missing details and likely duplicates (keep one, archive the other, references follow); Topics manages the taxonomy and the assistant's proposed topics.
+Collections: create from any resource or the library, order and annotate items, share with a space you run or (admins) everyone, add resources from the catalog; viewers who can't open an item see only a count. Admins choose *Feature on Home* from a document's ⋯ menu (featured documents lead *Start here* and feed *Recommended for you*; the section's menu removes them). Resource owners edit details (type, topics, owner, language, summary), link resources to further spaces and mark them verified. Manage → Documents → Quality shows what's due for re-verification or changed at the source, what's missing details and likely duplicates (keep one, archive the other, references follow); Topics manages the taxonomy and the assistant's proposed topics.
 
 ### 6. Contribute, review and publish
 Knowledge → **Contribute** → drop files → *Share as knowledge* (or *Keep private in My files*) → knowledge base "Let the assistant suggest" or a chosen one → optional note → Submit. The submission is **In review**, visible only to the contributor and that base's reviewers. The reviewer opens Manage → Documents → **Review**: preview, the assistant's type/topic/base/summary suggestions with confidence, flags (duplicate, new version, personal data) → *Approve & publish*, *Request changes* or *Decline*. Approval publishes: Publishing → Published, and only then is it searchable and used by the assistant. The contributor follows it in My library → **Contributions** and the Inbox, revises when asked, and can submit new versions later. Synced files follow their source's policy (publish automatically or send to review). Full journeys: [DOCUMENT_LIFECYCLE.md](DOCUMENT_LIFECYCLE.md).

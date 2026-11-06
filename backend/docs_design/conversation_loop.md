@@ -335,10 +335,13 @@ history.
   taken from stored turns and re-filtered on every read: turns and citations
   the reader cannot open now are withheld. Artifacts are shared separately
   through their own `audience`, and their reads likewise withhold content
-  whose sources the reader cannot open.
+  whose sources the reader cannot open. The link opens the read-only web
+  page `/chat/{conversation}/shares/{share}` (GetShare's snapshot).
 
-Implementation status: the web client still calls the removed legacy routes, keeps
-conversations and feedback device-local and has no sharing.
+Implementation status: the Message resource has no `workLog`, follow-up
+suggestions or question attachments yet, so the web client shows the work
+line and attachment chips only for turns streamed in the current page
+session, and no follow-up chips.
 
 ## Citations in an answer
 

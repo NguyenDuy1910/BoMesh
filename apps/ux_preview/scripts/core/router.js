@@ -28,6 +28,7 @@ route('/requests/new', { page: 'requestNew', mode: 'workspace', nav: 'requests',
 route('/requests/:id', { page: 'requestItem', mode: 'workspace', nav: 'requests', title: 'Request', module: 'requests' });
 route('/chat', { page: 'chatHome', mode: 'workspace', nav: 'chat', title: 'New chat', bare: true });
 route('/chat/:id', { page: 'chatThread', mode: 'workspace', nav: 'chat', title: 'Chat', bare: true });
+route('/project/:id', { page: 'project', mode: 'workspace', nav: 'projects', title: 'Project' });
 route('/chats', { page: 'chats', mode: 'workspace', nav: 'chats', title: 'Conversations', simLoad: true });
 route('/inbox', { page: 'inbox', mode: 'workspace', nav: 'inbox', title: 'Inbox', simLoad: true });
 route('/search', { page: 'search', mode: 'workspace', nav: 'search', title: 'Search' });

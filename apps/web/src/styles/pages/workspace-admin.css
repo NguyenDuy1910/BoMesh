@@ -1,0 +1,111 @@
+/*
+ * Workspace admin home: Overview (ov-), Assistant (asst-), Settings (set-)
+ * and the Inbox (inbox-). Composition only — components come from
+ * components.css; colors are theme tokens.
+ */
+
+/* ───── Overview ───── */
+.ov-line { display: block; }
+.ov-delta { display: inline-flex; align-items: center; gap: 2px; font-weight: 500; color: var(--success-soft-foreground); }
+.ov-delta--down { color: var(--danger-soft-foreground); }
+.ov-of { font-size: 16px; font-weight: 500; color: var(--muted); }
+.ov-split { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; align-items: start; }
+.ov-usage .stat__value { margin-top: -4px; }
+.ov-flash { animation: ov-flash 1.2s var(--ease-out); }
+@keyframes ov-flash { 0%, 40% { box-shadow: var(--surface-shadow), 0 0 0 2px var(--focus); } }
+.ov-gaps > .item { align-items: flex-start; }
+.ov-gap-q { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 16px; padding: 12px; border-radius: var(--radius-xl); background: var(--surface-secondary); font-weight: 500; overflow-wrap: anywhere; }
+.ov-gap-q .ov-gap-n { flex: none; }
+.ov-gap-actions { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0 0 -2px; }
+.ov-gaps .item__title > .truncate { white-space: normal; }
+.ov-gap-n { min-width: 36px; height: 24px; padding: 0 6px; border-radius: var(--radius-full); display: grid; place-items: center; background: var(--warning-soft); color: var(--warning-soft-foreground); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* ───── Inbox ───── */
+.inbox-line { display: block; }
+.inbox-time { display: block; font-size: 12px; line-height: 16px; color: var(--muted); margin-top: 2px; }
+.inbox-item:not(.item--unread) .item__title { font-weight: 400; }
+.inbox-foot { display: flex; justify-content: center; margin-top: 16px; }
+
+/* ───── Assistant ───── */
+.asst-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); gap: 24px; align-items: start; }
+.asst-form { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.asst-over { color: var(--danger-soft-foreground); font-weight: 500; }
+.asst-switches .switch-row:first-child { padding-top: 0; }
+.asst-switches .switch-row:last-child { padding-bottom: 0; }
+.asst-starters { display: flex; flex-direction: column; gap: 12px; }
+.asst-starter { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 12px; border-radius: var(--radius-xl); background: var(--surface-secondary); }
+.asst-starter__n { width: 24px; height: 24px; border-radius: var(--radius-full); display: grid; place-items: center; background: var(--default); font-size: 12px; font-weight: 600; margin-top: 26px; }
+.asst-starter__fields { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 12px; min-width: 0; }
+.asst-starter__fields > .field + .field { margin-top: 0; }
+.asst-starter__actions { display: flex; gap: 2px; margin-top: 22px; }
+
+.asst-preview { position: sticky; top: 16px; min-width: 0; }
+.asst-prev { gap: 16px; }
+.asst-prev__home { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 20px 12px; border-radius: var(--radius-xl); background: var(--background); }
+.asst-prev__welcome { font-size: 17px; line-height: 24px; font-weight: 600; text-align: center; overflow-wrap: anywhere; }
+.asst-prev__welcome.is-empty { color: var(--muted); font-weight: 500; }
+.asst-prev__composer { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 8px 8px 8px 14px; border-radius: var(--radius-2xl); background: var(--surface); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--border); font-size: 13px; color: var(--muted); }
+.asst-prev__send { width: 26px; height: 26px; border-radius: var(--radius-full); display: grid; place-items: center; background: var(--accent); color: var(--accent-foreground); }
+.asst-prev__tiles { display: grid; gap: 6px; width: 100%; }
+.asst-prev__tile { padding: 8px 12px; border-radius: var(--radius-lg); background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); font-size: 13px; min-width: 0; }
+.asst-prev__chat { display: flex; flex-direction: column; gap: 12px; font-size: 13px; line-height: 20px; }
+.asst-prev__q { align-self: flex-end; max-width: 85%; padding: 6px 12px; border-radius: var(--radius-2xl); background: var(--default); }
+.asst-prev__a { display: flex; flex-direction: column; gap: 6px; }
+.asst-prev__a ul, .asst-prev__a ol { margin: 0; padding-left: 18px; }
+.asst-prev__a ul { list-style: disc; }
+.asst-prev__a ol { list-style: decimal; }
+.asst-prev__sub { font-weight: 600; }
+.asst-prev__sources { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.asst-cite { display: inline-grid; place-items: center; min-width: 16px; height: 16px; margin-left: 2px; padding: 0 4px; border-radius: var(--radius-full); background: var(--evidence); color: var(--foreground); font-size: 10px; font-weight: 600; line-height: 1; vertical-align: super; }
+
+/* ───── Settings ───── */
+/* Web address: HeroUI InputGroup with the preview's tight "bomesh.app/" prefix (preview `.set-url`). */
+.set-url .set-url__prefix { flex: none; align-items: center; padding: 0 0 0 12px; border: none; font-size: 14px; color: var(--muted); }
+.set-url .input-group__input { padding-left: 1px; }
+.set-form + .savebar { margin-top: 24px; }
+.set-danger { box-shadow: var(--surface-shadow), inset 0 0 0 1px color-mix(in oklab, var(--danger) 35%, transparent); }
+/* Read-only workspace ID reads as a value, not an input (preview readonly field tint). */
+.set-id { background: var(--surface-secondary); }
+.set-id .input-group__input { padding-left: 12px; }
+.set-impact { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; font-size: 14px; }
+.set-impact li { display: flex; align-items: center; gap: 10px; }
+.set-impact .i { color: var(--muted); flex: none; }
+.set-danger .card__footer { padding-top: 16px; border-top: 1px solid var(--separator); flex-wrap: wrap; }
+
+/* Workspace setup */
+.set-setup .choice__desc { text-wrap: pretty; }
+.set-reset { margin-top: 10px; font-size: 13px; }
+.set-switches .switch-row:first-child { padding-top: 0; }
+.set-switches .switch-row:last-child { padding-bottom: 0; }
+.set-changed { display: inline-block; margin-left: 4px; font-weight: 500; color: var(--warning-soft-foreground); }
+.set-checks { display: flex; flex-direction: column; gap: 14px; }
+.set-checks .checkbox { align-items: flex-start; }
+.set-opt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.set-opt__title { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; font-weight: 500; }
+.set-opt__meta { font-size: 12px; font-weight: 400; color: var(--muted); }
+.set-opt__desc { font-size: 12px; line-height: 16px; color: var(--muted); }
+
+/* Assistant: starters per role */
+.asst-roles { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+
+/* ───── Responsive ───── */
+@container app (max-width: 1023px) {
+  .ov-split { grid-template-columns: minmax(0, 1fr); }
+  .asst-layout { grid-template-columns: minmax(0, 1fr); }
+  .asst-preview { position: static; }
+}
+@container app (max-width: 760px) {
+  .asst-style .choice-group { grid-template-columns: minmax(0, 1fr) !important; }
+  .set-setup .choice-group { grid-template-columns: minmax(0, 1fr) !important; }
+  .asst-starter__fields { grid-template-columns: minmax(0, 1fr); }
+}
+@container app (max-width: 679px) {
+  .ov-attn > .item, .inbox-list > .item { flex-wrap: wrap; }
+  .ov-attn .item__body, .inbox-list .item__body, .ov-gaps .item__body { flex: 1 1 0; }
+  .ov-attn .item__trail { width: 100%; padding-left: 48px; }
+  .inbox-list .item__trail:has(> .button:not(.button--icon-only):not(.hide-sm)) { width: 100%; padding-left: 48px; }
+  .inbox-list .item__trail > .button--icon-only { margin-left: auto; }
+  .asst-starter { grid-template-columns: minmax(0, 1fr) auto; }
+  .asst-starter__n { display: none; }
+  .asst-starter__actions { flex-direction: column; margin-top: 22px; }
+}

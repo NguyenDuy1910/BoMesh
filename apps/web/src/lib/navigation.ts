@@ -1,14 +1,17 @@
 import {
   Activity,
   BookOpen,
-  Building2,
+  Building,
   ChartColumn,
-  Cpu,
+  ClipboardList,
+  Database,
+  Files,
   House,
   Inbox,
+  Layers,
+  MessageSquare,
   Plug,
-  Plus,
-  Search,
+  RefreshCw,
   Server,
   Settings,
   Sparkles,
@@ -16,148 +19,185 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import type { PendingFeatureKey } from "@/lib/api/pending";
-import {
-  canAccessPlatformControl,
-  hasAnySessionPermission,
-  hasPlatformPermission,
-  hasSessionPermission,
-  type AuthSession,
-} from "@/lib/auth/session";
+import type { WorkspaceModule, WorkspacePermission } from "@/lib/workspace";
 
 /**
- * The one navigation definition: the product shell's sidebar, the command
- * palette's "Go to" pages and the address gate all read these lists. Items
- * appear by permission; the API still authorizes every request.
+ * The information architecture (UX preview `scripts/core/router.js` and
+ * `shell.js`): every screen's mode, title, nav item and gate, and the
+ * sidebar's destinations. The sidebar, topbar, command palette and the
+ * shell's route gate all read these; the API still authorizes every request.
  */
 
-/** Which attention count an item shows. */
-export type NavBadge = "inbox" | "sources" | "requests" | "outages";
+export type ShellMode = "auth" | "workspace" | "platform";
+
+/** Which attention count a nav item shows. */
+export type NavBadge = "requests" | "documents" | "sources" | "connections" | "people" | "indexing" | "health";
 
 export interface NavItem {
   id: string;
   label: string;
   icon: LucideIcon;
-  /** Where it goes. Absent for items that open a layer (search, inbox). */
-  href?: string;
-  /**
-   * `action` starts something where you are (a new chat, the palette, the
-   * inbox); `destination` is somewhere you go. Only a destination is ever the
-   * current item, so the sidebar never shows two selections.
-   */
-  kind: "action" | "destination";
-  /** Every one of these workspace permissions is needed. */
-  allOf?: readonly string[];
-  /** Any one of these workspace permissions is enough. */
-  anyOf?: readonly string[];
-  /** Any one of these platform permissions is enough. */
-  platformAnyOf?: readonly string[];
-  /** Hidden while this not-yet-connected API feature is turned off. */
-  pendingFeature?: PendingFeatureKey;
+  href: string;
+  /** Workspace permission (preview `can(perm)`) the caller needs. */
+  permission?: WorkspacePermission;
+  /** Workspace module that must be on. */
+  module?: WorkspaceModule;
   badge?: NavBadge;
-  /** Further address prefixes this destination owns (a document belongs to Knowledge). */
-  owns?: readonly string[];
-  /** Keyboard shortcut shown beside the label. */
-  shortcut?: string;
+  /** The badge means something is broken (danger tone). */
+  alert?: boolean;
 }
 
-/** Everyone in a workspace: ask, find, read. */
-export const WORKSPACE_NAV: readonly NavItem[] = [
-  { id: "new-chat", label: "New chat", href: "/chat", icon: Plus, kind: "action" },
-  { id: "inbox", label: "Inbox", icon: Inbox, kind: "action", pendingFeature: "notifications.inbox", badge: "inbox" },
-  { id: "search", label: "Search", icon: Search, kind: "action", shortcut: "⌘K" },
-  { id: "knowledge", label: "Knowledge", href: "/knowledge", icon: BookOpen, kind: "destination", owns: ["/documents"] },
+/** What the caller may see in the active workspace (`useWorkspace()`). */
+export interface NavAccess {
+  can: (permission: WorkspacePermission) => boolean;
+  hasModule: (module: WorkspaceModule) => boolean;
+}
+
+/** Member destinations, filtered by workspace modules. Conversations live in the sidebar's Recent group. */
+export const MEMBER_NAV: readonly NavItem[] = [
+  { id: "home", label: "Home", icon: House, href: "/home" },
+  { id: "knowledge", label: "Knowledge", icon: BookOpen, href: "/knowledge" },
+  { id: "work", label: "Work", icon: Sparkles, href: "/work", module: "work" },
+  { id: "requests", label: "Requests", icon: ClipboardList, href: "/requests", module: "requests", badge: "requests" },
 ];
 
-/** The Manage section: only the items the caller may open are listed. */
+/** Pages that are not in the sidebar but stay one ⌘K away. */
+export const MORE_PAGES: readonly NavItem[] = [
+  { id: "inbox", label: "Inbox", icon: Inbox, href: "/inbox" },
+  { id: "chats", label: "All conversations", icon: MessageSquare, href: "/chats" },
+];
+
+/** Spaces index (sidebar group label link and ⌘K page). */
+export const SPACES_NAV: NavItem = { id: "spaces", label: "Spaces", icon: Layers, href: "/spaces", module: "spaces" };
+
+/** The Manage group: only what the caller may open is listed. */
 export const MANAGE_NAV: readonly NavItem[] = [
-  { id: "overview", label: "Overview", href: "/manage/overview", icon: House, kind: "destination", allOf: ["tenant.read", "tenant.manage"] },
-  { id: "sources", label: "Sources", href: "/manage/sources", icon: Plug, kind: "destination", anyOf: ["source.manage", "ingestion.read"], badge: "sources" },
-  {
-    id: "access",
-    label: "People & access",
-    href: "/manage/access",
-    icon: Users,
-    kind: "destination",
-    anyOf: ["user.manage", "role.manage", "group.manage", "access.manage"],
-    badge: "requests",
-  },
-  {
-    id: "assistant",
-    label: "Assistant setup",
-    href: "/manage/assistant",
-    icon: Sparkles,
-    kind: "destination",
-    anyOf: ["tenant.manage"],
-    pendingFeature: "workspace.assistant_settings",
-  },
-  { id: "activity", label: "Activity", href: "/manage/activity", icon: Activity, kind: "destination", anyOf: ["audit.read"] },
-  { id: "settings", label: "Settings", href: "/manage/settings", icon: Settings, kind: "destination", anyOf: ["tenant.manage"] },
+  { id: "overview", label: "Overview", icon: House, href: "/overview", permission: "workspaces.getOverview" },
+  { id: "documents", label: "Documents", icon: Files, href: "/documents", permission: "contributions.review", badge: "documents" },
+  { id: "sources", label: "Sources", icon: RefreshCw, href: "/sources", permission: "sources.list", badge: "sources", alert: true },
+  // Preview gates Sources and Connections on one ability (source.manage); members can list their own connections.
+  { id: "connections", label: "Connections", icon: Plug, href: "/connections", permission: "sources.list", badge: "connections", alert: true },
+  { id: "people", label: "People", icon: Users, href: "/people", permission: "members.create", badge: "people" },
+  { id: "assistant", label: "Assistant", icon: Sparkles, href: "/assistant", permission: "workspaces.updateAssistant" },
+  { id: "activity", label: "Activity", icon: Activity, href: "/activity", permission: "auditEvents.list" },
+  { id: "settings", label: "Settings", icon: Settings, href: "/settings", permission: "workspaces.updateSettings" },
 ];
 
-/** The platform console: the same shell, a different sidebar. */
+/** The platform console (operators): the same shell, a different sidebar. */
 export const PLATFORM_NAV: readonly NavItem[] = [
-  { id: "p-workspaces", label: "Workspaces", href: "/platform/workspaces", icon: Building2, kind: "destination", platformAnyOf: ["platform.tenant.read"] },
-  { id: "p-users", label: "Users", href: "/platform/users", icon: Users, kind: "destination", platformAnyOf: ["platform.user.read"] },
-  { id: "p-connectors", label: "Connectors", href: "/platform/connectors", icon: Plug, kind: "destination", platformAnyOf: ["platform.tenant.read"], pendingFeature: "platform.connectors" },
-  { id: "p-capabilities", label: "AI capabilities", href: "/platform/capabilities", icon: Cpu, kind: "destination", platformAnyOf: ["platform.tenant.read"], pendingFeature: "platform.capabilities" },
-  { id: "p-usage", label: "Usage", href: "/platform/usage", icon: ChartColumn, kind: "destination", platformAnyOf: ["platform.tenant.read"], pendingFeature: "platform.usage" },
-  { id: "p-audit", label: "Audit log", href: "/platform/audit", icon: Activity, kind: "destination", platformAnyOf: ["platform.audit.read"] },
-  { id: "p-health", label: "System health", href: "/platform/health", icon: Server, kind: "destination", platformAnyOf: ["platform.health.read"], badge: "outages" },
+  { id: "p-workspaces", label: "Workspaces", icon: Building, href: "/p/workspaces" },
+  { id: "p-users", label: "Users", icon: Users, href: "/p/users" },
+  { id: "p-connectors", label: "Connectors", icon: Plug, href: "/p/connectors" },
+  { id: "p-indexing", label: "Indexing", icon: Database, href: "/p/indexing", badge: "indexing", alert: true },
+  { id: "p-usage", label: "Usage", icon: ChartColumn, href: "/p/usage" },
+  { id: "p-audit", label: "Audit log", icon: Activity, href: "/p/audit" },
+  { id: "p-health", label: "System health", icon: Server, href: "/p/health", badge: "health", alert: true },
 ];
 
-/** Whether a not-yet-connected feature is switched on; defaults to on (tests, previews). */
-export type FeatureCheck = (key: PendingFeatureKey) => boolean;
+export const PLATFORM_CONSOLE: NavItem = { id: "platform", label: "Platform console", icon: Layers, href: "/p/workspaces" };
 
-const allFeatures: FeatureCheck = () => true;
-
-/** Whether the caller may open one item. */
-export function canOpenNavItem(item: NavItem, session: AuthSession | null, isEnabled: FeatureCheck = allFeatures): boolean {
-  if (item.pendingFeature && !isEnabled(item.pendingFeature)) return false;
-  if (item.allOf && !item.allOf.every((code) => hasSessionPermission(session, code))) return false;
-  if (item.anyOf && !hasAnySessionPermission(session, item.anyOf)) return false;
-  if (item.platformAnyOf && !item.platformAnyOf.some((code) => hasPlatformPermission(session, code))) return false;
-  return true;
+/** Whether the caller may open an item. */
+export function canSeeNavItem(item: NavItem, access: NavAccess): boolean {
+  return (!item.module || access.hasModule(item.module)) && (!item.permission || access.can(item.permission));
 }
 
-/** The items of one list the caller is actually authorized to open. */
-export function visibleNavItems(
-  items: readonly NavItem[],
-  session: AuthSession | null,
-  isEnabled: FeatureCheck = allFeatures,
-): NavItem[] {
-  return items.filter((item) => canOpenNavItem(item, session, isEnabled));
+export function memberNav(access: NavAccess): NavItem[] {
+  return MEMBER_NAV.filter((item) => canSeeNavItem(item, access));
 }
 
-function ownsPath(prefix: string, pathname: string): boolean {
-  return pathname === prefix || pathname.startsWith(`${prefix}/`);
+export function manageNav(access: NavAccess): NavItem[] {
+  return MANAGE_NAV.filter((item) => canSeeNavItem(item, access));
 }
 
-/** Whether an item is the current place. Actions never are. */
-export function isNavItemActive(item: NavItem, pathname: string): boolean {
-  if (item.kind === "action" || !item.href) return false;
-  const [path] = item.href.split("?");
-  return ownsPath(path, pathname) || Boolean(item.owns?.some((prefix) => ownsPath(prefix, pathname)));
+/* ── Routes ── */
+
+export interface RouteInfo {
+  title: string;
+  mode: ShellMode;
+  /** The nav item this screen belongs to (sidebar highlight). */
+  nav?: string;
+  permission?: WorkspacePermission;
+  module?: WorkspaceModule;
+  /** The page manages its own scrolling (chat, reader, work item). */
+  bare?: boolean;
 }
 
-/** The platform console owns every `/platform` address; the sidebar swaps there. */
-export function isPlatformPath(pathname: string): boolean {
-  return ownsPath("/platform", pathname);
+interface RouteDef extends RouteInfo {
+  pattern: string;
 }
 
-/**
- * Whether the caller may open an address. Management and platform addresses
- * follow their nav item; `/manage` and `/platform` themselves open when any
- * of their items does. Everything else in the product is open to members
- * (what a page shows inside is still decided by the API).
- */
-export function canAccessPath(pathname: string, session: AuthSession | null, isEnabled: FeatureCheck = allFeatures): boolean {
-  const [path] = pathname.split("?");
-  if (path === "/manage") return visibleNavItems(MANAGE_NAV, session, isEnabled).length > 0;
-  if (path === "/platform") return canAccessPlatformControl(session) && visibleNavItems(PLATFORM_NAV, session, isEnabled).length > 0;
-  for (const item of [...MANAGE_NAV, ...PLATFORM_NAV]) {
-    if (isNavItemActive(item, path)) return canOpenNavItem(item, session, isEnabled);
+/** The route table; `:name` matches one path segment. First match wins. */
+export const ROUTES: readonly RouteDef[] = [
+  { pattern: "/signin", title: "Sign in", mode: "auth" },
+  { pattern: "/signup", title: "Create account", mode: "auth" },
+  { pattern: "/password-reset", title: "Reset password", mode: "auth" },
+  { pattern: "/password-reset/:token", title: "Reset password", mode: "auth" },
+  { pattern: "/workspaces", title: "Choose a workspace", mode: "auth" },
+  { pattern: "/home", title: "Home", mode: "workspace", nav: "home" },
+  { pattern: "/spaces", title: "Spaces", mode: "workspace", nav: "spaces", module: "spaces" },
+  { pattern: "/space/:id", title: "Space", mode: "workspace", nav: "space", module: "spaces" },
+  { pattern: "/work", title: "Work", mode: "workspace", nav: "work", module: "work" },
+  { pattern: "/work/new", title: "New work", mode: "workspace", nav: "work", module: "work" },
+  { pattern: "/work/:id", title: "Work", mode: "workspace", nav: "work", module: "work", bare: true },
+  { pattern: "/requests", title: "Requests", mode: "workspace", nav: "requests", module: "requests" },
+  { pattern: "/requests/new", title: "New request", mode: "workspace", nav: "requests", module: "requests" },
+  { pattern: "/requests/:id", title: "Request", mode: "workspace", nav: "requests", module: "requests" },
+  { pattern: "/chat", title: "New chat", mode: "workspace", nav: "chat", bare: true },
+  { pattern: "/chat/:id", title: "Chat", mode: "workspace", nav: "chat", bare: true },
+  { pattern: "/chat/:id/shares/:share", title: "Shared conversation", mode: "workspace", nav: "chats", bare: true },
+  { pattern: "/project/:id", title: "Project", mode: "workspace", nav: "projects" },
+  { pattern: "/chats", title: "Conversations", mode: "workspace", nav: "chats" },
+  { pattern: "/inbox", title: "Inbox", mode: "workspace", nav: "inbox" },
+  { pattern: "/search", title: "Search", mode: "workspace", nav: "search" },
+  { pattern: "/knowledge", title: "Knowledge", mode: "workspace", nav: "knowledge" },
+  { pattern: "/knowledge/library", title: "My library", mode: "workspace", nav: "knowledge" },
+  { pattern: "/knowledge/bases", title: "Knowledge bases", mode: "workspace", nav: "knowledge" },
+  { pattern: "/knowledge/collections/:id", title: "Collection", mode: "workspace", nav: "knowledge" },
+  { pattern: "/knowledge/:id", title: "Knowledge base", mode: "workspace", nav: "knowledge" },
+  { pattern: "/doc/:id", title: "Document", mode: "workspace", nav: "knowledge", bare: true },
+  { pattern: "/overview", title: "Overview", mode: "workspace", nav: "overview", permission: "workspaces.getOverview" },
+  { pattern: "/documents", title: "Documents", mode: "workspace", nav: "documents", permission: "contributions.review" },
+  { pattern: "/sources", title: "Sources", mode: "workspace", nav: "sources", permission: "sources.list" },
+  { pattern: "/connections", title: "Connections", mode: "workspace", nav: "connections", permission: "sources.list" },
+  { pattern: "/people", title: "People", mode: "workspace", nav: "people", permission: "members.create" },
+  { pattern: "/assistant", title: "Assistant", mode: "workspace", nav: "assistant", permission: "workspaces.updateAssistant" },
+  { pattern: "/activity", title: "Activity", mode: "workspace", nav: "activity", permission: "auditEvents.list" },
+  { pattern: "/settings", title: "Settings", mode: "workspace", nav: "settings", permission: "workspaces.updateSettings" },
+  { pattern: "/p/workspaces", title: "Workspaces", mode: "platform", nav: "p-workspaces" },
+  { pattern: "/p/users", title: "Users", mode: "platform", nav: "p-users" },
+  { pattern: "/p/connectors", title: "Connectors", mode: "platform", nav: "p-connectors" },
+  { pattern: "/p/indexing", title: "Indexing", mode: "platform", nav: "p-indexing" },
+  { pattern: "/p/usage", title: "Usage", mode: "platform", nav: "p-usage" },
+  { pattern: "/p/audit", title: "Audit log", mode: "platform", nav: "p-audit" },
+  { pattern: "/p/health", title: "System health", mode: "platform", nav: "p-health" },
+];
+
+const NOT_FOUND: RouteInfo = { title: "Not found", mode: "workspace" };
+
+function matches(pattern: string, pathname: string): boolean {
+  const want = pattern.split("/");
+  const got = pathname.replace(/\/+$/, "").split("/");
+  return want.length === got.length && want.every((seg, i) => seg.startsWith(":") ? got[i] !== "" : seg === got[i]);
+}
+
+/** The route an address belongs to; unknown addresses are "Not found" (platform ones in the console). */
+export function matchRoute(pathname: string): RouteInfo {
+  const def = ROUTES.find((r) => matches(r.pattern, pathname || "/"));
+  if (def) {
+    const { pattern: _pattern, ...info } = def;
+    return info;
   }
-  if (ownsPath("/manage", path) || ownsPath("/platform", path)) return false;
-  return Boolean(session);
+  return pathname.startsWith("/p/") ? { ...NOT_FOUND, mode: "platform" } : NOT_FOUND;
+}
+
+/** Whether a sidebar item is the current place. */
+export function isNavItemActive(item: NavItem, route: RouteInfo): boolean {
+  return route.nav === item.id;
+}
+
+/** Why the shell would not render a screen for this caller, if it wouldn't. */
+export function routeGate(route: RouteInfo, access: NavAccess): "permission" | "module" | null {
+  if (route.permission && !access.can(route.permission)) return "permission";
+  if (route.module && !access.hasModule(route.module)) return "module";
+  return null;
 }

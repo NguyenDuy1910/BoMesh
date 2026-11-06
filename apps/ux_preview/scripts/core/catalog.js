@@ -224,20 +224,20 @@ const facetsOn = () => FACETS.filter(f => !f.when || f.when());
 const SORTS_CATALOG = { relevance: 'Best match', updated: 'Recently updated', title: 'Title A–Z', popular: 'Most opened' };
 /** URL query → catalog params. Multi-value facets are comma lists. */
 function parseCatalogQuery(query = {}) {
-  const p = { q: (query.q || '').trim(), sort: SORTS_CATALOG[query.sort] ? query.sort : '', view: ['list', 'table', 'grid'].includes(query.view) ? query.view : 'list', filters: {} };
+  const p = { q: (query.q || '').trim(), sort: SORTS_CATALOG[query.sort] ? query.sort : '', view: query.view === 'list' ? 'list' : 'grid', filters: {} };
   facetsOn().forEach(f => { const v = (query[f.id] || '').split(',').filter(Boolean); if (v.length) p.filters[f.id] = f.single ? [v[0]] : v; });
   if (query.saved === '1') p.saved = true;
   return p;
 }
 /** Catalog params → query object for setQuery()/hrefs. */
 function catalogQueryOf(p) {
-  const q = { q: p.q || '', sort: p.sort || '', view: p.view && p.view !== 'list' ? p.view : '', saved: p.saved ? '1' : '' };
+  const q = { q: p.q || '', sort: p.sort || '', view: p.view === 'list' ? 'list' : '', saved: p.saved ? '1' : '' };
   facetsOn().forEach(f => { q[f.id] = (p.filters?.[f.id] || []).join(','); });
   return q;
 }
 /** '#/knowledge?…' (Browse) for a params patch, e.g. catalogHref({ filters: { topic: ['t-ml'] } }). */
 function catalogHref(p = {}) {
-  const qs = new URLSearchParams(Object.entries(catalogQueryOf({ view: 'list', ...p })).filter(([, v]) => v)).toString();
+  const qs = new URLSearchParams(Object.entries(catalogQueryOf({ view: 'grid', ...p })).filter(([, v]) => v)).toString();
   return '/knowledge' + (qs ? '?' + qs : '');
 }
 const activeFilterCount = p => Object.values(p.filters || {}).reduce((a, v) => a + v.length, 0) + (p.saved ? 1 : 0);

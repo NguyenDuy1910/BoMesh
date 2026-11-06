@@ -35,6 +35,7 @@ P.chats = () => {
 A['conv-open'] = el => go('/chat/' + el.dataset.id);
 MENUS['conv-row'] = el => [
   { label: 'Rename', icon: 'pencil', run: () => A['conv-rename'](el) },
+  ...(X.projects?.moveItems(convById(el.dataset.id)) || []),
   { sep: true },
   { label: 'Delete', icon: 'trash', danger: true, run: () => A['conv-delete'](el) },
 ];

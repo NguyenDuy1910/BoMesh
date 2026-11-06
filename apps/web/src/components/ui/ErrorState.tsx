@@ -1,74 +1,54 @@
 "use client";
 
+import { Button } from "@heroui/react";
 import { AlertCircle, RotateCw } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { ApiError } from "@/lib/api/client";
+import { EmptyState } from "./EmptyState";
 
-import { Button } from "@/components/ui/Button";
-import { Callout } from "@/components/ui/Callout";
-import { EmptyState } from "@/components/ui/EmptyState";
+const DEFAULT_TITLE = "This didn’t load";
+const DEFAULT_DESCRIPTION = "Check your connection and try again. Nothing was lost.";
 
-interface ErrorStateProps {
-  /** Defaults to "This didn’t load". */
-  title?: string;
-  /** What went wrong and what to do. Defaults to the reassuring generic line. */
-  description?: string;
-  /** The recovery action; usually a refetch. Without it no button is shown. */
-  onAction?: () => void;
-  /** Defaults to "Try again". */
-  actionLabel?: string;
-  /** `block` replaces a list or page region; `inline` sits inside a form, dialog or card. */
-  layout?: "block" | "inline";
-  /** Block layout only: the dashed outline. Defaults to `true`. */
+export interface ErrorStateProps {
+  /** The failure; a client-side API error (4xx) shows the server's message, anything else the generic copy. */
+  error?: unknown;
+  /** Retry handler (e.g. react-query `refetch`); the button shows progress while a returned promise runs. */
+  onRetry?: () => unknown;
+  title?: ReactNode;
+  description?: ReactNode;
+  /** Card surface around the state (default true, as in the preview). */
   boxed?: boolean;
-  className?: string;
+  compact?: boolean;
 }
 
-/**
- * A region that failed to load or an action that failed, with one way to
- * recover. Never shows a raw error code on its own.
- */
-export function ErrorState({
-  title,
-  description,
-  onAction,
-  actionLabel = "Try again",
-  layout = "block",
-  boxed = true,
-  className,
-}: ErrorStateProps) {
-  if (layout === "inline") {
-    return (
-      <Callout
-        actions={
-          onAction && (
-            <Button onClick={onAction} size="sm" variant="secondary">
-              {actionLabel}
-            </Button>
-          )
-        }
-        className={className}
-        title={title}
-        tone="err"
-      >
-        {description ?? "Something went wrong. Try again."}
-      </Callout>
-    );
-  }
-
+/** Load failure (preview `errorState()`): danger icon tile, plain copy, "Try again". */
+export function ErrorState({ error, onRetry, title = DEFAULT_TITLE, description, boxed = true, compact }: ErrorStateProps) {
+  const [retrying, setRetrying] = useState(false);
+  const detail = description ?? (error instanceof ApiError && error.status < 500 ? error.message : DEFAULT_DESCRIPTION);
+  const retry = async () => {
+    setRetrying(true);
+    try {
+      await onRetry?.();
+    } finally {
+      setRetrying(false);
+    }
+  };
   return (
     <EmptyState
-      action={
-        onAction && (
-          <Button icon={<RotateCw aria-hidden="true" className="h-4 w-4" />} onClick={onAction} variant="secondary">
-            {actionLabel}
-          </Button>
-        )
-      }
+      icon={AlertCircle}
+      tone="danger"
+      title={title}
+      description={detail}
       boxed={boxed}
-      className={className}
-      description={description ?? "Check your connection and try again. Nothing was lost."}
-      icon={<AlertCircle />}
-      title={title ?? "This didn’t load"}
-      tone="err"
+      compact={compact}
+      actions={
+        onRetry ? (
+          <Button variant="tertiary" isPending={retrying} onPress={retry}>
+            <RotateCw aria-hidden />
+            Try again
+          </Button>
+        ) : undefined
+      }
     />
   );
 }

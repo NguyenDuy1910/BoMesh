@@ -4,17 +4,21 @@
    template; destinations appear only when the workspace has the module on
    (core/workspace.js) and the caller has the permission. */
 
-/** Member destinations, filtered by workspace modules. */
+/** Member destinations, filtered by workspace modules. Conversations live under Projects and Recent (features/projects.js);
+    Inbox and the full conversation list stay reachable from ⌘K and links (`/inbox`, `/chats`). */
 function memberNav() {
   return [
     { id: 'home', label: 'Home', icon: 'home', to: '/home' },
-    { id: 'inbox', label: 'Inbox', icon: 'inbox', to: '/inbox', count: () => X.inboxUnread?.() || 0 },
+    { id: 'knowledge', label: 'Knowledge', icon: 'book', to: '/knowledge' },
     hasModule('work') && { id: 'work', label: 'Work', icon: 'sparkles', to: '/work' },
     hasModule('requests') && { id: 'requests', label: 'Requests', icon: 'clipboard', to: '/requests', count: () => X.requestsBadge?.() || 0 },
-    { id: 'knowledge', label: 'Knowledge', icon: 'book', to: '/knowledge' },
-    { id: 'chats', label: 'Conversations', icon: 'message', to: '/chats' },
   ].filter(Boolean);
 }
+/** Pages that are no longer in the sidebar but stay one ⌘K away. */
+const MORE_PAGES = [
+  { label: 'Inbox', icon: 'inbox', to: '/inbox' },
+  { label: 'All conversations', icon: 'message', to: '/chats' },
+];
 const MANAGE_NAV = [
   { id: 'overview', label: 'Overview', icon: 'home', to: '/overview', perm: 'tenant.manage' },
   { id: 'documents', label: 'Documents', icon: 'files', to: '/documents', perm: 'knowledge.manage', count: () => X.docsBadge?.() || 0 },
@@ -48,16 +52,13 @@ function sidebar() {
   let body = '';
   if (!platform) {
     body += `<div class="sidebar__group">${memberNav().map(n => navItem(n, cur.r.nav === n.id)).join('')}</div>`;
+    body += X.projects?.sidebar(cur) || '';
     if (hasModule('spaces')) {
       const mine = mySpaces();
       body += `<div class="sidebar__group"><div class="sidebar__group-label"><span>Spaces</span><a href="#/spaces" ${cur.r.nav === 'spaces' ? 'aria-current="page"' : ''}>All</a></div>${mine.slice(0, 8).map(sp => `<a class="nav-item" href="#/space/${sp.id}" ${cur.path === '/space/' + sp.id ? 'aria-current="page"' : ''} title="${esc(sp.name)}"><span class="space-dot" style="background:${esc(sp.color || 'var(--accent)')}" aria-hidden="true"></span><span class="nav-item__label">${esc(sp.name)}</span>${sp.code ? `<span class="nav-item__meta">${esc(sp.code)}</span>` : ''}</a>`).join('') || `<a class="nav-item nav-item--recent" href="#/spaces"><span class="nav-item__label">Find or create a space</span></a>`}</div>`;
     }
     const manage = MANAGE_NAV.filter(n => can(n.perm));
     if (manage.length) body += `<div class="sidebar__group"><div class="sidebar__group-label">Manage</div>${manage.map(n => navItem(n, cur.r.nav === n.id)).join('')}</div>`;
-    if (!hasModule('spaces')) {
-      const recents = myConvs().sort((a, b) => b.at - a.at).slice(0, 6);
-      if (recents.length) body += `<div class="sidebar__group"><div class="sidebar__group-label"><span>Recent</span></div>${recents.map(c => `<a class="nav-item nav-item--recent" href="#/chat/${c.id}" ${cur.path === '/chat/' + c.id ? 'aria-current="page"' : ''} title="${esc(c.title)}"><span class="nav-item__label">${esc(c.title)}</span></a>`).join('')}</div>`;
-    }
   } else {
     body += `<div class="sidebar__group">${PLATFORM_NAV.map(n => navItem(n, cur.r.nav === n.id)).join('')}</div>`;
     body += `<div class="sidebar__group"><div class="sidebar__group-label">Workspace</div><a class="nav-item" href="#${homeRoute()}">${ic('arrow-left')}<span class="nav-item__label">Back to ${esc(ws.name)}</span></a></div>`;

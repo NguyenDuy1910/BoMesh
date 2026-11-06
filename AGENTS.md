@@ -36,8 +36,8 @@ evaluation.md             retrieval and answer evaluation
 ```
 
 The backend implements this design: it serves the contract under `/api/v1`
-(routers in `backend/api/v1`, DTOs in `backend/api/dto`). The clients
-`apps/web` and `apps/mobile` still call the removed legacy routes and are
+(routers in `backend/api/v1`, DTOs in `backend/api/dto`). The web client
+`apps/web` uses it; `apps/mobile` still calls the removed legacy routes and is
 migrated next. Where code and design differ, the design wins;
 the remaining gaps are recorded as "Implementation status" notes in the design
 files. There is no legacy design document: do not recreate legacy contracts,

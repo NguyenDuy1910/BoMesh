@@ -1,214 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { turnWork } from "../src/modules/chat/work.ts";
-import { artifactSizeLabel, turnArtifacts } from "../src/modules/chat/artifacts.ts";
-import { ARTIFACT_ANNOTATION_TYPE, DOCUMENT_CITATION_TYPE } from "../src/modules/chat/types.ts";
-import type { ChatMessage, OutputTextAnnotation, TurnState } from "../src/modules/chat/types.ts";
-import type { ArtifactRevision, LocalArtifactRevision } from "../src/modules/chat/api.ts";
-import { conversationFiles } from "../src/modules/chat/components/files/conversation-files.ts";
-import { diffLines, diffMarkdown, diffSheet, sheetHasChanges } from "../src/modules/chat/components/files/diff.ts";
-import { exportFormatsFor, mergeFileRevisions } from "../src/modules/chat/components/files/file-model.ts";
-import { htmlToMarkdown, type MarkdownSourceNode } from "../src/modules/chat/components/files/html-markdown.ts";
-import { columnLetter, parseDelimited, sheetsFromBlocks, type Sheet } from "../src/modules/chat/components/files/sheet.ts";
-
-function artifact(overrides: Partial<Record<string, unknown>> = {}): OutputTextAnnotation {
-  return {
-    type: ARTIFACT_ANNOTATION_TYPE,
-    start_index: 18,
-    end_index: 18,
-    artifact: {
-      id: "artifact-1",
-      title: "Q3 memo",
-      file_name: "Q3-memo.md",
-      mime_type: "text/markdown",
-      revision: 1,
-      size_bytes: 2048,
-      updated_at: "2026-09-06T00:00:00+00:00",
-      ...overrides,
-    },
-  };
-}
-
-function turnWithAnnotations(perResponse: OutputTextAnnotation[][]): TurnState {
-  const responses: TurnState["responses"] = {};
-  const responseOrder: string[] = [];
-  perResponse.forEach((annotations, index) => {
-    const id = `response-${index}`;
-    responseOrder.push(id);
-    responses[id] = {
-      id,
-      status: "completed",
-      itemOrder: ["message"],
-      items: {
-        message: {
-          type: "message",
-          id: "message",
-          role: "assistant",
-          status: "completed",
-          content: [{ type: "output_text", text: "The memo is ready.", annotations }],
-        },
-      },
-    };
-  });
-  return { id: "turn", status: "completed", responses, responseOrder };
-}
-
-test("collects a produced file once, from its annotation", () => {
-  const artifacts = turnArtifacts(turnWithAnnotations([[artifact()]]));
-
-  assert.equal(artifacts.length, 1);
-  assert.deepEqual(artifacts[0], {
-    id: "artifact-1",
-    title: "Q3 memo",
-    fileName: "Q3-memo.md",
-    mimeType: "text/markdown",
-    revision: 1,
-    sizeBytes: 2048,
-    updatedAt: "2026-09-06T00:00:00+00:00",
-  });
-});
-
-test("a file presented twice keeps its newest revision and first position", () => {
-  const artifacts = turnArtifacts(turnWithAnnotations([
-    [artifact({ revision: 1 }), artifact({ id: "artifact-2", title: "Checklist" })],
-    [artifact({ revision: 2, size_bytes: 4096 })],
-  ]));
-
-  assert.deepEqual(artifacts.map((entry) => [entry.id, entry.revision]), [
-    ["artifact-1", 2],
-    ["artifact-2", 1],
-  ]);
-  assert.equal(artifacts[0]?.sizeBytes, 4096);
-});
-
-test("collects an explicitly exported workspace artifact from tool progress", () => {
-  const turn: TurnState = {
-    id: "turn-1",
-    status: "streaming",
-    responseOrder: [],
-    responses: {},
-    runtimeActivities: [{
-      callId: "export-1",
-      toolName: "export_sandbox_file",
-      state: "completed",
-      startedAt: 1,
-      progress: {
-        artifact: {
-          id: "artifact-1",
-          title: "Analysis",
-          file_name: "analysis.csv",
-          mime_type: "text/csv",
-          revision: 1,
-          size_bytes: 42,
-          updated_at: "2026-09-10T00:00:00Z",
-        },
-      },
-    }],
-  };
-
-  assert.deepEqual(turnArtifacts(turn), [{
-    id: "artifact-1",
-    title: "Analysis",
-    fileName: "analysis.csv",
-    mimeType: "text/csv",
-    revision: 1,
-    sizeBytes: 42,
-    updatedAt: "2026-09-10T00:00:00Z",
-  }]);
-});
-
-test("a container file citation never reaches the client as one", () => {
-  // The backend consumes the provider's own citation and republishes it as a
-  // Product file, so an unknown provider annotation contributes nothing.
-  const provider: OutputTextAnnotation = {
-    type: "container_file_citation",
-    container_id: "cntr_1",
-    file_id: "cfile_1",
-    filename: "/mnt/data/Q3-memo.md",
-  };
-
-  assert.deepEqual(turnArtifacts(turnWithAnnotations([[provider]])), []);
-});
-
-test("citation and unknown annotations are ignored", () => {
-  const citation: OutputTextAnnotation = {
-    type: DOCUMENT_CITATION_TYPE,
-    citation: { id: "e1", item_id: "item-1", chunk_id: "chunk-1" },
-  };
-  assert.deepEqual(turnArtifacts(turnWithAnnotations([[citation, { type: "file_path", path: "/x" }]])), []);
-  assert.deepEqual(turnArtifacts(undefined), []);
-});
-
-test("sizes read naturally", () => {
-  assert.equal(artifactSizeLabel(512), "512 B");
-  assert.equal(artifactSizeLabel(2048), "2.0 KB");
-  assert.equal(artifactSizeLabel(3 * 1024 * 1024), "3.0 MB");
-});
-
-test("a file revised within one turn shows once at its newest revision and reads as updated", () => {
-  const turn = turnWithAnnotations([
-    [artifact({ revision: 1 })],
-    [artifact({ revision: 3, size_bytes: 4096 }), artifact({ id: "artifact-2", title: "Totals", file_name: "totals.xlsx", revision: 1 })],
-  ]);
-
-  assert.deepEqual(turnArtifacts(turn).map(({ id, revision }) => [id, revision]), [["artifact-1", 3], ["artifact-2", 1]]);
-  assert.equal(turnWork(turn).summary, "Created 1 file · Updated 1 file");
-});
-
-function serverRevision(revision: number, extra: Partial<ArtifactRevision> = {}): ArtifactRevision {
-  return { revision, summary: `Agent version ${revision}`, size_bytes: 100 * revision, created_at: null, download_url: `https://files/${revision}`, ...extra };
-}
-
-function keptRevision(revision: number, restoredFrom: number | null = null): LocalArtifactRevision {
-  return {
-    revision,
-    summary: restoredFrom ? `Restored version ${restoredFrom}` : "Edited by you",
-    size_bytes: 10,
-    created_at: "2026-10-05T10:00:00Z",
-    download_url: null,
-    restored_from: restoredFrom,
-    content: `# Version ${revision}`,
-    mime_type: "text/markdown",
-  };
-}
-
-test("versions list the server's first, then the ones kept in this browser", () => {
-  const merged = mergeFileRevisions(
-    [serverRevision(2), serverRevision(1), serverRevision(2, { summary: "duplicate" })],
-    [keptRevision(4), keptRevision(3)],
-  );
-
-  assert.deepEqual(merged.map((entry) => [entry.revision, entry.local, entry.author]), [
-    [1, false, "assistant"],
-    [2, false, "assistant"],
-    [3, true, "you"],
-    [4, true, "you"],
-  ]);
-  assert.equal(merged[2]?.content, "# Version 3");
-  assert.equal(merged[2]?.downloadUrl, null);
-});
-
-test("a kept version whose number the assistant reused moves after the server's", () => {
-  const merged = mergeFileRevisions(
-    [serverRevision(1), serverRevision(2), serverRevision(3, { restored_from: 1 })],
-    [keptRevision(3, 2), keptRevision(4, 3)],
-  );
-
-  assert.deepEqual(merged.map((entry) => [entry.revision, entry.local, entry.restoredFrom]), [
-    [1, false, null],
-    [2, false, null],
-    [3, false, 1],
-    [4, true, 2],
-    [5, true, 4],
-  ]);
-  assert.equal(merged[2]?.author, "you", "a restore is a person's even without an author field");
-});
-
-test("the current revision is listed even when the server omits it from revisions", () => {
-  const merged = mergeFileRevisions([serverRevision(1)], [], serverRevision(2));
-  assert.deepEqual(merged.map((entry) => entry.revision), [1, 2]);
-});
+import { diffLines, diffMarkdown, diffSheet, sheetHasChanges } from "../src/modules/artifacts/diff.ts";
+import { htmlToMarkdown, type MarkdownSourceNode } from "../src/modules/artifacts/html-markdown.ts";
+import {
+  downloadOptions,
+  fileNameOf,
+  fileViewOf,
+  formatLabel,
+  revisionNumber,
+  toDelimited,
+  versionsOf,
+} from "../src/modules/artifacts/model.ts";
+import { columnLetter, parseDelimited, sheetFromDelimited, sheetsFromBlocks, type Sheet } from "../src/modules/artifacts/sheet.ts";
 
 test("Markdown changes are compared block by block, ignoring how a bullet is written", () => {
   const changes = diffMarkdown(
@@ -278,18 +82,6 @@ test("rows repeating a first cell are matched by occurrence", () => {
   assert.deepEqual(diff.rows.map((row) => row.cells[1]?.status), ["same", "changed"]);
 });
 
-test("download formats offered depend on what the file is", () => {
-  assert.deepEqual(exportFormatsFor("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "q3.xlsx"), ["csv", "pdf", "md"]);
-  assert.deepEqual(exportFormatsFor("text/csv", "q3.csv"), ["pdf", "md"]);
-  assert.deepEqual(exportFormatsFor("text/markdown", "plan.md"), ["pdf"]);
-  assert.deepEqual(exportFormatsFor("text/plain", "notes.txt"), ["pdf"]);
-  assert.deepEqual(exportFormatsFor("application/json", "data.json"), ["pdf", "md"]);
-  assert.deepEqual(exportFormatsFor("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "memo.docx"), ["pdf", "md"]);
-  assert.deepEqual(exportFormatsFor("application/pdf", "brief.pdf"), ["md"]);
-  assert.deepEqual(exportFormatsFor("image/png", "chart.png"), []);
-  assert.deepEqual(exportFormatsFor("application/zip", "bundle.zip"), []);
-});
-
 test("delimited text keeps quoted delimiters, quotes and line breaks", () => {
   assert.deepEqual(parseDelimited('\uFEFFName,Note\r\n"Acme, Inc.","said ""hi""\nthen left"\r\nBolt,\n\n'), [
     ["Name", "Note"],
@@ -297,6 +89,15 @@ test("delimited text keeps quoted delimiters, quotes and line breaks", () => {
     ["Bolt", ""],
   ]);
   assert.deepEqual([columnLetter(0), columnLetter(25), columnLetter(26), columnLetter(701)], ["A", "Z", "AA", "ZZ"]);
+});
+
+test("a cell edit round-trips through CSV", () => {
+  const sheet = sheetFromDelimited('Vendor,Note\nAcme,"a, b"\nBolt,"say ""hi"""\n', "Sheet1");
+  const rows = sheet.rows.map((row) => [...row]);
+  rows[1]![1] = "line\nbreak";
+  const text = toDelimited(sheet.columns, rows);
+  assert.equal(text, 'Vendor,Note\nAcme,"a, b"\nBolt,"line\nbreak"\n');
+  assert.deepEqual(parseDelimited(text), [["Vendor", "Note"], ["Acme", "a, b"], ["Bolt", "line\nbreak"]]);
 });
 
 test("a workbook rendition becomes named sheets", () => {
@@ -314,7 +115,9 @@ function element(nodeName: string, childNodes: MarkdownSourceNode[] = [], attrib
     nodeType: 1,
     nodeName,
     childNodes,
-    get textContent() { return childNodes.map((child) => child.textContent).join(""); },
+    get textContent() {
+      return childNodes.map((child) => child.textContent).join("");
+    },
     getAttribute: (name) => attributes[name] ?? null,
   };
 }
@@ -342,30 +145,36 @@ test("an edited document is saved back as Markdown", () => {
   ].join("\n\n") + "\n");
 });
 
-test("files in a chat: each made file once at its newest version, then attachments", () => {
-  const messages: Pick<ChatMessage, "id" | "role" | "parts" | "turn">[] = [
-    {
-      id: "u1",
-      role: "user",
-      parts: [
-        { type: "text", text: "Summarize", state: "done" },
-        { type: "data-document", data: { id: "doc-1", fileName: "vendors.xlsx", contentType: "application/vnd.ms-excel", sizeBytes: 10, mode: "indexed", status: "available" } },
-      ],
-    },
-    { id: "a1", role: "assistant", parts: [], turn: turnWithAnnotations([[artifact({ revision: 1 })]]) },
-    {
-      id: "u2",
-      role: "user",
-      parts: [{ type: "data-document", data: { id: "doc-1", fileName: "vendors.xlsx", contentType: "application/vnd.ms-excel", sizeBytes: 10, mode: "indexed", status: "available" } }],
-    },
-    { id: "a2", role: "assistant", parts: [], turn: turnWithAnnotations([[artifact({ revision: 2, size_bytes: 4096 })]]) },
-  ];
+test("the panel's shifted headings are saved at their file level", () => {
+  const root = element("DIV", [element("H2", [text("Title")]), element("H3", [text("Section")]), element("H6", [text("Deep")])]);
+  assert.equal(htmlToMarkdown(root, { headingOffset: 1 }), "# Title\n\n## Section\n\n##### Deep\n");
+});
 
-  const files = conversationFiles(messages);
-  assert.deepEqual(files.map((file) => [file.kind, file.id, file.messageId]), [
-    ["attached", "attached:doc-1", "u1"],
-    ["made", "made:artifact-1", "a1"],
+test("versions read oldest first with authors and default summaries", () => {
+  const versions = versionsOf([
+    { name: "workspaces/w/artifacts/a/revisions/3", author: "USER", changeSummary: "Edited B4", snapshot: { mimeType: "text/csv", sizeBytes: "120", text: "x" } },
+    { name: "workspaces/w/artifacts/a/revisions/1", author: "ASSISTANT", snapshot: { mimeType: "text/csv", sizeBytes: "100" } },
+    { name: "workspaces/w/artifacts/a/revisions/2", author: "USER", snapshot: { mimeType: "text/csv" } },
   ]);
-  const made = files.find((file) => file.kind === "made");
-  assert.equal(made?.kind === "made" && made.artifact.revision, 2);
+  assert.deepEqual(versions.map((v) => [v.n, v.author, v.summary, v.sizeBytes]), [
+    [1, "assistant", "First version", 100],
+    [2, "you", "Edited by you", 0],
+    [3, "you", "Edited B4", 120],
+  ]);
+  assert.equal(revisionNumber("workspaces/w/artifacts/a/revisions/12"), 12);
+  assert.equal(revisionNumber(undefined), 0);
+});
+
+test("files are shown, named and downloaded by type", () => {
+  assert.equal(fileViewOf("text/markdown"), "markdown");
+  assert.equal(fileViewOf("text/csv; charset=utf-8"), "csv");
+  assert.equal(fileViewOf("application/json"), "other");
+  assert.equal(fileViewOf("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"), "sheet");
+  assert.equal(fileViewOf("application/pdf"), "document");
+  assert.equal(fileNameOf({ displayName: "Claims over $500", mimeType: "text/csv" }), "Claims over $500.csv");
+  assert.equal(fileNameOf({ displayName: "memo.md", mimeType: "text/markdown" }), "memo.md");
+  assert.equal(formatLabel("application/vnd.openxmlformats-officedocument.wordprocessingml.document"), "Word document");
+  assert.deepEqual(downloadOptions("csv", "text/csv").map((o) => o.id), ["csv", "pdf"]);
+  assert.deepEqual(downloadOptions("markdown", "text/markdown").map((o) => o.id), ["docx", "pdf", "md"]);
+  assert.deepEqual(downloadOptions("sheet", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet").map((o) => [o.format, o.ext]), [["original", "xlsx"]]);
 });

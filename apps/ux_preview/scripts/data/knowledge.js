@@ -50,6 +50,15 @@
       'd-hr-parental': { kind: 'policy', topics: ['t-leave'], summary: '20 weeks fully paid leave for primary caregivers and 6 weeks for secondary caregivers from January 1, 2026.', version: 2, versions: [{ v: 2, at: ago(3 * HOUR), by: 'People Ops', note: 'Changed at the source — not reprocessed yet' }, { v: 1, at: ago(400 * DAY), by: 'People Ops', note: '2024 guidelines' }] },
       'd-fin-approvals': { kind: 'policy', topics: ['t-approvals'], summary: 'Who approves purchases and expense claims at each amount, from budget owner to CEO.' },
       'd-fin-reimb': { kind: 'sheet', topics: ['t-approvals'], summary: 'Q3 export of pending expense claims by employee, department and category.' },
+      'd-prod-3': { summary: 'Create, list and cancel orders through the REST API, with the order object and its error responses.' },
+      'd-prod-4': { summary: 'Get notified when orders are placed, paid or cancelled; verify signatures and handle retries.' },
+      'd-prod-5': { summary: 'How long order records, audit logs and backups are kept, and how customer data deletion works.' },
+      'd-prod-6': { summary: 'Connect Okta, Entra ID or Google Workspace so people sign in with SSO, then enforce it.' },
+      'd-prod-9': { summary: 'Sync customers, orders and invoices with SAP S/4HANA every 15 minutes.' },
+      'd-prod-11': { summary: 'Requests per minute for each plan and what to do when you get a 429.' },
+      'd-prod-12': { summary: 'What each API error code means and what to check first.' },
+      'd-prod-13': { summary: 'The services behind the Northwind platform and how they stay available.' },
+      'd-prod-14': { summary: 'What the product team plans to ship from July to December.' },
     });
     D.collections = [
       { id: 'col-nw-newhire', name: 'New hire essentials', desc: 'Read these in your first week.', owner: 'u-an', share: 'workspace', featured: true, created: ago(40 * DAY), updated: ago(5 * DAY),

@@ -1,213 +1,204 @@
 "use client";
 
+import { Button } from "@heroui/react";
+import { X } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { useCurrentWorkspace } from "@/components/shell/useCurrentWorkspace";
-import { Button } from "@/components/ui/Button";
-import { useToast } from "@/components/ui/Toast";
-import { cn } from "@/lib/cn";
-import { useModalLayer } from "@/lib/hooks/useModalLayer";
+import { IconButton } from "@/components/ui/IconButton";
+import { toast } from "@/components/ui/Toast";
 
-/** Prototype `POL_TOUR`: each step points at a `data-tour` anchor on the chat home or in the sidebar. */
-const STEPS = [
-  { anchor: "composer", title: "Ask in your own words", body: "Answers come from your company’s knowledge and cite every source they use." },
-  { anchor: "scope", title: "Choose what to search", body: "Search all knowledge, or narrow to the knowledge bases that matter for this question." },
-  { anchor: "starters", title: "Start from a suggestion", body: "Your admin picks these for the questions people ask most." },
-  { anchor: "knowledge", title: "Browse knowledge", body: "See every knowledge base you can use, and request access to locked ones." },
-  { anchor: "search", title: "Find anything with ⌘K", body: "Chats, documents, people and pages in one search." },
-] as const;
-
-const CARD_WIDTH = 300;
-const MARGIN = 12;
-const SPOT_PAD = 6;
-
-export interface TourController {
-  step: number | null;
-  start: () => void;
-  go: (delta: 1 | -1) => void;
-  stop: () => void;
-}
+import { getTourStep, setTourStep, useShellOverlays } from "./overlays";
 
 /**
- * The five-step first-run tour. It starts by itself once per account on the
- * chat home, and again whenever someone picks "Product tour".
+ * First-run product tour (preview `X.startTour`): four steps anchored to the
+ * chat home — composer, scope, starters — and the sidebar search. Steps whose
+ * anchor isn't on screen are skipped; Escape or Skip ends it.
+ * Anchors: `#chat-composer`, `#chat-scope`, `#chat-starters` (chat page) and
+ * `[data-tour="search"]` (sidebar).
  */
-export function useFirstRunTour(): TourController {
-  const router = useRouter();
-  const pathname = usePathname();
-  const toast = useToast();
-  const { session } = useCurrentWorkspace();
-  const [step, setStep] = useState<number | null>(null);
-  const [pending, setPending] = useState(false);
-  const seenKey = session ? `bomesh.tour.seen.${session.user_id}` : null;
+const TOUR = [
+  { sel: "#chat-composer", title: "Ask in your own words", body: "Answers come from your company knowledge and cite every source they use." },
+  { sel: "#chat-scope", title: "Choose what to search", body: "Search all knowledge, or narrow it to the knowledge bases that matter." },
+  { sel: "#chat-starters", title: "Start from a suggestion", body: "Common questions, picked by your workspace admin." },
+  { sel: '.sidebar [data-tour="search"]', title: "Find anything", body: "Search conversations, documents and pages, or press ⌘K." },
+];
+const TOUR_PATH = "/chat";
 
-  const start = useCallback(() => {
-    setStep(null);
-    setPending(true);
-    router.push("/chat");
-  }, [router]);
+/** Opens the chat home and starts the tour there. */
+export function startTour(): void {
+  setTourStep(0);
+}
 
-  // Show once the chat home is on screen: the first visit for this account, or on request.
-  useEffect(() => {
-    if (pathname !== "/chat" || !seenKey) return;
-    let firstRun = false;
-    try {
-      firstRun = !window.localStorage.getItem(seenKey);
-    } catch {
-      firstRun = false;
-    }
-    if (!pending && !firstRun) return;
-    const timer = window.setTimeout(() => {
-      try {
-        window.localStorage.setItem(seenKey, new Date().toISOString());
-      } catch {
-        // The tour may show again next time; nothing else depends on the flag.
-      }
-      setPending(false);
-      setStep(0);
-    }, 400);
-    return () => window.clearTimeout(timer);
-  }, [pathname, pending, seenKey]);
+function visibleSteps() {
+  const width = document.body.clientWidth;
+  return TOUR.filter((s) => {
+    const el = document.querySelector(s.sel);
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.right > 4 && r.left < width - 4;
+  });
+}
 
-  // The tour belongs to the chat home; leaving it ends the tour.
-  useEffect(() => {
-    if (pathname !== "/chat") setStep(null);
-  }, [pathname]);
-
-  const stop = useCallback(() => setStep(null), []);
-  const go = useCallback((delta: 1 | -1) => {
-    if (step === null) return;
-    const next = step + delta;
-    if (next < STEPS.length) {
-      setStep(Math.max(0, next));
-      return;
-    }
-    setStep(null);
-    toast.show({ message: "You’re all set. Ask your first question." });
-    window.requestAnimationFrame(() => {
-      document.querySelector<HTMLElement>('[data-tour="composer"] textarea, [data-tour="composer"] [contenteditable="true"]')?.focus();
-    });
-  }, [step, toast]);
-
-  return { step, start, go, stop };
+function focusComposer() {
+  document.querySelector<HTMLElement>("#chat-composer textarea, #chat-composer [contenteditable='true']")?.focus();
 }
 
 interface Placement {
-  spot: { left: number; top: number; width: number; height: number } | null;
+  ring: { left: number; top: number; width: number; height: number };
   card: { left: number; top: number };
 }
 
-function place(anchor: string, cardHeight: number): Placement {
-  const target = document.querySelector<HTMLElement>(`[data-tour="${anchor}"]`);
-  const rect = target?.getBoundingClientRect();
-  const width = window.innerWidth;
-  const height = window.innerHeight;
-  if (!rect || rect.width === 0 || rect.height === 0) {
-    return { spot: null, card: { left: (width - CARD_WIDTH) / 2, top: Math.max(MARGIN, (height - cardHeight) / 2) } };
-  }
-  let left: number;
-  let top: number;
-  if (rect.left < 260) {
-    // Sidebar anchors: the card sits to the right.
-    left = rect.right + 16;
-    top = rect.top;
-  } else {
-    left = rect.left + rect.width / 2 - CARD_WIDTH / 2;
-    top = rect.bottom + 14;
-    if (top + cardHeight > height - MARGIN) top = rect.top - cardHeight - 14;
-  }
-  return {
-    spot: { left: rect.left - SPOT_PAD, top: rect.top - SPOT_PAD, width: rect.width + SPOT_PAD * 2, height: rect.height + SPOT_PAD * 2 },
-    card: {
-      left: Math.max(MARGIN, Math.min(width - CARD_WIDTH - MARGIN, left)),
-      top: Math.max(MARGIN, Math.min(height - cardHeight - MARGIN, top)),
-    },
-  };
-}
+export function ProductTour({ onStart }: { onStart: () => void }) {
+  const { tour } = useShellOverlays();
+  const pathname = usePathname();
+  const router = useRouter();
+  const cardRef = useRef<HTMLDivElement>(null);
+  const nextRef = useRef<HTMLButtonElement>(null);
+  const arrived = useRef(false);
+  const [steps, setSteps] = useState<typeof TOUR>([]);
+  const [place, setPlace] = useState<Placement | null>(null);
 
-/** Prototype `polTourPaint`: a spotlight on the anchor and a callout card beside it. */
-export function ProductTour({ controller }: { controller: TourController }) {
-  const { step, go, stop } = controller;
-  const titleId = useId();
-  const cardRef = useRef<HTMLDivElement | null>(null);
-  const nextRef = useRef<HTMLButtonElement | null>(null);
-  const [placement, setPlacement] = useState<Placement | null>(null);
-  const open = step !== null;
+  const close = useCallback((done = false) => {
+    setTourStep(null);
+    arrived.current = false;
+    setSteps([]);
+    setPlace(null);
+    if (done) toast("You’re all set. Ask your first question.");
+    focusComposer();
+  }, []);
 
-  useModalLayer({ open, onClose: stop, panelRef: cardRef, initialFocusRef: nextRef, modal: false });
-
-  useLayoutEffect(() => {
-    if (step === null) {
-      setPlacement(null);
+  // Start: go to the chat home (closing the off-canvas sidebar), then wait for its anchors.
+  useEffect(() => {
+    if (tour == null) return;
+    if (pathname !== TOUR_PATH) {
+      if (arrived.current) {
+        // Left the chat home mid-tour: the tour ends.
+        setTourStep(null);
+        arrived.current = false;
+        setSteps([]);
+        setPlace(null);
+        return;
+      }
+      router.push(TOUR_PATH);
       return;
     }
-    const update = () => setPlacement(place(STEPS[step].anchor, cardRef.current?.offsetHeight ?? 180));
-    update();
-    window.addEventListener("resize", update);
-    window.addEventListener("scroll", update, true);
-    return () => {
-      window.removeEventListener("resize", update);
-      window.removeEventListener("scroll", update, true);
+    if (arrived.current) return;
+    arrived.current = true;
+    onStart();
+    let tries = 0;
+    let timer = 0;
+    const find = () => {
+      const found = visibleSteps();
+      if (found.length >= 3 || tries++ > 20) {
+        if (!found.length) {
+          setTourStep(null);
+          arrived.current = false;
+          return;
+        }
+        setSteps(found);
+      } else timer = window.setTimeout(find, 100);
     };
+    timer = window.setTimeout(find, 160);
+    return () => window.clearTimeout(timer);
+  }, [tour, pathname, router, onStart]);
+
+  const at = tour == null ? null : Math.min(tour, steps.length - 1);
+  const step = at != null && at >= 0 ? steps[at] : null;
+
+  // Position the ring around the anchor and the card next to it (re-done on resize).
+  useLayoutEffect(() => {
+    if (!step) return;
+    const paint = () => {
+      const target = document.querySelector(step.sel);
+      const card = cardRef.current;
+      if (!target || !card) return;
+      const r = target.getBoundingClientRect();
+      const W = document.body.clientWidth;
+      const H = document.body.clientHeight;
+      const pad = 6;
+      const cw = card.offsetWidth;
+      const ch = card.offsetHeight;
+      let left: number;
+      let top: number;
+      if (r.left < 260 && r.width < 300) {
+        left = r.right + 16;
+        top = r.top - 8;
+      } else {
+        left = r.left + r.width / 2 - cw / 2;
+        top = r.bottom + 14;
+        if (top + ch > H - 12) top = r.top - ch - 14;
+      }
+      setPlace({
+        ring: { left: r.left - pad, top: r.top - pad, width: r.width + pad * 2, height: r.height + pad * 2 },
+        card: { left: Math.max(12, Math.min(W - cw - 12, left)), top: Math.max(12, Math.min(H - ch - 12, top)) },
+      });
+    };
+    paint();
+    window.addEventListener("resize", paint);
+    return () => window.removeEventListener("resize", paint);
   }, [step]);
 
   useEffect(() => {
-    if (open) nextRef.current?.focus();
-  }, [open, step]);
+    if (place) nextRef.current?.focus();
+  }, [place, at]);
 
-  if (step === null) return null;
-  const current = STEPS[step];
-  const last = step === STEPS.length - 1;
+  // Escape ends the tour (when no dialog, menu or palette is open).
+  useEffect(() => {
+    if (!step) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || document.querySelector('[role="dialog"][aria-modal="true"], [role="menu"]')) return;
+      e.stopPropagation();
+      close();
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [step, close]);
 
-  return createPortal(
+  if (!step || at == null) return null;
+  const last = at === steps.length - 1;
+  const go = (d: number) => {
+    const n = (getTourStep() ?? 0) + d;
+    if (n >= steps.length) close(true);
+    else setTourStep(Math.max(0, n));
+  };
+
+  return (
     <>
-      {placement?.spot ? (
-        <div
-          aria-hidden="true"
-          className="pointer-events-none fixed z-[90] rounded-[var(--radius-sheet)] shadow-[0_0_0_9999px_var(--scrim)] transition-all duration-(--duration-base) ease-(--ease-standard) motion-reduce:transition-none"
-          style={placement.spot}
-        />
-      ) : (
-        <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-[90] bg-[var(--scrim)]" />
-      )}
+      <div className="chat-tour-ring" style={place ? place.ring : { visibility: "hidden" }} aria-hidden />
       <div
-        aria-labelledby={titleId}
-        className={cn(
-          "fixed z-[91] rounded-[var(--radius-xl)] bg-[var(--surface-raised)] p-4 shadow-[var(--shadow-modal)] motion-safe:animate-ui-pop",
-          !placement && "invisible",
-        )}
         ref={cardRef}
+        className="chat-tour"
         role="dialog"
-        style={{ width: CARD_WIDTH, left: placement?.card.left ?? 0, top: placement?.card.top ?? 0 }}
+        aria-labelledby="chat-tour-title"
+        style={place ? place.card : { visibility: "hidden", left: 0, top: 0 }}
       >
-        <div className="flex items-center justify-between">
-          <span className="font-mono text-[length:var(--text-size-caption)] font-medium text-[var(--text-tertiary)]">
-            {step + 1} of {STEPS.length}
+        <div className="row between">
+          <span className="t-xs muted num">
+            {at + 1} of {steps.length}
           </span>
-          <span aria-hidden="true" className="flex gap-1">
-            {STEPS.map((item, index) => (
-              <span
-                className={cn("size-1.5 rounded-full", index === step ? "bg-[var(--accent-primary)]" : "bg-[var(--border-default)]")}
-                key={item.anchor}
-              />
-            ))}
-          </span>
+          <IconButton icon={X} tip="Close tour" size="sm" onPress={() => close()} />
         </div>
-        <h3 className="mt-1.5 text-[length:var(--text-size-section)] font-semibold text-[var(--text-primary)]" id={titleId}>
-          {current.title}
+        <h3 className="t-subheading" id="chat-tour-title">
+          {step.title}
         </h3>
-        <p className="mt-1 text-[length:var(--text-size-meta)] text-[var(--text-secondary)]">{current.body}</p>
-        <div className="mt-3.5 flex items-center justify-between">
-          <Button onClick={stop} size="sm" variant="ghost">Skip tour</Button>
-          <div className="flex gap-2">
-            {step > 0 && <Button onClick={() => go(-1)} size="sm" variant="secondary">Back</Button>}
-            <Button onClick={() => go(1)} ref={nextRef} size="sm" variant="primary">{last ? "Done" : "Next"}</Button>
+        <p className="t-sm muted">{step.body}</p>
+        <div className="row between mt-8">
+          <Button variant="ghost" size="sm" onPress={() => close()}>
+            Skip
+          </Button>
+          <div className="row gap-8">
+            {at > 0 && (
+              <Button variant="tertiary" size="sm" onPress={() => go(-1)}>
+                Back
+              </Button>
+            )}
+            <Button ref={nextRef} variant="primary" size="sm" onPress={() => go(1)}>
+              {last ? "Done" : "Next"}
+            </Button>
           </div>
         </div>
       </div>
-    </>,
-    document.body,
+    </>
   );
 }

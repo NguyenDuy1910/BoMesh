@@ -1,0 +1,31 @@
+/* Platform console → Indexing (features/indexing.js): workspaces, errors, recent jobs, policies. Job metadata only. */
+
+.pix-min { min-width: 0; }
+.pix-nowrap { white-space: nowrap; }
+.pix-banner { margin-bottom: 8px; }
+.pix .table__cell--primary { min-width: 200px; }
+.pix .table__cell--actions { width: 1%; white-space: nowrap; }
+.pix-job { font-size: 13px; }
+
+/* Errors grouped by class */
+.pix-errs .item { align-items: center; }
+
+/* Policies */
+.pix-types { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; }
+.pix-size { display: flex; align-items: center; gap: 8px; }
+.pix-size .input { width: 120px; }
+.pix-settings code { font-size: 12px; }
+.pix-policy { padding-bottom: 8px; }
+
+@container app (max-width: 1023px) {
+  .pix .table__cell--primary { min-width: 160px; }
+}
+@container app (max-width: 760px) {
+  .pix .table__cell--primary { min-width: 0; }
+  .pix .table--stack .table__cell--actions { width: 100%; }
+  .pix .table--stack .table__cell--actions > .row { justify-content: flex-start; }
+  .pix-errs .item { flex-wrap: wrap; }
+}
+@container app (max-width: 679px) {
+  .pix-types { grid-template-columns: minmax(0, 1fr); }
+}

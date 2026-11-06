@@ -486,24 +486,28 @@ document.addEventListener('drop', e => {
   e.preventDefault(); const fs = [...(e.dataTransfer?.files || [])].map(f => ({ name: f.name, size: f.size })); if (fs.length) addFiles(fs, zone.dataset.drop);
 });
 
-/* Add from knowledge: reference documents instead of re-uploading */
+/* Add from knowledge: reference documents instead of re-uploading — to this message, or (wkPick.project) to a project. */
 function openPicker() { S.ui.wkPick = { q: '', sel: {} }; openModal('wk-pick'); }
 M['wk-pick'] = () => {
-  const p = ui('wkPick', { q: '', sel: {} }); const q = p.q.trim().toLowerCase(); const c = C().composer(C().composerKey());
-  const room = MAX - c.files.length; const n = Object.values(p.sel).filter(Boolean).length;
-  const docs = D.docs.filter(d => !d.archived && d.status !== 'unsupported' && C().canDoc(d) && !c.files.some(f => f.doc === d.id) && (!q || d.name.toLowerCase().includes(q)));
+  const p = ui('wkPick', { q: '', sel: {} }); const q = p.q.trim().toLowerCase();
+  const proj = p.project && X.projects?.byId(p.project), c = proj ? null : C().composer(C().composerKey());
+  const have = proj ? X.projects.docIds(proj.id) : c.files.map(f => f.doc);
+  const room = proj ? X.projects.room(proj.id) : MAX - c.files.length; const n = Object.values(p.sel).filter(Boolean).length;
+  const docs = D.docs.filter(d => !d.archived && d.status !== 'unsupported' && C().canDoc(d) && !have.includes(d.id) && (!q || d.name.toLowerCase().includes(q)));
   const groups = visibleKbs().filter(canReadKb).map(k => [k, docs.filter(d => d.kb === k.id)]).filter(([, l]) => l.length);
   const body = `<div class="search-field wk-pick__search">${ic('search')}${input({ id: 'wk-pick-q', bind: 'wkPick.q', value: p.q, placeholder: 'Search documents you can access', attrs: 'data-live aria-label="Search documents"', autofocus: true, size: 'sm' })}</div>
     ${groups.length ? groups.map(([k, l]) => `<div class="wk-pick__group"><div class="t-label mb-8">${esc(k.name)}</div>${l.slice(0, q ? 20 : 4).map(d => `<div class="wk-pick__row">${checkbox({ checked: !!p.sel[d.id], act: 'wk-pick-t', data: { id: d.id }, disabled: !p.sel[d.id] && n >= room, label: `${fileIcon(d.type, 'sm')}<span class="grow truncate">${esc(d.name)}</span><span class="t-xs muted none">${rel(d.updated)}</span>` })}</div>`).join('')}</div>`).join('')
       : emptyState({ icon: 'search', title: 'No documents match', desc: 'Try another word.', compact: true })}`;
-  return { size: 'lg', title: 'Add from knowledge', desc: 'The assistant reads these where they are. Nothing is copied, and access rules still apply.', body,
-    footStart: `<span class="t-sm muted">${room <= 0 ? 'This message already has 5 files' : `${n} of ${room} selected`}</span>`,
+  return { size: 'lg', title: proj ? `Add knowledge to ${proj.name}` : 'Add from knowledge', desc: proj ? 'Every new chat in this project starts with these. Nothing is copied, and access rules still apply.' : 'The assistant reads these where they are. Nothing is copied, and access rules still apply.', body,
+    footStart: `<span class="t-sm muted">${room <= 0 ? (proj ? 'This project already has 10 documents' : 'This message already has 5 files') : `${n} of ${room} selected`}</span>`,
     foot: btn('Cancel', { act: 'close-modal' }) + btn(n ? `Add ${plural(n, 'document')}` : 'Add documents', { v: 'primary', act: 'wk-pick-add', disabled: !n }) };
 };
 A['wk-pick-t'] = (el, e) => { e?.stopPropagation(); const p = ui('wkPick'); p.sel[el.dataset.id] = !p.sel[el.dataset.id]; refreshLayer(); };
 A['wk-pick-add'] = () => {
-  const p = ui('wkPick'); const c = C().composer(C().composerKey());
-  Object.entries(p.sel).filter(([, v]) => v).forEach(([id]) => { const d = docById(id); if (d && c.files.length < MAX && !c.files.some(f => f.doc === id)) c.files.push({ name: d.name, type: d.type, kind: 'ref', doc: id, ready: true }); });
+  const p = ui('wkPick'), ids = Object.entries(p.sel).filter(([, v]) => v).map(([id]) => id);
+  if (p.project) { const n = X.projects?.addDocs(p.project, ids) || 0; closeModal(); refresh(); if (n) toast(`Added ${plural(n, 'document')} to the project`); return; }
+  const c = C().composer(C().composerKey());
+  ids.forEach(id => { const d = docById(id); if (d && c.files.length < MAX && !c.files.some(f => f.doc === id)) c.files.push({ name: d.name, type: d.type, kind: 'ref', doc: id, ready: true }); });
   closeModal(); refresh(); C().focusComposer();
 };
 

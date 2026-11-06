@@ -1,9 +1,10 @@
 /* Resources: the shared building blocks every Knowledge surface uses to show
    and act on a resource — type and trust chips, provenance, the list row,
-   card and table row, the metadata list — and the shared actions: save,
-   add to a collection, ask, use in a workflow, edit details, link to spaces,
-   verify, copy link. Pages (hub.js, library.js, reader.js, knowledge.js,
-   spaces.js, governance.js) compose these; none re-implements them.
+   the document card (first-page thumbnail; Home, Browse grid) and table row,
+   the metadata list — and the shared actions: save, add to a collection, ask,
+   use in a workflow, edit details, link to spaces, verify, copy link. Pages
+   (home.js, hub.js, library.js, reader.js, knowledge.js, spaces.js,
+   governance.js) compose these; none re-implements them.
    Exports: X.res.*. Actions: res-*, col-new, col-edit. Model: core/catalog.js. */
 (() => {
   'use strict';
@@ -59,7 +60,8 @@
     const r = res(d), toks = tokens(q), k = kindMeta(r.kind);
     const snip = q ? resSnippet(d, q) : '';
     const meta = [esc(k.label), esc(r.kb?.name || ''), `Updated ${esc(rel(d.updated).replace(/^(Just now|Yesterday)$/, m => m.toLowerCase()))}`].filter(Boolean).join('<span class="res-dot" aria-hidden="true">·</span>');
-    const desc = compact ? '' : `<span class="res-row__summary">${snip || markTokens(r.summary, toks)}</span>`;
+    const about = compact ? '' : snip || markTokens(blurb(d), toks);
+    const desc = about ? `<span class="res-row__summary">${about}</span>` : '';
     const sel = select ? `<span class="res-row__check">${checkbox({ checked: !!ui(select).sel?.[d.id], act: 'sel-toggle', data: { ui: select, id: d.id }, aria: 'Select ' + d.name })}</span>` : '';
     return `<div class="${cx('res-row', active && 'is-active', compact && 'res-row--compact')}" role="button" tabindex="0" data-act="${act}" ${dataAttrs({ id: d.id, ...(data || {}) })} ${active ? 'aria-current="true"' : ''}>
       ${sel}<span class="res-row__lead">${fileIcon(d.type)}</span>
@@ -73,26 +75,112 @@
     </div>`;
   }
   const rows = (docs, opts) => `<div class="res-list">${docs.map(d => row(d, typeof opts === 'function' ? opts(d) : opts)).join('')}</div>`;
-  function card(d, { act = 'res-open', data } = {}) {
-    const r = res(d);
-    return `<div class="card card--action res-card" role="button" tabindex="0" data-act="${act}" ${dataAttrs({ id: d.id, ...(data || {}) })}>
-      <div class="res-card__top">${fileIcon(d.type)}<span class="grow"></span>${trustChip(d, { quiet: true })}${saveBtn(d)}</div>
-      <div class="res-card__title">${esc(d.name)}</div>
-      <div class="res-card__summary">${esc(r.summary)}</div>
-      <div class="res-card__foot">${appIcon(r.source.app, 'sm')}<span class="truncate">${esc(kindMeta(r.kind).label)} · ${esc(r.kb?.name || '')}</span></div>
-    </div>`;
+
+  /* ═══════════════ Document card + preview ═══════════════ */
+  const bare = n => String(n || '').replace(/\.[a-z0-9]{1,5}$/i, '');
+  const FMT_TONE = { pdf: 'danger', word: 'accent', sheet: 'success', slides: 'warning' };
+  const DOT = '<span class="res-dot" aria-hidden="true">·</span>';
+  const glanceCache = new Map();
+  /** What the rendition holds, cached per version: the first pages (ids dropped so previews can share them), length ("6 pages"),
+      layout (sheet, slides, text), its sections with their passages, and the opening paragraph. Null without a readable rendition. */
+  function glance(d) {
+    if (!X.docModel || !isSearchable(d)) return null;
+    const key = [S.ws, d.id, d.updated, d.status, d.name].join('|');
+    if (!glanceCache.has(key)) {
+      const m = X.docModel(d), first = m?.pages?.[0];
+      const layout = /doc-page--sheet/.test(first?.cls) ? 'sheet' : /doc-page--slide/.test(first?.cls) ? 'slides' : 'text';
+      const blocks = m?.blocks || [], sections = [];
+      blocks.forEach(b => { let s = sections.find(x => x.title === b.heading); if (!s) sections.push(s = { title: b.heading, page: b.page, blocks: [] }); s.blocks.push(b); });
+      glanceCache.set(key, first ? {
+        layout, sections, blocks,
+        pages: m.pages.slice(0, 2).map(p => ({ cls: p.cls || '', html: p.html.replace(/\sid="[^"]*"/g, '') })),
+        count: m.pages.length,
+        extent: layout === 'sheet' ? 'Spreadsheet' : plural(m.pages.length, layout === 'slides' ? 'slide' : 'page'),
+        opening: blocks.find(b => b.kind === 'p' && b.text)?.text || '',
+      } : null);
+    }
+    return glanceCache.get(key);
   }
-  const tableHead = () => `${th('Name')}${th('Type', 'table__column--hide-sm')}${th(hasModule('spaces') ? 'Space' : 'Owner', 'table__column--hide-sm')}${th('Trust')}${th('Updated')}${th('<span class="sr-only">Actions</span>', 'table__column--actions')}`;
-  function tableRow(d, { act = 'res-open', data, active = false } = {}) {
-    const r = res(d), sp = r.contexts.map(spaceById).filter(Boolean)[0];
-    const where = hasModule('spaces') ? (sp ? esc(sp.code || sp.name) : '<span class="muted">—</span>') : esc(r.owner || '—');
-    return `<tr class="table__row" data-act="${act}" ${dataAttrs({ id: d.id, ...(data || {}) })} tabindex="0" ${active ? 'aria-selected="true"' : ''}>
-      <td class="table__cell table__cell--primary"><div class="row gap-12">${fileIcon(d.type)}<div class="grow"><div class="cell-title truncate" title="${esc(d.name)}">${esc(d.name)}</div><div class="cell-sub truncate">${esc(r.kb?.name || '')}</div></div></div></td>
-      <td class="table__cell table__cell--hide-sm muted">${esc(kindMeta(r.kind).label)}</td>
-      <td class="table__cell table__cell--hide-sm">${where}</td>
-      <td class="table__cell">${trustChip(d) || statusChip(d) || '<span class="muted">—</span>'}</td>
-      <td class="table__cell muted res-nowrap" title="${esc(fmtDateTime(d.updated))}">${rel(d.updated)}</td>
-      <td class="table__cell table__cell--actions"><div class="row gap-4 none">${saveBtn(d)}${moreBtn(d)}</div></td></tr>`;
+  /** Sections people open each kind of document for — steps in a procedure, decisions in notes, findings in a report, rules in a policy.
+      Matched against the document's own section titles; a preview never invents content. */
+  const KEY_SECTION = {
+    procedure: /step|how|process|checklist/i, guide: /step|how|getting started|key/i, handbook: /how|key|work/i, playbook: /key|play|talk|step|pitch|how/i,
+    form: /step|checklist|require/i, notes: /decision|action|outcome|next/i, report: /finding|result|recommend|conclusion|key|summary/i,
+    policy: /rule|require|limit|approv|eligib|entitle|allowance|pay/i, spec: /endpoint|event|schema|object|decision|error|limit|auth|retention|component|code/i,
+    contract: /term|obligation|fee|payment|termination/i, calendar: /date|deadline|schedule/i,
+  };
+  const INTRO = /^(overview|purpose|welcome|introduction|summary|about|context|background|parties)$/i;
+  /** The best block for a query (most query words, earliest first). */
+  function matchBlock(g, toks) {
+    let best = null, bestN = 0;
+    g.blocks.forEach(b => { const low = fold(b.text), n = toks.filter(t => low.includes(t)).length; if (n > bestN) { best = b; bestN = n; } });
+    return best;
+  }
+  /** The section a preview shows: where the search matches (unless the title already explains the match); else the one this kind of
+      document is opened for (concrete, structured), skipping the introduction the summary already covers; else the first. */
+  function focusSection(d, g, toks) {
+    const titleHit = toks.length && toks.every(t => fold(d.name).includes(t));
+    const hit = toks.length && !titleHit ? matchBlock(g, toks) : null;
+    if (hit) return { section: g.sections.find(s => s.title === hit.heading), hit };
+    const re = KEY_SECTION[res(d).kind];
+    const score = (s, i) => (re?.test(s.title) ? 4 : 0) + (s.blocks.some(b => b.kind === 'li' || b.kind === 'row') ? 2 : 0) + (s.blocks.some(b => /\d/.test(b.text)) ? 1 : 0) - (INTRO.test(s.title) && g.sections.length > 1 ? 3 : 0) - i * 0.01;
+    return { section: g.sections.map((s, i) => [s, score(s, i)]).sort((a, b) => b[1] - a[1])[0]?.[0] };
+  }
+  const clip = (s, n) => (s.length > n ? s.slice(0, n).replace(/\s+\S*$/, '') + '…' : s);
+  /** Card preview. Sheets and slides show their first page (a grid, a slide); text documents show their most useful section at a readable size,
+      with the query highlighted when searching; no rendition → a tinted type tile. Decorative: the card's text says the same for assistive tech. */
+  function preview(d, { q = '' } = {}) {
+    const g = glance(d), toks = tokens(q);
+    if (g && g.layout !== 'text') {
+      const p = g.pages[0];
+      return `<div class="${cx('doc-thumb', g.layout === 'slides' && 'doc-thumb--slide')}" aria-hidden="true" inert><div class="doc-thumb__page"><div class="${cx('doc-page', p.cls)}">${p.html}</div></div></div>`;
+    }
+    const f = g?.sections.length ? focusSection(d, g, toks) : null;
+    if (f?.section) {
+      const s = f.section, items = s.blocks.filter(b => b.kind === 'li' || b.kind === 'row'), paras = s.blocks.filter(b => b.kind === 'p');
+      const from = f.hit ? Math.max(0, items.indexOf(f.hit)) : 0, shown = items.slice(from, from + 4);
+      const cells = b => b.text.split(' · ').map(x => { const i = x.indexOf(': '); return i > 0 && i < 40 ? [x.slice(0, i), x.slice(i + 2)] : ['', x]; });
+      const body = items.length < 2 || (f.hit && !items.includes(f.hit))
+        ? `<p>${markTokens(clip((f.hit || paras[0] || s.blocks[0]).text, 240), toks)}</p>`
+        : shown.every(b => b.kind === 'row')
+          ? `<table><thead><tr>${cells(shown[0]).map(([h]) => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${shown.map(b => `<tr>${cells(b).map(([, v]) => `<td>${markTokens(clip(v, 60), toks)}</td>`).join('')}</tr>`).join('')}</tbody></table>`
+          : `<ul>${shown.map(b => `<li>${markTokens(clip(b.text, 110), toks)}</li>`).join('')}</ul>`;
+      return `<div class="doc-thumb doc-thumb--focus" aria-hidden="true" inert><div class="doc-focus"><div class="doc-focus__head"><span class="doc-focus__title">${esc(s.title)}</span>${g.count > 1 ? `<span class="doc-focus__page">p. ${esc(String(f.hit?.page || s.page))}</span>` : ''}</div>${body}</div></div>`;
+    }
+    const k = kindMeta(res(d).kind), tone = FMT_TONE[formatOf(d)[0]] || 'default';
+    return `<div class="doc-thumb doc-thumb--blank doc-thumb--${tone}" aria-hidden="true">${fileIcon(d.type, 'lg')}<span class="doc-thumb__title">${esc(bare(d.name))}</span><span class="doc-thumb__kind">${ic(k.icon, 'i-xs')}${esc(k.label)}</span></div>`;
+  }
+  /** The passage that best matches a query: { where: "Page 2 · Approvals", html }. */
+  function matchPassage(d, q) {
+    const toks = tokens(q), g = glance(d);
+    const b = toks.length && g ? matchBlock(g, toks) : null;
+    return b ? { where: [g.layout !== 'sheet' && `Page ${b.page}`, b.heading].filter(Boolean).join(' · '), html: markTokens(clip(b.text, 220), toks) } : null;
+  }
+  /** One line on what a document is for: its summary, else its opening paragraph. Never a generated "Guide in …" filler. */
+  const blurb = d => d.summary || glance(d)?.opening || '';
+  /** Trust only where it changes a decision: a quiet Verified mark, a Review due chip; nothing for unverified or personal files. */
+  function trustMark(d) {
+    const t = trustOf(d);
+    if (t.state === 'verified') return `<span class="doc-card__ok" data-tip="${esc(t.note)}">${ic('shield-check', 'i-sm')}<span class="sr-only">Verified</span></span>`;
+    return t.state === 'review' ? chip(t.label, { tone: t.tone, icon: t.icon, size: 'sm', tip: t.note }) : '';
+  }
+  /** Document card (Knowledge grid): recognise a document and judge it without opening it. A content preview, the title, one line on
+      what it is for, its type and where it lives, and trust only when it matters. Save and ⋯ appear on hover/focus (always on touch).
+      opts: act + data (what selecting the card does, e.g. a quick preview), q (preview the matching section, highlight),
+      hide (['kb', 'topic']: context every card in the set shares, so it isn't repeated). */
+  function card(d, { act, data, q = '', hide = [] }) {
+    const r = res(d), g = glance(d), toks = tokens(q), k = kindMeta(r.kind), topic = r.topics[0];
+    const where = !hide.includes('topic') && topic ? topicName(topic) : !hide.includes('kb') ? r.kb?.name || '' : '';
+    const about = blurb(d);
+    return `<article class="doc-card" role="button" tabindex="0" data-act="${act}" ${dataAttrs({ id: d.id, ...(data || {}) })}>
+      <div class="doc-card__media">${preview(d, { q })}${g ? `<span class="doc-card__type">${fileIcon(d.type, 'sm')}</span><span class="doc-card__extent">${esc(g.extent)}</span>` : ''}
+        <div class="doc-card__actions">${saveBtn(d)}${moreBtn(d)}</div></div>
+      <div class="doc-card__body">
+        <h3 class="doc-card__title" title="${esc(d.name)}">${markTokens(bare(d.name), toks)}</h3>
+        ${about ? `<p class="doc-card__about">${markTokens(about, toks)}</p>` : ''}
+        <div class="doc-card__meta"><span class="doc-card__kind">${ic(k.icon, 'i-xs')}<span class="truncate">${esc(k.label)}${where ? DOT + esc(where) : ''}</span></span>${statusChip(d)}${trustMark(d)}</div>
+      </div>
+    </article>`;
   }
 
   /** Metadata list (About): what it is, where it lives, where it came from, who owns it, who can see it. */
@@ -113,7 +201,7 @@
     ]);
   }
 
-  X.res = { kindChip, trustChip, statusChip, saveBtn, moreBtn, provenance, topicChips, topicHref, demoChip, hubHeader, uploadBtn, row, rows, card, tableHead, tableRow, details, canEditRes, linkableSpaces };
+  X.res = { kindChip, trustChip, statusChip, saveBtn, moreBtn, provenance, topicChips, topicHref, demoChip, hubHeader, uploadBtn, row, rows, card, glance, blurb, matchPassage, details, canEditRes, linkableSpaces };
 
   /* ═══════════════ Actions ═══════════════ */
   A['res-open'] = el => { const { id, q } = el.dataset; go('/doc/' + id + (q ? '?q=' + encodeURIComponent(q) : '')); };

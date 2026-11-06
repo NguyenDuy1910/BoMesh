@@ -62,6 +62,17 @@ async def test_an_older_revision_exports_by_name(scene: Scene, runtime: AppRunti
     assert bad.status_code == 400  # type: ignore[attr-defined]
 
 
+async def test_a_non_latin_title_downloads_with_an_encoded_file_name(scene: Scene, runtime: AppRuntime) -> None:
+    artifact = await draft(scene, runtime, "body", displayName="Plan — Q4 \"final\"")
+
+    response = await export(scene, artifact["name"], "text/markdown")
+
+    assert response.status_code == 200  # type: ignore[attr-defined]
+    disposition = response.headers["content-disposition"]  # type: ignore[attr-defined]
+    assert "filename*=UTF-8''Plan%20%E2%80%94%20Q4%20%22final%22" in disposition
+    assert 'filename="Plan ? Q4 \'final\'' in disposition
+
+
 async def test_evidence_review_exports_and_withholds_per_reader(
     scene: Scene, runtime: AppRuntime, sessions: Sessions, world: World
 ) -> None:

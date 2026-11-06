@@ -1,0 +1,56 @@
+/* Projects (features/projects.js): sidebar folders and Recent, and the
+   project page (composer, Knowledge references, chats). Prefix: side-, proj-.
+   HeroUI tokens only. */
+
+/* ───── Sidebar: folders and conversations ───── */
+.sidebar__group-label .side-add { width: 24px; height: 24px; min-width: 24px; margin: -4px -4px -4px 0; }
+.side-conv { position: relative; display: flex; align-items: center; min-width: 0; }
+.side-conv > .nav-item { flex: 1 1 auto; min-width: 0; }
+/* ⋯ appears on hover or keyboard focus, never as a permanent column; always on touch. */
+.side-more { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 24px; height: 24px; min-width: 24px; opacity: 0; background: var(--default); transition: opacity var(--dur-fast); }
+.side-conv:hover > .side-more, .side-conv:focus-within > .side-more, .side-more[aria-expanded="true"] { opacity: 1; }
+.side-conv:hover > .nav-item, .side-conv:focus-within > .nav-item { padding-right: 32px; }
+@media (hover: none) { .side-more { opacity: 1; background: transparent; } .side-conv > .nav-item { padding-right: 32px; } }
+.side-proj__toggle { height: 34px; gap: 10px; }
+.side-proj__toggle[aria-expanded="true"] .i { color: var(--foreground); }
+.side-kids { display: flex; flex-direction: column; gap: 1px; margin: 1px 0 4px 17px; padding-left: 8px; border-left: 1px solid var(--separator); }
+.side-kids .nav-item--recent { height: 30px; }
+.side-kids__new, .side-kids__more { color: var(--muted); }
+.side-kids__new { gap: 8px; }
+.side-kids__new .i { color: inherit; }
+
+/* ───── Project page ───── */
+.proj { display: flex; flex-direction: column; gap: 28px; padding-top: 40px; }
+.proj-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.proj-head__icon { display: grid; place-items: center; width: 40px; height: 40px; flex: none; border-radius: var(--radius-xl); background: var(--default); color: var(--default-foreground); }
+.proj-head__title { flex: 1 1 auto; min-width: 0; font-size: 24px; line-height: 32px; font-weight: 600; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.proj-ask { position: relative; }
+.proj-sec { min-width: 0; }
+.proj-sec__head { display: flex; align-items: baseline; gap: 10px; min-height: 32px; margin-bottom: 8px; }
+.proj-sec__head > .button { align-self: center; }
+.proj-sec__title { font-size: 15px; line-height: 22px; font-weight: 600; }
+.proj-sec__note { font-size: 12px; line-height: 16px; color: var(--muted); }
+.proj-empty { font-size: 13px; line-height: 19px; color: var(--muted); }
+
+.proj-docs { display: flex; flex-wrap: wrap; gap: 8px; }
+.proj-doc { display: inline-flex; align-items: center; gap: 2px; max-width: 100%; height: 36px; padding: 0 2px 0 4px; border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); }
+.proj-doc__link { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 280px; height: 32px; padding: 0 6px; border-radius: var(--radius-md); color: var(--foreground); font-size: 13px; }
+.proj-doc__link:hover { background: var(--default-soft); }
+.proj-doc__link:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.proj-doc__x { width: 26px; height: 26px; min-width: 26px; }
+
+.proj-chats { display: flex; flex-direction: column; background: var(--surface); border-radius: var(--radius-2xl); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); overflow: hidden; }
+.proj-chat { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 4px 8px 4px 4px; }
+.proj-chat + .proj-chat { border-top: 1px solid var(--separator); }
+.proj-chat__link { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; padding: 8px 12px; border-radius: var(--radius-lg); color: var(--foreground); }
+.proj-chat__link:hover { background: var(--default-soft); }
+.proj-chat__link:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.proj-chat__title { font-size: 14px; line-height: 20px; font-weight: 500; }
+.proj-chat__last { font-size: 13px; line-height: 18px; color: var(--muted); }
+.proj-chat__at { flex: none; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+@container app (max-width: 679px) {
+  .proj { gap: 22px; padding-top: 20px; }
+  .proj-head__title { font-size: 20px; line-height: 28px; }
+  .proj-chat__at { display: none; }
+}

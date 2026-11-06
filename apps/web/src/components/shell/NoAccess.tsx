@@ -1,27 +1,30 @@
+"use client";
+
+import { buttonVariants } from "@heroui/react";
 import { Lock } from "lucide-react";
+import Link from "next/link";
 
-import { Page } from "@/components/shell/Page";
-import { ButtonLink } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { Page } from "@/components/ui/Page";
 
-/**
- * What a caller sees on an address they may not open (prototype `noAccess()`).
- * It never says which permission is missing — the sidebar already shows
- * everything this person can use.
- */
+/** A screen the caller may not open (preview `noAccessPage`, also used for the platform console). Renders no data. */
 export function NoAccess() {
   return (
     <Page>
       <EmptyState
-        action={(
-          <>
-            <ButtonLink href="/knowledge" variant="primary">Go to Knowledge</ButtonLink>
-            <ButtonLink href="/chat">New chat</ButtonLink>
-          </>
-        )}
-        description="Ask a workspace admin if you need it. Everything you can use is in the sidebar."
-        icon={<Lock aria-hidden="true" />}
+        icon={Lock}
         title="You don’t have access to this page"
+        description="Ask a workspace admin if you need it. Everything you can use is in the sidebar."
+        actions={
+          <>
+            <Link href="/home" className={buttonVariants({ variant: "primary" })}>
+              Go home
+            </Link>
+            <Link href="/knowledge" className={buttonVariants({ variant: "tertiary" })}>
+              Browse knowledge
+            </Link>
+          </>
+        }
       />
     </Page>
   );

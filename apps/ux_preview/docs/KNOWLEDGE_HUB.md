@@ -37,12 +37,13 @@ The resource type ("Policy", "Procedure", "Spec"…) maps to `items.document_typ
 ## Information architecture
 
 ```text
-Home (/home, core) ─── search/ask with scope · suggested questions · Explore (Topics · Knowledge bases · Collections)
-                       · Featured · Recently published · Recommended · Pick up where you left off  (see HOME.md)
+Home (/home, core) ─── one box to ask or find (scope, suggestions) · Pick up where you left off · Worth knowing (source-backed changes)
+                       · Start here / Recommended for you · Explore by topic  (see HOME.md)
 Knowledge (one sidebar item) ─ section tabs:
-├── Browse (/knowledge) ─ facets: Saved views · Topic · Space · Type · Owner · Source · Knowledge base · Trust · Updated · Format · Language
-│                      results: list / table / grid · sort · active-filter chips · Save view · Ask about these results
-│                      preview panel (≥ 1200 px) → Reader
+├── Browse (/knowledge) ─ one search field (Ask AI appears beside it once there is a query) · topic shortcuts (domains, then a domain's topics)
+│                      Continue reading (landing only) · document grid (or list) · sort · Filters drawer (Saved views · Topic · Space · Type · Owner ·
+│                      Source · Knowledge base · Trust · Updated · Format · Language) · removable chips · Save view
+│                      card → quick preview (drawer, ≥ 760 px) → Reader; on phones a card opens the Reader
 ├── My library ─────── Saved · Recent · Contributions · My files · Collections · Saved views
 │    └── Collection ── ordered items with notes · Ask about this collection · Use in… · edit order and notes · add resources
 └── Knowledge bases ── governed homes (access, sources, settings) · locked bases → Request access
@@ -52,6 +53,39 @@ Manage › Documents ─── Review · All documents · Quality · Topics (see
 ```
 
 All routes and their purposes are listed in [SCREEN_INVENTORY.md](SCREEN_INVENTORY.md).
+
+## Browse: content first
+
+People come to Knowledge to find and use information, not to manage files. So most of the page is documents, recognisable without opening them; everything else stays out of the way until someone asks for it.
+
+```text
+Knowledge header (Browse · My library · Knowledge bases)                   [Contribute]
+[ Search 230 documents                                        ✕  ✦ Ask AI ]   ← Ask AI only with a query
+(All) (Engineering & Architecture) (Data Platform…) (Banking Operations) …   ← topic shortcuts
+   (All Engineering) (Architecture decisions 20) (APIs 14) …                 ← only when a domain is chosen
+[Type: Technical reference ×]  Clear all                      Save view    ← only when filtered
+Continue reading: up to 3 recent documents                                 ← landing only, only with history
+All documents · 230             [✦ Ask about these] [Filters · n] [Sort ▾] [▦ ☰]
+┌ preview ┐ ┌ preview ┐ ┌ preview ┐   three cards a row on desktop, one on phones
+└ title, what it's for, type · topic, ✓ ┘ …
+```
+
+**Decisions.**
+- **No permanent filter rail and no permanent preview panel.** Together they took about half the width. Topic is the one dimension people browse by, so it stays visible as shortcuts; every other facet lives in the Filters drawer and shows as removable chips. The drawer keeps everything the rail had (topic tree, counts, saved views, *Only documents I saved*), so no capability was lost.
+- **Search and Ask stay separate.** Typing always searches documents. *Ask AI* appears in the field once there is a query and turns it into a cited conversation over these results (without a query, filtered results offer *Ask about these*). One AI entry point at a time.
+- **The landing is the catalog.** With no query or filter the page shows *Continue reading* (only if there is history) and all documents, newest first. Featured, recommended and recently published stay on Home; Browse doesn't repeat them.
+- **Grid by default, list for dense scanning.** The table layout was removed: the list already scans densely and the table only repeated it.
+
+**Document card** (`X.res.card`):
+- **Preview** shows content, not chrome. Text documents show their most useful section at a readable size: steps in procedures and guides, decisions in notes, findings or recommendations in reports, rules and eligibility in policies, endpoints and limits in technical references; tables keep their columns. When searching, it shows the section that matches, from the matching line, with the words highlighted, unless the title already explains the match. Spreadsheets and slides show their first page. The section is chosen from the document's own section titles; nothing is generated or presented as an insight. Without a rendition the card shows a tinted type tile.
+- **Text**: the title (no file extension; the format badge shows it), one line on what the document is for (its summary, else its opening paragraph; never a generated "Guide in Product Documentation" line), then type · topic (or base). Topic and base are left out when every card shares them. Trust appears only when it matters: a quiet ✓ for Verified (the tooltip says who and when), a *Review due* chip; nothing for unverified or personal files. Freshness, owner and source live in the preview.
+- **Actions**: the whole card opens the quick preview (Enter or Space too); Save and ⋯ appear on hover or keyboard focus (always on touch), and a saved document keeps its bookmark visible. Double-click opens the Reader.
+
+**Quick preview** (drawer, `cat-peek`): what the document is for, the matching passage with its page and section, trust with who verified it, the real first two pages (click to open the Reader), *Inside* (its sections), and *Details* behind a disclosure. Footer: *Ask about this document* · *Add to collection* · **Open**. Save and ⋯ sit in the header. On phones (< 760 px) the extra step adds nothing, so a card opens the Reader directly.
+
+**States.** Loading shows the search, pills and card skeletons. No results offers *Clear search*, *Clear filters* and *Ask AI*. Long titles clamp to two lines with the full name as a tooltip. A document without a summary or rendition still gets a typed tile and its type. Locked bases show the *Some knowledge bases aren't shared with you* link; their documents never appear.
+
+**Prototype data.** Northwind's product documentation (`d-prod-3`…`d-prod-14`) has authored renditions and summaries so its cards differ the way real documents do; the other generated documents use templates, so some previews look alike.
 
 ## Journeys
 
@@ -77,7 +111,7 @@ All routes and their purposes are listed in [SCREEN_INVENTORY.md](SCREEN_INVENTO
 | --- | --- | --- |
 | Model | `scripts/core/catalog.js` | Resource kinds, topics, `res(doc)`, trust, access-aware pools, search (accent-insensitive, stop words, weighted fields), facets and URL state, saved/recent/views, collections, related, governance signals |
 | Data | `scripts/data/knowledge.js` | Taxonomies (domains with icon, colour and description for Home), metadata, the Finx catalog (Confluence wiki, SharePoint policies and procedures, Google Drive product docs, GitHub payments docs, uploads; a few Vietnamese titles), featured documents, collections, saved/recent/views, duplicate seeds |
-| Shared UI | `scripts/features/resources.js` + `styles/pages/resources.css` | Knowledge header and tabs, resource row/card/table, trust/type chips, details list, save, add to collection, edit details, link to spaces, verify, collection create/edit |
+| Shared UI | `scripts/features/resources.js` + `styles/pages/resources.css` | Knowledge header and tabs, resource row, document card with content preview, trust/type chips, details list, save, add to collection, edit details, link to spaces, verify, collection create/edit |
 | Pages | `home.js` (Home), `hub.js` (Browse), `library.js` (My library, Collection, Contributions), `knowledge.js` (bases), `reader.js` (Reader), `contribute.js` (Contribute dialog), `curation.js` + `governance.js` (Manage → Documents), `documents.js` (renditions and document operations) | |
 
 ## Backend alignment and open decisions

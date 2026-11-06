@@ -5,7 +5,7 @@
 const DEMO_WORKSPACES = [['ws-northwind', 'Northwind'], ['ws-finx', 'Finx']];
 const JOURNEYS = [
   { ws: 'ws-northwind', who: 'member', title: 'Sign in and ask a question', run: () => { S.signedIn = false; go('/signin'); } },
-  { ws: 'ws-northwind', who: 'member', title: 'Start from the knowledge-first Home', run: () => go('/home') },
+  { ws: 'ws-northwind', who: 'member', title: 'Start from Home: ask, find or pick up', run: () => go('/home') },
   { ws: 'ws-northwind', who: 'member', title: 'Verify where an answer came from', run: () => goThen('/chat/c1', () => A['cite-open']?.({ dataset: { msg: 'm2', n: '1' } })) },
   { ws: 'ws-northwind', who: 'member', title: 'Find verified sales material', run: () => go('/knowledge?topic=d-sales&trust=verified') },
   { ws: 'ws-northwind', who: 'member', title: 'Request access to restricted knowledge', run: () => go('/knowledge/bases') },
@@ -20,7 +20,7 @@ const JOURNEYS = [
   { ws: 'ws-northwind', who: 'admin', title: 'Approve an access request', run: () => go('/people?tab=requests') },
   { ws: 'ws-northwind', who: 'admin', title: 'Add people and set their role', run: () => goThen('/people', () => A['member-add']?.()) },
   { ws: 'ws-northwind', who: 'admin', title: 'Turn on Spaces for Northwind', run: () => go('/settings?tab=setup') },
-  { ws: 'ws-finx', who: 'engineer', title: 'Start from Home: explore, search or ask', run: () => go('/home') },
+  { ws: 'ws-finx', who: 'engineer', title: 'Start from Home: ask, find or pick up', run: () => go('/home') },
   { ws: 'ws-finx', who: 'engineer', title: 'Ask how to get production access, then request it', run: () => go('/chat/fx-c1') },
   { ws: 'ws-finx', who: 'engineer', title: 'Request production access (rules checked first)', run: () => go('/requests/new?type=rt-prod') },
   { ws: 'ws-finx', who: 'engineer', title: 'Read an architecture decision with AI beside it', run: () => go('/doc/fx-eng-adr031') },
@@ -34,7 +34,7 @@ const JOURNEYS = [
   { ws: 'ws-finx', who: 'analyst', title: 'Find how a metric is defined', run: () => go('/knowledge?topic=t-metrics') },
   { ws: 'ws-finx', who: 'analyst', title: 'Ask about active customers', run: () => go('/chat/fx-c3') },
   { ws: 'ws-finx', who: 'analyst', title: 'Request production access without the training', run: () => go('/requests/new?type=rt-prod') },
-  { ws: 'ws-finx', who: 'wsadmin', title: 'Feature trusted documents on Home', run: () => go('/home') },
+  { ws: 'ws-finx', who: 'wsadmin', title: 'Recommend trusted documents on Home', run: () => go('/home') },
   { ws: 'ws-finx', who: 'wsadmin', title: 'Publish an updated procedure as a new version', run: () => go('/documents?tab=review&sel=fx-sub-4') },
   { ws: 'ws-finx', who: 'wsadmin', title: 'Approve a topic the assistant proposed', run: () => go('/documents?tab=topics') },
   { ws: 'ws-finx', who: 'wsadmin', title: 'Fix a document that couldn’t be published', run: () => go('/documents?tab=all&life=attention') },

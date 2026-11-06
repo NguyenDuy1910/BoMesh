@@ -1,0 +1,76 @@
+/* People (ppl-) and Activity (act-) */
+
+/* Shared bits */
+.ppl-nowrap, .act-when { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ppl-tip { display: inline-flex; border-radius: var(--field-radius); }
+.ppl-tip:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.ppl-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.ppl-full { max-width: none; }
+
+/* Members table */
+.ppl-role-select { width: auto; min-width: 156px; max-width: 200px; }
+.ppl-checks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; }
+
+/* Add people: multi-email chip input */
+.ppl-chipin { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 40px; padding: 6px 8px; border-radius: var(--field-radius); background: var(--field-background); box-shadow: var(--field-shadow), inset 0 0 0 1px var(--border); cursor: text; transition: box-shadow var(--dur-fast); }
+.ppl-chipin:focus-within { box-shadow: var(--field-shadow), 0 0 0 2px var(--focus); }
+.ppl-chipin.is-invalid { box-shadow: 0 0 0 1px var(--danger); }
+.ppl-chipin.is-invalid:focus-within { box-shadow: 0 0 0 2px var(--danger); }
+.ppl-chipin__input { flex: 1 1 160px; min-width: 120px; height: 26px; border: 0; background: transparent; color: var(--foreground); font-size: 14px; padding: 0 4px; }
+.ppl-chipin__input:focus { outline: none; }
+.ppl-chipin__input::placeholder { color: var(--field-placeholder); }
+.ppl-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; height: 26px; padding: 0 2px 0 4px; border-radius: var(--radius-2xl); background: var(--default); color: var(--default-foreground); font-size: 13px; font-weight: 500; }
+.ppl-chip.is-invalid { background: var(--danger-soft); color: var(--danger-soft-foreground); padding-left: 8px; }
+.ppl-chip__x { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; color: inherit; opacity: .7; flex: none; }
+.ppl-chip__x:hover { opacity: 1; background: var(--default-hover); }
+.ppl-chip__x:focus-visible { outline: 2px solid var(--focus); }
+
+/* Groups */
+.ppl-group { gap: 10px; }
+.ppl-group__desc { min-height: 36px; }
+.ppl-fresh { animation: pplflash 1.6s var(--ease-out); }
+@keyframes pplflash { 0% { box-shadow: 0 0 0 2px var(--accent); } }
+
+/* Roles: list + editor */
+.ppl-roles { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 24px; align-items: start; }
+.ppl-roles__nav { position: sticky; top: 0; }
+.ppl-roles__label { padding: 0 4px 8px; font-size: 12px; font-weight: 500; color: var(--muted); }
+.ppl-roles__label:not(:first-child) { margin-top: 16px; }
+.ppl-role-item { padding: 10px 14px; }
+.ppl-role-item.is-active { background: var(--accent-soft); }
+.ppl-role-item.is-active .item__title { color: var(--accent-soft-foreground); }
+@media (hover: hover) { .ppl-role-item.is-active:hover { background: var(--accent-soft); } }
+.ppl-roles__main { min-width: 0; }
+.ppl-perm-group { padding-top: 16px; border-top: 1px solid var(--separator); }
+.ppl-perm-group .switch-row { padding: 10px 0; }
+
+/* Requests */
+.ppl-req { align-items: flex-start; }
+.ppl-req .item__lead { padding-top: 2px; }
+.ppl-req .item__title { font-weight: 400; }
+.ppl-req .item__title .truncate { white-space: normal; overflow: visible; }
+.ppl-req .item__desc { display: flex; flex-direction: column; gap: 4px; }
+.ppl-req__note { display: block; margin-top: 4px; padding: 6px 10px; border-left: 2px solid var(--border); color: var(--foreground); font-size: 13px; line-height: 18px; }
+.ppl-req__note::before { content: "“"; } .ppl-req__note::after { content: "”"; }
+.ppl-req__time { font-size: 12px; }
+.ppl-req .item__trail { align-self: center; }
+
+/* Activity */
+.act-sys { color: var(--muted); }
+.act-target { display: block; max-width: 260px; }
+
+@container app (max-width: 1023px) {
+  .ppl-roles { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .ppl-roles__nav { position: static; }
+}
+@container app (max-width: 760px) {
+  .ppl-role-select { min-width: 140px; }
+}
+@container app (max-width: 679px) {
+  .ppl-checks { grid-template-columns: minmax(0, 1fr); }
+  .ppl-req { flex-wrap: wrap; }
+  .ppl-req .item__body { flex: 1 1 calc(100% - 52px); }
+  .ppl-req .item__trail { width: 100%; justify-content: flex-end; }
+  .act-toolbar .toggle-group { order: 5; }
+  .act-toolbar .toolbar__end { order: 6; }
+}

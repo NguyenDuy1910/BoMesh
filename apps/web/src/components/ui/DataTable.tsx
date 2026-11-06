@@ -1,481 +1,302 @@
 "use client";
 
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, ChevronsUpDown, SearchX, X } from "lucide-react";
-import { useMemo, useState } from "react";
-
-import { Button } from "@/components/ui/Button";
-import { Checkbox } from "@/components/ui/Checkbox";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { ErrorState } from "@/components/ui/ErrorState";
-import {
-  compareSortValues,
-  nextSort,
-  pagerRange,
-  selectionState,
-  type SortState,
-  toggleAllSelection,
-  toggleSelection,
-} from "@/components/ui/interaction";
-import { SkeletonRows } from "@/components/ui/Skeleton";
-import { cn } from "@/lib/cn";
-
-export type { SortState } from "@/components/ui/interaction";
+import { Checkbox, Dropdown, Label, Table } from "@heroui/react";
+import type { Selection, SortDescriptor } from "@heroui/react";
+import { ArrowUp, ChevronsUpDown, MoreHorizontal, X, type LucideIcon } from "lucide-react";
+import clsx from "clsx";
+import { useMemo, useState, type ReactNode } from "react";
+import { IconButton } from "./IconButton";
 
 export interface DataTableColumn<T> {
+  /** Stable column id (also the sort key). */
   id: string;
-  header: React.ReactNode;
-  cell: (row: T) => React.ReactNode;
-  sortable?: boolean;
-  /** Value for built-in sorting when `sort` is uncontrolled. Defaults to `row[id]`. */
-  sortValue?: (row: T) => unknown;
-  /** `right` for numbers (tabular figures). */
-  align?: "left" | "right";
-  width?: number | string;
-  minWidth?: number | string;
-  /** Hide the column when the viewport is at or below this width. Detail columns only — never name or status. */
-  hideBelow?: 1080 | 900;
+  /** Header label (a node for visually hidden headers, e.g. `<span className="sr-only">Actions</span>`). */
+  header: ReactNode;
+  /** Cell content for a row. */
+  cell: (row: T) => ReactNode;
+  /**
+   * Makes the column sortable. With client-side sorting (no `onSortChange`) the rows are
+   * ordered by this value; with server-side sorting any function enables the header.
+   */
+  sortValue?: (row: T) => string | number | boolean | null | undefined;
+  /** Right-align (numbers). */
+  align?: "start" | "end";
+  /** The row's main cell: row header, and the title of the card row below 760 px. Defaults to the first column. */
+  primary?: boolean;
+  /** Hide in the card-row layout (< 760 px). */
+  hideOnMobile?: boolean;
+  /** Prefix shown before the value in the card-row layout ("Updated"). */
+  mobileLabel?: string;
+  /** Column width: px, percentage or fraction (`120`, `"30%"`, `"2fr"`). */
+  width?: number | `${number}%` | `${number}fr`;
   className?: string;
 }
 
-export interface DataTablePagination {
-  /** One-based. */
-  page: number;
-  pageSize: number;
-  /** Rows across every page. When `data` holds more than one page, the table slices it itself. */
-  total: number;
-  onPageChange: (page: number) => void;
-  pageSizeOptions?: readonly number[];
-  onPageSizeChange?: (pageSize: number) => void;
+/** One entry of a row's ⋯ menu. */
+export interface RowAction {
+  id: string;
+  label: string;
+  icon?: LucideIcon;
+  /** Destructive entry (red); confirm it in `onAction`. */
+  danger?: boolean;
+  isDisabled?: boolean;
+  onAction: () => void;
 }
 
-interface DataTableProps<T> {
+export interface DataTableSort {
+  column: string;
+  direction: "ascending" | "descending";
+}
+
+export interface DataTableProps<T> {
+  /** Accessible name of the table. */
+  label: string;
+  rows: readonly T[];
   columns: readonly DataTableColumn<T>[];
-  data: readonly T[];
-  /** Accessible name of the table, e.g. "Workspace members". */
-  ariaLabel: string;
-  /** Defaults to `String(row.id)`. */
-  getRowId?: (row: T) => string;
-
-  /** Controlled sort. Omit both to let the table sort `data` itself with each column's `sortValue`. */
-  sort?: SortState | null;
-  onSortChange?: (sort: SortState | null) => void;
-
-  /** Adds a checkbox column. Selection is controlled when `selectedIds` is passed. */
-  selectable?: boolean;
-  selectedIds?: readonly string[];
-  onSelectionChange?: (ids: string[]) => void;
-  /** Names a row for its checkbox: "Select {name}". */
+  getRowId: (row: T) => string;
+  /** Controlled sort. Omit with `onSortChange` to sort client-side (initially by `defaultSort`). */
+  sort?: DataTableSort | null;
+  /** Server-side sorting: receive header clicks; `rows` must arrive sorted. */
+  onSortChange?: (sort: DataTableSort) => void;
+  defaultSort?: DataTableSort;
+  /** Enables row checkboxes; controlled selection. */
+  selectedIds?: ReadonlySet<string>;
+  onSelectionChange?: (ids: Set<string>) => void;
+  /**
+   * Human name of a row for its checkbox ("Select <name>"). Defaults to the primary column's `sortValue`
+   * when that is a string, else "row <n>".
+   */
   rowLabel?: (row: T) => string;
-  /** Actions for the floating bulk bar shown while rows are selected. Use `BulkActionButton`. */
-  bulkActions?: (selectedIds: string[]) => React.ReactNode;
-
-  /** Opens a row (Enter on the focused row too). Clicks on controls inside the row are ignored. */
-  onRowClick?: (row: T) => void;
-  /** Trailing actions, revealed on row hover or focus and always shown on touch screens. */
-  rowActions?: (row: T) => React.ReactNode;
-  /** The row an open drawer is describing. */
-  activeRowId?: string | null;
-
-  pagination?: DataTablePagination;
-
-  /** First load: skeleton rows. A refetch with rows on screen only marks the table busy. */
-  loading?: boolean;
-  /** The list failed to load. A string is shown as the explanation. */
-  error?: boolean | string | null;
-  onRetry?: () => void;
-  /** Shown when there are no rows and nothing is filtered. */
-  emptyState?: React.ReactNode;
-  /** A search or filter is narrowing the rows: an empty result is "no matches", not "empty". */
-  filtered?: boolean;
-  onClearFilters?: () => void;
-  /** Replaces the default no-matches state. */
-  noResultsState?: React.ReactNode;
-
-  /** Shorter rows. Follows `data-density="compact"` regardless. */
-  compact?: boolean;
+  /** Floating bulk bar content while rows are selected (buttons acting on `ids`). */
+  bulkActions?: (ids: string[], clear: () => void) => ReactNode;
+  /** Row ⋯ menu entries (hide what the caller can't do: return only allowed actions). */
+  rowActions?: (row: T) => readonly RowAction[];
+  /** Inline action before the ⋯ menu (preview "Sync now" / "Reconnect" beside the menu). */
+  rowActionLead?: (row: T) => ReactNode;
+  /** Extra class on the actions cells (page CSS such as `src-actions`). */
+  actionsClassName?: string;
+  /** Whole-row activation (open a drawer). */
+  onRowAction?: (row: T) => void;
+  /** Whole-row link (navigates on activation). */
+  rowHref?: (row: T) => string;
+  /** Rendered in the body when `rows` is empty. */
+  emptyContent?: ReactNode;
+  /** Card rows below 760 px (default true). */
+  stack?: boolean;
+  /** Footer under the table surface, usually `<Pager/>`. */
+  footer?: ReactNode;
   className?: string;
+  /** Extra class per row (e.g. `table__row--new` to flash freshly added rows). */
+  rowClassName?: (row: T) => string | undefined;
 }
 
-const hideClass = {
-  1080: "max-[1080px]:hidden",
-  900: "max-[900px]:hidden",
-} as const;
+function compare(a: unknown, b: unknown): number {
+  if (a === b) return 0;
+  if (a === null || a === undefined) return 1;
+  if (b === null || b === undefined) return -1;
+  if (typeof a === "string" && typeof b === "string") return a.localeCompare(b);
+  return Number(a) - Number(b);
+}
 
-const INTERACTIVE = "a,button,input,select,textarea,label,[role='menuitem'],[role='checkbox'],[role='switch']";
-
-function defaultRowId(row: object) {
-  return String((row as { id?: unknown }).id);
+function SelectionCheckbox({ label }: { label: string }) {
+  return (
+    <Checkbox aria-label={label} slot="selection">
+      <Checkbox.Content>
+        <Checkbox.Control>
+          <Checkbox.Indicator />
+        </Checkbox.Control>
+      </Checkbox.Content>
+    </Checkbox>
+  );
 }
 
 /**
- * The one table for lists of records: sortable headers, selection with a bulk
- * bar, a pager, hover-revealed row actions, and every list state — loading,
- * empty, no matches and failed. Detail columns drop out at 1080 px and 900 px.
+ * Data table (preview `table()` + `sortHead`/`selCheck`/`bulkBar`/`pager`, HeroUI Table primary variant):
+ * sortable headers, row selection with a floating bulk bar, row ⋯ actions, whole-row activation,
+ * and card rows below 760 px (primary cell · actions, other cells wrap underneath as metadata).
  */
-export function DataTable<T extends object>({
+export function DataTable<T>({
+  label,
+  rows,
   columns,
-  data,
-  ariaLabel,
-  getRowId = defaultRowId,
-  sort: controlledSort,
+  getRowId,
+  sort,
   onSortChange,
-  selectable = false,
-  selectedIds: controlledSelected,
+  defaultSort,
+  selectedIds,
   onSelectionChange,
   rowLabel,
   bulkActions,
-  onRowClick,
   rowActions,
-  activeRowId,
-  pagination,
-  loading = false,
-  error,
-  onRetry,
-  emptyState,
-  filtered = false,
-  onClearFilters,
-  noResultsState,
-  compact = false,
+  rowActionLead,
+  actionsClassName,
+  onRowAction,
+  rowHref,
+  emptyContent,
+  stack = true,
+  footer,
   className,
+  rowClassName,
 }: DataTableProps<T>) {
-  const [internalSort, setInternalSort] = useState<SortState | null>(null);
-  const [internalSelected, setInternalSelected] = useState<string[]>([]);
-  const sortControlled = controlledSort !== undefined;
-  const sort = sortControlled ? controlledSort : internalSort;
-  const selected = controlledSelected ?? internalSelected;
+  const [localSort, setLocalSort] = useState<DataTableSort | null>(defaultSort ?? null);
+  const activeSort = sort !== undefined ? sort : localSort;
+  const primaryId = (columns.find((c) => c.primary) ?? columns[0])?.id;
+  const selectable = Boolean(onSelectionChange);
 
-  const setSort = (next: SortState | null) => {
-    if (!sortControlled) setInternalSort(next);
-    onSortChange?.(next);
+  const ordered = useMemo(() => {
+    if (onSortChange || !activeSort) return rows;
+    const column = columns.find((c) => c.id === activeSort.column);
+    if (!column?.sortValue) return rows;
+    const value = column.sortValue;
+    const sign = activeSort.direction === "ascending" ? 1 : -1;
+    return [...rows].sort((a, b) => sign * compare(value(a), value(b)));
+  }, [rows, columns, activeSort, onSortChange]);
+
+  const byId = useMemo(() => new Map(ordered.map((row) => [getRowId(row), row])), [ordered, getRowId]);
+  const primarySort = columns.find((c) => c.id === primaryId)?.sortValue;
+  const nameOf = (row: T, index: number): string => {
+    const name = rowLabel?.(row) ?? primarySort?.(row);
+    return typeof name === "string" && name.trim() ? name.trim() : `row ${index + 1}`;
   };
-  const setSelected = (ids: string[]) => {
-    if (controlledSelected === undefined) setInternalSelected(ids);
-    onSelectionChange?.(ids);
+  const selected = selectedIds ?? new Set<string>();
+  const clear = () => onSelectionChange?.(new Set());
+
+  const handleSort = (descriptor: SortDescriptor) => {
+    const next: DataTableSort = { column: String(descriptor.column), direction: descriptor.direction };
+    if (onSortChange) onSortChange(next);
+    else setLocalSort(next);
   };
-
-  const sorted = useMemo(() => {
-    if (sortControlled || !sort) return data;
-    const column = columns.find((candidate) => candidate.id === sort.columnId);
-    if (!column) return data;
-    const value = column.sortValue ?? ((row: T) => (row as Record<string, unknown>)[column.id]);
-    const direction = sort.direction === "asc" ? 1 : -1;
-    return [...data].sort((left, right) => direction * compareSortValues(value(left), value(right)));
-  }, [columns, data, sort, sortControlled]);
-
-  const range = pagination ? pagerRange(pagination.page, pagination.pageSize, pagination.total) : null;
-  const rows = range && sorted.length > pagination!.pageSize ? sorted.slice(range.start, range.end) : sorted;
-  const visibleIds = rows.map(getRowId);
-  const headerSelection = selectionState(visibleIds, selected);
-
-  if (error && !rows.length) {
-    return (
-      <ErrorState
-        className={className}
-        description={typeof error === "string" ? error : undefined}
-        onAction={onRetry}
-      />
-    );
-  }
-
-  if (loading && !rows.length) {
-    return <SkeletonRows className={className} columns={columns.length} label={`Loading ${ariaLabel.toLowerCase()}`} rows={pagination?.pageSize ? Math.min(pagination.pageSize, 8) : 6} />;
-  }
-
-  if (!rows.length) {
-    if (filtered) {
-      return (
-        <div className={className}>
-          {noResultsState ?? (
-            <EmptyState
-              action={
-                onClearFilters && (
-                  <Button onClick={onClearFilters} variant="secondary">
-                    Clear filters
-                  </Button>
-                )
-              }
-              boxed
-              description="Try a different search or fewer filters."
-              icon={<SearchX />}
-              size="md"
-              title="No matches"
-            />
-          )}
-        </div>
-      );
-    }
-    return <div className={className}>{emptyState}</div>;
-  }
-
-  const cellPadding = compact ? "h-[46px] py-2" : "h-[var(--table-row-height)] py-[var(--table-cell-py)]";
+  const handleSelection = (keys: Selection) => {
+    onSelectionChange?.(keys === "all" ? new Set(byId.keys()) : new Set([...keys].map(String)));
+  };
+  const handleRowAction = onRowAction
+    ? (key: string | number) => {
+        const row = byId.get(String(key));
+        if (row) onRowAction(row);
+      }
+    : undefined;
 
   return (
-    <div className={className}>
-      <div
-        aria-busy={loading || undefined}
-        className="overflow-auto rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--surface-base)]"
-      >
-        <table aria-label={ariaLabel} className="w-full border-separate border-spacing-0 text-[length:var(--text-size-body)]">
-          <thead>
-            <tr>
-              {selectable && (
-                <th className={cn(headClass, "w-11 pr-0")} scope="col">
-                  <Checkbox
-                    className="align-middle"
-                    aria-label="Select all rows on this page"
-                    checked={headerSelection === "all"}
-                    indeterminate={headerSelection === "some"}
-                    onCheckedChange={() => setSelected(toggleAllSelection(visibleIds, selected))}
-                  />
-                </th>
-              )}
-              {columns.map((column) => {
-                const direction = sort?.columnId === column.id ? sort.direction : null;
-                return (
-                  <th
-                    aria-sort={direction ? (direction === "asc" ? "ascending" : "descending") : undefined}
-                    className={cn(
-                      headClass,
-                      column.align === "right" && "text-right",
-                      column.hideBelow && hideClass[column.hideBelow],
-                      column.className,
-                    )}
-                    key={column.id}
-                    scope="col"
-                    style={{ width: column.width, minWidth: column.minWidth }}
-                  >
-                    {column.sortable ? (
-                      <button
-                        className={cn(
-                          "inline-flex items-center gap-1 rounded-[var(--radius-xs)] font-[inherit] text-inherit transition-colors duration-[var(--duration-fast)]",
-                          "hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:shadow-[var(--shadow-focus)]",
-                          column.align === "right" && "flex-row-reverse",
-                          direction && "text-[var(--text-primary)]",
-                        )}
-                        onClick={() => setSort(nextSort(sort, column.id))}
-                        type="button"
-                      >
+    <div className={clsx("data-table", className)}>
+      <Table className={clsx(stack && "table--stack")}>
+        <Table.ScrollContainer>
+          <Table.Content
+            aria-label={label}
+            sortDescriptor={activeSort ?? undefined}
+            onSortChange={handleSort}
+            selectionMode={selectable ? "multiple" : "none"}
+            selectionBehavior="toggle"
+            selectedKeys={selectable ? selected : undefined}
+            onSelectionChange={selectable ? handleSelection : undefined}
+            onRowAction={handleRowAction}
+          >
+            <Table.Header>
+              {selectable ? (
+                <Table.Column className="table__column--check">
+                  <SelectionCheckbox label="Select all" />
+                </Table.Column>
+              ) : null}
+              {columns.map((column) => (
+                <Table.Column
+                  key={column.id}
+                  id={column.id}
+                  isRowHeader={column.id === primaryId}
+                  allowsSorting={Boolean(column.sortValue)}
+                  width={column.width}
+                  className={clsx(column.align === "end" && "table__column--num", column.className)}
+                >
+                  {({ sortDirection }) =>
+                    column.sortValue ? (
+                      <Table.SortableColumnHeader className="table__sort" sortDirection={sortDirection} indicator={<ArrowUp className="i" aria-hidden />}>
                         {column.header}
-                        {direction === "asc" ? (
-                          <ArrowUp aria-hidden="true" className="h-[13px] w-[13px]" />
-                        ) : direction === "desc" ? (
-                          <ArrowDown aria-hidden="true" className="h-[13px] w-[13px]" />
-                        ) : (
-                          <ChevronsUpDown aria-hidden="true" className="h-[13px] w-[13px] opacity-50" />
-                        )}
-                      </button>
+                        {sortDirection ? null : <ChevronsUpDown className="i table__sort-idle" aria-hidden />}
+                      </Table.SortableColumnHeader>
                     ) : (
                       column.header
-                    )}
-                  </th>
-                );
-              })}
-              {rowActions && (
-                <th className={cn(headClass, "w-14")} scope="col">
+                    )
+                  }
+                </Table.Column>
+              ))}
+              {rowActions || rowActionLead ? (
+                <Table.Column className="table__column--actions">
                   <span className="sr-only">Actions</span>
-                </th>
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => {
-              const id = getRowId(row);
-              const isSelected = selected.includes(id);
-              const isActive = id === activeRowId;
-              return (
-                <tr
-                  aria-current={isActive ? "true" : undefined}
-                  aria-selected={selectable ? isSelected : undefined}
-                  className={cn(
-                    "group/row [&:last-child>td]:border-b-0",
-                    onRowClick && "cursor-pointer [&:hover>td]:bg-[var(--surface-subtle)] focus-visible:outline-none [&:focus-visible>td]:bg-[var(--surface-subtle)] focus-visible:shadow-[inset_0_0_0_2px_var(--focus-ring)]",
-                    (isSelected || isActive) && "[&>td]:bg-[var(--surface-selected)] [&:hover>td]:bg-[var(--surface-selected)]",
-                  )}
-                  key={id}
-                  onClick={
-                    onRowClick
-                      ? (event) => {
-                          if ((event.target as HTMLElement).closest(INTERACTIVE)) return;
-                          onRowClick(row);
-                        }
-                      : undefined
-                  }
-                  onKeyDown={
-                    onRowClick
-                      ? (event) => {
-                          if (event.target !== event.currentTarget) return;
-                          if (event.key !== "Enter" && event.key !== " ") return;
-                          event.preventDefault();
-                          onRowClick(row);
-                        }
-                      : undefined
-                  }
-                  tabIndex={onRowClick ? 0 : undefined}
-                >
-                  {selectable && (
-                    <td className={cn(bodyCellClass, cellPadding, "w-11 pr-0")}>
-                      <Checkbox
-                        className="align-middle"
-                        aria-label={rowLabel ? `Select ${rowLabel(row)}` : "Select row"}
-                        checked={isSelected}
-                        onCheckedChange={() => setSelected(toggleSelection(selected, id))}
-                      />
-                    </td>
-                  )}
-                  {columns.map((column) => (
-                    <td
-                      className={cn(
-                        bodyCellClass,
-                        cellPadding,
-                        column.align === "right" && "text-right tabular-nums",
-                        column.hideBelow && hideClass[column.hideBelow],
-                        column.className,
-                      )}
-                      key={column.id}
-                      style={{ width: column.width, minWidth: column.minWidth }}
-                    >
-                      {column.cell(row)}
-                    </td>
-                  ))}
-                  {rowActions && (
-                    <td className={cn(bodyCellClass, cellPadding, "w-14 text-right")}>
-                      <div
-                        className={cn(
-                          "inline-flex items-center justify-end gap-1 opacity-0 transition-opacity duration-[var(--duration-fast)]",
-                          "group-hover/row:opacity-100 group-focus-within/row:opacity-100 [@media(hover:none)]:opacity-100",
-                          isActive && "opacity-100",
+                </Table.Column>
+              ) : null}
+            </Table.Header>
+            <Table.Body renderEmptyState={emptyContent ? () => emptyContent : undefined}>
+              {ordered.map((row, index) => {
+                const id = getRowId(row);
+                const actions = rowActions?.(row) ?? [];
+                const lead = rowActionLead?.(row);
+                return (
+                  <Table.Row key={id} id={id} href={rowHref?.(row)} className={clsx((onRowAction || rowHref) && "table__row--action", rowClassName?.(row))}>
+                    {selectable ? (
+                      <Table.Cell className="table__cell--check">
+                        <SelectionCheckbox label={`Select ${nameOf(row, index)}`} />
+                      </Table.Cell>
+                    ) : null}
+                    {columns.map((column) => (
+                      <Table.Cell
+                        key={column.id}
+                        data-label={column.mobileLabel}
+                        className={clsx(
+                          column.id === primaryId && "table__cell--primary",
+                          column.align === "end" && "table__cell--num",
+                          column.hideOnMobile && "table__cell--hide-sm",
+                          column.className,
                         )}
                       >
-                        {rowActions(row)}
-                      </div>
-                    </td>
-                  )}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      {pagination && range && (pagination.total > pagination.pageSize || pagination.pageSizeOptions) && (
-        <nav
-          aria-label={`${ariaLabel} pages`}
-          className="flex flex-wrap items-center justify-between gap-3 px-1 pt-2.5 text-[length:var(--text-size-meta)] text-[var(--text-tertiary)]"
-        >
-          <span className="tabular-nums">
-            {range.from.toLocaleString()}–{range.to.toLocaleString()} of {pagination.total.toLocaleString()}
-          </span>
-          <div className="flex items-center gap-2">
-            {pagination.pageSizeOptions && pagination.onPageSizeChange && (
-              <label className="inline-flex items-center gap-2">
-                Rows per page
-                <select
-                  className="h-[var(--control-sm)] rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--surface-base)] px-2 text-[length:var(--text-size-meta)] text-[var(--text-primary)] focus-visible:outline-none focus-visible:shadow-[var(--shadow-focus)]"
-                  onChange={(event) => pagination.onPageSizeChange?.(Number(event.target.value))}
-                  value={pagination.pageSize}
-                >
-                  {pagination.pageSizeOptions.map((size) => (
-                    <option key={size} value={size}>
-                      {size}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            <Button
-              disabled={!range.hasPrevious}
-              icon={<ChevronLeft aria-hidden="true" className="h-4 w-4" />}
-              onClick={() => pagination.onPageChange(range.page - 1)}
-              size="sm"
-              variant="secondary"
-            >
-              Previous
-            </Button>
-            <Button
-              disabled={!range.hasNext}
-              iconAfter={<ChevronRight aria-hidden="true" className="h-4 w-4" />}
-              onClick={() => pagination.onPageChange(range.page + 1)}
-              size="sm"
-              variant="secondary"
-            >
-              Next
-            </Button>
-          </div>
-        </nav>
-      )}
-      {selectable && bulkActions && selected.length > 0 && (
-        <div
-          aria-label="Bulk actions"
-          className={cn(
-            "sticky bottom-4 z-[5] mx-auto mt-3 flex w-max max-w-full items-center gap-1.5 rounded-[var(--radius-lg)] py-1.5 pl-3.5 pr-1.5",
-            "bg-[var(--surface-inverse)] text-[length:var(--text-size-body)] text-[var(--text-inverse)] shadow-[var(--shadow-pop)] motion-safe:animate-ui-pop",
-          )}
-          role="toolbar"
-        >
-          <span aria-live="polite" className="mr-1.5 whitespace-nowrap font-semibold tabular-nums">
-            {selected.length.toLocaleString()} selected
-          </span>
-          {bulkActions([...selected])}
-          <BulkActionButton aria-label="Clear selection" icon={<X />} onClick={() => setSelected([])} />
+                        {column.cell(row)}
+                      </Table.Cell>
+                    ))}
+                    {rowActions || rowActionLead ? (
+                      <Table.Cell className={clsx("table__cell--actions", actionsClassName)}>
+                        {lead ? (
+                          <div className="row gap-4">
+                            {lead}
+                            {actions.length ? <RowMenu actions={actions} /> : null}
+                          </div>
+                        ) : actions.length ? (
+                          <RowMenu actions={actions} />
+                        ) : null}
+                      </Table.Cell>
+                    ) : null}
+                  </Table.Row>
+                );
+              })}
+            </Table.Body>
+          </Table.Content>
+        </Table.ScrollContainer>
+      </Table>
+      {footer}
+      {selectable && bulkActions && selected.size > 0 ? (
+        <div className="bulk-bar" role="toolbar" aria-label="Bulk actions">
+          <span className="bulk-bar__count">{selected.size} selected</span>
+          {bulkActions([...selected], clear)}
+          <IconButton icon={X} tip="Clear selection" size="sm" onPress={clear} />
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
 
-const headClass = cn(
-  "sticky top-0 z-[1] h-[var(--table-head-height)] whitespace-nowrap border-b border-[var(--border-subtle)] bg-[var(--surface-subtle)] px-3 text-left",
-  "text-[length:var(--text-size-meta)] font-medium text-[var(--text-tertiary)]",
-);
-
-const bodyCellClass = "border-b border-[var(--border-subtle)] px-3 align-middle";
-
-/** A quiet button for the bulk bar, readable on its inverse background. Icon-only needs `aria-label`. */
-export function BulkActionButton({
-  icon,
-  children,
-  className,
-  ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & { icon?: React.ReactNode }) {
+function RowMenu({ actions }: { actions: readonly RowAction[] }) {
   return (
-    <button
-      className={cn(
-        "inline-flex h-[var(--control-sm)] items-center gap-1.5 rounded-[var(--radius-md)] px-2.5 font-medium text-inherit opacity-85",
-        "transition-[background-color,opacity] duration-[var(--duration-fast)] hover:bg-[var(--surface-inverse-hover)] hover:opacity-100",
-        "focus-visible:outline-none focus-visible:shadow-[var(--shadow-focus)] focus-visible:opacity-100 disabled:pointer-events-none disabled:opacity-45",
-        "[&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0",
-        !children && "w-[var(--control-sm)] justify-center px-0",
-        className,
-      )}
-      type="button"
-      {...props}
-    >
-      {icon && <span aria-hidden="true" className="inline-flex">{icon}</span>}
-      {children}
-    </button>
-  );
-}
-
-/** Primary cell content: a name with one line of supporting detail. */
-export function CellTitle({
-  title,
-  subtitle,
-  icon,
-}: {
-  title: React.ReactNode;
-  subtitle?: React.ReactNode;
-  icon?: React.ReactNode;
-}) {
-  return (
-    <div className="flex min-w-0 items-center gap-2.5">
-      {icon}
-      <span className="min-w-0">
-        <span className="block max-w-[420px] truncate font-medium text-[var(--text-primary)]">{title}</span>
-        {subtitle && (
-          <span className="mt-px block truncate text-[length:var(--text-size-meta)] text-[var(--text-tertiary)]">
-            {subtitle}
-          </span>
-        )}
-      </span>
-    </div>
+    <Dropdown>
+      <IconButton icon={MoreHorizontal} tip="More actions" size="sm" showTip={false} />
+      <Dropdown.Popover placement="bottom end">
+        <Dropdown.Menu aria-label="Row actions" onAction={(key) => actions.find((a) => a.id === key)?.onAction()} disabledKeys={actions.filter((a) => a.isDisabled).map((a) => a.id)}>
+          {actions.map((action) => {
+            const Icon = action.icon;
+            return (
+              <Dropdown.Item key={action.id} id={action.id} textValue={action.label} variant={action.danger ? "danger" : "default"}>
+                {Icon ? <Icon className="i" aria-hidden /> : null}
+                <Label>{action.label}</Label>
+              </Dropdown.Item>
+            );
+          })}
+        </Dropdown.Menu>
+      </Dropdown.Popover>
+    </Dropdown>
   );
 }

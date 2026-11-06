@@ -517,6 +517,13 @@ seedWorkspace('ws-finx', () => {
     ] },
     { id: 'fx-c8', owner: 'u-fx-bao', title: 'Unmasked data for model validation', at: P(3), scope: ['kb-fx-sec'], messages: [] },
   ];
+  D.projects = [
+    { id: 'fx-pj-api', owner: 'u-fx-khoa', name: 'Payments API v3 rollout', created: P(10), docs: ['fx-eng-adr031', 'fx-pay-api'] },
+    { id: 'fx-pj-oncall', owner: 'u-fx-khoa', name: 'On-call onboarding', created: P(5), docs: ['fx-sec-access', 'fx-pay-runbook'] },
+    { id: 'fx-pj-gw', owner: 'u-fx-ha', name: 'Gateway reliability', created: P(12), docs: ['fx-pay-runbook'] },
+    { id: 'fx-pj-mau', owner: 'u-fx-bao', name: 'Active customers dashboard', created: P(8), docs: ['fx-data-mau'] },
+  ];
+  [['fx-c5', 'fx-pj-api'], ['fx-c1', 'fx-pj-oncall'], ['fx-c2', 'fx-pj-gw'], ['fx-c3', 'fx-pj-mau']].forEach(([c, p]) => { D.convs.find(x => x.id === c).project = p; });
 
   /* ═══════════════ Home: featured documents (admins curate) ═══════════════ */
   D.featured = ['fx-sec-access', 'fx-eng-adr031', 'fx-ops-cutoff', 'fx-data-mau', 'fx-pay-runbook', 'fx-prod-roadmap', 'fx-pol-hybrid', 'fx-sec-incident'];
