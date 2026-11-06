@@ -19,6 +19,30 @@
   --font-sans: "Google Sans Flex", "Google Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
 
+  /* Type scale (size / line height). Weights: 400 body, 500 labels and controls, 600 headings — never heavier. */
+  --text-2xs: 11px; --leading-2xs: 14px;
+  --text-xs: 12px;  --leading-xs: 16px;
+  --text-sm: 13px;  --leading-sm: 19px;
+  --text-md: 14px;  --leading-md: 21px;
+  --text-lg: 16px;  --leading-lg: 24px;
+  --text-xl: 18px;  --leading-xl: 26px;
+  --text-2xl: 22px; --leading-2xl: 30px;
+  --text-3xl: 28px; --leading-3xl: 36px;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --tracking-tight: -0.015em;
+  --tracking-snug: -0.006em;
+
+  /* Spacing: one 4 px scale. */
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 20px;
+  --space-6: 24px; --space-8: 32px; --space-10: 40px; --space-12: 48px; --space-14: 56px;
+
+  /* Control heights (sm / md / lg); touch screens raise every target to at least --touch-min. */
+  --control-sm: 32px;
+  --control-md: 36px;
+  --control-lg: 44px;
+  --touch-min: 40px;
   /* Radius (HeroUI scale; --radius = Medium) */
   --radius: 0.5rem;
   --field-radius: 0.75rem;
@@ -43,9 +67,9 @@
   --dur-slow: 320ms;
 
   /* Layout */
-  --sidebar-w: 248px;
+  --sidebar-w: 256px;
   --content-max: 1200px;
-  --header-h: 52px;
+  --header-h: 56px;
 
   /* Z-index */
   --z-sticky: 10;
@@ -61,13 +85,13 @@
    --base-hue, which follows the accent hue. Status and evidence colors are
    fixed: they carry meaning, not brand. */
 :root {
-  --accent-l: 62.04%;
-  --accent-c: 0.195;
-  --accent-h: 139.21;
+  --accent-l: 54%;
+  --accent-c: 0.115;
+  --accent-h: 156;
   --accent-fg: var(--snow);
   --accent-ink: 70%;
-  --base-hue: 139.21;
-  --tint: 1;
+  --base-hue: 156;
+  --tint: 0.5;
 }
 
 :root,
@@ -75,43 +99,46 @@
   color-scheme: light;
   --accent: oklch(var(--accent-l) var(--accent-c) var(--accent-h));
   --accent-foreground: var(--accent-fg);
-  --background: oklch(97.02% calc(0.0200 * var(--tint)) var(--base-hue));
-  --border: oklch(90.00% calc(0.0200 * var(--tint)) var(--base-hue));
+  --background: oklch(98.30% calc(0.0200 * var(--tint)) var(--base-hue));
+  --border: oklch(91.50% calc(0.0200 * var(--tint)) var(--base-hue));
   --danger: oklch(65.32% 0.2421 11.99);
   --danger-foreground: oklch(99.11% 0 0);
-  --default: oklch(94.00% calc(0.0200 * var(--tint)) var(--base-hue));
+  --default: oklch(95.60% calc(0.0200 * var(--tint)) var(--base-hue));
   --default-foreground: oklch(21.03% calc(0.0059 * var(--tint)) var(--base-hue));
   --field-background: oklch(100.00% calc(0.0100 * var(--tint)) var(--base-hue));
-  --field-border: transparent;
+  --field-border: color-mix(in oklab, var(--foreground) 11%, transparent);
   --field-foreground: oklch(21.03% calc(0.0200 * var(--tint)) var(--base-hue));
   --field-placeholder: oklch(55.17% calc(0.0400 * var(--tint)) var(--base-hue));
   --focus: var(--accent);
   --foreground: oklch(21.03% calc(0.0200 * var(--tint)) var(--base-hue));
-  --muted: oklch(55.17% calc(0.0400 * var(--tint)) var(--base-hue));
+  --muted: oklch(53.50% calc(0.0400 * var(--tint)) var(--base-hue));
   --overlay: oklch(100.00% calc(0.0060 * var(--tint)) var(--base-hue));
   --overlay-foreground: oklch(21.03% calc(0.0200 * var(--tint)) var(--base-hue));
   --scrollbar: oklch(87.10% calc(0.0200 * var(--tint)) var(--base-hue));
   --segment: oklch(100.00% calc(0.0200 * var(--tint)) var(--base-hue));
   --segment-foreground: oklch(21.03% calc(0.0200 * var(--tint)) var(--base-hue));
-  --separator: oklch(92.00% calc(0.0200 * var(--tint)) var(--base-hue));
+  --separator: oklch(94.20% calc(0.0200 * var(--tint)) var(--base-hue));
   --success: oklch(73.29% 0.2012 137.06);
   --success-foreground: oklch(21.03% 0.0059 137.06);
   --surface: oklch(100.00% calc(0.0100 * var(--tint)) var(--base-hue));
   --surface-foreground: oklch(21.03% calc(0.0200 * var(--tint)) var(--base-hue));
-  --surface-secondary: oklch(95.24% calc(0.0160 * var(--tint)) var(--base-hue));
-  --surface-tertiary: oklch(93.73% calc(0.0160 * var(--tint)) var(--base-hue));
+  --surface-secondary: oklch(96.60% calc(0.0160 * var(--tint)) var(--base-hue));
+  --surface-tertiary: oklch(95.20% calc(0.0160 * var(--tint)) var(--base-hue));
   --warning: oklch(78.19% 0.1648 58.58);
   --warning-foreground: oklch(21.03% 0.0059 58.58);
-  --backdrop: rgba(0, 0, 0, 0.4);
+  --backdrop: rgba(16, 24, 20, 0.28);
 
-  --surface-shadow: 0 2px 4px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.06), 0 0 1px 0 rgba(0, 0, 0, 0.06);
-  --overlay-shadow: 0 2px 8px 0 rgba(0, 0, 0, 0.06), 0 -6px 12px 0 rgba(0, 0, 0, 0.03), 0 14px 28px 0 rgba(0, 0, 0, 0.08);
-  --field-shadow: 0 2px 4px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.06), 0 0 1px 0 rgba(0, 0, 0, 0.06);
-  --card-border: transparent;
+  /* Elevation: hairline + soft, low-contrast shadows (calm, never heavy). */
+  --surface-shadow: 0 1px 2px 0 rgba(16, 24, 20, 0.04), 0 1px 3px 0 rgba(16, 24, 20, 0.03);
+  --lift-shadow: 0 2px 4px -1px rgba(16, 24, 20, 0.05), 0 8px 20px -6px rgba(16, 24, 20, 0.10);
+  --overlay-shadow: 0 0 0 1px rgba(16, 24, 20, 0.05), 0 4px 10px -4px rgba(16, 24, 20, 0.06), 0 20px 40px -12px rgba(16, 24, 20, 0.18);
+  --field-shadow: 0 1px 2px 0 rgba(16, 24, 20, 0.04);
+  --card-border: color-mix(in oklab, var(--foreground) 7%, transparent);
+  --button-shadow: 0 1px 2px 0 rgba(16, 24, 20, 0.08), inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
 
-  --accent-soft: color-mix(in oklab, var(--accent) 15%, transparent);
+  --accent-soft: color-mix(in oklab, var(--accent) 12%, transparent);
   --accent-soft-foreground: color-mix(in oklab, var(--accent) var(--accent-ink), var(--foreground));
-  --accent-soft-hover: color-mix(in oklab, var(--accent) 20%, transparent);
+  --accent-soft-hover: color-mix(in oklab, var(--accent) 17%, transparent);
   --danger-soft: color-mix(in oklab, var(--danger) 15%, transparent);
   --danger-soft-foreground: color-mix(in oklab, var(--danger) 70%, var(--foreground) 40%);
   --danger-soft-hover: color-mix(in oklab, var(--danger) 20%, transparent);
@@ -134,7 +161,7 @@
   --default: oklch(27.40% calc(0.0200 * var(--tint)) var(--base-hue));
   --default-foreground: oklch(99.11% 0 0);
   --field-background: oklch(21.03% calc(0.0400 * var(--tint)) var(--base-hue));
-  --field-border: transparent;
+  --field-border: var(--border);
   --field-foreground: oklch(99.11% calc(0.0200 * var(--tint)) var(--base-hue));
   --field-placeholder: oklch(70.50% calc(0.0400 * var(--tint)) var(--base-hue));
   --focus: var(--accent);
@@ -157,9 +184,11 @@
   --backdrop: rgba(0, 0, 0, 0.6);
 
   --surface-shadow: 0 0 0 0 transparent;
+  --lift-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.5);
   --overlay-shadow: 0 0 1px 0 rgba(255, 255, 255, 0.3) inset, 0 16px 40px -12px rgba(0, 0, 0, 0.6);
   --field-shadow: 0 0 0 0 transparent;
   --card-border: var(--border);
+  --button-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.08);
 
   --accent-soft: color-mix(in oklab, var(--accent) 12%, transparent);
   --accent-soft-foreground: color-mix(in oklab, var(--accent) var(--accent-ink), var(--foreground));
@@ -188,7 +217,28 @@
   --default-soft-hover: color-mix(in oklab, var(--default) 70%, transparent);
   --separator-tertiary: color-mix(in oklab, var(--surface) 81%, var(--surface-foreground) 19%);
   --border-secondary: color-mix(in oklab, var(--surface) 78%, var(--surface-foreground) 22%);
+  /* Focus halo: a soft accent glow around focused fields and cards (the 2 px ring stays for buttons and links). */
+  --focus-halo: color-mix(in oklab, var(--focus) 22%, transparent);
   /* Evidence highlight: a fixed, non-themeable marker for cited passages. */
   --evidence: color-mix(in oklab, var(--warning) 28%, transparent);
   --evidence-strong: color-mix(in oklab, var(--warning) 48%, transparent);
+  /* Search highlight: matched words in search results and suggestions — neutral accent tint, never the evidence amber. */
+  --highlight: color-mix(in oklab, var(--accent) 18%, transparent);
+  --highlight-foreground: var(--foreground);
 }
+
+/* Native document viewer. Files keep their own look in every theme — a PDF or Word page is white paper with
+   dark ink, as in the file's own app; only the canvas around the pages follows the theme. */
+:root,
+[data-theme] {
+  --paper: oklch(100% 0 0);
+  --paper-ink: oklch(22% 0.01 260);
+  --paper-muted: oklch(52% 0.01 260);
+  --paper-rule: oklch(88% 0.005 260);
+  --paper-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.12), 0 6px 20px -6px rgba(0, 0, 0, 0.12);
+  --docx-heading: oklch(37% 0.08 245);
+  --slide-ink: oklch(30% 0.04 255);
+  --slide-title-bg: oklch(30% 0.045 255);
+  --viewer-canvas: color-mix(in oklab, var(--background) 86%, var(--foreground) 14%);
+}
+[data-theme="dark"] { --viewer-canvas: color-mix(in oklab, var(--background) 92%, var(--foreground) 8%); }

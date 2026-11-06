@@ -48,6 +48,28 @@
 /* Chip matrix */
 .ds-matrix { display: grid; grid-template-columns: 72px repeat(var(--cols), minmax(0, max-content)); gap: 12px 20px; align-items: center; overflow-x: auto; }
 
+/* Button variants with their role */
+.ds-variants { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px 20px; }
+.ds-variant { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.ds-variant__meta { display: flex; flex-direction: column; gap: 2px; }
+
+/* A field drawn in its focus state (live fields show it on focus) */
+.ds-focused.input, .ds-focused.input[readonly] { background: var(--field-background); box-shadow: inset 0 0 0 1px var(--focus), 0 0 0 3px var(--focus-halo); cursor: default; }
+
+/* Patterns: static dialog anatomy, rules, tones, lift cards */
+.ds-dialog-preview { max-width: 460px; animation: none; box-shadow: var(--overlay-shadow); }
+.ds-dialog-demo { display: flex; flex-wrap: wrap; gap: 24px 32px; align-items: flex-start; }
+.ds-dialog-demo__preview { flex: 1 1 380px; max-width: 460px; min-width: 0; }
+.ds-dialog-demo__notes { flex: 1 1 240px; min-width: 0; }
+.ds-picker { max-width: 460px; }
+.ds-rules { list-style: none; display: flex; flex-direction: column; gap: 10px; font-size: 13px; line-height: 19px; color: var(--muted); }
+.ds-rules li { display: flex; gap: 8px; align-items: flex-start; }
+.ds-rules .i { flex: none; margin-top: 2px; color: var(--accent); }
+.ds-rules strong { color: var(--foreground); font-weight: 500; }
+.ds-tones { display: flex; flex-wrap: wrap; gap: 16px; }
+.ds-tone { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.ds-lift { width: 100%; }
+
 @container app (max-width: 1023px) {
   .ds-layout { grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .ds-nav { position: static; flex-direction: row; overflow-x: auto; padding-bottom: 4px; margin: 0 -4px; }
@@ -61,4 +83,11 @@
   .ds-matrix { grid-template-columns: 64px repeat(var(--cols), max-content); }
   .ds-forms { gap: 0; }
   .ds-forms > div + div { margin-top: 16px; }
+}
+/* Shared primitives: a narrow frame so overflow and wrapping behaviour shows at any window width. */
+.ds-narrow { max-width: 340px; container: ds-narrow / inline-size; }
+@container ds-narrow (max-width: 679px) {
+  .item:has(> .item__trail .button:not(.button--icon-only)) { flex-wrap: wrap; }
+  .item:has(> .item__trail .button:not(.button--icon-only)) > .item__trail { flex-basis: 100%; padding-left: 48px; }
+  .item--lines-2 .item__title .truncate { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 }

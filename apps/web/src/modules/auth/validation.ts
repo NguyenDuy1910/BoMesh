@@ -1,55 +1,52 @@
-import type { AuthSession } from "@/lib/auth/session";
-
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-/** Accounts accept 8–128 characters (`AccountCreate`); the product also asks for letters and numbers. */
-export const PASSWORD_MIN = 8;
-export const PASSWORD_MAX = 128;
-
-/** The inline message for a work email, or undefined when it is fine. */
-export function emailError(value: string): string | undefined {
-  const email = value.trim();
-  if (!email) return "Enter your work email.";
-  if (!EMAIL_PATTERN.test(email)) return "Enter an email like name@company.com.";
-  return undefined;
-}
+export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export interface PasswordRule {
-  met: boolean;
+  test: (password: string) => boolean;
   label: string;
+  required: boolean;
 }
 
-/** The rules shown live under a new password. */
-export function passwordRules(password: string): PasswordRule[] {
-  return [
-    { met: password.length >= PASSWORD_MIN && password.length <= PASSWORD_MAX, label: `At least ${PASSWORD_MIN} characters` },
-    { met: /[A-Za-z]/.test(password) && /\d/.test(password), label: "Letters and numbers" },
+export const PASSWORD_RULES: PasswordRule[] = [
+  { test: (pw) => pw.length >= 8, label: "At least 8 characters", required: true },
+  { test: (pw) => /[A-Za-z]/.test(pw) && /\d/.test(pw), label: "Letters and numbers", required: true },
+  {
+    test: (pw) => pw.length >= 12 || /[^A-Za-z0-9]/.test(pw),
+    label: "A symbol or 12+ characters for extra strength",
+    required: false,
+  },
+];
+
+export type StrengthTone = "danger" | "warning" | "success";
+
+export interface PasswordStrength {
+  tone: StrengthTone;
+  label: "Weak" | "Fair" | "Good" | "Strong";
+  value: number;
+}
+
+export function passwordStrength(pw: string): PasswordStrength | null {
+  if (!pw) return null;
+  const score =
+    PASSWORD_RULES.filter((r) => r.test(pw)).length + (pw.length >= 12 && /[^A-Za-z0-9]/.test(pw) ? 1 : 0);
+  const levels: [StrengthTone, PasswordStrength["label"]][] = [
+    ["danger", "Weak"],
+    ["danger", "Weak"],
+    ["warning", "Fair"],
+    ["success", "Good"],
+    ["success", "Strong"],
   ];
+  const [tone, label] = levels[score];
+  return { tone, label, value: score * 25 };
 }
 
-export function newPasswordError(password: string): string | undefined {
-  if (password.length > PASSWORD_MAX) return `Use at most ${PASSWORD_MAX} characters.`;
-  return passwordRules(password).every((rule) => rule.met)
-    ? undefined
-    : `Use at least ${PASSWORD_MIN} characters with letters and numbers.`;
+export function passwordAcceptable(pw: string): boolean {
+  return PASSWORD_RULES.filter((r) => r.required).every((r) => r.test(pw));
 }
 
-/** Only same-origin paths; `//host` and `/\host` would leave the app. */
-export function safeNextPath(next: string | null | undefined): string | null {
-  if (next?.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\")) return next;
-  return null;
-}
-
-/**
- * Where a fresh session goes: the page that sent the person to sign in, else
- * straight into chat when there is one workspace, else the picker.
- */
-export function destinationAfterSignIn(session: AuthSession, next: string | null | undefined): string {
-  return safeNextPath(next) ?? (session.workspaces.length === 1 ? "/chat" : "/workspaces");
-}
-
-/** A query parameter of the current URL, read at event time (no Suspense boundary needed). */
-export function currentSearchParam(name: string): string | null {
-  if (typeof window === "undefined") return null;
-  return new URLSearchParams(window.location.search).get(name);
+export function validateIdentifier(identifier: string): string | undefined {
+  const id = identifier.trim();
+  if (!id) return "Enter your email or username.";
+  if (id.includes("@") && !EMAIL_RE.test(id)) return "Enter a full email address, like name@company.com.";
+  if (!id.includes("@") && id.length < 3) return "Usernames have at least 3 characters.";
+  return undefined;
 }

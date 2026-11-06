@@ -39,7 +39,7 @@ function snapshot() {
   const globalKeys = DATA_KEYS.filter(k => !WS_DATA_KEYS.has(k)), wsKeys = DATA_KEYS.filter(k => WS_DATA_KEYS.has(k));
   return {
     version: 7, savedAt: Date.now(),
-    context: { persona: S.persona, ws: S.ws, signedIn: S.signedIn, theme: S.theme, look: S.look, lang: S.lang, collapsed: S.collapsed, protoMin: S.protoMin, read: [...S.inbox.read], dismissed: [...S.inbox.dismissed] },
+    context: { persona: S.persona, ws: S.ws, signedIn: S.signedIn, theme: S.theme, look: S.look, lang: S.lang, collapsed: S.collapsed, protoMin: S.protoMin, manageOpen: !!S.manageOpen, read: [...S.inbox.read], dismissed: [...S.inbox.dismissed] },
     profiles: Object.fromEntries(Object.entries(PERSONAS).map(([id, p]) => [id, { name: p.name }])),
     data: { global: pick(DB.global, globalKeys), ws: Object.fromEntries(Object.entries(DB.ws).map(([id, store]) => [id, pick(store, wsKeys)])) },
   };
@@ -59,9 +59,10 @@ function hydrate() {
   if (D.pWorkspaces.some(w => w.id === c.ws)) S.ws = c.ws;
   if (typeof c.signedIn === 'boolean') S.signedIn = c.signedIn;
   if (['light', 'dark', 'system'].includes(c.theme)) S.theme = c.theme;
-  if (validLook(c.look)) S.look = { ...DEFAULT_LOOK, ...c.look };
+  // A named theme is its bundle: a stored BoMesh look always follows the current default definition.
+  if (validLook(c.look)) S.look = c.look.theme === 'bomesh' ? { ...DEFAULT_LOOK } : { ...DEFAULT_LOOK, ...c.look };
   if (UI_LANGS.some(l => l[0] === c.lang)) S.lang = c.lang;
-  S.collapsed = !!c.collapsed; S.protoMin = !!c.protoMin;
+  S.collapsed = !!c.collapsed; S.protoMin = !!c.protoMin; S.manageOpen = !!c.manageOpen;
   S.inbox.read = new Set(c.read || []); S.inbox.dismissed = new Set(c.dismissed || []);
 }
 function resetPrototype() {

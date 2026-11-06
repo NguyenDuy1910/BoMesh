@@ -49,17 +49,17 @@ The contribution queue has 9 items. Two of them propose new topics: *Open bankin
 
 ## Journeys
 
-1. **Engineer, first minute.** Home shows what Finx knows ("227 published documents in 7 knowledge bases"), the six domains, featured trusted documents with real thumbnails, and where Khoa left off. Ask "How do I get production access?" and the cited answer quotes the Access Control Policy. *Request production access* opens the IT Service Desk request, which checks the Secure coding training and the 8-hour limit before sending.
-2. **Engineer, on call.** Home → Featured *Runbook — Payment gateway timeouts* → Reader with Ask beside it → Payments on-call kit collection.
-3. **Engineer, contributing.** Contribute a Kafka consumer retry guide; it goes into review. Fix the contribution the lead sent back with changes requested, then resubmit.
-4. **Lead.** Reviews Payments and Engineering contributions in Manage → Documents. Compares Confluent Cloud, Pulsar and MSK in the *Event streaming platform — evaluation* review (every cell cited). Curates the on-call kit.
-5. **Analyst.** Explores Data Platform & Analytics → Metrics & definitions. Asks how a monthly active customer is defined. A production access request is blocked because the training is missing, and the check says how to fix it. The PII access request goes to Risk & Compliance.
+1. **Engineer, first minute.** The product tour walks Home once (the box, its scope, the first section, New chat, Search). Home shows what is waiting for Khoa, what he was reading, what changed at the source, recommended documents and the six domains. Ask "How do I get production access?" (question-like, so *Ask AI* leads) and the cited answer quotes the Access Control Policy; a citation opens the document preview at the passage. *Request production access* opens the IT Service Desk request, which checks the Secure coding training and the 8-hour limit before sending.
+2. **Engineer, on call.** Search "gateway timeouts" → *Runbook — Payment gateway timeouts* in the preview → *Open full document* → Reader with Ask beside it → Payments on-call kit collection (Browse → Shared with you).
+3. **Engineer, contributing.** Contribute a Kafka consumer retry guide to a knowledge base; it goes into review. Fix the contribution the lead sent back with changes requested, then resubmit; the declined one shows the reviewer's reason.
+4. **Lead.** Reviews Payments and Engineering contributions in Manage → Documents. Compares Confluent Cloud, Pulsar and MSK in the *Event streaming platform — evaluation* evidence review (every cell cited, evidence in a side panel), drafts a decision record from it and approves teammates' drafts sent for review. Curates the on-call kit in its Edit mode and decides access requests to Payments Platform in the base's Access tab.
+5. **Analyst.** Explores Data Platform & Analytics → Metrics & definitions. Asks how a monthly active customer is defined (*Ask about this document* → the Reader's Ask panel). A production access request is blocked because the training is missing, and the check says how to fix it. The PII access request goes to Risk & Compliance.
 6. **Admin.**
-   - Features documents on Home.
+   - Features documents on Home (Featured documents drawer).
    - Publishes the chargeback procedure update as a new version.
-   - Accepts or merges the proposed *Open banking* / *AI governance* topics.
-   - Fixes the password-protected file.
-   - Keeps policies verified, works the Risk & Compliance queue, and closes knowledge gaps from Overview.
+   - Accepts or merges the proposed *Open banking* / *AI governance* topics in Documents → Topics.
+   - Fixes the password-protected file (Open source, then sync again).
+   - Publishes updates for documents changed at the source, keeps policies verified, works the Risk & Compliance queue (the space opens on it) and its request types, and closes knowledge gaps from Overview.
 
 Every journey is in the prototype bar under **Journeys** (Finx).
 

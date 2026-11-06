@@ -7,9 +7,10 @@ the machine-readable contract with every field, error reason and
 documents, links, contributions, revisions) is decided in `item_model.md`;
 the schema is `design.dbml`.
 
-Implementation status: the backend serves this contract; the web and mobile
-clients still call the removed legacy routes, which section 9 maps to their
-replacements.
+Implementation status: the backend serves this contract and the web client
+(`apps/web`) uses it; the mobile client still calls the removed legacy routes,
+which section 9 maps to their replacements. UX surfaces the contract does not
+cover yet are listed at the end of section 9.
 
 Source of truth for the design rules: Google API Improvement Proposals
 ([AIP-190 naming](https://google.aip.dev/190) and the AIPs it references).
@@ -705,9 +706,39 @@ FAILED, a revision returns it to ACTIVE). **Component** `components/{component}`
 | Spaces, Work, Requests | Spaces + children, Artifacts (Work kinds), RequestTypes, Requests (`validateOnly`) |
 | Platform console | Workspaces (create/suspend/activate/pauseIngestion/summarizeUsage/exportUsage), Users, Connectors, `workspaces/-/ingestionRuns…`, IngestionPolicy, Components, Incidents, `workspaces/-/auditEvents`, `auditEvents` |
 
+Implementation status — UX surfaces without contract support yet (open
+design decisions; the web client shows them as unavailable or leaves the
+detail out, and never fakes them in production):
+
+- **Projects** (sidebar folders, `/project/{id}`): no resource. The web
+  client defines the expected shape in `apps/web/src/modules/projects/types.ts`
+  (per-user folders of conversations with ≤ 10 knowledge references) behind
+  an adapter that is unavailable in production.
+- **Conversation messages:** no stored `workLog` (see `conversation_loop.md`
+  "Web conversation client"), follow-up suggestions or question attachments,
+  so a reloaded answer loses its work line, chips and attachment chips.
+- **Reader:** PERMISSION_DENIED on GetItem does not name the governing
+  collection, so Request access cannot be offered; no method lists the
+  conversations that cite an item.
+- **Review and topics:** ApproveContribution cannot publish a submission as a
+  new revision of an existing item; nothing creates `PROPOSED` topics.
+- **Workspace admin:** AuditEvent carries no sign-in method or device;
+  WorkspaceAssistant has no citations setting; a denied request cannot be
+  reopened (no Undo).
+- **Work and Requests:** Artifact does not store the draft type; UpdateArtifact
+  cannot add `sourceItems`; no artifact copy; evidence-review synthesis is
+  free text; quiz questions carry no difficulty or citation. Request messages
+  carry no attachments, transitions or assignment history, approved requests
+  refuse messages, request types have no icon and spaces no short code or
+  opening hours.
+- **Platform console:** operators cannot read the owner/admins of workspaces
+  they do not belong to or a user's memberships; WorkspaceUsage has no daily
+  series or 90-day window; IngestionRunSelector has no error-class filter;
+  Component has no latency or uptime.
+
 **Removed legacy route → replacement.** The legacy routes lived under the
-same `/api/v1` prefix as this contract but are gone from the backend; the web
-and mobile clients still call them, so this table stays for their migration.
+same `/api/v1` prefix as this contract but are gone from the backend; the
+mobile client still calls them, so this table stays for its migration.
 
 | Removed legacy route | Replacement |
 | --- | --- |

@@ -18,7 +18,7 @@
   /* ── Access requests to a knowledge base (admins: all; owners: their bases) ── */
   function accessItem(r) {
     const kb = kbById(r.kb);
-    return { id: 'req-' + r.id, icon: 'user-plus', tone: 'warn', title: `${actorName(r.user)} requested ${r.role === 'editor' ? 'edit' : 'view'} access to ${kb?.name || 'a knowledge base'}`, body: r.note ? `“${r.note}”` : 'No message.', at: r.at, to: isAdmin() ? '/people?tab=requests' : `/knowledge/${r.kb}?tab=access`, kind: 'request', req: r.id };
+    return { id: 'req-' + r.id, icon: 'user-plus', tone: 'warn', title: `${actorName(r.user)} requested ${r.role === 'editor' ? 'edit' : 'view'} access to ${kb?.name || 'a knowledge base'}`, body: r.note ? `“${r.note}”` : 'No message.', at: r.at, to: isAdmin() ? '/people?tab=requests' : kbManageHref({ id: r.kb }, 'access'), kind: 'request', req: r.id };
   }
 
   /* ── Spaces: announcements from the last 7 days ── */
@@ -44,7 +44,7 @@
       const sp = spaceById(ev.space);
       const to = ev.work && hasModule('work') ? '/work/' + ev.work : ev.doc ? '/doc/' + ev.doc : ev.requestType && hasModule('requests') ? '/requests/new?type=' + ev.requestType : '/space/' + ev.space;
       const verb = { quiz: 'closes', exam: 'is', meeting: 'is' }[ev.kind] || 'is due';
-      return { id: 'due-' + ev.id, icon: 'calendar', tone: 'warn', title: `${ev.title} ${verb} ${relFuture(ev.at)}`, body: sp?.name || '', at: Math.min(t, ev.at - 3 * DAY), when: `Due ${fmtDateTime(ev.at)}`, to };
+      return { id: 'due-' + ev.id, icon: 'calendar', tone: 'warn', title: `${ev.title} ${verb} ${relFuture(ev.at)}`, body: sp?.name || '', at: Math.min(t, ev.at - 3 * DAY), due: ev.at, when: `Due ${fmtDateTime(ev.at)}`, to, needs: true };
     });
   }
 
@@ -57,19 +57,19 @@
       const sp = spaceById(w.space);
       if (w.kind === 'quiz' && w.status === 'published' && w.visibility === 'space' && sp && spaceRole(sp) && !isSpaceStaff(sp) && !attempted(w) && (!w.due || w.due > now())) {
         const n = w.data?.questions?.length || 0;
-        out.push({ id: 'quiz-' + w.id, icon: WORKFLOWS[w.workflow]?.icon || 'list', tone: 'info', title: `New quiz in ${sp.name}: ${w.title}`, body: [plural(n, 'question'), w.data?.timeLimit && `${w.data.timeLimit} min`, w.due && `closes ${fmtDateTime(w.due)}`].filter(Boolean).join(' · '), at: w.published || w.updated, to: '/work/' + w.id, cta: 'Start', space: sp.id });
+        out.push({ id: 'quiz-' + w.id, icon: WORKFLOWS[w.workflow]?.icon || 'list', tone: 'info', title: `New quiz in ${sp.name}: ${w.title}`, body: [plural(n, 'question'), w.data?.timeLimit && `${w.data.timeLimit} min`, w.due && `closes ${fmtDateTime(w.due)}`].filter(Boolean).join(' · '), at: w.published || w.updated, due: w.due, to: '/work/' + w.id, needs: true, quiz: true, space: sp.id });
       }
       const st = w.data?.stats;
       if (w.kind === 'quiz' && w.owner === me().id && w.status === 'published' && st?.attempts > 0) {
         const qs = w.data.questions || [], by = st.byQuestion || [];
         const worst = by.length ? by.indexOf(Math.min(...by)) : -1;
-        out.push({ id: 'quizres-' + w.id, icon: 'chart', tone: 'ok', title: `Results are in for ${w.title}`, body: `${plural(st.attempts, 'attempt')} · average ${st.avg}/${qs.length}${worst >= 0 && qs[worst] ? ` · most missed: “${qs[worst].q}” (${Math.round(by[worst] * 100)}% correct)` : ''}`, at: w.updated, to: '/work/' + w.id, cta: 'See results' });
+        out.push({ id: 'quizres-' + w.id, icon: 'chart', tone: 'ok', title: `Results are in for ${w.title}`, body: `${plural(st.attempts, 'attempt')} · average ${st.avg}/${qs.length}${worst >= 0 && qs[worst] ? ` · most missed: “${qs[worst].q}” (${Math.round(by[worst] * 100)}% correct)` : ''}`, at: w.updated, to: '/work/' + w.id });
       }
-      if (w.owner === me().id && ['draft', 'ready'].includes(w.status) && sp) {
+      if (w.owner === me().id && ['draft', 'changes'].includes(w.status) && sp) {
         const ev = (D.events || []).find(e => e.work === w.id && e.at > now());
         const leadRole = spaceType(sp.type).staff[0];
         const lead = sp.members?.find(m => m.role === leadRole && m.user !== me().id);
-        if (ev && lead) out.push({ id: 'wdue-' + w.id, icon: 'pencil', tone: 'neu', title: `${actorName(lead.user)} is waiting for your draft`, body: `${w.title} · ${ev.title} ${fmtDate(ev.at)}`, at: Math.min(now(), w.updated), to: '/work/' + w.id, cta: 'Open draft' });
+        if (ev && lead) out.push({ id: 'wdue-' + w.id, icon: 'pencil', tone: 'neu', title: `${actorName(lead.user)} is waiting for your draft`, body: `${w.title} · ${ev.title} ${fmtDate(ev.at)}`, at: Math.min(now(), w.updated), due: ev.at, to: '/work/' + w.id, needs: true });
       }
     });
     return out;
@@ -83,28 +83,32 @@
       const t = T[r.status]; if (!t) return;
       const type = svcType(r.type), last = r.thread?.[r.thread.length - 1];
       const answered = last?.kind === 'answer';
-      out.push({ id: `sr-${r.id}-${r.status}`, icon: answered ? 'message' : t[0], tone: t[1], title: answered ? `${actorName(last.by)} answered your question` : `${type?.name || 'Your request'} ${t[2]}`, body: last?.text || r.id, at: r.updated || r.created, to: '/requests/' + r.id, ...(r.status === 'needs_info' ? { kind: 'reply', cta: 'Reply' } : {}) });
+      out.push({ id: `sr-${r.id}-${r.status}`, icon: answered ? 'message' : t[0], tone: t[1], title: answered ? `${actorName(last.by)} answered your question` : `${type?.name || 'Your request'} ${t[2]}`, body: last?.text || r.id, at: r.updated || r.created, to: '/requests/' + r.id, ...(r.status === 'needs_info' ? { kind: 'reply', needs: true } : {}) });
     });
     queueSpaces().forEach(sp => {
       const fresh = (D.svcRequests || []).filter(r => r.space === sp.id && r.status === 'submitted');
       if (!fresh.length) return;
       const q = fresh.every(r => svcType(r.type)?.question);
-      out.push({ id: `srq-${sp.id}-${fresh.map(r => r.id).sort().join('.')}`, icon: q ? 'message' : 'clipboard', tone: 'info', title: `${plural(fresh.length, q ? 'new question' : 'new request')} in ${sp.name}`, body: fresh.slice(0, 3).map(r => `${actorName(r.requester)} · ${svcType(r.type)?.name || r.id}`).join(', '), at: Math.max(...fresh.map(r => r.created)), to: '/requests?tab=queue', cta: 'Review queue' });
+      out.push({ id: `srq-${sp.id}-${fresh.map(r => r.id).sort().join('.')}`, icon: q ? 'message' : 'clipboard', tone: 'info', title: `${plural(fresh.length, q ? 'new question' : 'new request')} in ${sp.name}`, body: fresh.slice(0, 3).map(r => `${actorName(r.requester)} · ${svcType(r.type)?.name || r.id}`).join(', '), at: Math.max(...fresh.map(r => r.created)), to: '/requests?tab=queue', needs: true });
     });
     return out;
   }
-  function slaItem() {
+  /** Requests in the caller's queues that are late, or else due within a day — one summary row (their "new request" notices fold into it). */
+  function slaHit() {
     if (!hasModule('requests')) return [];
     const ids = new Set(queueSpaces().map(s => s.id)), t = now();
     const open = (D.svcRequests || []).filter(r => ids.has(r.space) && OPEN_SR.includes(r.status) && r.due);
-    const late = open.filter(r => r.due < t), soon = open.filter(r => r.due >= t && r.due - t <= DAY);
-    const hit = late.length ? late : soon; if (!hit.length) return [];
-    const key = hit.map(r => r.id).sort().join('.');
+    const late = open.filter(r => r.due < t);
+    return late.length ? late : open.filter(r => r.due >= t && r.due - t <= DAY);
+  }
+  function slaItem(hit) {
+    if (!hit.length) return [];
+    const t = now(), late = hit[0].due < t, key = hit.map(r => r.id).sort().join('.');
     return [{
-      id: 'sla-' + hashOf(key), icon: 'clock', tone: late.length ? 'err' : 'warn',
-      title: late.length ? `${plural(late.length, 'request')} past the response time` : `${plural(soon.length, 'request')} due within a day`,
+      id: 'sla-' + hashOf(key), icon: 'clock', tone: late ? 'err' : 'warn',
+      title: late ? `${plural(hit.length, 'request')} past the response time` : `${plural(hit.length, 'request')} due within a day`,
       body: hit.slice(0, 3).map(r => `${r.id} · ${svcType(r.type)?.name || ''} · ${actorName(r.requester)}`).join(', ') + (hit.length > 3 ? ` and ${hit.length - 3} more` : ''),
-      at: late.length ? Math.max(...late.map(r => r.due)) : t - 30 * MIN, to: '/requests?tab=queue', cta: 'Review queue',
+      at: late ? Math.max(...hit.map(r => r.due)) : t - 30 * MIN, due: Math.min(...hit.map(r => r.due)), to: '/requests?tab=queue', needs: true,
     }];
   }
 
@@ -118,82 +122,89 @@
       pendingRequests().forEach(r => out.push(accessItem(r)));
       D.kbs.filter(k => !k.archived && !k.personal).forEach(kb => {
         const failed = docsIn(kb.id).filter(d => d.status === 'failed');
-        if (failed.length) out.push({ id: 'docs-' + kb.id, icon: 'file-text', tone: 'warn', title: `${plural(failed.length, 'document')} in ${kb.name} couldn’t be published`, body: failed.map(d => d.name).join(', '), at: Math.max(...failed.map(d => d.updated)), to: '/documents?tab=all&life=attention' });
+        if (failed.length) out.push({ id: 'docs-' + kb.id, icon: 'file-text', tone: 'warn', title: `${plural(failed.length, 'document')} in ${kb.name} couldn’t be published`, body: failed.map(d => d.name).join(', '), at: Math.max(...failed.map(d => d.updated)), to: '/documents?tab=all&life=attention', needs: true });
       });
       const gaps = D.gaps.filter(g => !g.dismissed);
       out.push({ id: 'a4', icon: 'sparkles', tone: 'info', title: `Weekly summary: ${fmtNum(D.usage.questions7)} questions, ${plural(gaps.length, 'knowledge gap')}`, body: gaps.length ? `Most asked without a good answer: “${[...gaps].sort((a, b) => b.n - a.n)[0].q}”` : 'Questions people asked and where knowledge fell short.', at: ago(2 * DAY), to: '/overview' });
-      if (kbById('kb-eng')) out.push({ id: 'a5', icon: 'users', tone: 'neu', title: 'Tuan Le shared Engineering Runbooks with Engineering', body: 'Engineering · 41 people', at: ago(5 * HOUR), to: '/knowledge/kb-eng' });
+      if (kbById('kb-eng')) out.push({ id: 'a5', icon: 'users', tone: 'neu', title: 'Tuan Le shared Engineering Runbooks with Engineering', body: 'Engineering · 41 people', at: ago(5 * HOUR), to: kbManageHref(kbById('kb-eng'), 'access') });
     } else {
       D.requests.filter(r => r.user === me().id).forEach(r => {
         const kb = kbById(r.kb)?.name || 'a knowledge base';
         const t = r.status === 'approved' ? { icon: 'check-circle', tone: 'ok', title: `You can now ${r.role === 'editor' ? 'edit' : 'view'} ${kb}`, body: 'Your access request was approved.' }
           : r.status === 'denied' ? { icon: 'x-circle', tone: 'neu', title: `Your request for ${kb} was declined`, body: 'Ask the owner if you still need it.' }
             : { icon: 'clock', tone: 'neu', title: `Your request for ${kb} is waiting for an owner`, body: 'You’ll hear back here when they decide.' };
-        out.push({ id: `my-${r.id}-${r.status}`, ...t, at: r.decidedAt || r.at, to: '/knowledge/' + r.kb });
+        out.push({ id: `my-${r.id}-${r.status}`, ...t, at: r.decidedAt || r.at, to: kbHref(kbById(r.kb)) });
       });
       pendingRequests().filter(r => r.user !== me().id && kbRole(kbById(r.kb)) === 'owner').forEach(r => out.push(accessItem(r)));
       if (docById('d-hr-parental')) out.push({ id: 'm1', icon: 'book', tone: 'info', title: 'Parental Leave Guidelines was updated', body: 'HR Policies · An answer you saw cites it.', at: ago(3 * HOUR), to: '/doc/d-hr-parental' });
-      if (kbById('kb-eng')) out.push({ id: 'm2', icon: 'check-circle', tone: 'ok', title: 'You can now view Engineering Runbooks', body: 'Shared with Engineering by Tuan Le.', at: ago(5 * HOUR), to: '/knowledge/kb-eng' });
-      if (convById('c9')) out.push({ id: 'm3', icon: 'message', tone: 'neu', title: 'Ben Walker shared a chat with you', body: '“SSO setup steps for customers”', at: ago(2 * DAY), to: '/chats' });
+      if (kbById('kb-eng')) out.push({ id: 'm2', icon: 'check-circle', tone: 'ok', title: 'You can now view Engineering Runbooks', body: 'Shared with Engineering by Tuan Le.', at: ago(5 * HOUR), to: kbHref(kbById('kb-eng')) });
+      if (convById('c9')) out.push({ id: 'm3', icon: 'message', tone: 'neu', title: 'Ben Walker shared a chat with you', body: '“SSO setup steps for customers”', at: ago(2 * DAY), to: '/chat/c9' });
     }
-    // Document lifecycle: contributors hear about decisions on their submissions; reviewers about what waits for them.
-    out.push(...(X.contribNotices?.() || []), ...(X.reviewNotices?.() || []));
+    // Document lifecycle: contributors hear about decisions on their submissions; reviewers about what waits for them; drafts in review.
+    out.push(...(X.contribNotices?.() || []), ...(X.reviewNotices?.() || []), ...(X.workNotices?.() || []));
     const work = workItems();
     // An announcement posted with a new quiz says the same thing: keep the actionable quiz item.
-    const quizAt = work.filter(i => i.cta === 'Start');
+    const quizAt = work.filter(i => i.quiz);
     out.push(...announcementItems().filter(a => !quizAt.some(q => q.space === a.space && Math.abs(q.at - a.at) < HOUR)), ...deadlineItems(), ...work);
-    if (hasModule('requests')) out.push(...(X.requestNotices ? X.requestNotices() : requestFallback()), ...slaItem());
+    if (hasModule('requests')) {
+      // One request, one row: a request already in the due/late summary doesn't also get its own "New request" notice.
+      const hit = slaHit(), inSla = new Set(hit.map(r => '/requests/' + r.id));
+      const staffOpen = n => (D.svcRequests || []).some(r => '/requests/' + r.id === n.to && r.requester !== me().id && OPEN_SR.includes(r.status));
+      const notices = (X.requestNotices ? X.requestNotices() : requestFallback()).filter(n => !(inSla.has(n.to) && !n.needs && n.kind !== 'reply')).map(n => (staffOpen(n) ? { ...n, needs: true } : n));
+      out.push(...notices, ...slaItem(hit));
+    }
     if (isOperator()) out.push({ id: 'o1', icon: 'server', tone: 'warn', title: 'Document processing is slower than usual', body: 'Queue wait is 9 minutes. New documents still process.', at: ago(40 * MIN), to: '/p/health' });
     const seen = new Set();
     return out.filter(i => !S.inbox.dismissed.has(i.id) && !seen.has(i.id) && seen.add(i.id)).sort((a, b) => b.at - a.at);
   }
   const isUnread = i => !S.inbox.read.has(i.id);
   X.inboxUnread = () => items().filter(isUnread).length;
+  /** Needs you: a decision or a person waiting on the caller (approve, reconnect, reply, review, a draft, a deadline). */
+  const needsYou = i => !!(i.needs || i.cta || ['request', 'reconnect', 'reply', 'source'].includes(i.kind) || i.tone === 'err');
 
+  /** Only in-place decisions get buttons (Approve, Deny, Reconnect); every other row opens by clicking it, with a quiet chevron. */
   function inlineAction(i) {
     if (i.kind === 'request') return btn('Deny', { v: 'ghost', size: 'sm', act: 'inbox-deny', data: { id: i.id, req: i.req } }) + btn('Approve', { v: 'secondary', size: 'sm', act: 'inbox-approve', data: { id: i.id, req: i.req } });
     if (i.kind === 'reconnect') return btn('Reconnect', { v: 'secondary', size: 'sm', act: 'inbox-reconnect', data: { id: i.id, acc: i.acc } });
-    if (i.cta || i.kind === 'reply') return btn(i.cta || 'Reply', { v: 'secondary', size: 'sm', act: 'inbox-open', data: { id: i.id } });
-    return btn('Open', { v: 'tertiary', size: 'sm', act: 'inbox-open', data: { id: i.id }, cls: 'hide-sm' });
+    return '';
   }
   function row(i) {
+    const decide = inlineAction(i);
     return item({
       lead: itemIcon(i.icon || 'bell', TONE[i.tone] ?? ''),
       title: esc(i.title),
       desc: `<span class="truncate inbox-line">${esc(i.body || '')}</span><span class="inbox-time">${esc(i.when || rel(i.at))}</span>`,
-      trail: inlineAction(i) + iconBtn('x', 'Dismiss', { size: 'sm', act: 'inbox-dismiss', data: { id: i.id } }),
-      act: 'inbox-open', data: { id: i.id }, unread: isUnread(i), cls: 'inbox-item',
+      trail: `${decide}<span class="reveal-on-hover">${iconBtn('x', 'Dismiss', { size: 'sm', act: 'inbox-dismiss', data: { id: i.id } })}</span>${decide ? '' : ic('chevron-right', 'inbox-go')}`,
+      act: 'inbox-open', data: { id: i.id }, unread: isUnread(i), cls: 'inbox-item', lines: 2,
     });
   }
   function caughtUpText() {
-    const what = [hasModule('spaces') && 'deadlines and announcements', hasModule('requests') && 'request updates', isAdmin() ? 'syncs and access requests' : 'shared knowledge'].filter(Boolean);
-    return `${what.join(', ').replace(/^./, c => c.toUpperCase())} show up here.`;
+    const what = [hasModule('spaces') && 'deadlines and announcements', hasModule('requests') && 'requests', isAdmin() ? 'syncs and access requests' : 'shared knowledge'].filter(Boolean);
+    return `Updates about ${what.length > 1 ? what.slice(0, -1).join(', ') + ' and ' + what.at(-1) : what[0]} show up here.`;
   }
 
   P.inbox = () => {
-    const u = ui('inbox', { tab: 'all' });
-    const all = items(), unread = all.filter(isUnread).length;
-    const head = pageHeader({ title: 'Inbox', actions: unread ? btn('Mark all read', { v: 'ghost', icon: 'check-check', act: 'inbox-readall' }) : '' });
-    const t = `<div class="page-tabs">${tabs([{ id: 'all', label: 'All' }, { id: 'unread', label: 'Unread', count: unread || '' }], u.tab, '/inbox', { variant: 'primary', act: 'inbox-tab' })}</div>`;
+    const all = items(), unread = all.filter(isUnread).length, live = S.pageState === 'live' && !S.navLoading;
+    // Header tools only when the list is really there (not while loading, empty or failed).
+    const head = pageHeader({ title: 'Inbox', actions: live && unread ? btn('Mark all read', { v: 'ghost', icon: 'check-check', act: 'inbox-readall' }) : '' });
     const caughtUp = () => emptyState({ icon: 'check-circle', tone: 'success', title: 'You’re all caught up', desc: esc(caughtUpText()), boxed: true });
     const body = gate({
       loading: () => skelRows(5),
       empty: caughtUp,
       ok: () => {
-        const shown = u.tab === 'unread' ? all.filter(isUnread) : all;
-        if (!shown.length) return u.tab === 'unread' && all.length
-          ? emptyState({ icon: 'check-circle', tone: 'success', title: 'Nothing unread', desc: 'You’ve seen everything.', actions: btn('Show all', { act: 'inbox-tab', data: { value: 'all' } }), boxed: true })
-          : caughtUp();
-        return list(shown.map(row), 'inbox-list');
+        if (!all.length) return caughtUp();
+        // Needs you first, soonest due (or longest waiting) on top; everything else is for your information, newest first.
+        const needs = all.filter(needsYou).sort((a, b) => (a.due == null) - (b.due == null) || (a.due ?? a.at) - (b.due ?? b.at)), updates = all.filter(i => !needsYou(i));
+        if (!needs.length) return list(updates.map(row), 'inbox-list');
+        return section('Needs you', list(needs.map(row), 'inbox-list'), { id: 'inbox-needs' }) + (updates.length ? section('Updates', list(updates.map(row), 'inbox-list'), { id: 'inbox-updates' }) : '');
       },
     });
-    const foot = `<div class="inbox-foot">${linkBtn('Notification settings', { act: 'inbox-prefs', icon: 'settings' })}</div>`;
-    return `<div class="page page--narrow">${head}${t}${body}${foot}</div>`;
+    const foot = live ? `<div class="inbox-foot">${linkBtn('Notification settings', { act: 'inbox-prefs', icon: 'settings' })}</div>` : '';
+    return `<div class="page page--narrow">${head}${body}${foot}</div>`;
   };
 
   const markRead = id => S.inbox.read.add(id);
   const find = id => items().find(i => i.id === id);
-  A['inbox-tab'] = el => { ui('inbox').tab = el.dataset.value; refresh(); };
   A['inbox-readall'] = () => { items().forEach(i => markRead(i.id)); refresh(); toast('Marked all as read'); };
   A['inbox-open'] = el => {
     const i = find(el.dataset.id); markRead(el.dataset.id);
@@ -208,5 +219,5 @@
   A['inbox-approve'] = el => { markRead(el.dataset.id); if (A['req-approve']) A['req-approve']({ dataset: { id: el.dataset.req } }); else go('/people?tab=requests'); };
   A['inbox-deny'] = el => { markRead(el.dataset.id); if (A['req-deny']) A['req-deny']({ dataset: { id: el.dataset.req } }); else go('/people?tab=requests'); };
   A['inbox-reconnect'] = el => { markRead(el.dataset.id); if (A['acc-reconnect']) A['acc-reconnect']({ dataset: { id: el.dataset.acc } }); else go('/connections'); };
-  A['inbox-prefs'] = () => openModal('prefs');
+  A['inbox-prefs'] = () => openPrefs('notif');
 })();

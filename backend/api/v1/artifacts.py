@@ -6,6 +6,7 @@ Routes are mounted under ``/api/v1``; ``name`` is the contract ``operationId``.
 from __future__ import annotations
 
 from typing import Annotated, Any, Literal
+from urllib.parse import quote
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -67,10 +68,13 @@ _REVISION = f"{_ARTIFACT}/revisions/{{revision:id}}"
 
 
 def _download(download: Download) -> Response:
+    # Header values are Latin-1: an ASCII fallback plus the RFC 6266 UTF-8 form keeps titles like "Plan — Q4".
+    fallback = download.file_name.encode("ascii", "replace").decode().replace('"', "'")
+    disposition = f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{quote(download.file_name)}"
     return Response(
         content=download.data,
         media_type=download.mime_type,
-        headers={"Content-Disposition": f'attachment; filename="{download.file_name}"'},
+        headers={"Content-Disposition": disposition},
     )
 
 

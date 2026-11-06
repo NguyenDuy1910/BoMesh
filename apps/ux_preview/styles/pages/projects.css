@@ -1,0 +1,75 @@
+/* Projects (features/projects.js): sidebar New chat, project folders and Recent, and the
+   project page (composer with its documents attached, Project documents, Conversations).
+   Prefix: side-, proj-. HeroUI tokens only. */
+
+/* ───── Sidebar: New chat, folders and conversations ───── */
+.side-new { padding-bottom: 0; }
+.sidebar__group-label .side-add { width: 24px; height: 24px; min-width: 24px; margin: -4px -4px -4px 0; }
+.side-conv { position: relative; display: flex; align-items: center; min-width: 0; }
+.side-conv > .nav-item { flex: 1 1 auto; min-width: 0; }
+/* ⋯ appears on hover or keyboard focus, never as a permanent column; always on touch. */
+.side-more { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 24px; height: 24px; min-width: 24px; opacity: 0; background: var(--default); transition: opacity var(--dur-fast); }
+.side-conv:hover > .side-more, .side-conv:focus-within > .side-more, .side-more[aria-expanded="true"] { opacity: 1; }
+.side-conv:hover > .nav-item, .side-conv:focus-within > .nav-item { padding-right: 32px; }
+@media (hover: none) { .side-more { opacity: 1; background: transparent; } .side-conv > .nav-item { padding-right: 32px; } }
+/* A project row: its name opens the project page; the chevron before it expands its conversations. */
+.side-proj__chev { position: absolute; left: 2px; top: 50%; z-index: 1; transform: translateY(-50%); display: grid; place-items: center; width: 20px; height: 24px; border-radius: var(--radius-md); color: var(--muted); }
+.side-proj__chev:hover { background: var(--default); color: var(--foreground); }
+.side-proj__chev:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.side-proj__link { padding-left: 24px; gap: 8px; }
+.side-kids { display: flex; flex-direction: column; gap: 1px; margin: 1px 0 4px 22px; padding-left: 8px; border-left: 1px solid var(--separator); }
+.side-kids .nav-item--recent { height: 30px; }
+.side-kids__more { color: var(--muted); }
+.side-kids__empty { padding: 6px 10px; font-size: 12px; line-height: 16px; color: var(--muted); }
+@media (hover: none) { .side-proj__chev { width: 32px; height: 40px; left: 0; } .side-proj__link { padding-left: 32px; } }
+
+/* ───── Project page ───── */
+.proj { display: flex; flex-direction: column; gap: 32px; padding-top: 40px; }
+.proj-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.proj-head__icon { display: grid; place-items: center; width: 40px; height: 40px; flex: none; border-radius: var(--radius-xl); background: var(--default-soft); color: var(--muted); }
+.proj-head__title { flex: 1 1 auto; min-width: 0; font-size: 24px; line-height: 32px; font-weight: 600; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.proj-ask { position: relative; margin-top: -12px; }
+.proj-sec { min-width: 0; }
+.proj-sec__head { display: flex; align-items: baseline; gap: 8px; min-height: 32px; margin-bottom: 8px; }
+.proj-sec__note, .proj-sec__count { font-size: 12px; line-height: 16px; color: var(--muted); }
+.proj-sec__head > .button { align-self: center; }
+.proj-sec__title { font-size: 15px; line-height: 22px; font-weight: 600; }
+.proj-empty { font-size: 13px; line-height: 20px; color: var(--muted); }
+
+.proj-docs { display: flex; flex-wrap: wrap; gap: 8px; }
+.proj-doc { display: inline-flex; align-items: center; gap: 2px; max-width: 100%; height: 36px; padding: 0 2px 0 4px; border-radius: var(--radius-lg); background: var(--surface-secondary); }
+.proj-doc__link { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 280px; height: 32px; padding: 0 6px; border-radius: var(--radius-md); color: var(--foreground); font-size: 13px; }
+.proj-doc__link:hover { background: var(--default-soft); }
+.proj-doc__link:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.proj-doc__x { width: 28px; height: 28px; min-width: 28px; }
+/* Empty documents: one invitation row (dashed = a slot to fill); the whole row adds. */
+.proj-add { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 16px; border: 1px dashed color-mix(in oklab, var(--foreground) 16%, transparent); border-radius: var(--radius-2xl); text-align: left; color: var(--foreground); transition: background-color var(--dur-fast), border-color var(--dur-fast); }
+.proj-add:hover { background: var(--surface); border-color: color-mix(in oklab, var(--accent) 45%, transparent); }
+.proj-add:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.proj-add__icon { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: var(--radius-lg); background: var(--accent-soft); color: var(--accent-soft-foreground); }
+.proj-add__body { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; }
+.proj-add__title { font-size: 14px; line-height: 20px; font-weight: 500; }
+.proj-add__desc { font-size: 13px; line-height: 18px; color: var(--muted); }
+.proj-add__go { flex: none; color: var(--muted); }
+.proj-add:hover .proj-add__go { color: var(--accent-soft-foreground); }
+
+/* Conversations: a plain list, rows separated by hairlines (no card around them). */
+.proj-chats { display: flex; flex-direction: column; }
+.proj-chat { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 2px 4px 2px 0; border-radius: var(--radius-lg); }
+.proj-chat + .proj-chat { border-top: 1px solid var(--separator); }
+.proj-chat:hover { background: var(--default-soft); }
+.proj-chat__link { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; padding: 10px 12px; border-radius: var(--radius-lg); color: var(--foreground); }
+.proj-chat__link:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.proj-chat__title { font-size: 14px; line-height: 20px; font-weight: 500; }
+.proj-chat__last { font-size: 13px; line-height: 18px; color: var(--muted); }
+.proj-chat__at { flex: none; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+@container app (max-width: 679px) {
+  .proj { gap: 24px; padding-top: 20px; }
+  .proj-ask { margin-top: -8px; }
+  .proj-head__title { font-size: 20px; line-height: 28px; }
+  .proj-sec__head { flex-wrap: wrap; row-gap: 0; }
+  .proj-sec__note { order: 1; flex-basis: 100%; }
+  .proj-chat__at { display: none; }
+  .proj-doc__link { max-width: 220px; }
+}

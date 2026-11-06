@@ -149,18 +149,20 @@ until a bucket rule exists; `rustfs-init` applies one
 ## Reading (web)
 
 - One shared document view renders a rendition for the full document viewer,
-  the chat source panel and the chat file panel; PDFs keep page images, with
-  the text view available beside them.
-- The full viewer is the web route `/documents/{item}`. It reads `GetItem`
+  the chat source panel and the chat file panel, in the file's native format
+  (PDF and Word pages, slides, a spreadsheet grid, web-like formats as one
+  continuous page); there is no separate text view. PDFs keep page images.
+- The full viewer is the web route `/doc/{item}`. It reads `GetItem`
   (name, parent collection, size, `indexingState`, `indexedRevision`),
   `GetItem` on the parent collection (name and the caller's `access`) and
   `GetItemContent` (elements, page assets, rendition), and lays the rendition
   out as one sheet per source page with an outline of its top two heading
   levels. A revision with no rendition is shown from `elements` (the indexed
   passages under their sections). Viewing an older revision passes
-  `?revision=`; `REVISION_NOT_RENDERED` shows the revision's metadata and a
+  `?v=<revision number>` (sent to the API as `revision`);
+  `REVISION_NOT_RENDERED` shows the revision's metadata and a
   download through `?alt=media`.
-- Citations open it as `/documents/{item}?passage=<passage>`, with one
+- Citations open it as `/doc/{item}?passage=<passage>&from=<conversation>`, with one
   `passage` parameter per passage an answer cited in that document, in
   citation order. Every passage is resolved through `GetPassage`: its
   `elementIds` name the blocks to mark and its `boundingBoxes` the page
@@ -178,11 +180,10 @@ until a bucket rule exists; `rustfs-init` applies one
   `CreateIngestionRun` (`selector.items: [item]`). A document the caller
   cannot read (`PERMISSION_DENIED`) offers `CreateRequest` with `kind:
   COLLECTION_ACCESS`; an unknown one is `NOT_FOUND`.
-- Implementation status: the web viewer still calls the removed legacy document,
-  collection and knowledge-viewer routes and uses `?chunk=` links.
-- "Ask about this document" and "Ask about this" on a text selection open
-  `/chat?q=<draft>&scope=<collection>&doc=<item>`; the draft is not
-  sent.
+- "Ask about this document" and "Ask about this" on a text selection ask in
+  place, in the viewer's Ask rail (`Converse` with the document attached);
+  "Continue in chat" opens that conversation at `/chat/{conversation}`.
+  `?q=` highlights matches with previous/next; `?page=` opens a page.
 - Performance:
   - The rendition is fetched once per document version and kept in an
     in-memory cache keyed by `item:version`; stepping between citations of one

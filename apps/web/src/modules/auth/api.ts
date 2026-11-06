@@ -1,151 +1,193 @@
-import { getApiUrl } from "@/lib/api/config";
-import { ApiError, apiRequest } from "@/lib/api/request";
-import { clearAuthSession, getAuthSession, storeAuthSession, type AuthSession } from "@/lib/auth/session";
-import { pendingApi } from "@/lib/api/pending";
-import * as pendingPasswordReset from "@/lib/api/pending/password-reset";
+"use client";
 
-export async function completeGoogleSignIn(credential: string): Promise<AuthSession> {
-  return requestSession(
-    { method: "google", credential },
-    undefined,
-    "Google sign-in could not be completed.",
-  );
-}
+import { useQuery } from "@tanstack/react-query";
 
-export async function completePasswordSignIn(identifier: string, password: string): Promise<AuthSession> {
-  const normalizedIdentifier = identifier.trim();
-  return requestSession(
-    normalizedIdentifier.includes("@")
-      ? { method: "password", email: normalizedIdentifier, password }
-      : { method: "password", username: normalizedIdentifier, password },
-    undefined,
-    "Sign-in details are incorrect.",
-  );
-}
-
-export async function createPasswordAccount(input: {
-  email: string;
-  password: string;
-  display_name: string;
-}): Promise<AuthSession> {
-  return requestSession(
-    { email: input.email.trim(), password: input.password, display_name: input.display_name.trim() },
-    undefined,
-    "Account could not be created.",
-    "POST",
-    "/api/v1/auth/accounts",
-  );
-}
-
-export async function switchWorkspace(workspaceId: string): Promise<AuthSession> {
-  const current = getAuthSession();
-  if (!current) throw new ApiError("Your session has expired. Please sign in again.", 401);
-  return requestSession(
-    { active_workspace_id: workspaceId },
-    current.access_token,
-    "Your workspace could not be changed.",
-    "PATCH",
-    "/api/v1/auth/session",
-  );
-}
-
-/** `GET /auth/session`: the memberships as they are now, not as the token was minted. */
-type CurrentSession = Omit<AuthSession, "access_token" | "token_type">;
+import { api, ApiError, call, resourceId, type Schema } from "@/lib/api/client";
+import { clearSession, getSession, storeSession, type StoredSession } from "@/lib/session";
+import { listMyWorkspaces, rememberWorkspace, resolveWorkspace } from "@/lib/workspace";
 
 /**
- * Re-read the current session so memberships granted after sign-in appear
- * without signing in again. The access token is unchanged; only the context
- * the server resolves for it is refreshed.
+ * Identity calls for the signed-out pages (backend/docs_design/auth_contract.md):
+ * CreateSession → GetUser(me) → session stored; then workspace selection.
  */
-export async function refreshSession(): Promise<AuthSession> {
-  const current = getAuthSession();
-  if (!current) throw new ApiError("Your session has expired. Please sign in again.", 401);
-  const fresh = await apiRequest<CurrentSession>("/auth/session");
-  const next: AuthSession = { ...current, ...fresh };
-  storeAuthSession(next);
-  return next;
-}
 
-/**
- * `DELETE /auth/session`, then forget the credentials locally. The browser is
- * signed out even when the server cannot be reached (auth_contract.md).
- */
-export async function signOut(): Promise<void> {
+type Credential = Schema<"SessionCredential">;
+
+async function createSession(credential: Credential): Promise<StoredSession> {
+  const session = await call(api.POST("/api/v1/sessions", { body: { credential } }));
+  if (!session.accessToken || !session.name) throw new ApiError("Sign-in could not be completed.", 500, "INTERNAL");
+  // The token is needed to read users/me; store it first, then complete the session.
+  const provisional: StoredSession = {
+    name: session.name,
+    accessToken: session.accessToken,
+    expireTime: session.expireTime,
+    user: { name: session.user ?? "", email: "" },
+  };
+  storeSession(provisional);
   try {
-    if (getAuthSession()) await apiRequest<void>("/auth/session", { method: "DELETE" });
-  } catch {
-    // Revocation failed (offline or already ended); local sign-out still happens.
-  } finally {
-    clearAuthSession();
-  }
-}
-
-export interface PasswordResetRequest {
-  email: string;
-}
-
-/** The same answer whether or not an account uses the address. */
-export interface PasswordResetAccepted {
-  status: "accepted";
-  expires_in_minutes: number;
-}
-
-export interface PasswordResetCompletion {
-  password: string;
-}
-
-/** Every session of the account ends; the person signs in with the new password. */
-export interface PasswordResetCompleted {
-  status: "completed";
-}
-
-/** API pending: `SendPasswordReset` (public). */
-export async function requestPasswordReset(body: PasswordResetRequest): Promise<PasswordResetAccepted> {
-  return pendingApi("auth.password_reset", () => pendingPasswordReset.requestPasswordReset(body));
-}
-
-/** API pending: `ResetPassword` (public). */
-export async function completePasswordReset(
-  token: string,
-  body: PasswordResetCompletion,
-): Promise<PasswordResetCompleted> {
-  return pendingApi("auth.password_reset", () => pendingPasswordReset.completePasswordReset(token, body));
-}
-
-async function requestSession(
-  body: Record<string, string>,
-  accessToken?: string,
-  fallbackError = "Sign-in could not be completed.",
-  method = "POST",
-  path = "/api/v1/auth/sessions",
-): Promise<AuthSession> {
-  const apiUrl = getApiUrl();
-  if (!apiUrl) {
-    throw new ApiError("Sign-in is unavailable because the BoMesh API URL is not configured.");
-  }
-  let response: Response;
-  try {
-    response = await fetch(`${apiUrl}${path}`, {
-      method,
-      headers: {
-        "Content-Type": "application/json",
-        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    const user = await call(api.GET("/api/v1/users/{user}", { params: { path: { user: "me" } } }));
+    const stored: StoredSession = {
+      ...provisional,
+      user: {
+        name: user.name ?? provisional.user.name,
+        email: user.email,
+        username: user.username,
+        displayName: user.displayName,
+        platformRole: user.platformRole,
       },
-      body: JSON.stringify(body),
-    });
+    };
+    storeSession(stored);
+    return stored;
+  } catch (error) {
+    clearSession();
+    throw error;
+  }
+}
+
+/** Email when it contains `@`, otherwise username. */
+export function signInWithPassword(identifier: string, password: string): Promise<StoredSession> {
+  const id = identifier.trim();
+  return createSession({ password: id.includes("@") ? { email: id, password } : { username: id, password } });
+}
+
+export function signInWithGoogle(idToken: string): Promise<StoredSession> {
+  return createSession({ google: { idToken } });
+}
+
+export interface NewAccount {
+  displayName: string;
+  email: string;
+  password: string;
+}
+
+/** CreateUser does not sign in; CreateSession follows. */
+export async function createAccount(account: NewAccount): Promise<StoredSession> {
+  const email = account.email.trim();
+  await call(
+    api.POST("/api/v1/users", {
+      body: { email, password: account.password, displayName: account.displayName.trim() },
+    }),
+  );
+  return createSession({ password: { email, password: account.password } });
+}
+
+/** `validateOnly` CreateUser: resolves `true` when the email is already in use. */
+export async function emailInUse(email: string): Promise<boolean> {
+  try {
+    await call(
+      api.POST("/api/v1/users", {
+        params: { query: { validateOnly: true } },
+        // validateOnly checks email/username only; the password is a placeholder that passes the strength check.
+        body: { email: email.trim(), password: "validate-only-0" },
+      }),
+    );
+    return false;
+  } catch (error) {
+    if (error instanceof ApiError && error.reason === "EMAIL_ALREADY_USED") return true;
+    return false;
+  }
+}
+
+/** Always answers the same, whether or not an account uses the address. */
+export async function sendPasswordReset(email: string): Promise<void> {
+  await call(api.POST("/api/v1/users:sendPasswordReset", { body: { email: email.trim() } }));
+}
+
+export async function resetPassword(resetToken: string, newPassword: string): Promise<void> {
+  await call(api.POST("/api/v1/users:resetPassword", { body: { resetToken, newPassword } }));
+}
+
+/** DeleteSession, then forget the token locally even when the server can't be reached. */
+export async function signOut(): Promise<void> {
+  const session = getSession();
+  try {
+    if (session) {
+      await call(api.DELETE("/api/v1/sessions/{session}", { params: { path: { session: resourceId(session.name) } } }));
+    }
   } catch {
-    throw new ApiError("BoMesh couldn't be reached. Check your connection and try again.");
+    // Already ended or offline: local sign-out still happens.
+  } finally {
+    clearSession();
   }
-  const payload = await response.json().catch(() => null) as AuthSession | { detail?: unknown } | null;
-  if (!response.ok) {
-    const detail = payload && typeof payload === "object" && "detail" in payload && typeof payload.detail === "string"
-      ? payload.detail
-      : fallbackError;
-    // The status is what screens act on (401 wrong credentials, 403 no
-    // workspace, 409 account exists); the detail is operator-facing.
-    throw new ApiError(detail, response.status);
+}
+
+/* ── Workspace memory (when each workspace was last opened on this device) ── */
+
+const openedKey = (user: string) => `bomesh.workspaceOpened.${resourceId(user)}`;
+
+export function workspacesOpened(): Record<string, number> {
+  const session = getSession();
+  if (!session) return {};
+  try {
+    return (JSON.parse(window.localStorage.getItem(openedKey(session.user.name)) ?? "{}") as Record<string, number>) ?? {};
+  } catch {
+    return {};
   }
-  const next = payload as AuthSession;
-  storeAuthSession(next);
+}
+
+export function markWorkspaceOpened(workspaceId: string): void {
+  const session = getSession();
+  if (!session) return;
+  const opened = { ...workspacesOpened(), [workspaceId]: Date.now() };
+  window.localStorage.setItem(openedKey(session.user.name), JSON.stringify(opened));
+}
+
+/** Records the choice (device + preferences) and returns the route to open. */
+export async function openWorkspace(workspaceId: string, next?: string | null): Promise<string> {
+  markWorkspaceOpened(workspaceId);
+  await rememberWorkspace(workspaceId);
+  return safeNext(next) ?? "/home";
+}
+
+/** Only same-origin absolute paths are followed after sign-in. */
+export function safeNext(next?: string | null): string | null {
+  if (!next || !next.startsWith("/") || next.startsWith("//") || next.startsWith("/\\")) return null;
   return next;
 }
+
+/** After sign-in: the resolved workspace opens directly, otherwise the chooser. */
+export async function routeAfterSignIn(next?: string | null): Promise<string> {
+  const workspaces = await listMyWorkspaces();
+  const chosen = await resolveWorkspace(workspaces);
+  if (chosen) return openWorkspace(chosen, next);
+  const target = safeNext(next);
+  return target ? `/workspaces?next=${encodeURIComponent(target)}` : "/workspaces";
+}
+
+/** "Workspace admin" for `roles/workspaceAdmin`; custom roles by their ID. */
+export function roleLabel(roles: string[] | undefined): string {
+  if (roles?.includes("roles/workspaceAdmin")) return "Workspace admin";
+  const custom = roles?.find((r) => r !== "roles/workspaceMember");
+  if (custom) {
+    const id = resourceId(custom) ?? custom;
+    const words = id.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[-_]/g, " ").toLowerCase();
+    return words.charAt(0).toUpperCase() + words.slice(1);
+  }
+  return "Member";
+}
+
+/** Custom workspace roles are named by their `displayName` (GetRole); built-in roles by `roleLabel`. */
+export async function roleDisplayName(workspaceId: string, roles: string[] | undefined): Promise<string> {
+  const custom = roles?.find((r) => r !== "roles/workspaceMember" && r !== "roles/workspaceAdmin");
+  if (!custom || roles?.includes("roles/workspaceAdmin")) return roleLabel(roles);
+  const role = await call(
+    api.GET("/api/v1/workspaces/{workspace}/roles/{role}", { params: { path: { workspace: workspaceId, role: resourceId(custom) } } }),
+  ).catch(() => null);
+  return role?.displayName || roleLabel(roles);
+}
+
+/** `roleDisplayName` for the shell: the built-in label at once, the custom role's name once loaded. */
+export function useRoleDisplayName(workspaceId: string | null | undefined, roles: string[] | undefined): string {
+  const { data } = useQuery({
+    queryKey: [workspaceId, "role-name", roles?.join(",")],
+    enabled: Boolean(workspaceId && roles),
+    staleTime: 5 * 60_000,
+    queryFn: () => roleDisplayName(workspaceId!, roles),
+  });
+  return data ?? roleLabel(roles);
+}
+
+export const TEMPLATE_LABEL: Record<NonNullable<Schema<"Workspace">["template"]>, string> = {
+  ENTERPRISE: "Enterprise",
+  CAMPUS: "Campus",
+};

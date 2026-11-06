@@ -11,6 +11,7 @@
 
 /** Accent palette: [id, label, L (%), C, H, ink on accent: 'light' | 'dark']. */
 const ACCENTS = [
+  ['sage', 'Sage', 54, 0.115, 156, 'light'],
   ['green', 'Green', 62.04, 0.195, 139.21, 'light'],
   ['emerald', 'Emerald', 60, 0.145, 163, 'light'],
   ['teal', 'Teal', 58, 0.105, 186, 'light'],
@@ -45,7 +46,8 @@ const FONTS = [
 ];
 /** Named themes: complete looks people can pick in one click. */
 const THEMES = [
-  { id: 'bomesh', label: 'BoMesh', note: 'HeroUI CRM · default', accent: 'green', base: 'default', radius: 'md', font: 'google' },
+  { id: 'bomesh', label: 'BoMesh', note: 'Calm sage', accent: 'sage', base: 'subtle', radius: 'md', font: 'google' },
+  { id: 'crm', label: 'Fresh green', note: 'HeroUI CRM green', accent: 'green', base: 'default', radius: 'md', font: 'google' },
   { id: 'heroui', label: 'HeroUI', note: 'Blue on neutral gray', accent: 'blue', base: 'none', radius: 'md', font: 'inter' },
   { id: 'ocean', label: 'Ocean', note: 'Calm cyan', accent: 'cyan', base: 'subtle', radius: 'lg', font: 'inter' },
   { id: 'sky', label: 'Sky', note: 'Bright and airy', accent: 'sky', base: 'subtle', radius: 'md', font: 'google' },
@@ -64,7 +66,7 @@ const THEMES = [
   { id: 'lime', label: 'Lime', note: 'Fresh lime', accent: 'lime', base: 'subtle', radius: 'sm', font: 'inter' },
   { id: 'graphite', label: 'Graphite', note: 'Monochrome', accent: 'graphite', base: 'none', radius: 'sm', font: 'inter' },
 ];
-const DEFAULT_LOOK = { theme: 'bomesh', accent: 'green', hue: 200, base: 'default', radius: 'md', font: 'google' };
+const DEFAULT_LOOK = { theme: 'bomesh', accent: 'sage', hue: 200, base: 'subtle', radius: 'md', font: 'google' };
 S.look = { ...DEFAULT_LOOK };
 
 const themeOpt = (list, id) => list.find(x => x[0] === id);

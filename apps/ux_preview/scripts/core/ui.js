@@ -7,7 +7,8 @@
 const ic = (name, cls = '') => `<svg class="i ${cls}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
 const spinner = (size = '') => `<span class="spinner ${size ? 'spinner--' + size : ''}" aria-hidden="true"></span>`;
 
-/** Button. v: primary | secondary | tertiary | ghost | outline | danger | danger-soft. size: sm | md | lg. */
+/** Button. v: primary | secondary | tertiary | ghost | outline | danger | danger-soft | link. size: sm | md | lg.
+    A disabled button needs a `tip` saying why (permission-blocked only — otherwise keep it enabled and validate on press). */
 function btn(label, o = {}) {
   const { v = 'tertiary', size, icon, iconRight, act, data, disabled, loading, tip, id, cls, type = 'button', aria = '', href, menu, full, muted } = o;
   const c = cx('button', 'button--' + v, size && size !== 'md' && 'button--' + size, !label && 'button--icon-only', full && 'button--full-width', muted && 'button--muted', cls);
@@ -19,8 +20,22 @@ function btn(label, o = {}) {
   return `<button type="${type}" class="${c}" ${a}>${inner}</button>`;
 }
 const iconBtn = (icon, tip, o = {}) => btn('', { v: 'ghost', icon, tip, muted: true, ...o });
-const linkBtn = (label, o = {}) => o.href ? `<a class="link-button" href="#${o.href}">${esc(label)}${o.icon ? ic(o.icon, 'i-sm') : ''}</a>` : `<button type="button" class="link-button" ${o.act ? `data-act="${o.act}"` : ''} ${dataAttrs(o.data)}>${esc(label)}${o.icon ? ic(o.icon, 'i-sm') : ''}</button>`;
+/** Quiet text action (HeroUI Link button): btn({ v: 'link' }) with its icon after the label. */
+const linkBtn = (label, o = {}) => btn(label, { ...o, v: 'link', icon: undefined, iconRight: o.icon });
+/** Count badge with one meaning per tone: danger = something is broken, accent = needs you, default = information.
+    Renders nothing for 0. `dot` shows a dot instead of the number (e.g. a collapsed group). */
+function badge(n, { tone = 'default', label = '', dot = false, cls = '' } = {}) {
+  if (!n) return '';
+  const aria = label || (tone === 'default' ? `${n}` : `${n} need attention`);
+  return dot ? `<span class="${cx('badge-dot', 'badge-dot--' + tone, cls)}" role="img" aria-label="${esc(aria)}"></span>`
+    : `<span class="${cx('badge', tone !== 'default' && 'badge--' + tone, cls)}" aria-label="${esc(aria)}">${n > 99 ? '99+' : fmtNum(n)}</span>`;
+}
+/** Does typed text read like a question? Then Ask AI ranks first; otherwise Search documents does (Home box, ⌘K). */
+const QUESTION_RE = /^(how|what|when|where|why|who|whom|whose|which|can|could|would|do|does|did|is|are|was|were|should|tell me|explain|summari[sz]e|compare|show me|help me|làm sao|làm thế nào|tại sao|vì sao|khi nào|bao giờ|ở đâu|ai|cái gì|thế nào|như thế nào|có nên|giải thích|tóm tắt|so sánh)(\s|$)/i;
+const isQuestion = q => { const s = String(q || '').trim(); return !!s && (/[?？]$/.test(s) || QUESTION_RE.test(s) || /\s(không|chưa|gì|nào|sao)$/i.test(s)); };
 
+/** Display name of a document: its title without the file extension ("Cut-off Times.pdf" → "Cut-off Times"). One formatter everywhere. */
+const bareName = n => String(n || '').replace(/\.[a-z0-9]{1,5}$/i, '');
 /** Chip. tone: default | accent | success | warning | danger. variant: soft (default) | primary | tertiary | outline. */
 function chip(label, o = {}) {
   const { tone = 'default', variant = 'soft', icon, dot, live, size, tip } = o;
@@ -92,12 +107,22 @@ function statCard({ icon, label, value, meta = '', tone = '', act, data, extra =
   const tag = act ? 'button' : 'div';
   return `<${tag} class="card stat ${act ? 'card--action' : ''}" ${act ? `type="button" data-act="${act}"` : ''} ${dataAttrs(data)}><div class="stat__label"><span class="stat__icon ${tone ? 'stat__icon--' + tone : ''}">${ic(icon, 'i-sm')}</span>${esc(label)}</div><div class="stat__value">${value}</div>${meta ? `<div class="stat__meta">${meta}</div>` : ''}${extra}</${tag}>`;
 }
-/** List item (ListBox row). act makes the whole row interactive. */
-function item({ lead = '', title, titleExtra = '', desc = '', meta = '', trail = '', act, data, href, cls = '', unread }) {
-  const inner = `${lead ? `<span class="item__lead">${lead}</span>` : ''}<span class="item__body"><span class="item__title"><span class="truncate">${title}</span>${titleExtra}</span>${desc ? `<span class="item__desc">${desc}</span>` : ''}</span>${meta ? `<span class="item__meta">${meta}</span>` : ''}${trail ? `<span class="item__trail">${trail}</span>` : ''}`;
-  const c = cx('item', unread && 'item--unread', cls);
-  if (href) return `<a class="${c}" href="#${href}">${inner}</a>`;
-  if (act) return `<div class="${c}" role="button" tabindex="0" data-act="${act}" ${dataAttrs(data)}>${inner}</div>`;
+/** Buttons inside alerts and list rows are decisions, not page actions: primary/tertiary become secondary, every size becomes sm. */
+function quietActions(html) {
+  return String(html || '').replace(/class="button ([^"]*)"/g, (m, c) => {
+    const k = c.split(/\s+/).filter(x => x !== 'button--lg' && x !== 'button--sm').map(x => (x === 'button--primary' || x === 'button--tertiary' ? 'button--secondary' : x));
+    return `class="button ${k.join(' ')} button--sm"`;
+  });
+}
+/** List item (ListBox row). `act` or `href` makes the whole row the click target: the title becomes the real button/link and is
+    stretched over the row, so trailing actions stay sibling controls (never nested inside an interactive row).
+    lines: 2 lets the title wrap to two lines on phones (messages, notifications). */
+function item({ lead = '', title, titleExtra = '', desc = '', meta = '', trail = '', act, data, href, cls = '', unread, lines = 1 }) {
+  const t = `<span class="truncate">${title}</span>`;
+  const head = act ? `<button type="button" class="item__action" data-act="${act}" ${dataAttrs(data)}>${t}</button>` : href && trail ? `<a class="item__action" href="#${href}">${t}</a>` : t;
+  const inner = `${lead ? `<span class="item__lead">${lead}</span>` : ''}<span class="item__body"><span class="item__title">${head}${unread ? '<span class="sr-only">Unread</span>' : ''}${titleExtra}</span>${desc ? `<span class="item__desc">${desc}</span>` : ''}</span>${meta ? `<span class="item__meta">${meta}</span>` : ''}${trail ? `<span class="item__trail">${quietActions(trail)}</span>` : ''}`;
+  const c = cx('item', (act || href) && 'item--action', unread && 'item--unread', lines === 2 && 'item--lines-2', cls);
+  if (href && !trail) return `<a class="${c}" href="#${href}">${inner}</a>`;
   return `<div class="${c}">${inner}</div>`;
 }
 const list = (items, cls = '') => `<div class="list ${cls}">${items.join('')}</div>`;
@@ -107,7 +132,7 @@ const separator = () => '<hr class="separator">';
 /** Alert. tone: default | accent | success | warning | danger. */
 function alertBox(tone, title, desc = '', actions = '', { soft = true, icon } = {}) {
   const icn = icon || { default: 'info', accent: 'info', success: 'check-circle', warning: 'alert', danger: 'alert-circle' }[tone];
-  return `<div class="${cx('alert', 'alert--' + tone, soft && 'alert--soft')}" role="${tone === 'danger' ? 'alert' : 'status'}"><span class="alert__indicator">${ic(icn)}</span><div class="alert__content">${title ? `<div class="alert__title">${esc(title)}</div>` : ''}${desc ? `<div class="alert__description">${desc}</div>` : ''}</div>${actions ? `<div class="alert__actions">${actions}</div>` : ''}</div>`;
+  return `<div class="${cx('alert', 'alert--' + tone, soft && 'alert--soft')}" role="${tone === 'danger' ? 'alert' : 'status'}"><span class="alert__indicator">${ic(icn)}</span><div class="alert__content">${title ? `<div class="alert__title">${esc(title)}</div>` : ''}${desc ? `<div class="alert__description">${desc}</div>` : ''}</div>${actions ? `<div class="alert__actions">${quietActions(actions)}</div>` : ''}</div>`;
 }
 function emptyState({ icon = 'inbox', title, desc = '', actions = '', tone = '', boxed = false, compact = false }) {
   return `<div class="${cx('empty-state', boxed && 'empty-state--boxed', compact && 'empty-state--compact')}" role="status"><div class="empty-state__icon ${tone ? 'empty-state__icon--' + tone : ''}">${ic(icon, 'i-lg')}</div><div class="empty-state__title">${esc(title)}</div>${desc ? `<div class="empty-state__description">${desc}</div>` : ''}${actions ? `<div class="empty-state__actions">${actions}</div>` : ''}</div>`;
@@ -154,13 +179,21 @@ function switchRow({ title, desc = '', ...o }) { return `<div class="switch-row"
 function checkbox({ id, label = '', checked, act, data, bind, aria, indeterminate, disabled }) {
   return `<label class="checkbox"><input type="checkbox" ${id ? `id="${id}"` : ''} ${checked ? 'checked' : ''} ${indeterminate ? 'data-indeterminate' : ''} ${act ? `data-act="${act}"` : ''} ${bind ? `data-bind="${bind}"` : ''} ${dataAttrs(data)} ${aria ? `aria-label="${esc(aria)}"` : ''} ${disabled ? 'disabled' : ''}><span class="checkbox__control">${ic('check')}</span>${label ? `<span class="checkbox__label">${label}</span>` : ''}</label>`;
 }
-/** Radio cards: options [[value, title, desc], …]. Selecting fires A[act] with data-value. */
+/** Radio cards: options [[value, title, desc, icon?], …]. With an icon the card leads with an icon tile (tinted when selected)
+    instead of the radio dot. Selecting fires A[act] with data-value. */
 function choiceGroup({ name, value, options, act, data, cols = 1 }) {
-  return `<div class="choice-group" role="radiogroup" style="grid-template-columns:repeat(${cols},minmax(0,1fr))">${options.map(([v, t, d]) => `<label class="choice"><input type="radio" name="${name}" value="${esc(v)}" ${String(v) === String(value) ? 'checked' : ''} data-change="${act}" data-value="${esc(v)}" ${dataAttrs(data)}><span class="radio__control" aria-hidden="true"></span><span class="grow"><span class="choice__title">${esc(t)}</span>${d ? `<span class="choice__desc" style="display:block">${d}</span>` : ''}</span></label>`).join('')}</div>`;
+  return `<div class="${cx('choice-group', cols >= 3 && options.some(o => o[3]) && 'choice-group--tiles')}" role="radiogroup" style="grid-template-columns:repeat(${cols},minmax(0,1fr))">${options.map(([v, t, d, icon]) => `<label class="${cx('choice', icon && 'choice--icon')}"><input type="radio" name="${name}" value="${esc(v)}" ${String(v) === String(value) ? 'checked' : ''} data-change="${act}" data-value="${esc(v)}" ${dataAttrs(data)}>${icon ? `<span class="choice__icon" aria-hidden="true">${ic(icon)}</span>` : '<span class="radio__control" aria-hidden="true"></span>'}<span class="grow"><span class="choice__title">${esc(t)}</span>${d ? `<span class="choice__desc" style="display:block">${d}</span>` : ''}</span></label>`).join('')}</div>`;
 }
-/** Segmented toggle (HeroUI ToggleButtonGroup). options: [[value,label],…]. */
-function seg({ value, options, act, data, label = '', full }) {
-  return `<div class="toggle-group ${full ? 'toggle-group--full' : ''}" role="group" ${label ? `aria-label="${esc(label)}"` : ''}>${options.map(o => { const [v, l, icon] = Array.isArray(o) ? o : [o, o]; return `<button type="button" aria-pressed="${String(v) === String(value)}" data-act="${act}" data-value="${esc(v)}" ${dataAttrs(data)}>${icon ? ic(icon, 'i-sm') : ''}${esc(l)}</button>`; }).join('')}</div>`;
+/** Disclosure (HeroUI Disclosure) for progressive disclosure: a quiet header row (title, optional summary of the current
+    choice) that expands its body. State lives at S.ui[path] (dotted) and is flipped by A['ui-toggle'], so it survives re-renders. */
+function disclosure({ path, title, summary = '', body, icon = '' }) {
+  const open = !!getPath(path), id = 'dsc-' + path.replace(/\W/g, '-');
+  return `<div class="${cx('disclosure', open && 'is-open')}"><button type="button" class="disclosure__trigger" aria-expanded="${open}" aria-controls="${id}" data-act="ui-toggle" data-path="${esc(path)}">${icon ? ic(icon) : ''}<span class="grow">${esc(title)}</span>${summary ? `<span class="disclosure__summary">${summary}</span>` : ''}${ic('chevron-down', 'disclosure__chevron')}</button>${open ? `<div class="disclosure__body" id="${id}">${body}</div>` : ''}</div>`;
+}
+/** Segmented toggle (HeroUI ToggleButtonGroup) — in-content filters and view options. options: [[value, label, icon?],…].
+    iconOnly: buttons show only the icon; the label becomes the accessible name and tooltip. */
+function seg({ value, options, act, data, label = '', full, iconOnly, size }) {
+  return `<div class="${cx('toggle-group', full && 'toggle-group--full', iconOnly && 'toggle-group--icons', size === 'sm' && 'toggle-group--sm')}" role="group" ${label ? `aria-label="${esc(label)}"` : ''}>${options.map(o => { const [v, l, icon] = Array.isArray(o) ? o : [o, o]; const only = iconOnly && icon; return `<button type="button" aria-pressed="${String(v) === String(value)}" data-act="${act}" data-value="${esc(v)}" ${dataAttrs(data)} ${only ? `aria-label="${esc(l)}" data-tip="${esc(l)}"` : ''}>${icon ? ic(icon, 'i-sm') : ''}${only ? '' : esc(l)}</button>`; }).join('')}</div>`;
 }
 /** Color swatch picker (HeroUI ColorSwatchPicker). options: [[value, label, cssColor], …]; fires A[act] with data-value. */
 function swatchPicker({ value, options, act, label = '', labelled = false }) {
@@ -170,20 +203,30 @@ function swatchPicker({ value, options, act, label = '', labelled = false }) {
     return labelled ? `<span class="color-swatch-picker__option">${sw}<span>${esc(l)}</span></span>` : sw;
   }).join('')}</div>`;
 }
-/** Tabs as links (deep-linkable `base?tab=id`). variant: primary (pill) | secondary (underline). */
-function tabs(items, active, base, { variant = 'secondary', act } = {}) {
-  return `<nav class="tabs ${variant === 'secondary' ? 'tabs--secondary' : ''}" aria-label="Sections"><div class="tabs__list" role="tablist">${items.map(t => {
+/** Page-section tabs as links (deep-linkable `base?tab=id`, aria-current). variant: primary (pill) | secondary (underline).
+    With `act` they are an in-content filter instead: toggle buttons (aria-pressed), not ARIA tabs without panels.
+    Narrow containers scroll the tabs with an edge fade (syncOverflow in app.js); the current tab is kept in view. */
+function tabs(items, active, base, { variant = 'secondary', act, label = 'Sections' } = {}) {
+  return `<nav class="tabs ${variant === 'secondary' ? 'tabs--secondary' : ''}" aria-label="${esc(label)}" data-overflow><div class="tabs__list" ${act ? 'role="group"' : ''}>${items.map(t => {
     const sel = t.id === active;
-    const inner = `${t.icon ? ic(t.icon, 'i-sm') : ''}${esc(t.label)}${t.count != null && t.count !== '' ? `<span class="${t.alert ? 'badge badge--accent' : 'tabs__count'}">${fmtNum(t.count)}</span>` : ''}`;
-    return act ? `<button type="button" role="tab" class="tabs__tab" aria-selected="${sel}" data-act="${act}" data-value="${t.id}">${inner}</button>`
-      : `<a role="tab" class="tabs__tab" href="#${base}?tab=${t.id}" aria-selected="${sel}">${inner}</a>`;
+    const inner = `${t.icon ? ic(t.icon, 'i-sm') : ''}${esc(t.label)}${t.count != null && t.count !== '' ? (t.alert ? badge(+t.count || 0, { tone: 'accent' }) : `<span class="tabs__count">${fmtNum(t.count)}</span>`) : ''}`;
+    return act ? `<button type="button" class="tabs__tab" aria-pressed="${sel}" data-act="${act}" data-value="${t.id}">${inner}</button>`
+      : `<a class="tabs__tab" href="#${base}?tab=${t.id}" ${sel ? 'aria-current="page"' : ''}>${inner}</a>`;
   }).join('')}</div></nav>`;
 }
 
 /* ── Collections: search, filters, sort, select, paging ── */
-function searchField({ uiKey, placeholder = 'Search', id }) {
-  const q = ui(uiKey).q || ''; id = id || uiKey + '-q';
-  return `<div class="search-field">${ic('search')}<input class="input input--sm" id="${id}" type="search" placeholder="${esc(placeholder)}" value="${esc(q)}" data-input="ui-q" data-ui="${uiKey}" aria-label="${esc(placeholder)}" autocomplete="off">${q ? `<span class="search-field__clear">${iconBtn('x', 'Clear search', { size: 'sm', act: 'ui-clear-q', data: { ui: uiKey } })}</span>` : ''}</div>`;
+/** The one search input (HeroUI SearchField). Modes:
+    - uiKey: filters a list — value is S.ui[uiKey].q, typing sets it (page 1) and re-renders;
+    - bind:  dotted S.ui path (dialogs/pickers); `live` re-renders on each keystroke;
+    - act:   A[act](el, e) runs on each keystroke (with or without bind).
+    Always has a clear (×) button while non-empty (CSS-driven, so it appears without a re-render); Escape clears too.
+    size: sm (toolbars, default) | md (dialogs/pickers) | lg (page-level search). full: no max width. enter: A[enter] on ↵. */
+function searchField({ uiKey, bind, act, value, placeholder = 'Search', id, size = 'sm', autofocus, label, full, live, enter, cls = '' }) {
+  const v = value ?? (uiKey ? ui(uiKey).q : bind ? getPath(bind) : '') ?? '';
+  id = id || (uiKey ? uiKey + '-q' : bind ? 'sf-' + bind.replace(/\W/g, '-') : 'sf-' + (act || 'q'));
+  const attrs = [uiKey ? `data-input="ui-q" data-ui="${uiKey}"` : act ? `data-input="${act}"` : '', bind && `data-bind="${bind}"`, live && 'data-live', enter && `data-enter="${enter}"`, autofocus && 'data-autofocus'].filter(Boolean).join(' ');
+  return `<div class="${cx('search-field', 'search-field--' + size, (full || size === 'lg') && 'search-field--full', cls)}">${ic('search', size === 'lg' ? 'i-lg' : '')}<input class="${cx('input', size !== 'md' && 'input--' + size)}" id="${id}" type="search" placeholder="${esc(placeholder || ' ')}" value="${esc(v)}" ${attrs} aria-label="${esc(label || placeholder)}" autocomplete="off" enterkeyhint="search"><span class="search-field__clear">${iconBtn('x', 'Clear search', { size: 'sm', act: 'search-clear' })}</span></div>`;
 }
 /** Single-select filter (dropdown). options: [[value,label],…]; '' = any. */
 function filterButton(label, uiKey, fieldName, options) {
@@ -213,11 +256,17 @@ function selAllCheck(uiKey, ids) { const n = ids.filter(id => ui(uiKey).sel?.[id
 /** Floating bulk-action bar; render when selCount(uiKey) > 0. */
 function bulkBar(uiKey, actions) { const n = selCount(uiKey); return n ? `<div class="bulk-bar" role="toolbar" aria-label="Bulk actions"><span class="bulk-bar__count">${n} selected</span>${actions}${iconBtn('x', 'Clear selection', { size: 'sm', act: 'sel-clear', data: { ui: uiKey }, cls: 'button--ghost' })}</div>` : ''; }
 function paginate(rows, uiKey, per = 20) { const u = ui(uiKey); const pages = Math.max(1, Math.ceil(rows.length / per)); u.page = Math.min(u.page || 1, pages); return rows.slice((u.page - 1) * per, u.page * per); }
+/** Pagination footer — only when there is more than one page (the count already lives in the list's header). */
 function pager(total, uiKey, per = 20) {
   const p = ui(uiKey).page || 1; const pages = Math.ceil(total / per);
-  const range = total ? `${fmtNum((p - 1) * per + 1)}–${fmtNum(Math.min(total, p * per))} of ${fmtNum(total)}` : '0 results';
-  return `<div class="table-foot"><span class="num">${range}</span>${pages > 1 ? `<div class="pagination">${btn('', { v: 'ghost', size: 'sm', icon: 'chevron-left', tip: 'Previous page', act: 'ui-page', data: { ui: uiKey, page: p - 1 }, disabled: p <= 1 })}${btn('', { v: 'ghost', size: 'sm', icon: 'chevron-right', tip: 'Next page', act: 'ui-page', data: { ui: uiKey, page: p + 1 }, disabled: p >= pages })}</div>` : ''}</div>`;
+  if (pages <= 1) return '';
+  const range = `${fmtNum((p - 1) * per + 1)}–${fmtNum(Math.min(total, p * per))} of ${fmtNum(total)}`;
+  return `<div class="table-foot"><span class="num">${range}</span><div class="pagination">${btn('', { v: 'ghost', size: 'sm', icon: 'chevron-left', tip: 'Previous page', act: 'ui-page', data: { ui: uiKey, page: p - 1 }, disabled: p <= 1 })}${btn('', { v: 'ghost', size: 'sm', icon: 'chevron-right', tip: 'Next page', act: 'ui-page', data: { ui: uiKey, page: p + 1 }, disabled: p >= pages })}</div></div>`;
 }
+/** Progressive disclosure for list tools: search, sort, filters and bulk selection show only when a list is long enough
+    to need them (≥ TOOLS_MIN items) or one of them is already in use (a query or any of `fields` set on S.ui[uiKey]). */
+const TOOLS_MIN = 7;
+function needsTools(n, uiKey, fields = []) { const u = ui(uiKey); return n >= TOOLS_MIN || !!u.q || fields.some(f => u[f]); }
 /** Empty result for a filtered collection, with a clear action. */
 function noMatches(uiKey, fields, what = 'items') { return emptyState({ icon: 'search', title: `No ${what} match`, desc: 'Try another word or clear the filters.', actions: btn('Clear filters', { act: 'ui-clear', data: { ui: uiKey, fields: fields.join(',') } }), boxed: true, compact: true }); }
 

@@ -9,9 +9,9 @@
 let run = null;    // active stream: { conv, msg, stop }
 let stick = true;  // keep the thread pinned to the bottom while streaming
 const cui = () => { const u = ui('chat', { panel: null, open: {}, edit: null, editText: '' }); u.open ??= {}; return u; };
-/** Composer state per place: 'home' or a conversation id (drafts never leak between threads). */
-function composer(key) { const all = ui('composer'); const c = (all[key] ??= { draft: '', files: [], scope: [], space: null }); c.draft ??= ''; c.files ??= []; c.scope ??= []; c.space ??= null; return c; }
-const composerKey = () => S.cur?.r.page === 'chatThread' ? S.cur.params.id : 'home';
+/** Composer state per place: 'home', 'proj:<project id>' or a conversation id (drafts never leak between threads). */
+function composer(key) { const all = ui('composer'); const c = (all[key] ??= { draft: '', files: [], scope: [], space: null, off: [] }); c.draft ??= ''; c.files ??= []; c.scope ??= []; c.space ??= null; c.off ??= []; return c; }
+const composerKey = () => S.cur?.r.page === 'chatThread' ? S.cur.params.id : S.cur?.r.page === 'project' ? 'proj:' + S.cur.params.id : 'home';
 function findMsg(id) { for (const conv of D.convs) { const m = conv.messages.find(x => x.id === id); if (m) return { conv, m }; } return {}; }
 const canDoc = d => !!d && canReadKb(kbById(d.kb));
 const visCites = m => (m.citations || []).filter(c => canDoc(docById(c.doc)));
@@ -32,7 +32,6 @@ function clean(s) {
   D.kbs.filter(k => !canReadKb(k)).forEach(k => { s = String(s).split(' and ' + k.name).join('').split(k.name + ' and ').join('').split(', ' + k.name).join(''); });
   return s;
 }
-const docHref = (conv, c) => `/doc/${c.doc}?q=${encodeURIComponent(c.quote)}&from=${conv.id}&page=${c.page}`;
 
 /* ═══════════════ Answer engine (canned, permission-aware) ═══════════════ */
 const CLAIMS = [
@@ -328,30 +327,50 @@ function md(text, ctx) {
 
 /* ═══════════════ Composer ═══════════════ */
 /** What the composer searches: the open conversation, or the home composer. Both carry scope (knowledge base ids) and space (context). */
-function scopeHolder() { const conv = S.cur?.r.page === 'chatThread' && convById(S.cur.params.id); if (conv) { conv.scope ??= []; return conv; } return composer('home'); }
+function scopeHolder() { const conv = S.cur?.r.page === 'chatThread' && convById(S.cur.params.id); if (conv) { conv.scope ??= []; return conv; } return composer(composerKey()); }
 const readableKbsOf = sp => (sp?.kbs || []).filter(id => canReadKb(kbById(id)));
 /** Spaces offered as a scope: mine, with knowledge I can read. */
 const scopeSpaces = () => hasModule('spaces') ? mySpaces().filter(sp => readableKbsOf(sp).length) : [];
 const holderSpace = h => (h.space && hasModule('spaces') && spaceById(h.space)) || null;
 function setSpace(h, sp) { h.space = sp?.id || null; h.scope.splice(0, h.scope.length, ...readableKbsOf(sp)); }
+/** One name for "everything": All of {workspace} (the same words as Home's box). */
+const allLabel = () => `All of ${curWs().name}`;
+const scopeKbNames = h => h.scope.map(kbById).filter(k => k && canReadKb(k)).map(k => k.name);
+function scopeLabel(h) {
+  const sp = holderSpace(h); if (sp) return sp.name;
+  const names = scopeKbNames(h);
+  return !names.length ? allLabel() : names.length === 1 ? names[0] : `${names[0]} +${names.length - 1}`;
+}
+/** The placeholder says where the question goes. */
+function scopePlaceholder(h) {
+  const sp = holderSpace(h); if (sp) return `Ask about ${sp.name}`;
+  const names = scopeKbNames(h);
+  if (!names.length) return hasModule('spaces') ? `Ask anything in ${curWs().name}` : 'Ask anything about your company knowledge';
+  return names.length === 1 ? `Ask about ${names[0]}` : `Ask about ${names[0]} and ${names.length - 1} more`;
+}
 function scopeBtn(h) {
-  const sp = holderSpace(h);
-  if (sp) return btn(sp.name, { v: 'ghost', size: 'sm', icon: spaceType(sp.type).icon, iconRight: 'chevron-down', menu: 'chat-scope', id: 'chat-scope', cls: 'chat-scope chat-scope--on', tip: `Searching ${sp.name}. Change what to search` });
-  const names = h.scope.map(kbById).filter(k => k && canReadKb(k)).map(k => k.name);
-  const label = !names.length ? 'All knowledge' : names.length === 1 ? names[0] : `${names[0]} +${names.length - 1}`;
-  return btn(label, { v: 'ghost', size: 'sm', icon: names.length ? 'book' : 'layers', iconRight: 'chevron-down', menu: 'chat-scope', id: 'chat-scope', cls: cx('chat-scope', names.length && 'chat-scope--on'), tip: 'Choose what to search' });
+  const sp = holderSpace(h), on = !!sp || scopeKbNames(h).length > 0, label = scopeLabel(h);
+  return btn(label, { v: 'ghost', size: 'sm', icon: sp ? spaceType(sp.type).icon : on ? 'book' : 'layers', iconRight: 'chevron-down', id: 'chat-scope', cls: cx('chat-scope', on && 'chat-scope--on'), tip: 'Choose what to search', aria: `data-popover="chat-scope" aria-haspopup="dialog" aria-expanded="false" aria-label="${esc('Search in: ' + label)}"` });
+}
+/** Chips in the composer: the file being edited, a project's documents (removable for this chat only), then this message's own files. */
+function composerFiles(key) {
+  const c = composer(key), chip = (f, i) => X.chatFiles?.chip(f, i, true) || '';
+  const target = X.chatFiles?.editTarget?.(key);
+  const proj = key.startsWith('proj:') ? (X.projects?.refs(key.slice(5)) || []).filter(f => !c.off.includes(f.doc) && !c.files.some(x => x.doc === f.doc)) : [];
+  return (target ? X.chatFiles.ctxChip(target) : '') + [...proj.map(f => chip({ ...f, proj: true }, -1)), ...c.files.map(chip)].join('');
 }
 function composerHtml({ key, holder, placeholder, streaming, lg }) {
   const c = composer(key);
-  const files = c.files.map((f, i) => X.chatFiles?.chip(f, i, true) || '').join('');
-  const canSend = c.draft.trim() && c.files.every(f => f.ready || f.error);
+  const target = X.chatFiles?.editTarget?.(key);
+  const files = composerFiles(key);
   const send = streaming
     ? btn('', { v: 'tertiary', icon: 'stop', tip: 'Stop answering', act: 'chat-stop', cls: 'chat-composer__send' })
-    : btn('', { v: 'primary', icon: 'arrow-up', tip: 'Send', act: 'chat-send', id: 'chat-send', disabled: !canSend, cls: 'chat-composer__send' });
+    : btn('', { v: 'primary', icon: 'arrow-up', tip: 'Send', act: 'chat-send', id: 'chat-send', cls: 'chat-composer__send' });
+  const ph = target ? `Ask for changes to ${target.title}` : placeholder || scopePlaceholder(holder);
   return `<div class="${cx('chat-composer', lg && 'chat-composer--lg')}" id="chat-composer">
     <div class="chat-composer__files" id="chat-files" ${files ? '' : 'hidden'}>${files}</div>
-    <textarea class="chat-composer__input" id="chat-input" rows="${lg ? 2 : 1}" placeholder="${esc(placeholder)}" aria-label="Message" data-bind="composer.${key}.draft" data-input="chat-draft" data-enter="chat-send" data-autofocus>${esc(c.draft)}</textarea>
-    <div class="chat-composer__bar">${iconBtn('paperclip', 'Attach files', { size: 'sm', menu: 'wk-attach' })}${scopeBtn(holder)}<span class="grow"></span>${c.files.length ? `<span class="t-xs muted num chat-composer__count">${c.files.length}/5</span>` : ''}${send}</div>
+    <textarea class="chat-composer__input" id="chat-input" rows="${lg ? 2 : 1}" placeholder="${esc(ph)}" aria-label="${esc(ph)}" data-bind="composer.${key}.draft" data-input="chat-draft" data-enter="chat-send" data-autofocus>${esc(c.draft)}</textarea>
+    <div class="chat-composer__bar">${iconBtn('paperclip', 'Attach files', { size: 'sm', menu: 'wk-attach' })}${target ? '' : scopeBtn(holder)}<span class="grow"></span>${c.files.length ? `<span class="t-xs muted num chat-composer__count">${c.files.length}/5</span>` : ''}${send}</div>
     <input type="file" id="wk-file-in" multiple hidden data-change="wk-file-picked" aria-label="Choose files to attach">
   </div>`;
 }
@@ -360,32 +379,45 @@ function focusComposer() { requestAnimationFrame(() => { const t = $('#chat-inpu
 function afterComposer(changed) {
   const ta = $('#chat-input'); if (!ta) return;
   grow(ta);
-  if (changed) setTimeout(() => { const t = $('#chat-input'); if (!t || document.activeElement !== t && document.activeElement !== document.body && document.activeElement) return; t.focus({ preventScroll: true }); const n = t.value.length; t.setSelectionRange(n, n); }, 0);
+  if (changed) { scopeUi().kbs = false; setTimeout(() => { const t = $('#chat-input'); if (!t || document.activeElement !== t && document.activeElement !== document.body && document.activeElement) return; t.focus({ preventScroll: true }); const n = t.value.length; t.setSelectionRange(n, n); }, 0); }
 }
-A['chat-draft'] = el => { grow(el); const b = $('#chat-send'); if (b) b.disabled = !(el.value.trim() && composer(composerKey()).files.every(f => f.ready || f.error)); };
-/* Scope picker: a checkbox menu that stays open while toggling. Whole workspace, one of my spaces, or chosen knowledge bases. */
-MENUS['chat-scope'] = () => {
-  const h = scopeHolder(), sc = h.scope, sp = holderSpace(h); const kbs = visibleKbs().filter(canReadKb); const spaces = scopeSpaces();
-  const reopen = i => { refresh(); requestAnimationFrame(() => { const t = $('#chat-scope'); if (!t) return; openMenu(t, MENUS['chat-scope'](t), 'chat-scope:'); requestAnimationFrame(() => $(`#menu [data-mi="${i}"]`)?.focus()); }); };
-  const row = (label, on, icon) => `<span class="${cx('chat-check', on && 'is-on')}" aria-hidden="true">${ic('check')}</span>${ic(icon)}<span class="grow truncate">${esc(label)}</span>`;
-  const items = [{ section: 'Search in' }];
-  const add = (label, on, icon, apply) => { const i = items.length; items.push({ html: row(label, on, icon), checked: on, run: () => { apply(); reopen(i); } }); };
-  add(`All of ${curWs().name}`, !sc.length && !sp, 'layers', () => setSpace(h, null));
-  if (spaces.length) {
-    items.push({ sep: true }, { section: 'My spaces' });
-    spaces.forEach(s => add(s.name, sp?.id === s.id, spaceType(s.type).icon, () => setSpace(h, sp?.id === s.id ? null : s)));
-    items.push({ sep: true }, { section: 'Knowledge bases' });
-  } else items.push({ sep: true });
-  kbs.forEach(k => add(k.name, !sp && sc.includes(k.id), k.personal ? 'user' : 'book', () => { if (sp) setSpace(h, null); const j = sc.indexOf(k.id); if (j >= 0) sc.splice(j, 1); else sc.push(k.id); }));
-  return items;
+A['chat-draft'] = el => grow(el);
+/* Scope picker (Popover): "Search in" is one choice — the whole workspace, one of my spaces, or specific knowledge bases.
+   Only that last choice reveals the knowledge-base checklist (multi-select), so a space and a base with the same name never sit side by side. */
+const scopeUi = () => ui('chatScope', { kbs: false });
+function scopeMode(h) { const sp = holderSpace(h); return sp ? 'sp:' + sp.id : h.scope.length || scopeUi().kbs ? 'kbs' : 'all'; }
+const docCount = k => D.docs.filter(d => d.kb === k.id && !d.archived).length;
+function scopeOpt(value, on, icon, label, meta) {
+  return `<label class="${cx('chat-opt', on && 'is-on')}"><input type="radio" name="chat-scope" value="${esc(value)}" ${on ? 'checked' : ''} data-change="chat-scope-set" data-value="${esc(value)}"><span class="radio__control" aria-hidden="true"></span>${ic(icon, 'i-sm chat-opt__icon')}<span class="chat-opt__body"><span class="chat-opt__label truncate">${esc(label)}</span>${meta ? `<span class="chat-opt__meta truncate">${esc(meta)}</span>` : ''}</span></label>`;
+}
+PO['chat-scope'] = () => {
+  const h = scopeHolder(), mode = scopeMode(h), spaces = scopeSpaces(), kbs = visibleKbs().filter(canReadKb);
+  const radios = [scopeOpt('all', mode === 'all', 'layers', allLabel(), plural(kbs.length, 'knowledge base')),
+    ...spaces.map(s => scopeOpt('sp:' + s.id, mode === 'sp:' + s.id, spaceType(s.type).icon, s.name, `Space · ${plural(readableKbsOf(s).length, 'knowledge base')}`)),
+    scopeOpt('kbs', mode === 'kbs', 'book', 'Specific knowledge bases', mode === 'kbs' && h.scope.length ? `${h.scope.length} selected` : 'Choose one or more')].join('');
+  const list = mode === 'kbs' ? `<div class="chat-scope-pop__kbs" role="group" aria-label="Knowledge bases">${kbs.map(k => checkbox({ checked: h.scope.includes(k.id), act: 'chat-scope-kb', data: { id: k.id }, label: `${ic(k.personal ? 'user' : 'book', 'i-sm chat-opt__icon')}<span class="chat-opt__body"><span class="chat-opt__label truncate">${esc(k.name)}</span><span class="chat-opt__meta">${k.personal ? 'Only you' : plural(docCount(k), 'document')}</span></span>` })).join('')}</div>` : '';
+  return { title: 'Search in', body: `<div class="chat-scope-pop"><div class="chat-scope-pop__group" role="radiogroup" aria-label="Search in">${radios}</div>${list}</div>` };
+};
+A['chat-scope-set'] = el => {
+  const h = scopeHolder(), v = el.dataset.value || el.value, u = scopeUi();
+  if (v === 'kbs') { u.kbs = true; if (holderSpace(h)) setSpace(h, null); }
+  else { u.kbs = false; setSpace(h, v.startsWith('sp:') ? spaceById(v.slice(3)) : null); }
+  refresh(); refreshLayer();
+};
+A['chat-scope-kb'] = (el, e) => {
+  e?.stopPropagation();
+  const h = scopeHolder(), id = el.dataset.id, j = h.scope.indexOf(id);
+  if (holderSpace(h)) setSpace(h, null);
+  if (j >= 0) h.scope.splice(j, 1); else h.scope.push(id);
+  scopeUi().kbs = true; refresh(); refreshLayer();
 };
 
 /* ═══════════════ Messages ═══════════════ */
 function userHtml(m) {
   const u = cui();
-  const files = (m.files || []).map(f => X.chatFiles?.chip(normFile(f), 0, false) || '').join('');
+  const files = (m.edit ? X.chatFiles?.ctxChip?.(m.edit) || '' : '') + (m.files || []).map(f => X.chatFiles?.chip(normFile(f), 0, false) || '').join('');
   const filesRow = files ? `<div class="chat-user__files">${files}</div>` : '';
-  if (u.edit === m.id) return `<div class="chat-msg chat-msg--user" id="msg-${m.id}"><div class="chat-edit">${filesRow}${textarea({ id: 'chat-edit-in', bind: 'chat.editText', value: u.editText, rows: 3, attrs: 'data-enter="chat-edit-save" aria-label="Edit your message"' })}<div class="row gap-8"><span class="grow t-xs muted">The answer below will be replaced.</span>${btn('Cancel', { size: 'sm', act: 'chat-edit-cancel' })}${btn('Send', { v: 'primary', size: 'sm', act: 'chat-edit-save' })}</div></div></div>`;
+  if (u.edit === m.id) return `<div class="chat-msg chat-msg--user" id="msg-${m.id}"><div class="chat-edit">${filesRow}${textarea({ id: 'chat-edit-in', bind: 'chat.editText', value: u.editText, rows: 3, attrs: 'data-enter="chat-edit-save" aria-label="Edit your message"' })}<div class="row gap-8"><span class="grow t-xs muted">The answer below will be replaced.</span>${btn('Cancel', { v: 'ghost', size: 'sm', act: 'chat-edit-cancel' })}${btn('Send', { v: 'primary', size: 'sm', icon: 'arrow-up', act: 'chat-edit-save' })}</div></div></div>`;
   return `<div class="chat-msg chat-msg--user" id="msg-${m.id}"><div class="chat-user">${filesRow}<div class="chat-bubble">${esc(m.text)}</div><div class="chat-user__actions">${iconBtn('copy', 'Copy', { size: 'sm', act: 'copy', data: { text: m.text, msg: 'Copied' } })}${iconBtn('pencil', 'Edit', { size: 'sm', act: 'chat-edit', data: { msg: m.id } })}</div></div></div>`;
 }
 const STEP_IC = { search: 'search', read: 'file-text', prepare: 'server', code: 'terminal', export: 'file', edit: 'pencil' };
@@ -423,13 +455,13 @@ function stepsHtml(m) {
   const open = !!cui().open[m.id];
   return `<div class="chat-steps"><button type="button" class="chat-steps__toggle" data-act="chat-steps" data-msg="${m.id}" aria-expanded="${open}">${ic(open ? 'chevron-down' : 'chevron-right', 'i-sm')}<span class="truncate">${esc(stepsSummary(m) || 'How this answer was found')}</span></button>${open ? stepsList(m) : ''}</div>`;
 }
-/* Follow-up action chips under an answer: the next step it suggests. */
+/* Next steps an answer suggests: actions, not documents — their own labelled row of secondary buttons, apart from the quiet source chips. */
 const NEXT_IC = { 'rq-new': 'send', 'rq-ask-staff': 'message' };
 const nextIcon = n => n.act === 'work-start' ? (WORKFLOWS[n.data?.workflow]?.icon || 'sparkles') : NEXT_IC[n.act] || 'arrow-right';
 function nextHtml(m) {
   const items = (m.next || []).filter(n => n?.label && (n.act || n.href));
   if (!items.length || m.state === 'streaming') return '';
-  return `<div class="chat-next" role="group" aria-label="Next steps">${items.map((n, i) => btn(n.label, { v: i ? 'tertiary' : 'secondary', size: 'sm', icon: nextIcon(n), act: 'chat-next', data: { msg: m.id, i: (m.next || []).indexOf(n) } })).join('')}</div>`;
+  return `<div class="chat-next" role="group" aria-labelledby="next-${m.id}"><span class="chat-next__label" id="next-${m.id}">${items.length > 1 ? 'Next steps' : 'Next step'}</span>${items.map(n => btn(n.label, { v: 'secondary', size: 'sm', icon: nextIcon(n), act: 'chat-next', data: { msg: m.id, i: (m.next || []).indexOf(n) } })).join('')}</div>`;
 }
 const qstr = o => Object.entries(o).filter(([, v]) => v != null && v !== '').map(([k, v]) => `${k}=${encodeURIComponent(v).replace(/%2C/g, ',')}`).join('&');
 /** Routes to fall back on while the module that owns an action hasn't loaded. */
@@ -450,15 +482,14 @@ A['chat-next'] = el => {
 function aiInner(conv, m) {
   X.chatFiles?.migrate(conv, m);
   if (m.activity?.length && !m.work) { m.work = m.activity.map(s => ({ k: s.kind, label: s.label, d: s.detail })); delete m.activity; }
-  const u = cui(), all = m.citations || [], vis = visCites(m), visN = new Set(vis.map(c => c.n));
-  const activeN = u.panel?.kind === 'cite' && u.panel.msg === m.id ? u.panel.n : null;
+  const all = m.citations || [], vis = visCites(m), visN = new Set(vis.map(c => c.n));
   // Built only from knowledge this person can't read: show nothing of it.
   if (all.length && !vis.length && m.state !== 'streaming') {
     const kb = kbById(docById(all[0].doc)?.kb); const locked = kbRole(kb) === 'none';
-    return alertBox('default', 'This answer uses knowledge you can’t access', locked ? `It comes from ${esc(kb.name)}. Request access to see it.` : 'Ask a workspace admin if you need it, or ask again to search what you can access.', locked ? btn('Request access', { size: 'sm', act: 'chat-request', data: { kb: kb.id } }) : '', { icon: 'lock' });
+    return alertBox('default', 'This answer uses knowledge you can’t access', locked ? `It comes from ${esc(kb.name)}. Request access to see it.` : 'Ask a workspace admin if you need it, or ask again to search only what you can access.', locked ? btn('Request access', { v: 'secondary', size: 'sm', act: 'chat-request', data: { kb: kb.id } }) : btn('Ask again with what I can access', { v: 'secondary', size: 'sm', icon: 'retry', act: 'chat-unscope', data: { msg: m.id } }), { icon: 'lock' });
   }
   let h = stepsHtml(m);
-  const ctx = { cite: n => { if (!visN.has(n)) return ''; const c = vis.find(x => x.n === n), d = docById(c.doc); return `<button type="button" class="cite" data-act="cite-open" data-msg="${m.id}" data-n="${n}" aria-pressed="${activeN === n}" aria-label="Source ${n}: ${esc(d.name)}, page ${c.page}">${n}</button>`; } };
+  const ctx = { cite: n => { if (!visN.has(n)) return ''; const c = vis.find(x => x.n === n), d = docById(c.doc); return `<button type="button" class="cite" data-act="cite-open" data-msg="${m.id}" data-n="${n}" aria-label="Source ${n}: ${esc(d.name)}, page ${c.page}">${n}</button>`; } };
   const txt = (m.text || '') + (m.state === 'streaming' && m.phase === 'write' ? '\u2063' : '');
   if (txt) h += `<div class="chat-answer">${md(txt, ctx)}</div>`;
   if (m.state === 'stopped') h += `<div class="chat-stopped">${ic('stop', 'i-xs')}<span>Stopped</span>${btn('Retry', { v: 'ghost', size: 'sm', icon: 'retry', act: 'chat-retry', data: { msg: m.id } })}</div>`;
@@ -468,20 +499,30 @@ function aiInner(conv, m) {
   }
   if ((m.state || 'done') === 'done') {
     if (m.noResults) {
-      h += `<div class="row gap-8 wrap mt-12">${m.noResults.scoped ? btn('Search all knowledge', { size: 'sm', icon: 'search', act: 'chat-unscope', data: { msg: m.id } }) : ''}${btn('Browse knowledge', { v: m.noResults.scoped ? 'ghost' : 'tertiary', size: 'sm', icon: 'book', href: '/knowledge' })}</div>`;
+      h += `<div class="row gap-8 wrap mt-12">${m.noResults.scoped ? btn(`Ask again in ${allLabel().replace(/^All/, 'all')}`, { v: 'secondary', size: 'sm', icon: 'layers', act: 'chat-unscope', data: { msg: m.id } }) : ''}${btn('Browse knowledge', { v: 'ghost', size: 'sm', icon: 'book', href: '/knowledge' })}</div>`;
       if (m.noResults.restricted) h += `<p class="chat-hint">${ic('lock', 'i-xs')}<span>Some knowledge bases are restricted. You can request access from Knowledge.</span></p>`;
     } else if (m.partial || vis.length < all.length) h += `<p class="chat-hint">${ic('lock', 'i-xs')}<span>Knowledge you can’t access may have more on this.</span></p>`;
     if (m.lowConf) h += `<p class="chat-hint">${ic('info', 'i-xs')}<span>The sources don’t settle this, so it’s been flagged to the people who keep this knowledge.</span></p>`;
     h += X.chatFiles?.cards(m) || '';
-    if (vis.length) h += `<div class="chat-sources" role="group" aria-label="Sources">${vis.map(c => { const d = docById(c.doc); return `<button type="button" class="chat-source" data-act="cite-open" data-msg="${m.id}" data-n="${c.n}" aria-pressed="${activeN === c.n}" data-tip="${esc(d.name)} · page ${c.page}"><span class="chat-source__n">${c.n}</span>${fileIcon(d.type, 'sm')}<span class="truncate">${esc(d.name)}</span></button>`; }).join('')}</div>`;
+    if (vis.length) h += sourcesHtml(m, vis);
     h += nextHtml(m);
     if (!m.noResults) {
       const vi = m.vi ?? (m.variants?.length || 1) - 1;
       const pager = m.variants?.length > 1 ? `<span class="chat-pager">${iconBtn('chevron-left', 'Previous answer', { size: 'sm', act: 'chat-variant', data: { msg: m.id, d: -1 }, disabled: !vi })}<span class="t-xs num">${vi + 1}/${m.variants.length}</span>${iconBtn('chevron-right', 'Next answer', { size: 'sm', act: 'chat-variant', data: { msg: m.id, d: 1 }, disabled: vi >= m.variants.length - 1 })}</span>` : '';
-      h += `<div class="chat-actions">${pager}${iconBtn('copy', 'Copy', { size: 'sm', act: 'copy', data: { text: plain(m.text), msg: 'Copied' } })}${iconBtn('retry', 'Retry', { size: 'sm', menu: 'chat-retry', data: { msg: m.id } })}${iconBtn('thumbs-up', 'Good answer', { size: 'sm', act: 'chat-up', data: { msg: m.id }, aria: `aria-pressed="${m.feedback === 'up'}"` })}${iconBtn('thumbs-down', 'Bad answer', { size: 'sm', menu: 'chat-down', data: { msg: m.id }, aria: `aria-pressed="${m.feedback === 'down'}"` })}${iconBtn('more', 'More', { size: 'sm', menu: 'chat-ans-more', data: { msg: m.id } })}</div>`;
+      h += `<div class="chat-actions">${pager}${iconBtn('copy', 'Copy', { size: 'sm', act: 'chat-copy', data: { msg: m.id } })}${iconBtn('retry', 'Retry', { size: 'sm', act: 'chat-retry', data: { msg: m.id } })}${iconBtn('thumbs-up', 'Good answer', { size: 'sm', act: 'chat-up', data: { msg: m.id }, aria: `aria-pressed="${m.feedback === 'up'}"` })}${iconBtn('thumbs-down', 'Bad answer', { size: 'sm', menu: 'chat-down', data: { msg: m.id }, aria: `aria-pressed="${m.feedback === 'down'}"` })}${iconBtn('more', 'More', { size: 'sm', menu: 'chat-ans-more', data: { msg: m.id } })}</div>`;
     }
   }
   return h;
+}
+/** One chip per cited document (an answer often quotes the same policy three times); its numbers open the matching passages. */
+function sourcesHtml(m, vis) {
+  const groups = [];
+  vis.forEach(c => { let g = groups.find(x => x.doc === c.doc); if (!g) groups.push(g = { doc: c.doc, cites: [] }); g.cites.push(c); });
+  return `<div class="chat-sources" role="group" aria-label="Sources">${groups.map(g => {
+    const d = docById(g.doc), ns = g.cites.map(c => c.n), pages = [...new Set(g.cites.map(c => c.page))];
+    const where = pages.length > 1 ? `pages ${pages.join(', ')}` : `page ${pages[0]}`;
+    return `<button type="button" class="chat-source" data-act="cite-open" data-msg="${m.id}" data-n="${ns[0]}" aria-label="${ns.length > 1 ? 'Sources' : 'Source'} ${ns.join(', ')}: ${esc(d.name)}, ${where}" data-tip="${esc(d.name)} · ${where}"><span class="chat-source__ns" aria-hidden="true">${ns.map(n => `<span class="chat-source__n">${n}</span>`).join('')}</span>${fileIcon(d.type, 'sm')}<span class="truncate">${esc(d.name)}</span></button>`;
+  }).join('')}</div>`;
 }
 function paint(m) {
   const el = document.getElementById('msg-' + m.id); if (!el) return;
@@ -491,47 +532,29 @@ function paint(m) {
 /** A reload mid-stream leaves 'streaming' messages behind; show them as stopped. */
 function settleStale(conv) { conv.messages.forEach(m => { if (m.state === 'streaming' && run?.msg !== m.id) { m.state = 'stopped'; m.phase = null; (m.work || []).forEach(s => (s.live = false)); } }); }
 
-/* ═══════════════ Citation panel ═══════════════ */
-function citePanel(conv, p) {
-  const m = conv.messages.find(x => x.id === p.msg); if (!m) return '';
-  const vis = visCites(m); if (!vis.length) return '';
-  const i = Math.max(0, vis.findIndex(c => c.n === p.n)), c = vis[i], d = docById(c.doc), kb = kbById(d.kb);
-  const ref = `“${c.quote}” — ${d.name}, page ${c.page} (${kb.name})`;
-  const others = vis.length > 1 ? `<div class="t-label mt-24 mb-8">In this answer</div>${list(vis.map(x => { const dx = docById(x.doc); return item({ lead: `<span class="cite" aria-hidden="true">${x.n}</span>`, title: esc(dx.name), desc: `Page ${x.page}`, act: 'cite-open', data: { msg: m.id, n: x.n }, cls: cx('chat-cite__other', x.n === c.n && 'is-on') }); }), 'list--plain')}` : '';
-  return `<aside class="split__panel chat-cite" aria-label="Source ${c.n}">
-    <div class="panel__header"><h2 class="panel__title">Source ${i + 1} of ${vis.length}</h2>${iconBtn('chevron-left', 'Previous source', { size: 'sm', act: 'cite-step', data: { d: -1 }, disabled: i === 0 })}${iconBtn('chevron-right', 'Next source', { size: 'sm', act: 'cite-step', data: { d: 1 }, disabled: i === vis.length - 1 })}${iconBtn('x', 'Close', { size: 'sm', act: 'chat-panel-close' })}</div>
-    <div class="panel__body" id="chat-panel-body" data-keep-scroll>
-      <div class="row gap-12">${fileIcon(d.type, 'lg')}<div class="grow"><a class="chat-cite__name truncate" href="#${docHref(conv, c)}">${esc(d.name)}</a><div class="t-xs muted truncate">${esc(kb.name)} · Page ${c.page}</div></div>${d.status !== 'ready' ? status('doc', d.status) : ''}</div>
-      <blockquote class="chat-cite__quote"><mark class="evidence is-focus">${esc(c.quote)}</mark></blockquote>
-      ${others}
-    </div>
-    <div class="panel__footer">${btn('Open document', { v: 'primary', icon: 'arrow-up-right', href: docHref(conv, c) })}${btn('Copy citation', { v: 'ghost', icon: 'copy', act: 'copy', data: { text: ref, msg: 'Citation copied' } })}</div>
-  </aside>`;
-}
+/* ═══════════════ Citations ═══════════════ */
+/** A citation (inline number or source chip) opens the shared document preview (preview.js) over the conversation: the cited passage
+    highlighted in the document's own pages, stepping through every passage this answer quotes; Open full document goes to the Reader. */
 A['cite-open'] = el => {
   const { msg, n } = el.dataset; const { conv, m } = findMsg(msg); if (!conv) return;
-  const vis = visCites(m); const num = +n || vis[0]?.n; if (!vis.length) return;
-  const u = cui();
-  if (u.panel?.kind === 'file' && X.chatFiles?.leaveEdit && !X.chatFiles.leaveEdit(() => A['cite-open'](el))) return;
-  u.panel = { conv: conv.id, kind: 'cite', msg, n: num }; u.panelScroll = true;
-  if (S.cur?.path !== '/chat/' + conv.id) go('/chat/' + conv.id); else refresh();
-};
-A['cite-step'] = el => {
-  const p = cui().panel; if (p?.kind !== 'cite') return; const { m } = findMsg(p.msg); const vis = m ? visCites(m) : [];
-  const i = vis.findIndex(c => c.n === p.n) + +el.dataset.d; if (!vis[i]) return;
-  p.n = vis[i].n; cui().panelScroll = true; refresh();
+  const vis = visCites(m); if (!vis.length) return;
+  const num = +n || vis[0].n;
+  X.preview.open({ id: vis.find(c => c.n === num)?.doc || vis[0].doc, n: num, from: conv.id, cites: vis.map(c => ({ doc: c.doc, page: c.page, quote: c.quote, n: c.n })) });
 };
 function closePanel() { cui().panel = null; refresh(); focusComposer(); }
 A['chat-panel-close'] = () => { if (X.chatFiles?.leaveEdit && !X.chatFiles.leaveEdit(closePanel)) return; closePanel(); };
 
 /* ═══════════════ Pages ═══════════════ */
 const STARTER_IC = ['file-text', 'list', 'users'];
-/** Quick starts under the home composer: AI workflows that fit what's being searched (a space, the space of one knowledge base, or everywhere). */
-function quickStarts(c) {
-  if (!hasModule('work')) return '';
-  const sp = holderSpace(c) || (c.scope.length === 1 && hasModule('spaces') && spaceById(kbById(c.scope[0])?.space)) || null;
-  const wfs = workflowsFor(sp || undefined).slice(0, 3); if (!wfs.length) return '';
-  return `<div class="chat-quick" role="group" aria-label="${esc(sp ? `Start work in ${sp.name}` : 'Start work')}">${wfs.map(w => btn(w.label, { v: 'tertiary', size: 'sm', icon: w.icon, act: 'chat-workflow', data: { workflow: w.id, space: sp?.id || '' }, tip: w.desc })).join('')}</div>`;
+/** One suggestion area under the composer. Searching a space (or one base of a space) with AI workflows swaps the starter
+    questions for that space's workflows — same cards, so the layout never grows a second row of ideas. */
+function suggestions(c) {
+  const sp = hasModule('work') && (holderSpace(c) || (c.scope.length === 1 && hasModule('spaces') && spaceById(kbById(c.scope[0])?.space))) || null;
+  const wfs = sp ? workflowsFor(sp).slice(0, 3) : [];
+  const card = (attrs, icon, title, desc) => `<button type="button" class="chat-starter" ${attrs}><span class="chat-starter__title">${ic(icon, 'i-sm')}<span class="truncate">${esc(title)}</span></span>${desc ? `<span class="chat-starter__prompt clamp-2">${esc(desc)}</span>` : ''}</button>`;
+  if (wfs.length) return `<div class="chat-starters" id="chat-starters" role="group" aria-label="${esc(`Start work in ${sp.name}`)}">${wfs.map(w => card(`data-act="chat-workflow" data-workflow="${esc(w.id)}" data-space="${esc(sp.id)}"`, w.icon, w.label, w.desc)).join('')}</div>`;
+  const starters = (X.assistantStarters?.() || D.assistant.starters || []).filter(s => s?.prompt).slice(0, 3);
+  return starters.length ? `<div class="chat-starters" id="chat-starters" role="group" aria-label="Suggested questions">${starters.map((s, i) => card(`data-act="chat-starter" data-prompt="${esc(s.prompt)}"`, STARTER_IC[i % 3], s.title || s.prompt, s.title ? s.prompt : '')).join('')}</div>` : '';
 }
 A['chat-workflow'] = el => {
   const { workflow, space } = el.dataset; const data = { workflow, ...(space ? { space } : {}) };
@@ -539,15 +562,13 @@ A['chat-workflow'] = el => {
 };
 P.chatHome = () => {
   const a = D.assistant, c = composer('home');
-  const starters = (a.roleStarters?.[S.persona] || a.starters || []).slice(0, 3);
-  const placeholder = hasModule('spaces') ? `Ask anything in ${curWs().name}` : 'Ask anything about your company knowledge';
   return `<div class="chat-home chat-drop" data-drop="home"><div class="chat-home__inner">
     <h1 class="chat-home__title">${esc(a.welcome || 'What can I help you find?')}</h1>
-    <div class="chat-home__ask">${composerHtml({ key: 'home', holder: c, placeholder, lg: true })}${quickStarts(c)}</div>
-    ${starters.length ? `<div class="chat-starters" id="chat-starters">${starters.map((s, i) => `<button type="button" class="card card--action chat-starter" data-act="chat-starter" data-prompt="${esc(s.prompt)}"><span class="chat-starter__title">${ic(STARTER_IC[i % 3], 'i-sm')}${esc(s.title)}</span><span class="chat-starter__prompt clamp-2">${esc(s.prompt)}</span></button>`).join('')}</div>` : ''}
+    ${composerHtml({ key: 'home', holder: c, lg: true })}
+    ${suggestions(c)}
   </div></div>`;
 };
-AFTER.chatHome = ({ changed }) => { if (changed) { cui().panel = null; cui().edit = null; } afterComposer(changed); tourPaint(false); };
+AFTER.chatHome = ({ changed }) => { if (changed) { cui().panel = null; cui().edit = null; } afterComposer(changed); };
 function threadSkel() {
   return `<div class="chat-thread" aria-busy="true" aria-label="Loading">${[0, 1].map(i => `<div class="chat-msg chat-msg--user"><span class="skeleton" style="width:${300 - i * 80}px;height:44px;border-radius:var(--radius-3xl)"></span></div><div class="stack gap-8"><span class="skeleton skeleton--line" style="width:40%;height:10px"></span><span class="skeleton skeleton--line" style="width:96%"></span><span class="skeleton skeleton--line" style="width:88%"></span><span class="skeleton skeleton--line" style="width:72%"></span></div>`).join('')}</div>`;
 }
@@ -559,16 +580,17 @@ P.chatThread = ({ params }) => {
   }
   ensureSeed(conv); conv.scope ??= []; settleStale(conv);
   const sp = holderSpace(conv);
-  crumbs(sp ? [{ label: 'Spaces', to: '/spaces' }, { label: sp.name, to: '/space/' + sp.id }, { label: conv.title }] : [{ label: 'Conversations', to: '/chats' }, { label: conv.title }]);
-  topbarActions(btn('Share', { v: 'ghost', size: 'sm', icon: 'share', act: 'chat-share', data: { id: conv.id } }) + iconBtn('more', 'More', { size: 'sm', menu: 'chat-more', data: { id: conv.id } }));
+  const proj = X.projects?.of(conv);
+  crumbs(sp ? [{ label: 'Spaces', to: '/spaces' }, { label: sp.name, to: '/space/' + sp.id }, { label: conv.title }] : proj ? [{ label: proj.name, to: '/project/' + proj.id }, { label: conv.title }] : [{ label: 'Conversations', to: '/chats' }, { label: conv.title }]);
+  topbarActions(`<span class="chat-top-actions">${btn(conv.share ? 'Shared' : 'Share', { v: 'ghost', size: 'sm', icon: conv.share ? 'users' : 'share', act: 'chat-share', data: { id: conv.id }, tip: conv.share ? shareSummary(conv) : '' })}${iconBtn('more', 'More', { size: 'sm', menu: 'chat-more', data: { id: conv.id } })}</span>`);
   const u = cui(); const panel = u.panel?.conv === conv.id ? u.panel : null;
   const streaming = run?.conv === conv.id;
   const ok = () => `<h1 class="sr-only">${esc(conv.title)}</h1><div class="chat-thread">${conv.messages.map(m => m.role === 'user' ? userHtml(m) : `<div class="chat-msg chat-msg--ai" id="msg-${m.id}">${aiInner(conv, m)}</div>`).join('')}</div>`;
-  const side = panel ? (panel.kind === 'file' ? X.chatFiles?.panel(conv, panel) : citePanel(conv, panel)) || '' : '';
+  const side = panel?.kind === 'file' ? X.chatFiles?.panel(conv, panel) || '' : '';
   return `<div class="split chat-split">
     <div class="split__main chat-main chat-drop" data-drop="${conv.id}">
       <div class="chat-scroll" id="chat-scroll" data-keep-scroll>${gate({ ok, loading: threadSkel, error: ok, empty: ok })}</div>
-      <div class="chat-dock"><div class="chat-dock__inner">${composerHtml({ key: conv.id, holder: conv, placeholder: 'Ask a follow-up', streaming })}</div></div>
+      <div class="chat-dock"><div class="chat-dock__inner">${streaming ? '' : X.chatFiles?.quickAsks?.(conv.id) || ''}${composerHtml({ key: conv.id, holder: conv, placeholder: 'Ask a follow-up', streaming })}</div></div>
     </div>${side}</div>`;
 };
 AFTER.chatThread = ({ params, changed }) => {
@@ -579,11 +601,6 @@ AFTER.chatThread = ({ params, changed }) => {
     if (changed || stick) sc.scrollTop = sc.scrollHeight;
     if (changed) stick = true;
     sc.onscroll = () => { stick = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 80; };
-  }
-  if (u.panelScroll) {
-    u.panelScroll = false;
-    const mark = u.panel?.kind === 'cite' && $(`#msg-${u.panel.msg} .cite[aria-pressed="true"]`);
-    if (mark && sc) { const r = mark.getBoundingClientRect(), s = sc.getBoundingClientRect(); if (r.top < s.top || r.bottom > s.bottom) { sc.scrollTop += r.top - s.top - s.height / 3; stick = false; } }
   }
   X.chatFiles?.after?.();
   afterComposer(changed);
@@ -603,7 +620,7 @@ async function stream(conv, am, fail) {
   const um = conv.messages[conv.messages.indexOf(am) - 1];
   const files = (um?.files || []).map(normFile);
   if (am.text && ['done', 'stopped'].includes(am.state || 'done')) am.variants ??= [snap(am)];
-  const plan = (X.chatFiles?.plan || basicPlan)(am.q, conv, files, am.mod); am.mod = null;
+  const plan = (X.chatFiles?.plan || basicPlan)(am.q, conv, files, am.mod, am.edit); am.mod = null;
   delete am.activity; delete am.artifact;
   Object.assign(am, { text: '', citations: [], work: [], artifacts: [], noResults: null, partial: false, next: null, lowConf: false, feedback: null, reason: null, state: 'streaming', phase: 'work', searching: plan.searchLabel, t0: Date.now() });
   refresh();
@@ -637,33 +654,41 @@ async function stream(conv, am, fail) {
   X.chatFiles?.afterStream?.(am, plan);
 }
 function end(r, am, st) { am.dur = Math.max(2, Math.round((Date.now() - (am.t0 || Date.now())) / 1000)); am.state = st; am.phase = null; (am.work || []).forEach(s => (s.live = false)); if (run === r) run = null; refresh(); }
-/** Add a user turn to a conversation and stream the answer. */
-function ask(conv, q, files = []) {
+/** Add a user turn to a conversation and stream the answer. edit: the id of an open file the question asks to change. */
+function ask(conv, q, files = [], { edit = null } = {}) {
   conv.at = Date.now();
-  conv.messages.push({ id: uid('m'), role: 'user', text: q, files });
-  const am = { id: uid('m'), role: 'assistant', q, text: '', citations: [], state: 'streaming', phase: 'work' };
+  conv.messages.push({ id: uid('m'), role: 'user', text: q, files, ...(edit ? { edit } : {}) });
+  const am = { id: uid('m'), role: 'assistant', q, text: '', citations: [], state: 'streaming', phase: 'work', ...(edit ? { edit } : {}) };
   conv.messages.push(am); stick = true;
   const fail = S.pageState === 'error';
   if (S.cur?.path !== '/chat/' + conv.id) go('/chat/' + conv.id);
   stream(conv, am, fail);
   return am;
 }
-function start(q, { scope = [], files = [], space = null } = {}) {
-  const conv = { id: uid('c'), owner: me().id, title: makeTitle(q), at: Date.now(), scope, ...(space ? { space } : {}), messages: [] };
+/** Start a conversation. project: the project it belongs to (its Knowledge references are attached to the first question). */
+function start(q, { scope = [], files = [], space = null, project = null } = {}) {
+  const conv = { id: uid('c'), owner: me().id, title: makeTitle(q), at: Date.now(), scope, ...(space ? { space } : {}), ...(project ? { project } : {}), messages: [] };
   D.convs.unshift(conv); cui().panel = null;
   ask(conv, q, files);
   return conv;
 }
 A['chat-send'] = () => {
   const key = composerKey(); const c = composer(key); const q = c.draft.trim();
-  if (!q || c.files.some(f => !f.ready && !f.error)) { $('#chat-input')?.focus(); return; }
+  if (!q) { $('#chat-input')?.focus(); return; }
+  if (c.files.some(f => !f.ready && !f.error)) { toast('Wait for your files to finish uploading.', { tone: 'accent' }); return; }
   if (run) { toast(run.conv === key ? 'Wait for this answer to finish, or stop it.' : 'Another answer is still being written. Wait for it or stop it.', { tone: 'accent' }); return; }
   const files = c.files.filter(f => f.ready).map(({ name, type, kind, doc }) => ({ name, type, kind, doc }));
-  c.draft = ''; c.files = [];
+  const off = c.off; c.draft = ''; c.files = []; c.off = [];
   if (key === 'home') { const scope = c.scope.filter(id => canReadKb(kbById(id))); const space = holderSpace(c)?.id || null; c.scope = []; c.space = null; start(q, { scope, space, files }); }
-  else ask(convById(key), q, files);
+  else if (key.startsWith('proj:')) {
+    const pid = key.slice(5), scope = c.scope.filter(id => canReadKb(kbById(id))), space = holderSpace(c)?.id || null;
+    const refs = (X.projects?.refs(pid) || []).filter(f => !off.includes(f.doc) && !files.some(x => x.doc === f.doc));
+    start(q, { scope, space, project: X.projects?.byId(pid) ? pid : null, files: [...refs, ...files] });
+  }
+  else { const target = X.chatFiles?.editTarget?.(key); ask(convById(key), q, files, { edit: target?.id || null }); }
 };
-A['chat-starter'] = el => { composer('home').draft = el.dataset.prompt; A['chat-send'](); };
+/** A suggestion fills the box (the person sees and can change the question before sending). */
+A['chat-starter'] = el => { composer(composerKey()).draft = el.dataset.prompt; refresh(); focusComposer(); };
 A['chat-stop'] = () => { if (run) run.stop = true; };
 function retry(msgId, mod) {
   if (run) return; const { conv, m } = findMsg(msgId); if (!m) return;
@@ -672,11 +697,16 @@ function retry(msgId, mod) {
 }
 A['chat-retry'] = el => retry(el.dataset.msg, null);
 A['chat-unscope'] = el => { const { conv } = findMsg(el.dataset.msg); if (!conv || run) return; conv.scope = []; conv.space = null; retry(el.dataset.msg, null); };
-MENUS['chat-retry'] = el => {
-  const { conv } = findMsg(el.dataset.msg); if (!conv) return [];
-  const items = [{ label: 'Try again', icon: 'retry', run: () => retry(el.dataset.msg, null) }, { label: 'More detail', icon: 'list', run: () => retry(el.dataset.msg, 'detail') }, { label: 'Shorter', icon: 'sliders', run: () => retry(el.dataset.msg, 'shorter') }];
-  if (conv.scope?.length) items.push({ sep: true }, { label: 'Search all knowledge', icon: 'layers', run: () => { conv.scope = []; conv.space = null; retry(el.dataset.msg, null); } });
-  return run ? items.map(i => i.sep ? i : { ...i, disabled: true }) : items;
+/** One Copy: the answer as formatted text, with Markdown as the plain-text flavour (pastes well in docs and in chat tools). */
+A['chat-copy'] = async el => {
+  const { m } = findMsg(el.dataset.msg); if (!m) return;
+  const vis = visCites(m), visN = new Set(vis.map(c => c.n));
+  const mdText = String(m.text || '').replace(/\s?\[(\d+)\]/g, (x, n) => visN.has(+n) ? x : '');
+  try {
+    const html = md(mdText, { cite: n => visN.has(n) ? `<sup>[${n}]</sup>` : '' });
+    await navigator.clipboard.write([new ClipboardItem({ 'text/plain': new Blob([mdText], { type: 'text/plain' }), 'text/html': new Blob([html], { type: 'text/html' }) })]);
+    toast('Copied');
+  } catch { copyText(mdText, 'Copied'); }
 };
 A['chat-variant'] = el => { const { m } = findMsg(el.dataset.msg); if (!m?.variants || run) return; m.vi = Math.max(0, Math.min(m.variants.length - 1, (m.vi ?? m.variants.length - 1) + +el.dataset.d)); Object.assign(m, clone(m.variants[m.vi])); refresh(); };
 A['chat-steps'] = el => { const u = cui(); u.open[el.dataset.msg] = !u.open[el.dataset.msg]; refresh(); };
@@ -712,7 +742,7 @@ A['chat-edit-save'] = () => {
     conv.messages.length = i + 2; am.q = t; am.text = ''; am.variants = null; am.vi = null; stick = true; conv.at = Date.now();
     stream(conv, am, S.pageState === 'error');
   };
-  if (later > 0) confirmAction({ title: 'Edit and resend?', body: `The ${plural(later, 'later message')} in this conversation will be removed. Files the assistant made stay available.`, confirm: 'Edit and resend', delay: 0, onConfirm: resend });
+  if (later > 0) confirmAction({ title: 'Edit and resend?', icon: 'pencil', body: `The ${plural(later, 'later message')} in this conversation will be removed. Files the assistant made stay available.`, confirm: 'Edit and resend', delay: 0, onConfirm: resend });
   else resend();
 };
 
@@ -723,24 +753,31 @@ A['chat-up'] = el => { const { m } = findMsg(el.dataset.msg); if (m) setFeedback
 MENUS['chat-down'] = el => {
   const { m } = findMsg(el.dataset.msg); if (!m) return [];
   const items = [{ section: 'What was wrong?' }, ...FB_REASONS.map(r => ({ label: r, checked: m.feedback === 'down' ? m.reason === r : undefined, run: () => setFeedback(m, 'down', r) })),
-    { label: 'Something else…', icon: 'pencil', run: () => { S.ui.chatFb = { text: '', err: '' }; openModal('chat-feedback', { msg: m.id }); } }];
+    { label: 'Something else…', icon: 'pencil', run: () => { S.ui.chatFb = { text: '', touched: false, busy: false }; openModal('chat-feedback', { msg: m.id }); } }];
   if (m.feedback === 'down') items.push({ sep: true }, { label: 'Remove feedback', icon: 'x', run: () => setFeedback(m, null) });
   return items;
 };
+/** A quiet "what this is about" row at the top of a dialog (the question, the conversation, the file). */
+const ctxRow = (lead, title, meta = '') => `<div class="chat-ctx">${lead}<div class="grow"><div class="chat-ctx__title truncate" translate="no">${title}</div>${meta ? `<div class="t-xs muted truncate">${meta}</div>` : ''}</div></div>`;
+const FB_MAX = 140;
 M['chat-feedback'] = p => {
-  const f = ui('chatFb', { text: '', err: '' });
-  return { size: 'sm', title: 'What was wrong with this answer?', desc: 'Your feedback goes to the workspace admins.',
-    body: field({ id: 'chat-fb-text', label: 'Tell us more', error: f.err, control: textarea({ id: 'chat-fb-text', bind: 'chatFb.text', value: f.text, rows: 3, placeholder: 'What should the answer have said?', invalid: !!f.err }) }),
-    foot: btn('Cancel', { act: 'close-modal' }) + btn('Send feedback', { v: 'primary', act: 'chat-fb-send', loading: p.busy }) };
+  const f = ui('chatFb', { text: '', touched: false, busy: false }), { m } = findMsg(p.msg), dis = f.busy ? 'disabled' : '';
+  const err = f.touched && !f.text.trim() ? 'Add a short note so the admins know what to fix.' : '';
+  return { size: 'sm', icon: 'thumbs-down', title: 'Send feedback', desc: 'Workspace admins see it with this answer and use it to fix the knowledge.',
+    body: (m?.q ? ctxRow(itemIcon('message', '', 'sm'), `“${esc(m.q)}”`, 'The question you asked') : '')
+      + field({ id: 'chat-fb-text', label: 'What was wrong?', error: err, counter: `<span class="counter">${f.text.length}/${FB_MAX}</span>`,
+        control: textarea({ id: 'chat-fb-text', bind: 'chatFb.text', value: f.text, rows: 3, placeholder: 'e.g. It cites last year’s version of the policy', invalid: !!err, attrs: `maxlength="${FB_MAX}" data-live data-autofocus data-enter="chat-fb-send" ${dis}` }) }),
+    foot: btn('Cancel', { v: 'ghost', act: 'close-modal', disabled: f.busy }) + btn('Send feedback', { v: 'primary', icon: 'send', act: 'chat-fb-send', loading: f.busy }) };
 };
 A['chat-fb-send'] = async () => {
-  const f = ui('chatFb'), p = S.modal.props;
-  if (!f.text.trim()) { f.err = 'Add a short comment.'; refreshLayer(); $('#chat-fb-text')?.focus(); return; }
-  p.busy = true; p.guard = true; refreshLayer(); await sleep(600);
-  const { m } = findMsg(p.msg); closeModal(); if (m) setFeedback(m, 'down', f.text.trim().slice(0, 140));
+  const f = ui('chatFb'), p = S.modal.props; if (f.busy) return;
+  f.touched = true;
+  if (!f.text.trim()) { refreshLayer(); $('#chat-fb-text')?.focus(); return; }
+  f.busy = true; p.guard = true; refreshLayer(); await sleep(600);
+  const { m } = findMsg(p.msg); closeModal(); if (m) setFeedback(m, 'down', f.text.trim().slice(0, FB_MAX));
 };
 
-/* Answer: more menu (copy as Markdown, Word, PDF) */
+/* Answer: more menu (rewrite, download) */
 function wrap(line, w = 90) { const out = []; let cur = ''; String(line).split(/\s+/).forEach(word => { if ((cur + ' ' + word).trim().length > w) { if (cur) out.push(cur); cur = word; } else cur = (cur + ' ' + word).trim(); }); if (cur) out.push(cur); return out.length ? out : ['']; }
 function downloadAnswer(conv, m, format) {
   const vis = visCites(m); const visN = new Set(vis.map(c => c.n));
@@ -754,9 +791,12 @@ function downloadAnswer(conv, m, format) {
 }
 MENUS['chat-ans-more'] = el => {
   const { conv, m } = findMsg(el.dataset.msg); if (!m) return [];
-  return [{ label: 'Copy as Markdown', icon: 'copy', run: () => copyText(m.text, 'Copied as Markdown') }, { sep: true },
-    { label: 'Download as Word', icon: 'download', meta: '.doc', run: () => downloadAnswer(conv, m, 'word') },
-    { label: 'Download as PDF', icon: 'download', meta: '.pdf', run: () => downloadAnswer(conv, m, 'pdf') }];
+  const busy = !!run, again = (label, icon, mod) => ({ label, icon, disabled: busy, run: () => retry(m.id, mod) });
+  return [{ section: 'Rewrite' }, again('More detail', 'list', 'detail'), again('Shorter', 'sliders', 'shorter'),
+    conv.scope?.length && { label: `Ask again in ${allLabel().replace(/^All/, 'all')}`, icon: 'layers', disabled: busy, run: () => A['chat-unscope']({ dataset: { msg: m.id } }) },
+    { sep: true }, { section: 'Download' },
+    { label: 'Word document', icon: 'download', meta: '.doc', run: () => downloadAnswer(conv, m, 'word') },
+    { label: 'PDF', icon: 'download', meta: '.pdf', run: () => downloadAnswer(conv, m, 'pdf') }].filter(Boolean);
 };
 A['chat-request'] = el => {
   if (A['kb-request']) return A['kb-request'](el);
@@ -766,31 +806,62 @@ A['chat-request'] = el => {
   toast('Access requested'); refresh();
 };
 
-/* Thread more menu → rename / delete live in conversations.js */
-MENUS['chat-more'] = el => [
-  { label: 'Rename', icon: 'pencil', run: () => A['conv-rename']?.({ dataset: { id: el.dataset.id } }) },
-  { sep: true },
-  { label: 'Delete conversation', icon: 'trash', danger: true, run: () => A['conv-delete']?.({ dataset: { id: el.dataset.id } }) },
-];
+/* Thread ⋯: the same conversation menu as /chats and the sidebar (conversations.js) */
+MENUS['chat-more'] = el => X.conversations?.menu(convById(el.dataset.id)) || [];
 
-/* ═══════════════ Share ═══════════════ */
-A['chat-share'] = el => { S.ui.chatShare = { id: el.dataset.id, who: 'workspace', people: '', err: '' }; openModal('chat-share'); };
+/* ═══════════════ Share ═══════════════
+   conv.share = { who: 'workspace' | 'people', people: [member ids], at } — saved on the conversation, shown when Share reopens,
+   revocable with Stop sharing (Undo). The dialog edits a draft: Cancel discards it. */
+const shareLink = conv => `https://bomesh.app/${curWs().code}/s/${conv.id}-${(hashOf(conv.id) % 1679616).toString(36)}`;
+const memberName = id => D.members.find(x => x.id === id)?.name || 'Someone';
+function namesList(ids) { const n = ids.map(memberName); return n.length <= 2 ? n.join(' and ') : `${n[0]}, ${n[1]} and ${n.length - 2} more`; }
+function shareSummary(conv) { const s = conv?.share; return !s ? '' : s.who === 'people' ? `Shared with ${namesList(s.people)}` : `Anyone in ${curWs().name} can open it`; }
+const sameShare = (a, b) => !!a && a.who === b.who && (a.who !== 'people' || (a.people.length === b.people.length && a.people.every(id => b.people.includes(id))));
+A['chat-share'] = el => { const conv = convById(el.dataset.id); if (!conv) return; S.ui.chatShare = { id: conv.id, who: conv.share?.who || 'workspace', people: [...(conv.share?.people || [])], q: '', touched: false }; openModal('chat-share'); };
+function shareMatches(s) {
+  const q = s.q.trim().toLowerCase(); if (!q) return [];
+  return (D.members || []).filter(x => x.id !== me().id && x.email !== me().email && x.status !== 'deactivated' && !s.people.includes(x.id) && (x.name.toLowerCase().includes(q) || x.email.toLowerCase().includes(q))).slice(0, 5);
+}
 M['chat-share'] = () => {
-  const s = ui('chatShare'); const conv = convById(s.id); const ws = curWs();
-  const link = `https://bomesh.app/${ws.code}/s/${s.id}-${(hashOf(s.id) % 1679616).toString(36)}`;
-  return { title: 'Share conversation', desc: esc(conv?.title || ''),
-    body: field({ id: 'chat-share-who', label: 'Who can open the link', control: select({ id: 'chat-share-who', bind: 'chatShare.who', value: s.who, change: 'chat-share-who', options: [['workspace', `Anyone in ${ws.name}`], ['people', 'Only people I choose']] }) })
-      + (s.who === 'people' ? field({ id: 'chat-share-people', label: 'People', desc: 'Separate names or emails with commas.', error: s.err, control: input({ id: 'chat-share-people', bind: 'chatShare.people', value: s.people, placeholder: 'An Nguyen, ben.walker@northwind.com', autofocus: true, invalid: !!s.err }) }) : '')
-      + field({ id: 'chat-share-link', label: 'Link', control: input({ id: 'chat-share-link', value: link, attrs: 'readonly', cls: 'mono' }) })
-      + `<p class="chat-hint mt-16">${ic('lock', 'i-xs')}<span>People see the answers, but only open sources they already have access to.</span></p>`,
-    foot: btn('Done', { act: 'close-modal' }) + btn('Copy link', { v: 'primary', icon: 'copy', act: 'chat-share-copy', data: { link } }) };
+  const s = ui('chatShare'), conv = convById(s.id), ws = curWs(); if (!conv) return { title: 'Share conversation', body: '' };
+  const asked = conv.messages.filter(m => m.role === 'user').length;
+  const err = s.who === 'people' && s.touched && !s.people.length ? 'Add at least one person.' : '';
+  const matches = shareMatches(s);
+  const chips = s.people.map(id => `<span class="chat-share__chip">${avatar(memberName(id), 'xs')}<span class="truncate">${esc(memberName(id))}</span><button type="button" class="chat-share__x" data-act="chat-share-remove" data-id="${esc(id)}" aria-label="Remove ${esc(memberName(id))}">${ic('x', 'i-xs')}</button></span>`).join('');
+  const people = s.who !== 'people' ? '' : `<div class="field"><label class="label" for="chat-share-q">People</label>
+    <div class="${cx('chat-share__box', err && 'is-invalid')}">${chips}<input id="chat-share-q" class="chat-share__input" type="text" value="${esc(s.q)}" placeholder="${s.people.length ? 'Add another person' : 'Search people by name or email'}" data-bind="chatShare.q" data-live data-enter="chat-share-enter" autocomplete="off" role="combobox" aria-expanded="${!!matches.length}" aria-controls="chat-share-opts" ${err ? 'aria-invalid="true" aria-describedby="chat-share-q-err"' : ''}></div>
+    ${matches.length ? `<div class="chat-share__opts" id="chat-share-opts" role="listbox" aria-label="People">${matches.map(x => `<button type="button" class="chat-share__opt" role="option" data-act="chat-share-add" data-id="${esc(x.id)}">${avatar(x.name, 'sm')}<span class="grow"><span class="chat-share__name">${esc(x.name)}</span><span class="t-xs muted truncate">${esc(x.email)}</span></span></button>`).join('')}</div>` : s.q.trim() ? `<div class="description">No one in ${esc(ws.name)} matches “${esc(s.q.trim())}”.</div>` : ''}
+    ${err ? `<div class="field-error" id="chat-share-q-err" role="alert">${ic('alert-circle')}<span>${esc(err)}</span></div>` : ''}</div>`;
+  const draft = { who: s.who, people: s.people }, shared = !!conv.share, changed = !sameShare(conv.share, draft);
+  const status = shared ? `<div class="chat-share__status">${ic(conv.share.who === 'people' ? 'users' : 'building', 'i-sm')}<span class="grow">${esc(shareSummary(conv))}</span><span class="t-xs muted none">${esc(rel(conv.share.at))}</span></div>` : '';
+  return { title: 'Share conversation', icon: 'share',
+    desc: 'They see the questions and answers. Sources open only for people who already have access.',
+    body: ctxRow(itemIcon('message', '', 'sm'), esc(conv.title), `${plural(asked, 'question')} · Updated ${rel(conv.at).toLowerCase()}`) + status
+      + `<div class="field"><span class="label">Who can open it</span>${choiceGroup({ name: 'chat-share-who', value: s.who, act: 'chat-share-who', options: [['workspace', `Anyone in ${ws.name}`, 'Everyone who can sign in to this workspace.', 'building'], ['people', 'Only people you choose', 'Only the people you add below.', 'lock']] })}</div>`
+      + people
+      + (shared ? field({ id: 'chat-share-link', label: 'Link', control: input({ id: 'chat-share-link', value: shareLink(conv), attrs: 'readonly', cls: 'mono' }) }) : ''),
+    footStart: shared ? btn('Stop sharing', { v: 'danger-soft', act: 'chat-share-stop' }) : '',
+    foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn(!shared ? 'Share' : changed ? 'Update sharing' : 'Copy link', { v: 'primary', icon: !shared || changed ? 'share' : 'copy', act: 'chat-share-save' }) };
 };
-A['chat-share-who'] = () => { ui('chatShare').err = ''; refreshLayer(); };
-A['chat-share-copy'] = async el => {
-  const s = ui('chatShare');
-  if (s.who === 'people' && !s.people.trim()) { s.err = 'Add at least one person.'; refreshLayer(); $('#chat-share-people')?.focus(); return; }
-  s.err = ''; refreshLayer();
-  if (await copyText(el.dataset.link, s.who === 'people' ? 'Link copied. Only the people you chose can open it.' : 'Link copied')) closeModal();
+A['chat-share-who'] = el => { const s = ui('chatShare'); s.who = el.dataset.value; s.touched = false; refreshLayer(); if (s.who === 'people') requestAnimationFrame(() => $('#chat-share-q')?.focus()); };
+A['chat-share-add'] = el => { const s = ui('chatShare'); if (!s.people.includes(el.dataset.id)) s.people.push(el.dataset.id); s.q = ''; refreshLayer(); requestAnimationFrame(() => $('#chat-share-q')?.focus()); };
+A['chat-share-enter'] = () => { const m = shareMatches(ui('chatShare'))[0]; if (m) A['chat-share-add']({ dataset: { id: m.id } }); else A['chat-share-save'](); };
+A['chat-share-remove'] = el => { const s = ui('chatShare'); s.people = s.people.filter(id => id !== el.dataset.id); refreshLayer(); $('#chat-share-q')?.focus(); };
+A['chat-share-save'] = async () => {
+  const s = ui('chatShare'), conv = convById(s.id); if (!conv) return closeModal();
+  if (s.who === 'people' && !s.people.length) { s.touched = true; refreshLayer(); $('#chat-share-q')?.focus(); return; }
+  const next = { who: s.who, people: s.who === 'people' ? [...s.people] : [] };
+  if (sameShare(conv.share, next)) { if (await copyText(shareLink(conv), 'Link copied')) closeModal(); return; }
+  const first = !conv.share;
+  conv.share = { ...next, at: conv.share && conv.share.who === next.who ? conv.share.at : Date.now() };
+  persist(); closeModal(); refresh();
+  const msg = !first ? 'Sharing updated. Link copied.' : next.who === 'people' ? `Shared with ${namesList(next.people)}. Link copied.` : `Shared with everyone in ${curWs().name}. Link copied.`;
+  await copyText(shareLink(conv), msg);
+};
+A['chat-share-stop'] = () => {
+  const s = ui('chatShare'), conv = convById(s.id); if (!conv?.share) return;
+  const before = conv.share; delete conv.share; persist(); closeModal(); refresh();
+  toast('Stopped sharing. The link no longer opens.', { action: { label: 'Undo', run: () => { conv.share = before; persist(); refresh(); } } });
 };
 
 /* ═══════════════ Escape: edit → file editing → panel ═══════════════ */
@@ -804,56 +875,93 @@ A['esc-page'] = () => {
   return prevEsc?.() || false;
 };
 
-/* ═══════════════ Product tour (4 steps on /chat) ═══════════════ */
+/* ═══════════════ Product tour: Home, the real landing page ═══════════════
+   Starts by itself the first time a person lands on Home in a workspace (remembered per person and workspace), and from
+   the account menu any time. Steps skip what isn't on screen (the sidebar on phones). The card never covers what it points
+   at: it sits beside the target, or as a bottom sheet on phones with the target scrolled above it. One way out: Skip tour (or Esc). */
+DATA_KEYS.push('tourSeen');
+const touch = () => matchMedia('(hover: none)').matches;
 const TOUR = [
-  { sel: '#chat-composer', title: 'Ask in your own words', body: 'Answers come from your company knowledge and cite every source they use.' },
-  { sel: '#chat-scope', title: 'Choose what to search', body: 'Search all knowledge, or narrow it to the knowledge bases that matter.' },
-  { sel: '#chat-starters', title: 'Start from a suggestion', body: 'Common questions, picked by your workspace admin.' },
-  { sel: '.sidebar [data-act="palette"]', title: 'Find anything', body: 'Search conversations, documents and pages, or press ⌘K.' },
+  { sel: '.home-box', title: 'Ask or find, in one box', body: () => 'Ask a question to get an answer that cites its sources, or type a few words to find a document.' },
+  { sel: '.home-box__scope, .home-scope-chip', title: 'Choose where to look', body: () => `Look in all of ${curWs().name}, one knowledge base or one of your spaces.` },
+  { sel: '.home-body > .home-sec', title: 'Pick up where you left off', body: () => 'What’s waiting for you, what changed in documents you can read, and what to read next.' },
+  { sel: '#side-new-chat', title: 'Start a conversation', body: () => 'Open a new chat to attach files or choose exactly what to search. Conversations and projects stay in the sidebar.' },
+  { sel: '#topbar-search', title: 'Find anything', body: () => touch() ? 'Search conversations, documents and pages.' : 'Search conversations, documents and pages, or press ⌘K.' },
 ];
 let tourAt = null;
-function tourSteps() {
+const tourKey = () => `${me().id}:${S.ws}`;
+const tourSeen = () => (D.tourSeen ??= {});
+/** The first on-screen element a step points at (phones show some controls in other places, or not at all). */
+function tourEl(sel) {
   const fr = $('#frame').getBoundingClientRect();
-  return TOUR.filter(s => { const el = $(s.sel); if (!el) return false; const r = el.getBoundingClientRect(); return r.width > 0 && r.right > fr.left + 4 && r.left < fr.right - 4; });
+  return $$(sel).find(el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.right > fr.left + 4 && r.left < fr.right - 4; }) || null;
 }
+const tourSteps = () => TOUR.filter(s => tourEl(s.sel));
 function tourClose() { tourAt = null; $('#chat-tour')?.remove(); $('#chat-tour-ring')?.remove(); }
+const overlaps = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
 function tourPaint(focus) {
   $('#chat-tour')?.remove(); $('#chat-tour-ring')?.remove();
   if (tourAt == null) return;
-  if (S.cur?.r.page !== 'chatHome') { tourAt = null; return; }
+  if (S.cur?.r.page !== 'home') { tourAt = null; return; }
   const steps = tourSteps(); if (!steps.length) { tourAt = null; return; }
   tourAt = Math.min(tourAt, steps.length - 1);
-  const st = steps[tourAt], t = $(st.sel), frame = $('#frame');
-  const fr = frame.getBoundingClientRect(), r = t.getBoundingClientRect(), pad = 6, last = tourAt === steps.length - 1;
+  const st = steps[tourAt], t = tourEl(st.sel), frame = $('#frame'), last = tourAt === steps.length - 1;
+  const card = document.createElement('div'); card.id = 'chat-tour'; card.className = 'chat-tour'; card.setAttribute('role', 'dialog'); card.setAttribute('aria-labelledby', 'chat-tour-title'); card.setAttribute('aria-describedby', 'chat-tour-body');
+  card.innerHTML = `<span class="chat-tour__step num">${tourAt + 1} of ${steps.length}</span><h3 class="chat-tour__title" id="chat-tour-title">${esc(st.title)}</h3><p class="chat-tour__body" id="chat-tour-body">${esc(st.body())}</p><div class="chat-tour__foot">${btn('Skip tour', { v: 'ghost', size: 'sm', act: 'chat-tour-skip' })}<span class="grow"></span>${tourAt ? btn('Back', { size: 'sm', act: 'chat-tour-step', data: { d: -1 } }) : ''}${btn(last ? 'Done' : 'Next', { v: 'primary', size: 'sm', act: 'chat-tour-step', data: { d: 1 }, id: 'chat-tour-next' })}</div>`;
+  const fr0 = frame.getBoundingClientRect(), sheet = fr0.width < 680;
+  if (sheet) card.classList.add('chat-tour--sheet');
+  frame.append(card);
+  const cw = card.offsetWidth, ch = card.offsetHeight;
+  // Bring the target into view (above the sheet on phones) before measuring.
+  const sc = $('#scroll'), r0 = t.getBoundingClientRect();
+  if (sc && sc.contains(t)) {
+    const room = sheet ? fr0.bottom - ch - 24 : fr0.bottom - 16;
+    if (r0.bottom > room || r0.top < fr0.top + 64) sc.scrollTop += r0.top - fr0.top - (sheet ? Math.max(64, (room - fr0.top - r0.height) / 2) : 96);
+  }
+  const fr = frame.getBoundingClientRect(), r = t.getBoundingClientRect(), pad = 6;
   const ring = document.createElement('div'); ring.id = 'chat-tour-ring'; ring.className = 'chat-tour-ring';
-  Object.assign(ring.style, { left: r.left - fr.left - pad + 'px', top: r.top - fr.top - pad + 'px', width: r.width + pad * 2 + 'px', height: r.height + pad * 2 + 'px' });
-  const card = document.createElement('div'); card.id = 'chat-tour'; card.className = 'chat-tour'; card.setAttribute('role', 'dialog'); card.setAttribute('aria-labelledby', 'chat-tour-title');
-  card.innerHTML = `<div class="row between"><span class="t-xs muted num">${tourAt + 1} of ${steps.length}</span>${iconBtn('x', 'Close tour', { size: 'sm', act: 'chat-tour-skip' })}</div><h3 class="t-subheading" id="chat-tour-title">${esc(st.title)}</h3><p class="t-sm muted">${esc(st.body)}</p><div class="row between mt-8">${btn('Skip', { v: 'ghost', size: 'sm', act: 'chat-tour-skip' })}<div class="row gap-8">${tourAt ? btn('Back', { size: 'sm', act: 'chat-tour-step', data: { d: -1 } }) : ''}${btn(last ? 'Done' : 'Next', { v: 'primary', size: 'sm', act: 'chat-tour-step', data: { d: 1 }, id: 'chat-tour-next' })}</div></div>`;
-  frame.append(ring, card);
-  const cw = card.offsetWidth, ch = card.offsetHeight; let left, top;
-  if (r.left - fr.left < 260 && r.width < 300) { left = r.right - fr.left + 16; top = r.top - fr.top - 8; }
-  else { left = r.left - fr.left + r.width / 2 - cw / 2; top = r.bottom - fr.top + 14; if (top + ch > fr.height - 12) top = r.top - fr.top - ch - 14; }
-  card.style.left = Math.max(12, Math.min(fr.width - cw - 12, left)) + 'px';
-  card.style.top = Math.max(12, Math.min(fr.height - ch - 12, top)) + 'px';
+  const rr = { left: r.left - fr.left - pad, top: r.top - fr.top - pad, right: r.right - fr.left + pad, bottom: r.bottom - fr.top + pad };
+  Object.assign(ring.style, { left: rr.left + 'px', top: rr.top + 'px', width: rr.right - rr.left + 'px', height: rr.bottom - rr.top + 'px' });
+  frame.insertBefore(ring, card);
+  if (!sheet) {
+    const gap = 12, cx0 = (rr.left + rr.right) / 2 - cw / 2, cy0 = (rr.top + rr.bottom) / 2 - ch / 2;
+    const clampX = x => Math.max(12, Math.min(fr.width - cw - 12, x)), clampY = y => Math.max(12, Math.min(fr.height - ch - 12, y));
+    const spots = [[clampX(cx0), rr.bottom + gap], [clampX(cx0), rr.top - gap - ch], [rr.right + gap, clampY(cy0)], [rr.left - gap - cw, clampY(cy0)]];
+    const fits = ([x, y]) => x >= 12 && y >= 12 && x + cw <= fr.width - 12 && y + ch <= fr.height - 12 && !overlaps({ left: x, top: y, right: x + cw, bottom: y + ch }, rr);
+    const [x, y] = spots.find(fits) || [fr.width - cw - 16, fr.height - ch - 16];
+    card.style.left = x + 'px'; card.style.top = y + 'px';
+  }
   if (focus) requestAnimationFrame(() => $('#chat-tour-next')?.focus());
 }
+function tourBegin() { tourSeen()[tourKey()] = Date.now(); persist(); tourAt = 0; tourPaint(true); }
 X.startTour = () => {
   tourClose();
-  if (S.cur?.r.page !== 'chatHome') go('/chat');
-  else if (S.navOpen) { S.navOpen = false; refresh(); }
-  setTimeout(() => { tourAt = 0; tourPaint(true); }, 160);
+  if (S.navOpen) S.navOpen = false;
+  if (S.cur?.r.page !== 'home') go('/home'); else refresh();
+  setTimeout(tourBegin, 200);
 };
+/** First visit to Home in this workspace: start once, by itself (after Home has finished loading). */
+function tourAuto() {
+  if (tourAt != null || !S.signedIn || S.cur?.r.page !== 'home' || S.pageState !== 'live' || S.modal || S.drawer || S.palette || S.menu) return;
+  if (tourSeen()[tourKey()]) return;
+  if (S.navLoading || !$('.home-box')) { setTimeout(tourAuto, 300); return; }
+  tourBegin();
+}
+/* Home re-renders (typing, scope, workspace switch) keep the tour on its target. */
+new MutationObserver(() => { if (tourAt != null) requestAnimationFrame(() => tourPaint(false)); }).observe(document.getElementById('app'), { childList: true });
+const tourDone = () => { tourClose(); if (!touch()) $('#home-q')?.focus(); };
 A['chat-tour-step'] = el => {
   const n = tourAt + +el.dataset.d;
-  if (n >= tourSteps().length) { tourClose(); toast('You’re all set. Ask your first question.'); focusComposer(); return; }
+  if (n >= tourSteps().length) { tourDone(); toast('You’re all set. Ask your first question in the box.'); return; }
   tourAt = Math.max(0, n); tourPaint(true);
 };
-A['chat-tour-skip'] = () => { tourClose(); focusComposer(); };
+A['chat-tour-skip'] = tourDone;
 window.addEventListener('resize', () => tourAt != null && tourPaint(false));
-window.addEventListener('hashchange', () => setTimeout(() => tourAt != null && tourPaint(false), 0));
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && tourAt != null && !S.modal && !S.menu && !S.palette) { e.stopPropagation(); tourClose(); focusComposer(); } }, true);
+window.addEventListener('load', () => setTimeout(tourAuto, 600));
+window.addEventListener('hashchange', () => setTimeout(() => (tourAt != null ? tourPaint(false) : tourAuto()), 400));
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && tourAt != null && !S.modal && !S.menu && !S.palette) { e.stopPropagation(); tourDone(); } }, true);
 
 /* Internal API shared with chat-files.js and conversations.js */
-X.chat = { findMsg, answer, plain, makeTitle, cui, composer, composerKey, canDoc, visCites, normFile, mineKb, isMine, paint, focusComposer, ensureSeed, lastLine, ask, CLAIMS,
+X.chat = { findMsg, answer, plain, makeTitle, cui, composer, composerKey, composerHtml, composerFiles, afterComposer, canDoc, visCites, normFile, mineKb, isMine, paint, focusComposer, ensureSeed, lastLine, ask, CLAIMS,
   busy: () => !!run, streamingIn: id => run?.conv === id, stopIfIn: id => { if (run?.conv === id) run.stop = true; } };
 })();

@@ -9,7 +9,7 @@
 
   const GOOGLE = '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5a5.6 5.6 0 0 1-2.4 3.6v3h3.9c2.2-2.1 3.5-5.1 3.5-8.8z"/><path fill="#34A853" d="M12 24c3.2 0 6-1.1 7.9-2.9l-3.9-3c-1.1.7-2.4 1.2-4 1.2-3.1 0-5.7-2.1-6.7-4.9h-4v3.1A12 12 0 0 0 12 24z"/><path fill="#FBBC05" d="M5.3 14.4a7.2 7.2 0 0 1 0-4.7V6.6h-4a12 12 0 0 0 0 10.8l4-3z"/><path fill="#EA4335" d="M12 4.8c1.8 0 3.3.6 4.6 1.8l3.4-3.4A12 12 0 0 0 1.3 6.6l4 3.1c1-2.8 3.6-4.9 6.7-4.9z"/></svg>';
   const brand = () => `<div class="row au-brand"><div class="brand grow"><span class="brand__mark">${ic('layers', 'i-sm')}</span>BoMesh</div>${X.lang.picker()}</div>`;
-  const signinUi = () => ui('auSignin', { id: '', pw: '', show: false, err: {}, busy: '' });
+  const signinUi = () => ui('auSignin', { id: '', pw: '', show: false, err: {}, busy: '', demo: false });
   const signupUi = () => ui('auSignup', { name: '', email: '', pw: '', show: false, terms: false, err: {}, busy: false });
   const wsUi = () => ui('auWs', { fresh: false, email: '', busy: false, checks: 0 });
 
@@ -42,21 +42,38 @@
     </figure>`;
   }
 
+  /** A person's role in one workspace, from that workspace's own membership (not their job title or platform role). */
+  function wsRoleOf(p, wsId) {
+    const store = DB.ws[wsId] || DB.ws['ws-northwind'];
+    const m = store?.members?.find(x => x.id === p.id);
+    return store?.roles?.find(r => r.id === m?.roleId)?.name || (p.perms.includes('tenant.manage') ? 'Workspace admin' : 'Member');
+  }
+  /** Demo accounts as one-click identities (fills the form; password is always “demo”). Folded away: a prototype aid, not a way in.
+      Each shows its role and workspace, so testers can tell the admins (and the platform operator) apart. */
+  function demoAccounts() {
+    const wsName = id => D.workspaces.find(w => w.id === id)?.name || '';
+    const people = ['member', 'admin', 'operator', 'engineer', 'lead', 'analyst', 'wsadmin'].filter(k => PERSONAS[k]);
+    const line = k => { const p = PERSONAS[k]; return k === 'operator' ? 'Platform admin · Platform console' : `${wsRoleOf(p, p.workspaces?.[0])} · ${wsName(p.workspaces?.[0])}`; };
+    const grid = `<div class="au-demo__grid">${people.map(k => { const p = PERSONAS[k], on = signinUi().id.trim().toLowerCase() === p.email.toLowerCase(); return `<button type="button" class="au-demo__btn" aria-pressed="${on}" data-act="au-demo" data-p="${k}" data-tip="${esc(p.email)}">${avatar(p.name, 'xs')}<span class="au-demo__text"><span class="au-demo__name truncate">${esc(p.name)}</span><span class="au-demo__ws truncate">${esc(line(k))}</span></span></button>`; }).join('')}</div>`;
+    return `<div class="au-demo">${disclosure({ path: 'auSignin.demo', icon: 'users', title: 'Try a demo account', summary: 'Password <span class="mono">demo</span>', body: grid })}</div>`;
+  }
+
   P.signin = () => {
     const s = signinUi(), e = s.err, busy = !!s.busy;
     return `<div class="auth au-page">
       <main class="auth__form"><div class="auth__form-inner">
         ${brand()}
         <h1 class="t-title au-title">Sign in</h1>
-        ${btn('Continue with Google', { v: 'outline', size: 'lg', full: true, act: 'au-google', loading: s.busy === 'google', disabled: busy, cls: 'au-google' }).replace('<span>', GOOGLE + '<span>')}
-        <div class="au-or" role="separator"><span>or</span></div>
+        <p class="muted au-sub">Welcome back. Pick up where your team left off.</p>
         ${field({ id: 'au-id', label: 'Email or username', error: e.id, control: input({ id: 'au-id', bind: 'auSignin.id', value: s.id, placeholder: 'name@company.com', onEnter: 'au-signin', autocomplete: 'username', invalid: !!e.id, autofocus: true }) })}
         ${field({ id: 'au-pw', label: 'Password', error: e.pw, control: passwordInput({ id: 'au-pw', bind: 'auSignin.pw', value: s.pw, show: s.show, act: 'au-signin-show', onEnter: 'au-signin', autocomplete: 'current-password', invalid: !!e.pw }) })}
         <div class="row end au-forgot">${linkBtn('Forgot password?', { act: 'au-forgot' })}</div>
         ${e.form ? `<div class="au-form-error">${alertBox('danger', e.form)}</div>` : ''}
-        ${btn('Sign in', { v: 'primary', size: 'lg', full: true, act: 'au-signin', loading: s.busy === 'pw', disabled: busy })}
+        ${btn('Sign in', { v: 'primary', size: 'lg', full: true, act: 'au-signin', loading: s.busy === 'pw', disabled: busy, id: 'au-submit' })}
+        <div class="au-or" role="separator"><span>or</span></div>
+        ${btn('Continue with Google', { v: 'outline', size: 'lg', full: true, act: 'au-google', loading: s.busy === 'google', disabled: busy, cls: 'au-google' }).replace('<span>', GOOGLE + '<span>')}
         <p class="au-foot">New to BoMesh? ${linkBtn('Create account', { href: '/signup' })}</p>
-        <p class="au-hint">Demo accounts, password <span class="mono">demo</span>: ${['member', 'engineer', 'lead', 'analyst', 'wsadmin'].filter(k => PERSONAS[k]).map(k => linkBtn(PERSONAS[k].email, { act: 'au-demo', data: { p: k } })).join(' · ')}</p>
+        ${demoAccounts()}
       </div></main>
       <aside class="auth__aside au-aside">${proof()}</aside>
     </div>`;
@@ -102,7 +119,8 @@
     if (!s.id.trim()) { s.err = { id: 'Enter your email or username first.' }; refresh(); $('#au-id')?.focus(); return; }
     toast('If an account exists, we sent a reset link.', { tone: 'accent' });
   };
-  A['au-demo'] = el => { const s = signinUi(), p = PERSONAS[el?.dataset?.p] || PERSONAS.member; s.id = p.email; s.pw = 'demo'; s.err = {}; refresh(); $('#au-pw')?.focus(); };
+  /** Fill the form with a demo account and hand focus to Sign in, so Enter (or one click) finishes. */
+  A['au-demo'] = el => { const s = signinUi(), p = PERSONAS[el?.dataset?.p] || PERSONAS.member; s.id = p.email; s.pw = 'demo'; s.err = {}; refresh(); $('#au-submit')?.focus(); };
 
   /* ── Create account ── */
   const PW_RULES = [
@@ -118,18 +136,19 @@
 
   P.signup = () => {
     const f = signupUi(), e = f.err, st = strength(f.pw);
-    const meter = `<div class="au-strength" aria-live="polite">
-      ${st ? `<div class="row gap-8">${progress(st[2], st[0], 'Password strength')}<span class="t-xs medium au-strength__label">${st[1]}</span></div>` : ''}
+    /* The checklist appears once there's a password to check; before that one line says what's needed. */
+    const meter = f.pw ? `<div class="au-strength" aria-live="polite">
+      <div class="row gap-8">${progress(st[2], st[0], 'Password strength')}<span class="t-xs medium au-strength__label">${st[1]}</span></div>
       <ul class="au-rules">${PW_RULES.map(([t, label]) => { const ok = t(f.pw); return `<li class="${ok ? 'is-ok' : ''}">${ic(ok ? 'check-circle' : 'circle-dashed', 'i-sm')}${esc(label)}</li>`; }).join('')}</ul>
-    </div>`;
+    </div>` : '';
     return `<div class="auth auth--single au-page">
       <main class="auth__form"><div class="auth__form-inner au-narrow">
         ${brand()}
         <h1 class="t-title au-title">Create your account</h1>
-        <p class="muted au-sub">Your workspace admin adds you to a workspace afterwards.</p>
+        <p class="muted au-sub">Use your work email. If a workspace admin invited you, use the address the invite went to.</p>
         ${field({ id: 'su-name', label: 'Full name', error: e.name, control: input({ id: 'su-name', bind: 'auSignup.name', value: f.name, placeholder: 'Kevin Ng', autocomplete: 'name', autofocus: true, invalid: !!e.name, onEnter: 'au-signup' }) })}
         ${fieldWithError({ id: 'su-email', label: 'Work email', control: input({ id: 'su-email', bind: 'auSignup.email', value: f.email, type: 'email', placeholder: 'name@company.com', autocomplete: 'email', invalid: !!e.email, onEnter: 'au-signup' }) }, e.email, e.dup ? linkBtn('Sign in instead', { act: 'au-signin-instead' }) : '')}
-        ${field({ id: 'su-pw', label: 'Password', error: e.pw, control: passwordInput({ id: 'su-pw', bind: 'auSignup.pw', value: f.pw, show: f.show, act: 'au-signup-show', onEnter: 'au-signup', autocomplete: 'new-password', invalid: !!e.pw, live: true }) + meter })}
+        ${field({ id: 'su-pw', label: 'Password', error: e.pw, desc: f.pw || e.pw ? '' : 'At least 8 characters, with letters and numbers.', control: passwordInput({ id: 'su-pw', bind: 'auSignup.pw', value: f.pw, show: f.show, act: 'au-signup-show', onEnter: 'au-signup', autocomplete: 'new-password', invalid: !!e.pw, live: true }) + meter })}
         <div class="au-terms">${checkbox({ id: 'su-terms', label: 'I agree to the terms of service and privacy policy', checked: f.terms, bind: 'auSignup.terms' })}
           ${e.terms ? `<div class="field-error" role="alert">${ic('alert-circle')}<span>${esc(e.terms)}</span></div>` : ''}</div>
         ${btn('Create account', { v: 'primary', size: 'lg', full: true, act: 'au-signup', loading: f.busy, disabled: f.busy })}
@@ -160,8 +179,11 @@
   };
 
   /* ── Choose a workspace ── */
-  const roleIn = ws => (ws.id === me().workspaces?.[0] ? me().role : 'Member');
+  const roleIn = ws => wsRoleOf(me(), ws.id);
+  const isArchived = ws => D.pWorkspaces.find(x => x.id === ws.id)?.status === 'archived';
   const opened = ws => D.wsOpened[ws.id] || 0;
+  /** “Last opened 5 h ago” / “Last opened Sep 27”: lower-case relative words, keep month names as written. */
+  const openedLabel = t => { const r = rel(t); return `Last opened ${/^\p{Lu}\p{Ll}+ \d/u.test(r) ? r : r.toLowerCase()}`; };
 
   P.workspaces = () => {
     const w = wsUi();
@@ -169,21 +191,24 @@
     const email = w.fresh ? w.email : me().email;
     let body;
     if (w.fresh) {
-      body = emptyState({ icon: 'building', title: 'No workspace yet', desc: `Ask your workspace admin to add <strong>${esc(email)}</strong>. It shows up here as soon as they do.`, actions: btn('Check again', { v: 'primary', icon: 'refresh', act: 'au-ws-check', loading: w.busy, disabled: w.busy }), boxed: true });
+      body = emptyState({ icon: 'building', title: 'No workspace yet', desc: `When a workspace admin adds or invites <strong>${esc(email)}</strong>, the workspace shows up here.`, actions: btn('Check again', { v: 'primary', icon: 'refresh', act: 'au-ws-check', loading: w.busy, disabled: w.busy }), boxed: true });
     } else {
       const all = workspacesForMe().sort((a, b) => opened(b) - opened(a));
+      const mixed = new Set(all.map(ws => wsTemplateId(ws))).size > 1;   // the template only helps tell workspaces apart when they differ
       const rows = all.filter(ws => matchesQ('auWs', ws.name, ws.code, roleIn(ws), wsTemplate(ws).label));
-      const items = rows.map(ws => item({ lead: wsMark(ws, 36), title: esc(ws.name), titleExtra: chip(wsTemplate(ws).label, { size: 'sm' }), desc: `${esc(roleIn(ws))} · ${plural(ws.members, 'member')}`, meta: opened(ws) ? `Last opened ${rel(opened(ws)).toLowerCase()}` : '', trail: ic('chevron-right', 'au-chev'), act: 'au-ws-enter', data: { id: ws.id } }));
-      const console_ = isOperator() ? `<div class="mt-12">${list([item({ lead: `<span class="ws-mark au-console-mark" style="width:36px;height:36px">${ic('layers', 'i-sm')}</span>`, title: 'Platform console', desc: 'All workspaces', trail: ic('chevron-right', 'au-chev'), act: 'au-console' })])}</div>` : '';
-      body = `${all.length > 3 ? `<div class="mb-12">${searchField({ uiKey: 'auWs', placeholder: 'Search workspaces' })}</div>` : ''}
+      const items = rows.map(ws => isArchived(ws)
+        ? item({ lead: wsMark(ws, 36), title: esc(ws.name), titleExtra: status('ws', 'archived'), desc: 'Archived. Ask a platform admin to restore it.', cls: 'au-ws-off' })
+        : item({ lead: wsMark(ws, 36), title: esc(ws.name), titleExtra: mixed ? chip(wsTemplate(ws).label, { size: 'sm' }) : '', desc: `${esc(roleIn(ws))} · ${plural(ws.members, 'member')}`, meta: opened(ws) ? esc(openedLabel(opened(ws))) : '', trail: ic('chevron-right', 'au-chev'), act: 'au-ws-enter', data: { id: ws.id } }));
+      const console_ = isOperator() ? `<div class="au-group"><div class="t-label au-group__label">Administration</div>${list([item({ lead: `<span class="ws-mark au-console-mark" style="width:36px;height:36px">${ic('layers', 'i-sm')}</span>`, title: 'Platform console', desc: 'Workspaces, users, connectors and system health', trail: ic('chevron-right', 'au-chev'), act: 'au-console' })])}</div>` : '';
+      body = `${needsTools(all.length, 'auWs') ? `<div class="mb-12">${searchField({ uiKey: 'auWs', placeholder: 'Search workspaces' })}</div>` : ''}
         ${rows.length ? list(items) : noMatches('auWs', [], 'workspaces')}${console_}`;
     }
     return `<div class="auth auth--single au-page">
       <main class="auth__form"><div class="auth__form-inner au-ws">
         ${brand()}
         <h1 class="t-title au-title">${w.fresh ? 'Welcome to BoMesh' : 'Choose a workspace'}</h1>
+        <p class="muted au-sub au-who">Signed in as <span class="medium au-who__email">${esc(email)}</span> · ${linkBtn('Sign out', { act: 'au-signout' })}</p>
         ${body}
-        <p class="au-foot au-foot--start">Signed in as ${esc(email)} · ${linkBtn('Sign out', { act: 'au-signout' })}</p>
       </div></main>
     </div>`;
   };
@@ -198,7 +223,7 @@
       Object.assign(w, { fresh: false, checks: 0 });
       S.persona = 'member'; S.ui.prefs = null; S.signedIn = true; persist();
       toast(`You were added to ${D.workspaces[0].name}`);
-    } else toast('Not yet. Your admin hasn’t added you.', { tone: 'accent' });
+    } else toast('Not yet. No workspace has added or invited you.', { tone: 'accent' });
     refresh();
   };
   A['au-signout'] = () => {

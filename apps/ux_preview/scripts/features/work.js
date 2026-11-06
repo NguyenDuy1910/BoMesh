@@ -8,11 +8,13 @@
 (() => {
   'use strict';
 
-  const works = () => (D.works ??= []);
+  /* Drafts used to say "ready" while waiting for a reviewer; that state is "in_review" now. */
+  const works = () => { const list = (D.works ??= []); list.forEach(w => { if (w.kind === 'draft' && w.status === 'ready') w.status = 'in_review'; }); return list; };
   const workById = id => works().find(w => w.id === id);
   const kindOf = w => WORK_KINDS[w?.kind || w] || { label: 'Work', icon: 'sparkles', noun: 'work' };
-  const KIND_TONE = { quiz: 'accent', guide: 'success', review: 'warning', draft: 'default' };
-  STATUS.work = { generating: ['accent', 'Generating', 'soft', 1], draft: ['default', 'Draft'], ready: ['success', 'Ready', 'tertiary'], published: ['accent', 'Published'] };
+  const KIND_TONE = { quiz: 'accent', guide: 'success', review: 'warning', draft: 'accent' };
+  /* "ready" (generated, nothing to do) carries no chip; drafts move draft → in review → changes requested | approved. */
+  STATUS.work = { generating: ['accent', 'Generating', 'soft', 1], draft: ['default', 'Draft'], in_review: ['accent', 'In review'], changes: ['warning', 'Changes requested'], approved: ['success', 'Approved', 'tertiary'], published: ['accent', 'Published'] };
 
   function audit(action, target) {
     D.audit?.unshift({ id: uid('ev'), at: Date.now(), actor: me().id, action, type: 'Work', target, outcome: 'success', ip: '10.4.12.30', device: 'Chrome on macOS' });
@@ -30,16 +32,17 @@
     if (isSpaceStaff(sp)) return true;
     return WORKFLOWS[w.workflow]?.audience !== 'staff' || w.status === 'published';
   }
-  /** Owner edits; the space's staff edit work shared to the space (e.g. a published quiz). */
+  /** Owner edits; the space's staff also edit staff work shared to the space (e.g. a quiz). Someone else's draft is reviewed, never edited. */
   function canEdit(w) {
     if (!w) return false;
     if (isOwner(w)) return true;
     const sp = spaceById(w.space);
-    return !!sp && w.visibility === 'space' && isSpaceStaff(sp);
+    return !!sp && w.visibility === 'space' && isSpaceStaff(sp) && WORKFLOWS[w.workflow]?.audience === 'staff';
   }
   function ctxFor(w, query = S.cur?.query || {}) {
     const sp = spaceById(w.space);
-    return { query, isOwner: isOwner(w), isStaff: !!sp && isSpaceStaff(sp), canEdit: canEdit(w), space: w.space, sp };
+    // Reviewers: the space's staff, for someone else's draft shared with the space.
+    return { query, isOwner: isOwner(w), isStaff: !!sp && isSpaceStaff(sp), isReviewer: !!sp && !isOwner(w) && w.visibility === 'space' && isSpaceStaff(sp), canEdit: canEdit(w), space: w.space, sp };
   }
   function worksVisible({ space } = {}) {
     return works().filter(w => canSee(w) && (!space || w.space === space)).sort((a, b) => b.updated - a.updated);
@@ -58,12 +61,13 @@
       if (w.due && w.due < Date.now()) return chip('Closed', { dot: true });
       return chip('To do', { tone: 'warning', dot: true });
     }
-    return status('work', w.status);
+    return STATUS.work[w.status] ? status('work', w.status) : '';
   }
   const spaceTag = sp => sp ? `<span class="work-space"><span class="space-dot" style="background:${esc(sp.color || 'var(--accent)')}" aria-hidden="true"></span><span class="truncate">${esc(sp.code || sp.name)}</span></span>` : '';
+  /** The one work row (Work list, space Work tab). o.hideSpace inside a space; o.owner adds "by …" for work shared with you. */
   function workItem(w, o = {}) {
-    const sp = spaceById(w.space);
-    return item({ lead: tile(w), title: esc(w.title), titleExtra: statusChip(w), desc: esc([summary(w), sp?.name].filter(Boolean).join(' · ')), meta: esc(rel(w.updated)), href: '/work/' + w.id + (o.from ? '?from=' + o.from : '') });
+    const sp = !o.hideSpace && spaceById(w.space);
+    return item({ lead: tile(w), title: esc(w.title), titleExtra: statusChip(w), desc: esc([summary(w), sp?.name, o.owner && !isOwner(w) && `by ${actorName(w.owner)}`].filter(Boolean).join(' · ')), meta: esc(rel(w.updated)), href: '/work/' + w.id + (o.from ? '?from=' + o.from : '') });
   }
 
   /* ═══════════════ Citations (shared drawer) ═══════════════ */
@@ -74,42 +78,44 @@
   }
   /** Replace [n] markers in generated HTML with citation buttons. */
   const cites = (html, list = []) => String(html || '').replace(/\[(\d+)\]/g, (m, n) => (list[n - 1] ? cite(list[n - 1], +n) : m));
-  const docHref = c => `/doc/${c.doc}?q=${encodeURIComponent(c.quote || '')}&page=${c.page || 1}`;
-  A['work-cite'] = el => openDrawer('work-cite', { doc: el.dataset.doc, page: +el.dataset.page || 1, quote: el.dataset.quote || '', n: el.dataset.n });
-  DR['work-cite'] = p => {
-    const d = docById(p.doc), kb = d && kbById(d.kb), readable = !!kb && canReadKb(kb);
-    const ref = `“${p.quote}” — ${d?.name || 'Document'}, page ${p.page}`;
-    return {
-      title: p.n ? `Source ${p.n}` : 'Source',
-      body: `<div class="row gap-12">${fileIcon(d?.type || 'pdf', 'lg')}<div class="grow" style="min-width:0">${readable ? `<a class="work-cite__name truncate" href="#${docHref(p)}">${esc(d.name)}</a>` : `<div class="work-cite__name truncate">${esc(d?.name || 'Document not available')}</div>`}<div class="t-xs muted truncate">${esc(kb?.name || '')}${kb ? ' · ' : ''}Page ${p.page}</div></div></div>
-        <blockquote class="work-cite__quote"><mark class="evidence is-focus">${esc(p.quote)}</mark></blockquote>
-        ${readable ? '' : `<div class="mt-16">${alertBox('default', 'You can’t open this document', 'The quote is shown so you can check the claim. Ask the owner of the knowledge base for access.')}</div>`}`,
-      foot: (readable ? btn('Open document', { v: 'primary', icon: 'arrow-up-right', href: docHref(p) }) : '') + btn('Copy citation', { v: 'ghost', icon: 'copy', act: 'copy', data: { text: ref, msg: 'Citation copied' } }),
-    };
+  /* Kinds with their own panel (draft rail, review evidence panel) show the citation there: one side panel at a time.
+     Everywhere else a citation opens the shared document preview (preview.js) on the cited passage. */
+  A['work-cite'] = el => {
+    const p = { doc: el.dataset.doc, page: +el.dataset.page || 1, quote: el.dataset.quote || '', n: el.dataset.n };
+    const w = S.cur?.r.page === 'workItem' && workById(S.cur.params.id), k = w && kindOf(w);
+    if (k?.onCite) { k.onCite(w, p, el); return; }
+    X.preview.open({ id: p.doc, page: p.page, quote: p.quote });
   };
   A['work-sources'] = el => openDrawer('work-sources', { id: el.dataset.id });
   DR['work-sources'] = p => {
     const w = workById(p.id); if (!w) return { title: 'Sources', body: '' };
+    const k = kindOf(w), groups = k.sourceGroups?.(w) || [{ ids: w.sources }];
+    const row = id => {
+      const d = docById(id), kb = d && kbById(d.kb), ok = !!kb && canReadKb(kb);
+      return item({ lead: fileIcon(d?.type || 'pdf'), title: esc(d?.name || 'Removed document'), desc: esc(kb?.name || ''), trail: ok ? ic('chevron-right', 'muted') : ic('lock', 'muted'), href: ok ? '/doc/' + id : undefined });
+    };
     return {
-      title: 'Sources', desc: `${kindOf(w).label} built from ${plural(w.sources.length, 'document')}.`,
-      body: list(w.sources.map(id => {
-        const d = docById(id), kb = d && kbById(d.kb), ok = !!kb && canReadKb(kb);
-        return item({ lead: fileIcon(d?.type || 'pdf'), title: esc(d?.name || 'Removed document'), desc: esc(kb?.name || ''), trail: ok ? ic('chevron-right', 'muted') : ic('lock', 'muted'), href: ok ? '/doc/' + id : undefined });
-      }), 'list--plain'),
+      title: 'Sources', desc: esc(sourceLine(w)),
+      body: groups.filter(g => g.ids.length).map(g => `${g.title ? `<div class="t-label mt-16 mb-8">${esc(g.title)}</div>` : ''}${list(g.ids.map(row), 'list--plain')}`).join(''),
     };
   };
+  /** One count per kind, said the same way in the header and the Sources panel. */
+  const sourceLine = w => kindOf(w).sourceLine?.(w) || plural((w.sources || []).length, 'source');
 
   /* ═══════════════ Materials ═══════════════ */
   const usable = d => d.status === 'ready' || d.status === 'outdated';
-  /** Documents grouped by knowledge base: the space's materials, plus My files for private work. */
+  /** Documents grouped by knowledge base: the space's materials (its bases, then documents linked from other bases), plus My files for private work. */
   function docGroups(sp, mine) {
     const kbs = sp ? (sp.kbs || []).map(kbById) : visibleKbs().filter(k => !k.personal);
     if (mine || !sp) kbs.push(...visibleKbs().filter(k => k.personal));
-    return [...new Set(kbs)].filter(k => k && !k.archived && canReadKb(k)).map(kb => ({ kb, docs: docsIn(kb.id) })).filter(g => g.docs.length);
+    const groups = [...new Set(kbs)].filter(k => k && !k.archived && canReadKb(k)).map(kb => ({ name: kb.name, docs: docsIn(kb.id) }));
+    const linked = sp && X.spaceLinkedDocs ? X.spaceLinkedDocs(sp) : [];
+    if (linked.length) groups.push({ name: 'Linked from other knowledge bases', docs: linked });
+    return groups.filter(g => g.docs.length);
   }
   const docsForSpace = (sp, o = {}) => docGroups(sp, o.mine).flatMap(g => g.docs);
   const privateFlow = wf => WORKFLOWS[wf]?.audience === 'member';
-  /** Checklist of documents for f.space (f = a view-state bucket with docs:{id:true}, q). */
+  /** Checklist of documents for f.space (f = a view-state bucket with docs:{id:true}, q). o.max: how many the workflow can use (the counter says so). */
   function sourcePicker(f, o = {}) {
     const sp = spaceById(f.space), uiKey = o.uiKey || 'workNew';
     const groups = docGroups(sp, o.mine ?? privateFlow(f.workflow));
@@ -117,11 +123,12 @@
     const q = (f.q || '').trim().toLowerCase();
     const shown = groups.map(g => ({ ...g, docs: g.docs.filter(d => !q || d.name.toLowerCase().includes(q)) })).filter(g => g.docs.length);
     const pickable = shown.flatMap(g => g.docs).filter(usable);
-    const n = groups.flatMap(g => g.docs).filter(d => f.docs[d.id]).length;
     const on = pickable.filter(d => f.docs[d.id]).length;
-    const head = `<div class="work-pick__bar">${searchField({ uiKey, placeholder: 'Search documents' })}<span class="grow"></span><span class="t-sm muted num">${n ? `${fmtNum(n)} selected` : 'None selected'}</span></div>
+    const all = groups.flatMap(g => g.docs), n = all.filter(d => f.docs[d.id]).length, over = o.max && n > o.max;
+    const count = o.max ? `${n ? `${fmtNum(n)} selected` : 'None selected'} · up to ${fmtNum(o.max)}` : n ? `${fmtNum(n)} selected` : 'None selected';
+    const head = `<div class="work-pick__bar">${needsTools(all.length, uiKey) ? searchField({ uiKey, placeholder: 'Search documents' }) : ''}<span class="grow"></span><span class="${cx('t-sm num', over ? 'work-pick__over' : 'muted')}" aria-live="polite">${count}</span></div>
       ${pickable.length ? `<div class="work-pick__all">${checkbox({ label: q ? 'Select all matches' : 'Select all', checked: on && on === pickable.length, indeterminate: on && on < pickable.length, act: 'work-doc-all', data: { ids: pickable.map(d => d.id).join(','), ui: uiKey } })}</div>` : ''}`;
-    const body = shown.length ? shown.map(g => `<div class="work-pick__group"><div class="t-label">${esc(g.kb.name)}</div><div class="work-pick__list">${g.docs.map(d => {
+    const body = shown.length ? shown.map(g => `<div class="work-pick__group"><div class="t-label">${esc(g.name)}</div><div class="work-pick__list">${g.docs.map(d => {
       const ok = usable(d);
       return `<div class="work-pick__doc ${f.docs[d.id] ? 'is-on' : ''}">${checkbox({ label: `<span class="work-pick__name">${fileIcon(d.type, 'sm')}<span class="truncate">${esc(d.name)}</span></span>`, checked: !!f.docs[d.id], disabled: !ok, act: 'work-doc-toggle', data: { id: d.id, ui: uiKey } })}<span class="work-pick__meta">${ok ? `${plural(d.pages, 'page')}` : status('doc', d.status)}</span></div>`;
     }).join('')}</div></div>`).join('') : `<div class="t-sm muted work-pick__none">No documents match “${esc(f.q)}”.</div>`;
@@ -148,7 +155,6 @@
     if (format === 'word') exportWord(w, k.exportHtml?.(w) || `<p>${esc(summary(w))}</p>`);
     else exportPdf(w, k.exportLines?.(w) || [summary(w)]);
   }
-  MENUS['work-dl'] = el => { const w = workById(el.dataset.id); return w ? [{ label: 'Word document', icon: 'file-text', run: () => download(w, 'word') }, { label: 'PDF', icon: 'download', run: () => download(w, 'pdf') }] : []; };
   const save = w => { w.updated = Date.now(); persist(); };
 
   /* ═══════════════ Generation (simulated) ═══════════════ */
@@ -220,41 +226,39 @@
     if (!flows.length) return emptyState({ icon: 'sparkles', title: 'Nothing to make here yet', desc: hasModule('spaces') ? 'Work starts from a space’s materials. Join a course, group or team to begin.' : 'Ask an admin to turn on workflows for this workspace.', actions: hasModule('spaces') ? btn('Browse spaces', { v: 'primary', href: '/spaces' }) : '', boxed: true });
     return `<div class="work-intro"><div class="t-heading">Turn your materials into finished work</div><p class="t-sm muted mt-4">Pick what you need and the documents to use. Every part cites the page it came from.</p></div>${flowCards(flows, 'work-start')}`;
   }
+  /** New: one workflow is a direct button; several open a menu. */
+  const newButton = (flows, space) => flows.length === 1
+    ? btn(flows[0].label, { v: 'primary', icon: flows[0].icon, act: 'work-start', data: { workflow: flows[0].id, space } })
+    : btn('New', { v: 'primary', icon: 'plus', iconRight: 'chevron-down', menu: 'work-new', data: { space } });
   P.work = ({ query }) => {
-    const tab = query.tab === 'shared' ? 'shared' : 'mine';
-    const u = ui('workList', { sort: { key: 'updated', dir: 'desc' } });
+    const u = ui('workList');
     const flows = workflowsFor();
     const vis = worksVisible(), mine = vis.filter(isOwner), shared = vis.filter(w => !isOwner(w));
+    // "Shared with me" only earns a tab once something has been shared.
+    const showTabs = shared.length > 0 || query.tab === 'shared';
+    const tab = showTabs && query.tab === 'shared' ? 'shared' : 'mine';
     const src = tab === 'mine' ? mine : shared;
-    const head = pageHeader({ title: 'Work', actions: flows.length ? btn('New', { v: 'primary', icon: 'plus', iconRight: 'chevron-down', menu: 'work-new' }) : '' });
-    const tabsHtml = `<div class="page-tabs">${tabs([{ id: 'mine', label: 'Mine', count: mine.length || '' }, { id: 'shared', label: 'Shared with me', count: shared.length || '' }], tab, '/work')}</div>`;
+    const head = pageHeader({ title: 'Work', actions: flows.length ? newButton(flows) : '' });
+    const tabsHtml = showTabs ? `<div class="page-tabs">${tabs([{ id: 'mine', label: 'Mine', count: mine.length || '' }, { id: 'shared', label: 'Shared with me', count: shared.length || '' }], tab, '/work')}</div>` : '';
     const kindOpts = [...new Set(vis.map(w => w.kind))].map(k => [k, kindOf(k).label]);
     const spaceOpts = [...new Set(vis.map(w => w.space).filter(Boolean))].map(id => [id, spaceById(id)?.name || id]);
-    const rows = applySort(src.filter(w => matchesQ('workList', w.title, summary(w), spaceById(w.space)?.name) && (!u.kind || w.kind === u.kind) && (!u.space || w.space === u.space)), 'workList', { title: w => w.title.toLowerCase(), updated: w => w.updated });
-    const toolbar = `<div class="toolbar">${searchField({ uiKey: 'workList', placeholder: 'Search work' })}${kindOpts.length > 1 ? filterButton('Type', 'workList', 'kind', kindOpts) : ''}${spaceOpts.length > 1 ? filterButton('Space', 'workList', 'space', spaceOpts) : ''}${clearFilters('workList', ['kind', 'space'])}<span class="toolbar__end t-sm muted num">${plural(rows.length, 'item')}</span></div>`;
-    const showOwner = tab === 'shared';
-    const row = w => {
-      const sp = spaceById(w.space), owner = actorName(w.owner);
-      return `<tr class="table__row" data-act="work-open" data-id="${w.id}" tabindex="0">
-        <td class="table__cell table__cell--primary"><div class="work-name">${tile(w, 'sm')}<div class="work-name__text"><span class="medium truncate">${esc(w.title)}</span><span class="t-xs muted truncate">${esc(summary(w))}</span></div></div></td>
-        <td class="table__cell">${spaceTag(sp) || '<span class="muted">—</span>'}</td>
-        <td class="table__cell">${statusChip(w)}</td>
-        <td class="table__cell t-sm muted num">${esc(rel(w.updated))}</td>
-        ${showOwner ? `<td class="table__cell table__cell--hide-sm"><div class="work-owner">${avatar(owner, 'xs')}<span class="t-sm truncate">${esc(owner)}</span></div></td>` : ''}
-      </tr>`;
-    };
+    const tools = needsTools(src.length, 'workList', ['kind', 'space']);
+    // worksVisible() is newest first, the order people come back to work in.
+    const rows = src.filter(w => matchesQ('workList', w.title, summary(w), spaceById(w.space)?.name) && (!u.kind || w.kind === u.kind) && (!u.space || w.space === u.space));
+    // The tab (or the list itself) already shows how many there are; a count only helps while filtering.
+    const filtering = !!u.q || !!u.kind || !!u.space;
+    const toolbar = tools ? `<div class="toolbar">${searchField({ uiKey: 'workList', placeholder: 'Search work' })}${kindOpts.length > 1 ? filterButton('Type', 'workList', 'kind', kindOpts) : ''}${spaceOpts.length > 1 ? filterButton('Space', 'workList', 'space', spaceOpts) : ''}${clearFilters('workList', ['kind', 'space'])}${filtering ? `<span class="toolbar__end t-sm muted num">${plural(rows.length, 'item')}</span>` : ''}</div>` : '';
     const body = gate({
       loading: () => skelRows(5),
       empty: () => firstRun(flows),
       ok: () => {
         if (!src.length) return tab === 'mine' ? firstRun(flows) : emptyState({ icon: 'users', title: 'Nothing shared with you yet', desc: 'Quizzes, guides and reviews people share to your spaces show up here.', boxed: true });
         if (!rows.length) return toolbar + noMatches('workList', ['kind', 'space'], 'work');
-        return toolbar + table({ label: 'Work', head: sortHead('Name', 'title', 'workList') + th('Space') + th('Status') + sortHead('Updated', 'updated', 'workList') + (showOwner ? th('Owner', 'table__cell--hide-sm') : ''), rows: rows.map(row) });
+        return toolbar + list(rows.map(w => workItem(w, { owner: tab === 'shared' })), 'work-list');
       },
     });
     return `<div class="page">${head}${tabsHtml}${body}</div>`;
   };
-  A['work-open'] = el => go('/work/' + el.dataset.id);
 
   /* ═══════════════ /work/new ═══════════════ */
   /** Spaces where the caller can run this workflow. */
@@ -269,7 +273,9 @@
     f.space = spaces.some(s => s.id === query.space) ? query.space : spaces[0]?.id || '';
     const ok = new Set(docsForSpace(spaceById(f.space), { mine: privateFlow(wf) }).filter(usable).map(d => d.id));
     (query.docs || '').split(',').filter(id => ok.has(id)).forEach(id => (f.docs[id] = true));
-    f.step = Object.keys(f.docs).length && query.space ? 3 : 2;
+    // Arriving with picked documents skips to options, unless the pick needs fixing first (then step 2 says why).
+    f.err = Object.keys(f.docs).length ? docsError(f) : '';
+    f.step = Object.keys(f.docs).length && query.space && !f.err ? 3 : 2;
     if (f.step === 3) wnDefaultTitle(f);
     return f;
   }
@@ -303,9 +309,9 @@
       const spaces = wnSpaces(f.workflow);
       const opts = [...(allowsNoSpace(f.workflow) ? [['', 'No space — any knowledge I can read']] : []), ...spaces.map(s => [s.id, s.name + (s.code ? ` · ${s.code}` : '')])];
       const spaceField = opts.length ? field({ id: 'wn-space', label: 'Space', control: select({ id: 'wn-space', value: f.space, options: opts, change: 'wn-space' }) }) : '';
-      const pick = (!opts.length) ? emptyState({ icon: 'layers', title: `No space where you can make a ${wf.label.toLowerCase()}`, desc: 'Join a space first. Its materials are what the assistant works from.', actions: btn('Browse spaces', { href: '/spaces' }), boxed: true, compact: true }) : sourcePicker(f);
+      const pick = (!opts.length) ? emptyState({ icon: 'layers', title: `No space where you can make a ${wf.label.toLowerCase()}`, desc: 'Join a space first. Its materials are what the assistant works from.', actions: btn('Browse spaces', { href: '/spaces' }), boxed: true, compact: true }) : sourcePicker(f, { max: maxFor(f) });
       body = `<h2 class="work-q">From which materials?</h2>${spaceField}<div class="field mt-16"><span class="label">Documents<span class="label__req" aria-hidden="true">*</span></span>${pick}${f.err ? `<div class="field-error" role="alert">${ic('alert-circle')}<span>${esc(f.err)}</span></div>` : ''}</div>`;
-      foot = `<div class="work-new__foot">${btn('Back', { icon: 'arrow-left', act: 'wn-step', data: { step: 1 } })}<span class="grow"></span>${cancel}${btn('Continue', { v: 'primary', act: 'wn-next', disabled: !opts.length })}</div>`;
+      foot = `<div class="work-new__foot">${btn('Back', { icon: 'arrow-left', act: 'wn-step', data: { step: 1 } })}<span class="grow"></span>${cancel}${opts.length ? btn('Continue', { v: 'primary', act: 'wn-next' }) : ''}</div>`;
     } else {
       const k = WORK_KINDS[wf.kind], ctx = wnCtx(f), sp = spaceById(f.space);
       let optsHtml = '';
@@ -318,7 +324,7 @@
         ${field({ id: 'wn-title', label: 'Title', required: true, error: f.titleErr || '', control: input({ id: 'wn-title', bind: 'workNew.title', value: f.title, attrs: 'data-input="wn-title"', onEnter: 'wn-generate', invalid: !!f.titleErr }) })}`;
       foot = `<div class="work-new__foot">${btn('Back', { icon: 'arrow-left', act: 'wn-step', data: { step: 2 } })}<span class="grow"></span>${cancel}${btn('Generate', { v: 'primary', icon: 'sparkles', act: 'wn-generate' })}</div>`;
     }
-    return `<div class="page page--narrow work-new">${head}${wf ? stepper(f) : ''}<div class="card card--lg work-new__card">${body}${foot}</div></div>`;
+    return `<div class="page page--narrow work-new">${head}${stepper(wf ? f : { ...f, step: 1 })}<div class="card card--lg work-new__card">${body}${foot}</div></div>`;
   };
   A['wn-flow'] = el => {
     const f = ui('workNew'), id = el.dataset.workflow;
@@ -331,9 +337,16 @@
   };
   A['wn-space'] = el => { const f = ui('workNew'); f.space = el.value; f.docs = {}; f.q = ''; f.err = ''; refresh(); };
   A['wn-step'] = el => { const f = ui('workNew'); f.step = +el.dataset.step; f.err = ''; f.titleErr = ''; refresh(); };
+  /** How many sources the workflow can use at once (a comparison stays readable); nothing is ever dropped silently. */
+  const maxFor = f => kindOf(WORKFLOWS[f.workflow]?.kind).maxSources || 0;
+  function docsError(f) {
+    const n = wnDocs(f).length, max = maxFor(f);
+    if (!n) return 'Pick at least one document.';
+    return max && n > max ? `Pick up to ${max} sources to compare. You picked ${n}.` : '';
+  }
   A['wn-next'] = () => {
-    const f = ui('workNew');
-    if (!wnDocs(f).length) { f.err = 'Pick at least one document.'; refresh(); return; }
+    const f = ui('workNew'), err = docsError(f);
+    if (err) { f.err = err; refresh(); return; }
     f.step = 3; f.err = ''; wnDefaultTitle(f); refresh();
   };
   A['wn-title'] = () => { const f = ui('workNew'); f.titleTouched = true; if (f.titleErr) { f.titleErr = ''; refresh(); } };
@@ -342,8 +355,8 @@
     const f = ui('workNew'), wf = WORKFLOWS[f.workflow]; if (!wf) return;
     const title = (f.title || '').trim();
     if (!title) { f.titleErr = 'Give it a title.'; refresh(); $('#wn-title')?.focus(); return; }
-    const sources = wnDocs(f).map(d => d.id);
-    if (!sources.length) { f.step = 2; f.err = 'Pick at least one document.'; refresh(); return; }
+    const sources = wnDocs(f).map(d => d.id), err = docsError(f);
+    if (err) { f.step = 2; f.err = err; refresh(); return; }
     wnStale = true;
     create({ kind: wf.kind, workflow: f.workflow, title, space: f.space || null, sources, options: { ...f.opts } });
   };
@@ -355,10 +368,11 @@
     const titleHtml = u.renaming === w.id
       ? `<div class="work-rename">${input({ id: 'work-rename', bind: 'workItem.name', value: u.name, onEnter: 'work-rename-save', attrs: 'aria-label="Title"' })}${btn('Save', { v: 'primary', size: 'sm', act: 'work-rename-save' })}${btn('Cancel', { v: 'ghost', size: 'sm', act: 'work-rename-cancel' })}</div>`
       : ctx.canEdit ? `<h1 class="page-header__title work-title"><button type="button" class="work-title__btn" data-act="work-rename" data-id="${w.id}" data-tip="Rename">${esc(w.title)}${ic('pencil', 'work-title__pen')}</button></h1>` : `<h1 class="page-header__title work-title">${esc(w.title)}</h1>`;
-    const sp = ctx.sp, n = w.sources.length;
+    const sp = ctx.sp, n = (w.sources || []).length;
     const meta = [
       sp && `<a class="work-meta__space" href="#/space/${sp.id}">${spaceTag(sp)}</a>`,
-      n && `<button type="button" class="link-button work-meta__src" data-act="work-sources" data-id="${w.id}">${plural(n, 'source')}</button>`,
+      // Kinds with their own sources panel (drafts) open it; the rest list the documents in a drawer. Same words as that panel.
+      n && `<button type="button" class="link-button work-meta__src" data-act="${k.sourcesAct || 'work-sources'}" data-id="${w.id}">${esc(sourceLine(w))}</button>`,
       `<span>Updated ${esc(rel(w.updated))}</span>`,
       !ctx.isOwner && `<span>by ${esc(actorName(w.owner))}</span>`,
       ctx.isOwner && w.space && `<span class="work-meta__vis">${ic(w.visibility === 'space' ? 'users' : 'lock', 'i-sm')}${w.visibility === 'space' ? 'Shared with the space' : 'Only you'}</span>`,
@@ -383,7 +397,10 @@
       catch (e) { console.error(e); body = errorState({ title: 'This didn’t load', desc: String(e.message || e) }); }
     }
     const layout = k.layout === 'wide' ? 'page--wide work-page--wide' : k.layout === 'doc' ? 'page--wide work-page--doc' : 'work-page';
-    return scroller(`<div class="page ${layout}">${header(w, k, ctx)}${body}</div>`);
+    // A kind's side panel (the review's evidence) sits beside the page, non-modal, so the work stays usable while it's open.
+    let panel = '';
+    if (w.status !== 'generating') { try { panel = k.panel?.(w, ctx) || ''; } catch (e) { console.error(e); } }
+    return `<div class="split work-split"><div class="split__main">${scroller(`<div class="page ${layout}">${header(w, k, ctx)}${body}</div>`)}</div>${panel}</div>`;
   };
   AFTER.workItem = ({ params }) => {
     const w = workById(params.id);
@@ -411,7 +428,10 @@
     const k = kindOf(w), ctx = ctxFor(w), gen = w.status === 'generating', sp = ctx.sp, items = [];
     if (!gen) { try { items.push(...(k.menu?.(w, ctx) || [])); } catch (e) { console.error(e); } }
     if (!gen && ctx.canEdit) items.push({ label: 'Duplicate', icon: 'copy', run: () => duplicate(w) });
-    if (!gen && !k.headerDownload && k.canDownload?.(w, ctx) !== false) items.push({ label: 'Download as Word', icon: 'file-text', run: () => download(w, 'word') }, { label: 'Download as PDF', icon: 'download', run: () => download(w, 'pdf') });
+    if (!gen && k.canDownload?.(w, ctx) !== false) {
+      items.push({ label: 'Download as Word', icon: 'file-text', run: () => download(w, 'word') }, { label: 'Download as PDF', icon: 'download', run: () => download(w, 'pdf') });
+      try { items.push(...(k.downloads?.(w, ctx) || [])); } catch (e) { console.error(e); }
+    }
     if (!gen && ctx.isOwner && sp && w.status !== 'published') items.push(w.visibility === 'space' ? { label: 'Make private', icon: 'lock', run: () => setVisibility(w, 'private') } : { label: `Share to ${sp.name}`, icon: 'share', run: () => setVisibility(w, 'space') });
     if (ctx.isOwner) items.push(...(items.length ? [{ sep: true }] : []), { label: 'Delete', icon: 'trash', danger: true, run: () => remove(w) });
     return items;
@@ -419,8 +439,8 @@
   MENUS['work-more'] = el => { const w = workById(el.dataset.id); return w ? moreItems(w) : []; };
   function duplicate(w) {
     const c = clone(w);
-    Object.assign(c, { id: uid('w'), title: `${w.title} (copy)`, owner: me().id, status: w.status === 'published' ? 'draft' : w.status, visibility: 'private', created: Date.now(), updated: Date.now() });
-    delete c.published; delete c.due;
+    Object.assign(c, { id: uid('w'), title: `${w.title} (copy)`, owner: me().id, status: ['published', 'in_review', 'changes', 'approved'].includes(w.status) ? 'draft' : w.status, visibility: 'private', created: Date.now(), updated: Date.now() });
+    delete c.published; delete c.due; delete c.reviews;
     if (c.data?.attempts) c.data.attempts = [];
     if (c.data?.stats) c.data.stats = { attempts: 0, avg: 0, byQuestion: [] };
     works().unshift(c); audit('Duplicated work', w.title); go('/work/' + c.id);
@@ -430,25 +450,24 @@
     const prev = w.visibility; w.visibility = v; save(w); audit(v === 'space' ? 'Shared work to space' : 'Made work private', w.title); refresh();
     toast(v === 'space' ? `Shared to ${spaceById(w.space)?.name || 'the space'}` : 'Now only you can see it', { action: { label: 'Undo', run: () => { w.visibility = prev; save(w); refresh(); } } });
   }
+  /** Unpublished work goes at once (Undo brings it back); published work takes students' results with it, so that asks first. */
   function remove(w) {
-    const published = w.status === 'published';
-    confirmAction({
-      title: `Delete “${w.title}”?`, body: published ? 'Students lose access and its results are deleted.' : 'You can undo this right after.', confirm: 'Delete', danger: true,
-      onConfirm: () => {
-        const i = works().indexOf(w); if (i < 0) return;
-        works().splice(i, 1);
-        const evs = (D.events || []).filter(e => e.work === w.id);
-        if (evs.length) D.events = D.events.filter(e => e.work !== w.id);
-        audit('Deleted work', w.title);
-        go('/work');
-        toast(`Deleted “${w.title}”`, { action: { label: 'Undo', run: () => { works().splice(Math.min(i, works().length), 0, w); if (evs.length) (D.events ??= []).push(...evs); refresh(); toast('Restored'); } } });
-      },
-    });
+    const run = () => {
+      const i = works().indexOf(w); if (i < 0) return;
+      works().splice(i, 1);
+      const evs = (D.events || []).filter(e => e.work === w.id);
+      if (evs.length) D.events = D.events.filter(e => e.work !== w.id);
+      audit('Deleted work', w.title);
+      go('/work');
+      toast(`Deleted “${w.title}”`, { action: { label: 'Undo', run: () => { works().splice(Math.min(i, works().length), 0, w); if (evs.length) (D.events ??= []).push(...evs); refresh(); toast('Restored'); } } });
+    };
+    if (w.status !== 'published') { run(); return; }
+    confirmAction({ title: `Delete “${w.title}”?`, body: 'Students lose access and their results are deleted.', confirm: 'Delete', danger: true, onConfirm: run });
   }
 
   /* ═══════════════ Exports ═══════════════ */
   X.workItem = workItem;
   X.worksVisible = worksVisible;
   X.workIcon = workIcon;
-  X.work = { create, cite, cites, sourcePicker, docsForSpace, save, exportWord, exportPdf, download, canEdit, canSee, ctxFor, myAttempt, statusChip, tile, byId: workById, audit };
+  X.work = { create, cite, cites, sourcePicker, docsForSpace, save, exportWord, exportPdf, download, canEdit, canSee, ctxFor, myAttempt, statusChip, tile, byId: workById, audit, newButton, sourceLine };
 })();

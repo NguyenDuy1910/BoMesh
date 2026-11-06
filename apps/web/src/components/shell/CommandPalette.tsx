@@ -1,15 +1,19 @@
 "use client";
 
+import { Autocomplete, Header, Input, Kbd, ListBox, Modal, TextField, type Key } from "@heroui/react";
+import { useQuery } from "@tanstack/react-query";
 import {
   BookOpen,
-  Building2,
-  Clock,
-  FileText,
-  Layers,
+  Building,
+  Filter,
+  Globe,
+  List,
+  ListPlus,
   MessageSquare,
+  MessageSquarePlus,
   Moon,
+  Palette,
   Plug,
-  Plus,
   Search,
   Sparkles,
   Sun,
@@ -19,407 +23,408 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useMemo, useState } from "react";
 
-import { PaletteContext, type PaletteControls } from "@/components/shell/usePalette";
-import { useCurrentWorkspace } from "@/components/shell/useCurrentWorkspace";
-import { Kbd } from "@/components/ui/Kbd";
-import { PreviewTag } from "@/components/ui/PreviewTag";
-import { isPendingFeatureEnabled } from "@/lib/api/pending";
-import {
-  canAccessPlatformControl,
-  hasPlatformPermission,
-  hasSessionPermission,
-  type AuthSession,
-} from "@/lib/auth/session";
-import { cn } from "@/lib/cn";
-import { useAccountPreferences } from "@/lib/hooks/useAccountPreferences";
-import { useModalLayer } from "@/lib/hooks/useModalLayer";
-import { MANAGE_NAV, PLATFORM_NAV, visibleNavItems } from "@/lib/navigation";
-import { useConversationList } from "@/modules/chat/hooks/useConversationList";
-import { findDocumentsByName, type FoundDocument } from "@/modules/knowledge/document-search";
-import { knowledgeApi, type KnowledgeHome } from "@/modules/knowledge/knowledge-api";
-import { memberName, workspaceDirectoryApi, type Member } from "@/modules/manage/access/directory";
-import { listPlatformUsers, listPlatformWorkspaces, type PlatformUser, type PlatformWorkspace } from "@/modules/platform/api";
-import { formatRelative } from "@/lib/format";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { api, call, listAll, resourceId, type Schema } from "@/lib/api/client";
+import { plural, rel } from "@/lib/format";
+import { tr, useLanguage } from "@/lib/i18n";
+import { manageNav, memberNav, MORE_PAGES, PLATFORM_CONSOLE, PLATFORM_NAV, SPACES_NAV, type NavItem, type ShellMode } from "@/lib/navigation";
+import { isPlatformOperator, useSession } from "@/lib/session";
+import { resolvedMode, setMode } from "@/lib/theme";
+import { useOptionalWorkspace, type WorkspaceContextValue } from "@/lib/workspace";
+import { roleLabel } from "@/modules/auth/api";
+import { openContribute } from "@/modules/knowledge/components/Contribute";
+import { openReadingListEditor } from "@/modules/knowledge/components/dialogs";
+import { spaceType } from "@/modules/spaces";
 
-const DEBOUNCE_MS = 180;
-const RECENT_SEARCHES = 5;
+import { changeLanguage } from "./LanguagePicker";
+import { closeOverlay, openAppearance, useShellOverlays } from "./overlays";
 
 interface PaletteItem {
   id: string;
   label: string;
   icon: LucideIcon;
   meta?: string;
-  /** Local data from a not-yet-connected API: marked so it is never mistaken for a record. */
-  preview?: boolean;
-  /** An app route, or a function for actions that do not navigate. */
-  to: string | (() => void);
+  /** The label is workspace content (titles, names): never translated. */
+  content?: boolean;
+  run: () => void;
 }
-
 interface PaletteGroup {
-  label: string;
+  group: string;
   items: PaletteItem[];
 }
 
-/** Loads once per open or per query; a refused or failed read is simply no results. */
-function useRemote<T>(key: string | null, load: (signal: AbortSignal) => Promise<T>): { data: T | null; loading: boolean } {
-  const [state, setState] = useState<{ key: string | null; data: T | null; loading: boolean }>({ key: null, data: null, loading: false });
-  const loader = useRef(load);
-  loader.current = load;
+const STALE = 60_000;
 
-  useEffect(() => {
-    if (key === null) {
-      setState({ key: null, data: null, loading: false });
-      return;
-    }
-    const controller = new AbortController();
-    setState((current) => ({ key, data: current.key === key ? current.data : null, loading: true }));
-    loader.current(controller.signal)
-      .then((data) => {
-        if (!controller.signal.aborted) setState({ key, data, loading: false });
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) setState({ key, data: null, loading: false });
-      });
-    return () => controller.abort();
-  }, [key]);
-
-  return { data: state.key === key ? state.data : null, loading: state.loading };
-}
-
-function useDebounced(value: string, delay: number): string {
+/** The query, debounced for server search. */
+function useDebounced(value: string, ms: number): string {
   const [debounced, setDebounced] = useState(value);
   useEffect(() => {
-    const timer = window.setTimeout(() => setDebounced(value), delay);
-    return () => window.clearTimeout(timer);
-  }, [value, delay]);
+    const t = window.setTimeout(() => setDebounced(value), ms);
+    return () => window.clearTimeout(t);
+  }, [value, ms]);
   return debounced;
 }
 
-const recentKey = (session: AuthSession | null) => `bomesh.palette.recent.${session?.user_id ?? "anonymous"}`;
-
-function readRecentSearches(session: AuthSession | null): string[] {
-  try {
-    const stored: unknown = JSON.parse(window.localStorage.getItem(recentKey(session)) ?? "[]");
-    return Array.isArray(stored) ? stored.filter((entry): entry is string => typeof entry === "string").slice(0, RECENT_SEARCHES) : [];
-  } catch {
-    return [];
-  }
+/** Workspace data the palette searches; loaded while it is open. */
+function useWorkspaceSources(ws: WorkspaceContextValue, enabled: boolean, q: string) {
+  const path = { workspace: ws.id };
+  const conversations = useQuery({
+    queryKey: [ws.id, "conversations", "palette"],
+    enabled,
+    staleTime: STALE,
+    queryFn: () => call(api.GET("/api/v1/workspaces/{workspace}/conversations", { params: { path, query: { pageSize: 100, orderBy: "lastMessageTime desc" } } })),
+  });
+  const collections = useQuery({
+    queryKey: [ws.id, "readingLists", "palette"],
+    enabled,
+    staleTime: STALE,
+    queryFn: () => call(api.GET("/api/v1/workspaces/{workspace}/readingLists", { params: { path, query: { pageSize: 200, orderBy: "updateTime desc" } } })),
+  });
+  const bases = useQuery({
+    queryKey: [ws.id, "items", "roots", "palette"],
+    enabled,
+    staleTime: STALE,
+    queryFn: () => call(api.GET("/api/v1/workspaces/{workspace}/items", { params: { path, query: { pageSize: 200, filter: 'parentItem = ""' } } })),
+  });
+  const spaces = useQuery({
+    queryKey: [ws.id, "spaces", "palette"],
+    enabled: enabled && ws.hasModule("spaces"),
+    staleTime: STALE,
+    queryFn: () => call(api.GET("/api/v1/workspaces/{workspace}/spaces", { params: { path, query: { pageSize: 200 } } })),
+  });
+  const people = useQuery({
+    queryKey: [ws.id, "members", "palette"],
+    enabled: enabled && Boolean(q) && ws.can("members.create"),
+    staleTime: STALE,
+    queryFn: () =>
+      listAll(
+        (pageToken) => call(api.GET("/api/v1/workspaces/{workspace}/members", { params: { path, query: { pageSize: 500, pageToken } } })),
+        (page) => page.members,
+      ),
+  });
+  const work = useQuery({
+    queryKey: [ws.id, "artifacts", "palette"],
+    enabled: enabled && Boolean(q) && ws.hasModule("work"),
+    staleTime: STALE,
+    queryFn: () => call(api.GET("/api/v1/workspaces/{workspace}/artifacts", { params: { path, query: { pageSize: 200, orderBy: "updateTime desc" } } })),
+  });
+  const documents = useQuery({
+    queryKey: [ws.id, "items:search", "palette", q],
+    enabled: enabled && Boolean(q),
+    staleTime: STALE,
+    queryFn: () => call(api.POST("/api/v1/workspaces/{workspace}/items:search", { params: { path }, body: { query: q, pageSize: 5 } })),
+  });
+  return {
+    conversations: conversations.data?.conversations ?? [],
+    collections: collections.data?.readingLists ?? [],
+    bases: (bases.data?.items ?? []).filter((i) => i.itemType === "COLLECTION"),
+    spaces: spaces.data?.spaces ?? [],
+    people: people.data ?? [],
+    work: work.data?.artifacts ?? [],
+    documents: (documents.data?.results ?? []).map((r) => r.item).filter((i): i is Schema<"Item"> => Boolean(i)),
+  };
 }
 
-function rememberSearch(session: AuthSession | null, query: string) {
-  const next = [query, ...readRecentSearches(session).filter((entry) => entry.toLowerCase() !== query.toLowerCase())];
-  try {
-    window.localStorage.setItem(recentKey(session), JSON.stringify(next.slice(0, RECENT_SEARCHES)));
-  } catch {
-    // Without storage, recent searches are simply not kept.
-  }
+function usePlatformSources(enabled: boolean, q: string) {
+  const workspaces = useQuery({
+    queryKey: ["platform", "workspaces", "palette"],
+    enabled,
+    staleTime: STALE,
+    queryFn: () => call(api.GET("/api/v1/workspaces", { params: { query: { pageSize: 500 } } })),
+  });
+  const users = useQuery({
+    queryKey: ["platform", "users", "palette"],
+    enabled: enabled && Boolean(q),
+    staleTime: STALE,
+    queryFn: () => call(api.GET("/api/v1/users", { params: { query: { pageSize: 500 } } })),
+  });
+  return { workspaces: workspaces.data?.workspaces ?? [], users: users.data?.users ?? [] };
 }
 
-/**
- * Provides `usePalette()` and renders the one command palette. ⌘K / Ctrl+K
- * and `?action=search` are wired by the shell.
- */
-export function PaletteProvider({ platform, children }: { platform: boolean; children: React.ReactNode }) {
-  const [state, setState] = useState<{ open: boolean; query: string; opened: number }>({ open: false, query: "", opened: 0 });
-  const open = useCallback((query = "") => setState((current) => ({ open: true, query, opened: current.opened + 1 })), []);
-  const close = useCallback(() => setState((current) => ({ ...current, open: false })), []);
-  const controls = useMemo<PaletteControls>(() => ({ open }), [open]);
+const toItems = (prefix: string, items: NavItem[], go: (href: string) => void): PaletteItem[] =>
+  items.map((n) => ({ id: `${prefix}:${n.id}`, label: n.label, icon: n.icon, run: () => go(n.href) }));
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.key.toLowerCase() !== "k") return;
-      event.preventDefault();
-      setState((current) => (current.open ? { ...current, open: false } : { open: true, query: "", opened: current.opened + 1 }));
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
-
-  return (
-    <PaletteContext value={controls}>
-      {children}
-      {state.open && <CommandPalette initialQuery={state.query} key={state.opened} onClose={close} platform={platform} />}
-    </PaletteContext>
-  );
-}
-
-function CommandPalette({ initialQuery, onClose, platform }: { initialQuery: string; onClose: () => void; platform: boolean }) {
+function useWorkspaceGroups(ws: WorkspaceContextValue, q: string, enabled: boolean): PaletteGroup[] {
   const router = useRouter();
-  const listId = useId();
-  const optionId = useId();
-  const panelRef = useRef<HTMLDivElement | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
-  const listRef = useRef<HTMLDivElement | null>(null);
-  const { session } = useCurrentWorkspace();
-  const { conversations } = useConversationList();
-  const { updatePreferences } = useAccountPreferences();
-  const [query, setQuery] = useState(initialQuery);
-  // Selection follows the item, not its position, so results arriving late never move it.
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [recent, setRecent] = useState<string[]>(() => readRecentSearches(session));
-  const [dark] = useState(() => document.documentElement.dataset.theme === "dark");
-  const q = useDebounced(query.trim(), DEBOUNCE_MS);
-  const typed = query.trim();
+  const session = useSession();
+  const [language] = useLanguage();
+  const debounced = useDebounced(q.trim(), 200);
+  const src = useWorkspaceSources(ws, enabled, debounced);
+  const query = q.trim();
+  const lower = query.toLowerCase();
 
-  useModalLayer({ open: true, onClose, panelRef, initialFocusRef: inputRef });
-
-  const can = (code: string) => hasSessionPermission(session, code);
-  const canPeople = !platform && can("user.manage");
-
-  const home = useRemote<KnowledgeHome>(platform ? null : "home", () => knowledgeApi.home());
-  const documents = useRemote<FoundDocument[]>(!platform && q ? `documents:${q}` : null, (signal) => findDocumentsByName(q, signal));
-  const people = useRemote<Member[]>(canPeople && q ? `people:${q}` : null, () =>
-    workspaceDirectoryApi.members(q).then((page) => page.items));
-  const workspaces = useRemote<PlatformWorkspace[]>(
-    platform && hasPlatformPermission(session, "platform.tenant.read") ? "workspaces" : null,
-    () => listPlatformWorkspaces(),
-  );
-  const users = useRemote<PlatformUser[]>(
-    platform && q && hasPlatformPermission(session, "platform.user.read") ? `users:${q}` : null,
-    () => listPlatformUsers({ search: q }),
-  );
-  const searching = documents.loading || people.loading || users.loading || (typed !== q);
-
-  const groups = useMemo<PaletteGroup[]>(() => {
-    const needle = typed.toLowerCase();
-    const matches = (...values: (string | null | undefined)[]) =>
-      !needle || values.some((value) => value?.toLowerCase().includes(needle));
+  return useMemo(() => {
+    const m = (s: string | undefined) => !lower || (s ?? "").toLowerCase().includes(lower);
+    // Pages and actions also match their interface-language label (preview `m(tr(label))`).
+    const mt = (s: string) => m(s) || m(tr(s) ?? "");
+    const go = (href: string) => router.push(href);
     const out: PaletteGroup[] = [];
-    const add = (label: string, items: PaletteItem[]) => {
-      if (items.length) out.push({ label, items });
-    };
+    const add = (group: string, items: PaletteItem[]) => items.length && out.push({ group, items });
+    const enc = encodeURIComponent(query);
 
-    if (!typed && recent.length) {
-      add("Recent searches", recent.map((entry) => ({ id: `recent:${entry}`, label: entry, icon: Clock, to: () => setQuery(entry) })));
-    }
-
-    if (platform) {
-      add("Workspaces", (workspaces.data ?? []).filter((row) => matches(row.name, row.code)).slice(0, 6).map((row) => ({
-        id: `workspace:${row.id}`,
-        label: row.name,
-        icon: Building2,
-        meta: row.code,
-        preview: row.source === "local" || row.changed_locally,
-        to: `/platform/workspaces?workspace=${encodeURIComponent(row.id)}`,
-      })));
-      add("Users", typed ? (users.data ?? []).slice(0, 5).map((row) => ({
-        id: `user:${row.id}`,
-        label: memberName(row),
-        icon: User,
-        meta: row.email,
-        preview: row.changed_locally,
-        to: `/platform/users?user=${encodeURIComponent(row.id)}`,
-      })) : []);
-      add("Go to", [
-        ...visibleNavItems(PLATFORM_NAV, session, isPendingFeatureEnabled).map((item) => ({ id: `page:${item.id}`, label: item.label, icon: item.icon, to: item.href ?? "/platform" })),
-        { id: "page:back", label: "Back to workspace", icon: Layers, to: "/chat" },
-      ].filter((item) => matches(item.label)));
-      return out;
-    }
-
-    if (typed) {
-      add("Ask the assistant", [{
-        id: "ask",
-        label: `Ask “${typed}”`,
-        icon: Sparkles,
-        to: `/chat?q=${encodeURIComponent(typed)}&send=1`,
-      }]);
-    }
-    add("Chats", conversations.filter((chat) => matches(chat.title, chat.preview)).slice(0, typed ? 5 : 3).map((chat) => ({
-      id: `chat:${chat.id}`,
-      label: chat.title,
-      icon: MessageSquare,
-      meta: formatRelative(new Date(chat.updated_at).toISOString(), ""),
-      to: `/chat/${chat.id}`,
-    })));
-    const personalId = home.data?.personal_collection_id ?? null;
-    add("Knowledge bases", (home.data?.collections ?? [])
-      .map((collection) => ({ ...collection, title: collection.id === personalId ? "My files" : collection.title }))
-      .filter((collection) => matches(collection.title))
-      .slice(0, 4)
-      .map((collection) => ({
-        id: `kb:${collection.id}`,
-        label: collection.title,
-        icon: collection.id === personalId ? User : BookOpen,
-        meta: `${collection.document_count.toLocaleString()} ${collection.document_count === 1 ? "document" : "documents"}`,
-        to: `/knowledge/${collection.id}`,
-      })));
-    if (typed) {
-      const titles = new Map((home.data?.collections ?? []).map((collection) => [collection.id, collection.id === personalId ? "My files" : collection.title]));
-      add("Documents", (documents.data ?? []).slice(0, 5).map((document) => ({
-        id: `doc:${document.id}`,
-        label: document.name,
-        icon: FileText,
-        meta: (document.collectionId && titles.get(document.collectionId)) || undefined,
-        to: `/documents/${document.id}`,
-      })));
-    }
-    if (typed && canPeople) {
-      add("People", (people.data ?? []).slice(0, 4).map((member) => ({
-        id: `person:${member.id}`,
-        label: memberName(member),
-        icon: User,
-        meta: member.roles.map((role) => role.display_name).join(", ") || member.email,
-        to: `/manage/access?tab=members&member=${encodeURIComponent(member.id)}`,
-      })));
-    }
-    const pages: PaletteItem[] = [
-      { id: "page:knowledge", label: "Knowledge", icon: BookOpen, to: "/knowledge" },
-      { id: "page:chats", label: "All chats", icon: MessageSquare, to: "/chats" },
-      ...visibleNavItems(MANAGE_NAV, session, isPendingFeatureEnabled).map((item) => ({ id: `page:${item.id}`, label: item.label, icon: item.icon, to: item.href ?? "/" })),
-      ...(canAccessPlatformControl(session) ? [{ id: "page:platform", label: "Platform console", icon: Layers, to: "/platform" }] : []),
+    if (query) add("Ask", [{ id: "ask", label: `Ask “${query}”`, icon: Sparkles, run: () => go(`/chat?q=${enc}`) }]);
+    add(
+      "Conversations",
+      src.conversations
+        .filter((c) => m(c.displayName))
+        .slice(0, query ? 5 : 3)
+        .map((c) => ({
+          id: `conv:${c.name}`,
+          label: c.displayName || "New chat",
+          icon: MessageSquare,
+          meta: c.lastMessageTime ? rel(c.lastMessageTime) : undefined,
+          content: Boolean(c.displayName),
+          run: () => go(`/chat/${resourceId(c.name)}`),
+        })),
+    );
+    if (query)
+      add(
+        "Resources",
+        src.documents.slice(0, 5).map((d) => ({
+          id: `doc:${d.name}`,
+          label: d.displayName ?? "",
+          icon: BookOpen,
+          meta: d.ancestors?.[0]?.displayName,
+          content: true,
+          run: () => go(`/doc/${resourceId(d.name)}?q=${enc}`),
+        })),
+      );
+    if (query) add("Browse", [{ id: "browse", label: `Browse knowledge for “${query}”`, icon: Filter, run: () => go(`/knowledge?q=${enc}`) }]);
+    add(
+      "Collections",
+      src.collections
+        .filter((c) => m(c.displayName))
+        .slice(0, query ? 3 : 2)
+        .map((c) => ({
+          id: `col:${c.name}`,
+          label: c.displayName ?? "",
+          icon: List,
+          meta: plural(c.itemCount ?? 0, "item"),
+          content: true,
+          run: () => go(`/knowledge/collections/${resourceId(c.name)}`),
+        })),
+    );
+    add(
+      "Knowledge bases",
+      src.bases
+        .filter((k) => m(k.displayName))
+        .slice(0, query ? 4 : 2)
+        .map((k) => ({
+          id: `kb:${k.name}`,
+          label: k.displayName ?? "",
+          icon: k.collection?.kind === "PERSONAL" ? User : BookOpen,
+          meta: plural(k.collection?.documentCount ?? 0, "document"),
+          content: k.collection?.kind !== "PERSONAL",
+          run: () => go(`/knowledge/${resourceId(k.name)}`),
+        })),
+    );
+    if (query && ws.can("members.create"))
+      add(
+        "People",
+        src.people
+          .filter((p) => m(p.displayName) || m(p.email))
+          .slice(0, 4)
+          .map((p) => ({
+            id: `member:${p.name}`,
+            label: p.displayName || p.email || "",
+            icon: User,
+            meta: roleLabel(p.roles),
+            content: true,
+            run: () => go(`/people?member=${resourceId(p.name)}`),
+          })),
+      );
+    if (ws.hasModule("spaces"))
+      add(
+        "Spaces",
+        src.spaces
+          .filter((s) => m(s.displayName))
+          .slice(0, query ? 5 : 3)
+          .map((s) => {
+            const type = spaceType(s.spaceType, ws.settings);
+            return {
+              id: `space:${s.name}`,
+              label: s.displayName,
+              icon: type.icon,
+              meta: type.label,
+              content: true,
+              run: () => go(`/space/${resourceId(s.name)}`),
+            };
+          }),
+      );
+    if (query && ws.hasModule("work"))
+      add(
+        "Work",
+        src.work
+          .filter((w) => m(w.displayName))
+          .slice(0, 4)
+          .map((w) => ({ id: `work:${w.name}`, label: w.displayName ?? "", icon: Sparkles, content: true, run: () => go(`/work/${resourceId(w.name)}`) })),
+      );
+    const pages = [
+      ...memberNav(ws),
+      ...MORE_PAGES,
+      ...(ws.hasModule("spaces") ? [SPACES_NAV] : []),
+      ...manageNav(ws),
+      ...(isPlatformOperator(session) ? [PLATFORM_CONSOLE] : []),
     ];
-    add("Go to", pages.filter((page) => matches(page.label)).slice(0, typed ? 6 : 4));
+    add("Go to", toItems("page", pages.filter((p) => mt(p.label)).slice(0, query ? 6 : 4), go));
+    const dark = resolvedMode() === "dark";
+    const vi = language === "vi";
     const actions: (PaletteItem | false)[] = [
-      { id: "action:new-chat", label: "New chat", icon: Plus, to: "/chat" },
-      can("knowledge.read") && { id: "action:upload", label: "Upload files to My files", icon: Upload, to: "/knowledge/personal?action=upload" },
-      can("knowledge.manage") && { id: "action:create-kb", label: "Create knowledge base", icon: BookOpen, to: "/knowledge?action=create" },
-      can("source.manage") && { id: "action:connect", label: "Connect a source", icon: Plug, to: "/manage/sources?connect=1" },
-      can("user.manage") && { id: "action:add-member", label: "Add a member", icon: UserPlus, to: "/manage/access?action=add" },
-      {
-        id: "action:theme",
-        label: dark ? "Switch to light theme" : "Switch to dark theme",
-        icon: dark ? Sun : Moon,
-        to: () => updatePreferences({ theme: dark ? "light" : "dark" }),
-      },
+      { id: "new-chat", label: "New chat", icon: MessageSquarePlus, run: () => go("/chat") },
+      ws.can("items.create") && { id: "kb-create", label: "Create knowledge base", icon: BookOpen, run: () => go("/knowledge/bases?create=1") },
+      { id: "col-new", label: "New collection", icon: ListPlus, run: () => openReadingListEditor() },
+      { id: "contribute", label: "Contribute a document", icon: Upload, run: () => openContribute() },
+      ws.can("sources.create") && { id: "src-connect", label: "Connect a source", icon: Plug, run: () => go("/sources?connect=1") },
+      ws.can("members.create") && { id: "member-add", label: "Add people", icon: UserPlus, run: () => go("/people?add=1") },
+      { id: "mode", label: dark ? "Switch to light theme" : "Switch to dark theme", icon: dark ? Sun : Moon, run: () => setMode(dark ? "light" : "dark") },
+      { id: "appearance", label: "Change theme and colors", icon: Palette, run: openAppearance },
+      { id: "lang", label: vi ? "Switch to English" : "Switch to Vietnamese (Tiếng Việt)", icon: Globe, run: () => changeLanguage(vi ? "en" : "vi") },
     ];
-    add("Actions", actions.filter((action): action is PaletteItem => Boolean(action) && matches((action as PaletteItem).label)));
+    add("Actions", actions.filter((a): a is PaletteItem => Boolean(a) && mt((a as PaletteItem).label)));
+    if (query) add("More", [{ id: "search", label: `See all results for “${query}”`, icon: Search, run: () => go(`/search?q=${enc}`) }]);
     return out;
-    // `can` reads `session`, which is listed.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [typed, recent, platform, workspaces.data, users.data, session, conversations, home.data, documents.data, people.data, canPeople, dark, updatePreferences]);
+  }, [lower, query, src, ws, session, router, language]);
+}
 
-  const flat = useMemo(() => groups.flatMap((group) => group.items), [groups]);
-  const found = selectedId ? flat.findIndex((item) => item.id === selectedId) : -1;
-  const active = found >= 0 ? found : 0;
+function usePlatformGroups(q: string, enabled: boolean): PaletteGroup[] {
+  const router = useRouter();
+  const query = q.trim();
+  const src = usePlatformSources(enabled, query);
+  return useMemo(() => {
+    const lower = query.toLowerCase();
+    const m = (s: string | undefined) => !lower || (s ?? "").toLowerCase().includes(lower);
+    const go = (href: string) => router.push(href);
+    const out: PaletteGroup[] = [];
+    const add = (group: string, items: PaletteItem[]) => items.length && out.push({ group, items });
+    add(
+      "Workspaces",
+      src.workspaces
+        .filter((w) => m(w.displayName))
+        .slice(0, 6)
+        .map((w) => ({
+          id: `pws:${w.name}`,
+          label: w.displayName,
+          icon: Building,
+          meta: plural(w.memberCount ?? 0, "member"),
+          content: true,
+          run: () => go(`/p/workspaces?open=${resourceId(w.name)}`),
+        })),
+    );
+    if (query)
+      add(
+        "Users",
+        src.users
+          .filter((u) => m(u.displayName) || m(u.email))
+          .slice(0, 5)
+          .map((u) => ({
+            id: `pu:${u.name}`,
+            label: u.displayName || u.email,
+            icon: User,
+            meta: u.email,
+            content: true,
+            run: () => go(`/p/users?open=${resourceId(u.name)}`),
+          })),
+      );
+    add("Go to", toItems("p", PLATFORM_NAV.filter((n) => m(n.label)), go));
+    return out;
+  }, [query, src, router]);
+}
 
-  useEffect(() => setSelectedId(null), [typed]);
+/** Open state and query of the palette; the query resets to the requested one each time it opens. */
+function usePaletteQuery(): { isOpen: boolean; q: string; setQ: (q: string) => void } {
+  const overlays = useShellOverlays();
+  const isOpen = overlays.open === "palette";
+  const [q, setQ] = useState("");
   useEffect(() => {
-    listRef.current?.querySelector(`[data-index="${active}"]`)?.scrollIntoView({ block: "nearest" });
-  }, [active]);
+    if (isOpen) setQ(overlays.query);
+  }, [isOpen, overlays.query]);
+  return { isOpen, q, setQ };
+}
 
-  const run = (item: PaletteItem | undefined) => {
-    if (!item) return;
-    if (typeof item.to === "function") {
-      if (item.id.startsWith("recent:")) {
-        item.to();
-        inputRef.current?.focus();
-        return;
-      }
-      onClose();
-      item.to();
-      return;
-    }
-    if (typed) {
-      rememberSearch(session, typed);
-      setRecent(readRecentSearches(session));
-    }
-    onClose();
-    router.push(item.to);
+function PaletteDialog({ isOpen, q, setQ, groups, placeholder }: { isOpen: boolean; q: string; setQ: (q: string) => void; groups: PaletteGroup[]; placeholder: string }) {
+  const byId = useMemo(() => new Map(groups.flatMap((g) => g.items).map((it) => [it.id, it])), [groups]);
+  const run = (key: Key) => {
+    const item = byId.get(String(key));
+    closeOverlay();
+    item?.run();
   };
-
-  const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    const count = flat.length;
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      if (count) setSelectedId(flat[(active + (event.key === "ArrowDown" ? 1 : -1) + count) % count].id);
-    } else if (event.key === "Enter") {
-      event.preventDefault();
-      run(flat[active]);
-    }
-  };
-
-  let index = -1;
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[60] flex justify-center bg-[var(--scrim)] px-4 pt-[10vh] motion-safe:animate-ui-fade"
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <div
-        aria-label="Search"
-        aria-modal="true"
-        className="flex max-h-[70vh] w-[min(640px,100%)] flex-col self-start overflow-hidden rounded-[var(--radius-2xl)] bg-[var(--surface-raised)] shadow-[var(--shadow-modal)] motion-safe:animate-ui-pop"
-        ref={panelRef}
-        role="dialog"
-        tabIndex={-1}
-      >
-        <div className="flex items-center gap-2.5 border-b border-[var(--border-subtle)] px-4">
-          <Search aria-hidden="true" className="size-[18px] shrink-0 text-[var(--text-tertiary)]" />
-          <input
-            aria-activedescendant={flat.length ? `${optionId}-${active}` : undefined}
-            aria-autocomplete="list"
-            aria-controls={listId}
-            aria-expanded="true"
-            aria-label="Search"
-            autoComplete="off"
-            className="h-[54px] min-w-0 flex-1 bg-transparent text-[length:var(--text-size-section)] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
-            onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={onKeyDown}
-            placeholder={platform ? "Search workspaces, users, pages…" : "Search chats, knowledge, documents, people…"}
-            ref={inputRef}
-            role="combobox"
-            spellCheck={false}
-            value={query}
-          />
-          <Kbd>Esc</Kbd>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-1.5" id={listId} ref={listRef} role="listbox" aria-label="Results">
-          {groups.map((group) => (
-            <div aria-label={group.label} key={group.label} role="group">
-              <div aria-hidden="true" className="px-2.5 pb-1 pt-2.5 text-[length:var(--text-size-caption)] font-medium text-[var(--text-tertiary)]">
-                {group.label}
-              </div>
-              {group.items.map((item) => {
-                index += 1;
-                const position = index;
-                const Icon = item.icon;
-                return (
-                  <div
-                    aria-selected={position === active}
-                    className={cn(
-                      "flex min-h-[42px] w-full cursor-pointer items-center gap-3 rounded-[var(--radius-md)] px-2.5 py-2 text-left text-[var(--text-primary)]",
-                      position === active && "bg-[var(--surface-hover)]",
-                    )}
-                    data-index={position}
-                    id={`${optionId}-${position}`}
-                    key={item.id}
-                    onClick={() => run(item)}
-                    onPointerMove={() => {
-                      if (position !== active) setSelectedId(item.id);
-                    }}
-                    role="option"
-                  >
-                    <Icon aria-hidden="true" className="size-[18px] shrink-0 text-[var(--text-tertiary)]" />
-                    <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                    {item.preview && <PreviewTag />}
-                    {item.meta && (
-                      <span className="shrink-0 whitespace-nowrap text-[length:var(--text-size-caption)] text-[var(--text-tertiary)]">{item.meta}</span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          ))}
-          {flat.length === 0 && (
-            <div className="px-6 py-8 text-center" role="status">
-              <p className="font-semibold text-[var(--text-primary)]">{searching ? "Searching…" : "No matches"}</p>
-              {!searching && <p className="mt-1 text-[var(--text-secondary)]">Try a different word, or ask the assistant.</p>}
-            </div>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center gap-4 border-t border-[var(--border-subtle)] px-4 py-2 text-[length:var(--text-size-caption)] text-[var(--text-tertiary)]">
-          <span><Kbd>↑</Kbd> <Kbd>↓</Kbd> to move</span>
-          <span><Kbd>Enter</Kbd> to open</span>
-          <span><Kbd>Esc</Kbd> to close</span>
-          <span aria-live="polite" className="ml-auto">{searching && flat.length > 0 ? "Searching…" : ""}</span>
-        </div>
-      </div>
-    </div>,
-    document.body,
+  return (
+    <Modal.Backdrop isOpen={isOpen} onOpenChange={(o) => !o && closeOverlay()}>
+      <Modal.Container placement="top" className="palette-container">
+        <Modal.Dialog className="palette" aria-label="Search">
+          <Autocomplete.Filter inputValue={q} onInputChange={setQ}>
+            <TextField aria-label="Search" className="palette__input" autoFocus>
+              <Search className="i i-lg" aria-hidden />
+              <Input placeholder={placeholder} autoComplete="off" />
+              <Kbd>
+                <Kbd.Content>Esc</Kbd.Content>
+              </Kbd>
+            </TextField>
+            <ListBox
+              aria-label="Results"
+              className="palette__list"
+              onAction={run}
+              renderEmptyState={() => <EmptyState icon={Search} title="No matches" description="Try a different word." compact />}
+            >
+              {groups.map((g) => (
+                <ListBox.Section key={g.group}>
+                  <Header className="palette__group">{g.group}</Header>
+                  {g.items.map((it) => {
+                    const Icon = it.icon;
+                    return (
+                      <ListBox.Item key={it.id} id={it.id} textValue={it.label} className="palette__item">
+                        <Icon className="i" aria-hidden />
+                        <span className="grow truncate" translate={it.content ? "no" : undefined}>
+                          {it.label}
+                        </span>
+                        {it.meta && <span className="palette__item-meta truncate">{it.meta}</span>}
+                      </ListBox.Item>
+                    );
+                  })}
+                </ListBox.Section>
+              ))}
+            </ListBox>
+          </Autocomplete.Filter>
+          <div className="palette__foot">
+            <span>
+              <Kbd>
+                <Kbd.Content>↑</Kbd.Content>
+              </Kbd>{" "}
+              <Kbd>
+                <Kbd.Content>↓</Kbd.Content>
+              </Kbd>{" "}
+              to move
+            </span>
+            <span>
+              <Kbd>
+                <Kbd.Content>↵</Kbd.Content>
+              </Kbd>{" "}
+              to open
+            </span>
+          </div>
+        </Modal.Dialog>
+      </Modal.Container>
+    </Modal.Backdrop>
   );
+}
+
+function WorkspacePalette({ ws }: { ws: WorkspaceContextValue }) {
+  const { isOpen, q, setQ } = usePaletteQuery();
+  const groups = useWorkspaceGroups(ws, q, isOpen);
+  return <PaletteDialog isOpen={isOpen} q={q} setQ={setQ} groups={groups} placeholder="Search or ask anything…" />;
+}
+
+function PlatformPalette() {
+  const { isOpen, q, setQ } = usePaletteQuery();
+  const operator = isPlatformOperator(useSession());
+  const groups = usePlatformGroups(q, isOpen && operator);
+  return <PaletteDialog isOpen={isOpen} q={q} setQ={setQ} groups={groups} placeholder="Search workspaces, users, pages…" />;
+}
+
+/** ⌘K: one search for everything the caller may open (preview `paletteResults`). */
+export function CommandPalette({ mode }: { mode: Exclude<ShellMode, "auth"> }) {
+  const ws = useOptionalWorkspace();
+  return mode === "workspace" && ws ? <WorkspacePalette ws={ws} /> : <PlatformPalette />;
 }

@@ -11,12 +11,14 @@
 .ctb-samples { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 12px; }
 .ctb-samples .button { max-width: 100%; }
 .ctb-samples .button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ctb-dest { margin-top: 20px; }
+/* The destination comes first: everything below follows the choice. */
+.ctb-dest { margin: 0 0 20px; }
 .ctb-fields { display: grid; gap: 16px; margin-top: 16px; }
+.ctb-fields > :is(.field, .disclosure) { margin-top: 0; }
 
 /* ───── Contribution panel ───── */
 .ctb-panel { display: flex; flex-direction: column; gap: 24px; }
-.ctb-state { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.ctb-state { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .ctb-sec__title { margin: 0 0 10px; font-size: 13px; line-height: 18px; font-weight: 600; }
 .ctb-panel .kv { font-size: 13px; }
 .ctb-quote { margin: 6px 0 0; padding: 8px 12px; border-left: 2px solid var(--border-secondary); border-radius: 0 var(--radius-lg) var(--radius-lg) 0; background: var(--surface-secondary); color: var(--foreground); font-size: 13px; line-height: 18px; white-space: pre-line; }
@@ -54,9 +56,10 @@
 .ctb-flags .i { flex: none; margin-top: 2px; }
 
 /* Revise and resubmit */
-.ctb-revise { display: flex; flex-direction: column; gap: 16px; padding: 16px; border-radius: var(--radius-2xl); background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); }
+/* A plain section (no card-in-a-drawer): the form sits on the panel like the rest, set off by a soft tint only. */
+.ctb-revise { display: flex; flex-direction: column; gap: 16px; padding: 16px; border-radius: var(--radius-2xl); background: var(--surface-secondary); }
 .ctb-revise .ctb-sec__title { margin: 0; }
-.ctb-revfile { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 8px 8px 8px 12px; border-radius: var(--radius-xl); background: var(--surface-secondary); }
+.ctb-revfile { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 8px 8px 8px 12px; border-radius: var(--radius-xl); background: var(--surface); }
 
 @container app (max-width: 760px) {
   .ctb-drop { padding: 20px 12px; }

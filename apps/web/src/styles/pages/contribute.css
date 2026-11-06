@@ -1,0 +1,65 @@
+/* Contribute (features/contribute.js): the contribute dialog, the contribution panel
+   (state, history timeline, assistant suggestions, revise form). Tokens only. */
+
+/* ───── Dialog ───── */
+.ctb-current { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 12px; margin-bottom: 16px; border-radius: var(--radius-xl); background: var(--surface-secondary); }
+.ctb-drop { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 28px 16px; border-radius: var(--radius-2xl); border: 1.5px dashed var(--border-secondary); background: var(--surface-secondary); text-align: center; transition: background-color var(--dur-fast), border-color var(--dur-fast); }
+.ctb-drop:hover, .ctb-drop.is-drag { background: var(--accent-soft); border-color: var(--accent); }
+.ctb-drop:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.ctb-drop__icon { display: grid; place-items: center; width: 40px; height: 40px; margin-bottom: 4px; border-radius: var(--radius-xl); background: var(--surface); color: var(--muted); box-shadow: var(--surface-shadow); }
+.ctb-pct { width: 36px; text-align: right; }
+.ctb-dest { margin-top: 20px; }
+.ctb-fields { display: grid; gap: 16px; margin-top: 16px; }
+
+/* ───── Contribution panel ───── */
+.ctb-panel { display: flex; flex-direction: column; gap: 24px; }
+.ctb-state { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.ctb-sec__title { margin: 0 0 10px; font-size: 13px; line-height: 18px; font-weight: 600; }
+.ctb-panel .kv { font-size: 13px; }
+.ctb-quote { margin: 6px 0 0; padding: 8px 12px; border-left: 2px solid var(--border-secondary); border-radius: 0 var(--radius-lg) var(--radius-lg) 0; background: var(--surface-secondary); color: var(--foreground); font-size: 13px; line-height: 18px; white-space: pre-line; }
+.alert .ctb-quote { background: color-mix(in oklab, var(--surface) 60%, transparent); }
+
+/* History timeline */
+.ctb-tl { list-style: none; display: flex; flex-direction: column; margin: 0; padding: 0; }
+.ctb-tl__step { position: relative; display: flex; gap: 12px; padding-bottom: 16px; }
+.ctb-tl__step:last-child { padding-bottom: 0; }
+.ctb-tl__step:not(:last-child)::before { content: ""; position: absolute; left: 13px; top: 30px; bottom: 2px; width: 1.5px; background: var(--separator); }
+.ctb-tl__dot { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: var(--radius-full); background: var(--default); color: var(--muted); }
+.ctb-tl__dot .i { width: 14px; height: 14px; }
+.ctb-tl__step--success .ctb-tl__dot { background: var(--success-soft); color: var(--success-soft-foreground); }
+.ctb-tl__step--warning .ctb-tl__dot { background: var(--warning-soft); color: var(--warning-soft-foreground); }
+.ctb-tl__step--danger .ctb-tl__dot { background: var(--danger-soft); color: var(--danger-soft-foreground); }
+.ctb-tl__step--accent .ctb-tl__dot { background: var(--accent-soft); color: var(--accent-soft-foreground); }
+.ctb-tl__step.is-next .ctb-tl__dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--border-secondary); }
+.ctb-tl__step.is-next .ctb-tl__title { color: var(--muted); font-weight: 400; }
+.ctb-tl__body { flex: 1 1 auto; min-width: 0; padding-top: 5px; }
+.ctb-tl__title { font-size: 13px; line-height: 18px; font-weight: 500; }
+.ctb-tl__desc { font-size: 13px; line-height: 18px; color: var(--muted); }
+.ctb-tl__meta { font-size: 12px; line-height: 16px; color: var(--muted); }
+.ctb-tl--compact .ctb-tl__step { gap: 10px; padding-bottom: 12px; }
+.ctb-tl--compact .ctb-tl__dot { width: 24px; height: 24px; }
+.ctb-tl--compact .ctb-tl__step:not(:last-child)::before { left: 11px; top: 26px; }
+.ctb-tl--compact .ctb-tl__body { padding-top: 3px; }
+
+/* What the assistant suggested */
+.ctb-topics { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.ctb-conf { font-size: 12px; line-height: 16px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ctb-topics .ctb-conf { margin-right: 4px; }
+.ctb-reading { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.ctb-flags { list-style: none; display: flex; flex-direction: column; gap: 6px; margin: 12px 0 0; padding: 0; }
+.ctb-flags li { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; line-height: 18px; color: var(--muted); }
+.ctb-flags .i { flex: none; margin-top: 2px; }
+
+/* Revise and resubmit */
+.ctb-revise { display: flex; flex-direction: column; gap: 16px; padding: 16px; border-radius: var(--radius-2xl); background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); }
+.ctb-revise .ctb-sec__title { margin: 0; }
+.ctb-revfile { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 8px 8px 8px 12px; border-radius: var(--radius-xl); background: var(--surface-secondary); }
+
+@container app (max-width: 760px) {
+  .ctb-drop { padding: 20px 12px; }
+}
+@container app (max-width: 679px) {
+  /* choiceGroup sets its columns inline; stack the destination choices on phones. */
+  .ctb-dest .choice-group { grid-template-columns: minmax(0, 1fr) !important; }
+  .ctb-revise { padding: 12px; }
+}

@@ -1,0 +1,121 @@
+/* Resources — shared resource row, document card, chips and pickers (features/resources.js).
+   Used by Home, Browse, Library, collections, knowledge bases, spaces and the reader. */
+
+/* ───── Knowledge area section nav (X.res.hubHeader) ───── */
+.hub-nav { margin: -12px 0 24px; overflow-x: auto; scrollbar-width: none; }
+.hub-nav::-webkit-scrollbar { display: none; }
+.hub-tabs .tabs__tab { white-space: nowrap; }
+
+/* ───── List row ───── */
+.res-list { display: flex; flex-direction: column; background: var(--surface); border-radius: var(--radius-2xl); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); overflow: hidden; }
+.res-row { position: relative; display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; min-width: 0; cursor: pointer; transition: background-color var(--dur-fast); }
+.res-list > .res-row + .res-row { border-top: 1px solid var(--separator); }
+.res-row:hover { background: var(--default-soft); }
+.res-row.is-active { background: var(--accent-soft); }
+.res-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.res-row__check { flex: none; padding-top: 6px; }
+.res-row__lead { flex: none; padding-top: 2px; }
+.res-row__body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.res-row__title { display: flex; align-items: center; gap: 2px 8px; min-width: 0; font-weight: 500; line-height: 20px; }
+.res-row__title > .tip-trigger { flex: none; }
+.res-row__title .chip { white-space: nowrap; }
+@media (max-width: 640px) {
+  .res-row__title { flex-wrap: wrap; }
+  .res-row__title > .truncate { flex: 0 1 auto; min-width: min(100%, 7em); }
+}
+.res-row__meta { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; line-height: 16px; color: var(--muted); white-space: nowrap; overflow: hidden; }
+.res-row__meta .app-icon { flex: none; }
+.res-dot { opacity: .6; }
+.res-row__summary { font-size: 13px; line-height: 18px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.res-row__note { display: flex; gap: 6px; align-items: flex-start; font-size: 13px; line-height: 18px; color: var(--foreground); background: var(--default-soft); border-radius: var(--radius-lg); padding: 6px 10px; width: fit-content; max-width: 100%; }
+.res-row__note .i { margin-top: 2px; color: var(--muted); flex: none; }
+.res-row__trail { flex: none; display: flex; align-items: center; gap: 2px; }
+.res-row--compact { padding: 10px 14px; align-items: center; }
+.res-row--compact .res-row__lead { padding-top: 0; }
+.res-nowrap { white-space: nowrap; }
+
+/* Saved state of the bookmark button */
+.res-save.is-on { color: var(--accent); }
+.button--tertiary.res-save.is-on, .button--secondary.res-save.is-on { color: var(--accent-soft-foreground); background: var(--accent-soft); }
+
+/* ───── Topics & provenance ───── */
+.res-topics { display: flex; flex-wrap: wrap; gap: 4px; }
+.res-topic { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: var(--radius-full); background: var(--default); color: var(--default-foreground); font-size: 12px; line-height: 1; text-decoration: none; transition: background-color var(--dur-fast); }
+.res-topic:hover { background: var(--default-hover); }
+.res-topic:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.res-prov { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--muted); font-size: 12px; }
+.res-path { word-break: break-word; }
+
+/* ───── Document card (X.res.card): content preview, title, what it's for, type · where, trust when it matters ───── */
+.doc-card { position: relative; display: flex; flex-direction: column; min-width: 0; border-radius: var(--radius-2xl); background: var(--surface); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); overflow: hidden; cursor: pointer; transition: box-shadow var(--dur-fast), transform var(--dur-fast) var(--ease-out); }
+@media (hover: hover) {
+  .doc-card:hover { transform: translateY(-2px); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--border-secondary); }
+}
+.doc-card:focus-visible { outline: none; box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border), 0 0 0 2px var(--focus); }
+.doc-card__media { position: relative; }
+.doc-card__type { position: absolute; left: 10px; bottom: 10px; display: inline-flex; border-radius: 6px; box-shadow: 0 0 0 2px var(--surface); }
+.doc-card__extent { position: absolute; right: 10px; bottom: 10px; padding: 2px 8px; border-radius: var(--radius-full); background: color-mix(in oklab, var(--surface) 88%, transparent); box-shadow: 0 0 0 1px var(--separator); font-size: 11px; line-height: 16px; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* Secondary actions stay out of the way: shown on hover or keyboard focus, always on touch, and Save stays visible once saved. */
+.doc-card__actions { position: absolute; z-index: 2; top: 8px; right: 8px; display: flex; gap: 2px; padding: 2px; border-radius: var(--radius-lg); background: color-mix(in oklab, var(--surface) 92%, transparent); box-shadow: var(--surface-shadow), 0 0 0 1px var(--separator); opacity: 0; transition: opacity var(--dur-fast); }
+.doc-card:hover .doc-card__actions, .doc-card:focus-within .doc-card__actions, .doc-card__actions:has(.res-save.is-on) { opacity: 1; }
+@media (hover: hover) {
+  .doc-card:not(:hover):not(:focus-within) .res-save.is-on ~ * { display: none; }
+}
+@media (hover: none) { .doc-card__actions { opacity: 1; } }
+.doc-card__body { display: flex; flex-direction: column; gap: 4px; flex: 1 1 auto; min-width: 0; padding: 12px 16px 14px; border-top: 1px solid var(--separator); }
+.doc-card__title { font-size: 15px; line-height: 21px; font-weight: 600; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.doc-card__about { font-size: 13px; line-height: 19px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.doc-card__meta { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: auto; padding-top: 6px; font-size: 12px; line-height: 16px; color: var(--muted); }
+.doc-card__kind { display: flex; align-items: center; gap: 5px; flex: 1 1 auto; min-width: 0; }
+.doc-card__kind > .i { flex: none; }
+.doc-card__kind .res-dot { margin: 0 4px; }
+.doc-card__ok { position: relative; z-index: 1; display: inline-flex; flex: none; color: var(--success-soft-foreground); }
+.doc-card__meta .chip { position: relative; z-index: 1; flex: none; }
+@media (prefers-reduced-motion: reduce) {
+  .doc-card, .doc-card__actions { transition: none; }
+  .doc-card:hover { transform: none !important; }
+}
+
+/* Preview frame. Sheets and slides: the real first page at 40% (width compensates, so it always fills the frame). */
+.doc-thumb { --thumb-scale: 0.4; position: relative; aspect-ratio: 16 / 9; overflow: hidden; background: var(--surface-secondary); pointer-events: none; user-select: none; }
+/* Text documents: their most useful section, on a page, at a size people can read. */
+.doc-thumb--focus { padding: 14px 16px 0; }
+.doc-focus { height: 100%; padding: 12px 14px; border-radius: 10px 10px 0 0; background: var(--surface); box-shadow: 0 0 0 1px var(--separator); font-size: 12px; line-height: 17px; color: var(--foreground); overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, #000 70%, transparent); mask-image: linear-gradient(to bottom, #000 70%, transparent); }
+.doc-focus__head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.doc-focus__title { font-size: 12px; line-height: 16px; font-weight: 600; letter-spacing: .01em; text-transform: uppercase; color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.doc-focus__page { flex: none; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.doc-focus p { margin: 0; }
+.doc-focus ul { margin: 0; padding-left: 16px; }
+.doc-focus li + li { margin-top: 3px; }
+.doc-focus li::marker { color: var(--muted); }
+.doc-focus table { width: 100%; border-collapse: collapse; font-size: 11px; line-height: 15px; }
+.doc-focus th, .doc-focus td { padding: 4px 6px; border-bottom: 1px solid var(--separator); text-align: left; vertical-align: top; }
+.doc-focus th { font-weight: 600; color: var(--muted); background: var(--surface-secondary); }
+.doc-thumb__page { position: absolute; left: 14px; top: 14px; width: calc((100% - 28px) / var(--thumb-scale)); transform: scale(var(--thumb-scale)); transform-origin: 0 0; }
+.doc-thumb .doc-page { max-width: none; margin: 0; border-radius: 16px; overflow: hidden; }
+.doc-thumb .doc-page:not(.doc-page--slide) { min-height: 1200px; }
+.doc-thumb--slide .doc-thumb__page { top: 50%; transform: scale(var(--thumb-scale)) translateY(-50%); }
+.doc-thumb .doc-page--sheet .doc-sheet { overflow: hidden; }
+/* No rendition (unsupported or not readable): a calm, typed tile. */
+.doc-thumb--blank { display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-end; gap: 6px; padding: 14px 16px; }
+.doc-thumb--blank .file-icon { margin-bottom: auto; }
+.doc-thumb__title { font-size: 14px; line-height: 19px; font-weight: 600; color: var(--foreground); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.doc-thumb__kind { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; line-height: 14px; color: var(--muted); }
+.doc-thumb--danger { background: color-mix(in oklab, var(--danger-soft) 60%, var(--surface-secondary)); }
+.doc-thumb--accent { background: color-mix(in oklab, var(--accent-soft) 60%, var(--surface-secondary)); }
+.doc-thumb--success { background: color-mix(in oklab, var(--success-soft) 60%, var(--surface-secondary)); }
+.doc-thumb--warning { background: color-mix(in oklab, var(--warning-soft) 60%, var(--surface-secondary)); }
+
+/* ───── Pickers in dialogs (collections, spaces, topics) ───── */
+.res-picks { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius-xl); max-height: 300px; overflow: auto; }
+.res-pick { padding: 10px 12px; }
+.res-pick + .res-pick { border-top: 1px solid var(--separator); }
+.res-tgroups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-xl); max-height: 280px; overflow: auto; }
+.res-tgroup { display: flex; flex-direction: column; gap: 6px; }
+.res-tgroup__items { display: flex; flex-direction: column; gap: 4px; }
+
+@container app (max-width: 679px) {
+  .res-row { padding: 12px; gap: 10px; }
+  .res-row__trail .res-save:not(.is-on) { display: none; }
+  .res-tgroups { grid-template-columns: minmax(0, 1fr); }
+}

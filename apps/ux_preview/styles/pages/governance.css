@@ -6,24 +6,22 @@
 .kh-reason { white-space: nowrap; }
 .kh-owner { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 220px; }
 
-/* Quality: one summary sentence, then the check switcher */
-.gov-summary { margin: 0 0 12px; font-size: 14px; line-height: 20px; color: var(--muted); }
-.gov-summary--quiet { display: flex; align-items: center; gap: 8px; font-size: 13px; }
-.gov-summary--quiet .i { flex: none; }
-.gov-seg { margin-bottom: 12px; max-width: 100%; overflow-x: auto; }
+/* Quality: the check switcher, then one line on what it finds and what to do */
+.gov-summary { margin: 0 0 16px; font-size: 13px; line-height: 19px; color: var(--muted); }
+.gov-seg { margin-bottom: 8px; max-width: 100%; overflow-x: auto; }
 
-/* Topics: proposed by the assistant */
-.gov-props { display: flex; flex-direction: column; gap: 8px; }
-.gov-prop { display: flex; align-items: flex-start; gap: 16px; padding: 12px 16px; border-radius: var(--radius-2xl); background: var(--surface); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); min-width: 0; }
-.gov-prop__main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
-.gov-prop__title { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.gov-prop__fields { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; min-width: 0; }
-.gov-prop__fields > .item-icon { margin-bottom: 4px; }
-.gov-prop__fields .field { flex: 0 1 220px; min-width: 160px; }
-.gov-prop__docs { display: flex; align-items: center; gap: 6px 12px; flex-wrap: wrap; min-width: 0; }
-.gov-prop__from { flex: none; }
-.gov-prop__doc { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 320px; font-size: 13px; line-height: 18px; }
-.gov-prop__acts { display: flex; align-items: center; gap: 6px; flex: none; padding-top: 22px; }
+/* Topics: proposed by the assistant — compact rows in one list: the name as a sentence, the reason, Accept and ⋯. */
+.gov-props { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; border-radius: var(--radius-2xl); background: var(--surface); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); overflow: hidden; }
+.gov-prop { display: flex; align-items: flex-start; gap: 12px; padding: 12px 12px 12px 16px; min-width: 0; }
+.gov-prop + .gov-prop { border-top: 1px solid var(--separator); }
+.gov-prop > .item-icon { margin-top: 2px; }
+.gov-prop__main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.gov-prop__title { font-size: 14px; line-height: 20px; min-width: 0; overflow-wrap: anywhere; }
+.gov-prop__docs { display: flex; align-items: baseline; gap: 2px 6px; flex-wrap: wrap; min-width: 0; font-size: 12px; line-height: 18px; color: var(--muted); }
+.gov-prop__doc { display: inline-flex; min-width: 0; max-width: 280px; }
+.gov-prop__edit { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
+.gov-prop__edit .field { flex: 0 1 240px; min-width: 160px; margin: 0; }
+.gov-prop__acts { display: flex; align-items: center; gap: 4px; flex: none; }
 .gov-counts { display: inline-flex; align-items: center; gap: 4px; flex: none; }
 .gov-inreview { color: var(--accent); }
 
@@ -59,7 +57,10 @@
 .kh-topic { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 6px 8px 6px 16px; min-width: 0; font-size: 14px; }
 .kh-topic + .kh-topic { border-top: 1px solid var(--separator); }
 .kh-topic.is-archived { color: var(--muted); }
-.kh-topic__acts { display: flex; align-items: center; gap: 2px; flex: none; }
+/* Rename / archive are secondary: they show on hover or focus (always on touch and phones). */
+.kh-topic__acts { display: flex; align-items: center; gap: 2px; flex: none; opacity: 0; transition: opacity var(--dur-fast); }
+.kh-topic:hover .kh-topic__acts, .kh-topic:focus-within .kh-topic__acts { opacity: 1; }
+@media (hover: none) { .kh-topic__acts { opacity: 1; } }
 .kh-tipwrap { display: inline-flex; border-radius: var(--radius-lg); }
 .kh-tipwrap .button:disabled { pointer-events: none; }
 .kh-tipwrap:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
@@ -68,8 +69,6 @@
 .kh-edit__row .input { flex: 1 1 auto; min-width: 0; }
 
 @container app (max-width: 1023px) {
-  .gov-prop { flex-direction: column; gap: 12px; }
-  .gov-prop__acts { padding-top: 0; flex-wrap: wrap; }
   .kh-domains { grid-template-columns: minmax(0, 1fr); }
   .kh .table__cell--primary { min-width: 220px; }
 }
@@ -83,11 +82,17 @@
   .kh-dup-dates { display: none; }
 }
 @container app (max-width: 679px) {
-  .gov-prop { padding: 12px; }
-  .gov-prop__fields .field { flex-basis: 100%; }
+  /* The three checks stay visible on phones: the switcher wraps instead of scrolling one off-screen. */
+  .gov-seg { overflow: visible; }
+  .gov-seg .toggle-group { display: flex; flex-wrap: wrap; width: 100%; height: auto; }
+  .gov-seg .toggle-group > button { flex: 1 1 auto; }
+  .gov-prop { flex-wrap: wrap; padding: 12px; }
+  .gov-prop__main { flex-basis: calc(100% - 44px); }
+  .gov-prop__acts { width: 100%; justify-content: flex-end; }
+  .gov-prop__edit .field { flex-basis: 100%; }
   .gov-prop__doc { max-width: 100%; }
-  .gov-prop__fields > .item-icon { display: none; }
   .kh-topic { padding-left: 12px; }
+  .kh-topic__acts { opacity: 1; }
   .kh-domain__head { flex-wrap: wrap; padding-left: 12px; }
   .kh-edit__row { flex-wrap: wrap; }
   .kh-edit__row .input { flex-basis: 100%; }

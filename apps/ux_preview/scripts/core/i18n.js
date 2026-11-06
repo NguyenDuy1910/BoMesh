@@ -17,7 +17,7 @@
 const UI_LANGS = [['en', 'English', 'English'], ['vi', 'Tiếng Việt', 'Vietnamese']];
 S.lang = 'en';
 
-const SKIP_SEL = '[translate="no"], .chat-answer, .chat-bubble, .doc-page, .doc-note, .chat-cite__quote, .home-suggest__chip, .chat-starter__prompt, script, style, textarea, code, pre, [contenteditable="true"]';
+const SKIP_SEL = '[translate="no"], .chat-answer, .chat-bubble, .doc-page, .doc-note, .pv-quote, .home-suggest__chip, .chat-starter__prompt, script, style, textarea, code, pre, [contenteditable="true"]';
 const ATTRS = ['placeholder', 'aria-label', 'title', 'data-tip', 'alt'];
 /** Chrome where a word is always interface copy, even if a workspace record has the same name. */
 const CHROME_SEL = '.sidebar, .topbar, .menu, .palette, .tabs, [role="tablist"], .page-header, .modal__heading, .drawer__heading, #proto-root, .button, .toggle-group';

@@ -1,9 +1,9 @@
 {
   "name": "BoMesh",
   "short_name": "BoMesh",
-  "description": "Enterprise knowledge and BI assistant.",
+  "description": "Answers from your company's knowledge, with sources you can check.",
   "display": "standalone",
-  "start_url": "/app",
+  "start_url": "/home",
   "background_color": "#f8f7fc",
   "theme_color": "#f8f7fc"
 }

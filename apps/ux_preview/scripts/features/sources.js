@@ -85,15 +85,24 @@
     if (l.review) return [`${l.review} sent to review`, l.failed && `${l.failed} failed`].filter(Boolean).join(' · ');
     return [l.added && `${l.added} added`, l.updated && `${l.updated} updated`, l.failed && `${l.failed} failed`].filter(Boolean).join(' · ') || 'No changes';
   }
-  const kbLink = kb => kb ? `<a class="src-kb" href="#/knowledge/${kb.id}" data-act="go" data-to="/knowledge/${kb.id}"><span class="src-kb__dot" style="background:${esc(kb.color)}"></span><span class="truncate">${esc(kb.name)}</span></a>` : '<span class="muted">Removed</span>';
+  const kbLink = kb => kb ? `<a class="src-kb" href="#${kbManageHref(kb, 'sources')}" data-act="go" data-to="${kbManageHref(kb, 'sources')}"><span class="src-kb__dot" style="background:${esc(kb.color)}"></span><span class="truncate">${esc(kb.name)}</span></a>` : '<span class="muted">Removed</span>';
   function audit(action, target, outcome = 'success') { D.audit.unshift({ id: uid('ev'), at: Date.now(), actor: me().id, action, type: 'Sources', target, outcome, ip: '10.4.12.30', device: 'Chrome on macOS' }); }
-  /* Publishing policy for new and changed files: trusted systems publish directly, others wait for a reviewer. */
+  /* Publishing policy for new and changed files: trusted systems publish after every sync (scheduled or manual), others wait for a reviewer. */
   const policyOf = s => (s.publish === 'review' ? 'review' : 'auto');
   const POLICY = {
-    auto: { label: 'Publish automatically', short: 'Publishes automatically', icon: 'zap', desc: 'For trusted systems. New and changed files become searchable without a review.' },
+    auto: { label: 'Publish automatically', short: 'Publishes automatically', icon: 'zap', desc: 'For trusted systems. New and changed files are published after every sync, without a review.' },
     review: { label: 'Send to review first', short: 'Review first', icon: 'shield-check', desc: 'A reviewer of the knowledge base approves each new or changed file before it’s published.' },
   };
   const policyChoices = () => Object.entries(POLICY).map(([k, p]) => [k, p.label, esc(p.desc)]);
+  /** The state a person sees: the stored status, except a finished sync where some files couldn't be read ('partial'). */
+  const srcState = s => (s.status === 'healthy' && s.last?.failed ? 'partial' : s.status);
+  /** Status chip for a source (rows, drawer, knowledge base Sources tab). "Up to date" only after a clean sync. */
+  function statusChip(s) {
+    if (srcState(s) !== 'partial') return status('source', s.status);
+    return chip('Synced with issues', { tone: 'warning', dot: true, tip: `${plural(s.last.failed, 'file')} couldn’t be read in the last sync` });
+  }
+  /** Nav badges: sources that need a fix on the Sources page (failed syncs). Expired accounts are counted once, on Connections. */
+  X.srcBadge = () => (can('source.manage') ? D.sources.filter(s => s.status === 'failed').length : 0);
 
   /* ═══════════════ Sync engine (simulated) ═══════════════ */
   const TICK_PAGES = ['sources', 'connections', 'kbDetail', 'overview'];
@@ -134,9 +143,9 @@
     const n = pool[(i - 1) % pool.length], k = Math.floor((i - 1) / pool.length);
     return k ? n.replace(/(\.\w+)$/, ` (${k + 1})$1`) : n;
   }
-  /** Publish documents (an Ingestion Run). Syncs only change the inventory: documents land as Waiting to publish.
-      Scheduled syncs publish what changed; manual and first syncs leave it for an explicit Publish.
-      Review-policy sources send new and changed files to the review queue instead. */
+  /** Publish documents (an Ingestion Run). A sync changes the inventory, then publishes what it touched:
+      auto-policy sources publish new and changed files after every sync (scheduled, manual or first);
+      review-policy sources send them to the review queue instead. Approved files that didn't finish publishing are retried either way. */
   function processDocs(docs) {
     if (!docs.length) return;
     if (X.processDocs) { X.processDocs(docs, { quiet: true }); return; }
@@ -196,13 +205,14 @@
         }
       }
       src.last.review = toReview.length;
+      run.outcome = { published: affected.length, review: toReview.length };
       const kb = kbById(src.kb); if (kb) kb.updated = Date.now();
-      if (run.trigger === 'Scheduled') processDocs(affected);
-      else {
-        const parts = [toReview.length && `${plural(toReview.length, 'document')} sent to review`, (affected.length || !review) && `${plural(affected.length, 'document')} waiting to publish`].filter(Boolean);
+      processDocs(affected);
+      if (run.trigger !== 'Scheduled') {
+        const parts = [affected.length && `publishing ${plural(affected.length, 'document')}`, toReview.length && `${plural(toReview.length, 'document')} sent to review`, run.counts.failed && `${run.counts.failed} couldn’t be read`].filter(Boolean);
         const action = toReview.length && canReview() ? { label: 'Review', run: () => go('/documents?tab=review') }
-          : affected.length ? { label: 'Publish', run: () => A['src-process']({ dataset: { id: src.id } }) }
-          : kb ? { label: 'View', run: () => go(`/knowledge/${kb.id}?tab=documents`) } : undefined;
+          : run.counts.failed ? { label: 'View', run: () => openDrawer('src-run', { id: run.id }) }
+          : kb ? { label: 'View', run: () => go(can('knowledge.manage') ? `/documents?tab=all&kb=${kb.id}` : kbHref(kb)) } : undefined;
         toast(`${src.name} synced · ${parts.join(' · ') || 'no changes'}`, { tone: run.counts.failed ? 'accent' : 'success', action });
       }
     }
@@ -254,7 +264,7 @@
     list.forEach(s => { const r = runById(s.runId); if (r?.status === 'running') stopRun(r); s.status = 'paused'; s.noAccount = true; s.account = null; s.next = null; });
     return list;
   }
-  X.src = { boot, startSync, resumeAccount, attach, detachAccount, schedText, rerender, audit, open: id => A['src-open']({ dataset: { id } }) };
+  X.src = { boot, startSync, resumeAccount, attach, detachAccount, schedText, rerender, audit, statusChip, open: id => A['src-open']({ dataset: { id } }) };
 
   /* ═══════════════ Page ═══════════════ */
   P.sources = ({ query }) => {
@@ -263,22 +273,24 @@
     const live = S.pageState === 'live' && !S.navLoading;
     const alerts = live ? attention() : '';
     const empty = tab === 'sources' && !S.navLoading && (S.pageState === 'empty' || (S.pageState === 'live' && !D.sources.length));
-    const actions = empty ? '' : btn('Connect source', { v: alerts ? 'secondary' : 'primary', icon: 'plus', act: 'src-connect' });
+    // Alerts carry secondary actions, so the page's own primary stays the one primary.
+    const actions = empty ? '' : btn('Connect source', { v: 'primary', icon: 'plus', act: 'src-connect' });
     return `<div class="page">${pageHeader({ title: 'Sources', desc: 'Apps that keep your knowledge bases up to date.', actions })}${alerts}<div class="page-tabs">${tabs([{ id: 'sources', label: 'Sources', count: live ? D.sources.length : null }, { id: 'history', label: 'Sync history' }], tab, '/sources')}</div>${tab === 'history' ? tabHistory() : tabSources()}</div>`;
   };
-  /** One alert per problem: an expired account (grouping its sources) or a failed source. */
+  /** One alert per problem. An expired account is fixed in Connections (where it's counted), so here it's a link;
+      a failed source carries Sync now; files that didn't publish carry the single Publish all. */
   function attention() {
     const out = [], byAcc = {};
     D.sources.filter(s => s.status === 'reconnect').forEach(s => (byAcc[s.account] ||= []).push(s));
-    Object.entries(byAcc).forEach(([accId, list]) => {
-      const acc = accById(accId); const who = list.length === 1 ? list[0].name : `${list[0].name} and ${plural(list.length - 1, 'other source')}`;
-      out.push(alertBox('danger', `${who} can’t sync — ${appName(list[0].app)} access expired`, acc ? `Sign in again as ${esc(acc.user)}. Synced documents stay searchable.` : '', btn('Reconnect', { v: 'primary', size: 'sm', act: 'acc-reconnect', data: { id: accId } })));
+    Object.values(byAcc).forEach(list => {
+      const who = list.length === 1 ? list[0].name : `${list[0].name} and ${plural(list.length - 1, 'other source')}`;
+      out.push(alertBox('danger', `${who} can’t sync — ${appName(list[0].app)} access expired`, 'Synced documents stay searchable.', btn('Reconnect in Connections', { v: 'secondary', size: 'sm', iconRight: 'arrow-right', href: '/connections' })));
     });
-    D.sources.filter(s => s.status === 'failed').forEach(s => out.push(alertBox('danger', `${s.name} couldn’t sync`, esc(s.last?.error || 'Try syncing again.'), btn('Sync now', { v: 'primary', size: 'sm', act: 'src-sync', data: { id: s.id } }))));
+    D.sources.filter(s => s.status === 'failed').forEach(s => out.push(alertBox('danger', `${s.name} couldn’t sync`, esc(s.last?.error || 'Try syncing again.'), btn('Sync now', { v: 'secondary', size: 'sm', icon: 'refresh', act: 'src-sync', data: { id: s.id } }))));
     const waitSrc = D.sources.filter(s => s.status !== 'syncing' && waitingDocs(s).length);
     if (waitSrc.length) {
       const n = waitSrc.reduce((a, s) => a + waitingDocs(s).length, 0);
-      out.push(alertBox('accent', `${plural(n, 'synced document')} waiting to publish`, `From ${esc(waitSrc.map(s => s.name).join(', '))}. Publishing makes them searchable.`, btn('Publish all waiting', { size: 'sm', icon: 'play', act: 'src-process-all' })));
+      out.push(alertBox('accent', `${plural(n, 'synced document')} waiting to publish`, `From ${esc(waitSrc.map(s => s.name).join(', '))}. They synced but haven’t been published yet.`, btn('Publish all', { v: 'secondary', size: 'sm', icon: 'play', act: 'src-process-all' })));
     }
     return out.length ? `<div class="stack gap-8 mb-16">${out.join('')}</div>` : '';
   }
@@ -292,8 +304,8 @@
       empty: emptySources,
       ok: () => {
         if (!D.sources.length) return emptySources();
-        const toolbar = `<div class="toolbar">${searchField({ uiKey: 'srcList', placeholder: 'Search sources' })}${filterButton('Status', 'srcList', 'status', [['healthy', 'Up to date'], ['syncing', 'Syncing'], ['attention', 'Needs attention'], ['paused', 'Paused']])}${clearFilters('srcList', ['status'])}</div>`;
-        let rows = D.sources.filter(s => (!u.status || (u.status === 'attention' ? ['failed', 'reconnect'].includes(s.status) : s.status === u.status)) && matchesQ('srcList', s.name, kbById(s.kb)?.name, accById(s.account)?.label, appName(s.app), ...(s.scope || [])));
+        const toolbar = needsTools(D.sources.length, 'srcList', ['status']) ? `<div class="toolbar">${searchField({ uiKey: 'srcList', placeholder: 'Search sources' })}${filterButton('Status', 'srcList', 'status', [['healthy', 'Up to date'], ['partial', 'Synced with issues'], ['syncing', 'Syncing'], ['attention', 'Needs attention'], ['paused', 'Paused']])}${clearFilters('srcList', ['status'])}</div>` : '';
+        let rows = D.sources.filter(s => (!u.status || (u.status === 'attention' ? ['failed', 'reconnect'].includes(s.status) : srcState(s) === u.status)) && matchesQ('srcList', s.name, kbById(s.kb)?.name, accById(s.account)?.label, appName(s.app), ...(s.scope || [])));
         rows = applySort(rows, 'srcList', { name: s => s.name.toLowerCase(), last: s => s.last?.at || 0 });
         if (!rows.length) return toolbar + noMatches('srcList', ['status'], 'sources');
         const head = sortHead('Source', 'name', 'srcList') + th('Knowledge base') + th('Schedule') + sortHead('Last sync', 'last', 'srcList') + th('Status') + th('<span class="sr-only">Actions</span>', 'table__column--actions');
@@ -305,15 +317,27 @@
     const p = s.progress || { done: 0, total: 0 };
     return `<div class="src-syncing">${status('source', 'syncing')}<span class="src-syncing__bar">${progress(p.done / Math.max(1, p.total) * 100, '', 'Sync progress')}<span class="num t-xs muted">${p.done}/${p.total}</span></span></div>`;
   }
-  function rowAction(s) {
-    const acc = accById(s.account);
-    if (s.status === 'reconnect') return btn('Reconnect', { size: 'sm', act: 'acc-reconnect', data: { id: s.account } });
-    if (s.status === 'syncing') return btn('Cancel', { v: 'ghost', size: 'sm', act: 'src-cancel', data: { id: s.id } });
-    if (s.status === 'paused') return btn('Resume', { size: 'sm', icon: 'play', act: 'src-pause', data: { id: s.id } });
-    if (acc?.status !== 'connected') return '';
-    return btn('Sync now', { size: 'sm', icon: 'refresh', act: 'src-sync', data: { id: s.id } });
+  /** The one visible row action. Broken sources are fixed from the alert above the list (and the row's ⋯);
+      healthy rows keep Sync now as a quiet icon that shows on hover or focus. */
+  function rowActKind(s) {
+    if (s.status === 'syncing') return 'cancel';
+    if (s.status === 'paused') return 'resume';
+    if (s.status === 'healthy' && accById(s.account)?.status === 'connected') return 'sync';
+    return '';
   }
-  function policyNote(s) { const p = POLICY[policyOf(s)]; return `<span class="cell-sub src-policy src-policy--${policyOf(s)}" title="${esc(p.desc)}">${ic(p.icon, 'i-xs')}<span class="truncate">${esc(p.short)}</span></span>`; }
+  function rowAction(s) {
+    const k = rowActKind(s);
+    if (k === 'cancel') return btn('Cancel', { v: 'ghost', size: 'sm', act: 'src-cancel', data: { id: s.id } });
+    if (k === 'resume') return btn('Resume', { size: 'sm', icon: 'play', act: 'src-pause', data: { id: s.id } });
+    if (k === 'sync') return iconBtn('refresh', 'Sync now', { size: 'sm', act: 'src-sync', data: { id: s.id }, cls: 'src-quiet' });
+    return '';
+  }
+  /** Under the base: the publishing policy, or — when files are waiting — that plainly. */
+  function policyNote(s) {
+    const n = waitingDocs(s).length;
+    if (n && s.status !== 'syncing') return `<span class="cell-sub src-policy src-policy--waiting">${ic('clock', 'i-xs')}<span class="truncate">${esc(`${n} waiting to publish`)}</span></span>`;
+    const p = POLICY[policyOf(s)]; return `<span class="cell-sub src-policy src-policy--${policyOf(s)}" data-tip="${esc(p.desc)}">${ic(p.icon, 'i-xs')}<span class="truncate">${esc(p.short)}</span></span>`;
+  }
   function srcRow(s) {
     const acc = accById(s.account);
     const last = s.last ? `<div class="stack"><span>${rel(s.last.at)}</span><span class="cell-sub ${s.last.result === 'failed' ? 'text-danger' : s.last.failed ? 'text-warning' : ''}">${esc(lastText(s.last))}</span></div>` : '<span class="muted">Never</span>';
@@ -322,20 +346,25 @@
       <td class="table__cell"><div class="stack src-min src-kbcell">${kbLink(kbById(s.kb))}${policyNote(s)}</div></td>
       <td class="table__cell table__cell--hide-sm ${s.status === 'paused' ? 'muted' : ''}">${esc(schedText(s.schedule))}</td>
       <td class="table__cell table__cell--hide-sm">${last}</td>
-      <td class="table__cell">${s.status === 'syncing' ? syncingChip(s) : status('source', s.status)}</td>
-      <td class="table__cell table__cell--actions src-actions"><div class="row gap-4">${rowAction(s)}${iconBtn('more', 'More actions', { size: 'sm', menu: 'src-row', data: { id: s.id } })}</div></td></tr>`;
+      <td class="table__cell">${s.status === 'syncing' ? syncingChip(s) : statusChip(s)}</td>
+      <td class="table__cell table__cell--actions src-actions"><div class="row gap-4">${rowAction(s)}<span class="reveal-on-hover">${iconBtn('more', 'More actions', { size: 'sm', menu: 'src-row', data: { id: s.id } })}</span></div></td></tr>`;
   }
+  /** Row ⋯ holds what the row doesn't show. In the drawer, Sync now / Pause sit in the footer and
+      Change / View all beside their sections, so only Disconnect is left. */
   MENUS['src-row'] = el => {
     const s = srcById(el.dataset.id); if (!s) return [];
     const syncing = s.status === 'syncing', paused = s.status === 'paused';
     const items = [];
-    if (el.dataset.ctx !== 'drawer') items.push(
-      { label: 'Sync now', icon: 'refresh', disabled: syncing, run: () => A['src-sync']({ dataset: { id: s.id } }) },
-      { label: 'Edit schedule', icon: 'clock', run: () => A['src-open']({ dataset: { id: s.id, focus: 'schedule' } }) },
-      { label: paused ? 'Resume' : 'Pause', icon: paused ? 'play' : 'pause', disabled: syncing, run: () => A['src-pause']({ dataset: { id: s.id } }) });
-    items.push({ label: 'Change what’s synced', icon: 'folder', disabled: !accById(s.account), run: () => openWizard({ mode: 'scope', srcId: s.id }) },
-      { label: 'View sync history', icon: 'history', run: () => A['src-history']({ dataset: { id: s.id } }) },
-      { sep: true }, { label: 'Disconnect', icon: 'trash', danger: true, run: () => A['src-disconnect']({ dataset: { id: s.id } }) });
+    if (el.dataset.ctx !== 'drawer') {
+      const shown = rowActKind(s);
+      if (s.status === 'reconnect') items.push({ label: 'Reconnect', icon: 'log-in', run: () => A['acc-reconnect']({ dataset: { id: s.account } }) });
+      else if (shown !== 'sync') items.push({ label: 'Sync now', icon: 'refresh', disabled: syncing, run: () => A['src-sync']({ dataset: { id: s.id } }) });
+      items.push({ label: 'Edit schedule', icon: 'clock', run: () => A['src-open']({ dataset: { id: s.id, focus: 'schedule' } }) });
+      if (shown !== 'resume') items.push({ label: paused ? 'Resume' : 'Pause', icon: paused ? 'play' : 'pause', disabled: syncing, run: () => A['src-pause']({ dataset: { id: s.id } }) });
+      items.push({ label: 'Change what’s synced', icon: 'folder', disabled: !accById(s.account), run: () => openWizard({ mode: 'scope', srcId: s.id }) },
+        { label: 'View sync history', icon: 'history', run: () => A['src-history']({ dataset: { id: s.id } }) }, { sep: true });
+    }
+    items.push({ label: 'Disconnect', icon: 'trash', danger: true, run: () => A['src-disconnect']({ dataset: { id: s.id } }) });
     return items;
   };
 
@@ -351,7 +380,7 @@
         const all = D.runs.filter(r => r.source);
         if (!all.length) return none();
         const srcOpts = [...new Map(all.map(r => [r.source, runName(r)])).entries()];
-        const toolbar = `<div class="toolbar">${filterButton('Source', 'srcRuns', 'source', srcOpts)}${filterButton('Status', 'srcRuns', 'status', RUN_STATUS)}${clearFilters('srcRuns', ['source', 'status'])}</div>`;
+        const toolbar = needsTools(all.length, 'srcRuns', ['source', 'status']) ? `<div class="toolbar">${srcOpts.length > 1 || u.source ? filterButton('Source', 'srcRuns', 'source', srcOpts) : ''}${filterButton('Status', 'srcRuns', 'status', RUN_STATUS)}${clearFilters('srcRuns', ['source', 'status'])}</div>` : '';
         const rows = all.filter(r => (!u.source || r.source === u.source) && (!u.status || r.status === u.status || (u.status === 'running' && r.status === 'queued'))).sort((a, b) => b.started - a.started);
         if (!rows.length) return toolbar + noMatches('srcRuns', ['source', 'status'], 'syncs');
         const head = th('Source') + th('Trigger') + th('Started') + th('Duration') + th('Documents') + th('Status');
@@ -423,7 +452,8 @@
   A['src-open'] = el => {
     boot(); const s = srcById(el.dataset.id);
     if (!s) { toast('This source was disconnected', { tone: 'danger' }); return; }
-    schedInit(s); openDrawer('src-source', { id: s.id });
+    schedInit(s); if (el.dataset.focus === 'schedule') S.ui.srcSched.open = true;
+    openDrawer('src-source', { id: s.id });
     if (el.dataset.focus === 'schedule') requestAnimationFrame(() => { const sec = $('#src-sched'); sec?.scrollIntoView({ block: 'start' }); sec?.querySelector('[aria-pressed="true"]')?.focus(); });
   };
   const sec = (title, body, actions = '', id = '') => `<section class="drawer__section" ${id ? `id="${id}"` : ''}><div class="src-sec__head"><h3 class="drawer__section-title">${esc(title)}</h3>${actions}</div>${body}</section>`;
@@ -438,11 +468,23 @@
       top = `<div class="card card--secondary src-live"><div class="row between gap-12"><span class="medium">Syncing · ${p.done} of ${plural(p.total, 'document')}</span>${btn('Cancel', { v: 'ghost', size: 'sm', act: 'src-cancel', data: { id: s.id } })}</div>${progress(p.done / Math.max(1, p.total) * 100, '', 'Sync progress')}</div>`;
     }
     const waiting = waitingDocs(s).length;
-    if (!top && waiting) top = alertBox('accent', `${plural(waiting, 'document')} waiting to publish`, 'Synced into the knowledge base. Publish them to make them searchable.', srcCan() ? btn('Publish', { v: 'primary', size: 'sm', icon: 'play', act: 'src-process', data: { id: s.id } }) : '');
+    // The fix (Publish) is the footer's primary; the alert only explains.
+    if (!top && waiting) top = alertBox('accent', `${plural(waiting, 'document')} waiting to publish`, 'They synced into the knowledge base but aren’t searchable yet.');
+    // Files that couldn't be read are their own problem, shown beside any other note.
+    if (srcState(s) === 'partial' && !['reconnect', 'failed', 'syncing'].includes(s.status)) {
+      const run = runsOf(s.id).find(r => r.status === 'partial');
+      top += `${top ? '<div class="mt-8"></div>' : ''}${alertBox('warning', `${plural(s.last.failed, 'file')} couldn’t be read in the last sync`, 'Everything else synced.', run ? btn('See files', { v: 'secondary', size: 'sm', act: 'src-run-open', data: { id: run.id } }) : '')}`;
+    }
     const last = s.last ? `${rel(s.last.at)} · <span class="${s.last.result === 'failed' ? 'text-danger' : s.last.failed ? 'text-warning' : ''}">${esc(lastText(s.last).toLowerCase())}</span>` : 'Never';
     const next = s.status === 'paused' ? 'Paused' : s.next ? `${relFuture(s.next)} <span class="muted">· ${esc(fmtDateTime(s.next))}</span>` : s.schedule.freq === 'manual' ? 'When someone clicks Sync now' : s.status === 'reconnect' ? 'After you reconnect' : '—';
     const accCell = `<div class="row gap-8 wrap">${acc ? `<span class="truncate">${esc(acc.label)}</span>${acc.status !== 'connected' ? status('account', acc.status) : ''}` : '<span class="muted">None</span>'}${srcCan() ? btn('Change', { v: 'ghost', size: 'sm', menu: 'src-acc-switch', data: { id: s.id } }) : ''}</div>`;
-    return `<section class="drawer__section">${top ? `<div class="mb-16">${top}</div>` : ''}${kv([['Status', s.status === 'syncing' ? status('source', 'syncing') : status('source', s.status)], ['Last sync', last], ['Next sync', next], ['Account', accCell]])}</section>`;
+    const kbCell = kb ? `<div class="row gap-8 src-min">${kbLink(kb)}<span class="t-sm muted none">${esc(plural(docsIn(kb.id).length, 'document'))}</span></div>` : '<span class="muted">Removed knowledge base</span>';
+    return `<section class="drawer__section">${top ? `<div class="mb-16">${top}</div>` : ''}${kv([['Status', s.status === 'syncing' ? status('source', 'syncing') : statusChip(s)], ['Last sync', last], ['Next sync', next], ['Knowledge base', kbCell], ['Account', accCell]])}${reviewLine(s)}</section>`;
+  }
+  /** Synced files from this source that wait for a reviewer (review-first policy). */
+  function reviewLine(s) {
+    const waiting = D.docs.filter(d => d.source === s.id && !d.archived && stageOf(d) === 'review').length;
+    return waiting ? `<div class="row gap-8 wrap mt-12"><span class="t-sm muted">${esc(`${plural(waiting, 'file')} from this source waiting in review`)}</span>${canReview() ? linkBtn('Open review', { href: '/documents?tab=review', icon: 'arrow-up-right' }) : ''}</div>` : '';
   }
   function schedForm(s) {
     const f = S.ui.srcSched?.id === s.id ? S.ui.srcSched : (schedInit(s), S.ui.srcSched);
@@ -459,22 +501,26 @@
     const kb = kbById(s.kb), acc = accById(s.account), canM = srcCan();
     const syncing = s.status === 'syncing', paused = s.status === 'paused';
     const scope = sec('What it syncs', list((s.scope?.length ? s.scope : ['Everything']).map(x => item({ lead: ic(s.app === 'gdrive' ? 'folder' : 'book', 'muted'), title: esc(x) }))), canM && acc ? btn('Change', { v: 'ghost', size: 'sm', act: 'src-scope', data: { id: s.id } }) : '');
-    const dest = sec('Destination', list([item({ lead: `<span class="src-kb__dot src-kb__dot--lg" style="background:${esc(kb?.color || 'var(--default)')}"></span>`, title: esc(kb?.name || 'Removed knowledge base'), desc: kb ? plural(docsIn(kb.id).length, 'document') : '', trail: kb ? ic('chevron-right', 'muted') : '', href: kb ? `/knowledge/${kb.id}?tab=documents` : undefined })]));
-    const sched = canM ? sec('Schedule', schedForm(s), '', 'src-sched') : '';
-    const policy = sec('New and changed files', policyForm(s, canM), '', 'src-policy');
+    // Publishing policy and schedule are set once and rarely changed: quiet rows that open on demand.
+    const pol = POLICY[policyOf(s)];
+    const settings = canM
+      ? sec('Settings', `<div class="stack gap-8">${disclosure({ path: 'srcSched.polOpen', icon: pol.icon, title: 'New and changed files', summary: esc(pol.label), body: policyForm(s, true) })}${disclosure({ path: 'srcSched.open', icon: 'clock', title: 'Sync schedule', summary: esc(schedText(s.schedule)), body: schedForm(s) })}</div>`, '', 'src-sched')
+      : sec('New and changed files', policyForm(s, false), '', 'src-policy');
     const runs = runsOf(s.id).slice(0, 5);
     const recent = sec('Recent syncs', runs.length ? list(runs.map(r => item({ title: esc(fmtDateTime(r.started)), desc: esc(deltaText(r)), trail: status('run', r.status), act: 'src-run-open', data: { id: r.id } }))) : '<p class="muted">No syncs yet.</p>', runs.length ? btn('View all', { v: 'ghost', size: 'sm', act: 'src-history', data: { id: s.id } }) : '');
-    const danger = canM ? sec('Disconnect', `<div class="src-danger"><p class="description grow">Stops syncing. Documents already in ${esc(kb?.name || 'the knowledge base')} stay.</p>${btn('Disconnect', { v: 'danger-soft', size: 'sm', act: 'src-disconnect', data: { id: s.id } })}</div>`) : '';
+    // One primary: the state's fix (Reconnect when expired, Publish when files wait), else Sync now.
     let foot = '';
     if (canM) {
+      const waiting = waitingDocs(s).length;
       if (syncing) foot = btn('Cancel sync', { icon: 'stop', act: 'src-cancel', data: { id: s.id } });
-      else if (s.status === 'reconnect') foot = btn('Reconnect', { v: 'primary', act: 'acc-reconnect', data: { id: s.account } });
-      else foot = btn(paused ? 'Resume' : 'Pause', { icon: paused ? 'play' : 'pause', act: 'src-pause', data: { id: s.id } }) + btn('Sync now', { v: 'primary', icon: 'refresh', act: 'src-sync', data: { id: s.id }, disabled: !acc });
+      else if (s.status === 'reconnect') foot = btn('Reconnect', { v: 'primary', icon: 'log-in', act: 'acc-reconnect', data: { id: s.account } });
+      else if (waiting) foot = btn('Sync now', { icon: 'refresh', act: 'src-sync', data: { id: s.id }, disabled: !acc, tip: acc ? '' : 'Choose an account first' }) + btn(`Publish ${fmtNum(waiting)}`, { v: 'primary', icon: 'play', act: 'src-process', data: { id: s.id } });
+      else foot = btn(paused ? 'Resume' : 'Pause', { icon: paused ? 'play' : 'pause', act: 'src-pause', data: { id: s.id } }) + btn('Sync now', { v: 'primary', icon: 'refresh', act: 'src-sync', data: { id: s.id }, disabled: !acc, tip: acc ? '' : 'Choose an account first' });
     }
     return {
-      lead: appIcon(s.app, 'lg'), title: s.name, desc: esc(`${appName(s.app)}${acc ? ' · ' + acc.label : ''}`),
+      lead: appIcon(s.app, 'lg'), title: s.name, desc: esc(appName(s.app)),
       headActions: canM ? iconBtn('more', 'More actions', { menu: 'src-row', data: { id: s.id, ctx: 'drawer' } }) : '',
-      body: sourceSummary(s, acc, kb) + scope + dest + policy + sched + recent + danger,
+      body: sourceSummary(s, acc, kb) + scope + settings + recent,
       foot,
     };
   };
@@ -489,10 +535,9 @@
   A['src-scope'] = el => openWizard({ mode: 'scope', srcId: el.dataset.id });
   /** Publishing policy: who decides when synced files become searchable. Changes apply to the next sync. */
   function policyForm(s, canM) {
-    const cur = policyOf(s), waiting = D.docs.filter(d => d.source === s.id && !d.archived && stageOf(d) === 'review').length;
-    const queue = waiting ? `<div class="row gap-8 wrap mt-8"><span class="t-sm muted">${esc(`${plural(waiting, 'file')} from this source waiting in review`)}</span>${canReview() ? linkBtn('Open review', { href: '/documents?tab=review', icon: 'arrow-up-right' }) : ''}</div>` : '';
-    if (!canM) return `<div class="row gap-8">${ic(POLICY[cur].icon, 'i-sm muted')}<span class="medium">${esc(POLICY[cur].label)}</span></div><p class="description mt-4">${esc(POLICY[cur].desc)}</p>${queue}`;
-    return choiceGroup({ name: `src-pol-${s.id}`, value: cur, options: policyChoices(), act: 'src-policy', data: { id: s.id } }) + `<p class="description mt-8">Applies from the next sync. Files already published stay published.</p>${queue}`;
+    const cur = policyOf(s);
+    if (!canM) return `<div class="row gap-8">${ic(POLICY[cur].icon, 'i-sm muted')}<span class="medium">${esc(POLICY[cur].label)}</span></div><p class="description mt-4">${esc(POLICY[cur].desc)}</p>`;
+    return choiceGroup({ name: `src-pol-${s.id}`, value: cur, options: policyChoices(), act: 'src-policy', data: { id: s.id } }) + '<p class="description mt-8">Applies from the next sync. Files already published stay published.</p>';
   }
   A['src-policy'] = el => {
     const s = srcById(el.dataset.id), v = el.dataset.value; if (!s || !srcCan() || !POLICY[v] || policyOf(s) === v) return;
@@ -513,13 +558,23 @@
 
   /* ═══════════════ Sync run drawer ═══════════════ */
   A['src-run-open'] = el => { boot(); const r = runById(el.dataset.id); if (r) openDrawer('src-run', { id: r.id }); };
+  /** What the sync did with the files it read: published (trusted sources), sent to review, or still waiting to publish. */
+  function outcomeNote(r) {
+    const c = r.counts, s = srcById(r.source);
+    let o = r.outcome;
+    if (!o) {
+      const latest = s && runsOf(s.id).find(x => x.status !== 'running') === r, wait = latest ? waitingDocs(s).length : 0;
+      o = s && policyOf(s) === 'review' ? { review: c.ok } : { published: Math.max(0, c.ok - wait), waiting: Math.min(wait, c.ok) };
+    }
+    return [o.published && `${o.published} published`, o.waiting && `${o.waiting} waiting to publish`, o.review && `${o.review} sent to review`].filter(Boolean).join(' · ') || 'Nothing to add';
+  }
   function runSteps(r) {
-    const c = r.counts, el = r.status === 'running' ? Date.now() - r.started : (r.dur || 0);
-    const s1 = { label: 'Find changes' }, s2 = { label: 'Read documents' }, s3 = { label: 'Make searchable' };
+    const c = r.counts, el = r.status === 'running' ? Date.now() - r.started : (r.dur || 0), kb = kbById(r.kb);
+    const s1 = { label: 'Find changes' }, s2 = { label: 'Read documents' }, s3 = { label: kb ? `Add to ${kb.name}` : 'Add to the knowledge base' };
     if (r.status === 'failed' && !c.total) { s1.st = 'failed'; s1.note = `Couldn’t open ${appName(runApp(r))}`; s1.dur = el; s2.st = s3.st = 'pending'; s2.note = s3.note = 'Not started'; }
-    else if (r.status === 'running' || r.status === 'queued') { s1.st = 'done'; s1.note = `Found ${plural(c.total, 'changed document')}`; s1.dur = Math.min(el * 0.15, 20e3); s2.st = 'active'; s2.note = `${c.ok + c.failed} of ${c.total} read`; s3.st = c.ok ? 'active' : 'pending'; s3.note = c.ok ? `${c.ok} ready for questions` : 'Waiting'; }
-    else if (r.status === 'cancelled') { s1.st = 'done'; s1.note = `Found ${plural(c.total, 'changed document')}`; s2.st = 'stopped'; s2.note = `Cancelled after ${c.ok} of ${c.total}`; s3.st = 'stopped'; s3.note = `${c.ok} ready for questions`; }
-    else { s1.st = s2.st = s3.st = 'done'; s1.note = `Found ${plural(c.total, 'changed document')}`; s1.dur = el * 0.1; s2.note = `${c.ok} read${c.failed ? ` · ${c.failed} couldn’t be read` : ''}`; s2.dur = el * 0.6; s3.note = `${c.ok} ready for questions`; s3.dur = el * 0.3; if (c.failed) s2.st = 'warn'; }
+    else if (r.status === 'running' || r.status === 'queued') { s1.st = 'done'; s1.note = `Found ${plural(c.total, 'changed document')}`; s1.dur = Math.min(el * 0.15, 20e3); s2.st = 'active'; s2.note = `${c.ok + c.failed} of ${c.total} read`; s3.st = 'pending'; s3.note = 'After reading'; }
+    else if (r.status === 'cancelled') { s1.st = 'done'; s1.note = `Found ${plural(c.total, 'changed document')}`; s2.st = 'stopped'; s2.note = `Cancelled after ${c.ok} of ${c.total}`; s3.st = 'stopped'; s3.note = `${c.ok} kept`; }
+    else { s1.st = s2.st = s3.st = 'done'; s1.note = `Found ${plural(c.total, 'changed document')}`; s1.dur = el * 0.1; s2.note = `${c.ok} read${c.failed ? ` · ${c.failed} couldn’t be read` : ''}`; s2.dur = el * 0.6; s3.note = outcomeNote(r); s3.dur = el * 0.3; if (c.failed) s2.st = 'warn'; }
     return [s1, s2, s3];
   }
   const STEP_ICON = { done: ['check-circle', 'success'], warn: ['alert', 'warning'], failed: ['x-circle', 'danger'], pending: ['clock', 'default'], stopped: ['stop', 'default'] };
@@ -531,14 +586,16 @@
     const s = srcById(r.source), acc = s && accById(s.account), canM = srcCan(), c = r.counts;
     const who = r.trigger === 'Scheduled' ? 'Scheduled' : r.trigger === 'Upload' ? `Uploaded by ${r.by}` : `Started by ${r.by}`;
     let top = '';
-    if (r.status === 'failed' && r.error) top = alertBox('danger', `Couldn’t reach ${appName(runApp(r))}`, esc(r.error), acc?.status === 'expired' && canM ? btn('Reconnect', { v: 'primary', size: 'sm', act: 'acc-reconnect', data: { id: acc.id } }) : '');
+    if (r.status === 'failed' && r.error) top = alertBox('danger', `Couldn’t reach ${appName(runApp(r))}`, esc(r.error), acc?.status === 'expired' && canM ? btn('Reconnect', { v: 'secondary', size: 'sm', act: 'acc-reconnect', data: { id: acc.id } }) : '');
     if (r.status === 'running') top = `<div class="card card--secondary src-live"><div class="row between gap-12"><span class="medium">${c.ok + c.failed} of ${plural(c.total, 'document')}</span>${canM ? btn('Cancel', { v: 'ghost', size: 'sm', act: 'src-cancel', data: { run: r.id } }) : ''}</div>${progress((c.ok + c.failed) / Math.max(1, c.total) * 100, '', 'Sync progress')}</div>`;
     const d = delta(r);
     const tiles = r.status === 'running' ? '' : `<div class="src-counts">${[['Added', d.added], ['Updated', d.updated], ['Failed', d.failed], ...(c.skipped ? [['Skipped', c.skipped]] : [])].map(([l, n]) => `<div class="src-counts__tile"><div class="src-counts__n num ${l === 'Failed' && n ? 'text-danger' : ''}">${fmtNum(n)}</div><div class="t-xs muted">${l}</div></div>`).join('')}</div>`;
-    const fails = (r.failures || []).map(docById).filter(Boolean), open = fails.filter(x => x.status === 'failed');
-    const failHtml = fails.length ? sec('Couldn’t publish', list(fails.map(x => item({ lead: fileIcon(x.type, 'sm'), title: esc(x.name), desc: esc(x.status === 'failed' ? (x.error || 'This file couldn’t be read.') : 'Published in a later sync.'), trail: x.status === 'failed' ? ic('chevron-right', 'muted') : status('doc', x.status), href: `/doc/${x.id}` })))) : '';
+    // Password-protected files fail again until someone removes the password, so they carry that fix instead of Retry.
+    const fails = (r.failures || []).map(docById).filter(Boolean), retryable = fails.filter(x => x.status === 'failed' && !isLocked(x));
+    const failDesc = x => x.status !== 'failed' ? 'Published in a later sync.' : isLocked(x) && !/remove the password|sync again/i.test(x.error || '') ? `${x.error || 'Password-protected.'} Remove the password in ${appName(runApp(r))}, then sync again.` : (x.error || 'This file couldn’t be read.');
+    const failHtml = fails.length ? sec('Couldn’t read', list(fails.map(x => item({ lead: fileIcon(x.type, 'sm'), title: esc(x.name), desc: esc(failDesc(x)), trail: x.status === 'failed' ? '' : status('doc', x.status) })))) : '';
     let foot = '';
-    if (s) foot = btn('Open source', { act: 'src-open', data: { id: s.id } }) + (canM && open.length ? btn('Retry failed', { v: 'primary', icon: 'retry', act: 'src-retry', data: { id: r.id }, disabled: s.status === 'syncing' }) : '');
+    if (s) foot = btn('Open source', { v: retryable.length && canM ? 'secondary' : 'primary', act: 'src-open', data: { id: s.id } }) + (canM && retryable.length ? btn('Retry failed', { v: 'primary', icon: 'retry', act: 'src-retry', data: { id: r.id }, disabled: s.status === 'syncing', tip: s.status === 'syncing' ? 'Wait for the current sync to finish' : '' }) : '');
     return {
       lead: appIcon(runApp(r), 'lg'), title: runName(r), desc: esc(`${fmtDateTime(r.started)} · ${who}`),
       body: `<section class="drawer__section"><div class="row gap-8 wrap mb-16">${status('run', r.status)}${r.dur ? `<span class="t-sm muted">Took ${fmtDuration(r.dur)}</span>` : ''}</div>${top ? `<div class="mb-16">${top}</div>` : ''}${tiles}</section>${sec('Steps', stepsHtml(r))}${failHtml}`,
@@ -552,7 +609,7 @@
     const stuck = docs.filter(isLocked);
     const nr = startSync(s, { plan: { added: 0, updated: docs.length - stuck.length, failed: stuck.length, failures: stuck.map(d => d.id) }, ticks: 3 });
     if (!nr) return toast(`${s.name} is already syncing`, { tone: 'accent' });
-    audit('Retried failed documents', s.name); toast(`Retrying ${plural(docs.length, 'document')}…`, { tone: 'accent' });
+    audit('Retried failed documents', s.name); toast(`Retrying ${plural(docs.length - stuck.length, 'document')}…`, { tone: 'accent' });
     openDrawer('src-run', { id: nr.id }); refresh();
   };
 
@@ -608,49 +665,93 @@
   function wizGo(w, step) {
     w.step = step; w.ask = false; w.selErr = ''; w.oauthErr = '';
     if (step === 3) prepTree(w);
+    if (step === 4 && !w.kb) w.kb = w.kbAuto = suggestKb(w);
     refreshLayer(); const mb = $('#modal-body'); if (mb) mb.scrollTop = 0;
+  }
+  const editableKbs = () => D.kbs.filter(k => !k.archived && !k.personal && canEditKb(k));
+  /** Smart default for the destination: the only base the caller can edit, or the one base whose name shares a word with what was picked. */
+  function suggestKb(w) {
+    const kbs = editableKbs(); if (kbs.length === 1) return kbs[0].id;
+    const idx = treeIdx(w.app), split = s => s.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(x => x.length >= 4);
+    const words = new Set(selItems(w.app, w.sel).flatMap(n => split(idx.path[n.id])));
+    const hits = kbs.filter(k => split(k.name).some(x => words.has(x)));
+    return hits.length === 1 ? hits[0].id : '';
+  }
+  const noun = w => (w.app === 'gdrive' ? 'folders' : 'spaces and pages');
+  function selSummary(w) {
+    const items = selItems(w.app, w.sel), docs = items.reduce((a, n) => a + nodeDocs(n), 0);
+    return items.length ? `${plural(items.length, 'item')} · about ${plural(docs, 'document')}` : 'Nothing selected yet';
+  }
+  /** Steps as a quiet progress line; finished steps are buttons back to them. */
+  function stepper(w) {
+    const lock = w.busy || w.ask || w.oauth === 'waiting' || !!w.rcAcc;
+    return `<ol class="src-stepper" aria-label="Steps">${WIZ_STEPS.map((l, i) => {
+      const n = i + 1, st = n < w.step ? 'done' : n === w.step ? 'current' : 'todo';
+      const inner = `<span class="src-stepper__dot">${st === 'done' ? ic('check', 'i-xs') : n}</span><span class="src-stepper__label">${esc(l)}</span>`;
+      const el = st === 'done' && !lock ? `<button type="button" class="src-stepper__btn" data-act="src-wiz-goto" data-step="${n}">${inner}</button>` : `<span class="src-stepper__btn">${inner}</span>`;
+      return `<li class="src-stepper__step src-stepper__step--${st}" ${n === w.step ? 'aria-current="step"' : ''}>${el}</li>`;
+    }).join('')}</ol>`;
   }
   M['src-wizard'] = () => {
     const w = S.ui.srcWiz; if (!w) return { title: 'Connect a source', body: '' };
     const scope = w.mode === 'scope', s = scope && srcById(w.srcId);
-    const stepper = scope ? '' : `<ol class="src-stepper" aria-label="Steps">${WIZ_STEPS.map((l, i) => { const n = i + 1; const st = n < w.step ? 'done' : n === w.step ? 'current' : 'todo'; return `<li class="src-stepper__step src-stepper__step--${st}" ${n === w.step ? 'aria-current="step"' : ''}><span class="src-stepper__dot">${n < w.step ? ic('check', 'i-xs') : n}</span><span class="src-stepper__label">${esc(l)}</span></li>`; }).join('')}</ol>`;
+    const desc = scope ? esc(`${s?.name || ''} · ${appName(w.app)}`)
+      : w.step === 1 ? 'Where are the documents? Pick the app that keeps them.'
+        : w.step === 2 ? esc(`Which ${appName(w.app)} account should BoMesh read from?`)
+          : w.step === 3 ? esc(`Choose the ${noun(w)} to keep in sync. New files inside them sync automatically.`)
+            : 'Choose where documents go and how they stay up to date.';
     const body = w.step === 1 ? step1(w) : w.step === 2 ? step2(w) : w.step === 3 ? step3(w) : step4(w);
     const f = wizFoot(w);
-    return { size: 'lg', noClose: w.oauth === 'waiting' || !!w.rcAcc, title: scope ? 'Change what’s synced' : 'Connect a source', desc: scope ? esc(`${s?.name || ''} · ${appName(w.app)}`) : '', body: stepper + body, foot: f.foot, footStart: f.start };
+    return {
+      size: 'lg', noClose: w.oauth === 'waiting' || !!w.rcAcc, closeAct: 'src-wiz-close',
+      title: scope ? 'Change what’s synced' : 'Connect a source', icon: w.app ? appIcon(w.app) : 'plug', tone: w.app ? 'default' : 'accent', desc,
+      head: scope ? '' : stepper(w), body: `<div class="${cx('src-wiz', !scope && 'src-wiz--steps')}">${body}</div>`, foot: f.foot, footStart: f.start,
+    };
   };
   function wizFoot(w) {
-    if (w.ask) return { start: `<span class="t-sm medium">${w.mode === 'scope' ? 'Discard your changes?' : 'Discard this source?'}</span>`, foot: btn('Keep editing', { act: 'src-wiz-keep' }) + btn('Discard', { v: 'danger', act: 'src-wiz-discard' }) };
-    if (w.oauth === 'waiting' || w.rcAcc) return { foot: btn('Cancel', { act: 'src-wiz-oauth-cancel' }) };
-    const back = btn('Back', { act: 'src-wiz-back', disabled: w.busy });
-    if (w.step === 1) return { foot: btn('Cancel', { act: 'src-wiz-close' }) + btn('Continue', { v: 'primary', act: 'src-wiz-next', disabled: !w.app }) };
+    if (w.ask) return { start: `<span class="t-sm medium fg">${w.mode === 'scope' ? 'Discard your changes?' : 'Discard this source?'}</span>`, foot: btn('Keep editing', { act: 'src-wiz-keep' }) + btn('Discard', { v: 'danger', act: 'src-wiz-discard' }) };
+    if (w.oauth === 'waiting' || w.rcAcc) return { foot: btn('Cancel', { v: 'ghost', act: 'src-wiz-oauth-cancel' }) };
+    // Progress lives in the stepper above; the footer carries only the actions.
+    const back = btn('Back', { v: 'ghost', icon: 'arrow-left', act: 'src-wiz-back', disabled: w.busy });
+    if (w.step === 1) return { foot: btn('Cancel', { v: 'ghost', act: 'src-wiz-close' }) + (w.app ? btn('Continue', { v: 'primary', act: 'src-wiz-next' }) : '') };
     if (w.step === 2) {
       if (w.acc === 'new' && w.app === 'gdrive') return { foot: back + btn('Continue with Google', { v: 'primary', iconRight: 'external', act: 'src-wiz-next' }) };
       if (w.acc === 'new') return { foot: back + btn('Verify and continue', { v: 'primary', act: 'src-wiz-next', loading: w.busy }) };
-      const a = accById(w.acc); return { foot: back + btn('Continue', { v: 'primary', act: 'src-wiz-next', disabled: !a || a.status !== 'connected' }) };
+      return { foot: back + btn('Continue', { v: 'primary', act: 'src-wiz-next' }) };
     }
-    if (w.step === 3) return w.mode === 'scope' ? { foot: btn('Cancel', { act: 'src-wiz-close', disabled: w.busy }) + btn('Save changes', { v: 'primary', act: 'src-wiz-next', loading: w.busy }) } : { foot: back + btn('Continue', { v: 'primary', act: 'src-wiz-next' }) };
-    return { foot: back + btn('Connect and sync', { v: 'primary', act: 'src-wiz-next', loading: w.busy }) };
+    if (w.step === 3) {
+      const start = `<span aria-live="polite">${esc(selSummary(w))}</span>`;
+      return w.mode === 'scope'
+        ? { start, foot: btn('Cancel', { v: 'ghost', act: 'src-wiz-close', disabled: w.busy }) + btn('Save changes', { v: 'primary', act: 'src-wiz-next', loading: w.busy }) }
+        : { start, foot: back + btn('Continue', { v: 'primary', act: 'src-wiz-next' }) };
+    }
+    return { foot: back + btn('Connect and sync', { v: 'primary', icon: 'plug', act: 'src-wiz-next', loading: w.busy }) };
   }
   const waitHtml = (title, sub) => `<div class="src-wait" role="status">${spinner('lg')}<div class="t-subheading">${esc(title)}</div><p class="description">${esc(sub)}</p></div>`;
+  /** Available apps as tiles; apps that aren't available yet collapse into one quiet "Request it" line. */
   function step1(w) {
-    const apps = D.pConnectors.filter(c => c.key !== 'upload');
-    return `<p class="muted mb-12">Where are the documents?</p><div class="src-apps" role="radiogroup" aria-label="App">${apps.map(c => c.status === 'enabled'
-      ? `<button type="button" class="card card--action src-app" role="radio" aria-checked="${w.app === c.key}" data-act="src-wiz-app" data-app="${c.key}">${appIcon(c.key, 'lg')}<span class="src-app__name">${esc(c.name)}</span><span class="src-app__desc">${esc(c.desc)}</span></button>`
-      : `<div class="card src-app src-app--off" aria-disabled="true">${appIcon(c.key, 'lg')}<span class="src-app__name">${esc(c.name)}</span><span class="src-app__desc">Not available yet</span><span class="src-app__foot">${(c.requestedBy || []).includes(me().id) ? chip('Requested', { size: 'sm', icon: 'check' }) : linkBtn('Request', { act: 'src-wiz-request', data: { app: c.key } })}</span></div>`).join('')}</div>`;
+    const apps = D.pConnectors.filter(c => c.key !== 'upload'), on = apps.filter(c => c.status === 'enabled'), off = apps.filter(c => c.status !== 'enabled');
+    const tiles = `<div class="src-apps" role="radiogroup" aria-label="App">${on.map(c => `<button type="button" class="card card--action src-app" role="radio" aria-checked="${w.app === c.key}" data-act="src-wiz-app" data-app="${c.key}">${appIcon(c.key, 'lg')}<span class="src-app__name">${esc(c.name)}</span><span class="src-app__desc">${esc(c.desc)}</span>${w.app === c.key ? `<span class="src-app__check" aria-hidden="true">${ic('check', 'i-xs')}</span>` : ''}</button>`).join('')}</div>`;
+    const more = off.length ? `<p class="src-more-apps">${esc(`Need ${off.map(c => c.name).join(', ')} or another app?`)} ${btn('Request it', { v: 'ghost', size: 'sm', iconRight: 'chevron-down', menu: 'src-wiz-request', cls: 'src-more-apps__btn' })}</p>` : '';
+    return tiles + more;
   }
+  MENUS['src-wiz-request'] = () => [{ section: 'Ask your platform admin for' }, ...D.pConnectors.filter(c => c.key !== 'upload' && c.status !== 'enabled').map(c => {
+    const asked = (c.requestedBy || []).includes(me().id);
+    return { label: c.name, meta: asked ? 'Requested' : '', checked: asked, disabled: asked, run: () => A['src-wiz-request']({ dataset: { app: c.key } }) };
+  })];
   function step2(w) {
     const prov = w.app === 'gdrive' ? 'Google' : 'Atlassian';
     if (w.oauth === 'waiting') return waitHtml(`Finish signing in with ${prov}`, `A ${prov} window opened. Come back here when you’re done.`);
     const rows = D.accounts.filter(a => a.app === w.app).map(a => {
       const off = a.status !== 'connected', used = D.sources.filter(s => s.account === a.id).length;
-      const trail = off ? (w.rcAcc === a.id ? `<span class="row gap-6 t-sm muted src-choice__trail">${spinner('sm')}Waiting for ${prov}…</span>` : `<span class="src-choice__trail">${btn('Reconnect', { size: 'sm', act: 'src-wiz-reacc', data: { id: a.id }, disabled: w.busy })}</span>`) : '';
+      const trail = off ? (w.rcAcc === a.id ? `<span class="row gap-6 t-sm muted src-choice__trail">${spinner('sm')}Waiting for ${prov}…</span>` : `<span class="src-choice__trail">${btn('Reconnect', { size: 'sm', icon: 'log-in', act: 'src-wiz-reacc', data: { id: a.id }, disabled: w.busy })}</span>`) : '';
       return `<label class="${cx('choice', off && 'src-choice--off')}"><input type="radio" name="src-acc" value="${a.id}" ${w.acc === a.id ? 'checked' : ''} ${off || w.busy ? 'disabled' : ''} data-change="src-wiz-acc" data-value="${a.id}"><span class="radio__control" aria-hidden="true"></span><span class="grow src-min"><span class="choice__title truncate" style="display:block">${esc(a.label)}</span><span class="choice__desc" style="display:block">${off ? 'Access expired — reconnect to use it' : used ? `Used by ${plural(used, 'source')}` : 'Connected'}</span></span>${trail}</label>`;
     }).join('');
     const isNew = w.acc === 'new';
     const add = `<label class="choice"><input type="radio" name="src-acc" value="new" ${isNew ? 'checked' : ''} ${w.busy ? 'disabled' : ''} data-change="src-wiz-acc" data-value="new"><span class="radio__control" aria-hidden="true"></span><span class="grow"><span class="choice__title" style="display:block">Connect a new account</span><span class="choice__desc" style="display:block">${w.app === 'gdrive' ? 'Sign in with Google.' : 'Use your Confluence site and an API token.'}</span></span></label>`;
     const form = isNew && w.app === 'confluence' ? `<div class="src-conf">${X.acc?.confForm('srcWiz.conf', w.conf, w.cerr, 'src-wiz-next') || ''}</div>` : '';
     const err = w.oauthErr ? alertBox('danger', '', esc(w.oauthErr)) : '';
-    return `<p class="muted mb-12">Which ${esc(appName(w.app))} account should BoMesh read from?</p><div class="stack gap-8 src-choices">${err}${rows}${add}${form}</div>`;
+    return `<div class="stack gap-8 src-choices" role="radiogroup" aria-label="Account">${err}${rows}${add}${form}</div>`;
   }
   function treeRows(nodes, depth, w, q, force) {
     return nodes.map(n => {
@@ -660,37 +761,44 @@
       const open = q ? (kids.some(k => treeMatch(k, q)) || !!w.open[n.id]) : !!w.open[n.id];
       const st = nodeState(n, w.sel), icon = w.app === 'gdrive' ? 'folder' : n.space ? 'book' : 'file-text';
       const tog = kids.length ? btn('', { v: 'ghost', size: 'sm', icon: open ? 'chevron-down' : 'chevron-right', act: 'src-wiz-tog', data: { id: n.id }, muted: true, aria: `aria-expanded="${open}" aria-label="${open ? 'Collapse' : 'Expand'} ${esc(n.name)}"`, cls: 'src-tree__tog' }) : '<span class="src-tree__tog" aria-hidden="true"></span>';
-      return `<div class="src-tree__row" style="--depth:${depth}">${tog}${checkbox({ label: `<span class="row gap-8 src-min">${ic(icon, 'i-sm muted')}<span class="truncate">${esc(n.name)}</span></span>`, checked: st === 'all', indeterminate: st === 'some', act: 'src-wiz-check', data: { id: n.id } })}<span class="src-tree__count num">${fmtNum(nodeDocs(n))}</span></div>` + (kids.length && open ? treeRows(kids, depth + 1, w, q, force || hit) : '');
+      return `<div class="${cx('src-tree__row', st !== 'none' && 'is-on')}" style="--depth:${depth}">${tog}${checkbox({ label: `<span class="row gap-8 src-min">${ic(icon, 'i-sm muted')}<span class="truncate">${esc(n.name)}</span></span>`, checked: st === 'all', indeterminate: st === 'some', act: 'src-wiz-check', data: { id: n.id } })}<span class="src-tree__count num">${fmtNum(nodeDocs(n))}</span></div>` + (kids.length && open ? treeRows(kids, depth + 1, w, q, force || hit) : '');
     }).join('');
   }
   function step3(w) {
-    const q = (w.q || '').trim().toLowerCase(), items = selItems(w.app, w.sel), docs = items.reduce((a, n) => a + nodeDocs(n), 0);
-    const noun = w.app === 'gdrive' ? 'folders' : 'spaces and pages';
+    const q = (w.q || '').trim().toLowerCase(), any = selItems(w.app, w.sel).length;
     const rows = treeRows(TREE[w.app] || [], 0, w, q, false);
-    return `<p class="muted mb-12">Choose the ${noun} to keep in sync. New files inside them sync automatically.</p>
-      <div class="toolbar src-tree-bar">${searchField({ uiKey: 'srcWiz', placeholder: `Search ${noun}` })}<div class="toolbar__end"><span class="t-sm muted" aria-live="polite">${items.length ? `${plural(items.length, 'item')} · about ${plural(docs, 'document')}` : 'Nothing selected'}</span>${items.length ? btn('Clear', { v: 'ghost', size: 'sm', act: 'src-wiz-clear' }) : ''}</div></div>
-      <div class="src-tree" role="group" aria-label="Content to sync">${rows || emptyState({ icon: 'search', title: 'No matches', desc: 'Try a different name.', compact: true })}</div>
-      ${w.selErr ? `<div class="field-error mt-8" role="alert">${ic('alert-circle')}<span>${esc(w.selErr)}</span></div>` : ''}`;
+    return `<div class="toolbar src-tree-bar">${searchField({ uiKey: 'srcWiz', placeholder: `Search ${noun(w)}` })}${any ? `<div class="toolbar__end">${btn('Clear selection', { v: 'ghost', size: 'sm', act: 'src-wiz-clear' })}</div>` : ''}</div>
+      <div class="${cx('src-tree', w.selErr && 'is-invalid')}" role="group" aria-label="Content to sync" ${w.selErr ? 'aria-describedby="src-sel-err"' : ''}>${rows || emptyState({ icon: 'search', title: 'No matches', desc: 'Try a different name.', compact: true })}</div>
+      ${w.selErr ? `<div class="field-error mt-8" id="src-sel-err" role="alert">${ic('alert-circle')}<span>${esc(w.selErr)}</span></div>` : ''}`;
   }
+  const wizSchedText = w => schedText(w) + (w.freq !== 'manual' ? ` · ${tzShort(w.tz)}` : '');
   function step4(w) {
-    const kbs = D.kbs.filter(k => !k.archived && !k.personal && canEditKb(k));
+    const kbs = editableKbs(), acc = accById(w.acc);
     const items = selItems(w.app, w.sel), docs = items.reduce((a, n) => a + nodeDocs(n), 0), idx = treeIdx(w.app);
-    const kbF = field({ id: 'src-w-kb', label: 'Knowledge base', required: true, error: w.err.kb, control: select({ id: 'src-w-kb', bind: 'srcWiz.kb', value: w.kb, options: [['', 'Choose a knowledge base'], ...kbs.map(k => [k.id, k.name]), ['__new', 'New knowledge base…']], change: 'src-wiz-kb', attrs: w.err.kb ? 'aria-invalid="true"' : '' }) });
-    const nameF = w.kb === '__new' ? field({ id: 'src-w-kbname', label: 'Name', required: true, error: w.err.kbName, control: input({ id: 'src-w-kbname', bind: 'srcWiz.kbName', value: w.kbName, placeholder: 'e.g. Marketing Assets', invalid: !!w.err.kbName, attrs: 'data-input="src-wiz-kbinput"', onEnter: 'src-wiz-next' }) }) : '';
-    const sched = `<div class="field"><span class="label">Keep in sync</span>${seg({ value: w.freq, options: [['manual', 'Manual'], ['daily', 'Daily'], ['weekly', 'Weekly']], act: 'src-wiz-freq', label: 'Keep in sync', full: true })}</div>${w.freq === 'manual' ? '<p class="description">Syncs only when someone clicks Sync now.</p>' : `<div class="src-sched-grid ${w.freq === 'weekly' ? 'src-sched-grid--3' : ''}">${w.freq === 'weekly' ? field({ id: 'src-w-day', label: 'Day', control: select({ id: 'src-w-day', bind: 'srcWiz.day', value: w.day, options: DAYS }) }) : ''}${field({ id: 'src-w-time', label: 'Time', control: select({ id: 'src-w-time', bind: 'srcWiz.time', value: w.time, options: TIMES }) })}${field({ id: 'src-w-tz', label: 'Time zone', control: select({ id: 'src-w-tz', bind: 'srcWiz.tz', value: w.tz, options: TZ }) })}</div>`}`;
-    const content = items.length ? `${idx.path[items[0].id]}${items.length > 1 ? ` +${items.length - 1}` : ''} · about ${plural(docs, 'document')}` : '—';
-    const summary = `<div class="card card--secondary">${kv([['Source', esc(wizName(w, items))], ['Account', `<span class="row gap-8">${appIcon(w.app, 'sm')}<span class="truncate">${esc(accById(w.acc)?.label || '—')}</span></span>`], ['Content', esc(content)]])}</div>`;
+    const content = items.length ? `${idx.path[items[0].id]}${items.length > 1 ? ` +${items.length - 1}` : ''}` : '';
+    const change = w.skipAcc ? linkBtn('Change', { act: 'src-wiz-goto', data: { step: 2 }, cls: 'src-recap__change' }) : '';
+    const recap = `<div class="src-recap">${appIcon(w.app)}<div class="grow src-min"><div class="medium truncate">${esc(wizName(w, items))}</div><div class="t-xs muted truncate">${esc([acc?.label, content, items.length && `about ${plural(docs, 'document')}`].filter(Boolean).join(' · '))}</div></div>${change}</div>`;
+    const kbF = field({ id: 'src-w-kb', label: 'Knowledge base', required: true, error: w.err.kb, desc: w.kbAuto && w.kb === w.kbAuto ? 'Suggested from what you picked. Change it if it belongs elsewhere.' : 'People who can see this knowledge base can find what syncs into it.', control: select({ id: 'src-w-kb', bind: 'srcWiz.kb', value: w.kb, options: [['', 'Choose a knowledge base'], ...kbs.map(k => [k.id, k.name]), ['__new', 'New knowledge base…']], change: 'src-wiz-kb', attrs: w.err.kb ? 'aria-invalid="true" aria-describedby="src-w-kb-err"' : '' }) });
+    // A new base made here starts like one made from Create knowledge base: Everyone can see it (changeable in its Access tab).
+    const nameF = w.kb === '__new' ? field({ id: 'src-w-kbname', label: 'Name', required: true, error: w.err.kbName, desc: `<span>${esc(kbAccessDesc('workspace'))}</span> <span>You can change who sees it in its Access tab.</span>`, control: input({ id: 'src-w-kbname', bind: 'srcWiz.kbName', value: w.kbName, placeholder: 'e.g. Marketing Assets', invalid: !!w.err.kbName, attrs: 'data-input="src-wiz-kbinput"', onEnter: 'src-wiz-next' }) }) : '';
     const first = Math.min(docs, 30);
-    const then = w.publish === 'review' ? `The first sync sends about ${plural(first, 'file')} to the review queue.` : `About ${plural(first, 'file')} will be ready to publish after the first sync.`;
-    const policy = `<div class="field"><span class="label">New and changed files</span>${choiceGroup({ name: 'src-w-pol', value: w.publish, options: policyChoices(), act: 'src-wiz-policy' })}<p class="description">${esc(then)}</p></div>`;
-    return `<div class="stack gap-16">${kbF}${nameF}${sched}${policy}${summary}</div>`;
+    const then = w.publish === 'review' ? `The first sync sends about ${plural(first, 'file')} to the review queue.` : `The first sync publishes about ${plural(first, 'file')}.`;
+    const policy = `<div class="field"><span class="label">New and changed files</span>${choiceGroup({ name: 'src-w-pol', value: w.publish, options: Object.entries(POLICY).map(([k, p]) => [k, p.label, esc(p.desc), p.icon]), act: 'src-wiz-policy', cols: 2 })}<p class="description">${esc(then)}</p></div>`;
+    const sel = (id, label, bind, value, options) => field({ id, label, control: select({ id, bind, value, options, change: 'src-wiz-sched' }) });
+    const schedBody = `<div class="stack gap-12">${seg({ value: w.freq, options: [['manual', 'Manual'], ['daily', 'Daily'], ['weekly', 'Weekly']], act: 'src-wiz-freq', label: 'How often to sync', full: true })}${w.freq === 'manual' ? '<p class="description">Syncs only when someone clicks Sync now.</p>' : `<div class="src-sched-grid ${w.freq === 'weekly' ? 'src-sched-grid--3' : ''}">${w.freq === 'weekly' ? sel('src-w-day', 'Day', 'srcWiz.day', w.day, DAYS) : ''}${sel('src-w-time', 'Time', 'srcWiz.time', w.time, TIMES)}${sel('src-w-tz', 'Time zone', 'srcWiz.tz', w.tz, TZ)}</div>`}</div>`;
+    const sched = disclosure({ path: 'srcWiz.schedOpen', icon: 'clock', title: 'Sync schedule', summary: esc(wizSchedText(w)), body: schedBody });
+    return `<div class="stack gap-16">${recap}${kbF}${nameF}${policy}${sched}</div>`;
   }
 
   /* Wizard actions */
+  /** Picking an app: with exactly one connected account, it's preselected and the Account step is skipped (Change in the recap goes back). */
   A['src-wiz-app'] = el => {
     const w = ui('srcWiz');
     if (w.app !== el.dataset.app) { w.app = el.dataset.app; w.cerr = {}; const ok = D.accounts.find(a => a.app === w.app && a.status === 'connected'); w.acc = ok ? ok.id : D.accounts.some(a => a.app === w.app) ? '' : 'new'; }
-    wizGo(w, 2);
+    const own = D.accounts.filter(a => a.app === w.app);
+    w.skipAcc = own.length === 1 && own[0].status === 'connected';
+    if (w.skipAcc) w.acc = own[0].id;
+    wizGo(w, w.skipAcc ? 3 : 2);
   };
   A['src-wiz-request'] = el => {
     const c = D.pConnectors.find(x => x.key === el.dataset.app); if (!c) return;
@@ -722,6 +830,8 @@
   A['src-wiz-clear'] = () => { ui('srcWiz').sel = {}; refreshLayer(); };
   A['src-wiz-kb'] = () => { const w = ui('srcWiz'); if (w.kb) delete w.err.kb; refreshLayer(); if (w.kb === '__new') requestAnimationFrame(() => $('#src-w-kbname')?.focus()); };
   A['src-wiz-freq'] = el => { ui('srcWiz').freq = el.dataset.value; refreshLayer(); };
+  A['src-wiz-sched'] = () => refreshLayer();
+  A['src-wiz-goto'] = el => { const w = ui('srcWiz'), n = +el.dataset.step; if (w.busy || w.ask || !(n >= 1 && n < w.step)) return; wizGo(w, n); };
   A['src-wiz-policy'] = el => { if (POLICY[el.dataset.value]) { ui('srcWiz').publish = el.dataset.value; refreshLayer(); } };
   function kbNameErr(v) { const n = (v || '').trim(); if (!n) return 'Name the new knowledge base.'; if (D.kbs.some(k => !k.archived && k.name.toLowerCase() === n.toLowerCase())) return 'A knowledge base with this name already exists.'; return ''; }
   A['src-wiz-kbinput'] = () => { const w = ui('srcWiz'); if (!w.err.kbName) return; const e = kbNameErr(w.kbName); if (e !== w.err.kbName) { w.err.kbName = e; refreshLayer(); } };
@@ -770,8 +880,8 @@
     if (S.ui.srcWiz !== w || S.modal?.name !== 'src-wizard') return;
     let kbId = w.kb;
     if (kbId === '__new') {
-      const k = { id: uid('kb'), name: w.kbName.trim(), desc: '', color: KB_COLORS[D.kbs.length % KB_COLORS.length], memberRole: null, general: 'restricted', shares: [{ kind: 'user', id: me().id, role: 'owner' }], updated: Date.now() };
-      D.kbs.push(k); kbId = k.id;
+      const k = { id: uid('kb'), name: w.kbName.trim(), desc: '', color: KB_COLORS[D.kbs.length % KB_COLORS.length], general: 'workspace', access: {}, shares: [{ kind: 'user', id: me().id, role: 'owner' }], updated: Date.now(), created: Date.now() };
+      D.kbs.push(k); kbId = k.id; X.kbSyncPersonas?.(k);
       D.audit.unshift({ id: uid('ev'), at: Date.now(), actor: me().id, action: 'Created knowledge base', type: 'Knowledge', target: k.name, outcome: 'success', ip: '10.4.12.30', device: 'Chrome on macOS' });
     }
     const idx = treeIdx(w.app), items = selItems(w.app, w.sel), docs = items.reduce((a, n) => a + nodeDocs(n), 0);
@@ -791,7 +901,7 @@
     if (w.step === 1) { if (w.app) wizGo(w, 2); return; }
     if (w.step === 2) {
       if (w.acc === 'new') return w.app === 'gdrive' ? wizGoogle(w) : wizConfluence(w);
-      const a = accById(w.acc); if (!a || a.status !== 'connected') return;
+      const a = accById(w.acc); if (!a || a.status !== 'connected') { w.oauthErr = 'Choose a connected account, or connect a new one.'; refreshLayer(); return; }
       return wizGo(w, 3);
     }
     if (w.step === 3) {
@@ -800,13 +910,13 @@
     }
     return wizSubmit(w);
   };
-  /* Esc, the close button and the scrim ask before discarding wizard work. */
+  /* Esc and the scrim ask before discarding wizard work (the close button uses closeAct). */
   window.addEventListener('keydown', e => {
     if (e.key !== 'Escape' || S.menu || S.palette || S.modal?.name !== 'src-wizard') return;
     e.preventDefault(); e.stopImmediatePropagation(); A['src-wiz-close']();
   }, true);
   window.addEventListener('click', e => {
     if (S.modal?.name !== 'src-wizard' || S.menu) return;
-    if (e.target.closest?.('.modal__close [data-act="close-modal"]') || e.target.classList?.contains('modal__container')) { e.preventDefault(); e.stopImmediatePropagation(); A['src-wiz-close'](); }
+    if (e.target.classList?.contains('modal__container')) { e.preventDefault(); e.stopImmediatePropagation(); A['src-wiz-close'](); }
   }, true);
 })();

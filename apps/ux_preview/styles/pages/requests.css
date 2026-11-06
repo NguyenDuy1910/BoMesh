@@ -17,11 +17,13 @@
 /* New request */
 .rq-new { display: flex; flex-direction: column; gap: 16px; }
 .rq-checkcard .card__header .item-icon { margin-top: 0; }
+.rq-checkcard--ok { padding: 4px 8px; }
+.rq-checkcard .disclosure__body .rq-checks { padding: 4px 4px 0; }
 .rq-checking { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--muted); }
 .rq-fields { display: flex; flex-direction: column; gap: 16px; }
-.rq-summary { padding: 12px 14px; border-radius: var(--radius-xl); background: var(--surface-secondary); }
-.rq-summary .kv { font-size: 13px; gap: 6px 24px; }
 .rq-form__foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.rq-form__fee { display: inline-flex; align-items: center; gap: 6px; margin-right: auto; font-size: 13px; color: var(--muted); }
+.rq-form__fee .i { flex: none; }
 
 /* Eligibility checks */
 .rq-checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
@@ -64,6 +66,7 @@
 .rq-answers { display: flex; flex-direction: column; gap: 12px; margin: 0; }
 .rq-answers dt { font-size: 12px; line-height: 16px; color: var(--muted); }
 .rq-answers dd { margin: 2px 0 0; font-size: 14px; line-height: 20px; overflow-wrap: anywhere; }
+.rq-answers--thread { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 24px; margin: 0 0 12px 42px; padding: 12px 14px; border-radius: var(--radius-xl); background: var(--surface-secondary); }
 
 .rq-ai { display: flex; gap: 10px; padding: 12px 14px; border-radius: var(--radius-xl); background: var(--surface-secondary); font-size: 13px; line-height: 19px; color: var(--muted); }
 .rq-ai > .i { color: var(--accent); flex: none; margin-top: 2px; }
@@ -94,6 +97,7 @@
 .rq-file > .muted { padding-right: 6px; flex: none; }
 
 .rq-composer { gap: 12px; }
+.rq-composer__ask { padding: 2px 0; font-size: 14px; }
 .rq-composer__actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .rq-composer__btns { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin-left: auto; }
 .rq-closed { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-radius: var(--radius-2xl); background: var(--surface-secondary); color: var(--muted); font-size: 13px; line-height: 18px; flex-wrap: wrap; }
@@ -101,8 +105,6 @@
 
 .rq-avatars { display: inline-flex; flex: none; }
 .rq-avatars .avatar + .avatar { margin-left: -4px; box-shadow: 0 0 0 2px var(--overlay); }
-
-.rq-quote { margin: 0; padding: 12px 14px; border-radius: var(--radius-lg); background: var(--surface-secondary); font-size: 14px; line-height: 23px; }
 
 @container app (max-width: 1023px) {
   .rq-detail { grid-template-columns: minmax(0, 1fr); }
@@ -113,4 +115,6 @@
   .rq-thread { padding: 4px 12px; }
   .rq-msg { gap: 10px; }
   .rq-form__foot .button { flex: 1 1 auto; }
+  .rq-form__fee { width: 100%; }
+  .rq-answers--thread { grid-template-columns: minmax(0, 1fr); margin-left: 0; }
 }

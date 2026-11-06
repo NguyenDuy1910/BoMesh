@@ -13,10 +13,10 @@ interface GoogleIdentityApi {
     parent: HTMLElement,
     options: {
       type: "standard";
-      theme: "outline";
+      theme: "outline" | "filled_black";
       size: "large";
       text: "continue_with";
-      shape: "rectangular";
+      shape: "pill";
       logo_alignment: "left";
       width: number;
       locale: string;
@@ -48,16 +48,17 @@ export async function renderGoogleSignInButton(
   clientId: string,
   onCredential: (credential: string) => void,
   onError: (message: string) => void,
+  dark = false,
 ): Promise<void> {
   const identity = await initializeGoogleIdentity(clientId);
   currentCallbacks = { onCredential, onError };
   host.replaceChildren();
   identity.renderButton(host, {
     type: "standard",
-    theme: "outline",
+    theme: dark ? "filled_black" : "outline",
     size: "large",
     text: "continue_with",
-    shape: "rectangular",
+    shape: "pill",
     logo_alignment: "left",
     width: Math.min(400, Math.max(240, Math.floor(host.getBoundingClientRect().width))),
     // The product is written in English; Google would otherwise follow the browser.

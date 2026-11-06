@@ -1,0 +1,99 @@
+/* Base: reset, typography, a deliberately small utility set. */
+/* The element reset sits in the `base` layer so HeroUI's layered component
+   styles win over it; the utilities below stay unlayered. */
+@layer base {
+*, *::before, *::after { box-sizing: border-box; }
+html, body { height: 100%; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--foreground);
+  background: var(--background);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "cv11", "ss01";
+}
+h1, h2, h3, h4, p, ul, ol, dl, dd, figure, blockquote { margin: 0; }
+ul, ol { padding: 0; }
+button, input, select, textarea { font: inherit; color: inherit; letter-spacing: inherit; }
+button { cursor: pointer; background: none; border: 0; padding: 0; }
+button:disabled { cursor: not-allowed; }
+a { color: inherit; text-decoration: none; }
+img, svg { display: block; }
+table { border-collapse: separate; border-spacing: 0; }
+::selection { background: color-mix(in oklab, var(--accent) 28%, transparent); }
+* { scrollbar-width: thin; scrollbar-color: color-mix(in oklch, var(--foreground) 16%, transparent) transparent; }
+:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--radius-md); }
+[hidden] { display: none !important; }
+}
+
+/* Icons — lucide-react glyphs sized and stroked like the preview: <Icon className="i" /> */
+.i { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+.i-xs { width: 12px; height: 12px; }
+.i-sm { width: 14px; height: 14px; }
+.i-lg { width: 20px; height: 20px; }
+.i-xl { width: 24px; height: 24px; }
+.spin { animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Typography */
+.t-display { font-size: 28px; line-height: 36px; font-weight: 600; letter-spacing: -0.02em; }
+.t-title { font-size: 20px; line-height: 28px; font-weight: 600; letter-spacing: -0.01em; }
+.t-heading { font-size: 16px; line-height: 24px; font-weight: 600; }
+.t-subheading { font-size: 14px; line-height: 20px; font-weight: 600; }
+.t-body { font-size: 14px; line-height: 20px; }
+.t-sm { font-size: 13px; line-height: 18px; }
+.t-xs { font-size: 12px; line-height: 16px; }
+.t-label { font-size: 12px; line-height: 16px; font-weight: 500; color: var(--muted); }
+.t-num { font-size: 24px; line-height: 32px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.muted { color: var(--muted); }
+.fg { color: var(--foreground); }
+.strong { font-weight: 600; }
+.medium { font-weight: 500; }
+.mono { font-family: var(--font-mono); font-size: 0.92em; }
+.num { font-variant-numeric: tabular-nums; }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.text-danger { color: var(--danger-soft-foreground); }
+.text-success { color: var(--success-soft-foreground); }
+.text-warning { color: var(--warning-soft-foreground); }
+.text-accent { color: var(--accent-soft-foreground); }
+.link { color: var(--accent-soft-foreground); font-weight: 500; text-underline-offset: 3px; }
+.link:hover { text-decoration: underline; }
+
+/* Layout helpers */
+.row { display: flex; align-items: center; min-width: 0; }
+.row-start { display: flex; align-items: flex-start; min-width: 0; }
+.stack { display: flex; flex-direction: column; min-width: 0; }
+.wrap { flex-wrap: wrap; }
+.between { justify-content: space-between; }
+.end { justify-content: flex-end; }
+.center { justify-content: center; align-items: center; }
+.grow { flex: 1 1 auto; min-width: 0; }
+.none { flex: none; }
+.gap-2 { gap: 2px; } .gap-4 { gap: 4px; } .gap-6 { gap: 6px; } .gap-8 { gap: 8px; } .gap-12 { gap: 12px; } .gap-16 { gap: 16px; } .gap-20 { gap: 20px; } .gap-24 { gap: 24px; } .gap-32 { gap: 32px; }
+.mt-4 { margin-top: 4px; } .mt-8 { margin-top: 8px; } .mt-12 { margin-top: 12px; } .mt-16 { margin-top: 16px; } .mt-24 { margin-top: 24px; } .mt-32 { margin-top: 32px; }
+.mb-8 { margin-bottom: 8px; } .mb-12 { margin-bottom: 12px; } .mb-16 { margin-bottom: 16px; } .mb-24 { margin-bottom: 24px; }
+.ml-auto { margin-left: auto; }
+.w-full { width: 100%; }
+.grid { display: grid; gap: 16px; }
+.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.cols-auto { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+/* Responsive rules use the `app` container (<body>, see layout.css), so the
+   shell, pages and portalled overlays share the same breakpoints. */
+@container app (max-width: 1100px) { .cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .cols-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container app (max-width: 680px) { .cols-2, .cols-3, .cols-4 { grid-template-columns: minmax(0, 1fr); } }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+@container app (max-width: 1023px) { .hide-md { display: none !important; } }
+@container app (max-width: 679px) { .hide-sm { display: none !important; } }
+@container app (min-width: 680px) { .only-sm { display: none !important; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; }
+}

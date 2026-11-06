@@ -1,269 +1,216 @@
 /**
- * Sync schedules as people say them.
+ * Sync schedules as people say them ("Daily at 02:00", "Weekly on Mon at 06:00").
  *
- * The API stores a schedule as a cron expression and an IANA time zone. People
- * choose "Daily at 02:00" or "Weekly on Monday at 06:00", and that is all this
- * module offers them: a draft of frequency, day, time and time zone, the cron
- * it becomes, and the sentence it reads as. A cron expression is never shown;
- * one written by another client that is not daily or weekly reads as "Custom
- * schedule" and the editor offers to replace it.
+ * The API stores a 5-field cron expression plus an IANA time zone
+ * (`Source.schedule {cron, timeZone}`); no schedule means Manual. This module
+ * converts between that and the preview's form (Manual / Daily / Weekly, day,
+ * time on the hour, time zone) and works out the next sync time in the
+ * source's own zone. Pure: no React, no API.
  */
 
-export type ScheduleFrequency = "manual" | "daily" | "weekly";
+export type Frequency = "manual" | "daily" | "weekly";
+export type Day = "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun";
 
-export const WEEKDAYS = [
-  { value: "mon", short: "Mon", label: "Monday", cron: 1 },
-  { value: "tue", short: "Tue", label: "Tuesday", cron: 2 },
-  { value: "wed", short: "Wed", label: "Wednesday", cron: 3 },
-  { value: "thu", short: "Thu", label: "Thursday", cron: 4 },
-  { value: "fri", short: "Fri", label: "Friday", cron: 5 },
-  { value: "sat", short: "Sat", label: "Saturday", cron: 6 },
-  { value: "sun", short: "Sun", label: "Sunday", cron: 0 },
-] as const;
+export interface ScheduleDraft {
+  freq: Frequency;
+  day: Day;
+  /** "HH:MM", wall time in `tz`. */
+  time: string;
+  tz: string;
+}
 
-export type Weekday = (typeof WEEKDAYS)[number]["value"];
+/** The API's schedule fields this module reads and writes. */
+export interface ScheduleValue {
+  cron?: string;
+  timeZone?: string;
+}
 
-export const FREQUENCY_OPTIONS: readonly { value: ScheduleFrequency; label: string }[] = [
+export const DAYS: readonly (readonly [Day, string])[] = [
+  ["Mon", "Monday"],
+  ["Tue", "Tuesday"],
+  ["Wed", "Wednesday"],
+  ["Thu", "Thursday"],
+  ["Fri", "Friday"],
+  ["Sat", "Saturday"],
+  ["Sun", "Sunday"],
+];
+
+export const TIME_ZONES: readonly (readonly [string, string])[] = [
+  ["Asia/Ho_Chi_Minh", "Ho Chi Minh City (GMT+7)"],
+  ["Asia/Singapore", "Singapore (GMT+8)"],
+  ["Asia/Tokyo", "Tokyo (GMT+9)"],
+  ["Europe/London", "London (GMT+1)"],
+  ["America/New_York", "New York (GMT−4)"],
+  ["UTC", "UTC"],
+];
+
+/** Every hour, "00:00" … "23:00". */
+export const TIMES: readonly string[] = Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, "0")}:00`);
+
+export const FREQUENCIES: readonly { value: Frequency; label: string }[] = [
   { value: "manual", label: "Manual" },
   { value: "daily", label: "Daily" },
   { value: "weekly", label: "Weekly" },
 ];
 
-/** What a person edits. `time` is "HH:MM" in `timezone`. */
-export interface ScheduleDraft {
-  frequency: ScheduleFrequency;
-  day: Weekday | "";
-  time: string;
-  timezone: string;
+export const DEFAULT_DRAFT: ScheduleDraft = { freq: "daily", day: "Mon", time: "02:00", tz: "Asia/Ho_Chi_Minh" };
+
+/* Cron day-of-week: 0 or 7 = Sunday, 1 = Monday … 6 = Saturday. */
+const CRON_DOW: Readonly<Record<Day, number>> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+const DOW_NAMES = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+const DAY_BY_DOW: readonly Day[] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+const pad = (n: number) => String(n).padStart(2, "0");
+
+function dayFromCron(field: string): Day | null {
+  const upper = field.toUpperCase();
+  const named = DOW_NAMES.indexOf(upper);
+  if (named >= 0) return DAY_BY_DOW[named] ?? null;
+  if (!/^\d$/.test(field)) return null;
+  return DAY_BY_DOW[Number(field) % 7] ?? null;
 }
 
-/** The fields of an API `Schedule` these helpers read. */
-export interface ScheduleFacts {
-  cron_expression: string;
-  timezone: string | null;
-  enabled: boolean;
+/** The cron expression a draft saves as; `null` for Manual (no schedule). */
+export function cronFor(draft: Pick<ScheduleDraft, "freq" | "day" | "time">): string | null {
+  if (draft.freq === "manual") return null;
+  const [h = 0, m = 0] = draft.time.split(":").map(Number);
+  return draft.freq === "daily" ? `${m} ${h} * * *` : `${m} ${h} * * ${CRON_DOW[draft.day]}`;
 }
 
-export const DEFAULT_SYNC_TIME = "02:00";
-export const DEFAULT_TIMEZONE = "UTC";
-
-/** The time zones offered first; the browser's own and a schedule's own are added when missing. */
-export const SCHEDULE_TIMEZONES = [
-  "Asia/Ho_Chi_Minh",
-  "Asia/Singapore",
-  "Asia/Tokyo",
-  "Europe/London",
-  "America/New_York",
-  "UTC",
-] as const;
-
-const TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
-
-export function isScheduleTime(value: string): boolean {
-  return TIME_PATTERN.test(value);
-}
-
-const pad = (value: number) => String(value).padStart(2, "0");
-
-/** What a cron expression means, when it is one this product can say in words. */
-export type Cadence =
-  | { kind: "daily"; time: string }
-  | { kind: "weekly"; day: Weekday; time: string }
-  | { kind: "hourly"; every: number };
-
-const CRON_DAY_NAMES: Record<string, Weekday> = {
-  sun: "sun",
-  mon: "mon",
-  tue: "tue",
-  wed: "wed",
-  thu: "thu",
-  fri: "fri",
-  sat: "sat",
-};
-
-function weekdayFromCron(field: string): Weekday | null {
-  const named = CRON_DAY_NAMES[field.toLowerCase()];
-  if (named) return named;
-  if (!/^[0-7]$/.test(field)) return null;
-  const number = Number(field) % 7;
-  return WEEKDAYS.find((day) => day.cron === number)?.value ?? null;
-}
-
-export function parseCron(expression: string): Cadence | null {
-  const fields = expression.trim().split(/\s+/);
-  if (fields.length !== 5) return null;
-  const [minute, hour, dayOfMonth, month, dayOfWeek] = fields;
-  if (dayOfMonth !== "*" || month !== "*") return null;
-
-  if (/^\d{1,2}$/.test(minute) && /^\d{1,2}$/.test(hour)) {
-    const m = Number(minute);
-    const h = Number(hour);
-    if (m > 59 || h > 23) return null;
-    const time = `${pad(h)}:${pad(m)}`;
-    if (dayOfWeek === "*") return { kind: "daily", time };
-    const day = weekdayFromCron(dayOfWeek);
-    return day ? { kind: "weekly", day, time } : null;
-  }
-
-  if (minute === "0" && dayOfWeek === "*") {
-    if (hour === "*") return { kind: "hourly", every: 1 };
-    const step = /^\*\/(\d{1,2})$/.exec(hour);
-    if (step && Number(step[1]) > 0) return { kind: "hourly", every: Number(step[1]) };
-  }
-  return null;
-}
-
-/** The cron expression a draft is saved as; `null` for manual (no schedule). */
-export function cronFor(draft: Pick<ScheduleDraft, "frequency" | "day" | "time">): string | null {
-  if (draft.frequency === "manual" || !isScheduleTime(draft.time)) return null;
-  const [hour, minute] = draft.time.split(":").map(Number);
-  if (draft.frequency === "daily") return `${minute} ${hour} * * *`;
-  const day = WEEKDAYS.find((entry) => entry.value === draft.day);
-  return day ? `${minute} ${hour} * * ${day.cron}` : null;
-}
-
-function weekdayShort(day: Weekday): string {
-  return WEEKDAYS.find((entry) => entry.value === day)?.short ?? day;
-}
-
-function describeCadence(cadence: Cadence): string {
-  switch (cadence.kind) {
-    case "daily":
-      return `Daily at ${cadence.time}`;
-    case "weekly":
-      return `Weekly on ${weekdayShort(cadence.day)} at ${cadence.time}`;
-    case "hourly":
-      return cadence.every === 1 ? "Every hour" : `Every ${cadence.every} hours`;
-  }
-}
-
-/** "Daily at 02:00", "Weekly on Mon at 06:00", "Manual" — never a cron expression. */
-export function describeSchedule(schedule: ScheduleFacts | null | undefined): string {
-  if (!schedule) return "Manual";
-  const cadence = parseCron(schedule.cron_expression);
-  return cadence ? describeCadence(cadence) : "Custom schedule";
-}
-
-/** The same sentence for a draft that has not been saved yet. */
-export function describeDraft(draft: ScheduleDraft): string {
-  if (draft.frequency === "manual") return "Manual";
-  if (!isScheduleTime(draft.time)) return draft.frequency === "daily" ? "Daily" : "Weekly";
-  if (draft.frequency === "daily") return `Daily at ${draft.time}`;
-  return draft.day ? `Weekly on ${weekdayShort(draft.day)} at ${draft.time}` : "Weekly";
+/** The API schedule for a draft; `undefined` for Manual. */
+export function scheduleFor(draft: ScheduleDraft): ScheduleValue | undefined {
+  const cron = cronFor(draft);
+  return cron ? { cron, timeZone: draft.tz } : undefined;
 }
 
 /**
- * A draft that starts from what is saved. `custom` is set when the saved
- * schedule is not daily or weekly, so the editor can say what it replaces.
+ * The form state for a saved schedule. `custom` is true when the cron isn't one
+ * this form can show (it then starts from the defaults).
  */
-export function draftFromSchedule(
-  schedule: ScheduleFacts | null | undefined,
-  fallbackTimezone: string,
-): { draft: ScheduleDraft; custom: boolean } {
-  const timezone = schedule?.timezone || fallbackTimezone || DEFAULT_TIMEZONE;
-  if (!schedule) {
-    return { draft: { frequency: "manual", day: "mon", time: DEFAULT_SYNC_TIME, timezone }, custom: false };
-  }
-  const cadence = parseCron(schedule.cron_expression);
-  if (cadence?.kind === "daily") {
-    return { draft: { frequency: "daily", day: "mon", time: cadence.time, timezone }, custom: false };
-  }
-  if (cadence?.kind === "weekly") {
-    return { draft: { frequency: "weekly", day: cadence.day, time: cadence.time, timezone }, custom: false };
-  }
-  return { draft: { frequency: "daily", day: "mon", time: DEFAULT_SYNC_TIME, timezone }, custom: true };
+export function draftFrom(schedule: ScheduleValue | undefined | null): { draft: ScheduleDraft; custom: boolean } {
+  const tz = schedule?.timeZone || DEFAULT_DRAFT.tz;
+  if (!schedule?.cron) return { draft: { ...DEFAULT_DRAFT, freq: "manual", tz }, custom: false };
+  const parts = schedule.cron.trim().split(/\s+/);
+  const [min, hour, dom, mon, dow] = parts;
+  const simple = parts.length === 5 && /^\d{1,2}$/.test(min ?? "") && /^\d{1,2}$/.test(hour ?? "") && dom === "*" && mon === "*";
+  if (!simple || Number(hour) > 23 || Number(min) > 59) return { draft: { ...DEFAULT_DRAFT, tz }, custom: true };
+  const time = `${pad(Number(hour))}:${pad(Number(min))}`;
+  if (dow === "*") return { draft: { ...DEFAULT_DRAFT, freq: "daily", time, tz }, custom: false };
+  const day = dayFromCron(dow ?? "");
+  if (!day) return { draft: { ...DEFAULT_DRAFT, tz }, custom: true };
+  return { draft: { freq: "weekly", day, time, tz }, custom: false };
 }
 
-export interface ScheduleErrors {
-  day?: string;
-  time?: string;
+/** "Manual", "Daily at 02:00", "Weekly on Mon at 06:00", or "Custom schedule". */
+export function draftText(draft: ScheduleDraft): string {
+  if (draft.freq === "manual") return "Manual";
+  if (draft.freq === "daily") return `Daily at ${draft.time}`;
+  return `Weekly on ${draft.day} at ${draft.time}`;
 }
 
-export function validateDraft(draft: ScheduleDraft): ScheduleErrors {
-  const errors: ScheduleErrors = {};
-  if (draft.frequency === "weekly" && !draft.day) errors.day = "Choose a day.";
-  if (draft.frequency !== "manual" && !isScheduleTime(draft.time)) errors.time = "Choose a time.";
-  return errors;
+export function scheduleText(schedule: ScheduleValue | undefined | null): string {
+  const { draft, custom } = draftFrom(schedule);
+  return custom ? "Custom schedule" : draftText(draft);
 }
 
-/** On the hour, every hour, plus `include` (a saved time such as 02:30) when it is not one of them. */
-export function scheduleTimes(include?: string): string[] {
-  const times = Array.from({ length: 24 }, (_, hour) => `${pad(hour)}:00`);
-  if (include && isScheduleTime(include) && !times.includes(include)) {
-    times.push(include);
-    times.sort();
-  }
-  return times;
+/** Whether the form differs from what's saved (time zone and day only count when they apply). */
+export function draftDirty(form: ScheduleDraft, saved: ScheduleDraft): boolean {
+  if (form.freq !== saved.freq) return true;
+  if (form.freq === "manual") return false;
+  return form.time !== saved.time || form.tz !== saved.tz || (form.freq === "weekly" && form.day !== saved.day);
 }
 
-function isTimeZone(value: string): boolean {
+/* ═══════════════ Time zones ═══════════════ */
+
+/** The offered zones plus any other valid zone (a saved one) the list lacks. */
+export function timeZoneOptions(extra?: string | null): readonly (readonly [string, string])[] {
+  if (!extra || TIME_ZONES.some(([tz]) => tz === extra) || !isTimeZone(extra)) return TIME_ZONES;
+  return [...TIME_ZONES, [extra, extra.replace(/_/g, " ")] as const];
+}
+
+/** "Ho Chi Minh City" — the label without its offset. */
+export function tzShort(tz: string): string {
+  return (TIME_ZONES.find(([value]) => value === tz)?.[1] ?? tz).replace(/ \(.*\)$/, "");
+}
+
+function isTimeZone(tz: string): boolean {
   try {
-    new Intl.DateTimeFormat("en-US", { timeZone: value });
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
     return true;
   } catch {
     return false;
   }
 }
 
-/** "GMT+7" for Asia/Ho_Chi_Minh; "UTC" for UTC. Offsets follow daylight saving at `at`. */
-export function timezoneOffset(timezone: string, at: Date = new Date()): string {
-  if (timezone === "UTC" || timezone === "Etc/UTC") return "UTC";
-  try {
-    const part = new Intl.DateTimeFormat("en-US", { timeZone: timezone, timeZoneName: "shortOffset" })
-      .formatToParts(at)
-      .find((entry) => entry.type === "timeZoneName")?.value;
-    return part === "GMT" ? "GMT+0" : part ?? timezone;
-  } catch {
-    return timezone;
+interface WallClock {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  /** 0 = Sunday. */
+  weekday: number;
+}
+
+const formatters = new Map<string, Intl.DateTimeFormat>();
+function formatterFor(tz: string): Intl.DateTimeFormat {
+  let f = formatters.get(tz);
+  if (!f) {
+    f = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      weekday: "short",
+    });
+    formatters.set(tz, f);
   }
+  return f;
 }
 
-/** "Ho Chi Minh City" for Asia/Ho_Chi_Minh, "New York" for America/New_York. */
-export function timezoneCity(timezone: string): string {
-  if (timezone === "UTC" || timezone === "Etc/UTC") return "UTC";
-  const city = timezone.split("/").pop()?.replaceAll("_", " ") ?? timezone;
-  return city === "Ho Chi Minh" ? "Ho Chi Minh City" : city;
+/** The wall clock in `tz` at instant `t`. */
+export function wallClock(t: number, tz: string): WallClock {
+  const parts: Record<string, string> = {};
+  for (const p of formatterFor(tz).formatToParts(new Date(t))) parts[p.type] = p.value;
+  return {
+    year: Number(parts.year),
+    month: Number(parts.month),
+    day: Number(parts.day),
+    hour: Number(parts.hour) % 24,
+    minute: Number(parts.minute),
+    weekday: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(parts.weekday ?? ""),
+  };
 }
 
-/** "Ho Chi Minh City (GMT+7)", or "UTC". */
-export function timezoneLabel(timezone: string, at?: Date): string {
-  const city = timezoneCity(timezone);
-  return city === "UTC" ? "UTC" : `${city} (${timezoneOffset(timezone, at)})`;
+/** Offset of `tz` from UTC at instant `t`, in ms. */
+function offsetAt(t: number, tz: string): number {
+  const w = wallClock(t, tz);
+  const asUtc = Date.UTC(w.year, w.month - 1, w.day, w.hour, w.minute, new Date(t).getUTCSeconds());
+  return asUtc - Math.floor(t / 1000) * 1000;
 }
 
-/** The offered zones, plus any extra valid ones (the browser's, the saved one), without duplicates. */
-export function timezoneOptions(
-  extra: readonly (string | null | undefined)[] = [],
-  at?: Date,
-): { value: string; label: string }[] {
-  const zones: string[] = [];
-  for (const zone of [...extra, ...SCHEDULE_TIMEZONES]) {
-    if (zone && !zones.includes(zone) && isTimeZone(zone)) zones.push(zone);
+/** The instant a wall time in `tz` happens (month is 1-based; day may overflow). */
+export function zonedInstant(year: number, month: number, day: number, hour: number, minute: number, tz: string): number {
+  const guess = Date.UTC(year, month - 1, day, hour, minute);
+  const first = guess - offsetAt(guess, tz);
+  return guess - offsetAt(first, tz);
+}
+
+/** The next sync after `now` for a draft, or `null` for Manual. */
+export function nextSyncAt(draft: ScheduleDraft, now: number = Date.now()): number | null {
+  if (draft.freq === "manual") return null;
+  const tz = isTimeZone(draft.tz) ? draft.tz : "UTC";
+  const [h = 0, m = 0] = draft.time.split(":").map(Number);
+  const today = wallClock(now, tz);
+  const want = CRON_DOW[draft.day];
+  for (let i = 0; i <= 7; i++) {
+    if (draft.freq === "weekly" && (today.weekday + i) % 7 !== want) continue;
+    const at = zonedInstant(today.year, today.month, today.day + i, h, m, tz);
+    if (at > now) return at;
   }
-  return zones.map((zone) => ({ value: zone, label: timezoneLabel(zone, at) }));
-}
-
-/** The browser's time zone, or UTC. */
-export function browserTimezone(): string {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || DEFAULT_TIMEZONE;
-  } catch {
-    return DEFAULT_TIMEZONE;
-  }
-}
-
-function plural(count: number, word: string): string {
-  return `${count} ${count === 1 ? word : `${word}s`}`;
-}
-
-/** "Next sync in 3 hours"; null when nothing is scheduled ahead. */
-export function nextSyncPhrase(nextRunAt: string | null | undefined, now: number = Date.now()): string | null {
-  if (!nextRunAt) return null;
-  const at = Date.parse(nextRunAt);
-  if (Number.isNaN(at) || at <= now) return null;
-  const minutes = Math.max(1, Math.round((at - now) / 60_000));
-  if (minutes < 60) return `Next sync in ${plural(minutes, "minute")}`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `Next sync in ${plural(hours, "hour")}`;
-  return `Next sync in ${plural(Math.round(hours / 24), "day")}`;
+  return null;
 }

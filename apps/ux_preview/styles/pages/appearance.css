@@ -2,16 +2,24 @@
    previews are drawn from each theme's own colors (--tp-*), set inline from
    themePreview(); everything else uses the live tokens. */
 
-/* Clear backdrop: the app behind stays visible and re-themes live. */
-.backdrop--clear { background: transparent; }
+/* Clear backdrop: the app behind stays sharp and visible and re-themes live (no tint, no blur). */
+.backdrop--clear { background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; }
 
 .theme-dot { display: inline-block; width: 16px; height: 16px; border-radius: var(--radius-full); flex: none; box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--foreground) 14%, transparent); }
 
 .theme-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 8px; }
-.theme-card { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 6px; border-radius: var(--radius-xl); background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); text-align: left; cursor: pointer; transition: box-shadow var(--dur-fast) var(--ease-smooth), transform var(--dur-fast) var(--ease-smooth); }
-.theme-card:hover { box-shadow: inset 0 0 0 1px var(--border-secondary); }
-.theme-card[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--accent); }
-.theme-card:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--focus), 0 0 0 2px var(--background), 0 0 0 4px var(--focus); }
+.theme-card { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 6px; border-radius: var(--radius-xl); background: var(--surface); box-shadow: inset 0 0 0 1px var(--card-border); text-align: left; cursor: pointer; transition: box-shadow var(--dur-fast) var(--ease-smooth), transform var(--dur) var(--ease-out); }
+@media (hover: hover) { .theme-card:hover { box-shadow: var(--lift-shadow), inset 0 0 0 1px color-mix(in oklab, var(--foreground) 11%, transparent); transform: translateY(-1px); } }
+.theme-card:active { transform: scale(0.985); }
+.theme-card[aria-pressed="true"], .theme-card[aria-pressed="true"]:hover { box-shadow: inset 0 0 0 2px var(--accent); }
+.theme-card:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--focus), 0 0 0 3px var(--focus-halo); }
+/* The recommended default: preview beside its name and a one-line reason. */
+.theme-card--featured { flex-direction: row; align-items: center; gap: 14px; padding: 8px 40px 8px 8px; }
+.theme-card--featured .theme-card__preview { width: 132px; flex: none; }
+.theme-card--featured .theme-card__meta { gap: 4px; padding: 0; }
+.theme-card--featured .theme-card__name { font-size: 14px; line-height: 20px; font-weight: 600; }
+.theme-card__note.theme-card__note--wrap { font-size: 12px; line-height: 17px; white-space: normal; overflow: visible; }
+.theme-card--featured .theme-card__check { top: 50%; right: 14px; margin-top: -9px; }
 .theme-card__preview { display: flex; height: 64px; border-radius: calc(var(--radius-xl) - 3px); overflow: hidden; background: var(--tp-bg); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--tp-text) 10%, transparent); color: var(--tp-text); }
 .theme-card__side { display: flex; flex-direction: column; gap: 4px; width: 22px; padding: 8px 5px; }
 .theme-card__side i { display: block; height: 4px; border-radius: 2px; background: color-mix(in oklab, var(--tp-muted) 45%, transparent); }
@@ -26,7 +34,9 @@
 .theme-card__meta { display: flex; flex-direction: column; padding: 0 2px 2px; min-width: 0; }
 .theme-card__name { font-size: 13px; line-height: 18px; font-weight: 500; color: var(--foreground); }
 .theme-card__note { font-size: 11px; line-height: 14px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.theme-card__check { position: absolute; top: 10px; right: 10px; display: grid; place-items: center; width: 18px; height: 18px; border-radius: var(--radius-full); background: var(--accent); color: var(--accent-foreground); }
+.theme-card__check { position: absolute; top: 10px; right: 10px; display: grid; place-items: center; width: 18px; height: 18px; border-radius: var(--radius-full); background: var(--accent); color: var(--accent-foreground); animation: theme-check-pop var(--dur) var(--ease-out); }
+@keyframes theme-check-pop { from { transform: scale(0.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .theme-card__check { animation: none; } .theme-card, .theme-card:hover { transform: none; } }
 .theme-card__check .i { width: 12px; height: 12px; stroke-width: 3; }
 
 .hue-field { display: flex; flex-direction: column; gap: 6px; }
@@ -36,10 +46,10 @@
 .hue-slider:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--focus); }
 
 .font-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-.font-option { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 8px 10px; border-radius: var(--radius-lg); background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); cursor: pointer; text-align: left; color: var(--foreground); }
+.font-option { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 8px 10px; border-radius: var(--radius-lg); background: var(--surface); box-shadow: inset 0 0 0 1px var(--card-border); cursor: pointer; text-align: left; color: var(--foreground); transition: background-color var(--dur-fast), box-shadow var(--dur-fast); }
 .font-option:hover { background: var(--surface-hover); }
 .font-option[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--accent); }
-.font-option:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--focus); }
+.font-option:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--focus), 0 0 0 3px var(--focus-halo); }
 .font-option__sample { font-size: 18px; line-height: 22px; font-weight: 600; }
 .font-option__name { font-size: 12px; line-height: 16px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 
@@ -49,4 +59,5 @@
 @container app (max-width: 679px) {
   .font-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .theme-gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .theme-card--featured .theme-card__preview { width: 104px; }
 }

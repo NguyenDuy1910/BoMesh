@@ -114,8 +114,9 @@
     const line = published
       ? `<div class="quiz-status">${ic('calendar', 'i-sm')}<span>${w.due ? `${w.due < Date.now() ? 'Closed' : 'Due'} ${esc(fmtDateTime(w.due))}` : 'Published'}</span><span aria-hidden="true">·</span><span>${d.attemptsAllowed === 1 ? 'One attempt' : 'Unlimited attempts'}</span><span aria-hidden="true">·</span><span>${fmtNum(s.attempts || 0)} of ${fmtNum(classSize(sp, s))} submitted</span></div>`
       : `<div class="quiz-status">${ic('eye-off', 'i-sm')}<span>Draft — only the teaching team can see it. Check the questions, then publish.</span></div>`;
+    const pubErr = !published && u.pubErr ? `<div class="field-error mb-16" role="alert">${ic('alert-circle')}<span>${esc(u.pubErr)}</span></div>` : '';
     const tabsHtml = hasResults ? `<div class="quiz-tabs">${tabs([{ id: 'questions', label: 'Questions', count: qs.length }, { id: 'results', label: 'Results' }], tab, '', { variant: 'primary', act: 'quiz-tab' })}</div>` : '';
-    return `${line}${tabsHtml}${tab === 'results' ? resultsView(w, ctx) : questionsView(w, ctx)}`;
+    return `${line}${pubErr}${tabsHtml}${tab === 'results' ? resultsView(w, ctx) : questionsView(w, ctx)}`;
   }
   A['quiz-tab'] = el => { const w = curWork(); if (!w) return; qb(w).tab = el.dataset.value; refresh(); };
   function questionsView(w, ctx) {
@@ -158,7 +159,7 @@
   A['quiz-edit-cancel'] = () => {
     const e = S.ui.quizEdit, w = X.work.byId(e?.wid); if (!w) return;
     if (e.isNew) { const i = w.data.questions.findIndex(q => q.id === e.qid); if (i >= 0) w.data.questions.splice(i, 1); }
-    qb(w).edit = null; S.ui.quizEdit = null; refresh();
+    Object.assign(qb(w), { edit: null, pubErr: '' }); S.ui.quizEdit = null; refresh();
   };
   A['quiz-edit-save'] = () => {
     const e = S.ui.quizEdit, w = X.work.byId(e?.wid); if (!w) return;
@@ -166,7 +167,7 @@
     const q = w.data.questions.find(x => x.id === e.qid); if (!q) return;
     Object.assign(q, { q: e.q.trim(), options: e.options.map(o => o.trim()), answer: e.answer, difficulty: e.difficulty, explain: e.explain.trim() });
     delete q.topic;
-    qb(w).edit = null; S.ui.quizEdit = null; X.work.save(w); refresh();
+    Object.assign(qb(w), { edit: null, pubErr: '' }); S.ui.quizEdit = null; X.work.save(w); refresh();
     toast(e.isNew ? 'Question added' : 'Question saved');
   };
   A['quiz-add'] = el => {
@@ -206,7 +207,7 @@
     const hard = rated[0];
     const insight = hard && hard.r < 0.6 ? `<div class="mt-16">${alertBox('warning', `Q${hard.i + 1} — ${topicOf(hard.q) || `“${hard.q.q}”`} — only ${Math.round(hard.r * 100)}% correct`, `Correct answer: ${esc(hard.q.options[hard.q.answer])}. ${esc(hard.q.explain || '')}`, btn('Explain in class', { size: 'sm', v: 'secondary', icon: 'sparkles', act: 'quiz-explain', data: { id: w.id, q: hard.q.id } }), { icon: 'lightbulb' })}</div>` : '';
     const tone = r => (r < 0.5 ? 'danger' : r < 0.7 ? 'warning' : 'success');
-    const barsHtml = rated.length ? `<div class="card quiz-bars">${rated.map(x => `<div class="quiz-bar"><span class="quiz-bar__n num">Q${x.i + 1}</span><span class="quiz-bar__q truncate" title="${esc(x.q.q)}">${esc(x.q.q)}</span><span class="quiz-bar__track">${progress(x.r * 100, tone(x.r), `Q${x.i + 1} correct rate`)}</span><span class="quiz-bar__pct num">${Math.round(x.r * 100)}%</span></div>`).join('')}</div>` : emptyState({ icon: 'chart', title: 'No answers for these questions yet', compact: true, boxed: true });
+    const barsHtml = rated.length ? `<div class="card quiz-bars">${rated.map(x => `<div class="quiz-bar"><span class="quiz-bar__n num">Q${x.i + 1}</span><span class="quiz-bar__q truncate" data-tip="${esc(x.q.q)}">${esc(x.q.q)}</span><span class="quiz-bar__track">${progress(x.r * 100, tone(x.r), `Q${x.i + 1} correct rate`)}</span><span class="quiz-bar__pct num">${Math.round(x.r * 100)}%</span></div>`).join('')}</div>` : emptyState({ icon: 'chart', title: 'No answers for these questions yet', compact: true, boxed: true });
     return `${stats}${insight}${section('By question', barsHtml, { desc: 'Share of students who answered correctly, hardest first.' })}`;
   }
   A['quiz-explain'] = el => {
@@ -221,26 +222,37 @@
   const dueAt = days => { const d = new Date(Date.now() + days * DAY); d.setHours(23, 59, 0, 0); return d.getTime(); };
   A['quiz-publish'] = el => {
     const w = X.work.byId(el.dataset.id); if (!w) return;
-    S.ui.quizPub = { days: '5', attempts: '1', notify: true, limit: String(w.data.timeLimit || 15) };
+    // The primary stays enabled; what's missing is said next to the questions instead.
+    const u = qb(w), qs = w.data?.questions || [];
+    if (u.edit) { const i = qs.findIndex(q => q.id === u.edit); u.pubErr = `Save or cancel question ${i + 1} first.`; refresh(); $('#quiz-q-' + u.edit)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); return; }
+    if (!qs.length) { u.pubErr = 'Add at least one question first.'; refresh(); return; }
+    u.pubErr = '';
+    S.ui.quizPub = { days: '5', attempts: '1', notify: true, limit: String(w.data.timeLimit || 15), more: false, busy: false };
     openModal('quiz-publish', { id: w.id });
   };
+  const dueLabel = (days, o = { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) => new Date(dueAt(days)).toLocaleString('en-US', o);
   M['quiz-publish'] = p => {
     const w = X.work.byId(p.id), sp = spaceById(w?.space), f = S.ui.quizPub || {};
     if (!w || !sp) return { title: 'Publish quiz', body: '' };
-    const n = w.data.questions.length;
+    const n = w.data.questions.length, dis = f.busy ? 'disabled' : '';
+    const rules = `<div class="quiz-pub__row">${field({ id: 'qp-limit', label: 'Time limit', control: select({ id: 'qp-limit', bind: 'quizPub.limit', value: f.limit, change: 'quiz-pub-refresh', options: [['10', '10 minutes'], ['15', '15 minutes'], ['20', '20 minutes'], ['30', '30 minutes']], attrs: dis }) })}
+      <div class="field"><span class="label">Attempts</span>${seg({ value: f.attempts, options: [['1', 'One attempt'], ['0', 'Unlimited']], act: 'quiz-pub-attempts', label: 'Attempts' })}</div></div>`;
     return {
-      title: `Publish to ${sp.code || sp.name}`, desc: `${plural(n, 'question')} · students in ${esc(sp.name)} see it on Home and in the course.`,
-      body: `<div class="quiz-pub">${field({ id: 'qp-due', label: 'Due', control: select({ id: 'qp-due', bind: 'quizPub.days', value: f.days, options: [3, 5, 7].map(dd => [String(dd), `In ${dd} days — ${new Date(dueAt(dd)).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`]) }) })}
-        ${field({ id: 'qp-limit', label: 'Time limit', control: select({ id: 'qp-limit', bind: 'quizPub.limit', value: f.limit, options: [['10', '10 minutes'], ['15', '15 minutes'], ['20', '20 minutes'], ['30', '30 minutes']] }) })}
-        <div class="field"><span class="label">Attempts</span>${seg({ value: f.attempts, options: [['1', 'One attempt'], ['0', 'Unlimited']], act: 'quiz-pub-attempts', label: 'Attempts' })}</div>
-        <div class="mt-8">${switchRow({ title: 'Notify students', desc: 'Posts an announcement in the course.', on: f.notify, act: 'quiz-pub-notify' })}</div></div>`,
-      foot: btn('Cancel', { act: 'close-modal' }) + btn('Publish', { v: 'primary', icon: 'send', act: 'quiz-pub-ok', data: { id: w.id } }),
+      title: `Publish to ${sp.code || sp.name}`, icon: 'send',
+      desc: `${plural(n, 'question')} · students in ${esc(sp.name)} see it on Home and in the course.`,
+      body: `<div class="quiz-pub">${field({ id: 'qp-due', label: 'Due', control: select({ id: 'qp-due', bind: 'quizPub.days', value: f.days, options: [3, 5, 7].map(dd => [String(dd), `In ${dd} days — ${dueLabel(dd)}`]), attrs: `data-autofocus ${dis}` }) })}
+        ${disclosure({ path: 'quizPub.more', icon: 'sliders', title: 'Quiz rules', summary: `${f.limit} minutes · ${f.attempts === '1' ? 'One attempt' : 'Unlimited attempts'}`, body: rules })}
+        ${switchRow({ id: 'qp-notify', title: 'Notify students', desc: 'Posts an announcement in the course.', on: f.notify, act: 'quiz-pub-notify', disabled: f.busy })}</div>`,
+      footStart: 'Students see it as soon as you publish.',
+      foot: btn('Cancel', { v: 'ghost', act: 'close-modal', disabled: f.busy }) + btn('Publish', { v: 'primary', icon: 'send', act: 'quiz-pub-ok', data: { id: w.id }, loading: f.busy }),
     };
   };
   A['quiz-pub-attempts'] = el => { S.ui.quizPub.attempts = el.dataset.value; refreshLayer(); };
+  A['quiz-pub-refresh'] = () => refreshLayer();
   A['quiz-pub-notify'] = () => { S.ui.quizPub.notify = !S.ui.quizPub.notify; refreshLayer(); };
-  A['quiz-pub-ok'] = el => {
-    const w = X.work.byId(el.dataset.id), sp = spaceById(w?.space), f = S.ui.quizPub; if (!w || !sp) return;
+  A['quiz-pub-ok'] = async el => {
+    const w = X.work.byId(el.dataset.id), sp = spaceById(w?.space), f = S.ui.quizPub; if (!w || !sp || f.busy) return;
+    f.busy = true; S.modal.props.guard = true; refreshLayer(); await sleep(500);
     const prev = { status: w.status, visibility: w.visibility, published: w.published, due: w.due, attemptsAllowed: w.data.attemptsAllowed, timeLimit: w.data.timeLimit };
     const due = dueAt(+f.days);
     Object.assign(w, { status: 'published', visibility: 'space', published: Date.now(), due });
@@ -383,7 +395,7 @@
   };
   function quizActions(w, ctx) {
     if (isPractice(w) || !ctx.canEdit || w.status === 'published' || !ctx.sp) return '';
-    return btn(`Publish to ${ctx.sp.code || ctx.sp.name}`, { v: 'primary', icon: 'send', act: 'quiz-publish', data: { id: w.id }, disabled: !w.data?.questions?.length || !!qb(w).edit });
+    return btn(`Publish to ${ctx.sp.code || ctx.sp.name}`, { v: 'primary', icon: 'send', act: 'quiz-publish', data: { id: w.id } });
   }
   const quizHtml = w => `<ol>${(w.data.questions || []).map(q => `<li><p>${esc(q.q)}</p><ol type="A">${q.options.map((o, j) => `<li>${esc(o)}${j === q.answer ? ' <b>(correct)</b>' : ''}</li>`).join('')}</ol>${q.explain ? `<p><i>${esc(q.explain)}</i></p>` : ''}${q.cite?.doc ? `<p><small>Source: ${esc(docById(q.cite.doc)?.name || '')}, page ${q.cite.page}</small></p>` : ''}</li>`).join('')}</ol>`;
   const quizLines = w => (w.data.questions || []).flatMap((q, i) => [`${i + 1}. ${q.q}`, ...q.options.map((o, j) => `   ${KEYS[j]}. ${o}${j === q.answer ? '  (correct)' : ''}`), q.explain ? `   ${q.explain}` : '', '']);
@@ -495,8 +507,8 @@
   function guideActions(w, ctx) {
     const flows = workflowsFor(ctx.sp).map(f => f.id);
     const wf = flows.includes('practice-quiz') ? ['practice-quiz', 'Practice quiz from this'] : flows.includes('quiz') && ctx.isStaff ? ['quiz', 'Make a quiz from this'] : null;
-    return (wf ? btn(wf[1], { icon: 'target', act: 'work-start', data: { workflow: wf[0], space: w.space || '', docs: w.sources.join(',') } }) : '')
-      + iconBtn('download', 'Download', { menu: 'work-dl', data: { id: w.id }, muted: false });
+    // Downloads live in ⋯ with every other kind of work.
+    return wf ? btn(wf[1], { icon: 'target', act: 'work-start', data: { workflow: wf[0], space: w.space || '', docs: w.sources.join(',') } }) : '';
   }
   const sup = (html, cs) => String(html).replace(/\[(\d+)\]/g, (m, n) => (cs[n - 1] ? `<sup>[${n}]</sup>` : ''));
   const guideHtml = w => (w.data.sections || []).map(s => `<h2>${esc(s.title)}</h2>${sup(s.html, s.cites || [])}${s.cites?.length ? `<p><small>${s.cites.map((c, i) => `[${i + 1}] ${esc(docById(c.doc)?.name || '')}, page ${c.page} — “${esc(c.quote)}”`).join('<br>')}</small></p>` : ''}`).join('');
@@ -507,6 +519,6 @@
     label: 'Study guide', icon: 'book', noun: 'study guide',
     options: guideOptions, title: guideTitle, generate: generateGuide, render: renderGuide, actions: guideActions,
     summary: w => `${plural(w.data?.sections?.length || 0, 'section')}${w.data?.depth === 'quick' ? ' · quick summary' : ''}`,
-    exportHtml: guideHtml, exportLines: guideLines, headerDownload: true,
+    exportHtml: guideHtml, exportLines: guideLines,
   };
 })();

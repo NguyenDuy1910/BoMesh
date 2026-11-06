@@ -1,30 +1,22 @@
 /*
- * Workspace admin home: Overview (ov-), Assistant (asst-), Settings (set-)
- * and the Inbox (inbox-). Composition only — components come from
+ * Workspace admin home: Overview (ov-), Assistant (asst-) and Settings (set-).
+ * Composition only — components come from
  * components.css; colors are theme tokens.
  */
 
 /* ───── Overview ───── */
 .ov-line { display: block; }
+/* Questions trend inside its KPI card (the card has no page of its own). */
+.ov-spark { margin-top: 8px; color: var(--accent); }
+.ov-spark svg { display: block; width: 100%; }
 .ov-delta { display: inline-flex; align-items: center; gap: 2px; font-weight: 500; color: var(--success-soft-foreground); }
 .ov-delta--down { color: var(--danger-soft-foreground); }
 .ov-of { font-size: 16px; font-weight: 500; color: var(--muted); }
-.ov-split { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; align-items: start; }
-.ov-usage .stat__value { margin-top: -4px; }
-.ov-flash { animation: ov-flash 1.2s var(--ease-out); }
-@keyframes ov-flash { 0%, 40% { box-shadow: var(--surface-shadow), 0 0 0 2px var(--focus); } }
 .ov-gaps > .item { align-items: flex-start; }
 .ov-gap-q { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 16px; padding: 12px; border-radius: var(--radius-xl); background: var(--surface-secondary); font-weight: 500; overflow-wrap: anywhere; }
 .ov-gap-q .ov-gap-n { flex: none; }
-.ov-gap-actions { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0 0 -2px; }
 .ov-gaps .item__title > .truncate { white-space: normal; }
 .ov-gap-n { min-width: 36px; height: 24px; padding: 0 6px; border-radius: var(--radius-full); display: grid; place-items: center; background: var(--warning-soft); color: var(--warning-soft-foreground); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
-
-/* ───── Inbox ───── */
-.inbox-line { display: block; }
-.inbox-time { display: block; font-size: 12px; line-height: 16px; color: var(--muted); margin-top: 2px; }
-.inbox-item:not(.item--unread) .item__title { font-weight: 400; }
-.inbox-foot { display: flex; justify-content: center; margin-top: 16px; }
 
 /* ───── Assistant ───── */
 .asst-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); gap: 24px; align-items: start; }
@@ -32,12 +24,22 @@
 .asst-over { color: var(--danger-soft-foreground); font-weight: 500; }
 .asst-switches .switch-row:first-child { padding-top: 0; }
 .asst-switches .switch-row:last-child { padding-bottom: 0; }
-.asst-starters { display: flex; flex-direction: column; gap: 12px; }
-.asst-starter { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 12px; border-radius: var(--radius-xl); background: var(--surface-secondary); }
-.asst-starter__n { width: 24px; height: 24px; border-radius: var(--radius-full); display: grid; place-items: center; background: var(--default); font-size: 12px; font-weight: 600; margin-top: 26px; }
+.asst-starters { display: flex; flex-direction: column; gap: 8px; }
+.asst-starter { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 10px 12px; border-radius: var(--radius-xl); background: var(--surface-secondary); }
 .asst-starter__fields { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 12px; min-width: 0; }
 .asst-starter__fields > .field + .field { margin-top: 0; }
-.asst-starter__actions { display: flex; gap: 2px; margin-top: 22px; }
+.asst-starter__actions { display: flex; gap: 2px; margin-top: 26px; }
+/* Reorder and remove are secondary: they appear on hover or keyboard focus (always visible on touch). */
+@media (hover: hover) {
+  .asst-starter__actions { opacity: 0; transition: opacity var(--dur-fast); }
+  .asst-starter:hover .asst-starter__actions, .asst-starter:focus-within .asst-starter__actions { opacity: 1; }
+}
+/* Column labels once: later rows keep them for screen readers only */
+.asst-starter + .asst-starter .label { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.asst-starter + .asst-starter .asst-starter__actions { margin-top: 2px; }
+.asst-caps__note { margin-bottom: 12px; }
+.asst-prev__title { display: inline-flex; align-items: center; gap: 6px; }
+.asst-prev__title .i { color: var(--muted); }
 
 .asst-preview { position: sticky; top: 16px; min-width: 0; }
 .asst-prev { gap: 16px; }
@@ -66,48 +68,60 @@
 .set-url__prefix { flex: none; padding-left: 12px; font-size: 14px; color: var(--muted); }
 .set-url .input { background: transparent; box-shadow: none; padding-left: 1px; height: 34px; }
 .set-url .input:focus, .set-url .input[aria-invalid="true"] { box-shadow: none; }
-.set-form + .savebar { margin-top: 24px; }
-.set-danger { box-shadow: var(--surface-shadow), inset 0 0 0 1px color-mix(in oklab, var(--danger) 35%, transparent); }
+.set-notice { margin-bottom: 24px; }
+.set-advanced { margin-top: 24px; }
+.set-advanced + .savebar { margin-top: 24px; }
 .set-id > .input { padding-left: 12px; }
-.set-impact { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; font-size: 14px; }
-.set-impact li { display: flex; align-items: center; gap: 10px; }
-.set-impact .i { color: var(--muted); flex: none; }
-.set-danger .card__footer { padding-top: 16px; border-top: 1px solid var(--separator); flex-wrap: wrap; }
+/* Archive: a quiet row under the workspace ID, separated by a hairline */
+.set-archive { display: flex; align-items: center; gap: 16px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--separator); }
+.set-archive .chip { vertical-align: middle; margin-left: 4px; }
 
 /* Workspace setup */
 .set-setup .choice__desc { text-wrap: pretty; }
-.set-reset { margin-top: 10px; font-size: 13px; }
+.set-reset { margin-top: 12px; font-size: 13px; }
 .set-switches .switch-row:first-child { padding-top: 0; }
 .set-switches .switch-row:last-child { padding-bottom: 0; }
-.set-changed { display: inline-block; margin-left: 4px; font-weight: 500; color: var(--warning-soft-foreground); }
+/* An AI workflow its space types don't allow: dimmed, with the reason as its meta line and tooltip */
+.set-opt-off { display: block; border-radius: var(--radius-md); }
+.set-opt-off .set-opt { opacity: .7; }
+.set-opt-off:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .set-checks { display: flex; flex-direction: column; gap: 14px; }
 .set-checks .checkbox { align-items: flex-start; }
 .set-opt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.set-opt__title { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; font-weight: 500; }
+.set-opt__title { display: flex; flex-wrap: wrap; align-items: center; column-gap: 8px; font-weight: 500; }
+.set-opt__icon { color: var(--muted); margin-right: -2px; }
 .set-opt__meta { font-size: 12px; font-weight: 400; color: var(--muted); }
 .set-opt__desc { font-size: 12px; line-height: 16px; color: var(--muted); }
 
-/* Assistant: starters per role */
-.asst-roles { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+/* Assistant: who a starter list is for (Everyone, a role or a group) */
+.asst-aud-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 16px; }
+.asst-aud-row .label { margin: 0; }
+.asst-aud { width: auto; min-width: 200px; max-width: 100%; }
+.asst-aud-note { margin: 6px 0 12px; }
+.asst-aud-empty { padding: 16px; border-radius: var(--radius-xl); background: var(--surface-secondary); }
+/* Preview in a drawer (phones and tablets): no card around it */
+.asst-prev--sheet { display: flex; flex-direction: column; gap: 16px; }
+/* The header Preview button only exists where the inline preview doesn't */
+.asst-prev-open { display: none; }
 
 /* ───── Responsive ───── */
 @container app (max-width: 1023px) {
-  .ov-split { grid-template-columns: minmax(0, 1fr); }
   .asst-layout { grid-template-columns: minmax(0, 1fr); }
-  .asst-preview { position: static; }
+  .asst-preview { display: none; }
+  .asst-prev-open { display: inline-flex; }
 }
 @container app (max-width: 760px) {
   .asst-style .choice-group { grid-template-columns: minmax(0, 1fr) !important; }
   .set-setup .choice-group { grid-template-columns: minmax(0, 1fr) !important; }
   .asst-starter__fields { grid-template-columns: minmax(0, 1fr); }
+  .asst-starter + .asst-starter .label { position: static; width: auto; height: auto; margin: 0; overflow: visible; clip: auto; white-space: normal; }
+  .asst-starter + .asst-starter .asst-starter__actions { margin-top: 26px; }
 }
 @container app (max-width: 679px) {
-  .ov-attn > .item, .inbox-list > .item { flex-wrap: wrap; }
-  .ov-attn .item__body, .inbox-list .item__body, .ov-gaps .item__body { flex: 1 1 0; }
-  .ov-attn .item__trail { width: 100%; padding-left: 48px; }
-  .inbox-list .item__trail:has(> .button:not(.button--icon-only):not(.hide-sm)) { width: 100%; padding-left: 48px; }
-  .inbox-list .item__trail > .button--icon-only { margin-left: auto; }
-  .asst-starter { grid-template-columns: minmax(0, 1fr) auto; }
-  .asst-starter__n { display: none; }
-  .asst-starter__actions { flex-direction: column; margin-top: 22px; }
+  /* Item titles wrap to two lines via item({ lines: 2 }); the description gets the same clamp so what and why aren't cut off.
+     Trailing actions wrap under the content automatically (components.css). */
+  .ov-attn .ov-line { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; overflow: hidden; }
+  .ov-attn .item__body, .ov-gaps .item__body { flex: 1 1 0; min-width: 0; }
+  .asst-starter__actions, .asst-starter + .asst-starter .asst-starter__actions { flex-direction: column; margin-top: 26px; }
+  .set-archive { flex-wrap: wrap; }
 }

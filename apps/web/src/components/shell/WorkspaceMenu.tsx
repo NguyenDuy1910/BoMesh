@@ -1,96 +1,125 @@
 "use client";
 
-import { ArrowLeft, ChevronsUpDown, LayoutGrid, Layers, Settings } from "lucide-react";
+import { Dropdown, Header, Label, Separator } from "@heroui/react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, ChevronsUpDown, Layers, LayoutGrid } from "lucide-react";
 import { useRouter } from "next/navigation";
 
-import { RailTip } from "@/components/shell/RailTip";
-import { useCurrentWorkspace } from "@/components/shell/useCurrentWorkspace";
-import { WorkspaceMark } from "@/components/patterns/WorkspaceMark";
-import { Menu, MenuItem, MenuLabel, MenuRadioItem, MenuSeparator } from "@/components/ui/Menu";
-import { useToast } from "@/components/ui/Toast";
-import { canAccessPlatformControl, hasSessionPermission } from "@/lib/auth/session";
-import { useWorkspaceSwitch } from "@/modules/auth/queries";
+import { toast } from "@/components/ui/Toast";
+import { WorkspaceMark } from "@/components/ui/WorkspaceMark";
+import { resourceId, type Schema } from "@/lib/api/client";
+import { PLATFORM_CONSOLE, type ShellMode } from "@/lib/navigation";
+import { isPlatformOperator, useSession } from "@/lib/session";
+import { listMyWorkspaces, rememberedWorkspace, rememberWorkspace, useOptionalWorkspace } from "@/lib/workspace";
+import { markWorkspaceOpened, useRoleDisplayName } from "@/modules/auth/api";
 
-/**
- * The sidebar head (prototype `MENUS.ws`): the workspace you are in, every
- * workspace you can switch to, the platform console for operators,
- * workspace settings for admins, and the full workspace list.
- */
-export function WorkspaceMenu({ platform, collapsed }: { platform: boolean; collapsed: boolean }) {
+export interface ShellWorkspaces {
+  workspaces: Schema<"Workspace">[];
+  /** The workspace this device last opened (the console's "Back to …"). */
+  current: Schema<"Workspace"> | null;
+}
+
+/** Workspaces and the remembered one, for the platform console (which has no active workspace context). */
+export function useShellWorkspaces(enabled: boolean): ShellWorkspaces {
+  const session = useSession();
+  const { data } = useQuery({
+    queryKey: ["shell", "my-workspaces", session?.user.name],
+    queryFn: listMyWorkspaces,
+    enabled: enabled && Boolean(session),
+    staleTime: 5 * 60_000,
+  });
+  const workspaces = data ?? [];
+  const remembered = data ? rememberedWorkspace() : null;
+  return { workspaces, current: workspaces.find((w) => resourceId(w.name) === remembered) ?? workspaces[0] ?? null };
+}
+
+/** Sidebar header: workspace switcher (preview `MENUS.ws`). */
+export function WorkspaceMenu({ mode }: { mode: ShellMode }) {
   const router = useRouter();
-  const toast = useToast();
-  const { session, workspace, viewer } = useCurrentWorkspace();
-  const { switchingId, switchWorkspace } = useWorkspaceSwitch();
-  const workspaces = session?.workspaces ?? [];
-  const name = platform ? "Platform" : workspace?.name ?? "Workspace";
-  const triggerLabel = platform ? "Platform console: switch workspace" : `${name}: switch workspace`;
+  const queryClient = useQueryClient();
+  const session = useSession();
+  const ctx = useOptionalWorkspace();
+  const platform = mode === "platform";
+  const fallback = useShellWorkspaces(!ctx);
+  const workspaces = ctx?.workspaces ?? fallback.workspaces;
+  const activeId = ctx?.id ?? null;
+  const role = useRoleDisplayName(ctx?.id, ctx?.member.roles);
 
-  const choose = async (workspaceId: string, workspaceName: string) => {
-    if (workspaceId === session?.active_workspace_id) {
-      if (platform) router.push("/chat");
-      return;
-    }
-    if (await switchWorkspace(workspaceId)) {
-      toast.show({ tone: "info", message: `Switched to ${workspaceName}` });
-      router.push("/chat");
-    } else {
-      toast.show({ tone: "err", message: `Couldn’t switch to ${workspaceName}. Try again.` });
-    }
+  const switchTo = (workspace: Schema<"Workspace">) => {
+    const id = resourceId(workspace.name);
+    if (!id || (!platform && id === activeId)) return;
+    markWorkspaceOpened(id);
+    if (ctx) ctx.switchTo(id);
+    else
+      void rememberWorkspace(id).then(() => {
+        queryClient.clear();
+        router.push("/home");
+      });
+    if (id !== activeId) toast(`Switched to ${workspace.displayName}`, { tone: "accent" });
   };
 
   return (
-    <Menu
-      align="start"
-      className="flex w-full"
-      menuClassName="min-w-[248px]"
-      trigger={(props) => (
-        <RailTip enabled={collapsed} label={triggerLabel}>
-          <button {...props} aria-label={triggerLabel} className="ws-switch">
-            {platform ? (
-              <span aria-hidden="true" className="grid size-7 shrink-0 place-items-center rounded-[7px] bg-[var(--surface-inverse)] text-[var(--text-inverse)]">
-                <Layers className="size-4" />
-              </span>
-            ) : (
-              <WorkspaceMark className="size-7 rounded-[7px] text-[length:var(--text-size-meta)] font-semibold" name={name} />
-            )}
-            <span className="side-grow hide-collapsed">
-              {platform ? (
-                <span className="ws-name flex items-center gap-2">Platform <span className="mode-chip">Console</span></span>
-              ) : (
-                <span className="ws-name">{name}</span>
-              )}
-              <span className="ws-meta">{platform ? "All workspaces" : viewer?.roleLabel ?? "Member"}</span>
+    <Dropdown>
+      <Dropdown.Trigger className="ws-switch" aria-label="Switch workspace">
+        {platform ? (
+          <>
+            <span className="ws-mark" style={{ background: "var(--foreground)", color: "var(--background)" }} aria-hidden>
+              <Layers className="i i-sm" />
             </span>
-            <ChevronsUpDown aria-hidden="true" className="hide-collapsed size-4 shrink-0 text-[var(--text-tertiary)]" />
-          </button>
-        </RailTip>
-      )}
-    >
-      <MenuLabel>Workspaces</MenuLabel>
-      {workspaces.map((item) => (
-        <MenuRadioItem
-          checked={!platform && item.id === session?.active_workspace_id}
-          disabled={Boolean(switchingId)}
-          icon={<WorkspaceMark className="size-[22px] rounded-[6px] text-[10px] font-semibold" name={item.name} />}
-          key={item.id}
-          onSelect={() => void choose(item.id, item.name)}
-          textValue={item.name}
-        >
-          <span className="block truncate">{switchingId === item.id ? `Switching to ${item.name}…` : item.name}</span>
-        </MenuRadioItem>
-      ))}
-      <MenuSeparator />
-      {canAccessPlatformControl(session) && (
-        platform ? (
-          <MenuItem href="/chat" icon={<ArrowLeft />}>Back to workspace</MenuItem>
+            <span className="grow stack">
+              <span className="ws-switch__name truncate">Platform console</span>
+              <span className="ws-switch__meta">All workspaces</span>
+            </span>
+          </>
         ) : (
-          <MenuItem href="/platform" icon={<Layers />}>Platform console</MenuItem>
-        )
-      )}
-      {!platform && hasSessionPermission(session, "tenant.manage") && (
-        <MenuItem href="/manage/settings" icon={<Settings />}>Workspace settings</MenuItem>
-      )}
-      <MenuItem href="/workspaces" icon={<LayoutGrid />}>All workspaces</MenuItem>
-    </Menu>
+          <>
+            <WorkspaceMark name={ctx?.workspace.displayName ?? ""} size={28} />
+            <span className="grow stack">
+              <span className="ws-switch__name truncate" translate="no">
+                {ctx?.workspace.displayName}
+              </span>
+              <span className="ws-switch__meta truncate">{role}</span>
+            </span>
+          </>
+        )}
+        <ChevronsUpDown className="i i-sm" aria-hidden />
+      </Dropdown.Trigger>
+      <Dropdown.Popover placement="bottom start" offset={4} className="shell-menu">
+        <Dropdown.Menu aria-label="Workspaces">
+          <Dropdown.Section selectionMode="single" selectedKeys={!platform && activeId ? [activeId] : []}>
+            <Header>Workspaces</Header>
+            {workspaces.map((w) => (
+              <Dropdown.Item key={w.name} id={resourceId(w.name)} textValue={w.displayName} onAction={() => switchTo(w)}>
+                <WorkspaceMark name={w.displayName} size={22} />
+                <Label className="grow truncate" translate="no">
+                  {w.displayName}
+                </Label>
+                <Dropdown.ItemIndicator />
+              </Dropdown.Item>
+            ))}
+          </Dropdown.Section>
+          <Separator />
+          <Dropdown.Section>
+            {isPlatformOperator(session) ? (
+              platform ? (
+                <Dropdown.Item id="back" textValue="Back to workspace" onAction={() => router.push("/home")}>
+                  <ArrowLeft className="i" aria-hidden />
+                  <Label>Back to workspace</Label>
+                </Dropdown.Item>
+              ) : (
+                <Dropdown.Item id="platform" textValue="Platform console" onAction={() => router.push(PLATFORM_CONSOLE.href)}>
+                  <Layers className="i" aria-hidden />
+                  <Label>Platform console</Label>
+                </Dropdown.Item>
+              )
+            ) : null}
+            <Dropdown.Item id="all" textValue="All workspaces" onAction={() => router.push("/workspaces")}>
+              <LayoutGrid className="i" aria-hidden />
+              <Label>All workspaces</Label>
+            </Dropdown.Item>
+          </Dropdown.Section>
+        </Dropdown.Menu>
+      </Dropdown.Popover>
+    </Dropdown>
   );
 }

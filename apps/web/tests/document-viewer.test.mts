@@ -1,35 +1,38 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { askAboutDocumentHref, askAboutPassageHref, documentHref } from "../src/modules/knowledge/preview.ts";
-
-const target = { documentId: "doc 1", name: "Employee Handbook.pdf", collectionId: "kb-hr" };
+import { explainPassagePrompt, parseReaderQuery, readerHref, revisionNumber } from "../src/modules/knowledge/reader/links.ts";
 
 function query(href: string): URLSearchParams {
   return new URL(href, "http://bomesh.test").searchParams;
 }
 
-test("the viewer address carries every cited chunk, in citation order", () => {
-  assert.equal(documentHref("doc 1"), "/documents/doc%201");
-  const href = documentHref("doc 1", ["c2", "", "c1"]);
-  assert.ok(href.startsWith("/documents/doc%201?"));
-  assert.deepEqual(query(href).getAll("chunk"), ["c2", "c1"]);
+test("the reader address carries every cited passage, in citation order", () => {
+  assert.equal(readerHref({ item: "workspaces/w/items/doc 1" }), "/doc/doc%201");
+  const href = readerHref({ item: "doc1", passages: ["workspaces/w/items/doc1/passages/c2", "", "c1"], from: "workspaces/w/conversations/k9", q: "  leave  " });
+  assert.ok(href.startsWith("/doc/doc1?"));
+  const params = query(href);
+  assert.deepEqual(params.getAll("passage"), ["c2", "c1"]);
+  assert.equal(params.get("from"), "k9");
+  assert.equal(params.get("q"), "leave");
 });
 
-test("asking about a document starts a draft scoped to its knowledge base, with it attached", () => {
-  const params = query(askAboutDocumentHref(target));
-  assert.equal(params.get("q"), "About “Employee Handbook.pdf”: ");
-  assert.equal(params.get("scope"), "kb-hr");
-  assert.equal(params.get("doc"), "doc 1");
+test("deep-link parameters parse back, ignoring junk", () => {
+  const parsed = parseReaderQuery(query("/doc/x?q=%20leave%20&page=3&passage=a&passage=b&passage=a&from=k&v=0"));
+  assert.deepEqual(parsed, { q: "leave", page: 3, passages: ["a", "b"], from: "k", v: undefined });
+  assert.equal(parseReaderQuery(query("/doc/x?page=two&v=2")).v, 2);
+  assert.equal(parseReaderQuery(query("/doc/x?page=two")).page, undefined);
+});
+
+test("revision numbers come from revision names", () => {
+  assert.equal(revisionNumber("workspaces/w/items/d/revisions/3"), 3);
+  assert.equal(revisionNumber(""), undefined);
 });
 
 test("asking about a selection quotes it, collapsed and cut to a readable length", () => {
-  const short = query(askAboutPassageHref(target, "  Contractors   follow\nthe terms. "));
-  assert.equal(short.get("q"), "About this passage from “Employee Handbook.pdf”:\n“Contractors follow the terms.”\n\n");
-  assert.equal(short.get("scope"), "kb-hr");
-
-  const long = query(askAboutPassageHref(target, "word ".repeat(100))).get("q") ?? "";
-  const quote = long.split("“")[2]!.split("”")[0]!;
+  assert.equal(explainPassagePrompt("  Contractors   follow\nthe terms. "), "Explain this passage: “Contractors follow the terms.”");
+  const long = explainPassagePrompt("word ".repeat(100));
+  const quote = long.split("“")[1]!.split("”")[0]!;
   assert.ok(quote.endsWith("…"));
   assert.ok(quote.length <= 241);
 });

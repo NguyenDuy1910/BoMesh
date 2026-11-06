@@ -1,7 +1,9 @@
 /* Assistant (/assistant) — how the workspace assistant answers and what
    people see when they start a chat. Edits are a local draft with a live
-   preview; Publish writes D.assistant (read by the chat home). Workspaces
-   with role starters (D.assistant.roleStarters) set starters per role. */
+   preview; Publish writes D.assistant (read by the chat home and Home).
+   Starters: `starters` is what everyone sees; `audienceStarters[roleOrGroupId]`
+   gives a real workspace role or group its own list (a group list wins over a role list).
+   Exports: X.assistantStarters(userId?) — the starters one person sees. */
 (() => {
   'use strict';
 
@@ -11,33 +13,38 @@
     ['balanced', 'Balanced', 'The answer first, then key details.'],
     ['detailed', 'Detailed', 'Thorough, with steps and context.'],
   ];
-  const roleLabel = r => PERSONAS[r]?.label || r;
+  /** '' = Everyone; otherwise a role id (People › Roles) or a group id (People › Groups). */
+  const audName = id => (!id ? 'Everyone' : roleById(id)?.name || groupById(id)?.name || id);
+  const isGroup = id => !!groupById(id);
 
   const draft = () => (S.ui.asst ??= clone(D.assistant));
-  const meta = () => ui('asstMeta', { tried: false, touched: {}, busy: false, role: '' });
-  /** Roles with their own starters, or null when everyone shares one list. */
-  const rolesOf = a => (a.roleStarters ? Object.keys(a.roleStarters) : null);
-  function curRole(a) {
-    const roles = rolesOf(a); if (!roles) return '';
-    const m = meta();
-    if (!roles.includes(m.role)) m.role = roles.includes(S.persona) ? S.persona : roles[0];
-    return m.role;
-  }
-  const startersOf = (a, role) => (role ? a.roleStarters[role] : a.starters);
+  const meta = () => ui('asstMeta', { tried: false, touched: {}, busy: false, aud: '' });
+  const own = (a, aud) => !!aud && !!a.audienceStarters?.[aud];
+  /** The audience being edited ('' when it has no own list any more). */
+  function curAud(a) { const m = meta(); if (m.aud && !roleById(m.aud) && !groupById(m.aud)) m.aud = ''; return m.aud; }
+  const startersOf = (a, aud) => (own(a, aud) ? a.audienceStarters[aud] : a.starters);
   /** Error/touched key of a starter field; ids stay per visible list. */
-  const sk = (role, i, f) => `${role ? role + '-' : ''}st${i}${f}`;
+  const sk = (aud, i, f) => `${aud ? aud + '-' : ''}st${i}${f}`;
   const pairs = list => list.map(s => [s.title, s.prompt]);
-  const key = a => JSON.stringify([a.instructions, a.style, !!a.citations, !!a.caps?.analyze, !!a.caps?.files, a.welcome, pairs(a.starters), a.roleStarters ? Object.entries(a.roleStarters).map(([r, l]) => [r, pairs(l)]) : null]);
+  const audLists = a => Object.entries(a.audienceStarters || {}).sort(([x], [y]) => x.localeCompare(y));
+  const key = a => JSON.stringify([a.instructions, a.style, !!a.citations, !!a.caps?.analyze, !!a.caps?.files, a.welcome, pairs(a.starters), audLists(a).map(([r, l]) => [r, pairs(l)])]);
   const dirty = () => key(draft()) !== key(D.assistant);
+
+  /** The starters one person sees: their first group with its own list, else their role's, else Everyone's. */
+  X.assistantStarters = (userId = me().id) => {
+    const a = D.assistant, m = memberById(userId), lists = a?.audienceStarters || {};
+    const g = m?.groups?.find(id => lists[id]?.length);
+    return (g && lists[g]) || (m && lists[m.roleId]) || a?.starters || [];
+  };
 
   function errors(a) {
     const e = {};
     if (a.instructions.length > MAX_INS) e.instructions = `Shorten by ${fmtNum(a.instructions.length - MAX_INS)} characters.`;
     if (!a.welcome.trim()) e.welcome = 'Enter a welcome message.';
     else if (a.welcome.length > MAX_WELCOME) e.welcome = `Keep it to ${MAX_WELCOME} characters.`;
-    (rolesOf(a) || ['']).forEach(role => startersOf(a, role).forEach((s, i) => {
-      if (!s.title.trim()) e[sk(role, i, 't')] = 'Add a title.';
-      if (!s.prompt.trim()) e[sk(role, i, 'p')] = 'Add the prompt it sends.';
+    ['', ...Object.keys(a.audienceStarters || {})].forEach(aud => startersOf(a, aud).forEach((s, i) => {
+      if (!s.title.trim()) e[sk(aud, i, 't')] = 'Add a title.';
+      if (!s.prompt.trim()) e[sk(aud, i, 'p')] = 'Add the prompt it sends.';
     }));
     return e;
   }
@@ -45,13 +52,26 @@
   const liveAttrs = (k, extra = '') => `data-input="asst-touch" data-field="${k}" ${extra}`;
 
   /* ── Form ── */
+  /** "Starters for" picker: Everyone, then roles and groups (a select, so it doesn't grow with the workspace). */
+  function audiencePicker(a, aud) {
+    const opt = (id, name) => `<option value="${esc(id)}" ${id === aud ? 'selected' : ''}>${esc(name)}${own(a, id) ? ` · ${esc(plural(a.audienceStarters[id].length, 'starter'))}` : ''}</option>`;
+    return `<select class="select asst-aud" id="asst-aud" data-change="asst-aud" aria-label="Starters for">${opt('', 'Everyone')}
+      <optgroup label="Roles">${D.roles.map(r => opt(r.id, r.name)).join('')}</optgroup>
+      ${D.groups.length ? `<optgroup label="Groups">${D.groups.map(g => opt(g.id, g.name)).join('')}</optgroup>` : ''}</select>`;
+  }
+  /** Who sees the list being edited, in one line. */
+  function audienceNote(a, aud) {
+    const n = Object.keys(a.audienceStarters || {}).length;
+    if (!aud) return n ? `Shown to anyone whose role or groups don’t have their own (${plural(n, 'role or group', 'roles or groups')} do).` : 'Shown to everyone in the workspace.';
+    if (!own(a, aud)) return `${isGroup(aud) ? `Members of ${audName(aud)}` : `People with the ${audName(aud)} role`} see Everyone’s starters.`;
+    return isGroup(aud) ? `Shown to members of ${audName(aud)}. A group’s starters win over a role’s.` : `Shown to people with the ${audName(aud)} role, unless one of their groups has its own.`;
+  }
   function startersHtml(a, show) {
-    const role = curRole(a), list = startersOf(a, role), n = list.length, base = role ? `asst.roleStarters.${role}` : 'asst.starters';
+    const aud = curAud(a), mine = own(a, aud), list = startersOf(a, aud), n = list.length, base = mine ? `asst.audienceStarters.${aud}` : 'asst.starters';
     const rows = list.map((s, i) => `<div class="asst-starter" role="group" aria-label="Starter ${i + 1}">
-      <span class="asst-starter__n" aria-hidden="true">${i + 1}</span>
       <div class="asst-starter__fields">
-        ${field({ id: `asst-st${i}t`, label: 'Title', error: show(sk(role, i, 't')), control: input({ id: `asst-st${i}t`, bind: `${base}.${i}.title`, value: s.title, placeholder: 'Find a policy', invalid: !!show(sk(role, i, 't')), attrs: liveAttrs(sk(role, i, 't'), 'maxlength="40"') }) })}
-        ${field({ id: `asst-st${i}p`, label: 'Prompt', error: show(sk(role, i, 'p')), control: input({ id: `asst-st${i}p`, bind: `${base}.${i}.prompt`, value: s.prompt, placeholder: 'What does our travel policy say about per diem?', invalid: !!show(sk(role, i, 'p')), attrs: liveAttrs(sk(role, i, 'p'), 'maxlength="160"') }) })}
+        ${field({ id: `asst-st${i}t`, label: 'Title', error: show(sk(aud, i, 't')), control: input({ id: `asst-st${i}t`, bind: `${base}.${i}.title`, value: s.title, placeholder: 'Find a policy', invalid: !!show(sk(aud, i, 't')), attrs: liveAttrs(sk(aud, i, 't'), 'maxlength="40"') }) })}
+        ${field({ id: `asst-st${i}p`, label: 'Prompt', error: show(sk(aud, i, 'p')), control: input({ id: `asst-st${i}p`, bind: `${base}.${i}.prompt`, value: s.prompt, placeholder: 'What does our travel policy say about per diem?', invalid: !!show(sk(aud, i, 'p')), attrs: liveAttrs(sk(aud, i, 'p'), 'maxlength="160"') }) })}
       </div>
       <div class="asst-starter__actions">
         ${iconBtn('arrow-up', 'Move up', { size: 'sm', act: 'asst-st-move', data: { i, d: -1 }, disabled: i === 0 })}
@@ -59,12 +79,12 @@
         ${iconBtn('trash', 'Remove starter', { size: 'sm', act: 'asst-st-rm', data: { i } })}
       </div>
     </div>`).join('');
-    const roles = rolesOf(a);
-    const picker = roles ? `<div class="asst-roles">${seg({ value: role, options: roles.map(r => [r, roleLabel(r)]), act: 'asst-role', label: 'Starters for' })}</div>` : '';
-    return `<div class="row between mt-8"><span class="label">${roles ? 'Starters by role' : 'Starters'}</span><span class="t-xs muted">${n}/${MAX_STARTERS}</span></div>
-      ${picker}
-      ${n ? `<div class="asst-starters">${rows}</div>` : `<p class="t-sm muted">No starters. ${roles ? `${esc(roleLabel(role))}s see` : 'People see'} only the welcome message.</p>`}
-      <div>${btn('Add starter', { size: 'sm', icon: 'plus', act: 'asst-st-add', disabled: n >= MAX_STARTERS })}</div>`;
+    const head = `<div class="asst-aud-row"><label class="label" for="asst-aud">Starters for</label>${audiencePicker(a, aud)}${mine ? linkBtn('Use Everyone’s instead', { act: 'asst-aud-reset' }) : ''}</div>
+      <p class="t-xs muted asst-aud-note">${esc(audienceNote(a, aud))}</p>`;
+    if (aud && !mine) return `${head}<div class="asst-aud-empty">${btn(`Give ${audName(aud)} their own starters`, { size: 'sm', icon: 'plus', act: 'asst-aud-own' })}</div>`;
+    return `${head}
+      ${n ? `<div class="asst-starters">${rows}</div>` : `<p class="t-sm muted">No starters. ${aud ? esc(audName(aud)) : 'People'} see only the welcome message.</p>`}
+      <div class="row between gap-8">${n < MAX_STARTERS ? btn('Add starter', { size: 'sm', icon: 'plus', act: 'asst-st-add' }) : '<span></span>'}<span class="t-xs muted num">${n}/${MAX_STARTERS}</span></div>`;
   }
   function formHtml(a, show) {
     const ins = card(field({
@@ -75,19 +95,24 @@
 
     const style = card(`<div class="asst-style">${choiceGroup({ name: 'asst-style', value: a.style, options: STYLES, act: 'asst-style', cols: 3 })}</div>`, { title: 'Answer style' });
 
-    const caps = card(`<div class="asst-switches">
-      ${switchRow({ title: 'Search company knowledge', desc: 'Always on. Answers come from your knowledge.', on: true, disabled: true })}
+    /* Rarely changed: capabilities sit behind a disclosure under what people see. Searching knowledge is always on. */
+    const capOn = [a.citations, a.caps.analyze, a.caps.files].filter(Boolean).length;
+    const caps = disclosure({
+      path: 'asstMeta.caps', icon: 'sliders', title: 'Capabilities',
+      summary: capOn === 3 ? 'All on' : capOn ? `${capOn} of 3 on` : 'All off',
+      body: `<p class="t-sm muted asst-caps__note">Answers always come from your company knowledge.</p><div class="asst-switches">
       ${switchRow({ title: 'Cite sources', desc: 'Every claim links to the passage it came from.', on: a.citations, act: 'asst-cap', data: { k: 'citations' } })}
       ${switchRow({ title: 'Analyze files and data', desc: 'Read spreadsheets and calculate.', on: a.caps.analyze, act: 'asst-cap', data: { k: 'analyze' } })}
       ${switchRow({ title: 'Create files', desc: 'Produce documents and spreadsheets.', on: a.caps.files, act: 'asst-cap', data: { k: 'files' } })}
-    </div>`, { title: 'Capabilities' });
+    </div>`,
+    });
 
     const home = card(`${field({
       id: 'asst-welcome', label: 'Welcome message', required: true, error: show('welcome'), counter: show('welcome') ? '' : counter(a.welcome.length, MAX_WELCOME),
       control: input({ id: 'asst-welcome', bind: 'asst.welcome', value: a.welcome, placeholder: 'What can I help you find?', invalid: !!show('welcome'), attrs: liveAttrs('welcome') }),
-    })}${startersHtml(a, show)}`, { title: 'Chat home', desc: rolesOf(a) ? 'What people see when they start a new chat. Each role gets its own starters.' : 'What people see when they start a new chat.' });
+    })}${startersHtml(a, show)}`, { title: 'Chat home', desc: 'What people see when they start a new chat.' });
 
-    return `<div class="asst-form">${ins}${style}${caps}${home}</div>`;
+    return `<div class="asst-form">${ins}${style}${home}${caps}</div>`;
   }
 
   /* ── Live preview ── */
@@ -98,9 +123,10 @@
     if (a.style === 'balanced') return core;
     return `${core}<p class="asst-prev__sub">How to claim</p><ol><li>Log the trip in Concur within 30 days.${cite(a, 2)}</li><li>Attach receipts only for lodging.</li><li>Your manager approves; Finance pays in the next cycle.</li></ol><p>For exceptions, ask Finance before you travel.</p>`;
   }
-  function previewHtml(a) {
-    const w = a.welcome.trim(), role = curRole(a);
-    const tiles = startersOf(a, role).filter(s => s.title.trim() || s.prompt.trim());
+  /** The preview body (inline on wide screens, in a drawer on phones and tablets). */
+  function previewBody(a) {
+    const w = a.welcome.trim(), aud = curAud(a);
+    const tiles = startersOf(a, aud).filter(s => s.title.trim() || s.prompt.trim());
     const homeHtml = `<div class="asst-prev__home">
       <div class="${cx('asst-prev__welcome', !w && 'is-empty')}">${esc(w || 'Welcome message')}</div>
       <div class="asst-prev__composer"><span class="truncate">Ask anything…</span><span class="row gap-6">${a.caps.analyze ? ic('paperclip', 'i-sm') : ''}<span class="asst-prev__send">${ic('arrow-up', 'i-sm')}</span></span></div>
@@ -110,19 +136,18 @@
       <div class="asst-prev__q">What’s our per diem?</div>
       <div class="asst-prev__a">${sampleAnswer(a)}${a.citations ? `<div class="asst-prev__sources">${chip('1 Travel & Expense Policy.pdf', { size: 'sm', icon: 'file-text' })}${a.style === 'detailed' ? chip('2 Expense How-to.docx', { size: 'sm', icon: 'file-text' }) : ''}</div>` : ''}</div>
     </div>`;
-    return `<aside class="asst-preview" aria-label="Preview">
-      <div class="card asst-prev">
-        <div class="row between"><span class="t-label">Preview</span><span class="t-xs muted">${role ? `As a ${esc(roleLabel(role).toLowerCase())} sees it` : 'As members see it'}</span></div>
+    return `<div class="row between gap-8"><span class="t-label asst-prev__title">${ic('eye', 'i-sm')}Live preview</span><span class="t-xs muted truncate">${esc(aud ? `As ${audName(aud)} sees it` : 'As everyone sees it')}</span></div>
         ${homeHtml}
         <hr class="separator">
         <div class="t-xs muted">Sample answer · ${esc(STYLES.find(s => s[0] === a.style)?.[1] || '')}</div>
-        ${answer}
-      </div>
-    </aside>`;
+        ${answer}`;
   }
+  const previewHtml = a => `<aside class="asst-preview" aria-label="Preview"><div class="card asst-prev">${previewBody(a)}</div></aside>`;
+  DR['asst-preview'] = () => ({ title: 'Preview', desc: 'What people see with your unpublished changes.', body: `<div class="asst-prev asst-prev--sheet">${previewBody(draft())}</div>`, foot: btn('Back to editing', { v: 'primary', act: 'close-drawer' }) });
 
   P.assistant = () => {
-    const head = pageHeader({ title: 'Assistant', desc: 'How it answers and what people see first.' });
+    /* Below 1024 px the preview sits behind one button (it would otherwise come after the whole form). */
+    const head = pageHeader({ title: 'Assistant', desc: 'How it answers and what people see first.', actions: S.pageState === 'live' && !S.navLoading ? btn('Preview', { v: 'secondary', icon: 'eye', act: 'asst-preview-open', cls: 'asst-prev-open' }) : '' });
     const body = gate({
       loading: () => `<div class="asst-layout"><div class="stack gap-16">${skelCards(2)}</div><div class="card"><span class="skeleton" style="height:280px"></span></div></div>`,
       error: () => errorState({ title: 'Assistant settings didn’t load' }),
@@ -137,10 +162,14 @@
     return `<div class="page">${head}${body}</div>`;
   };
 
-  const shownStarters = () => { const a = draft(); return startersOf(a, curRole(a)); };
+  const shownStarters = () => { const a = draft(); return startersOf(a, curAud(a)); };
+  A['asst-preview-open'] = () => openDrawer('asst-preview', {});
   A['asst-touch'] = el => { const k = el.dataset.field; if (k) meta().touched[k] = true; refresh(); };
   A['asst-style'] = el => { draft().style = el.dataset.value; refresh(); };
-  A['asst-role'] = el => { meta().role = el.dataset.value; refresh(); };
+  A['asst-aud'] = el => { meta().aud = el.value; refresh(); };
+  /** Give the picked role or group its own list, starting from Everyone's (draft until Publish). */
+  A['asst-aud-own'] = () => { const a = draft(), aud = meta().aud; if (!aud) return; (a.audienceStarters ??= {})[aud] = clone(a.starters); refresh(); };
+  A['asst-aud-reset'] = () => { const a = draft(), aud = meta().aud; if (a.audienceStarters) delete a.audienceStarters[aud]; meta().touched = {}; refresh(); };
   A['asst-cap'] = el => { const a = draft(), k = el.dataset.k; if (k === 'citations') a.citations = !a.citations; else a.caps[k] = !a.caps[k]; refresh(); };
   A['asst-st-add'] = () => {
     const s = shownStarters(); if (s.length >= MAX_STARTERS) return;
@@ -160,19 +189,19 @@
     const errs = Object.keys(errors(a));
     if (errs.length) {
       m.tried = true;
-      const roles = rolesOf(a), bad = roles?.find(r => errs.some(k => k.startsWith(r + '-st')));
-      if (bad && !errs.some(k => k.startsWith(m.role + '-st'))) m.role = bad;
+      const bad = Object.keys(a.audienceStarters || {}).find(r => errs.some(k => k.startsWith(r + '-st')));
+      if (bad && !errs.some(k => k.startsWith((m.aud ? m.aud + '-' : '') + 'st'))) m.aud = bad;
       refresh(); $('.asst-form [aria-invalid="true"]')?.focus(); return;
     }
     m.busy = true; refresh(); await sleep(700);
     const next = clone(a), trim = l => l.map(s => ({ title: s.title.trim(), prompt: s.prompt.trim() }));
     next.welcome = next.welcome.trim();
     next.starters = trim(next.starters);
-    if (next.roleStarters) Object.keys(next.roleStarters).forEach(r => { next.roleStarters[r] = trim(next.roleStarters[r]); });
+    if (next.audienceStarters) Object.keys(next.audienceStarters).forEach(r => { next.audienceStarters[r] = trim(next.audienceStarters[r]); });
     Object.assign(D.assistant, next);
     D.audit.unshift({ id: uid('ev'), at: Date.now(), actor: me().id, action: 'Updated assistant setup', type: 'Settings', target: 'Assistant', outcome: 'success', ip: '10.4.12.30', device: 'Chrome on macOS' });
-    const role = m.role;
-    S.ui.asst = clone(D.assistant); S.ui.asstMeta = null; meta().role = role;
+    const aud = m.aud;
+    S.ui.asst = clone(D.assistant); S.ui.asstMeta = null; meta().aud = aud;
     refresh(); toast('Assistant published', { action: { label: 'Open chat', run: () => go('/chat') } });
   };
 })();

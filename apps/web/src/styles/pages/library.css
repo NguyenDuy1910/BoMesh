@@ -1,0 +1,66 @@
+/* My library and collections (features/library.js). Resource rows come from resources.css. */
+
+/* Recent: date groups */
+.lib-group__title { margin: 0 0 8px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+
+/* Collection and saved-view lists */
+.lib-list { background: var(--surface); border-radius: var(--radius-2xl); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); overflow: hidden; }
+.lib-list > .item + .item { border-top: 1px solid var(--separator); }
+.lib-col__meta { flex-wrap: wrap; color: var(--muted); }
+.lib-col__meta .i { color: var(--muted); }
+
+/* Contributions: lifecycle filter, rows with the latest event and one next step */
+.lib-ctb-bar .search-field { flex: 1 1 200px; max-width: 320px; }
+.lib-ctb-seg { min-width: 0; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.lib-ctb-seg::-webkit-scrollbar { display: none; }
+.lib-ctb .item__title .chip { flex: none; }
+.lib-ctb__desc { display: flex; align-items: center; gap: 0 6px; min-width: 0; }
+.lib-ctb__kb { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Collection header meta */
+.lib-col__head-meta { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+@media (max-width: 640px) {
+  .lib .page-header__body { flex-basis: 0; }
+}
+
+/* Items the viewer can't open: count only */
+.lib-locked { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 10px 16px; border-radius: var(--radius-xl); background: var(--default-soft); color: var(--muted); font-size: 13px; line-height: 18px; }
+
+/* Edit mode: reorder, note, remove */
+.lib-edit { display: flex; flex-direction: column; background: var(--surface); border-radius: var(--radius-2xl); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); overflow: hidden; }
+.lib-edit__row { display: flex; align-items: flex-start; gap: 12px; padding: 12px 16px; }
+.lib-edit__row + .lib-edit__row { border-top: 1px solid var(--separator); }
+.lib-edit__order { flex: none; display: flex; align-items: center; gap: 2px; }
+.lib-edit__order .num { width: 20px; text-align: right; }
+.lib-edit__body { flex: 1 1 auto; min-width: 0; display: flex; align-items: flex-start; gap: 12px; }
+.lib-edit__body .input { max-width: 520px; }
+.lib-edit__body .input--sm { height: 32px; font-size: 13px; }
+
+/* Add resources picker */
+.lib-add { max-height: 360px; overflow-y: auto; }
+
+/* Knowledge base header: owner unit and topics (knowledge.js) */
+.kb-head__meta { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-top: 6px; }
+
+@container app (max-width: 1023px) {
+  .lib-edit__body .input { max-width: none; }
+}
+@container app (max-width: 760px) {
+  .lib-list .item__meta { display: none; }
+}
+@container app (max-width: 679px) {
+  .lib-edit__row { flex-wrap: wrap; padding: 12px; }
+  .lib-edit__order { order: 2; }
+  .lib-edit__body { flex-basis: 100%; }
+  .lib-edit__body .file-icon { display: none; }
+  .lib-ctb { padding: 12px; gap: 10px; align-items: flex-start; }
+  .lib-ctb .item__lead { display: none; }
+  .lib-ctb .item__title { flex-wrap: wrap; row-gap: 4px; }
+  .lib-ctb .item__title .truncate { white-space: normal; flex-basis: 100%; }
+  .lib-ctb__desc { flex-direction: column; align-items: flex-start; }
+  .lib-ctb__desc .res-dot { display: none; }
+  .lib-ctb__kb { max-width: 100%; }
+  .lib-ctb__desc .truncate { white-space: normal; }
+  .lib-ctb-bar .search-field { max-width: none; flex-basis: 100%; }
+  .lib-share span { display: none; }
+}

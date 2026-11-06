@@ -4,11 +4,10 @@ import test from "node:test";
 import {
   CITATION_ELEMENT,
   CITATION_NUMBER_PROPERTY,
-  citationRenderingSources,
   rehypeCitationMarkers,
   splitCitationMarkers,
 } from "../src/modules/chat/citation-markers.ts";
-import type { AnswerSource } from "../src/modules/chat/sources.ts";
+import { markerNumbers, plainAnswer, sourceLookup, sourcesFromCitations } from "../src/modules/chat/citations.ts";
 
 function text(value: string) {
   return { type: "text", value };
@@ -108,45 +107,47 @@ test("nested inline formatting still gets its chip", () => {
   assert.equal((strong.children[1] as { tagName: string }).tagName, CITATION_ELEMENT);
 });
 
-// --- resolution -----------------------------------------------------------
+// --- resolution of stored answers -------------------------------------------
 
-test("only the answer's own citation numbers resolve to a chip", () => {
-  const source: AnswerSource = {
-    id: "ref_1",
-    index: 1,
-    title: "Lesson 3.pdf",
-    itemId: "item-1",
-    chunkId: "item-1:12",
-    internalUrl: "/knowledge/documents/item-1?chunk=item-1%3A12",
-    used: true,
-    spans: [],
-    passages: [],
-  };
-  const resolved = citationRenderingSources([source]);
+const ws = "workspaces/w/items";
 
-  assert.equal(resolved.get(1)?.itemId, "item-1");
-  // A number the answer never cited must not become clickable.
-  assert.equal(resolved.get(9), undefined);
+test("passages of one document share its number, in first-use order", () => {
+  const sources = sourcesFromCitations("Leave is 20 weeks [1]. Tell People Ops [2]. Paid in full [1].", [
+    { available: true, item: `${ws}/a`, passage: `${ws}/a/passages/p1`, displayName: "Parental leave.pdf", pageNumber: 2 },
+    { available: true, item: `${ws}/b`, passage: `${ws}/b/passages/p9`, displayName: "Handbook.pdf", pageNumber: 18 },
+    { available: true, item: `${ws}/a`, passage: `${ws}/a/passages/p2`, displayName: "Parental leave.pdf", pageNumber: 3 },
+  ]);
+  assert.deepEqual(sources.map((s) => [s.n, s.title, s.passages.map((p) => p.page)]), [
+    [1, "Parental leave.pdf", [2, 3]],
+    [2, "Handbook.pdf", [18]],
+  ]);
+  assert.equal(sources[0]!.aliases, undefined);
 });
 
-test("an answer saved with one number per passage opens each passage of the one source", () => {
-  const source: AnswerSource = {
-    id: "document:sheet",
-    index: 2,
-    title: "DSBTH.xlsx",
-    itemId: "sheet",
-    chunkId: "sheet:1",
-    internalUrl: "/knowledge/documents/sheet?chunk=sheet%3A1",
-    used: true,
-    spans: [],
-    passages: [
-      { number: 2, chunkId: "sheet:1", internalUrl: "", spans: [] },
-      { number: 4, chunkId: "sheet:7", internalUrl: "", spans: [] },
-    ],
-  };
-  const resolved = citationRenderingSources([source]);
+test("an answer saved with one number per passage resolves every old number", () => {
+  const sources = sourcesFromCitations("A [1]. B [2]. C [3].", [
+    { available: true, item: `${ws}/a`, passage: `${ws}/a/passages/p1` },
+    { available: true, item: `${ws}/a`, passage: `${ws}/a/passages/p2` },
+    { available: true, item: `${ws}/b`, passage: `${ws}/b/passages/p3` },
+  ]);
+  const lookup = sourceLookup(sources);
+  assert.equal(lookup.get(1)?.item, `${ws}/a`);
+  assert.equal(lookup.get(2)?.item, `${ws}/a`);
+  assert.equal(lookup.get(3)?.item, `${ws}/b`);
+});
 
-  assert.equal(resolved.get(2)?.chunkId, "sheet:1");
-  assert.equal(resolved.get(4)?.chunkId, "sheet:7");
-  assert.equal(resolved.get(4)?.itemId, "sheet");
+test("a citation the reader can no longer open keeps its number without a document", () => {
+  const sources = sourcesFromCitations("Open [1]. Closed [2].", [
+    { available: true, item: `${ws}/a`, passage: `${ws}/a/passages/p1` },
+    { available: false },
+  ]);
+  assert.deepEqual(sources.map((s) => [s.n, s.available, s.item]), [[1, true, `${ws}/a`], [2, false, ""]]);
+});
+
+test("marker numbers come out once each, in reading order", () => {
+  assert.deepEqual(markerNumbers("x [2] y [1] z [2] `[9]`"), [2, 1, 9]);
+});
+
+test("plain copy drops markers, emphasis, links and table rows", () => {
+  assert.equal(plainAnswer("**Bold** claim [1] and [a link](/doc/1).\n\n| a | b |\n|---|---|"), "Bold claim and a link.");
 });

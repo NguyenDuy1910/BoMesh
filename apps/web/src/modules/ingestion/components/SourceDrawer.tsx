@@ -1,483 +1,388 @@
 "use client";
 
-import { BookOpen, ChevronRight, FileText, Folder, Pause, Play, RefreshCw } from "lucide-react";
-import Link from "next/link";
+import { Button, Card, Dropdown } from "@heroui/react";
+import { ArrowUpRight, BookOpen, ChevronRight, Folder, History, MoreHorizontal, Pause, Play, Plug, RefreshCw, Trash2 } from "lucide-react";
+import NextLink from "next/link";
 import { useEffect, useState } from "react";
 
-import { Button } from "@/components/ui/Button";
-import { Callout } from "@/components/ui/Callout";
-import { Drawer, DrawerSection } from "@/components/ui/Drawer";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { Progress } from "@/components/ui/Progress";
-import { Skeleton } from "@/components/ui/Skeleton";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { useToast } from "@/components/ui/Toast";
-import { runStatusKey } from "@/lib/status";
-import {
-  accountLine,
-  connectionState,
-  needsReconnect,
-  sourceName,
-  syncChangesText,
-} from "@/modules/ingestion/connection-state";
-import type { Source } from "@/modules/ingestion/integrations-api";
-import { ingestionActions } from "@/modules/ingestion/queries";
-import { runProgress } from "@/modules/ingestion/run-state";
-import {
-  browserTimezone,
-  describeDraft,
-  describeSchedule,
-  draftFromSchedule,
-  nextSyncPhrase,
-  parseCron,
-  timezoneLabel,
-  validateDraft,
-  type ScheduleDraft,
-  type ScheduleErrors,
-} from "@/modules/ingestion/schedule";
-import { errorMessage, formatDateTime, formatRelative, pluralize } from "@/lib/format";
+import { Callout, ChoiceGroup, EmptyState, IconButton, KeyValue, List, ListItem, SkeletonRows, StatusChip } from "@/components/ui";
+import { resourceId } from "@/lib/api/client";
+import { fmtDateTime, plural, rel, relFuture } from "@/lib/format";
+import { useWorkspace } from "@/lib/workspace";
+import { baseColor } from "@/modules/knowledge/bases/model";
+import { useItem } from "@/modules/knowledge/queries";
 
-import { AppIcon } from "./AppIcon";
+import type { SourceActions } from "../actions";
+import type { Connection, Source, Sync } from "../api";
+import { accountLabel, accountStatus, accountUser, appName, canTogglePause, lastSyncText, POLICY, POLICY_CHOICES, policyOf, scopeText, sourceName, sourceStatus, syncDeltaText, syncStatus } from "../model";
+import { openReconnect } from "../overlays";
+import { useSource, useSyncs } from "../queries";
+import { draftDirty, draftFrom, nextSyncAt, tzShort, type ScheduleDraft } from "../schedule";
 import { ScheduleFields } from "./ScheduleFields";
-import { SourceMenu } from "./SourcesTable";
-import type { SourcesModel } from "./SourcesScreen";
-import { RunDocuments } from "./SyncHistory";
+import { Sheet, SheetSection } from "./Sheet";
+import { SourceAppIcon, SourceStatusChip, useParamState } from "./shared";
 
-/** What a provider resource is, in words. */
-const RESOURCE_KIND: Record<string, string> = {
-  space: "Confluence space and its pages",
-  page: "Page and its subpages",
-  drive: "Drive and its folders",
-  shared_drive: "Shared drive and its folders",
-  folder: "Folder and its subfolders",
-};
-
-const RECENT_SYNCS = 5;
-
-/** One source (`?source=<id>`): its standing, what it syncs, where to, when, with which account, and lately. */
+/** The source drawer (preview `DR['src-source']`), opened by `?open=<source id>`. */
 export function SourceDrawer({
   sourceId,
-  model,
-  editSchedule,
-  onClose,
-  onScheduleEditDone,
+  focus,
+  connections,
+  actions,
+  onOpenSync,
 }: {
   sourceId: string | null;
-  model: SourcesModel;
-  /** Opened from "Edit schedule": start in the editor. */
-  editSchedule: boolean;
-  onClose: () => void;
-  onScheduleEditDone: () => void;
+  focus: string | null;
+  connections: ReadonlyMap<string, Connection>;
+  actions: SourceActions;
+  onOpenSync: (sync: Sync) => void;
 }) {
-  const source = model.data?.sources.find((item) => item.id === sourceId) ?? null;
+  const { set } = useParamState();
+  const { name: workspace } = useWorkspace();
+  const query = useSource(sourceId ? `${workspace}/sources/${sourceId}` : null);
+  const close = () => set({ open: null, focus: null });
+  const source = query.data;
 
-  if (!sourceId) return null;
+  if (!sourceId) return <Sheet isOpen={false} onClose={close} title="">{null}</Sheet>;
   if (!source) {
     return (
-      <Drawer onClose={onClose} open title={model.data ? "Source not found" : "Loading source"}>
-        {model.data ? (
-          <EmptyState
-            description="Documents it synced stay in their knowledge base."
-            icon={<BookOpen />}
-            size="md"
-            title="This source was disconnected"
-          />
-        ) : (
-          <div aria-busy="true" className="grid gap-3">
-            <span className="sr-only">Loading</span>
-            <Skeleton className="h-14 w-full" />
-            <Skeleton className="h-24 w-full" />
-            <Skeleton className="h-24 w-full" />
-          </div>
-        )}
-      </Drawer>
+      <Sheet isOpen onClose={close} title={query.isError ? "Source disconnected" : "Source"}>
+        {query.isError ? <EmptyState icon={Plug} title="This source was disconnected" description="Documents it synced stay in their knowledge base." /> : <SkeletonRows rows={5} />}
+      </Sheet>
     );
   }
-  return (
-    <SourceDetail
-      editSchedule={editSchedule}
-      key={source.id}
-      model={model}
-      onClose={onClose}
-      onScheduleEditDone={onScheduleEditDone}
-      source={source}
-    />
-  );
+  return <SourceSheet source={source} focus={focus} connections={connections} actions={actions} onClose={close} onOpenSync={onOpenSync} />;
 }
 
-function SourceDetail({
+function SourceSheet({
   source,
-  model,
-  editSchedule,
+  focus,
+  connections,
+  actions,
   onClose,
-  onScheduleEditDone,
+  onOpenSync,
 }: {
   source: Source;
-  model: SourcesModel;
-  editSchedule: boolean;
+  focus: string | null;
+  connections: ReadonlyMap<string, Connection>;
+  actions: SourceActions;
   onClose: () => void;
-  onScheduleEditDone: () => void;
+  onOpenSync: (sync: Sync) => void;
 }) {
-  const toast = useToast();
-  const connection = model.connection(source.connection_id);
-  const kb = model.knowledgeBase(source.collection_id);
-  const app = connection ? model.connectorName(connection.connector_key) : "The app";
-  const canManage = model.canManageSource(source);
-  const key = model.status(source);
-  const name = sourceName(source);
-
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState<ScheduleDraft | null>(null);
-  const [errors, setErrors] = useState<ScheduleErrors>({});
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-
-  const startEditing = () => {
-    setDraft(draftFromSchedule(source.schedule, browserTimezone()).draft);
-    setErrors({});
-    setSaveError(null);
-    setEditing(true);
-  };
+  const { can } = useWorkspace();
+  const { set } = useParamState();
+  const manage = can("sources.create");
+  const connection = connections.get(source.connection);
+  const kb = useItem(source.targetCollection);
+  const kbName = kb.data?.displayName;
+  const status = sourceStatus(source);
+  const syncing = status === "syncing";
+  const paused = status === "paused";
 
   useEffect(() => {
-    if (!editSchedule) return;
-    if (canManage) {
-      setDraft(draftFromSchedule(source.schedule, browserTimezone()).draft);
-      setEditing(true);
-    }
-    onScheduleEditDone();
-    // Only the arrival of the deep link starts the editor.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editSchedule]);
+    if (focus !== "schedule") return;
+    const frame = requestAnimationFrame(() => {
+      const section = document.getElementById("src-sched");
+      section?.scrollIntoView({ block: "start" });
+      section?.querySelector<HTMLElement>("[aria-checked='true'],[aria-pressed='true'],[data-selected='true']")?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [focus]);
 
-  const save = async () => {
-    if (!draft) return;
-    const found = validateDraft(draft);
-    setErrors(found);
-    if (found.day || found.time) return;
-    setSaving(true);
-    setSaveError(null);
-    try {
-      await ingestionActions.saveSchedule(source, draft);
-      toast.show({ message: `Schedule saved — ${describeDraft(draft)}` });
-      setEditing(false);
-    } catch (cause) {
-      setSaveError(errorMessage(cause, "The schedule"));
-    } finally {
-      setSaving(false);
-    }
-  };
+  const menu = manage ? (
+    <Dropdown>
+      <IconButton icon={MoreHorizontal} tip="More actions" showTip={false} />
+      <Dropdown.Popover placement="bottom end">
+        <Dropdown.Menu
+          aria-label="Source actions"
+          onAction={(key) => {
+            if (key === "history") set({ tab: "history", source: resourceId(source.name), status: null, page: null, open: null, focus: null });
+            if (key === "disconnect") void actions.disconnect(source, kbName).then((done) => done && onClose());
+          }}
+        >
+          <Dropdown.Item id="history" textValue="View sync history">
+            <History className="i" aria-hidden />
+            View sync history
+          </Dropdown.Item>
+          <Dropdown.Item id="disconnect" textValue="Disconnect" variant="danger">
+            <Trash2 className="i" aria-hidden />
+            Disconnect
+          </Dropdown.Item>
+        </Dropdown.Menu>
+      </Dropdown.Popover>
+    </Dropdown>
+  ) : null;
 
-  const runs = (model.data?.runs ?? []).filter((run) => run.scope.source_id === source.id);
-  const paused = key === "paused";
-  const custom = source.schedule && !parseCron(source.schedule.cron_expression) ? describeSchedule(source.schedule) : undefined;
-
-  const footer = !canManage ? undefined : editing ? (
-    <>
-      <Button disabled={saving} onClick={() => setEditing(false)} variant="secondary">
-        Cancel
-      </Button>
-      <Button loading={saving} onClick={() => void save()}>
-        Save schedule
-      </Button>
-    </>
-  ) : (
-    <>
-      <Button
-        disabled={key === "syncing"}
-        icon={paused ? <Play /> : <Pause />}
-        onClick={() => void model.act.setPaused(source, !paused)}
-        variant="secondary"
-      >
-        {paused ? "Resume" : "Pause"}
-      </Button>
-      <Button
-        disabled={key === "syncing" || key === "reconnect" || paused}
-        icon={<RefreshCw />}
-        onClick={() => void model.act.sync(source)}
-        variant={key === "reconnect" ? "secondary" : "primary"}
-      >
-        Sync now
-      </Button>
-    </>
-  );
-
-  return (
-    <Drawer
-      busy={saving}
-      description={[app, kb?.title].filter(Boolean).join(" · ")}
-      footer={footer}
-      headerActions={canManage && <SourceMenu inDrawer model={model} source={source} />}
-      icon={<AppIcon connector={connection?.connector_key ?? "unknown"} />}
-      onClose={onClose}
-      open
-      title={name}
-    >
-      <SourceStatusBlock model={model} source={source} />
-
-      <DrawerSection title="What’s synced">
-        <div className="flex items-center gap-3 rounded-lg border border-border-subtle px-3.5 py-2.5">
-          {source.resource_type === "page" ? (
-            <FileText aria-hidden="true" className="size-4 shrink-0 text-text-tertiary" />
-          ) : source.resource_type === "space" ? (
-            <BookOpen aria-hidden="true" className="size-4 shrink-0 text-text-tertiary" />
-          ) : (
-            <Folder aria-hidden="true" className="size-4 shrink-0 text-text-tertiary" />
-          )}
-          <span className="min-w-0 flex-1">
-            <span className="block truncate">{name}</span>
-            <span className="block text-meta text-text-tertiary">
-              {RESOURCE_KIND[source.resource_type ?? ""] ?? "Everything this source reads"}
-            </span>
-          </span>
-        </div>
-        {canManage && (
-          <p className="mt-2 text-meta text-text-tertiary">To sync something else, connect another source.</p>
-        )}
-      </DrawerSection>
-
-      <DrawerSection title="Destination">
-        {kb ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <Link
-              className="inline-flex items-center gap-2 rounded-xs font-medium text-text-primary hover:text-text-accent focus-visible:shadow-(--shadow-focus) focus-visible:outline-none"
-              href={`/knowledge/${kb.id}`}
-            >
-              <BookOpen aria-hidden="true" className="size-4 text-text-tertiary" />
-              {kb.title}
-            </Link>
-            {kb.documentCount !== null && (
-              <span className="text-text-tertiary">· {pluralize(kb.documentCount, "document")}</span>
-            )}
-          </div>
-        ) : (
-          <p className="text-text-tertiary">You can’t open this knowledge base.</p>
-        )}
-      </DrawerSection>
-
-      <DrawerSection
-        actions={
-          canManage && !editing && (
-            <Button onClick={startEditing} size="sm" variant="ghost">
-              Edit
-            </Button>
-          )
-        }
-        title="Schedule"
-      >
-        {editing && draft ? (
-          <div className="grid gap-3">
-            <ScheduleFields
-              draft={draft}
-              errors={errors}
-              idBase={`schedule-${source.id}`}
-              label="How often to sync"
-              onChange={(next) => {
-                setDraft(next);
-                setErrors({});
-              }}
-              replaces={custom}
-            />
-            {saveError && <Callout tone="err">{saveError}</Callout>}
-          </div>
-        ) : (
-          <div>
-            <div>
-              {describeSchedule(source.schedule)}
-              {source.schedule?.timezone && (
-                <span className="text-text-tertiary"> ({timezoneLabel(source.schedule.timezone)})</span>
-              )}
-            </div>
-            <div className="mt-0.5 text-meta text-text-tertiary">
-              {paused
-                ? "Scheduled syncs are off while paused."
-                : !source.schedule
-                  ? "Syncs when someone clicks Sync now."
-                  : !source.schedule.enabled
-                    ? "The schedule is off."
-                    : key === "reconnect"
-                      ? "Scheduled syncs resume after you reconnect."
-                      : nextSyncPhrase(source.schedule.next_run_at) ?? ""}
-            </div>
-          </div>
-        )}
-      </DrawerSection>
-
-      <DrawerSection title="Account">
-        {connection ? (
-          <div className="flex items-center gap-3 rounded-lg border border-border-subtle px-3.5 py-2.5">
-            <AppIcon connector={connection.connector_key} size="sm" />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate font-medium">{accountLine(connection)}</span>
-              <span className="block text-meta text-text-tertiary">
-                {connection.last_checked_at ? `Checked ${formatRelative(connection.last_checked_at)}` : app}
-              </span>
-            </span>
-            <StatusBadge kind="account" value={connectionState(connection).value} />
-            {canManage && needsReconnect(connection) && key !== "reconnect" && (
-              <Button onClick={() => model.open.reconnect(connection.id)} size="sm" variant="secondary">
-                Reconnect
-              </Button>
-            )}
-          </div>
-        ) : (
-          <p className="text-text-tertiary">The account behind this source was removed.</p>
-        )}
-      </DrawerSection>
-
-      <DrawerSection
-        actions={
-          <Button onClick={() => model.open.history(source.id)} size="sm" variant="ghost">
-            View all
+  let footer = null;
+  if (manage) {
+    if (status === "reconnect")
+      footer = (
+        <Button variant="primary" onPress={() => openReconnect(source.connection)}>
+          Reconnect
+        </Button>
+      );
+    else
+      footer = (
+        <>
+          <Button variant="secondary" isDisabled={syncing || !canTogglePause(source)} onPress={() => void actions.togglePause(source)}>
+            {paused ? <Play className="i" aria-hidden /> : <Pause className="i" aria-hidden />}
+            {paused ? "Resume" : "Pause"}
           </Button>
-        }
-        title="Recent syncs"
-      >
-        {source.sync?.last_synced_at && (
-          <p className="mb-2 text-meta text-text-secondary">
-            Last checked for changes {formatRelative(source.sync.last_synced_at)}: {syncChangesText(source.sync).toLowerCase()}.
-          </p>
-        )}
-        {runs.length ? (
-          <ul className="overflow-hidden rounded-lg border border-border-subtle">
-            {runs.slice(0, RECENT_SYNCS).map((run) => (
-              <li className="border-b border-border-subtle last:border-b-0" key={run.id}>
-                <button
-                  className="flex w-full items-center gap-3 px-3.5 py-2.5 text-left hover:bg-surface-hover focus-visible:shadow-[inset_0_0_0_2px_var(--focus-ring)] focus-visible:outline-none"
-                  onClick={() => model.open.run(run.id)}
-                  type="button"
-                >
-                  <span className="min-w-0 flex-1">
-                    <span className="block tabular-nums">{formatDateTime(run.created_at)}</span>
-                    <span className="block text-meta text-text-tertiary">
-                      <RunDocuments run={run} />
-                    </span>
-                  </span>
-                  <StatusBadge kind="run" value={runStatusKey(run)} />
-                  <ChevronRight aria-hidden="true" className="size-4 text-text-tertiary" />
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-text-tertiary">No syncs yet.</p>
-        )}
-      </DrawerSection>
-    </Drawer>
+          <Button variant="primary" isDisabled={!connection || paused} isPending={syncing} onPress={() => void actions.syncNow(source)}>
+            <RefreshCw className="i" aria-hidden />
+            {syncing ? "Syncing…" : "Sync now"}
+          </Button>
+        </>
+      );
+  }
+
+  const app = connection?.connector;
+  return (
+    <Sheet
+      isOpen
+      onClose={onClose}
+      lead={<SourceAppIcon source={source} connections={connections} size="lg" />}
+      title={sourceName(source)}
+      description={`${appName(app)}${connection ? ` · ${accountLabel(connection)}` : ""}`}
+      headActions={menu}
+      footer={footer}
+    >
+      <Summary source={source} connection={connection} kbName={kbName} actions={actions} manage={manage} />
+      <SheetSection title="What it syncs">
+        <List>
+          <ListItem lead={app === "connectors/google_drive" ? <Folder className="i muted" aria-hidden /> : <BookOpen className="i muted" aria-hidden />} title={scopeText(source)} contentTitle />
+        </List>
+      </SheetSection>
+      <SheetSection title="Destination">
+        <List>
+          <ListItem
+            lead={<span className="src-kb__dot src-kb__dot--lg" style={{ background: baseColor(source.targetCollection) }} aria-hidden />}
+            title={kbName ?? (kb.isError ? "Removed knowledge base" : "Knowledge base")}
+            contentTitle
+            description={kb.data?.collection?.childCount != null ? plural(kb.data.collection.childCount, "item") : undefined}
+            actions={kb.data ? <ChevronRight className="i muted" aria-hidden /> : undefined}
+            href={kb.data ? `/knowledge/${resourceId(source.targetCollection)}?tab=documents` : undefined}
+          />
+        </List>
+      </SheetSection>
+      <SheetSection title="New and changed files" id="src-policy">
+        <PolicyForm source={source} manage={manage} actions={actions} />
+      </SheetSection>
+      {manage ? (
+        <SheetSection title="Schedule" id="src-sched">
+          <ScheduleForm key={`${source.name}-${source.etag}`} source={source} actions={actions} />
+        </SheetSection>
+      ) : null}
+      <RecentSyncs source={source} onOpenSync={onOpenSync} />
+      {manage ? (
+        <SheetSection title="Disconnect">
+          <div className="src-danger">
+            <p className="description grow">Stops syncing. Documents already in {kbName || "the knowledge base"} stay.</p>
+            <Button variant="danger-soft" size="sm" onPress={() => void actions.disconnect(source, kbName).then((done) => done && onClose())}>
+              Disconnect
+            </Button>
+          </div>
+        </SheetSection>
+      ) : null}
+    </Sheet>
   );
 }
 
-/** The one thing to know about this source right now, with what fixes it. */
-function SourceStatusBlock({ model, source }: { model: SourcesModel; source: Source }) {
-  const connection = model.connection(source.connection_id);
-  const kb = model.knowledgeBase(source.collection_id);
-  const app = connection ? model.connectorName(connection.connector_key) : "The app";
-  const canManage = model.canManageSource(source);
-  const key = model.status(source);
-  const name = sourceName(source);
-  const run = model.activeRun(source);
-
-  let main: React.ReactNode = null;
-  if (key === "reconnect") {
-    main = (
-      <Callout
-        actions={
-          canManage && (
-            <Button onClick={() => model.open.reconnect(source.connection_id)} size="sm">
-              Reconnect
-            </Button>
-          )
-        }
-        title={`${app} access expired`}
-        tone="err"
-      >
-        Reconnect {connection ? accountLine(connection) : "the account"} to resume syncing. Documents already in{" "}
-        {kb?.title ?? "the knowledge base"} stay searchable.
-      </Callout>
+function Summary({ source, connection, kbName, actions, manage }: { source: Source; connection: Connection | undefined; kbName: string | undefined; actions: SourceActions; manage: boolean }) {
+  const status = sourceStatus(source);
+  const lastError = useSyncs(source.name, 5).data?.find((x) => x.name === source.lastSync?.sync)?.error?.message;
+  const app = appName(connection?.connector);
+  let top = null;
+  if (status === "reconnect")
+    top = <Callout tone="danger" title={`${app} access expired`} description={`Sign in again as ${accountUser(connection)}. Documents in ${kbName || "the knowledge base"} stay searchable.`} />;
+  else if (status === "failed") top = <Callout tone="danger" title="Last sync failed" description={lastError || "Try syncing again."} />;
+  else if (!connection) top = <Callout tone="warning" title="No account" description="The account this source used is no longer connected." />;
+  else if (status === "paused") top = <Callout title="Paused" description="Scheduled syncs are off until you resume." />;
+  else if (status === "syncing") {
+    const n = (source.lastSync?.addedCount ?? 0) + (source.lastSync?.updatedCount ?? 0);
+    top = (
+      <Card variant="secondary" className="src-live">
+        <span className="medium">Syncing · {plural(n, "document")} so far</span>
+      </Card>
     );
-  } else if (key === "syncing") {
-    const progress = run ? runProgress(run) : null;
-    main = (
-      <Callout
-        actions={
-          run && model.canCancelRun(run) && (
-            <Button onClick={() => model.act.cancelRun(run, name)} size="sm" variant="secondary">
-              Stop sync
-            </Button>
-          )
-        }
-        title={
-          progress && progress.total
-            ? `Syncing — ${progress.done.toLocaleString()} of ${pluralize(progress.total, "document")}`
-            : "Syncing — finding what changed"
-        }
-        tone="info"
-      >
-        <Progress
-          className="mt-2"
-          label={`${name} sync progress`}
-          value={progress && progress.total ? progress.percent : undefined}
-        />
-      </Callout>
-    );
-  } else if (key === "failed") {
-    main = (
-      <Callout title="Last sync failed" tone="err">
-        {source.sync?.error || "Try syncing again."}
-      </Callout>
-    );
-  } else if (key === "paused") {
-    main = (
-      <Callout title="Paused" tone="neutral">
-        New changes won’t sync until you resume.
-      </Callout>
-    );
-  } else {
-    const partial = (model.data?.runs ?? []).find(
-      (item) => item.scope.source_id === source.id && runStatusKey(item) === "partial",
-    );
-    const latest = (model.data?.runs ?? []).find((item) => item.scope.source_id === source.id);
-    if (latest && partial && latest.id === partial.id) {
-      main = (
-        <Callout
-          actions={
-            <Button onClick={() => model.open.run(partial.id)} size="sm" variant="secondary">
-              View details
-            </Button>
-          }
-          title={`${pluralize(partial.counts.failed, "document")} couldn’t be processed`}
-          tone="warn"
-        />
-      );
-    } else if (source.sync && source.sync.status === "succeeded" && source.sync.failed > 0) {
-      main = (
-        <Callout title={`${pluralize(source.sync.failed, "document")} couldn’t be fetched`} tone="warn">
-          {source.sync.error || "They are tried again at the next sync."}
-        </Callout>
-      );
-    }
   }
-
-  const waiting =
-    key !== "syncing" && key !== "reconnect" && source.pending_documents > 0 && (canManage || model.canRetry) ? (
+  const waiting = source.pendingDocumentCount ?? 0;
+  if (!top && waiting)
+    top = (
       <Callout
+        tone="accent"
+        title={`${plural(waiting, "document")} waiting to publish`}
+        description="Synced into the knowledge base. Publish them to make them searchable."
         actions={
-          <Button onClick={() => void model.act.process(source)} size="sm" variant="secondary">
-            Process now
-          </Button>
+          manage ? (
+            <Button size="sm" variant="primary" onPress={() => void actions.publish([source])}>
+              <Play className="i" aria-hidden />
+              Publish
+            </Button>
+          ) : null
         }
-        title={`${pluralize(source.pending_documents, "document")} waiting to be made searchable`}
-        tone="info"
-      >
-        They were synced but not processed yet.
-      </Callout>
-    ) : null;
+      />
+    );
 
-  if (!main && !waiting) return null;
+  const last = source.lastSync;
+  const draft = draftFrom(source.schedule);
+  const next = nextSyncAt(draft.draft);
+  const nextCell =
+    status === "paused" ? (
+      "Paused"
+    ) : status === "reconnect" ? (
+      "After you reconnect"
+    ) : draft.draft.freq === "manual" && !draft.custom ? (
+      "When someone clicks Sync now"
+    ) : next && !draft.custom ? (
+      <>
+        {relFuture(next)} <span className="muted">· {fmtDateTime(next)}</span>
+      </>
+    ) : (
+      "—"
+    );
+
   return (
-    <div className="mb-6 grid gap-2">
-      {main}
-      {waiting}
+    <section className="drawer__section">
+      {top ? <div className="mb-16">{top}</div> : null}
+      <KeyValue
+        pairs={[
+          ["Status", <SourceStatusChip key="s" source={source} />],
+          [
+            "Last sync",
+            last && last.state !== "RUNNING" ? (
+              <>
+                {rel(last.endTime)} · <span className={last.state === "FAILED" ? "text-danger" : last.failedCount ? "text-warning" : undefined}>{lastSyncText(source).toLowerCase()}</span>
+              </>
+            ) : last ? (
+              "Syncing now"
+            ) : (
+              "Never"
+            ),
+          ],
+          ["Next sync", nextCell],
+          [
+            "Account",
+            <div key="a" className="row gap-8 wrap">
+              {connection ? (
+                <>
+                  <span className="truncate" translate="no">
+                    {accountLabel(connection)}
+                  </span>
+                  {accountStatus(connection) !== "connected" ? <StatusChip kind="account" value={accountStatus(connection)} /> : null}
+                </>
+              ) : (
+                <span className="muted">None</span>
+              )}
+            </div>,
+          ],
+        ]}
+      />
+    </section>
+  );
+}
+
+function PolicyForm({ source, manage, actions }: { source: Source; manage: boolean; actions: SourceActions }) {
+  const { can } = useWorkspace();
+  const current = policyOf(source);
+  const inReview = source.inReviewCount ?? 0;
+  const queue = inReview ? (
+    <div className="row gap-8 wrap mt-8">
+      <span className="t-sm muted">{`${plural(inReview, "file")} from this source waiting in review`}</span>
+      {can("contributions.review") ? (
+        <NextLink href="/documents?tab=review" className="link-button">
+          Open review
+          <ArrowUpRight className="i i-sm" aria-hidden />
+        </NextLink>
+      ) : null}
+    </div>
+  ) : null;
+  if (!manage) {
+    const meta = POLICY[current];
+    const Icon = meta.icon;
+    return (
+      <>
+        <div className="row gap-8">
+          <Icon className="i i-sm muted" aria-hidden />
+          <span className="medium">{meta.label}</span>
+        </div>
+        <p className="description mt-4">{meta.desc}</p>
+        {queue}
+      </>
+    );
+  }
+  return (
+    <>
+      <ChoiceGroup label="New and changed files" value={current} options={POLICY_CHOICES} onChange={(v) => void actions.setPolicy(source, v)} />
+      <p className="description mt-8">Applies from the next sync. Files already published stay published.</p>
+      {queue}
+    </>
+  );
+}
+
+function ScheduleForm({ source, actions }: { source: Source; actions: SourceActions }) {
+  const saved = draftFrom(source.schedule);
+  const [form, setForm] = useState<ScheduleDraft>(saved.draft);
+  const [saving, setSaving] = useState(false);
+  const next = nextSyncAt(form);
+  const dirty = draftDirty(form, saved.draft) || (saved.custom && form.freq !== "manual");
+  const hint = form.freq === "manual" ? "Syncs only when someone clicks Sync now." : next ? `Next sync ${relFuture(next)} (${tzShort(form.tz)}).` : "";
+  return (
+    <div className="stack gap-12">
+      {saved.custom ? <p className="description">This source uses a custom schedule. Saving replaces it.</p> : null}
+      <ScheduleFields label="How often to sync" draft={form} onChange={setForm} />
+      <div className="row between gap-12">
+        <span className="description">{hint}</span>
+        <Button
+          variant="secondary"
+          size="sm"
+          isDisabled={!dirty}
+          isPending={saving}
+          onPress={async () => {
+            setSaving(true);
+            await actions.saveSchedule(source, form);
+            setSaving(false);
+          }}
+        >
+          Save schedule
+        </Button>
+      </div>
     </div>
   );
 }
+
+function RecentSyncs({ source, onOpenSync }: { source: Source; onOpenSync: (sync: Sync) => void }) {
+  const { set } = useParamState();
+  const syncs = useSyncs(source.name, 5);
+  const list = syncs.data ?? [];
+  return (
+    <SheetSection
+      title="Recent syncs"
+      actions={
+        list.length ? (
+          <Button variant="ghost" size="sm" onPress={() => set({ tab: "history", source: resourceId(source.name), status: null, page: null, open: null, focus: null })}>
+            View all
+          </Button>
+        ) : null
+      }
+    >
+      {syncs.isPending ? (
+        <SkeletonRows rows={2} />
+      ) : list.length ? (
+        <List>
+          {list.map((sync) => (
+            <ListItem
+              key={sync.name}
+              title={fmtDateTime(sync.startTime)}
+              description={syncDeltaText(sync)}
+              actions={<StatusChip kind="run" value={syncStatus(sync)} />}
+              onPress={() => onOpenSync(sync)}
+            />
+          ))}
+        </List>
+      ) : (
+        <p className="muted">No syncs yet.</p>
+      )}
+    </SheetSection>
+  );
+}
+

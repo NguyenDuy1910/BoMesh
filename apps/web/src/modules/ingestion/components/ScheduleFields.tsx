@@ -1,101 +1,61 @@
 "use client";
 
-import { useMemo } from "react";
+import { Label, ListBox, Select } from "@heroui/react";
+import clsx from "clsx";
 
-import { FormField } from "@/components/ui/FormField";
-import { SegmentedControl } from "@/components/ui/SegmentedControl";
-import { Select } from "@/components/ui/Select";
-import {
-  browserTimezone,
-  describeDraft,
-  FREQUENCY_OPTIONS,
-  scheduleTimes,
-  timezoneCity,
-  timezoneOptions,
-  WEEKDAYS,
-  type ScheduleDraft,
-  type ScheduleErrors,
-  type ScheduleFrequency,
-} from "@/modules/ingestion/schedule";
+import { Segmented } from "@/components/ui";
 
-/**
- * How often a source syncs: Manual, Daily or Weekly, then the day, time and
- * time zone. Shared by the connect wizard and the source drawer so both say
- * the same thing the same way.
- */
-export function ScheduleFields({
-  idBase,
+import { DAYS, FREQUENCIES, TIMES, timeZoneOptions, type Day, type ScheduleDraft } from "../schedule";
+
+/** Labelled HeroUI Select over `[value, label]` pairs. */
+export function OptionSelect<V extends string>({
   label,
-  draft,
+  value,
+  options,
   onChange,
-  errors = {},
-  replaces,
+  isInvalid,
+  placeholder,
 }: {
-  idBase: string;
-  /** Visible name of the frequency choice. */
   label: string;
-  draft: ScheduleDraft;
-  onChange: (draft: ScheduleDraft) => void;
-  errors?: ScheduleErrors;
-  /** What saving replaces when the saved schedule is not daily or weekly, e.g. "Every 6 hours". */
-  replaces?: string;
+  value: V | "";
+  options: readonly (readonly [V, string])[];
+  onChange: (value: V) => void;
+  isInvalid?: boolean;
+  placeholder?: string;
 }) {
-  const times = useMemo(() => scheduleTimes(draft.time).map((time) => ({ value: time, label: time })), [draft.time]);
-  const zones = useMemo(() => timezoneOptions([draft.timezone, browserTimezone()]), [draft.timezone]);
-  const preview =
-    draft.frequency === "manual"
-      ? "Syncs only when someone clicks Sync now."
-      : !errors.day && !errors.time && (draft.frequency === "daily" || draft.day)
-        ? `${describeDraft(draft)} (${timezoneCity(draft.timezone)} time)`
-        : null;
-
   return (
-    <div className="grid gap-3">
-      <div className="grid gap-1.5">
-        <span className="text-[0.84375rem] font-medium text-text-primary" id={`${idBase}-frequency`}>
-          {label}
-        </span>
-        <SegmentedControl<ScheduleFrequency>
-          ariaLabel={label}
-          className="w-max"
-          onChange={(frequency) => onChange({ ...draft, frequency })}
-          options={FREQUENCY_OPTIONS}
-          value={draft.frequency}
-        />
-      </div>
-      {draft.frequency !== "manual" && (
-        <div className={draft.frequency === "weekly" ? "grid gap-3 sm:grid-cols-3" : "grid gap-3 sm:grid-cols-2"}>
-          {draft.frequency === "weekly" && (
-            <FormField error={errors.day} htmlFor={`${idBase}-day`} label="Day" required>
-              <Select
-                onChange={(event) => onChange({ ...draft, day: event.target.value as ScheduleDraft["day"] })}
-                options={WEEKDAYS.map((day) => ({ value: day.value, label: day.label }))}
-                placeholder="Choose a day"
-                value={draft.day}
-              />
-            </FormField>
-          )}
-          <FormField error={errors.time} htmlFor={`${idBase}-time`} label="Time" required>
-            <Select
-              onChange={(event) => onChange({ ...draft, time: event.target.value })}
-              options={times}
-              placeholder="Choose a time"
-              value={draft.time}
-            />
-          </FormField>
-          <FormField htmlFor={`${idBase}-timezone`} label="Time zone" required>
-            <Select
-              onChange={(event) => onChange({ ...draft, timezone: event.target.value })}
-              options={zones}
-              value={draft.timezone}
-            />
-          </FormField>
+    <Select className="field" value={value || null} onChange={(v) => v != null && onChange(String(v) as V)} isInvalid={isInvalid} placeholder={placeholder} fullWidth>
+      <Label>{label}</Label>
+      <Select.Trigger>
+        <Select.Value />
+        <Select.Indicator />
+      </Select.Trigger>
+      <Select.Popover>
+        <ListBox>
+          {options.map(([v, text]) => (
+            <ListBox.Item key={v} id={v} textValue={text}>
+              {text}
+              <ListBox.ItemIndicator />
+            </ListBox.Item>
+          ))}
+        </ListBox>
+      </Select.Popover>
+    </Select>
+  );
+}
+
+/** Manual · Daily · Weekly, then day (weekly), time and time zone (preview `schedForm` / wizard step 4). */
+export function ScheduleFields({ draft, onChange, label }: { draft: ScheduleDraft; onChange: (draft: ScheduleDraft) => void; label: string }) {
+  return (
+    <>
+      <Segmented label={label} value={draft.freq} options={FREQUENCIES} onChange={(freq) => onChange({ ...draft, freq })} full />
+      {draft.freq !== "manual" ? (
+        <div className={clsx("src-sched-grid", draft.freq === "weekly" && "src-sched-grid--3")}>
+          {draft.freq === "weekly" ? <OptionSelect<Day> label="Day" value={draft.day} options={DAYS} onChange={(day) => onChange({ ...draft, day })} /> : null}
+          <OptionSelect label="Time" value={draft.time} options={TIMES.map((t) => [t, t] as const)} onChange={(time) => onChange({ ...draft, time })} />
+          <OptionSelect label="Time zone" value={draft.tz} options={timeZoneOptions(draft.tz)} onChange={(tz) => onChange({ ...draft, tz })} />
         </div>
-      )}
-      {replaces && draft.frequency !== "manual" && (
-        <p className="text-meta text-text-secondary">Saving replaces the current schedule ({replaces}).</p>
-      )}
-      {preview && <p className="text-meta text-text-tertiary">{preview}</p>}
-    </div>
+      ) : null}
+    </>
   );
 }

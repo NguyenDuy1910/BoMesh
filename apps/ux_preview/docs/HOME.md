@@ -1,55 +1,84 @@
-# Home — the knowledge-first landing
+# Home — the intent-driven entry
 
-Home is where every person lands in every workspace (`/home`, first sidebar item). Its job is to show what BoMesh knows before asking anyone to do anything: what knowledge exists, how to explore it, which trusted documents are worth opening, and where you left off.
+Home is where every person lands in every workspace (`/home`, first sidebar item). People don't open a workspace to look at what it contains; they open it to get an answer, find something, carry on, or catch up. Home makes the next of those obvious and leaves the rest to the pages that own it:
 
-It is **not** a dashboard (no KPI cards, no charts), a file manager (no inventory, no processing states) or a copy of Knowledge → Browse (no facets, no full lists).
+| Page | Owns |
+| --- | --- |
+| **Home** | One box to search documents or ask AI; what's waiting for you and what you were reading; what changed; a few documents; shortcuts into topics |
+| **Knowledge** | Browsing, filtering, previewing and reading documents ([KNOWLEDGE_HUB.md](KNOWLEDGE_HUB.md)) |
+| **Projects** (sidebar) | AI conversations organised by goal, plus *Recent* for conversations in no project ([PRODUCT_FLOW.md](PRODUCT_FLOW.md#1b-organise-ai-work-in-projects)) |
+| **Inbox** (topbar bell, ⌘K) | Notifications, requests and everything that asks for a decision |
 
 ```text
 Home
-├── Hero ─────────────── greeting · what this workspace knows · one input (scope · Search · Ask) · suggested questions
-├── Explore knowledge ── Topics (domain cards) │ Knowledge bases │ Collections          → filtered Browse / base / collection
-├── Featured knowledge ─ curated document cards with first-page thumbnails             → Reader
-├── Recently published │ Recommended for you (with a reason)                           → Reader
-└── Pick up where you left off ─ recent reads · conversations · my contributions · one review line · up to 3 Up next
+├── Good morning, Khoa
+├── [ Ask a question or find a document                 ⚲ All of Finx ▾ ]
+│     typing → Search documents for “…” · Ask AI “…” (question-like text puts Ask AI first) · matching documents · questions you asked before
+│     empty  → your recent questions · questions this workspace suggests
+│   Try asking: 3 suggested questions                                    ← first visit only
+├── Waiting for you    ≤ 3: changes requested · your review queue · a reply needed or something due soon
+├── Continue reading   the documents you opened last → Reader where you left off
+├── Worth knowing      ≤ 3 source-backed changes: “Batch cut-off moved from 16:00 to 15:30” — Payment Cut-off Times · Version 5
+├── Start here (new) / Recommended for you (returning)   ≤ 3 documents, each with its reason
+└── Explore by topic   domain shortcuts → Knowledge filtered to that domain · All knowledge →
 ```
 
-## Sections and why they exist
+Every block after the box appears only when it has something real to show. A new person sees the box with three suggested questions, *Worth knowing*, *Start here* and the topics; a returning reader sees what they were reading first.
 
-| Section | What people see | Behaviour | Why this shape |
-| --- | --- | --- | --- |
-| **Hero** | "Good evening, Khoa"; "Search or ask across 227 published documents in 7 knowledge bases"; one input with a scope select (whole workspace, each readable base, my spaces); **Search** and primary **Ask**; 3–4 suggested questions | Ask starts a grounded, cited conversation (`chat-ask`), scoped if a base or space is chosen. Search opens Browse with the query and, if a base is chosen, its filter. Enter asks when the text reads like a question (ends with "?" or starts with how/what/when/why/who/can/do/is/does/which) and searches otherwise; the hint under the box says which. Suggested questions ask straight away and change by role | The numbers say what this workspace knows. People either look something up or ask about it, so both are first-class without a mode switch |
-| **Explore knowledge** | Topic domains as cards: tinted icon, name, one-line description, document count, top topics as chips with counts. A small switch shows **Knowledge bases** instead (mark, owner, count, access; locked bases offer *Request access*) or **Collections** (featured and shared reading lists) | Card → Browse filtered to the domain; chip → Browse filtered to the topic; base → its page; collection → the collection | Answers "what's in here?" at a glance. The three dimensions are progressive disclosure: topics first, structure and curation one click away |
-| **Featured knowledge** | Up to 8 document cards showing a real first-page thumbnail, type, title, topic, base, updated date and *Verified* | Card → Reader; Save toggles in place. Workspace admins curate the list with *Feature on Home* in any document's ⋯ menu, and a quiet *Manage* menu here removes items (Undo). A partly filled row is topped up with the most-opened verified documents; with nothing curated the section becomes *Popular and verified* | Shows trusted, useful content immediately. The thumbnails tell people what they'll get before they click |
-| **Recently published** · **Recommended for you** | Two compact columns of rows | Recently published = ready, published, readable documents, newest approval first. Recommended comes from what you read (related documents), your spaces and your saved topics. It never repeats what you've read or what is already shown above, skips duplicates, and allows at most two per reason. Each row says why ("Because you read ADR-031", "From Payments Platform") | Keeps Home fresh and personal without a feed. The stated reasons make recommendations trustworthy |
-| **Pick up where you left off** | Recently viewed documents, recent conversations, my contributions (changes requested first, with lifecycle chips), one line for reviewers ("5 documents waiting for your review · Review"), up to 3 Up next items when Spaces or Requests are on | Each row opens its target: Reader, conversation, contribution drawer, Documents → Review, event | Continuity matters, but it comes last and stays quiet so admin work never dominates Home |
+## What was wrong
 
-## Document cards and thumbnails
+| Before | Problem | Now |
+| --- | --- | --- |
+| "Search or ask across 227 published documents in 7 knowledge bases", Search and Ask buttons, a scope select and four question chips | The first viewport described the system and asked people to choose between two buttons before typing | A short greeting and one box. Typing shows both actions, so nobody has to decide up front, plus the documents and earlier questions that already match |
+| Explore knowledge: six large topic cards with descriptions, counts and sub-topic chips, plus Knowledge bases and Collections tabs | The biggest block on Home duplicated Knowledge's taxonomy | One row of topic shortcuts that open Knowledge filtered to the domain. Shared collections live in Browse, your own in My library; a knowledge base is a Browse filter |
+| Featured knowledge: eight cards whose previews showed fragments ("Approvals p. 2", "Working hours p. 12") | Fragments without context had to be interpreted | *Worth knowing* states what changed, in the owner's own words, with its source; featured documents feed *Start here* and *Recommended*, shown as title, purpose and reason |
+| Recently published and Recommended for you, two columns of rows | Two near-identical lists of documents | One reading row of three documents, each with its reason |
+| Pick up where you left off came last: recent documents, conversations, contributions, a review line, Up next | The most useful thing for a returning person was at the bottom, and conversations repeated the sidebar | Continuity comes right after the box as two honestly titled rows: *Waiting for you* first, then *Continue reading*; conversations come back through the box |
 
-- The thumbnail is the document's own first page: the Reader's rendition, scaled down inside a fixed 16:10 frame (2:1 on tablets), inert and hidden from assistive technology. Policies look like policies, spreadsheets show their grid, and slides look like slides.
-- When there is no rendition (images, unsupported files), the card shows a tinted tile with the file-type badge, the type icon and the title. There are no stock images.
-- The whole card is one link to the Reader (`.doc-card__link`). Save is a separate button. Hover lifts the border and shadow slightly; focus shows a ring.
-- Exported as `X.docCard(d, {reason})` and `X.docThumb(d)` (`scripts/features/home.js`, styles in `home.css`) for reuse.
+## Behaviour
+
+### The box (intent A: an answer; intent B: a document)
+
+- One input with a combobox. Clicking into it, typing or pressing ↓ opens suggestions. It is autofocused only on wide screens with a fine pointer; on touch and phones it waits for a tap, so the keyboard doesn't cover the page.
+- **Typing** shows two clearly named actions first: *Search documents for "…"* (opens Knowledge with the query) and *Ask AI "…"* (starts a grounded conversation with sources). *Ask AI* ranks first only when the text reads like a question (`isQuestion`: ends with "?" or starts with how, what, when, why, who, can, do, is, explain…), *Search documents* otherwise. Enter runs the first option, so it is always visible what Enter will do; nothing is sent to the AI silently.
+- Below the actions: up to four matching documents (the Knowledge catalog search, same ranking and permissions, query words highlighted; opens the document preview at the match) and up to two earlier questions that match (opens that conversation).
+- **Empty box**: your three most recent questions (*Continue a conversation*) and the questions the workspace suggests for your audience (*Ask*).
+- ↑/↓ move, Enter picks, Escape closes; options keep focus in the input (ARIA combobox with `aria-activedescendant`).
+- **Scope** is a quiet menu inside the box (*All of Finx*, a readable knowledge base, or one of my spaces). It scopes both Ask and Search. On phones it becomes a labelled chip under the box ("In: All of Finx Workspace ▾").
+- **Suggested questions** under the box only on a first visit (no reading history, no conversations). Returning people get them in the empty-box suggestions instead.
+
+### Waiting for you · Continue reading (intent C)
+
+Two rows of compact cards, each with its own title. *Waiting for you* (at most three) holds what is waiting on you: one contribution with changes requested, your review queue (*9 documents to review* — the same count as the Manage → Documents badge), and a request that needs your reply or something due soon (Spaces/Requests). *Continue reading* lists the documents you opened last ("Opened 1 h ago") and opens them in the Reader, so you resume where you were rather than in a preview. Conversations aren't repeated: the sidebar's *Recent* and the box already offer them. Each row is absent when it has nothing.
+
+### Worth knowing (intent D)
+
+Source-backed changes, never generated statements:
+
+- a document's new version with its owner's change note ("Standing production access removed; just-in-time access for up to 8 hours" — *Access Control Policy · Version 4*), or
+- a recent announcement with its summary.
+
+Only ready, published documents the person can read; changes older than 120 days and announcements older than 60 days drop off; a change disappears once you've opened the document after it. Ranked by your reading and saved topics, your spaces, verification and recency; three at most. The card's headline is the change itself, with the kind and date above and the source document and version below. It opens the document preview. Absent when nothing qualifies.
+
+### Start here · Recommended for you
+
+Three documents, each card showing title, what it's for (summary or opening paragraph) and why it's here; a card opens the document preview. New people get *Start here*: what admins featured (*Recommended by Finx Workspace*), topped up with often-opened verified documents. Returning people get *Recommended for you*: related to what they read (*Because you read ADR-031*), from their spaces, or featured. One per reason first, nothing they have opened, nothing already in *Worth knowing*. Admins edit featured documents in the *Featured documents* drawer (the section's sliders button or ⌘K "Edit featured documents"): rows open the document, × removes with Undo, *Add documents* opens a searchable picker. Documents can also be featured from their ⋯ menu.
+
+### Explore by topic
+
+The workspace's topic domains as small pills with their icon and colour. Each opens Knowledge filtered to that domain (`catalogHref`), where the pill row and sub-topics take over. *All knowledge* opens Knowledge.
 
 ## Trust and permissions
 
-Home only shows content from the catalog pools (`catalogPool()`, `featuredResources()`, `recentlyPublished()`). That means published, ready documents the person can open. Submissions, declined or unpublished documents and restricted bases never appear as titles. Locked bases appear in *Knowledge bases* only as bases, with *Request access*. Contributions appear only to their contributor.
-
-## Roles and workspaces
-
-Everything is computed from the active workspace's data and the active persona:
-
-- Greeting and suggested questions follow the role (`D.assistant.roleStarters`).
-- Recommendations follow reading history and spaces.
-- My contributions appear only for contributors.
-- The review line appears only for reviewers and admins.
-
-Switching workspace or persona (prototype bar or account menu) redraws Home with that context. Northwind (no Spaces) has no "From your spaces" reasons and no Up next.
+Home draws only from the catalog pools: published, readable, shared documents (`catalogPool()` minus My files). Suggestions run the same catalog search as Knowledge. Restricted documents never appear as titles, counts, changes or recommendations. Contributions appear only to their contributor; the review card only to reviewers.
 
 ## States and responsiveness
 
-- **States.** Loading skeletons match the layout. Forced Empty shows "Your workspace has no published knowledge yet" with *Contribute* and *Browse*. Error offers retry.
-- **Breakpoints.** At ≤ 1023 px: topic cards go to two columns and featured cards to two per row. At ≤ 760 px, Recently published and Recommended stack. At ≤ 679 px: the input's controls wrap under the field, cards are single-column, and featured cards become a horizontal scroll-snap row. There's no horizontal page overflow at 834 or 390 px.
+- **Loading**: greeting and box, then skeletons for continue cards and three cards.
+- **Empty workspace**: "Your workspace has no published knowledge yet" with *Contribute* and *Browse knowledge*.
+- **Error**: retry. Sections without data are left out rather than shown empty.
+- **≤ 1023 px**: continue cards two per row, card rows show two. **≤ 679 px**: one column, the greeting aligns left, the scope becomes a labelled chip under the box, suggested questions and topics scroll horizontally, keyboard hints hide. No horizontal overflow at 834 or 390 px.
 
-## Relationship to Knowledge
+## Roles and workspaces
 
-Home absorbed the old Knowledge → Discover page. Two discovery pages competed for the same job, so Discover was removed. Knowledge now opens on **Browse**, the full faceted catalog with list, table and grid views and saved views, alongside My library and Knowledge bases. Home links into Browse rather than reproducing it.
+Everything is computed from the active workspace and persona: suggested questions follow the person's audience in the published assistant settings (`X.assistantStarters()`: group → role → Everyone), recommendations and *Worth knowing* follow reading history, saved topics and spaces, review cards follow review rights. Northwind (no Spaces) has no space reasons and no due items. The first-run product tour starts here (box, scope, first section, New chat, Search).

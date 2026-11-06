@@ -8,6 +8,10 @@
   const appName = key => APPS[key]?.name || 'App';
   const provider = app => APPS[app]?.provider || (app === 'gdrive' ? 'Google' : 'Atlassian');
   const usedBy = acc => D.sources.filter(s => s.account === acc.id);
+  /** Sources an expired account actually stops (paused ones aren't syncing anyway). The same rule as Sources and Overview. */
+  const blockedBy = acc => usedBy(acc).filter(s => s.status === 'reconnect');
+  /** Nav badge: accounts that need signing in again. An expired account is counted here only (Sources links to it). */
+  X.accBadge = () => (can('source.manage') ? D.accounts.filter(a => a.status === 'expired' || a.status === 'error').length : 0);
   const audit = (action, target) => X.src?.audit(action, target);
   const signInFailed = () => S.pageState === 'error';
 
@@ -71,8 +75,13 @@
     X.src?.boot();
     const live = S.pageState === 'live' && !S.navLoading;
     const empty = !S.navLoading && (S.pageState === 'empty' || (S.pageState === 'live' && !D.accounts.length));
-    const broken = live && D.accounts.some(a => a.status === 'expired');
-    const actions = empty ? '' : btn('Connect account', { v: broken ? 'secondary' : 'primary', icon: 'plus', act: 'acc-connect' });
+    const expired = live ? D.accounts.filter(a => a.status === 'expired') : [];
+    const actions = empty ? '' : btn('Connect account', { v: 'primary', icon: 'plus', act: 'acc-connect' });
+    // One alert per expired account, naming what it stops and the fix.
+    const alerts = expired.map(a => {
+      const used = blockedBy(a), who = used.length === 1 ? used[0].name : used.length ? `${used[0].name} and ${plural(used.length - 1, 'other source')}` : '';
+      return alertBox('danger', `${a.label} access expired`, who ? `${esc(who)} can’t sync until you sign in again as ${esc(a.user)}. Synced documents stay searchable.` : `Sign in again as ${esc(a.user)}.`, btn('Reconnect', { v: 'secondary', size: 'sm', icon: 'log-in', act: 'acc-reconnect', data: { id: a.id } }));
+    });
     const none = () => emptyState({ icon: 'key', title: 'No accounts connected', desc: 'Connect Google Drive or Confluence so sources can sync.', actions: btn('Connect account', { v: 'primary', icon: 'plus', act: 'acc-connect' }), boxed: true });
     const body = gate({
       loading: () => skelRows(3),
@@ -83,27 +92,27 @@
         return table({ label: 'Connected accounts', head, rows: D.accounts.map(accRow) });
       },
     });
-    return `<div class="page">${pageHeader({ title: 'Connections', desc: 'Accounts BoMesh uses to read your apps.', actions })}${body}</div>`;
+    return `<div class="page">${pageHeader({ title: 'Connections', desc: 'Accounts BoMesh uses to read your apps.', actions })}${alerts.length ? `<div class="stack gap-8 mb-16">${alerts.join('')}</div>` : ''}${body}</div>`;
   };
   function accRow(a) {
     const used = usedBy(a);
     const st = a.checking ? `<span class="row gap-6 t-sm muted">${spinner('sm')}Checking…</span>` : status('account', a.status);
     const usedCell = used.length ? linkBtn(plural(used.length, 'source'), { act: 'acc-sources', data: { id: a.id } }) : '<span class="muted">Not used</span>';
-    const main = a.status === 'expired'
-      ? btn('Reconnect', { v: 'primary', size: 'sm', act: 'acc-reconnect', data: { id: a.id } })
-      : btn('Test connection', { size: 'sm', act: 'acc-test', data: { id: a.id }, disabled: a.checking, cls: 'acc-test-inline' });
+    // The alert above the table names what stopped and carries Reconnect; rows stay quiet (everything else in ⋯).
     return `<tr class="table__row">
       <td class="table__cell table__cell--primary"><div class="row gap-12">${appIcon(a.app)}<div class="stack src-min"><span class="cell-title truncate">${esc(a.label)}</span><span class="cell-sub truncate">${esc(appName(a.app))}${a.user !== a.label ? ' · ' + esc(a.user) : ''}</span></div></div></td>
       <td class="table__cell">${st}</td>
       <td class="table__cell">${usedCell}</td>
       <td class="table__cell table__cell--hide-sm muted">${rel(a.checked)}</td>
-      <td class="table__cell table__cell--actions src-actions"><div class="row gap-4">${main}${iconBtn('more', 'More actions', { size: 'sm', menu: 'acc-row', data: { id: a.id } })}</div></td></tr>`;
+      <td class="table__cell table__cell--actions src-actions">${iconBtn('more', 'More actions', { size: 'sm', menu: 'acc-row', data: { id: a.id } })}</td></tr>`;
   }
   MENUS['acc-row'] = el => {
     const a = accById(el.dataset.id); if (!a) return [];
+    const expired = a.status === 'expired';
+    const reconnect = { label: 'Reconnect', icon: 'log-in', run: () => A['acc-reconnect']({ dataset: { id: a.id } }) };
+    const test = { label: 'Test connection', icon: 'refresh', disabled: a.checking, run: () => A['acc-test']({ dataset: { id: a.id } }) };
     return [
-      { label: 'Test connection', icon: 'refresh', disabled: a.checking, run: () => A['acc-test']({ dataset: { id: a.id } }) },
-      { label: 'Reconnect', icon: 'log-in', run: () => A['acc-reconnect']({ dataset: { id: a.id } }) },
+      ...(expired ? [reconnect, test] : [test, reconnect]),
       { label: 'Connect a source', icon: 'plug', disabled: a.status !== 'connected', run: () => X.src.openWizard({ app: a.app, acc: a.id }) },
       { sep: true },
       { label: 'Disconnect', icon: 'trash', danger: true, run: () => A['acc-disconnect']({ dataset: { id: a.id } }) },
@@ -141,16 +150,19 @@
     if (acc.status === 'connected') { const fixed = reconnect(acc); toast(reconnectMsg(acc, fixed)); refresh(); return; }
     openModal('acc-reconnect', { id: acc.id, phase: 'idle' });
   };
+  /** Sign-in in progress (a provider window is open): the dialog waits and offers only Cancel. */
+  const waitBody = (title, sub) => `<div class="src-wait" role="status">${spinner('lg')}<div class="t-subheading">${esc(title)}</div><p class="description">${esc(sub)}</p></div>`;
   M['acc-reconnect'] = p => {
-    const acc = accById(p.id); if (!acc) return { title: 'Account removed', body: '', foot: btn('Close', { act: 'close-modal' }) };
-    const prov = provider(acc.app), title = `Reconnect ${appName(acc.app)}`;
-    if (p.phase === 'waiting') return { size: 'md', title, noClose: true, body: `<div class="src-wait" role="status">${spinner('lg')}<div class="t-subheading">Finish signing in with ${prov}</div><p class="description">Sign in as ${esc(acc.user)}, then come back here.</p></div>`, foot: btn('Cancel', { act: 'acc-rc-cancel' }) };
+    const acc = accById(p.id); if (!acc) return { title: 'Account removed', icon: 'key', tone: 'default', size: 'sm', desc: 'It was disconnected in the meantime.', foot: btn('Close', { v: 'primary', act: 'close-modal' }) };
+    const prov = provider(acc.app), title = `Reconnect ${appName(acc.app)}`, icon = appIcon(acc.app), tone = 'default';
+    if (p.phase === 'waiting') return { size: 'md', title, icon, tone, noClose: true, body: waitBody(`Finish signing in with ${prov}`, `Sign in as ${acc.user}, then come back here.`), foot: btn('Cancel', { v: 'ghost', act: 'acc-rc-cancel' }) };
     const used = usedBy(acc);
     const err = p.phase === 'error' ? `<div class="mb-12">${alertBox('danger', '', `${prov} didn’t confirm the sign-in. Try again.`)}</div>` : '';
     return {
-      size: 'md', title, icon: appIcon(acc.app, 'lg'),
-      body: `${err}${list([item({ title: esc(acc.label), desc: used.length ? 'Used by ' + esc(used.map(s => s.name).join(', ')) : 'Not used by any source', trail: status('account', acc.status) })])}<p class="description mt-12">Synced documents stay searchable. Syncing resumes once you sign in.</p>`,
-      foot: btn('Cancel', { act: 'close-modal' }) + btn(p.phase === 'error' ? 'Try again' : `Continue with ${prov}`, { v: 'primary', iconRight: 'external', act: 'acc-rc-go' }),
+      size: 'md', title, icon, tone,
+      desc: esc(`Sign in again as ${acc.user} to resume syncing. Synced documents stay searchable.`),
+      body: `${err}${list([item({ title: esc(acc.label), desc: used.length ? 'Used by ' + esc(used.map(s => s.name).join(', ')) : 'Not used by any source', trail: status('account', acc.status) })])}`,
+      foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn(p.phase === 'error' ? 'Try again' : `Continue with ${prov}`, { v: 'primary', iconRight: 'external', act: 'acc-rc-go' }),
     };
   };
   A['acc-rc-go'] = async () => {
@@ -175,16 +187,19 @@
   };
   M['acc-connect'] = () => {
     const f = S.ui.accNew; if (!f) return { title: 'Connect account', body: '' };
-    const prov = provider(f.app);
-    if (f.phase === 'waiting') return { size: 'md', title: 'Connect account', noClose: true, body: `<div class="src-wait" role="status">${spinner('lg')}<div class="t-subheading">Finish signing in with ${prov}</div><p class="description">A ${prov} window opened. Come back here when you’re done.</p></div>`, foot: btn('Cancel', { act: 'acc-new-cancel' }) };
+    const prov = provider(f.app), title = f.fixed ? `Connect ${appName(f.app)} account` : 'Connect account';
+    const icon = f.fixed ? appIcon(f.app) : 'key', tone = f.fixed ? 'default' : 'accent';
+    if (f.phase === 'waiting') return { size: 'md', title, icon, tone, noClose: true, body: waitBody(`Finish signing in with ${prov}`, `A ${prov} window opened. Come back here when you’re done.`), foot: btn('Cancel', { v: 'ghost', act: 'acc-new-cancel' }) };
     const apps = D.pConnectors.filter(c => c.key !== 'upload' && c.status === 'enabled');
-    const pick = f.fixed ? '' : `<div class="field src-choices"><span class="label">App</span>${choiceGroup({ name: 'acc-app', value: f.app, options: apps.map(c => [c.key, c.name, esc(c.auth || '')]), act: 'acc-new-app', cols: 2 })}</div>`;
+    const choice = c => `<label class="choice acc-app"><input type="radio" name="acc-app" value="${c.key}" ${f.app === c.key ? 'checked' : ''} data-change="acc-new-app" data-value="${c.key}" ${f.busy ? 'disabled' : ''}>${appIcon(c.key)}<span class="grow src-min"><span class="choice__title" style="display:block">${esc(c.name)}</span>${c.auth ? `<span class="choice__desc" style="display:block">${esc(c.auth)}</span>` : ''}</span></label>`;
+    const pick = f.fixed ? '' : `<div class="field"><span class="label" id="acc-app-label">App</span><div class="choice-group" role="radiogroup" aria-labelledby="acc-app-label" style="grid-template-columns:repeat(${Math.min(2, apps.length)},minmax(0,1fr))">${apps.map(choice).join('')}</div></div>`;
     const err = f.phase === 'error' ? alertBox('danger', '', `${prov} didn’t confirm the sign-in. Try again.`) : '';
-    const form = f.app === 'confluence' ? confForm('accNew.conf', f.conf, f.cerr, 'acc-new-go') : '<p class="description">You’ll sign in with Google in a new window. BoMesh only reads the folders you choose.</p>';
+    const form = f.app === 'confluence' ? confForm('accNew.conf', f.conf, f.cerr, 'acc-new-go') : `<div class="acc-note">${ic('shield-check', 'i-sm')}<span>You’ll sign in with Google in a new window. BoMesh only reads the folders you choose.</span></div>`;
     return {
-      size: 'md', title: f.fixed ? `Connect ${appName(f.app)} account` : 'Connect account',
+      size: 'md', title, icon, tone,
+      desc: 'Sources sign in with it to read the folders and spaces you pick.',
       body: `<div class="stack gap-16">${err}${pick}${form}</div>`,
-      foot: btn('Cancel', { act: 'close-modal', disabled: f.busy }) + (f.app === 'gdrive' ? btn('Continue with Google', { v: 'primary', iconRight: 'external', act: 'acc-new-go' }) : btn('Verify and connect', { v: 'primary', act: 'acc-new-go', loading: f.busy })),
+      foot: btn('Cancel', { v: 'ghost', act: 'close-modal', disabled: f.busy }) + (f.app === 'gdrive' ? btn('Continue with Google', { v: 'primary', iconRight: 'external', act: 'acc-new-go' }) : btn('Verify and connect', { v: 'primary', icon: 'check', act: 'acc-new-go', loading: f.busy })),
     };
   };
   A['acc-new-app'] = el => { const f = ui('accNew'); f.app = el.dataset.value; f.cerr = {}; f.phase = 'idle'; refreshLayer(); };

@@ -10,7 +10,10 @@
                      (doc.contexts, plus the knowledge base's own space) without being copied.
    - Topic           the workspace taxonomy (domain → topic), D.topics.
    - Collection      a curated, ordered list of references (D.collections). Never grants access.
-   - Saved view      a stored Browse query (D.views). Library = saved + recent + my files + my collections.
+   - Saved view      a stored Browse query (D.views), kept and managed in Browse's Filters.
+   Browse = the organization's knowledge (topics, collections shared with you, filters).
+   My library = saved + recent + my files + my collections + contributions. Managing
+   knowledge bases (access, sources, settings) is Manage → Knowledge bases.
 
    Feature code reads metadata through res(doc), so derived defaults apply everywhere and
    resources without hand-written metadata (uploads, synced files) still work. Workspace-
@@ -119,6 +122,9 @@ function res(doc) {
     kb,
   };
 }
+/** The one display title of a document (Foundation's bareName: its name without the file extension — the format badge says PDF/MD).
+    Rows, cards, the Reader, previews, crumbs and Edit details all use it. */
+const docTitle = doc => bareName(doc?.name);
 
 /* ═══════════════ Trust (verification + freshness) ═══════════════ */
 const TRUST = {
@@ -146,9 +152,18 @@ const isDemoWs = () => !!curWs()?.demo;
 const isPublishedStage = d => !d.stage || d.stage === 'published';
 /** Published resources the caller may read (any publishing status). Authorization happens here, before any listing, search or AI use. */
 const readableResources = () => D.docs.filter(d => { const kb = kbById(d.kb); return !d.archived && isPublishedStage(d) && kb && !kb.archived && canReadKb(kb); });
-/** What Browse lists: published knowledge people can use. Publishing problems are handled in Manage → Documents. */
+/** Every published resource the caller can use, My files included (search, ⌘K, the assistant). */
 const catalogPool = () => readableResources().filter(isReaderVisible);
+/** What Browse lists: the organization's knowledge. Personal files live in My library. */
+const sharedPool = () => catalogPool().filter(d => !kbById(d.kb)?.personal);
 const canOpenRes = doc => !!doc && !doc.archived && isPublishedStage(doc) && canReadKb(kbById(doc.kb)) && !kbById(doc.kb)?.archived;
+/** Where a knowledge base opens for reading: its documents in Browse (a locked base offers Request access there); My files in My library. */
+const kbHref = kb => (!kb ? '/knowledge' : kb.personal ? '/knowledge/library?tab=files' : catalogHref({ filters: { kb: [kb.id] } }));
+/** Bases the caller manages (owner or editor) — Manage → Knowledge bases. */
+const managedKbs = () => visibleKbs().filter(k => !k.personal && canEditKb(k));
+const canManageKbs = () => can('knowledge.manage') || managedKbs().length > 0;
+/** A managed base's page (access, sources, settings). */
+const kbManageHref = (kb, tab = '') => '/bases/' + kb.id + (tab ? '?tab=' + tab : '');
 
 /* ═══════════════ Search ═══════════════ */
 const _textCache = new Map();
@@ -193,11 +208,13 @@ function resSnippet(doc, q) {
   const start = Math.max(0, text.lastIndexOf(' ', Math.max(0, i - 70)) + 1), end = Math.min(text.length, i + 150);
   return (start > 0 ? '…' : '') + markTokens(text.slice(start, end).trim(), toks) + (end < text.length ? '…' : '');
 }
-/** Escape text and wrap query words (accent-insensitive) in <mark class="srch-hl">. */
+/** Escape text and wrap query words (accent-insensitive) in <mark class="srch-hl">. Matches start at a word start only, so "cut"
+    marks "cut-off" but never the middle of "Executive". */
+const WORD_CHAR = /[\p{L}\p{N}]/u;
 function markTokens(text, toks) {
   const s = String(text ?? ''); if (!toks?.length) return esc(s);
   const low = fold(s), ranges = [];
-  toks.forEach(t => { let i = 0; while ((i = low.indexOf(t, i)) !== -1) { ranges.push([i, i + t.length]); i += t.length; } });
+  toks.forEach(t => { let i = 0; while ((i = low.indexOf(t, i)) !== -1) { if (i === 0 || !WORD_CHAR.test(low[i - 1])) ranges.push([i, i + t.length]); i += t.length; } });
   if (!ranges.length) return esc(s);
   ranges.sort((a, b) => a[0] - b[0]);
   let out = '', at = 0;
@@ -224,30 +241,29 @@ const facetsOn = () => FACETS.filter(f => !f.when || f.when());
 const SORTS_CATALOG = { relevance: 'Best match', updated: 'Recently updated', title: 'Title A–Z', popular: 'Most opened' };
 /** URL query → catalog params. Multi-value facets are comma lists. */
 function parseCatalogQuery(query = {}) {
-  const p = { q: (query.q || '').trim(), sort: SORTS_CATALOG[query.sort] ? query.sort : '', view: ['list', 'table', 'grid'].includes(query.view) ? query.view : 'list', filters: {} };
+  const p = { q: (query.q || '').trim(), sort: SORTS_CATALOG[query.sort] ? query.sort : '', view: query.view === 'list' ? 'list' : 'grid', filters: {} };
   facetsOn().forEach(f => { const v = (query[f.id] || '').split(',').filter(Boolean); if (v.length) p.filters[f.id] = f.single ? [v[0]] : v; });
-  if (query.saved === '1') p.saved = true;
   return p;
 }
 /** Catalog params → query object for setQuery()/hrefs. */
 function catalogQueryOf(p) {
-  const q = { q: p.q || '', sort: p.sort || '', view: p.view && p.view !== 'list' ? p.view : '', saved: p.saved ? '1' : '' };
+  const q = { q: p.q || '', sort: p.sort || '', view: p.view === 'list' ? 'list' : '' };
   facetsOn().forEach(f => { q[f.id] = (p.filters?.[f.id] || []).join(','); });
   return q;
 }
 /** '#/knowledge?…' (Browse) for a params patch, e.g. catalogHref({ filters: { topic: ['t-ml'] } }). */
 function catalogHref(p = {}) {
-  const qs = new URLSearchParams(Object.entries(catalogQueryOf({ view: 'list', ...p })).filter(([, v]) => v)).toString();
+  const qs = new URLSearchParams(Object.entries(catalogQueryOf({ view: 'grid', ...p })).filter(([, v]) => v)).toString();
   return '/knowledge' + (qs ? '?' + qs : '');
 }
-const activeFilterCount = p => Object.values(p.filters || {}).reduce((a, v) => a + v.length, 0) + (p.saved ? 1 : 0);
+const activeFilterCount = p => Object.values(p.filters || {}).reduce((a, v) => a + v.length, 0);
 /** Run a catalog query: { rows:[{doc, score}], facets:{ id: [{value,label,count,on}] }, total, pool }.
     Facet counts are disjunctive (each facet ignores its own selection), so people can widen as well as narrow. */
 function catalogSearch(p, pool = catalogPool()) {
   const toks = tokens(p.q), fs = facetsOn();
   const metas = new Map(pool.map(d => [d.id, res(d)]));
   const keys = new Map(pool.map(d => [d.id, Object.fromEntries(fs.map(f => [f.id, f.values(d, metas.get(d.id))]))]));
-  const scored = pool.map(d => ({ doc: d, score: scoreRes(d, toks) })).filter(x => x.score > 0 && (!p.saved || isSaved(x.doc.id)));
+  const scored = pool.map(d => ({ doc: d, score: scoreRes(d, toks) })).filter(x => x.score > 0);
   const passes = (x, skip) => fs.every(f => f.id === skip || !p.filters[f.id]?.length || p.filters[f.id].some(v => keys.get(x.doc.id)[f.id].includes(v)));
   const rows = scored.filter(x => passes(x, null));
   const facets = {};

@@ -60,7 +60,8 @@
   }
 
   /* ═══════════════ Status, SLA, list row ═══════════════ */
-  /** Status chip as the viewer should read it (requester vs staff wording). */
+  /** The one request status, as the viewer should read it: the requester is asked to reply; staff wait for the requester.
+      Used everywhere a request shows (Requests, space queue, Home, request page). */
   function requestStatus(r) {
     if (r.status === 'needs_info' && r.requester !== me().id) return chip(spaceById(r.space)?.type === 'course' ? 'Waiting for student' : 'Waiting for reply', { tone: 'warning', dot: true });
     if (r.status === 'completed' && isQ(r)) return chip('Answered', { tone: 'success', variant: 'tertiary', dot: true });
@@ -119,8 +120,8 @@
   const snap = r => ({ status: r.status, n: r.thread.length, updated: r.updated, lastBy: r.lastBy, assignee: r.assignee });
   const undoTo = (r, s) => () => { Object.assign(r, { status: s.status, updated: s.updated, lastBy: s.lastBy, assignee: s.assignee }); r.thread.length = s.n; refresh(); toast('Undone', { tone: 'accent' }); };
   const cKey = r => `rqc_${me().id}_${r.id}`;   // drafts belong to the person writing them
-  const composerState = r => ui(cKey(r), { text: '', err: '', faq: true, files: [] });
-  const clearComposer = r => Object.assign(composerState(r), { text: '', err: '', files: [] });
+  const composerState = r => ui(cKey(r), { text: '', err: '', faq: true, files: [], ask: false });
+  const clearComposer = r => Object.assign(composerState(r), { text: '', err: '', files: [], ask: false });
 
   function assign(r, userId, { quiet } = {}) {
     if (r.assignee === userId) return;
@@ -239,58 +240,69 @@
   }
 
   const OPEN_STATUS_OPTS = [['submitted', 'Submitted'], ['in_review', 'In review'], ['needs_info', 'Waiting for reply'], ['approved', 'Approved']];
-  const DONE_STATUS_OPTS = [['completed', 'Done'], ['declined', 'Declined'], ['withdrawn', 'Withdrawn']];
-  function queueView(q) {
-    const u = ui('rqQ', { view: 'open', sel: {} });
-    const spaces = staffSpaces(), live = !S.navLoading && S.pageState === 'live';
-    const inView = q.filter(r => (u.view === 'done' ? !isOpen(r) : isOpen(r)));
+  const CLOSED_STATUS_OPTS = [['completed', 'Done'], ['declined', 'Declined'], ['withdrawn', 'Withdrawn']];
+  /** The one staff queue. space: scoped to one space (its Requests/Questions tab) — same table, SLA, assignee and bulk actions. */
+  function queueView(q, { space } = {}) {
+    const key = space ? 'rqQ_' + space : 'rqQ';
+    const u = ui(key, { view: 'open', sel: {} });
+    if (u.view === 'done') u.view = 'closed';
+    const spaces = space ? [] : staffSpaces();
+    const inView = q.filter(r => (u.view === 'closed' ? !isOpen(r) : isOpen(r)));
+    const filtering = !!(u.q || u.space || u.status || u.type);
+    const tools = needsTools(inView.length, key, ['space', 'status', 'type']);
     const filtered = inView.filter(r => (!u.space || r.space === u.space) && (!u.status || r.status === u.status) && (!u.type || r.type === u.type)
-      && matchesQ('rqQ', title(r), personName(r.requester), memberById(r.requester)?.email, r.id, typeById(r.type)?.name));
-    const rows = u.sort ? applySort(filtered, 'rqQ', { name: r => personName(r.requester).toLowerCase(), created: r => r.created, due: r => r.due })
-      : [...filtered].sort(u.view === 'done' ? (a, b) => b.updated - a.updated : byDue);
-    const typeOpts = types().filter(t => spaces.some(s => s.id === t.space)).map(t => [t.id, t.question ? `${t.name} · ${spaceById(t.space)?.code || spaceById(t.space)?.name}` : t.name]);
-    const counts = { open: q.filter(isOpen).length, done: q.length - q.filter(isOpen).length };
-    const toolbar = `<div class="toolbar">${seg({ value: u.view, options: [['open', `Open · ${counts.open}`], ['done', `Done · ${counts.done}`]], act: 'rq-q-view', label: 'Show' })}
-      ${searchField({ uiKey: 'rqQ', placeholder: 'Search by person, ID or request' })}
-      ${spaces.length > 1 ? filterButton('Space', 'rqQ', 'space', spaces.map(s => [s.id, s.name])) : ''}
-      ${filterButton('Status', 'rqQ', 'status', u.view === 'done' ? DONE_STATUS_OPTS : OPEN_STATUS_OPTS)}
-      ${typeOpts.length > 1 ? filterButton('Type', 'rqQ', 'type', typeOpts) : ''}
-      ${clearFilters('rqQ', ['space', 'status', 'type'])}
-      ${live ? `<span class="toolbar__end t-sm muted num">${plural(rows.length, 'request')}</span>` : ''}</div>`;
-    const empty = () => u.view === 'done'
-      ? emptyState({ icon: 'archive', boxed: true, title: 'Nothing closed yet', desc: 'Requests you approve, decline or answer move here.' })
-      : emptyState({ icon: 'check-circle', tone: 'success', boxed: true, title: 'Your queue is clear', desc: 'New requests and questions for your spaces show up here.' });
+      && matchesQ(key, title(r), personName(r.requester), memberById(r.requester)?.email, r.id, typeById(r.type)?.name));
+    const rows = tools && u.sort ? applySort(filtered, key, { name: r => personName(r.requester).toLowerCase(), created: r => r.created, due: r => r.due })
+      : [...filtered].sort(u.view === 'closed' ? (a, b) => b.updated - a.updated : byDue);
+    const typeOpts = types().filter(t => (space ? t.space === space : spaces.some(s => s.id === t.space))).map(t => [t.id, t.question && !space ? `${t.name} · ${spaceById(t.space)?.code || spaceById(t.space)?.name}` : t.name]);
+    // The tab counts what waits on you; Open / Closed only switches the view.
+    const filters = tools ? `${searchField({ uiKey: key, placeholder: 'Search by person, ID or request' })}
+      ${spaces.length > 1 ? filterButton('Space', key, 'space', spaces.map(s => [s.id, s.name])) : ''}
+      ${filterButton('Status', key, 'status', u.view === 'closed' ? CLOSED_STATUS_OPTS : OPEN_STATUS_OPTS)}
+      ${typeOpts.length > 1 ? filterButton('Type', key, 'type', typeOpts) : ''}
+      ${clearFilters(key, ['space', 'status', 'type'])}
+      ${filtering && !S.navLoading && S.pageState === 'live' ? `<span class="toolbar__end t-sm muted num">${plural(rows.length, 'request')}</span>` : ''}` : '';
+    const toolbar = `<div class="toolbar">${seg({ value: u.view, options: [['open', 'Open'], ['closed', 'Closed']], act: 'rq-q-view', data: { ui: key }, label: 'Show' })}${filters}</div>`;
+    const empty = () => u.view === 'closed'
+      ? emptyState({ icon: 'archive', boxed: true, compact: !!space, title: 'Nothing closed yet', desc: 'Requests you approve, decline or answer move here.' })
+      : emptyState({ icon: 'check-circle', tone: 'success', boxed: true, compact: !!space, title: 'Your queue is clear', desc: space ? 'New requests and questions for this space show up here.' : 'New requests and questions for your spaces show up here.' });
     return toolbar + gate({
       empty,
       ok: () => {
         if (!inView.length) return empty();
-        if (!rows.length) return noMatches('rqQ', ['space', 'status', 'type'], 'requests');
-        const page = paginate(rows, 'rqQ', 20), ids = page.filter(isOpen).map(r => r.id);
-        const head = (ids.length ? selAllCheck('rqQ', ids) : th('', 'table__column--check')) + sortHead('Requester', 'name', 'rqQ') + th('Request') + sortHead('Submitted', 'created', 'rqQ', 'table__column--hide-sm') + sortHead(u.view === 'done' ? 'Closed' : 'SLA', 'due', 'rqQ') + th('Status') + th('Assignee', 'hide-md');
+        if (!rows.length) return noMatches(key, ['space', 'status', 'type'], 'requests');
+        const page = paginate(rows, key, 20), ids = tools ? page.filter(isOpen).map(r => r.id) : [];
+        const sorted = (label, k, cls = '') => (tools ? sortHead(label, k, key, cls) : th(label, cls));
+        const head = (tools ? (ids.length ? selAllCheck(key, ids) : th('', 'table__column--check')) : '') + sorted('Requester', 'name') + th('Request') + sorted('Submitted', 'created', 'table__column--hide-sm') + sorted(u.view === 'closed' ? 'Closed' : 'SLA', 'due') + th('Status') + th('Assignee', 'hide-md');
         const trs = page.map(r => {
           const t = typeById(r.type), sp = spaceById(r.space), m = memberById(r.requester), sid = /^\d+@/.test(m?.email || '') ? m.email.split('@')[0] : (m?.email || '');
-          return `<tr class="${cx('table__row', overdue(r) && 'rq-row--over')}" data-act="rq-open" data-id="${r.id}" tabindex="0" ${u.sel?.[r.id] ? 'aria-selected="true"' : ''}>
-            ${isOpen(r) ? selCheck('rqQ', r.id, 'Select ' + r.id) : '<td class="table__cell table__cell--check"></td>'}
+          return `<tr class="${cx('table__row', overdue(r) && 'rq-row--over')}" data-act="rq-open" data-id="${r.id}" tabindex="0" ${tools && u.sel?.[r.id] ? 'aria-selected="true"' : ''}>
+            ${!tools ? '' : isOpen(r) ? selCheck(key, r.id, 'Select ' + r.id) : '<td class="table__cell table__cell--check"></td>'}
             <td class="table__cell"><span class="row gap-12">${avatar(personName(r.requester), 'sm')}<span class="stack" style="min-width:0"><span class="cell-title truncate">${esc(personName(r.requester))}</span><span class="cell-sub truncate num">${esc(sid)}</span></span></span></td>
-            <td class="table__cell table__cell--primary"><span class="stack rq-cell-req"><span class="cell-title rq-clamp">${esc(title(r))}</span><span class="cell-sub truncate">${esc(t?.question ? `Question · ${sp?.name || ''}` : `${spaces1(spaces, sp)}${r.id}`)}</span></span></td>
+            <td class="table__cell table__cell--primary"><span class="stack rq-cell-req"><span class="cell-title rq-clamp">${esc(title(r))}</span><span class="cell-sub truncate">${esc(t?.question ? (space ? `Question · ${r.id}` : `Question · ${sp?.name || ''}`) : `${spaces1(spaces, sp)}${r.id}`)}</span></span></td>
             <td class="table__cell table__cell--hide-sm muted"><span class="rq-nowrap">${esc(rel(r.created))}</span></td>
             <td class="table__cell">${slaHtml(r)}</td>
             <td class="table__cell">${requestStatus(r)}</td>
             <td class="table__cell hide-md table__cell--hide-sm">${r.assignee ? `<span class="row gap-6">${avatar(personName(r.assignee), 'xs')}<span class="truncate">${esc(r.assignee === me().id ? 'You' : firstName(r.assignee))}</span></span>` : '<span class="muted">Unassigned</span>'}</td></tr>`;
         });
-        const bulk = bulkBar('rqQ', btn('Assign to me', { v: 'ghost', size: 'sm', icon: 'user', act: 'rq-bulk-assign' }));
-        return table({ head, rows: trs, label: 'Request queue' }) + pager(rows.length, 'rqQ', 20) + bulk;
+        const bulk = tools ? bulkBar(key, btn('Assign to me', { v: 'ghost', size: 'sm', icon: 'user', act: 'rq-bulk-assign', data: { ui: key } })) : '';
+        return table({ head, rows: trs, label: 'Request queue' }) + pager(rows.length, key, 20) + bulk;
       },
     });
   }
+  /** Space page: the same queue, scoped to one space's requests. */
+  X.requestQueue = spaceId => { const sp = spaceById(spaceId); return isSpaceStaff(sp) ? queueView(all().filter(r => r.space === spaceId && r.requester !== me().id), { space: spaceId }) : ''; };
+  /** Space page: open items waiting on staff (the tab badge counts these; same rule as the Requests badge). */
+  X.requestQueueCount = spaceId => { const sp = spaceById(spaceId); return isSpaceStaff(sp) ? all().filter(r => r.space === spaceId && r.requester !== me().id && ACTIONABLE.includes(r.status)).length : 0; };
   /** Space name prefix in the queue only when the caller staffs several spaces. */
   const spaces1 = (spaces, sp) => spaces.length > 1 && sp ? sp.name + ' · ' : '';
 
-  A['rq-q-view'] = el => { const u = ui('rqQ'); u.view = el.dataset.value; u.status = ''; u.sel = {}; u.page = 1; refresh(); };
+  A['rq-q-view'] = el => { const u = ui(el.dataset.ui || 'rqQ'); u.view = el.dataset.value; u.status = ''; u.sel = {}; u.page = 1; refresh(); };
   A['rq-open'] = el => go('/requests/' + el.dataset.id);
-  A['rq-bulk-assign'] = () => {
-    const rs = selIds('rqQ').map(reqById).filter(r => r && isOpen(r) && r.assignee !== me().id);
-    ui('rqQ').sel = {};
+  A['rq-bulk-assign'] = el => {
+    const key = el?.dataset?.ui || 'rqQ';
+    const rs = selIds(key).map(reqById).filter(r => r && isOpen(r) && r.assignee !== me().id);
+    ui(key).sel = {};
     if (!rs.length) { refresh(); toast('These are already yours', { tone: 'accent' }); return; }
     const snaps = rs.map(r => [r, snap(r)]);
     rs.forEach(r => assign(r, me().id, { quiet: true }));
@@ -299,18 +311,22 @@
   };
 
   /* ═══════════════ /requests/new — catalog ═══════════════ */
+  /** Service requests only. Questions to a team go through "Ask the team" on the space (one surface, with the assistant's context). */
   function catalogGroups() {
-    const svc = visibleSpaces().map(sp => ({ sp, list: types().filter(t => t.space === sp.id && !t.question) })).filter(g => g.list.length)
+    return visibleSpaces().map(sp => ({ sp, list: types().filter(t => t.space === sp.id && !t.question && !t.archived) })).filter(g => g.list.length)
       .sort((a, b) => (a.sp.type !== 'office') - (b.sp.type !== 'office') || a.sp.name.localeCompare(b.sp.name));
-    const qs = mySpaces().filter(sp => !isSpaceStaff(sp)).map(sp => ({ sp, list: types().filter(t => t.space === sp.id && t.question && !t.auto) })).filter(g => g.list.length);
-    return [...svc, ...qs];
   }
-  function catalog() {
+  function catalog(query = {}) {
     crumbs([{ label: 'Requests', to: '/requests' }, { label: 'New request' }]);
-    const groups = catalogGroups();
+    const all = catalogGroups();
+    // From a space's page ("New request"), the catalog is that space's; the rest stays one link away.
+    const scoped = query.space && all.find(g => g.sp.id === query.space);
+    const groups = scoped ? [scoped] : all;
     const shown = groups.map(g => ({ sp: g.sp, list: g.list.filter(t => matchesQ('rqCat', t.name, t.desc, g.sp.name, g.sp.code)) })).filter(g => g.list.length);
-    const head = pageHeader({ title: 'New request', desc: 'Ask a team or office for something they handle. The assistant checks the rules before you send.' });
-    const empty = () => emptyState({ icon: 'clipboard', boxed: true, title: 'No one takes requests here yet', desc: isAdmin() ? 'Offices and teams add request types in their space settings.' : 'When an office or team starts taking requests, you’ll find them here.', actions: btn('Back to requests', { href: '/requests' }) });
+    const head = pageHeader({ title: 'New request', desc: 'Ask a team or office for something they handle. The assistant checks the rules before you send.', actions: scoped && all.length > 1 ? btn('All request types', { v: 'ghost', href: '/requests/new' }) : '' });
+    const total = groups.reduce((n, g) => n + g.list.length, 0);
+    const toolbar = needsTools(total, 'rqCat') ? `<div class="toolbar">${searchField({ uiKey: 'rqCat', placeholder: 'Search requests and offices' })}</div>` : '';
+    const empty = () => emptyState({ icon: 'clipboard', boxed: true, title: 'No one takes requests here yet', desc: isAdmin() ? 'Office and team leads add request types in their space’s Settings, under Requests.' : 'When an office or team starts taking requests, you’ll find them here.', actions: btn('Back to requests', { href: '/requests' }) });
     const body = gate({
       loading: () => skelRows(6), empty,
       ok: () => {
@@ -318,7 +334,7 @@
         if (!shown.length) return noMatches('rqCat', [], 'request types');
         return shown.map(({ sp, list: ts }) => `<section class="rq-group"><div class="rq-group__head">${mark(sp, 32)}<div class="grow" style="min-width:0"><h2 class="section__title truncate">${esc(sp.name)}</h2><p class="t-xs muted truncate">${esc(sp.type === 'course' ? [sp.code, 'Your course'].filter(Boolean).join(' · ') : sp.schedule || sp.desc || '')}</p></div></div>
           ${list(ts.map(t => item({
-            lead: itemIcon(t.icon || 'clipboard', t.question ? 'accent' : ''),
+            lead: itemIcon(t.icon || 'clipboard'),
             title: esc(t.name),
             desc: `<span class="rq-cat-desc">${esc(t.desc || '')}</span><span class="rq-cat-meta">${ic('clock', 'i-sm')}${esc(slaUsual(t))}${t.fee ? ` · ${esc(t.fee)}` : ''}</span>`,
             trail: ic('chevron-right', 'muted'),
@@ -326,7 +342,7 @@
           })))}</section>`).join('');
       },
     });
-    return `<div class="page page--narrow rq-page">${head}<div class="toolbar">${searchField({ uiKey: 'rqCat', placeholder: 'Search requests and offices' })}</div>${body}</div>`;
+    return `<div class="page page--narrow rq-page">${head}${toolbar}${body}</div>`;
   }
 
   /* ═══════════════ /requests/new?type= — check rules, fill in, send ═══════════════ */
@@ -354,12 +370,18 @@
     const d = docById(c.doc);
     return `<button type="button" class="cite" data-act="rq-quote" ${dataAttrs({ doc: c.doc, page: c.page, q: c.quote })} aria-label="Source ${n}: ${esc(d?.name || 'source')}${c.page ? ', page ' + c.page : ''}">${n}</button>`;
   }
-  function checkLines(results) {
+  function checkLines(results, { notes = true } = {}) {
     let n = 0;
     return `<ul class="rq-checks">${results.map(c => {
       const [icon, label] = CHECK_UI[c.state] || CHECK_UI.info;
-      return `<li class="rq-check rq-check--${c.state}"><span class="rq-check__icon">${ic(icon)}<span class="sr-only">${label}:</span></span><div class="rq-check__body"><div class="rq-check__label">${esc(c.label)}${c.cite ? citeBtn(c.cite, ++n) : ''}</div>${c.detail ? `<div class="rq-check__detail">${esc(c.detail)}</div>` : ''}${c.consequence ? `<div class="rq-check__note">${esc(c.consequence)}</div>` : ''}</div></li>`;
+      return `<li class="rq-check rq-check--${c.state}"><span class="rq-check__icon">${ic(icon)}<span class="sr-only">${label}:</span></span><div class="rq-check__body"><div class="rq-check__label">${esc(c.label)}${c.cite ? citeBtn(c.cite, ++n) : ''}</div>${c.detail ? `<div class="rq-check__detail">${esc(c.detail)}</div>` : ''}${notes && c.consequence ? `<div class="rq-check__note">${esc(c.consequence)}</div>` : ''}</div></li>`;
     }).join('')}</ul>`;
+  }
+  /** Rules that are met fold into one line; only what blocks the request stays open. */
+  function metLine(ok) {
+    const met = ok.filter(c => c.state === 'pass').length, know = ok.length - met;
+    const summary = [met && plural(met, 'rule') + ' met', know && plural(know, 'thing') + ' to know'].filter(Boolean).join(' · ');
+    return disclosure({ path: 'rqNew.showChecks', icon: 'shield-check', title: 'Rules the assistant checked', summary: esc(summary), body: checkLines(ok) });
   }
 
   function formState(t, query) {
@@ -408,32 +430,47 @@
 
     let checkCard = '';
     if (checks.length) {
-      const body = f.phase !== 'done'
-        ? `<div class="rq-checking" role="status">${spinner()}<span>Checking the rules…</span></div><div class="stack gap-12 mt-4" aria-hidden="true">${checks.map((_, i) => `<span class="skeleton skeleton--line" style="width:${[78, 62, 70][i % 3]}%"></span>`).join('')}</div>`
-        : checkLines(results) + (failing.length ? `<div class="mt-12">${alertBox('danger', 'You can’t send this request', `${capital(teamWord(sp))} can still tell you what’s possible, for example whether an exception applies.`, btn(`Ask ${teamWord(sp)} instead`, { v: 'secondary', size: 'sm', icon: 'message', act: 'rq-ask-instead', data: { type: t.id } }))}</div>` : '');
-      checkCard = card(body, { title: 'Before you send', desc: f.phase === 'done' ? 'The assistant checked the rules that apply to you. Select a number to read the source.' : '', icon: itemIcon('shield-check', 'accent', 'sm'), cls: 'rq-checkcard' });
+      const ok = results.filter(c => c.state !== 'fail');
+      if (f.phase !== 'done') checkCard = card(`<div class="rq-checking" role="status">${spinner()}<span>Checking the rules that apply to you…</span></div>`, { cls: 'rq-checkcard' });
+      else if (!failing.length) checkCard = `<div class="card rq-checkcard rq-checkcard--ok">${metLine(ok)}</div>`;
+      else {
+        // One red box: the failing rule's plain detail, then what to do about it.
+        const fix = failing.find(c => c.cite)?.cite;
+        const fixDoc = fix && docById(fix.doc), readable = !!fixDoc && canReadKb(kbById(fixDoc.kb));
+        const actions = btn(`Ask ${teamWord(sp)} instead`, { v: 'secondary', size: 'sm', icon: 'message', act: 'rq-ask-instead', data: { type: t.id } })
+          + (readable ? linkBtn('Read the policy', { href: `/doc/${fix.doc}?q=${encodeURIComponent(fix.quote || '')}&page=${fix.page || 1}`, icon: 'arrow-up-right' }) : '');
+        checkCard = card(`${alertBox('danger', 'You can’t send this request yet', esc(failing.map(c => c.consequence || c.detail).join(' ')), actions)}
+          <div class="mt-12">${checkLines(failing, { notes: false })}</div>${ok.length ? `<div class="mt-8">${metLine(ok)}</div>` : ''}`, { title: 'Before you send', icon: itemIcon('shield-check', 'accent', 'sm'), cls: 'rq-checkcard' });
+      }
     }
 
     const fields = t.fields.map(fd => field({ id: 'rq-f-' + fd.id, label: fd.label, required: fd.required, error: f.errs[fd.id], control: fieldControl(fd, f) })).join('');
-    const summary = `<div class="rq-summary">${kv([['Sent to', esc(sp?.name || '—')], ['Usually takes', esc(slaUsual(t).replace(/^Usually /, ''))], ['Fee', esc(t.fee || 'Free')]])}</div>`;
+    // Where it goes and how long it takes are in the header; the footer only adds a fee when there is one.
+    const fee = t.fee ? `<span class="rq-form__fee">${ic('info', 'i-sm')}${esc(`Fee: ${t.fee}`)}</span>` : '';
+    const wait = f.waitNote && f.phase !== 'done' ? `<span class="rq-form__fee" role="status">${spinner()}Still checking the rules. One moment.</span>` : '';
     const conv = f.conv && myConvs().some(c => c.id === f.conv) ? convById(f.conv) : null;
-    const foot = `<div class="rq-form__foot">${btn('Cancel', { v: 'tertiary', href: '/requests/new' })}${btn(t.question ? 'Send question' : 'Send request', { v: 'primary', icon: 'send', act: 'rq-send', disabled: f.phase !== 'done' || failing.length > 0, loading: f.sending, id: 'rq-send' })}</div>`;
-    const formCard = card(`${t.desc ? `<p class="t-sm muted">${esc(t.desc)}</p>` : ''}${conv ? `<p class="row gap-6 t-sm muted">${ic('message', 'i-sm')}<span class="truncate">From your conversation <a class="link" href="#/chat/${conv.id}">${esc(conv.title)}</a></span></p>` : ''}<div class="rq-fields">${fields}</div>${summary}${foot}`, { title: t.question ? 'Your question' : 'Details', cls: 'rq-formcard' });
-    return `<div class="page page--narrow rq-page">${head}<div class="rq-new">${checkCard}${formCard}</div></div>`;
+    const foot = `<div class="rq-form__foot">${wait || fee}${btn('Cancel', { v: 'ghost', href: '/requests/new' })}${btn(t.question ? 'Send question' : 'Send request', { v: 'primary', icon: 'send', act: 'rq-send', loading: f.sending, id: 'rq-send' })}</div>`;
+    const formCard = card(`${t.desc ? `<p class="t-sm muted">${esc(t.desc)}</p>` : ''}${conv ? `<p class="row gap-6 t-sm muted">${ic('message', 'i-sm')}<span class="truncate">From your conversation <a class="link" href="#/chat/${conv.id}">${esc(conv.title)}</a></span></p>` : ''}<div class="rq-fields">${fields}</div>${foot}`, { title: t.question ? 'Your question' : 'Details', cls: 'rq-formcard' });
+    // A failed rule can't be fixed in the form, so the form waits until the rules are met; asking the office is the way forward.
+    return `<div class="page page--narrow rq-page">${head}<div class="rq-new">${checkCard}${failing.length ? '' : formCard}</div></div>`;
   }
 
   P.requestNew = ({ query }) => {
-    const t = query.type && typeById(query.type);
+    const t = query.type && typeById(query.type) && !typeById(query.type).archived ? typeById(query.type) : null;
     if (query.type && !t) {
       crumbs([{ label: 'Requests', to: '/requests' }, { label: 'New request' }]);
       return `<div class="page">${emptyState({ icon: 'clipboard', title: 'This request type isn’t available', desc: 'It may have been removed by the office.', actions: btn('See all request types', { v: 'primary', href: '/requests/new' }), boxed: true })}</div>`;
     }
-    return t ? newForm(t, query) : catalog();
+    // Old links to a question type open the one way to ask a team: its Ask dialog.
+    if (t?.question) { askFromLink = t.space; return catalog({ space: t.space }); }
+    return t ? newForm(t, query) : catalog(query);
   };
+  let askFromLink = '';
   AFTER.requestNew = () => {
+    if (askFromLink) { const space = askFromLink; askFromLink = ''; if (!S.modal) A['rq-ask-staff']({ dataset: { space, q: S.cur.query.q || '' } }); return; }
     const f = S.ui.rqNew;
     if (!S.cur.query.type || !f || f.phase !== 'checking' || f.timer) return;
-    f.timer = setTimeout(() => { delete f.timer; if (S.ui.rqNew !== f) return; f.phase = 'done'; if (S.cur.r.page === 'requestNew') refresh(); }, 1100);
+    f.timer = setTimeout(() => { delete f.timer; if (S.ui.rqNew !== f) return; f.phase = 'done'; f.waitNote = false; if (S.cur.r.page === 'requestNew') refresh(); }, 1100);
   };
   /** Editing a field clears its error; a select change re-renders so checks see the new value. */
   const clearErr = el => { const f = S.ui.rqNew, k = el.id.replace(/^rq-f-/, ''); if (f?.errs?.[k]) { delete f.errs[k]; return true; } return false; };
@@ -442,6 +479,7 @@
   A['rq-send'] = async () => {
     const f = S.ui.rqNew, t = typeById(f?.type);
     if (!t || f.sending) return;
+    if (f.phase !== 'done') { f.waitNote = true; refresh(); return; }
     f.errs = validate(t, f.vals);
     const bad = Object.keys(f.errs);
     if (bad.length) { refresh(); $('#rq-f-' + bad[0])?.focus(); return; }
@@ -456,20 +494,15 @@
     go('/requests/' + r.id);
   };
   A['rq-new'] = el => {
-    const d = el?.dataset || {}, qs = new URLSearchParams();
+    const d = { ...(el?.dataset || {}) }, qs = new URLSearchParams();
+    // A space that takes a single kind of request opens its form directly.
+    if (d.space && !d.type) { const only = types().filter(t => t.space === d.space && !t.question && !t.archived); if (only.length === 1) d.type = only[0].id; }
     ['type', 'space', 'course', 'q', 'conv'].forEach(k => d[k] && qs.set(k, d[k]));
     delete S.ui.rqNew;
     go('/requests/new' + (qs.toString() ? '?' + qs : ''));
   };
-  A['rq-quote'] = el => openDrawer('rq-quote', { doc: el.dataset.doc, page: el.dataset.page, q: el.dataset.q });
-  DR['rq-quote'] = ({ doc, page, q }) => {
-    const d = docById(doc), kb = d && kbById(d.kb), readable = !!kb && canReadKb(kb);
-    return {
-      title: d?.name || 'Source', desc: esc([kb?.name, page && `Page ${page}`].filter(Boolean).join(' · ')), lead: fileIcon(d?.type || 'pdf', 'lg'),
-      body: `<blockquote class="rq-quote"><mark class="evidence">${esc(q)}</mark></blockquote><p class="t-sm muted mt-12">The assistant checked your request against this passage.</p>`,
-      foot: readable ? btn('Open document', { v: 'primary', icon: 'external', href: `/doc/${doc}?q=${encodeURIComponent(q || '')}${page ? '&page=' + page : ''}` }) : '',
-    };
-  };
+  /** The passage a rule check relied on: the shared document preview (preview.js), highlighted on its page. */
+  A['rq-quote'] = el => X.preview.open({ id: el.dataset.doc, page: el.dataset.page, quote: el.dataset.q });
 
   /* ═══════════════ Ask the teaching team (or an office) ═══════════════ */
   /** The space's question type; offices without one get it on first use. */
@@ -507,13 +540,15 @@
       ? `${roles.has('ta') ? 'The lecturer and TA answer' : 'The lecturer answers'} within ${days}; you’ll get it in your Inbox.`
       : `${sp.name} answers within ${plural(t?.sla || 2, 'working day')}; you’ll get it in your Inbox.`;
     const tried = aiFrom(conv), aboutT = typeById(about);
+    const names = team.map(m => personName(m.user));
+    const who = team.length ? `<span class="rq-avatars">${team.slice(0, 3).map(m => avatar(personName(m.user), 'xs')).join('')}</span><span class="truncate">${esc(names.length > 2 ? `${names.slice(0, 2).join(', ')} +${names.length - 2}` : names.join(' and '))}</span>` : '';
     return {
-      title: sp.type === 'course' ? 'Ask the teaching team' : `Ask ${sp.name}`, size: 'md',
-      desc: esc([sp.name, sp.code, aboutT && `About ${aboutT.name}`].filter(Boolean).join(' · ')),
-      body: `${field({ id: 'rq-ask-q', label: 'Your question', required: true, error: f.err, desc: esc(note), control: textarea({ id: 'rq-ask-q', bind: 'rqAsk.text', value: f.text, rows: 5, placeholder: 'What do you want to know?', invalid: !!f.err, attrs: 'data-autofocus' }) })}
-        ${tried ? `<div class="rq-ai mt-16">${ic('sparkles', 'i-sm')}<div class="grow"><div class="rq-ai__label">Sent along: what the assistant found</div><p>${esc(tried)}</p></div></div>` : ''}
-        ${team.length ? `<div class="row gap-8 mt-16 t-sm muted"><span class="rq-avatars">${team.slice(0, 3).map(m => avatar(personName(m.user), 'xs')).join('')}</span><span class="truncate">${esc(team.map(m => personName(m.user)).join(', '))}</span></div>` : ''}`,
-      foot: btn('Cancel', { act: 'close-modal' }) + btn('Send question', { v: 'primary', icon: 'send', act: 'rq-ask-send', loading: f.busy, id: 'rq-ask-send' }),
+      title: sp.type === 'course' ? `Ask the ${sp.code || sp.name} teaching team` : `Ask ${sp.name}`, size: 'md', icon: 'message',
+      desc: esc(note),
+      body: `${field({ id: 'rq-ask-q', label: 'Your question', required: true, error: f.err, desc: aboutT ? esc(`About ${aboutT.name}`) : 'Say what you already tried, so they can answer in one go.', control: textarea({ id: 'rq-ask-q', bind: 'rqAsk.text', value: f.text, rows: 5, placeholder: 'What do you want to know?', invalid: !!f.err, attrs: `data-autofocus ${f.busy ? 'disabled' : ''}` }) })}
+        ${tried ? `<div class="rq-ai mt-16">${ic('sparkles', 'i-sm')}<div class="grow"><div class="rq-ai__label">Sent along: what the assistant found</div><p>${esc(tried)}</p></div></div>` : ''}`,
+      footStart: who,
+      foot: btn('Cancel', { v: 'ghost', act: 'close-modal', disabled: f.busy }) + btn('Send question', { v: 'primary', icon: 'send', act: 'rq-ask-send', loading: f.busy, id: 'rq-ask-send' }),
     };
   };
   A['rq-ask-send'] = async () => {
@@ -540,16 +575,25 @@
       const icon = m.text === 'Submitted.' ? 'send' : /withdrew/.test(m.text) ? 'undo' : /assign|took/.test(m.text) ? 'user' : 'clock';
       const submitted = m.text === 'Submitted.';
       const ai = submitted && r.aiTried ? `<div class="rq-ai rq-ai--thread">${ic('sparkles', 'i-sm')}<div class="grow"><div class="rq-ai__label">What the assistant found</div><p>${esc(r.aiTried)}</p></div></div>` : '';
-      return `<div class="rq-event"><span class="rq-event__icon">${ic(icon, 'i-sm')}</span><span class="grow"><span class="medium fg">${esc(who)}</span> ${esc(text)}${stChip ? ` ${stChip}` : ''}</span><time class="rq-time" title="${esc(fmtDateTime(m.at))}">${esc(rel(m.at))}</time></div>${ai}`;
+      // What was asked sits right under "submitted": staff read it before they decide, requesters see what they sent.
+      const asked = submitted ? answersList(r) : '';
+      return `<div class="rq-event"><span class="rq-event__icon">${ic(icon, 'i-sm')}</span><span class="grow"><span class="medium fg">${esc(who)}</span> ${esc(text)}${stChip ? ` ${stChip}` : ''}</span><time class="rq-time" data-tip="${esc(fmtDateTime(m.at))}" datetime="${new Date(m.at).toISOString()}">${esc(rel(m.at))}</time></div>${asked}${ai}`;
     }
     const staffMsg = m.by !== r.requester, role = staffMsg ? roleLabel(sp, m.by) : '';
     const files = m.files?.length ? `<div class="rq-files">${m.files.map(x => `<span class="rq-file">${fileIcon(String(x.name).split('.').pop(), 'sm')}<span class="truncate">${esc(x.name)}</span>${x.size ? `<span class="muted">${esc(fmtSize(x.size))}</span>` : ''}</span>`).join('')}</div>` : '';
     const faqDoc = m.faqDoc && docById(m.faqDoc);
-    const faq = faqDoc && !faqDoc.archived ? `<a class="rq-faq-link" href="#${faqLink(faqDoc.id, m.text)}" title="${esc(faqDoc.name)}">${ic('book', 'i-sm')}<span class="truncate">Added to the course FAQ</span></a>` : '';
+    const faq = faqDoc && !faqDoc.archived ? `<a class="rq-faq-link" href="#${faqLink(faqDoc.id, m.text)}" data-tip="${esc(faqDoc.name)}">${ic('book', 'i-sm')}<span class="truncate">${sp?.type === 'course' ? 'Added to the course FAQ' : 'Added to the FAQ'}</span></a>` : '';
     return `<article class="${cx('rq-msg', staffMsg && 'rq-msg--staff')}">${avatar(personName(m.by), 'sm')}<div class="rq-msg__body">
-      <header class="rq-msg__head"><span class="medium">${esc(who)}</span>${role ? `<span class="rq-msg__role">${esc(role)}</span>` : ''}<time class="rq-time" title="${esc(fmtDateTime(m.at))}">${esc(rel(m.at))}</time></header>
+      <header class="rq-msg__head"><span class="medium">${esc(who)}</span>${role ? `<span class="rq-msg__role">${esc(role)}</span>` : ''}<time class="rq-time" data-tip="${esc(fmtDateTime(m.at))}" datetime="${new Date(m.at).toISOString()}">${esc(rel(m.at))}</time></header>
       ${stChip ? `<div class="rq-msg__status">${ic('arrow-right', 'i-sm')}${stChip}</div>` : ''}
       ${m.text ? `<div class="rq-msg__text">${esc(m.text).replace(/\n/g, '<br>')}</div>` : ''}${files}${faq}</div></article>`;
+  }
+  /** The request's own answers (form fields), as filled in by the requester. Questions are their title. */
+  function answersList(r) {
+    const t = typeById(r.type);
+    if (!t || t.question) return '';
+    const rows = (t.fields || []).map(fd => [fd.label, fmtField(fd, r.fields?.[fd.id])]);
+    return rows.length ? `<dl class="rq-answers rq-answers--thread">${rows.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${v}</dd></div>`).join('')}</dl>` : '';
   }
 
   function composer(r, t, sp, { isReq, staff }) {
@@ -557,33 +601,41 @@
     if (!isReq && !staff) return `<div class="rq-closed">${ic('eye', 'i-sm')}<span>You can see this request, but only ${esc(sp?.name || 'its staff')} can act on it.</span></div>`;
     const c = composerState(r), data = { id: r.id };
     const first = firstName(r.requester);
-    let label, placeholder, actions;
+    // Requesters: one Send. Staff: one Send for the note (it can ask the requester for information, which pauses the SLA), then the decision.
+    let label, placeholder, decide, ask = '';
     if (isReq) {
       label = r.status === 'needs_info' ? 'Your reply' : 'Add a message';
       placeholder = r.status === 'needs_info' ? 'Answer the question above or attach what they asked for.' : `Add details for ${sp?.name || 'the office'}.`;
-      actions = btn(r.status === 'needs_info' ? 'Send reply' : 'Send', { v: 'primary', icon: 'send', act: 'rq-reply', data });
-    } else if (t.question) {
-      label = 'Your answer'; placeholder = `Answer ${first}. Cite the slide or document if you can.`;
-      actions = (r.status !== 'needs_info' ? btn('Ask for information', { v: 'tertiary', act: 'rq-askinfo', data }) : '') + btn('Answer', { v: 'primary', icon: 'send', act: 'rq-answer', data });
-    } else if (r.status === 'approved') {
-      label = `Message to ${first}`; placeholder = 'Optional: pick-up details, next steps…';
-      actions = btn('Reply', { v: 'tertiary', act: 'rq-reply', data }) + btn('Mark completed', { v: 'primary', icon: 'check', act: 'rq-complete', data });
+      // Prominent only when the office is waiting on the requester; otherwise there's nothing to do but wait.
+      decide = btn(r.status === 'needs_info' ? 'Send reply' : 'Send', { v: r.status === 'needs_info' ? 'primary' : 'secondary', icon: 'send', act: 'rq-reply', data });
     } else {
-      label = `Message to ${first}`; placeholder = `Reply, ask ${first} for something, or add a note to your decision.`;
-      actions = (r.status !== 'needs_info' ? btn('Ask for information', { v: 'tertiary', act: 'rq-askinfo', data }) : '') + btn('Reply', { v: 'tertiary', act: 'rq-reply', data }) + btn('Decline', { v: 'danger-soft', act: 'rq-decline', data }) + btn('Approve', { v: 'primary', icon: 'check', act: 'rq-approve', data });
+      const asking = c.ask && r.status !== 'needs_info';
+      ask = r.status !== 'needs_info' ? `<div class="rq-composer__ask">${checkbox({ id: 'rq-ask-info', checked: asking, act: 'rq-ask-toggle', data, label: `Ask ${esc(first)} for information <span class="muted">(pauses the SLA)</span>` })}</div>` : '';
+      const send = v => btn('Send', { v, icon: 'send', act: 'rq-send-note', data });
+      if (t.question) {
+        label = 'Your answer'; placeholder = asking ? `What do you need from ${first}?` : `Answer ${first}. Cite the slide or document if you can.`;
+        decide = asking ? send('primary') : btn('Answer', { v: 'primary', icon: 'send', act: 'rq-answer', data });
+      } else if (asking) {
+        label = `Message to ${first}`; placeholder = `What do you need from ${first}?`;
+        decide = send('primary');
+      } else if (r.status === 'approved') {
+        label = `Message to ${first}`; placeholder = 'Optional: pick-up details, next steps…';
+        decide = send('secondary') + btn('Mark completed', { v: 'primary', icon: 'check', act: 'rq-complete', data });
+      } else {
+        label = `Message to ${first}`; placeholder = `Write to ${first}, or add a note to your decision.`;
+        decide = send('secondary') + btn('Decline', { v: 'danger-soft', act: 'rq-decline', data }) + btn('Approve', { v: 'primary', icon: 'check', act: 'rq-approve', data });
+      }
     }
-    const ask = isReq && r.status === 'needs_info' ? [...r.thread].reverse().find(m => m.by !== r.requester && (m.status === 'needs_info' || m.kind === 'needs_info')) : null;
-    const need = ask ? alertBox('warning', `${sp?.name || 'The office'} needs more information`, esc(clip(ask.text, 220))) : '';
     const files = c.files.length ? `<div class="rq-files">${c.files.map((x, i) => `<span class="rq-file">${fileIcon(String(x.name).split('.').pop(), 'sm')}<span class="truncate">${esc(x.name)}</span>${iconBtn('x', 'Remove ' + x.name, { size: 'sm', act: 'rq-file-rm', data: { id: r.id, i } })}</span>`).join('')}</div>` : '';
     const kbName = kbById(sp?.kbs?.[0])?.name;
-    const faq = staff && !isReq && t.question && kbName ? switchRow({ title: 'Add this answer to the course FAQ', desc: `Saved to ${esc(kbName)} so the assistant can answer it next time.`, on: c.faq, act: 'rq-faq', data }) : '';
-    return `<div class="card rq-composer">${need}
+    const faq = staff && !isReq && t.question && kbName && !c.ask ? switchRow({ title: sp?.type === 'course' ? 'Add this answer to the course FAQ' : 'Add this answer to the FAQ', desc: `Saved to ${esc(kbName)} so the assistant can answer it next time.`, on: c.faq, act: 'rq-faq', data }) : '';
+    return `<div class="card rq-composer">
       ${field({ id: 'rq-text', label, error: c.err, control: textarea({ id: 'rq-text', bind: cKey(r) + '.text', value: c.text, rows: 3, placeholder, invalid: !!c.err }) })}
-      ${files}${faq}
+      ${files}${faq}${ask}
       <div class="rq-composer__actions">
         <input type="file" id="rq-file" class="sr-only" multiple data-change="rq-file" data-id="${r.id}" tabindex="-1" aria-hidden="true">
         ${iconBtn('paperclip', 'Attach a file', { act: 'rq-attach', data })}
-        <div class="rq-composer__btns">${actions}</div>
+        <div class="rq-composer__btns">${decide}</div>
       </div></div>`;
   }
   function closedNote(r, t, sp, isReq) {
@@ -594,24 +646,20 @@
   }
 
   function sideCards(r, t, sp, { isReq, staff }) {
-    const fields = t.question ? [] : (t.fields || []).map(fd => [fd.label, fmtField(fd, r.fields?.[fd.id], r)]);
     const fee = r.fee || t.fee;
     const aboutT = typeById(r.about);
     const conv = r.from && myConvs().find(c => c.id === r.from);
-    const dueRow = !isOpen(r) ? null : staff && !isReq ? ['SLA', slaHtml(r)] : ['Expected by', esc(fmtDay(r.due))];
+    // Where it was sent and when it's due are in the header; the request ID is in the breadcrumb.
     const assignee = r.assignee ? `<span class="row gap-6" style="min-width:0">${avatar(personName(r.assignee), 'xs')}<span class="truncate">${esc(r.assignee === me().id ? 'You' : personName(r.assignee))}</span></span>` : '<span class="muted">Not assigned yet</span>';
     const assignCtl = staff && isOpen(r) ? `<span class="row gap-4 none">${r.assignee !== me().id ? btn('Assign to me', { v: 'tertiary', size: 'sm', act: 'rq-assign-me', data: { id: r.id } }) : ''}${iconBtn('users', 'Assign to someone else', { size: 'sm', menu: 'rq-assign', data: { id: r.id } })}</span>` : '';
     const meta = kv([
-      ['Request', `<span class="num">${esc(r.id)}</span>`],
-      ['Sent to', esc(sp?.name || '—')],
       ['Submitted', esc(fmtDateTime(r.created))],
-      dueRow,
       ['Assignee', `<span class="rq-assignee">${assignee}${assignCtl}</span>`],
       aboutT && ['About', esc(aboutT.name)],
       conv && ['Started from', `<a class="link" href="#/chat/${conv.id}">${esc(conv.title)}</a>`],
+      fee && ['Fee', esc(fee)],
     ]);
-    const answers = [...fields, fee && ['Fee', esc(fee)]].filter(Boolean);
-    const details = card(`${answers.length ? `<dl class="rq-answers">${answers.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${v}</dd></div>`).join('')}</dl>${separator()}` : ''}${meta}`, { title: 'Details', cls: 'rq-side-card' });
+    const details = card(meta, { title: 'Details', cls: 'rq-side-card' });
 
     let person = '';
     if (staff && !isReq) {
@@ -644,11 +692,13 @@
       lead: mark(sp, 40),
       title: title(r), extra: requestStatus(r),
       desc: `<span class="rq-sub">${sub.map(x => /^</.test(x) ? x : esc(x)).join('<span aria-hidden="true">·</span>')}</span>`,
-      actions: isReq && isOpen(r) ? btn('Withdraw', { v: 'ghost', icon: 'undo', act: 'rq-withdraw', data: { id: r.id } }) : '',
+      // Withdrawing is rare and ends the request: it lives in ⋯.
+      actions: isReq && isOpen(r) ? iconBtn('more', 'More', { menu: 'rq-more', data: { id: r.id } }) : '',
     });
     const thread = `<section class="card rq-thread" aria-label="Activity">${r.thread.map(m => entry(r, m, sp)).join('')}</section>`;
     return `<div class="page rq-page rq-page--item">${head}<div class="rq-detail"><div class="rq-main">${thread}${composer(r, t, sp, { isReq, staff })}</div><aside class="rq-side" aria-label="Request details">${sideCards(r, t, sp, { isReq, staff })}</aside></div></div>`;
   };
+  MENUS['rq-more'] = el => { const r = reqById(el.dataset.id); return r && isOpen(r) && r.requester === me().id ? [{ label: 'Withdraw request', icon: 'undo', danger: true, run: () => A['rq-withdraw']({ dataset: { id: r.id } }) }] : []; };
 
   /* ── Request actions ── */
   function ctx(el) { const r = reqById(el.dataset.id); return r ? { r, t: typeById(r.type) || { name: 'Request' }, c: composerState(r) } : null; }
@@ -698,10 +748,11 @@
   M['rq-decline'] = ({ id }) => {
     const r = reqById(id), f = ui('rqDecline', { text: '', err: '' });
     return {
-      title: 'Decline this request?', size: 'sm', icon: ic('x-circle'),
+      title: 'Decline this request?', icon: 'x-circle', tone: 'danger',
       desc: `${esc(firstName(r?.requester))} sees your reason and can send a new request.`,
-      body: field({ id: 'rq-decline-text', label: 'Reason', required: true, error: f.err, control: textarea({ id: 'rq-decline-text', bind: 'rqDecline.text', value: f.text, rows: 4, placeholder: 'For example: the re-grading window for this exam closed on Oct 28.', invalid: !!f.err, attrs: 'data-autofocus' }) }),
-      foot: btn('Cancel', { act: 'close-modal' }) + btn('Decline', { v: 'danger', act: 'rq-decline-ok', data: { id } }),
+      body: field({ id: 'rq-decline-text', label: 'Reason', required: true, error: f.err, desc: f.err ? '' : 'Say why, and what they can do instead.', control: textarea({ id: 'rq-decline-text', bind: 'rqDecline.text', value: f.text, rows: 4, placeholder: 'For example: this needs sign-off from your manager first.', invalid: !!f.err, attrs: 'data-autofocus' }) }),
+      footStart: 'You can undo this right after.',
+      foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn('Decline request', { v: 'danger', icon: 'x-circle', act: 'rq-decline-ok', data: { id } }),
     };
   };
   A['rq-decline-ok'] = el => {
@@ -723,10 +774,14 @@
     post(r, text, 'answer', { status: 'completed', extra: { ...(doc ? { faqDoc: doc.id } : {}), ...(c.files.length ? { files: [...c.files] } : {}) } });
     audit('Answered a question', r);
     clearComposer(r); refresh();
-    toast(doc ? `Answer sent and added to the course FAQ${gap ? '. 1 knowledge gap closed' : ''}` : `Answer sent to ${firstName(r.requester)}`,
+    const course = spaceById(r.space)?.type === 'course';
+    toast(doc ? `${course ? 'Answer sent and added to the course FAQ' : 'Answer sent and added to the FAQ'}${gap ? '. 1 knowledge gap closed' : ''}` : `Answer sent to ${firstName(r.requester)}`,
       doc ? { action: { label: 'Open FAQ', run: () => go(faqLink(doc.id, text)) } } : {});
   };
   A['rq-faq'] = el => { const r = reqById(el.dataset.id); if (!r) return; const c = composerState(r); c.faq = !c.faq; refresh(); };
+  A['rq-ask-toggle'] = el => { const r = reqById(el.dataset.id); if (!r) return; const c = composerState(r); c.ask = !c.ask; c.err = ''; refresh(); requestAnimationFrame(() => $('#rq-text')?.focus()); };
+  /** Staff Send: a plain message, or — with "Ask … for information" ticked — a request for information that pauses the SLA. */
+  A['rq-send-note'] = el => { const r = reqById(el.dataset.id); if (!r) return; (composerState(r).ask ? A['rq-askinfo'] : A['rq-reply'])(el); };
   A['rq-withdraw'] = el => {
     const r = reqById(el.dataset.id); if (!r) return;
     confirmAction({
