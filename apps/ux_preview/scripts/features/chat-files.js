@@ -1,14 +1,16 @@
 (() => {
 'use strict';
 /* File work in chat: files the assistant makes (artifacts with revisions —
-   nothing is overwritten), the file workspace panel (Preview · Changes ·
-   History, edit, restore, ask for changes, download, save to knowledge),
-   message attachments with validation, and the knowledge file picker.
+   nothing is overwritten), the file workspace panel (Preview, then Changes ·
+   History once there is a second version; edit, restore, download, save to
+   knowledge), message attachments with validation, and the knowledge file picker.
+   Changes are asked for in the thread composer: while a file is open it carries
+   a removable "Editing …" chip, so there is one composer and one send.
    Plugs into chat.js through X.chatFiles; uses X.chat for chat internals. */
 
 const C = () => X.chat;
 const KIND = t => ['xlsx', 'csv'].includes(t) ? 'sheet' : 'doc';
-const FMT = { xlsx: 'Excel spreadsheet', csv: 'CSV', docx: 'Word document', md: 'Markdown', pdf: 'PDF' };
+const FMT = { xlsx: 'Excel workbook', csv: 'CSV', docx: 'Word document', md: 'Markdown', pdf: 'PDF' };
 const usd = n => typeof n === 'number' ? '$' + fmtNum(n) : n;
 const art = id => D.artifacts[id];
 const latest = a => a.revs[a.revs.length - 1];
@@ -114,12 +116,13 @@ function targetArt(conv, q) {
   return null;
 }
 const slug = t => t.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
-function plan(q, conv, files, mod) {
-  const target = targetArt(conv, q);
+/** edit: the file the question was asked about (the composer's "Editing …" chip). */
+function plan(q, conv, files, mod, edit) {
+  const target = (edit && art(edit)) || targetArt(conv, q);
   if (target) {
     const instr = q.replace(/^Update “[^”]+”:\s*/, '');
     const t = transform(target, instr); const next = target.revs.length + 1;
-    return { text: `Done — **${target.title}** is now on version ${next}. ${t.summary}. Open it to review the changes, or restore an earlier version from History.`, citations: [], noResults: null, partial: false, searchLabel: 'the files in this conversation',
+    return { text: `Done — **${target.title}** is now on version ${next}. ${t.summary}. Every earlier version stays in History.`, citations: [], noResults: null, partial: false, searchLabel: 'the files in this conversation',
       work: [{ k: 'prepare', label: 'Reused the files already open in this conversation' }, { k: 'code', label: 'Ran code', runs: [{ cmd: KIND(target.type) === 'sheet' ? `df = pd.read_excel("${target.file}")\n# ${instr}\ndf.to_excel("${target.file}", index=False)` : `doc = Document("${target.file}")\n# ${instr}\ndoc.save("${target.file}")`, out: `Saved ${target.file}`, exit: 0 }] }, { k: 'export', label: `Updated ${target.file}`, d: `Version ${next}` }],
       apply: () => { const r = addRev(target, { ...t.rev, summary: t.summary }); return [{ id: target.id, rev: r.n }]; }, editOf: target.id };
   }
@@ -163,9 +166,10 @@ function afterStream(am, pl) {
   if (am.state !== 'done' || !am.artifacts?.length) return;
   const ref = am.artifacts[0], a = art(ref.id); if (!a) return;
   if (pl.editOf) {
+    // Panel already on this file: it switches to Changes itself, so the toast only confirms.
     const p = panelState();
-    if (p?.art === a.id) { Object.assign(p, { rev: ref.rev, tab: 'changes', cell: null }); refresh(); }
-    toast(`${a.title} is on version ${ref.rev}`, { action: { label: 'Review changes', run: () => openFile(a.id, ref.rev, 'changes') } });
+    if (p?.art === a.id) { Object.assign(p, { rev: ref.rev, tab: 'changes', cell: null }); refresh(); toast(`Saved as version ${ref.rev}`); }
+    else toast(`${a.title} is on version ${ref.rev}`, { action: { label: 'Review changes', run: () => openFile(a.id, ref.rev, 'changes') } });
   } else toast(am.artifacts.length > 1 ? `Created ${am.artifacts.length} files` : `Created ${a.file}`, { action: { label: 'Open', run: () => openFile(a.id, ref.rev) } });
 }
 
@@ -175,7 +179,7 @@ function cards(m) {
   const p = panelState();
   return `<div class="wk-cards" role="group" aria-label="Files from this answer">${refs.map(r => {
     const a = art(r.id), rev = revOf(a, r.rev), last = latest(a);
-    return `<div class="${cx('wk-card', p?.art === a.id && p.rev === rev.n && 'is-on')}" role="button" tabindex="0" data-act="wk-open" data-id="${a.id}" data-rev="${rev.n}" aria-label="Open ${esc(a.title)}, version ${rev.n}">${fileIcon(a.type, 'lg')}<div class="grow"><div class="wk-card__title truncate">${esc(a.title)}</div><div class="t-xs muted truncate">Version ${rev.n} · ${FMT[a.type] || a.type.toUpperCase()} · ${fmtSize(rev.size)}${last.n > rev.n ? ` · <span class="text-accent">Version ${last.n} available</span>` : ''}</div></div>${iconBtn('download', 'Download', { size: 'sm', menu: 'wk-dl', data: { id: a.id, rev: rev.n } })}</div>`;
+    return `<div class="${cx('wk-card', p?.art === a.id && p.rev === rev.n && 'is-on')}" role="button" tabindex="0" data-act="wk-open" data-id="${a.id}" data-rev="${rev.n}" aria-label="Open ${esc(a.title)}${a.revs.length > 1 ? `, version ${rev.n}` : ''}">${fileIcon(a.type, 'lg')}<div class="grow"><div class="wk-card__title truncate">${esc(a.title)}</div><div class="t-xs muted truncate">${a.revs.length > 1 ? `Version ${rev.n} · ` : ''}${FMT[a.type] || a.type.toUpperCase()} · ${fmtSize(rev.size)}${last.n > rev.n ? ` · <span class="text-accent">Version ${last.n} available</span>` : ''}</div></div>${iconBtn('download', 'Download', { size: 'sm', menu: 'wk-dl', data: { id: a.id, rev: rev.n } })}</div>`;
   }).join('')}</div>`;
 }
 
@@ -231,8 +235,24 @@ function openFile(id, rev, tab = 'preview') {
   const a = art(id); if (!a) return; const u = C().cui();
   if (u.panel?.kind === 'file' && u.panel.edit && !leaveEdit(() => openFile(id, rev, tab))) return;
   u.panel = { conv: a.conv, kind: 'file', art: id, rev: +rev || latest(a).n, tab, sheet: 0, cell: null, edit: false, draft: null, full: u.panel?.full || false };
-  S.ui.wkAsk = { text: '' };
   if (S.cur?.path !== '/chat/' + a.conv) go('/chat/' + a.conv); else refresh();
+}
+/** The file the thread composer is editing: the open file panel's file, unless its chip was removed. */
+function editTarget(key) {
+  const p = panelState(); if (!p || p.conv !== key || p.ctxOff) return null;
+  return art(p.art) || null;
+}
+/** "Editing …" chip: removable in the composer, a plain label on the question it was sent with. */
+function ctxChip(target) {
+  const a = typeof target === 'string' ? art(target) : target; if (!a) return '';
+  const live = typeof target !== 'string';
+  return `<span class="wk-chip wk-chip--ctx" ${live ? 'data-tip="Your message asks for changes to this file"' : ''}>${fileIcon(a.type, 'sm')}<span class="wk-chip__meta">Editing</span><span class="wk-chip__name truncate">${esc(a.title)}</span>${live ? `<button type="button" class="wk-chip__x" data-act="wk-ctx-off" aria-label="Stop editing ${esc(a.title)}" data-tip="Ask about something else">${ic('x', 'i-xs')}</button>` : ''}</span>`;
+}
+/** Suggested changes for the open file, above the thread composer (one click asks for it). */
+function quickAsks(key) {
+  const a = editTarget(key); if (!a || panelState()?.edit) return '';
+  const quick = KIND(a.type) === 'sheet' ? ['Sort by largest amount', 'Add a total row', 'Add a status column'] : ['Make it shorter', 'More formal tone', 'Add an at-a-glance table'];
+  return `<div class="wk-quick" role="group" aria-label="${esc(`Suggested changes to ${a.title}`)}">${quick.map(q => btn(q, { v: 'tertiary', size: 'sm', act: 'wk-ask-quick', data: { q } })).join('')}</div>`;
 }
 function historyHtml(a, cur) {
   const last = latest(a);
@@ -251,37 +271,40 @@ function historyHtml(a, cur) {
     ${src.length ? `<div><div class="t-label mb-8">Built from</div><div class="row gap-6 wrap">${src.map(d => `<a class="chat-source" href="#/doc/${d.id}?from=${a.conv}">${fileIcon(d.type, 'sm')}<span class="truncate">${esc(d.name)}</span></a>`).join('')}</div></div>` : ''}
   </div>`;
 }
-function askHtml(a, streaming) {
-  if (streaming) return `<div class="panel__footer wk-ask"><div class="row gap-8 t-sm muted">${spinner('sm')}<span>Working on version ${a.revs.length + 1}… you can keep reviewing.</span></div></div>`;
-  const f = ui('wkAsk', { text: '' }); const sheet = KIND(a.type) === 'sheet';
-  const quick = sheet ? ['Sort by largest amount', 'Add a total row', 'Add a status column'] : ['Make it shorter', 'More formal tone', 'Add an at-a-glance table'];
-  return `<div class="panel__footer wk-ask"><div class="wk-ask__row">${input({ id: 'wk-ask-in', bind: 'wkAsk.text', value: f.text, placeholder: 'Ask for changes…', onEnter: 'wk-ask-send', attrs: `aria-label="Ask for changes to ${esc(a.title)}"` })}${btn('', { v: 'primary', icon: 'arrow-up', tip: 'Ask for changes', act: 'wk-ask-send' })}</div><div class="wk-quick">${quick.map(q => `<button type="button" class="chip chip--default chip--outline wk-quick__item" data-act="wk-ask-quick" data-q="${esc(q)}">${esc(q)}</button>`).join('')}</div></div>`;
-}
 function panel(conv, p) {
   const a = art(p.art); if (!a) return '';
+  // Changes and History only mean something once there is a second version.
+  const versions = a.revs.length > 1; if (!versions && p.tab !== 'preview') p.tab = 'preview';
   const rev = revOf(a, p.rev), last = latest(a), prev = a.revs.find(r => r.n === rev.n - 1);
   const sheet = KIND(a.type) === 'sheet', streaming = C().streamingIn(conv.id);
-  const head = `<div class="panel__header wk-head">${fileIcon(a.type)}<div class="grow"><h2 class="panel__title truncate">${esc(a.title)}</h2><div class="t-xs muted truncate">${esc(a.file)} · ${fmtSize(rev.size)} · ${rev.by === 'you' ? 'edited by you' : 'by the assistant'} ${rel(rev.at).toLowerCase()}</div></div>
-    ${btn(`v${rev.n}${rev.n === last.n ? ' · Latest' : ''}`, { v: 'outline', size: 'sm', iconRight: 'chevron-down', menu: 'wk-ver', data: { id: a.id }, tip: 'Versions', cls: 'wk-ver' })}
-    ${iconBtn(p.full ? 'chevron-right' : 'maximize', p.full ? 'Narrower' : 'Wider', { size: 'sm', act: 'wk-wide', cls: 'hide-md' })}${iconBtn('download', 'Download', { size: 'sm', menu: 'wk-dl', data: { id: a.id, rev: rev.n } })}${iconBtn('more', 'More', { size: 'sm', menu: 'wk-file-more', data: { id: a.id } })}${iconBtn('x', 'Close', { size: 'sm', act: 'chat-panel-close' })}</div>`;
   const canEdit = !sheet && p.tab === 'preview' && !p.edit && rev.n === last.n;
-  const tabsH = `<div class="wk-tabs">${tabs([{ id: 'preview', label: 'Preview' }, { id: 'changes', label: 'Changes' }, { id: 'history', label: 'History', count: a.revs.length }], p.tab, '', { act: 'wk-tab' })}${canEdit ? btn('Edit', { v: 'ghost', size: 'sm', icon: 'pencil', act: 'wk-edit', disabled: streaming }) : ''}</div>`;
-  const old = rev.n !== last.n && p.tab !== 'history' ? `<div class="mb-12">${alertBox('default', `You’re viewing version ${rev.n} of ${a.revs.length}`, '', btn('View latest', { size: 'sm', act: 'wk-goto', data: { rev: last.n } }) + btn('Restore', { v: 'ghost', size: 'sm', act: 'wk-restore', data: { rev: rev.n } }), { icon: 'history' })}</div>` : '';
+  // The header keeps Edit (documents), Download, ⋯ and Close; versions live in History once there are two.
+  const head = `<div class="panel__header wk-head">${fileIcon(a.type)}<div class="grow"><h2 class="panel__title truncate">${esc(a.title)}</h2><div class="t-xs muted truncate">${versions ? `Version ${rev.n}${rev.n === last.n ? ' · Latest' : ''} · ` : ''}${FMT[a.type] || a.type.toUpperCase()} · ${fmtSize(rev.size)}</div></div>
+    ${canEdit ? iconBtn('pencil', streaming ? 'Wait for the answer to finish to edit' : 'Edit', { size: 'sm', act: 'wk-edit', disabled: streaming }) : ''}${dlBtn(a, rev)}${iconBtn('more', 'More', { size: 'sm', menu: 'wk-file-more', data: { id: a.id } })}${iconBtn('x', 'Close', { size: 'sm', act: 'chat-panel-close' })}</div>`;
+  const tabsH = versions ? `<div class="wk-tabs">${tabs([{ id: 'preview', label: 'Preview' }, { id: 'changes', label: 'Changes' }, { id: 'history', label: 'History', count: a.revs.length }], p.tab, '', { act: 'wk-tab' })}</div>` : '';
+  const old = rev.n !== last.n && p.tab !== 'history' ? `<div class="mb-12">${alertBox('default', `You’re viewing version ${rev.n} of ${a.revs.length}`, '', btn('View latest', { v: 'secondary', size: 'sm', act: 'wk-goto', data: { rev: last.n } }) + btn('Restore', { v: 'ghost', size: 'sm', act: 'wk-restore', data: { rev: rev.n } }), { icon: 'history' })}</div>` : '';
   let body;
   if (p.tab === 'history') body = historyHtml(a, rev);
-  else if (p.tab === 'changes') body = !prev ? emptyState({ icon: 'git-compare', title: 'This is the first version', desc: sheet ? 'Edit a cell or ask for changes to make a new version.' : 'Edit it or ask for changes to make a new version.', compact: true })
-    : `<div class="wk-legend"><span><i class="wk-legend__add"></i>Added</span>${sheet ? '<span><i class="wk-legend__chg"></i>Changed</span>' : ''}<span><i class="wk-legend__del"></i>Removed</span><span class="grow"></span><span class="medium truncate">v${prev.n} → v${rev.n} · ${esc(rev.summary)}</span></div>` + (sheet ? sheetHtml(a, rev, p, prev) : `<div class="wk-doc"><article class="wk-page wk-page--diff">${docDiffHtml(prev.html, rev.html)}</article></div>`);
+  else if (p.tab === 'changes' && prev) body = `<div class="wk-legend"><span><i class="wk-legend__add"></i>Added</span>${sheet ? '<span><i class="wk-legend__chg"></i>Changed</span>' : ''}<span><i class="wk-legend__del"></i>Removed</span><span class="grow"></span><span class="medium truncate">v${prev.n} → v${rev.n} · ${esc(rev.summary)}</span></div>` + (sheet ? sheetHtml(a, rev, p, prev) : `<div class="wk-doc"><article class="wk-page wk-page--diff">${docDiffHtml(prev.html, rev.html)}</article></div>`);
+  else if (p.tab === 'changes') body = `<p class="muted">Version 1 is where this file starts. Pick a later version in History to compare.</p>`;
   else if (sheet) body = sheetHtml(a, rev, p, null);
   else if (p.edit) body = `<div class="wk-etb" role="toolbar" aria-label="Formatting">${[['bold', '<b>B</b>', 'Bold'], ['italic', '<i>I</i>', 'Italic'], ['formatBlock:h3', '<b>H</b>', 'Heading'], ['insertUnorderedList', ic('list', 'i-sm'), 'Bulleted list'], ['undo', ic('undo', 'i-sm'), 'Undo']].map(([c, l, t]) => `<button type="button" class="button button--ghost button--sm button--icon-only button--muted" data-wk-cmd="${c}" aria-label="${t}" data-tip="${t}">${l}</button>`).join('')}<span class="grow"></span><span class="t-xs muted">Saving makes version ${a.revs.length + 1}</span></div><div class="wk-doc"><article class="wk-page is-editing" contenteditable="true" id="wk-editor" data-input="wk-edit-input" role="textbox" aria-multiline="true" aria-label="Edit ${esc(a.title)}">${p.draft ?? rev.html}</article></div>`;
   else body = `<div class="wk-doc"><article class="wk-page">${rev.html}</article></div>`;
-  const dirty = p.draft != null && p.draft !== rev.html;
-  const foot = p.edit
-    ? `<div class="panel__footer wk-edit-foot"><span class="grow t-xs muted" id="wk-edit-state">${dirty ? 'Unsaved changes' : 'No changes yet'}</span>${btn('Cancel', { size: 'sm', act: 'wk-edit-cancel' })}${btn(`Save as version ${a.revs.length + 1}`, { v: 'primary', size: 'sm', act: 'wk-edit-save', disabled: !dirty, id: 'wk-edit-save' })}</div>`
-    : askHtml(a, streaming);
+  const foot = p.edit ? editFoot(a, rev, p)
+    : streaming && editTarget(conv.id) ? `<div class="panel__footer wk-status" role="status">${spinner('sm')}<span>Working on version ${a.revs.length + 1}… you can keep reviewing.</span></div>` : '';
   return `<aside class="${cx('split__panel split__panel--wide wk-panel', p.full && 'wk-panel--full')}" aria-label="${esc(a.title)}">${head}${tabsH}<div class="panel__body wk-body" id="chat-panel-body" data-keep-scroll>${old}${body}</div>${foot}</aside>`;
 }
-/** Bring the first added/changed spreadsheet column into view once per version. */
+/** Save stays enabled; pressing it with nothing changed explains why instead. */
+function editFoot(a, rev, p) {
+  const dirty = p.draft != null && p.draft !== rev.html;
+  const hint = !dirty && p.saveTried ? `<span class="grow wk-edit-state is-err" id="wk-edit-state" role="alert">${ic('alert-circle', 'i-xs')}<span>Change something first, or Cancel.</span></span>` : `<span class="grow wk-edit-state" id="wk-edit-state">${dirty ? 'Unsaved changes' : 'No changes yet'}</span>`;
+  return `<div class="panel__footer wk-edit-foot">${hint}${btn('Cancel', { v: 'ghost', size: 'sm', act: 'wk-edit-cancel' })}${btn(`Save as version ${a.revs.length + 1}`, { v: 'primary', size: 'sm', act: 'wk-edit-save', id: 'wk-edit-save' })}</div>`;
+}
+/* The thread's composer height, for what must sit above it: the file sheet below 1024 px and toasts (chat.css). */
+const dockObs = new ResizeObserver(([e]) => $('#frame')?.style.setProperty('--dock-h', Math.ceil(e.target.getBoundingClientRect().height) + 'px'));
+/** Keep the dock measured; bring the first added/changed spreadsheet column into view once per version. */
 function after() {
+  const dock = $('.chat-dock'); dockObs.disconnect(); if (dock) dockObs.observe(dock);
   const p = panelState(); if (!p) return; const key = `${p.art}:${p.rev}:${p.tab}`; if (p.scrolled === key) return; p.scrolled = key;
   const g = $('#wk-grid'); const c = g && (g.querySelector('thead th.is-add') || g.querySelector('td.is-chg'));
   if (g && c) g.scrollLeft = Math.max(0, c.offsetLeft - g.clientWidth + c.offsetWidth + 24);
@@ -321,11 +344,7 @@ A['wk-cell-save'] = () => {
   Object.assign(p, { rev: rv.n, cell: null }); refresh();
   toast(`Saved as version ${rv.n}`, { action: { label: 'Undo', run: () => { if (latest(a) === rv) { a.revs.pop(); p.rev = latest(a).n; refresh(); } } } });
 };
-MENUS['wk-ver'] = el => {
-  const a = art(el.dataset.id); const p = panelState(); if (!a || !p) return []; const last = latest(a);
-  return [{ section: 'Versions' }, ...[...a.revs].reverse().map(r => ({ html: `<span class="stack grow" style="min-width:0"><span>Version ${r.n}${r.n === last.n ? ' · Latest' : ''}</span><span class="t-xs muted truncate">${esc(r.summary)} · ${rel(r.at).toLowerCase()}</span></span>`, checked: p.rev === r.n, run: () => { p.rev = r.n; p.cell = null; refresh(); } })),
-    { sep: true }, { label: 'Compare with previous', icon: 'git-compare', disabled: revOf(a, p.rev).n === 1, run: () => { p.tab = 'changes'; refresh(); } }, { label: 'All versions', icon: 'history', run: () => { p.tab = 'history'; refresh(); } }];
-};
+
 function rowsOf(rev, si = 0) { const sh = rev?.sheets?.[si] || rev?.sheets?.[0]; return sh ? [sh.cols.map(c => c.n), ...sh.rows] : [['Content'], [String(rev?.html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()]]; }
 function htmlToMd(html) {
   const d = new DOMParser().parseFromString(`<div>${html}</div>`, 'text/html');
@@ -336,54 +355,124 @@ function htmlToMd(html) {
     if (t === 'TABLE') { const rows = [...el.querySelectorAll('tr')].map(tr => [...tr.children].map(c => c.textContent.trim())); return rows.map((r, i) => `| ${r.join(' | ')} |` + (i === 0 ? `\n|${r.map(() => '---').join('|')}|` : '')).join('\n'); }
     return tx; }).join('\n\n');
 }
+/* Native formats: a minimal Office Open XML package (stored zip), so .xlsx and .docx downloads are the real file type. */
+const CRC = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+const crc32 = b => { let c = ~0; for (let i = 0; i < b.length; i++) c = CRC[(c ^ b[i]) & 255] ^ (c >>> 8); return ~c >>> 0; };
+function zipStore(files) {
+  const enc = new TextEncoder(), parts = [], dir = []; let off = 0;
+  const le = (n, size) => { const a = new Uint8Array(size); for (let i = 0; i < size; i++) a[i] = (n >>> (8 * i)) & 255; return a; };
+  files.forEach(([name, text]) => {
+    const nb = enc.encode(name), data = enc.encode(text), crc = crc32(data);
+    const common = [le(20, 2), le(0x0800, 2), le(0, 2), le(0, 2), le(0x21, 2), le(crc, 4), le(data.length, 4), le(data.length, 4), le(nb.length, 2), le(0, 2)];
+    const head = [le(0x04034b50, 4), ...common, nb];
+    dir.push([le(0x02014b50, 4), le(20, 2), ...common, le(0, 2), le(0, 2), le(0, 2), le(0, 4), le(off, 4), nb]);
+    head.forEach(x => parts.push(x)); parts.push(data);
+    off += head.reduce((s, x) => s + x.length, 0) + data.length;
+  });
+  const cd = dir.flat(), cdSize = cd.reduce((s, x) => s + x.length, 0);
+  return new Blob([...parts, ...cd, le(0x06054b50, 4), le(0, 4), le(files.length, 2), le(files.length, 2), le(cdSize, 4), le(off, 4), le(0, 2)]);
+}
+const xmlEsc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const RELS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+const XML = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+function xlsxBlob(rev) {
+  const sheets = rev.sheets.map((sh, i) => {
+    const rows = [sh.cols.map(c => c.n), ...sh.rows].map((r, ri) => `<row r="${ri + 1}">${r.map((v, ci) => { const ref = COL(ci) + (ri + 1); return typeof v === 'number' ? `<c r="${ref}"><v>${v}</v></c>` : `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${xmlEsc(v)}</t></is></c>`; }).join('')}</row>`).join('');
+    return [`xl/worksheets/sheet${i + 1}.xml`, `${XML}<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${rows}</sheetData></worksheet>`, sh.name.replace(/[[\]:*?/\\]/g, ' ').slice(0, 31)];
+  });
+  return zipStore([
+    ['[Content_Types].xml', `${XML}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>${sheets.map(s => `<Override PartName="/${s[0]}" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}</Types>`],
+    ['_rels/.rels', `${XML}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${RELS}/officeDocument" Target="xl/workbook.xml"/></Relationships>`],
+    ['xl/workbook.xml', `${XML}<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="${RELS}"><sheets>${sheets.map((s, i) => `<sheet name="${xmlEsc(s[2])}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')}</sheets></workbook>`],
+    ['xl/_rels/workbook.xml.rels', `${XML}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((s, i) => `<Relationship Id="rId${i + 1}" Type="${RELS}/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('')}</Relationships>`],
+    ...sheets.map(s => [s[0], s[1]]),
+  ]);
+}
+function docxBlob(title, html) {
+  const d = new DOMParser().parseFromString(`<div>${html}</div>`, 'text/html');
+  const para = (text, { bold, size, bullet } = {}) => `<w:p>${bullet ? '<w:pPr><w:ind w:left="360"/></w:pPr>' : ''}<w:r>${bold || size ? `<w:rPr>${bold ? '<w:b/>' : ''}${size ? `<w:sz w:val="${size}"/>` : ''}</w:rPr>` : ''}<w:t xml:space="preserve">${xmlEsc((bullet ? bullet + ' ' : '') + text)}</w:t></w:r></w:p>`;
+  const body = [...d.body.firstChild.children].map(el => {
+    const t = el.tagName, tx = el.textContent.trim();
+    if (t === 'H2') return para(tx, { bold: true, size: 32 }); if (t === 'H3') return para(tx, { bold: true, size: 26 });
+    if (t === 'UL') return [...el.children].map(li => para(li.textContent.trim(), { bullet: '•' })).join('');
+    if (t === 'OL') return [...el.children].map((li, i) => para(li.textContent.trim(), { bullet: `${i + 1}.` })).join('');
+    if (t === 'TABLE') return [...el.querySelectorAll('tr')].map((tr, i) => para([...tr.children].map(c => c.textContent.trim()).join('  |  '), { bold: i === 0 })).join('');
+    return para(tx);
+  }).join('');
+  return zipStore([
+    ['[Content_Types].xml', `${XML}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`],
+    ['_rels/.rels', `${XML}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${RELS}/officeDocument" Target="word/document.xml"/></Relationships>`],
+    ['word/document.xml', `${XML}<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body || para(title)}</w:body></w:document>`],
+  ]);
+}
 function download(a, rev, format) {
   const base = a.file.replace(/\.[^.]+$/, ''); const p = panelState(); const si = p?.art === a.id ? p.sheet || 0 : 0;
-  const rows = rowsOf(rev, si); const msg = name => `Downloaded ${name} (version ${rev.n})`;
+  const rows = rowsOf(rev, si); const msg = name => `Downloaded ${name}${a.revs.length > 1 ? ` (version ${rev.n})` : ''}`;
+  if (format === 'xlsx') return saveLocalFile(base + '.xlsx', xlsxBlob(rev), '', msg(base + '.xlsx'));
+  if (format === 'docx') return saveLocalFile(base + '.docx', docxBlob(a.title, rev.html || ''), '', msg(base + '.docx'));
   if (format === 'csv') return saveCsv(base + '.csv', rows, msg(base + '.csv'));
   if (format === 'pdf') return savePdf(base + '.pdf', a.title, rev.html ? htmlToMd(rev.html).split('\n').filter(Boolean).slice(0, 44) : rows.slice(0, 44).map(r => r.map(v => typeof v === 'number' ? usd(v) : v).join(' | ')), msg(base + '.pdf'));
-  if (format === 'word') return saveWord(base + '.doc', a.title, rev.html || `<table border="1" cellpadding="4">${rows.map(r => `<tr>${r.map(c => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</table>`, msg(base + '.doc'));
   if (format === 'md') return saveLocalFile(base + '.md', rev.html ? htmlToMd(rev.html) : rows.map(r => `| ${r.join(' | ')} |`).join('\n'), 'text/markdown;charset=utf-8', msg(base + '.md'));
 }
+/** The file's own format first, then the conversions. */
+const dlFormats = a => KIND(a.type) === 'sheet'
+  ? [['xlsx', 'Excel workbook', 'table', '.xlsx'], ['csv', 'CSV (current sheet)', 'file', '.csv'], ['pdf', 'PDF', 'file', '.pdf']]
+  : [['docx', 'Word document', 'file-text', '.docx'], ['pdf', 'PDF', 'file', '.pdf'], ['md', 'Markdown', 'file', '.md']];
+const dlBtn = (a, rev) => iconBtn('download', 'Download', { size: 'sm', menu: 'wk-dl', data: { id: a.id, rev: rev.n } });
 MENUS['wk-dl'] = el => {
   const a = art(el.dataset.id); if (!a) return []; const rev = revOf(a, el.dataset.rev);
-  return KIND(a.type) === 'sheet'
-    ? [{ section: `Version ${rev.n}` }, { label: 'Spreadsheet as CSV', icon: 'table', meta: '.csv', run: () => download(a, rev, 'csv') }, { label: 'PDF', icon: 'file', meta: '.pdf', run: () => download(a, rev, 'pdf') }]
-    : [{ section: `Version ${rev.n}` }, { label: 'Word document', icon: 'file-text', meta: '.doc', run: () => download(a, rev, 'word') }, { label: 'PDF', icon: 'file', meta: '.pdf', run: () => download(a, rev, 'pdf') }, { label: 'Markdown', icon: 'file', meta: '.md', run: () => download(a, rev, 'md') }];
+  return [a.revs.length > 1 && { section: `Version ${rev.n}` }, ...dlFormats(a).map(([f, label, icon, meta]) => ({ label, icon, meta, run: () => download(a, rev, f) }))].filter(Boolean);
 };
 MENUS['wk-file-more'] = el => {
-  const a = art(el.dataset.id); if (!a) return [];
-  return [{ label: 'Save to knowledge…', icon: 'book', disabled: !visibleKbs().some(canEditKb), run: () => A['wk-publish']({ dataset: { id: a.id } }) },
-    { label: 'Rename', icon: 'pencil', run: () => { S.ui.wkRen = { id: a.id, v: a.title, err: '' }; openModal('wk-rename'); } },
-    { sep: true }, { label: 'Show in conversation', icon: 'message', run: () => { const m = convById(a.conv)?.messages.find(x => (x.artifacts || []).some(r => r.id === a.id)); document.getElementById('msg-' + m?.id)?.scrollIntoView({ behavior: 'smooth', block: 'center' }); } }];
+  const a = art(el.dataset.id); if (!a) return []; const p = panelState();
+  // Wider/Narrower only where the panel can grow (it fills the screen below 1024 px).
+  const wide = p?.art === a.id && ($('#frame')?.clientWidth || 0) > 1023;
+  return [visibleKbs().some(canEditKb) && { label: 'Save to knowledge…', icon: 'book', run: () => A['wk-publish']({ dataset: { id: a.id } }) },
+    { label: 'Rename', icon: 'pencil', run: () => openRename(a) },
+    { sep: true },
+    wide && { label: p.full ? 'Narrower panel' : 'Wider panel', icon: p.full ? 'chevron-right' : 'maximize', run: () => A['wk-wide']() },
+    { label: 'Show in conversation', icon: 'message', run: () => { const m = convById(a.conv)?.messages.find(x => (x.artifacts || []).some(r => r.id === a.id)); document.getElementById('msg-' + m?.id)?.scrollIntoView({ behavior: 'smooth', block: 'center' }); } }].filter(Boolean);
 };
-M['wk-rename'] = () => { const f = ui('wkRen'); return { size: 'sm', title: 'Rename file', body: field({ id: 'wk-ren', label: 'Name', error: f.err, control: input({ id: 'wk-ren', bind: 'wkRen.v', value: f.v, autofocus: true, onEnter: 'wk-ren-save', invalid: !!f.err }) }), foot: btn('Cancel', { act: 'close-modal' }) + btn('Save', { v: 'primary', act: 'wk-ren-save' }) }; };
-A['wk-ren-save'] = () => {
-  const f = ui('wkRen'); const v = f.v.trim(); if (!v) { f.err = 'Enter a name.'; refreshLayer(); return; }
-  const a = art(f.id); const before = a.title; a.title = v; closeModal(); refresh();
-  toast('File renamed', { action: { label: 'Undo', run: () => { a.title = before; refresh(); } } });
+/* Rename a file the assistant made: the title shown in the answer card and the panel (versions are untouched). */
+function openRename(a) { S.ui.wkRen = { id: a.id, v: a.title, touched: false, busy: false }; openModal('wk-rename'); requestAnimationFrame(() => $('#wk-ren')?.select()); }
+M['wk-rename'] = () => {
+  const f = ui('wkRen'), dis = f.busy ? 'disabled' : '', err = f.touched && !f.v.trim() ? 'Enter a name.' : '';
+  return { size: 'sm', title: 'Rename file', icon: 'pencil',
+    body: field({ id: 'wk-ren', label: 'Name', error: err, desc: 'Only the name changes. Every version stays in History.', control: input({ id: 'wk-ren', bind: 'wkRen.v', value: f.v, autofocus: true, onEnter: 'wk-ren-save', invalid: !!err, attrs: `maxlength="80" data-live ${dis}` }) }),
+    foot: btn('Cancel', { v: 'ghost', act: 'close-modal', disabled: f.busy }) + btn('Rename', { v: 'primary', act: 'wk-ren-save', loading: f.busy }) };
 };
+A['wk-ren-save'] = async () => {
+  const f = ui('wkRen'); if (f.busy) return; const a = art(f.id); if (!a) return closeModal();
+  const v = f.v.trim(); f.touched = true;
+  if (!v) { refreshLayer(); $('#wk-ren')?.focus(); return; }
+  if (v === a.title) return closeModal();
+  f.busy = true; S.modal.props.guard = true; refreshLayer(); await sleep(300);
+  const before = a.title; a.title = v; closeModal(); refresh();
+  toast(`Renamed to “${v}”`, { action: { label: 'Undo', run: () => { a.title = before; refresh(); } } });
+};
+/** Restoring is reversible (it adds a version; nothing is overwritten): act at once, Undo removes the new version. */
 A['wk-restore'] = el => {
   const p = panelState(); const a = p && art(p.art); if (!a) return; const from = revOf(a, el.dataset.rev);
-  confirmAction({ title: `Restore version ${from.n}?`, body: `This makes version ${a.revs.length + 1}, a copy of version ${from.n}. Every version stays in History.`, confirm: 'Restore', delay: 300,
-    onConfirm: () => { const r = addRev(a, { ...(from.sheets ? { sheets: clone(from.sheets) } : { html: from.html }), by: 'you', summary: `Restored version ${from.n}` }); p.rev = r.n; p.tab = 'preview'; refresh(); toast(`Restored as version ${r.n}`); } });
+  const r = addRev(a, { ...(from.sheets ? { sheets: clone(from.sheets) } : { html: from.html }), by: 'you', summary: `Restored version ${from.n}` });
+  Object.assign(p, { rev: r.n, tab: 'preview', cell: null }); refresh();
+  toast(`Restored version ${from.n} as version ${r.n}`, { action: { label: 'Undo', run: () => { if (latest(a) === r) { a.revs.pop(); const q = panelState(); if (q?.art === a.id) q.rev = latest(a).n; refresh(); } } } });
 };
-/* Ask for changes → an assistant turn → a new version */
-A['wk-ask-quick'] = el => { ui('wkAsk').text = el.dataset.q; A['wk-ask-send'](); };
-A['wk-ask-send'] = () => {
-  const f = ui('wkAsk', { text: '' }); const t = (f.text || '').trim(); const p = panelState(); const a = p && art(p.art);
-  if (!a) return; if (!t) { $('#wk-ask-in')?.focus(); return; }
+/* Ask for changes: the thread composer (with its "Editing …" chip) is the one place to type; suggestions send at once. */
+A['wk-ctx-off'] = () => { const p = panelState(); if (p) { p.ctxOff = true; refresh(); C().focusComposer(); } };
+A['wk-ask-quick'] = el => {
+  const p = panelState(); const a = p && art(p.art); if (!a) return;
   if (C().busy()) { toast('Wait for the current answer to finish.', { tone: 'accent' }); return; }
-  const conv = convById(a.conv); if (!conv) return;
-  f.text = ''; C().ask(conv, `Update “${a.title}”: ${t}`);
+  const conv = convById(a.conv); if (conv) C().ask(conv, el.dataset.q, [], { edit: a.id });
 };
 /* Edit in place (documents) */
-A['wk-edit'] = () => { const p = panelState(); if (!p) return; Object.assign(p, { edit: true, tab: 'preview', draft: null }); refresh(); requestAnimationFrame(() => $('#wk-editor')?.focus()); };
-A['wk-edit-input'] = el => { const p = panelState(); if (!p) return; p.draft = el.innerHTML; const dirty = p.draft !== revOf(art(p.art), p.rev).html; const s = $('#wk-edit-state'); if (s) s.textContent = dirty ? 'Unsaved changes' : 'No changes yet'; const b = $('#wk-edit-save'); if (b) b.disabled = !dirty; };
+A['wk-edit'] = () => { const p = panelState(); if (!p) return; Object.assign(p, { edit: true, tab: 'preview', draft: null, saveTried: false }); refresh(); requestAnimationFrame(() => $('#wk-editor')?.focus()); };
+A['wk-edit-input'] = el => { const p = panelState(); if (!p) return; p.draft = el.innerHTML; p.saveTried = false; const dirty = p.draft !== revOf(art(p.art), p.rev).html; const s = $('#wk-edit-state'); if (s) { s.className = 'grow wk-edit-state'; s.removeAttribute('role'); s.textContent = dirty ? 'Unsaved changes' : 'No changes yet'; } };
 A['wk-edit-cancel'] = () => { if (leaveEdit()) refresh(); };
 A['wk-edit-save'] = () => {
   const p = panelState(); if (!p) return; const a = art(p.art); const html = $('#wk-editor')?.innerHTML ?? p.draft;
+  if (html == null || html === revOf(a, p.rev).html) { p.draft = html; p.saveTried = true; refresh(); requestAnimationFrame(() => $('#wk-editor')?.focus()); return; }
   const r = addRev(a, { html, by: 'you', summary: 'Edited by you' });
-  Object.assign(p, { edit: false, draft: null, rev: r.n, tab: 'changes' }); refresh();
+  Object.assign(p, { edit: false, draft: null, saveTried: false, rev: r.n, tab: 'changes' }); refresh();
   toast(`Saved as version ${r.n}`, { action: { label: 'Undo', run: () => { if (latest(a) === r) { a.revs.pop(); p.rev = latest(a).n; p.tab = 'preview'; refresh(); } } } });
 };
 document.addEventListener('mousedown', e => {
@@ -394,55 +483,65 @@ document.addEventListener('mousedown', e => {
 document.addEventListener('keydown', e => { const b = e.target.closest?.('[data-wk-cmd]'); if (b && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); b.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); } });
 
 /* Save to knowledge: publish a version into a knowledge base you can edit */
+/** Default target: where it was saved before, else the knowledge base its sources came from, else the first shared one you can edit. */
 A['wk-publish'] = el => {
   const a = art(el.dataset.id); const kbs = visibleKbs().filter(canEditKb); if (!a || !kbs.length) return;
-  S.ui.wkPub = { id: a.id, kb: el.dataset.kb || a.published[0]?.kb || (kbs.find(k => !k.personal) || kbs[0]).id, name: a.file, err: '' };
+  const ok = id => kbs.some(k => k.id === id) && id;
+  const fromSources = (a.sources || []).map(id => docById(id)?.kb).find(ok);
+  S.ui.wkPub = { id: a.id, kb: ok(el.dataset.kb) || ok(a.published[0]?.kb) || fromSources || (kbs.find(k => !k.personal) || kbs[0]).id, name: a.published[0] ? docById(a.published[0].doc)?.name || a.file : `${a.title}.${a.type}`, touched: false, busy: false };
   openModal('wk-publish');
 };
-M['wk-publish'] = p => {
+M['wk-publish'] = () => {
   const f = ui('wkPub'); const a = art(f.id); const l = latest(a); const kbs = visibleKbs().filter(canEditKb); const kb = kbById(f.kb); const existing = a.published.find(x => x.kb === f.kb);
-  const who = kb?.personal ? 'Only you can find it.' : kb?.general === 'workspace' ? `Everyone in ${curWs().name} can find and cite it.` : `People with access to ${kb?.name} can find and cite it.`;
-  return { title: existing ? 'Update saved copy' : 'Save to knowledge', desc: `${esc(a.title)} · version ${l.n}`,
-    body: field({ id: 'wk-pub-kb', label: 'Knowledge base', control: select({ id: 'wk-pub-kb', bind: 'wkPub.kb', value: f.kb, change: 'wk-pub-kb', options: kbs.map(k => [k.id, k.name]) }) })
-      + field({ id: 'wk-pub-name', label: 'Document name', error: f.err, control: input({ id: 'wk-pub-name', bind: 'wkPub.name', value: f.name, invalid: !!f.err }) })
-      + `<p class="t-sm muted mt-16">${existing ? `Replaces version ${existing.rev}. ` : ''}${who}</p>`,
-    foot: btn('Cancel', { act: 'close-modal' }) + btn(existing ? `Update to version ${l.n}` : 'Save', { v: 'primary', act: 'wk-pub-save', loading: p.busy }) };
+  const dis = f.busy ? 'disabled' : '', err = f.touched && !f.name.trim() ? 'Enter a document name.' : '';
+  const [whoIcon, who] = kb?.personal ? ['lock', 'Only you can find it.'] : kb?.general === 'workspace' ? ['globe', `Everyone in ${curWs().name} can find and cite it.`] : ['users', `People with access to ${kb?.name} can find and cite it.`];
+  const file = `<div class="chat-ctx">${fileIcon(a.type)}<div class="grow"><div class="chat-ctx__title truncate" translate="no">${esc(a.title)}</div><div class="t-xs muted truncate">Version ${l.n} · ${FMT[a.type] || a.type.toUpperCase()} · ${fmtSize(l.size)}</div></div></div>`;
+  return { title: existing ? 'Update saved copy' : 'Save to knowledge', icon: existing ? 'refresh' : 'book',
+    desc: existing ? `Replace version ${existing.rev} in ${esc(kb.name)} with version ${l.n}.` : 'Turn this file into a document people can find, read and ask about.',
+    body: file
+      + field({ id: 'wk-pub-kb', label: 'Knowledge base', desc: `<span class="wk-pub__who">${ic(whoIcon, 'i-xs')}<span>${esc(who)}</span></span>`, control: select({ id: 'wk-pub-kb', bind: 'wkPub.kb', value: f.kb, change: 'wk-pub-kb', options: kbs.map(k => [k.id, k.name]), attrs: dis }) })
+      + field({ id: 'wk-pub-name', label: 'Document name', error: err, control: input({ id: 'wk-pub-name', bind: 'wkPub.name', value: f.name, onEnter: 'wk-pub-save', invalid: !!err, attrs: `maxlength="120" data-live ${dis}` }) }),
+    foot: btn('Cancel', { v: 'ghost', act: 'close-modal', disabled: f.busy }) + btn(existing ? `Update to version ${l.n}` : 'Save to knowledge', { v: 'primary', icon: existing ? 'refresh' : 'book', act: 'wk-pub-save', loading: f.busy }) };
 };
 A['wk-pub-kb'] = () => refreshLayer();
 A['wk-pub-save'] = async () => {
-  const f = ui('wkPub'); const a = art(f.id); const l = latest(a); const kb = kbById(f.kb); const name = f.name.trim();
-  if (!name) { f.err = 'Enter a document name.'; refreshLayer(); return; }
-  const p = S.modal.props; p.busy = true; p.guard = true; refreshLayer(); await sleep(800);
+  const f = ui('wkPub'); if (f.busy) return; const a = art(f.id); const l = latest(a); const kb = kbById(f.kb); const name = f.name.trim();
+  f.touched = true;
+  if (!name) { refreshLayer(); $('#wk-pub-name')?.focus(); return; }
+  f.busy = true; S.modal.props.guard = true; refreshLayer(); await sleep(800);
   const ex = a.published.find(x => x.kb === f.kb); let doc = ex && docById(ex.doc);
   if (doc) Object.assign(doc, { status: 'processing', updated: Date.now(), name });
   else { doc = mkDoc(f.kb, uid('d-pub'), name, { addedBy: me().name, updated: Date.now(), status: 'processing', size: l.size, pages: 2 }); D.docs.push(doc); }
   if (ex) Object.assign(ex, { rev: l.n, at: Date.now() }); else a.published.push({ kb: f.kb, rev: l.n, at: Date.now(), doc: doc.id });
   D.audit.unshift({ id: uid('ev'), at: Date.now(), actor: me().id, action: ex ? 'Updated a saved file' : 'Saved a file from chat', type: 'Knowledge', target: `${name} → ${kb.name}`, outcome: 'success', ip: '10.4.12.30', device: 'Chrome on macOS' });
   closeModal(); refresh();
-  toast(ex ? `Updated in ${kb.name}` : `Saved to ${kb.name}`, { action: { label: 'Open', run: () => go('/knowledge/' + kb.id) } });
+  toast(ex ? `Updated in ${kb.name}` : `Saved to ${kb.name}`, { action: { label: 'Open', run: () => go('/doc/' + doc.id) } });
   setTimeout(() => { doc.status = 'ready'; persist(); }, 3500);
 };
 
 /* ═══════════════ Attachments ═══════════════ */
 const BLOCKED = /\.(mp4|mov|avi|mkv|exe|dmg|iso|app|msi)$/i;
 const MAX = 5, MAXB = 100 * 1048576;
+/** f.proj: a project document pre-attached to a new chat in the project (its × leaves it out of this chat only). */
 function chipHtml(f, i, inComposer) {
   const t = f.type || f.name.split('.').pop().toLowerCase();
   const doc = f.doc && docById(f.doc); const locked = f.kind === 'ref' && doc && !C().canDoc(doc);
-  const x = inComposer && (f.ready || f.error) ? `<button type="button" class="wk-chip__x" data-act="wk-unattach" data-i="${i}" aria-label="Remove ${esc(f.name)}" data-tip="Remove">${ic('x', 'i-xs')}</button>` : '';
+  const x = !inComposer || !(f.ready || f.error) ? ''
+    : f.proj ? `<button type="button" class="wk-chip__x" data-act="wk-unref" data-doc="${esc(f.doc)}" aria-label="Leave ${esc(f.name)} out of this chat" data-tip="Leave out of this chat">${ic('x', 'i-xs')}</button>`
+    : `<button type="button" class="wk-chip__x" data-act="wk-unattach" data-i="${i}" aria-label="Remove ${esc(f.name)}" data-tip="Remove">${ic('x', 'i-xs')}</button>`;
   if (f.error) return `<span class="wk-chip is-err" role="group" aria-label="${esc(f.name)}: ${esc(f.error)}" data-tip="${esc(f.error)}">${ic('alert-circle', 'i-sm')}<span class="wk-chip__name truncate">${esc(f.name)}</span><span class="wk-chip__meta">Can’t attach</span>${x}</span>`;
   const uploading = f.progress != null && f.progress < 100;
   const state = uploading ? `<span class="wk-chip__meta num">${Math.round(f.progress)}%</span>` : !f.ready && inComposer ? '<span class="wk-chip__meta">Reading…</span>' : '';
-  const meta = f.kind === 'ref' ? `<span class="wk-chip__meta truncate">${locked ? 'No access' : esc(kbById(doc?.kb)?.name || 'Knowledge')}</span>` : '';
+  const meta = f.proj ? '<span class="wk-chip__meta">Project</span>' : f.kind === 'ref' ? `<span class="wk-chip__meta truncate">${locked ? 'No access' : esc(kbById(doc?.kb)?.name || 'Knowledge')}</span>` : '';
   const inner = `${locked ? ic('lock', 'i-sm') : fileIcon(t, 'sm')}<span class="wk-chip__name truncate">${esc(f.name)}</span>${meta}${state}${x}${uploading ? `<span class="wk-chip__bar" style="width:${f.progress}%"></span>` : ''}`;
   const cls = cx('wk-chip', f.kind === 'ref' && 'is-ref', locked && 'is-locked');
-  const tip = f.kind === 'ref' ? 'From knowledge — read in place, not copied' : 'Saved to My files';
+  const tip = f.proj ? 'Project document — every new chat here starts with it' : f.kind === 'ref' ? 'From knowledge — read in place, not copied' : 'Saved to My files';
   return !inComposer && doc && !locked ? `<a class="${cls}" href="#/doc/${doc.id}" data-tip="${tip}">${inner}</a>` : `<span class="${cls}" ${f.ready ? `data-tip="${tip}"` : ''}>${inner}</span>`;
 }
 function paintFiles(key) {
   if (C().composerKey() !== key) return;
   const box = $('#chat-files'); if (!box) return;
-  box.innerHTML = C().composer(key).files.map((f, i) => chipHtml(f, i, true)).join('');
+  box.innerHTML = C().composerFiles(key); box.hidden = !box.innerHTML;
 }
 async function addFiles(list, key = C().composerKey()) {
   const c = C().composer(key); const fresh = [];
@@ -468,6 +567,7 @@ async function addFiles(list, key = C().composerKey()) {
   if (fresh.length) { refresh(); C().focusComposer(); toast(fresh.length > 1 ? `Added ${fresh.length} files to My files` : `Added ${fresh[0].name} to My files`); }
 }
 A['wk-unattach'] = el => { C().composer(C().composerKey()).files.splice(+el.dataset.i, 1); refresh(); C().focusComposer(); };
+A['wk-unref'] = el => { const c = C().composer(C().composerKey()); if (!c.off.includes(el.dataset.doc)) c.off.push(el.dataset.doc); refresh(); C().focusComposer(); };
 A['wk-file-picked'] = el => { const fs = [...el.files].map(f => ({ name: f.name, size: f.size })); el.value = ''; if (fs.length) addFiles(fs); };
 MENUS['wk-attach'] = () => [
   { section: 'Add to this message' },
@@ -486,30 +586,48 @@ document.addEventListener('drop', e => {
   e.preventDefault(); const fs = [...(e.dataTransfer?.files || [])].map(f => ({ name: f.name, size: f.size })); if (fs.length) addFiles(fs, zone.dataset.drop);
 });
 
-/* Add from knowledge: reference documents instead of re-uploading — to this message, or (wkPick.project) to a project. */
-function openPicker() { S.ui.wkPick = { q: '', sel: {} }; openModal('wk-pick'); }
+/* Add from knowledge: reference documents instead of re-uploading — to this message, or (wkPick.project) to a project.
+   One scrollable option list grouped by knowledge base; long groups show the newest few until expanded or searched. */
+const PICK_FEW = 5;
+function openPicker() { S.ui.wkPick = { q: '', sel: {}, more: {} }; openModal('wk-pick'); }
 M['wk-pick'] = () => {
-  const p = ui('wkPick', { q: '', sel: {} }); const q = p.q.trim().toLowerCase();
+  const p = ui('wkPick', { q: '', sel: {}, more: {} }); p.more ??= {}; const q = p.q.trim().toLowerCase(), toks = tokens(p.q);
   const proj = p.project && X.projects?.byId(p.project), c = proj ? null : C().composer(C().composerKey());
   const have = proj ? X.projects.docIds(proj.id) : c.files.map(f => f.doc);
   const room = proj ? X.projects.room(proj.id) : MAX - c.files.length; const n = Object.values(p.sel).filter(Boolean).length;
-  const docs = D.docs.filter(d => !d.archived && d.status !== 'unsupported' && C().canDoc(d) && !have.includes(d.id) && (!q || d.name.toLowerCase().includes(q)));
+  // A project keeps only documents people can open (published and readable), the same rule addDocs applies.
+  const addable = d => proj ? canOpenRes(d) : C().canDoc(d);
+  const docs = D.docs.filter(d => !d.archived && d.status !== 'unsupported' && addable(d) && !have.includes(d.id) && (!q || d.name.toLowerCase().includes(q))).sort((a, b) => b.updated - a.updated);
   const groups = visibleKbs().filter(canReadKb).map(k => [k, docs.filter(d => d.kb === k.id)]).filter(([, l]) => l.length);
-  const body = `<div class="search-field wk-pick__search">${ic('search')}${input({ id: 'wk-pick-q', bind: 'wkPick.q', value: p.q, placeholder: 'Search documents you can access', attrs: 'data-live aria-label="Search documents"', autofocus: true, size: 'sm' })}</div>
-    ${groups.length ? groups.map(([k, l]) => `<div class="wk-pick__group"><div class="t-label mb-8">${esc(k.name)}</div>${l.slice(0, q ? 20 : 4).map(d => `<div class="wk-pick__row">${checkbox({ checked: !!p.sel[d.id], act: 'wk-pick-t', data: { id: d.id }, disabled: !p.sel[d.id] && n >= room, label: `${fileIcon(d.type, 'sm')}<span class="grow truncate">${esc(d.name)}</span><span class="t-xs muted none">${rel(d.updated)}</span>` })}</div>`).join('')}</div>`).join('')
-      : emptyState({ icon: 'search', title: 'No documents match', desc: 'Try another word.', compact: true })}`;
-  return { size: 'lg', title: proj ? `Add knowledge to ${proj.name}` : 'Add from knowledge', desc: proj ? 'Every new chat in this project starts with these. Nothing is copied, and access rules still apply.' : 'The assistant reads these where they are. Nothing is copied, and access rules still apply.', body,
-    footStart: `<span class="t-sm muted">${room <= 0 ? (proj ? 'This project already has 10 documents' : 'This message already has 5 files') : `${n} of ${room} selected`}</span>`,
-    foot: btn('Cancel', { act: 'close-modal' }) + btn(n ? `Add ${plural(n, 'document')}` : 'Add documents', { v: 'primary', act: 'wk-pick-add', disabled: !n }) };
+  const row = d => checkbox({ checked: !!p.sel[d.id], act: 'wk-pick-t', data: { id: d.id }, disabled: !p.sel[d.id] && n >= room, label: `${fileIcon(d.type, 'sm')}<span class="grow truncate">${q ? markTokens(d.name, toks) : esc(d.name)}</span><span class="t-xs muted none">${rel(d.updated)}</span>` });
+  const group = ([k, l]) => {
+    const all = q || p.more[k.id] || l.length <= PICK_FEW + 1, shown = all ? l : l.slice(0, PICK_FEW);
+    return `<div class="wk-pick__kb" role="presentation">${esc(k.name)}<span class="num">${fmtNum(l.length)}</span></div>${shown.map(row).join('')}${all ? '' : `<button type="button" class="wk-pick__more" data-act="wk-pick-more" data-kb="${esc(k.id)}">${ic('chevron-down', 'i-sm')}<span>Show ${fmtNum(l.length - PICK_FEW)} more</span></button>`}`;
+  };
+  const empty = q
+    ? emptyState({ icon: 'search', title: 'No documents match', desc: 'Try another word, or clear the search to browse by knowledge base.', actions: btn('Clear search', { v: 'ghost', size: 'sm', act: 'wk-pick-clear' }), compact: true })
+    : emptyState({ icon: 'check-circle', title: 'Nothing left to add', desc: 'Every document you can access is already here.', compact: true });
+  const body = `<div class="wk-pick">${searchField({ id: 'wk-pick-q', bind: 'wkPick.q', live: true, size: 'md', full: true, autofocus: true, placeholder: 'Search documents you can access', label: 'Search documents' })}
+    ${groups.length ? `<div class="option-list wk-pick__list" role="group" aria-label="Documents">${groups.map(group).join('')}</div>` : empty}</div>`;
+  const left = Math.max(0, room - n);
+  const footStart = p.tried && !n ? `<span class="field-error" role="alert">${ic('alert-circle')}<span>Select at least one document.</span></span>`
+    : room <= 0 ? `<span class="muted">${proj ? `This project already has ${X.projects.max} documents.` : `This message already has ${MAX} files.`}</span>`
+    : `<span class="muted">${n ? `${n} selected · ${left ? `you can add ${left} more` : 'that’s the limit'}` : `You can add ${room} more`}</span>`;
+  return { size: 'lg', icon: 'book', title: proj ? `Add documents to ${proj.name}` : 'Add from knowledge',
+    desc: proj ? 'New chats in this project start with these. Nothing is copied; access rules still apply.' : 'The assistant reads these where they are. Nothing is copied; access rules still apply.', body, footStart,
+    foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn(n ? `Add ${plural(n, 'document')}` : 'Add documents', { v: 'primary', icon: 'plus', act: 'wk-pick-add' }) };
 };
-A['wk-pick-t'] = (el, e) => { e?.stopPropagation(); const p = ui('wkPick'); p.sel[el.dataset.id] = !p.sel[el.dataset.id]; refreshLayer(); };
+A['wk-pick-more'] = el => { ui('wkPick').more[el.dataset.kb] = true; refreshLayer(); };
+A['wk-pick-clear'] = () => { ui('wkPick').q = ''; refreshLayer(); $('#wk-pick-q')?.focus(); };
+A['wk-pick-t'] = (el, e) => { e?.stopPropagation(); const p = ui('wkPick'); p.sel[el.dataset.id] = !p.sel[el.dataset.id]; p.tried = false; refreshLayer(); };
 A['wk-pick-add'] = () => {
   const p = ui('wkPick'), ids = Object.entries(p.sel).filter(([, v]) => v).map(([id]) => id);
-  if (p.project) { const n = X.projects?.addDocs(p.project, ids) || 0; closeModal(); refresh(); if (n) toast(`Added ${plural(n, 'document')} to the project`); return; }
+  if (!ids.length) { p.tried = true; refreshLayer(); $('.wk-pick__list input:not(:disabled)')?.focus(); return; }
+  if (p.project) { const n = X.projects?.addDocs(p.project, ids) || 0; closeModal(); refresh(); if (n) toast(`Added ${plural(n, 'document')} to the project. New chats here start with them.`); return; }
   const c = C().composer(C().composerKey());
   ids.forEach(id => { const d = docById(id); if (d && c.files.length < MAX && !c.files.some(f => f.doc === id)) c.files.push({ name: d.name, type: d.type, kind: 'ref', doc: id, ready: true }); });
   closeModal(); refresh(); C().focusComposer();
 };
 
-X.chatFiles = { plan, afterStream, migrate, cards, panel, chip: chipHtml, after, leaveEdit, openFile };
+X.chatFiles = { plan, afterStream, migrate, cards, panel, chip: chipHtml, after, leaveEdit, openFile, editTarget, ctxChip, quickAsks };
 })();

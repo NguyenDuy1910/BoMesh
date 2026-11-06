@@ -1,38 +1,56 @@
-/* People (ppl-) and Activity (act-) */
+/* People (ppl-) and Activity / audit log (act-, shared with the platform Audit log) */
 
 /* Shared bits */
 .ppl-nowrap, .act-when { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .ppl-tip { display: inline-flex; border-radius: var(--field-radius); }
 .ppl-tip:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .ppl-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
-.ppl-full { max-width: none; }
 
-/* Members table */
+/* Members table: the inline role reads as text until the row is hovered or the select focused (a quiet control, not 16 boxes) */
 .ppl-role-select { width: auto; min-width: 156px; max-width: 200px; }
-.ppl-checks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; }
+.table__row:not(:hover) .ppl-role-select:not(:focus-visible) { background-color: transparent; box-shadow: none; }
+.ppl-checks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; }
 
 /* Add people: multi-email chip input */
-.ppl-chipin { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 40px; padding: 6px 8px; border-radius: var(--field-radius); background: var(--field-background); box-shadow: var(--field-shadow), inset 0 0 0 1px var(--border); cursor: text; transition: box-shadow var(--dur-fast); }
-.ppl-chipin:focus-within { box-shadow: var(--field-shadow), 0 0 0 2px var(--focus); }
-.ppl-chipin.is-invalid { box-shadow: 0 0 0 1px var(--danger); }
-.ppl-chipin.is-invalid:focus-within { box-shadow: 0 0 0 2px var(--danger); }
-.ppl-chipin__input { flex: 1 1 160px; min-width: 120px; height: 26px; border: 0; background: transparent; color: var(--foreground); font-size: 14px; padding: 0 4px; }
+.ppl-chipin { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 44px; max-height: 168px; overflow-y: auto; padding: 8px; border-radius: var(--field-radius); background: var(--field-background); box-shadow: var(--field-shadow), inset 0 0 0 1px var(--field-border); cursor: text; transition: box-shadow var(--dur-fast); }
+@media (hover: hover) { .ppl-chipin:hover:not(:focus-within) { box-shadow: var(--field-shadow), inset 0 0 0 1px color-mix(in oklab, var(--foreground) 20%, transparent); } }
+.ppl-chipin:focus-within { box-shadow: inset 0 0 0 1px var(--focus), 0 0 0 3px var(--focus-halo); }
+.ppl-chipin.is-invalid, .ppl-chipin.is-invalid:hover { box-shadow: inset 0 0 0 1px var(--danger); }
+.ppl-chipin.is-invalid:focus-within { box-shadow: inset 0 0 0 1px var(--danger), 0 0 0 3px var(--danger-soft); }
+.ppl-chipin__input { flex: 1 1 160px; min-width: 120px; height: 28px; border: 0; background: transparent; color: var(--field-foreground); font-size: 14px; padding: 0 4px; }
 .ppl-chipin__input:focus { outline: none; }
 .ppl-chipin__input::placeholder { color: var(--field-placeholder); }
-.ppl-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; height: 26px; padding: 0 2px 0 4px; border-radius: var(--radius-2xl); background: var(--default); color: var(--default-foreground); font-size: 13px; font-weight: 500; }
-.ppl-chip.is-invalid { background: var(--danger-soft); color: var(--danger-soft-foreground); padding-left: 8px; }
-.ppl-chip__x { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; color: inherit; opacity: .7; flex: none; }
-.ppl-chip__x:hover { opacity: 1; background: var(--default-hover); }
-.ppl-chip__x:focus-visible { outline: 2px solid var(--focus); }
+.ppl-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; height: 28px; padding: 0 2px 0 4px; border-radius: var(--radius-full); background: var(--default); color: var(--default-foreground); font-size: 13px; font-weight: 500; }
+.ppl-chip.is-invalid, .ppl-chip.is-warn, .ppl-chip.is-invite { padding-left: 8px; }
+.ppl-chip.is-invalid { background: var(--danger-soft); color: var(--danger-soft-foreground); }
+.ppl-chip.is-warn { background: var(--warning-soft); color: var(--warning-soft-foreground); }
+/* No account yet: the chip says "gets an invite" (accent), not "error" */
+.ppl-chip.is-invite { background: var(--accent-soft); color: var(--accent-soft-foreground); }
+.ppl-chip__x { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; color: inherit; opacity: .65; flex: none; transition: opacity var(--dur-fast), background-color var(--dur-fast); }
+.ppl-chip__x:hover { opacity: 1; background: color-mix(in oklab, currentColor 12%, transparent); }
+.ppl-chip__x:focus-visible { outline: 2px solid var(--focus); opacity: 1; }
+/* Below the box: one line of status (who joins, who gets an invite, what can't be added, or the hint) */
+.ppl-add-ok { display: flex; align-items: center; gap: 6px; font-size: 12px; line-height: 16px; color: var(--success-soft-foreground); }
+.ppl-add-issues { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: var(--radius-lg); background: color-mix(in oklab, var(--danger-soft) 55%, transparent); font-size: 12px; line-height: 16px; }
+.ppl-add-issues__title { font-weight: 600; color: var(--danger-soft-foreground); }
+.ppl-add-issues .link-button { font-size: 12px; }
+.ppl-add-issue { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--foreground); }
+.ppl-add-issue > .i { color: var(--danger-soft-foreground); flex: none; }
+.ppl-add-issue__why { flex: none; margin-left: auto; padding-left: 8px; color: var(--muted); }
+/* Group drawer: people found by the "Add people" search are whole-row targets */
+.ppl-cand { cursor: pointer; }
+.ppl-cand__add { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 500; color: var(--accent-soft-foreground); }
+/* Role still in use: a compact list of who holds it */
+.ppl-blocked > .item { padding-block: 8px; }
 
 /* Groups */
-.ppl-group { gap: 10px; }
+.ppl-group { gap: 8px; }
 .ppl-group__desc { min-height: 36px; }
 .ppl-fresh { animation: pplflash 1.6s var(--ease-out); }
 @keyframes pplflash { 0% { box-shadow: 0 0 0 2px var(--accent); } }
 
-/* Roles: list + editor */
-.ppl-roles { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 24px; align-items: start; }
+/* Roles: list + detail */
+.ppl-roles { display: grid; grid-template-columns: 248px minmax(0, 1fr); gap: 24px; align-items: start; }
 .ppl-roles__nav { position: sticky; top: 0; }
 .ppl-roles__label { padding: 0 4px 8px; font-size: 12px; font-weight: 500; color: var(--muted); }
 .ppl-roles__label:not(:first-child) { margin-top: 16px; }
@@ -41,8 +59,17 @@
 .ppl-role-item.is-active .item__title { color: var(--accent-soft-foreground); }
 @media (hover: hover) { .ppl-role-item.is-active:hover { background: var(--accent-soft); } }
 .ppl-roles__main { min-width: 0; }
-.ppl-perm-group { padding-top: 16px; border-top: 1px solid var(--separator); }
+.ppl-role-head { display: flex; align-items: flex-start; gap: 12px; padding-bottom: 4px; }
+.ppl-role-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 8px; font-size: 13px; line-height: 20px; color: var(--muted); }
+.ppl-role-meta .link-button { font-size: 13px; }
+.ppl-perm-group { padding-top: 16px; margin-top: 16px; border-top: 1px solid var(--separator); }
 .ppl-perm-group .switch-row { padding: 10px 0; }
+/* Built-in (or not yours to edit): a read-only checklist, not a wall of disabled switches */
+.ppl-perms { list-style: none; display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.ppl-perm { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; line-height: 20px; color: var(--muted); }
+.ppl-perm > .i { flex: none; margin-top: 2px; color: var(--muted); opacity: .6; }
+.ppl-perm.is-on { color: var(--foreground); }
+.ppl-perm.is-on > .i { color: var(--success); opacity: 1; }
 
 /* Requests */
 .ppl-req { align-items: flex-start; }
@@ -55,9 +82,22 @@
 .ppl-req__time { font-size: 12px; }
 .ppl-req .item__trail { align-self: center; }
 
-/* Activity */
+/* Activity and the platform Audit log (one builder, activity.js) */
 .act-sys { color: var(--muted); }
-.act-target { display: block; max-width: 260px; }
+.act-what { min-width: 0; max-width: 420px; }
+.act-how { display: flex; flex-direction: column; min-width: 0; }
+.act-copy { margin-block: -8px; }
+.act-filters { display: contents; }
+.act-filters-btn, .act-export-menu { display: none; }
+/* Filters sheet (phones): one group per filter, options as toggles */
+.act-sheet { display: flex; flex-direction: column; gap: 16px; min-width: 240px; }
+.act-sheet__group { border: 0; padding: 0; margin: 0; }
+.act-sheet__label { margin-bottom: 8px; font-size: 12px; font-weight: 500; color: var(--muted); }
+.act-sheet__opts { display: flex; flex-wrap: wrap; gap: 6px; }
+.act-sheet__opt { min-height: 36px; padding: 0 12px; border-radius: var(--radius-full); background: var(--default); color: var(--default-foreground); font-size: 13px; font-weight: 500; transition: background-color var(--dur-fast), color var(--dur-fast); }
+@media (hover: hover) { .act-sheet__opt:hover { background: color-mix(in oklab, var(--default) 80%, var(--foreground) 8%); } }
+.act-sheet__opt[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-soft-foreground); }
+.act-sheet__opt:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 @container app (max-width: 1023px) {
   .ppl-roles { grid-template-columns: minmax(0, 1fr); gap: 16px; }
@@ -68,9 +108,19 @@
 }
 @container app (max-width: 679px) {
   .ppl-checks { grid-template-columns: minmax(0, 1fr); }
+  .ppl-role-head { flex-wrap: wrap; }
   .ppl-req { flex-wrap: wrap; }
   .ppl-req .item__body { flex: 1 1 calc(100% - 52px); }
   .ppl-req .item__trail { width: 100%; justify-content: flex-end; }
-  .act-toolbar .toggle-group { order: 5; }
-  .act-toolbar .toolbar__end { order: 6; }
+  /* Content first: one row — search plus one Filters button (window and filters live in its sheet); Export moves into ⋯ */
+  .act-toolbar { flex-wrap: nowrap; }
+  .act-toolbar .search-field { flex: 1 1 auto; min-width: 0; }
+  .act-filters, .act-toolbar .toggle-group, .act-toolbar .toolbar__end, .act-toolbar > .button--ghost { display: none; }
+  .act-filters-btn { display: inline-flex; flex: none; }
+  .act-export-wide { display: none; }
+  .act-export-menu { display: inline-flex; }
+  /* Sign-in cards: who on the first line; how and when underneath */
+  .act-signin .table__cell--primary { flex-basis: 100%; }
+  .act-how { flex-direction: row; gap: 4px; }
+  .act-how .cell-sub::before { content: "· "; }
 }

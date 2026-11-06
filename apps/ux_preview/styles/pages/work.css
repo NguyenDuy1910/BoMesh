@@ -5,10 +5,7 @@
 .work-space .space-dot { margin: 0 2px 0 0; width: 8px; height: 8px; }
 .work-doc-pill { display: inline-flex; align-items: center; gap: 6px; max-width: 280px; height: 28px; padding: 0 10px 0 6px; border-radius: var(--radius-full); background: var(--surface-secondary); font-size: 12px; font-weight: 500; min-width: 0; }
 
-/* ───── /work list ───── */
-.work-name { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.work-name__text { display: flex; flex-direction: column; min-width: 0; }
-.work-owner { display: flex; align-items: center; gap: 8px; min-width: 0; }
+/* ───── /work list (the shared work row: X.workItem) ───── */
 .work-intro { margin-bottom: 16px; }
 .work-flows { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
 .work-flow { flex-direction: row; align-items: flex-start; gap: 12px; width: 100%; }
@@ -40,7 +37,9 @@ button.work-steps__btn:hover { background: var(--default); color: var(--foregrou
 .work-new__opts:empty { display: none; }
 .work-new__opts .field + .field { margin-top: 16px; }
 .work-new .field > .toggle-group, .quiz-q--edit .field > .toggle-group, .quiz-pub .field > .toggle-group { align-self: flex-start; }
-.quiz-pub > .field + .field { margin-top: 16px; }
+.quiz-pub { display: flex; flex-direction: column; gap: 16px; }
+.quiz-pub .field + .field { margin-top: 0; }
+.quiz-pub__row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px 16px; align-items: start; padding-top: 4px; }
 
 /* Materials picker */
 .work-pick { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
@@ -58,9 +57,13 @@ button.work-steps__btn:hover { background: var(--default); color: var(--foregrou
 .work-pick__doc .checkbox__label { min-width: 0; flex: 1 1 auto; }
 .work-pick__name { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .work-pick__meta { flex: none; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.work-pick__over { color: var(--danger); font-weight: 500; }
 .work-pick__none { padding: 16px 4px; }
 
 /* ───── /work/:id shell ───── */
+/* The page and a kind's side panel (review evidence) share one split; the panel never covers the work on wide screens. */
+.work-split { position: relative; }
+.work-split > .split__main { min-height: 0; }
 .work-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 .work-page { max-width: 880px; }
 .work-head { align-items: flex-start; }
@@ -89,11 +92,6 @@ button.work-steps__btn:hover { background: var(--default); color: var(--foregrou
 .work-gen__step.is-done .i { color: var(--success); }
 .work-gen__docs { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 12px; border-top: 1px solid var(--separator); }
 
-/* Citation drawer */
-.work-cite__name { display: block; font-weight: 500; }
-a.work-cite__name:hover { text-decoration: underline; text-underline-offset: 3px; }
-.work-cite__quote { margin: 20px 0 0; padding: 12px 14px; border-left: 3px solid var(--evidence-strong); border-radius: 0 var(--radius-lg) var(--radius-lg) 0; background: var(--surface-secondary); font-size: 14px; line-height: 22px; }
-
 /* ───── Quiz ───── */
 .quiz-status { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; margin: -8px 0 16px; font-size: 13px; color: var(--muted); }
 .quiz-tabs { margin-bottom: 16px; }
@@ -105,6 +103,11 @@ a.work-cite__name:hover { text-decoration: underline; text-underline-offset: 3px
 .quiz-q__n.is-wrong { background: var(--danger-soft); color: var(--danger-soft-foreground); }
 .quiz-q__text { flex: 1 1 auto; min-width: 0; font-size: 15px; line-height: 22px; font-weight: 500; overflow-wrap: anywhere; }
 .quiz-q__acts { display: flex; gap: 2px; flex: none; margin: -4px -6px 0 0; }
+/* Per-question and per-section tools are secondary: they show on hover or keyboard focus (always on touch). */
+@media (hover: hover) {
+  .quiz-q__acts, .guide-sec__acts { opacity: 0; transition: opacity var(--dur-fast); }
+  .quiz-q:hover .quiz-q__acts, .quiz-q__acts:focus-within, .guide-sec:hover .guide-sec__acts, .guide-sec__acts:focus-within { opacity: 1; }
+}
 .quiz-key { list-style: none; margin: 0; padding: 0 0 0 36px; display: flex; flex-direction: column; gap: 4px; }
 .quiz-key__opt { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: var(--radius-lg); font-size: 14px; line-height: 20px; min-width: 0; }
 .quiz-key__opt > .grow { min-width: 0; overflow-wrap: anywhere; }
@@ -183,8 +186,7 @@ a.work-cite__name:hover { text-decoration: underline; text-underline-offset: 3px
 .guide-sec + .guide-sec { border-top: 1px solid var(--separator); }
 .guide-sec__head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; min-width: 0; }
 .guide-sec__title { font-size: 17px; line-height: 26px; font-weight: 600; }
-.guide-sec__acts { display: flex; align-items: center; gap: 2px; flex: none; opacity: .75; transition: opacity var(--dur-fast); }
-.guide-sec:hover .guide-sec__acts, .guide-sec__acts:focus-within { opacity: 1; }
+.guide-sec__acts { display: flex; align-items: center; gap: 2px; flex: none; }
 .guide-sec__body { font-size: 15px; line-height: 26px; overflow-wrap: anywhere; }
 .guide-sec__body p + p { margin-top: 12px; }
 .guide-sec__body ul, .guide-sec__body ol { padding-left: 22px; display: flex; flex-direction: column; gap: 6px; }
@@ -210,7 +212,8 @@ a.work-cite__name:hover { text-decoration: underline; text-underline-offset: 3px
   .quiz-key, .quiz-q__explain, .quiz-q__foot { padding-left: 0; }
   .quiz-stats { grid-template-columns: minmax(0, 1fr); }
   .quiz-score__row { gap: 16px; }
+  .quiz-pub__row { grid-template-columns: minmax(0, 1fr); }
   .quiz-take { padding: 16px; }
   .quiz-take__q { font-size: 16px; line-height: 24px; }
-  .guide-sec__acts { opacity: 1; }
+  .guide-sec__acts, .quiz-q__acts { opacity: 1; }
 }

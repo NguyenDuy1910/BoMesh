@@ -1,8 +1,8 @@
 /* Research work kinds — registered into WORK_KINDS (core/workspace.js) and
    rendered by the generic Work shell (features/work.js).
-   review: evidence matrix (sources × criteria, every cell cited).
-   draft:  a grounded document draft with an editor, sources rail, revisions and versions.
-   Prefixes: rv- (review), dr- (draft). */
+   review: Evidence review (sources × criteria table, every cell cited; evidence in a side panel).
+   draft:  a grounded document draft with an editor, sources rail, versions and a review loop (draft → in review → approved | changes requested).
+   Prefixes: rv- (review), dr- (draft). Inbox: X.workNotices(). */
 (() => {
   'use strict';
 
@@ -127,40 +127,44 @@
     return { text: s, cite: cell.cite };
   }
 
-  /* ═══════════════ Review (evidence matrix) ═══════════════ */
-  const DEFAULT_CRITERIA = ['Method', 'Dataset', 'Result', 'Limitations'];
-  const SUGGESTED_CRITERIA = ['Cost', 'Operations effort', 'Data residency', 'Risks'];
+  /* ═══════════════ Evidence review (sources × criteria) ═══════════════ */
+  /* Defaults follow the space: research groups compare papers; teams and projects compare options. */
+  const RESEARCH_CRITERIA = ['Method', 'Dataset', 'Result', 'Limitations'];
+  const OPTION_CRITERIA = ['Cost', 'Operations effort', 'Risks'];
+  const MORE_CRITERIA = ['Data residency', 'Security', 'Vendor support'];
+  const criteriaFor = sp => (sp?.type === 'research' || sp?.type === 'course' ? RESEARCH_CRITERIA : OPTION_CRITERIA);
+  const suggestionsFor = sp => [...new Set([...(sp?.type === 'research' || sp?.type === 'course' ? OPTION_CRITERIA : RESEARCH_CRITERIA), ...MORE_CRITERIA])];
+  /** A comparison stays readable up to this many rows; the New work flow says so before generating. */
+  const MAX_SOURCES = 8;
   const DEFAULT_IDS = { Method: 'method', Dataset: 'data', Result: 'result', Limitations: 'limit' };
   const critId = label => DEFAULT_IDS[label] || uid('c');
-  const rvu = w => ui('rv:' + w.id, { pendingRows: {}, pendingCols: {}, synth: false, fresh: {} });
+  const rvu = w => ui('rv:' + w.id, { pendingRows: {}, pendingCols: {}, synth: false, fresh: {}, sel: null, busy: false });
 
   function rvOptions(f) {
-    const o = (f.opts ??= {}); o.criteria ??= [...DEFAULT_CRITERIA]; o.maxPapers ??= 6;
-    const all = [...new Set([...DEFAULT_CRITERIA, ...SUGGESTED_CRITERIA, ...o.criteria])];
+    const o = (f.opts ??= {}), sp = spaceById(f.space), type = sp?.type || '';
+    // Until someone picks criteria themselves, they follow the chosen space.
+    if (!o.critTouched && o.critFor !== type) { o.criteria = [...criteriaFor(sp)]; o.critFor = type; }
+    const all = [...new Set([...criteriaFor(sp), ...suggestionsFor(sp), ...o.criteria])];
     const chips = all.map(l => `<button type="button" class="rv-chip" aria-pressed="${o.criteria.includes(l)}" data-act="rv-opt-crit" data-label="${esc(l)}">${o.criteria.includes(l) ? ic('check', 'i-sm') : ic('plus', 'i-sm')}${esc(l)}</button>`).join('');
-    return `<div class="stack gap-16">
-      ${field({ id: 'rv-opt-new', label: 'Compare sources on', desc: 'Each criterion becomes a column. Every cell cites the passage it comes from.', control: `<div class="rv-chips" role="group" aria-label="Criteria">${chips}</div><div class="row gap-8 mt-8">${input({ id: 'rv-opt-new', bind: 'workNew.opts.critNew', value: o.critNew || '', placeholder: 'Add your own, e.g. Cost', onEnter: 'rv-opt-crit-add', size: 'sm' })}${btn('Add', { size: 'sm', act: 'rv-opt-crit-add' })}</div>` })}
-      ${field({ id: 'rv-opt-max', label: 'Sources at most', control: seg({ value: o.maxPapers, options: [[4, '4'], [6, '6'], [8, '8']], act: 'rv-opt-max', label: 'Sources at most' }) })}
-    </div>`;
+    return field({ id: 'rv-opt-new', label: 'Compare sources on', desc: 'Each criterion becomes a column. Every cell cites the passage it comes from.', control: `<div class="rv-chips" role="group" aria-label="Criteria">${chips}</div><div class="row gap-8 mt-8">${input({ id: 'rv-opt-new', bind: 'workNew.opts.critNew', value: o.critNew || '', placeholder: 'Add your own, e.g. Time to migrate', onEnter: 'rv-opt-crit-add', size: 'sm' })}${btn('Add', { size: 'sm', act: 'rv-opt-crit-add' })}</div>` });
   }
-  A['rv-opt-crit'] = el => { const o = ui('workNew').opts; const l = el.dataset.label; o.criteria = o.criteria.includes(l) ? o.criteria.filter(x => x !== l) : [...o.criteria, l]; refresh(); };
+  A['rv-opt-crit'] = el => { const o = ui('workNew').opts; const l = el.dataset.label; o.critTouched = true; o.criteria = o.criteria.includes(l) ? o.criteria.filter(x => x !== l) : [...o.criteria, l]; refresh(); };
   A['rv-opt-crit-add'] = () => {
     const o = ui('workNew').opts; const l = String(o.critNew || $('#rv-opt-new')?.value || '').trim(); if (!l) return;
     if (!o.criteria.some(x => x.toLowerCase() === l.toLowerCase())) o.criteria.push(l);
-    o.critNew = ''; refresh(); $('#rv-opt-new')?.focus();
+    o.critTouched = true; o.critNew = ''; refresh(); $('#rv-opt-new')?.focus();
   };
-  A['rv-opt-max'] = el => { ui('workNew').opts.maxPapers = +el.dataset.value; refresh(); };
 
   function rvGenerate(ctx) {
     const sp = spOf(ctx.space), o = ctx.options || {};
+    // Every selected source becomes a row: the New work flow already kept the pick within MAX_SOURCES.
     let papers = idsOf(ctx.sources).filter(id => docById(id));
-    if (!papers.length) papers = paperDocs(sp).filter(d => /\b(19|20)\d\d\s+[—–-]/.test(d.name)).map(d => d.id);
-    papers = papers.slice(0, +o.maxPapers || 6);
-    const labels = (o.criteria?.length ? o.criteria : DEFAULT_CRITERIA);
+    if (!papers.length) papers = paperDocs(sp).filter(d => /\b(19|20)\d\d\s+[—–-]/.test(d.name)).map(d => d.id).slice(0, MAX_SOURCES);
+    const labels = (o.criteria?.length ? o.criteria : criteriaFor(sp));
     const criteria = labels.map(label => ({ id: critId(label), label }));
     const cells = {};
     papers.forEach(p => { cells[p] = {}; criteria.forEach(c => { cells[p][c.id] = finding(p, c.label); }); });
-    return { papers, criteria, cells, maxPapers: +o.maxPapers || 6 };
+    return { papers, criteria, cells };
   }
 
   function rvRender(w, ctx) {
@@ -168,92 +172,151 @@
     d.papers ??= []; d.criteria ??= []; d.cells ??= {};
     // Seeded reviews may list sources and criteria only: read any missing cell from the evidence bank.
     d.papers.forEach(p => { const row = (d.cells[p] ??= {}); d.criteria.forEach(c => { row[c.id] ??= finding(p, c.label); }); });
-    const meta = `${plural(d.papers.length, 'source')} · ${plural(d.criteria.length, 'criterion', 'criteria')}`;
-    const tools = can ? `<div class="row gap-8 wrap">${btn('Add source', { icon: 'plus', size: 'sm', act: 'rv-add-paper', data: { w: w.id } })}${btn('Add criterion', { icon: 'plus', size: 'sm', act: 'rv-add-crit', data: { w: w.id } })}${btn(d.synthesis ? 'Update synthesis' : 'Synthesize', { v: 'secondary', icon: 'sparkles', size: 'sm', act: 'rv-synth', data: { w: w.id }, loading: u.synth, disabled: u.synth || !d.papers.length || !d.criteria.length })}</div>` : '';
+    const empty = !d.papers.length || !d.criteria.length;
+    // The bar holds the table's tools: add a criterion (also at the table's edge) and synthesize (until a synthesis exists, which then owns Update).
+    const synth = can && !empty && !d.synthesis && !u.synth ? btn('Synthesize', { v: 'secondary', icon: 'sparkles', size: 'sm', act: 'rv-synth', data: { w: w.id } }) : '';
+    const addCrit = can && !empty ? btn('Add criterion', { v: 'ghost', size: 'sm', icon: 'plus', act: 'rv-add-crit', data: { w: w.id } }) : '';
     return `<div class="rv">
       ${u.synth ? synthSkeleton() : d.synthesis ? synthCard(w, can) : ''}
-      <div class="rv-bar"><span class="t-sm muted">${meta}</span>${tools}</div>
-      ${d.papers.length && d.criteria.length ? matrix(w, can, u) : emptyState({ icon: 'table', title: d.papers.length ? 'No criteria yet' : 'No sources yet', desc: d.papers.length ? 'Add what you want to compare, like Cost or Risks.' : 'Add documents from this space’s knowledge to compare them.', actions: can ? btn(d.papers.length ? 'Add criterion' : 'Add source', { v: 'primary', icon: 'plus', act: d.papers.length ? 'rv-add-crit' : 'rv-add-paper', data: { w: w.id } }) : '', boxed: true })}
+      ${empty ? '' : `<div class="rv-bar"><span class="t-sm muted rv-bar__hint">Select a cell to see its evidence</span><span class="row gap-8">${addCrit}${synth}</span></div>`}
+      ${!empty ? matrix(w, can, u) + cards(w, can, u) : emptyState({ icon: 'table', title: d.papers.length ? 'No criteria yet' : 'No sources yet', desc: d.papers.length ? 'Add what you want to compare, like Cost or Risks.' : 'Add documents from this space’s knowledge to compare them.', actions: can ? btn(d.papers.length ? 'Add criterion' : 'Add sources', { v: 'primary', icon: 'plus', act: d.papers.length ? 'rv-add-crit' : 'rv-add-paper', data: { w: w.id } }) : '', boxed: true })}
     </div>`;
   }
+  const isSel = (u, p, c) => !!u.sel && !u.sel.cite && u.sel.p === p && u.sel.c === c;
+  const cellAttrs = (w, pid, c, pp, cell, u) => `data-act="rv-cell" data-w="${w.id}" data-p="${esc(pid)}" data-c="${esc(c.id)}" aria-label="${esc(c.label)} for ${esc(pp.short)}: ${esc(cell.text)}" ${isSel(u, pid, c.id) ? 'aria-current="true"' : ''}`;
   function matrix(w, can, u) {
     const d = w.data;
-    const head = `<th class="table__column rv-col rv-col--paper" scope="col">Source</th>` + d.criteria.map(c => `<th class="table__column rv-col" scope="col"><span class="rv-col__inner"><span class="truncate">${esc(c.label)}</span>${can ? iconBtn('more', `Options for ${c.label}`, { size: 'sm', menu: 'rv-col', data: { w: w.id, id: c.id } }) : ''}</span></th>`).join('');
+    // Row and column menus are secondary: they show on hover or keyboard focus (always on touch).
+    const head = `<th class="table__column rv-col rv-col--paper" scope="col">Source</th>` + d.criteria.map(c => `<th class="table__column rv-col" scope="col"><span class="rv-col__inner"><span class="truncate">${esc(c.label)}</span>${can ? iconBtn('more', `Options for ${c.label}`, { size: 'sm', menu: 'rv-col', data: { w: w.id, id: c.id }, cls: 'rv-more' }) : ''}</span></th>`).join('')
+      + (can ? `<th class="table__column rv-col--add" scope="col">${iconBtn('plus', 'Add criterion', { size: 'sm', act: 'rv-add-crit', data: { w: w.id } })}</th>` : '');
     const rows = d.papers.map(pid => {
       const pp = paper(pid), pending = u.pendingRows[pid];
-      const lead = `<th class="table__cell rv-paper" scope="row"><div class="rv-paper__inner"><div class="grow" style="min-width:0"><a class="rv-paper__title clamp-2" href="#/doc/${esc(pid)}" title="${esc(pp.title)}">${esc(pp.title)}</a><div class="t-xs muted truncate">${esc(pp.authors)}${pp.year ? ' · ' + esc(pp.year) : ''}</div></div>${can ? iconBtn('more', `Options for ${pp.title}`, { size: 'sm', menu: 'rv-row', data: { w: w.id, id: pid } }) : ''}</div></th>`;
+      const lead = `<th class="table__cell rv-paper" scope="row"><div class="rv-paper__inner"><div class="grow" style="min-width:0"><a class="rv-paper__title clamp-2" href="#/doc/${esc(pid)}">${esc(pp.title)}</a><div class="t-xs muted truncate">${esc(pp.authors)}${pp.year ? ' · ' + esc(pp.year) : ''}</div></div>${can ? iconBtn('more', `Options for ${pp.title}`, { size: 'sm', menu: 'rv-row', data: { w: w.id, id: pid }, cls: 'rv-more' }) : ''}</div></th>`;
       const cells = d.criteria.map(c => {
         if (pending || u.pendingCols[c.id]) return `<td class="table__cell rv-cell" aria-busy="true"><span class="skeleton skeleton--line" style="width:86%"></span><span class="skeleton skeleton--line mt-8" style="width:54%"></span></td>`;
         const cell = d.cells[pid]?.[c.id] || { text: '—', none: true };
         const fresh = u.fresh[c.id] || u.fresh[pid];
-        return `<td class="${cx('table__cell rv-cell', cell.none && 'rv-cell--none', fresh && 'rv-cell--new')}" role="button" tabindex="0" data-act="rv-cell" data-w="${w.id}" data-p="${esc(pid)}" data-c="${esc(c.id)}" aria-label="${esc(c.label)} for ${esc(pp.short)}: ${esc(cell.text)}"><span class="rv-cell__text">${esc(cell.text)}</span>${cell.cite ? `<span class="cite" aria-hidden="true">p.${cell.cite.page}</span>` : ''}</td>`;
+        return `<td class="${cx('table__cell rv-cell', cell.none && 'rv-cell--none', fresh && 'rv-cell--new', isSel(u, pid, c.id) && 'is-selected')}" role="button" tabindex="0" ${cellAttrs(w, pid, c, pp, cell, u)}><span class="rv-cell__text">${esc(cell.text)}</span>${cell.cite ? `<span class="cite" aria-hidden="true">p.${cell.cite.page}</span>` : ''}</td>`;
       }).join('');
-      return `<tr class="${cx('table__row', u.fresh[pid] && 'table__row--new')}">${lead}${cells}</tr>`;
+      return `<tr class="${cx('table__row', u.fresh[pid] && 'table__row--new')}">${lead}${cells}${can ? '<td class="table__cell rv-cell--add" aria-hidden="true"></td>' : ''}</tr>`;
     });
-    return `<div class="table-root rv-matrix"><div class="table__scroll rv-matrix__scroll" id="rv-scroll-${w.id}" data-w="${w.id}" tabindex="0" role="region" aria-label="Evidence matrix"><table class="table__content rv-table"><thead class="table__head"><tr>${head}</tr></thead><tbody class="table__body">${rows.join('')}</tbody></table></div></div>`;
+    const addRow = can ? `<tr class="table__row rv-add-row"><th class="table__cell rv-paper" scope="row">${btn('Add sources', { v: 'ghost', size: 'sm', icon: 'plus', act: 'rv-add-paper', data: { w: w.id } })}</th><td class="table__cell" colspan="${d.criteria.length + 1}"></td></tr>` : '';
+    return `<div class="table-root rv-matrix"><div class="table__scroll rv-matrix__scroll" id="rv-scroll-${w.id}" data-w="${w.id}" tabindex="0" role="region" aria-label="${esc(w.title)}"><table class="table__content rv-table"><thead class="table__head"><tr>${head}</tr></thead><tbody class="table__body">${rows.join('')}${addRow}</tbody></table></div></div>`;
+  }
+  /** Phones: one card per source, each criterion a row (the table is hidden by a container query). */
+  function cards(w, can, u) {
+    const d = w.data;
+    return `<div class="rv-cards">${d.papers.map(pid => {
+      const pp = paper(pid), pending = u.pendingRows[pid];
+      const rows = d.criteria.map(c => {
+        const cell = d.cells[pid]?.[c.id] || { text: '—', none: true };
+        const text = pending || u.pendingCols[c.id] ? '<span class="skeleton skeleton--line" style="width:70%"></span>' : `${esc(cell.text)}${cell.cite ? ` <span class="cite" aria-hidden="true">p.${cell.cite.page}</span>` : ''}`;
+        return `<li><button type="button" class="${cx('rv-card__row', cell.none && 'rv-cell--none', isSel(u, pid, c.id) && 'is-selected')}" ${cellAttrs(w, pid, c, pp, cell, u)}><span class="rv-card__label">${esc(c.label)}</span><span class="rv-card__text">${text}</span></button></li>`;
+      }).join('');
+      return `<section class="card rv-card" aria-label="${esc(pp.title)}"><div class="rv-card__head"><div class="grow" style="min-width:0"><a class="rv-paper__title clamp-2" href="#/doc/${esc(pid)}">${esc(pp.title)}</a>${pp.authors || pp.year ? `<div class="t-xs muted truncate">${esc(pp.authors)}${pp.year ? ' · ' + esc(pp.year) : ''}</div>` : ''}</div>${can ? iconBtn('more', `Options for ${pp.title}`, { size: 'sm', menu: 'rv-row', data: { w: w.id, id: pid } }) : ''}</div><ul class="rv-card__list">${rows}</ul></section>`;
+    }).join('')}${can ? `<div class="row gap-8">${btn('Add sources', { size: 'sm', icon: 'plus', act: 'rv-add-paper', data: { w: w.id } })}</div>` : ''}</div>`;
   }
   function flash(w, key) { const u = rvu(w); u.fresh[key] = true; setTimeout(() => { delete u.fresh[key]; }, 1700); }
-  /* The matrix keeps its horizontal position across re-renders (core only keeps vertical scroll). */
+  /* The table keeps its horizontal position across re-renders (core only keeps vertical scroll). */
   document.addEventListener('scroll', e => { const t = e.target; if (t.classList?.contains('rv-matrix__scroll')) { const w = W(t.dataset.w); if (w) rvu(w).x = t.scrollLeft; } }, true);
   function rvAfter(w) { const sc = $('#rv-scroll-' + w.id), x = rvu(w).x; if (sc && x) sc.scrollLeft = x; }
   const scrollEnd = w => { rvu(w).x = 1e6; };
 
-  /* Cell evidence drawer */
-  A['rv-cell'] = el => openDrawer('rv-cell', { w: el.dataset.w, p: el.dataset.p, c: el.dataset.c });
-  DR['rv-cell'] = p => {
-    const w = W(p.w); const crit = w?.data.criteria.find(c => c.id === p.c); const cell = w?.data.cells[p.p]?.[p.c];
-    if (!w || !crit || !cell) return { title: 'Finding', body: emptyState({ icon: 'file', title: 'This cell no longer exists', compact: true }) };
-    const pp = paper(p.p), can = canEditWork(w);
-    const finding = `<div class="t-label mb-8">${esc(crit.label)}</div><p class="rv-ev__finding">${p.busy ? `<span class="row gap-8 muted">${spinner()}Re-reading the passage…</span>` : esc(cell.text)}</p>${cell.replaced ? `<div class="t-xs muted mt-4">Replaced by you ${rel(cell.replaced)}</div>` : ''}`;
-    const evidence = cell.cite ? `<div class="t-label mt-24 mb-8">Evidence</div>${evidenceBody(pp.doc, cell.cite)}`
-      : `<div class="mt-24">${alertBox('default', 'No passage found', `This source doesn’t report ${esc(crit.label.toLowerCase())}. Check the document if you expected it.`)}</div>`;
-    const ref = cell.cite ? `“${cell.cite.quote}” — ${pp.parsed ? `${pp.authors} (${pp.year}), ` : ''}${pp.title}, p. ${cell.cite.page}` : '';
-    return {
-      title: pp.title, desc: `${esc(pp.authors)}${pp.year ? ' · ' + esc(pp.year) : ''}`, size: 'md',
-      body: finding + evidence,
-      footStart: can ? btn('Wrong? Replace finding', { icon: 'retry', act: 'rv-replace', loading: p.busy, disabled: p.busy }) : '',
-      foot: (cell.cite ? btn('Copy', { v: 'ghost', icon: 'copy', act: 'copy', data: { text: ref, msg: 'Citation copied' } }) : '') + btn('Open document', { v: 'primary', icon: 'arrow-up-right', href: cell.cite ? docHref(cell.cite) : '/doc/' + p.p }),
-    };
+  /* Evidence panel: non-modal, beside the table; selecting another cell (or a synthesis citation) updates it. */
+  A['rv-cell'] = el => { const w = W(el.dataset.w); if (!w) return; const u = rvu(w); u.sel = { p: el.dataset.p, c: el.dataset.c }; u.busy = false; refresh(); };
+  A['rv-panel-close'] = el => { const w = W(el.dataset.w); if (!w) return; rvu(w).sel = null; refresh(); };
+  function rvPanel(w, ctx) {
+    const u = rvu(w), s = u.sel; if (!s) return '';
+    const close = iconBtn('x', 'Close evidence', { size: 'sm', act: 'rv-panel-close', data: { w: w.id } });
+    let title, body, ref = '', href, reread = '';
+    if (s.cite) {
+      const d = docById(s.cite.doc), kb = d && kbById(d.kb);
+      title = d?.name || 'Source'; href = d && canReadKb(kb) ? docHref(s.cite) : '';
+      body = `<div class="t-label mb-8">Cited passage</div>${evidenceBody(d, s.cite)}`;
+      ref = `“${s.cite.quote}” — ${title}, p. ${s.cite.page}`;
+    } else {
+      const crit = w.data.criteria.find(c => c.id === s.c), cell = w.data.cells[s.p]?.[s.c];
+      if (!crit || !cell) { u.sel = null; return ''; }
+      const pp = paper(s.p);
+      title = pp.title; href = cell.cite ? docHref(cell.cite) : '/doc/' + s.p;
+      body = `<div class="t-label mb-8">${esc(crit.label)}</div><p class="rv-ev__finding">${u.busy ? `<span class="row gap-8 muted">${spinner()}Re-reading the passage…</span>` : esc(cell.text)}</p>${cell.replaced ? `<div class="t-xs muted mt-4">Re-read ${esc(rel(cell.replaced).toLowerCase())}</div>` : ''}`
+        + (cell.cite ? `<div class="t-label mt-24 mb-8">Evidence</div>${evidenceBody(pp.doc, cell.cite)}` : `<div class="mt-24">${alertBox('default', 'No passage found', `This source doesn’t report ${esc(crit.label.toLowerCase())}. Check the document if you expected it.`)}</div>`);
+      ref = cell.cite ? `“${cell.cite.quote}” — ${pp.parsed ? `${pp.authors} (${pp.year}), ` : ''}${pp.title}, p. ${cell.cite.page}` : '';
+      reread = ctx.canEdit ? iconBtn('retry', 'Re-read the passage and restate the finding', { size: 'sm', act: 'rv-replace', data: { w: w.id }, disabled: u.busy }) : '';
+    }
+    const copy = ref ? iconBtn('copy', 'Copy citation', { size: 'sm', act: 'copy', data: { text: ref, msg: 'Citation copied' } }) : '';
+    return `<aside class="split__panel rv-panel" aria-label="Evidence"><div class="panel__header"><div class="panel__title truncate">${esc(title)}</div>${reread}${copy}${close}</div>
+      <div class="panel__body">${body}${href ? `<div class="mt-16">${btn('Open document', { v: 'secondary', size: 'sm', icon: 'arrow-up-right', href })}</div>` : ''}</div></aside>`;
+  }
+  A['rv-replace'] = async el => {
+    const w = W(el.dataset.w); if (!w) return; const u = rvu(w), s = u.sel; if (!s || s.cite) return;
+    u.busy = true; refresh(); await sleep(900);
+    const crit = w.data.criteria.find(c => c.id === s.c), cells = w.data.cells[s.p], prev = cells?.[s.c];
+    u.busy = false;
+    if (!crit || !prev) { refresh(); return; }
+    cells[s.c] = { ...restate(prev, crit.label, s.p), replaced: Date.now() };
+    saveWork(w); refresh();
+    toast('Finding restated from the passage', { action: { label: 'Undo', run: () => { cells[s.c] = prev; saveWork(w); refresh(); } } });
   };
-  A['rv-replace'] = async () => {
-    const p = S.drawer?.props; const w = p && W(p.w); if (!w) return;
-    p.busy = true; refreshLayer(); await sleep(900);
-    const crit = w.data.criteria.find(c => c.id === p.c), cells = w.data.cells[p.p], prev = cells?.[p.c];
-    if (!crit || !prev) { p.busy = false; refreshLayer(); return; }
-    cells[p.c] = { ...restate(prev, crit.label, p.p), replaced: Date.now() };
-    p.busy = false; saveWork(w); refresh();
-    toast('Finding replaced', { action: { label: 'Undo', run: () => { cells[p.c] = prev; saveWork(w); refresh(); } } });
+  const prevEsc = A['esc-page'];
+  A['esc-page'] = () => {
+    const w = S.cur?.r.page === 'workItem' && W(S.cur.params.id);
+    if (w?.kind === 'review' && rvu(w).sel) { rvu(w).sel = null; refresh(); return true; }
+    return prevEsc?.() || false;
   };
 
-  /* Add source */
-  A['rv-add-paper'] = el => openModal('rv-add-paper', { w: el.dataset.w });
+  /* Add sources: search the space's documents, pick several, each row fills in as it is read. */
+  const hasYear = d => /\b(19|20)\d\d\s+[—–-]/.test(d.name);
+  A['rv-add-paper'] = el => { S.ui.rvAdd = { q: '', picked: [], err: '' }; openModal('rv-add-paper', { w: el.dataset.w }); };
   M['rv-add-paper'] = p => {
-    const w = W(p.w); const sp = spaceById(w?.space);
-    const docs = paperDocs(sp).filter(d => !w.data.papers.includes(d.id)).sort((a, b) => (/\b(19|20)\d\d\s+[—–-]/.test(b.name)) - (/\b(19|20)\d\d\s+[—–-]/.test(a.name)));
+    const w = W(p.w); if (!w) return { title: 'Add sources', body: '' };
+    const sp = spaceById(w.space), f = ui('rvAdd', { q: '', picked: [], err: '' }), q = f.q.trim().toLowerCase(), n = f.picked.length;
+    const docs = paperDocs(sp).filter(d => !w.data.papers.includes(d.id)).sort((a, b) => hasYear(b) - hasYear(a));
+    const shown = docs.filter(d => !q || d.name.toLowerCase().includes(q) || (kbById(d.kb)?.name || '').toLowerCase().includes(q));
+    const rows = shown.map(d => {
+      const pp = paper(d.id), meta = esc([pp.parsed && pp.authors, pp.year, kbById(d.kb)?.name].filter(Boolean).join(' · '));
+      return checkbox({ id: 'rv-add-' + d.id, checked: f.picked.includes(d.id), act: 'rv-add-paper-pick', data: { id: d.id }, label: `<span class="rv-opt">${fileIcon(d.type, 'sm')}<span class="rv-opt__text"><span class="rv-opt__title truncate">${esc(pp.title)}</span><span class="rv-opt__meta truncate">${meta}</span></span>${d.status !== 'ready' ? status('doc', d.status) : ''}</span>` });
+    }).join('');
+    const room = MAX_SOURCES - w.data.papers.length;
+    const picker = !docs.length ? emptyState({ icon: 'files', title: 'Every source is already in this review', desc: 'Add documents to the space’s knowledge to compare more.', compact: true })
+      : rows ? `<div class="option-list rv-options mt-12" id="rv-add-list" data-keep-scroll role="group" aria-label="Documents">${rows}</div>` : `<p class="t-sm muted rv-options__empty">No documents match. Try another word.</p>`;
     return {
-      title: 'Add a source', desc: sp ? `From ${esc(sp.name)}’s knowledge` : 'From your knowledge', size: 'md',
-      body: docs.length ? list(docs.map(d => { const pp = paper(d.id); return item({ lead: fileIcon(d.type), title: esc(pp.title), desc: esc([pp.parsed && pp.authors, pp.year, kbById(d.kb)?.name].filter(Boolean).join(' · ')), trail: d.status !== 'ready' ? status('doc', d.status) : ic('plus', 'muted'), act: 'rv-add-paper-pick', data: { w: w.id, id: d.id } }); }), 'list--plain')
-        : emptyState({ icon: 'files', title: 'Every source is already in the matrix', desc: 'Add documents to the space’s knowledge to compare more.', compact: true }),
-      foot: btn('Cancel', { act: 'close-modal' }),
+      title: 'Add sources', icon: 'files', size: 'md',
+      desc: 'Each one is read for every criterion, and every cell cites its passage.',
+      body: `${docs.length ? searchField({ id: 'rv-add-q', bind: 'rvAdd.q', value: f.q, placeholder: 'Search documents', size: 'md', full: true, live: true, autofocus: true, label: 'Search documents' }) : ''}${picker}${f.err ? `<div class="field-error mt-8" role="alert">${ic('alert-circle')}<span>${esc(f.err)}</span></div>` : ''}`,
+      footStart: n ? `${plural(n, 'source')} selected · room for ${fmtNum(Math.max(0, room))}` : docs.length ? `Room for ${plural(Math.max(0, room), 'more source')}.` : '',
+      foot: btn(docs.length ? 'Cancel' : 'Close', { v: 'ghost', act: 'close-modal' }) + (docs.length ? btn(n ? `Add ${plural(n, 'source')}` : 'Add sources', { v: 'primary', icon: 'plus', act: 'rv-add-paper-go', data: { w: w.id } }) : ''),
     };
   };
-  A['rv-add-paper-pick'] = async el => {
-    const w = W(el.dataset.w), id = el.dataset.id; if (!w || w.data.papers.includes(id)) return;
+  A['rv-add-paper-pick'] = el => { const f = ui('rvAdd'), id = el.dataset.id; f.picked = f.picked.includes(id) ? f.picked.filter(x => x !== id) : [...f.picked, id]; f.err = ''; refreshLayer(); };
+  A['rv-add-paper-go'] = async el => {
+    const w = W(el.dataset.w), f = ui('rvAdd'); if (!w) return;
+    const ids = f.picked.filter(id => !w.data.papers.includes(id));
+    if (!ids.length) { f.err = 'Select at least one document.'; refreshLayer(); return; }
+    const room = MAX_SOURCES - w.data.papers.length;
+    if (ids.length > room) { f.err = room > 0 ? `A review compares up to ${MAX_SOURCES} sources. Pick ${room} or fewer, or remove a source first.` : `This review already compares ${MAX_SOURCES} sources. Remove one first.`; refreshLayer(); return; }
     closeModal();
-    const u = rvu(w); w.data.papers.push(id); u.pendingRows[id] = true; refresh();
+    const u = rvu(w); ids.forEach(id => { w.data.papers.push(id); u.pendingRows[id] = true; }); refresh();
     requestAnimationFrame(() => { const sc = $('#rv-scroll-' + w.id); sc?.closest('.rv')?.querySelector('.table__row:last-child')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); });
     await sleep(1100);
-    if (!w.data.papers.includes(id)) return;
-    w.data.cells[id] = Object.fromEntries(w.data.criteria.map(c => [c.id, finding(id, c.label)]));
-    if (!w.sources?.includes(id)) (w.sources ??= []).push(id);
-    delete u.pendingRows[id]; flash(w, id); saveWork(w); refresh();
-    toast(`Added ${paper(id).short}`, { action: { label: 'Undo', run: () => removePaper(w, id, true) } });
+    const added = ids.filter(id => w.data.papers.includes(id));
+    if (!added.length) return;
+    added.forEach(id => {
+      w.data.cells[id] = Object.fromEntries(w.data.criteria.map(c => [c.id, finding(id, c.label)]));
+      if (!w.sources?.includes(id)) (w.sources ??= []).push(id);
+      delete u.pendingRows[id]; flash(w, id);
+    });
+    saveWork(w); refresh();
+    toast(added.length === 1 ? `Added ${paper(added[0]).short}` : `Added ${plural(added.length, 'source')}`, { action: { label: 'Undo', run: () => added.forEach(id => removePaper(w, id, true)) } });
   };
+  /** Rows and w.sources stay in step, so every count (header, Sources panel, synthesis) agrees. */
   function removePaper(w, id, quiet) {
     const i = w.data.papers.indexOf(id); if (i < 0) return;
-    const cells = w.data.cells[id];
-    w.data.papers.splice(i, 1); delete w.data.cells[id]; saveWork(w); refresh();
-    if (!quiet) toast(`Removed ${paper(id).short}`, { action: { label: 'Undo', run: () => { w.data.papers.splice(i, 0, id); w.data.cells[id] = cells; saveWork(w); refresh(); } } });
+    const cells = w.data.cells[id], si = (w.sources || []).indexOf(id);
+    w.data.papers.splice(i, 1); delete w.data.cells[id]; if (si >= 0) w.sources.splice(si, 1);
+    if (rvu(w).sel?.p === id) rvu(w).sel = null;
+    saveWork(w); refresh();
+    if (!quiet) toast(`Removed ${paper(id).short}`, { action: { label: 'Undo', run: () => { w.data.papers.splice(i, 0, id); w.data.cells[id] = cells; if (si >= 0) w.sources.splice(si, 0, id); saveWork(w); refresh(); } } });
   }
   MENUS['rv-row'] = el => {
     const w = W(el.dataset.w), id = el.dataset.id; if (!w) return [];
@@ -269,12 +332,13 @@
   A['rv-add-crit'] = el => { setPath('rvCrit', { label: '', err: '' }); openModal('rv-add-crit', { w: el.dataset.w }); };
   M['rv-add-crit'] = p => {
     const w = W(p.w); const f = getPath('rvCrit') || {}; const have = new Set(w.data.criteria.map(c => c.label.toLowerCase()));
-    const sugg = SUGGESTED_CRITERIA.filter(s => !have.has(s.toLowerCase()));
+    const sugg = [...criteriaFor(spaceById(w.space)), ...suggestionsFor(spaceById(w.space))].filter(s => !have.has(s.toLowerCase()));
     return {
-      title: 'Add a criterion', desc: 'A new column. Each source is read for it and every cell is cited.', size: 'sm',
-      body: `${field({ id: 'rv-crit', label: 'Criterion', error: f.err, control: input({ id: 'rv-crit', bind: 'rvCrit.label', value: f.label, placeholder: 'e.g. Security', autofocus: true, onEnter: 'rv-add-crit-ok', invalid: !!f.err }) })}
-        ${sugg.length ? `<div class="row gap-8 wrap mt-12">${sugg.map(s => `<button type="button" class="rv-chip" data-act="rv-crit-sugg" data-label="${esc(s)}">${ic('plus', 'i-sm')}${esc(s)}</button>`).join('')}</div>` : ''}`,
-      foot: btn('Cancel', { act: 'close-modal' }) + btn('Add column', { v: 'primary', act: 'rv-add-crit-ok' }),
+      title: 'Add a criterion', icon: 'list-plus', size: 'sm',
+      desc: 'A new column. Each source is read for it and every cell is cited.',
+      body: `${field({ id: 'rv-crit', label: 'What do you want to compare?', error: f.err, control: input({ id: 'rv-crit', bind: 'rvCrit.label', value: f.label, placeholder: 'e.g. Time to migrate', autofocus: true, onEnter: 'rv-add-crit-ok', invalid: !!f.err, attrs: 'maxlength="40"' }) })}
+        ${sugg.length ? `<div class="mt-16"><div class="t-label mb-8">Suggested</div><div class="row gap-8 wrap">${sugg.map(s => `<button type="button" class="rv-chip" data-act="rv-crit-sugg" data-label="${esc(s)}">${ic('plus', 'i-sm')}${esc(s)}</button>`).join('')}</div></div>` : ''}`,
+      foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn('Add criterion', { v: 'primary', icon: 'plus', act: 'rv-add-crit-ok' }),
     };
   };
   A['rv-crit-sugg'] = el => { setPath('rvCrit.label', el.dataset.label); A['rv-add-crit-ok'](); };
@@ -353,32 +417,39 @@
     return `<div class="card rv-synth" aria-busy="true"><div class="row gap-8 muted t-sm">${spinner()}Reading every cited passage…</div><div class="rv-synth__grid">${[0, 1, 2].map(() => `<div class="stack gap-8"><span class="skeleton skeleton--line" style="width:40%"></span><span class="skeleton skeleton--line"></span><span class="skeleton skeleton--line" style="width:80%"></span><span class="skeleton skeleton--line" style="width:65%"></span></div>`).join('')}</div></div>`;
   }
   function synthCard(w, can) {
-    const s = w.data.synthesis; const seen = [];
+    const s = w.data.synthesis, u = rvu(w); const seen = [];
     const num = c => { let i = seen.findIndex(x => x.doc === c.doc && x.page === c.page); if (i < 0) { seen.push(c); i = seen.length - 1; } return i + 1; };
     const stale = s.sig !== synthSig(w);
-    const col = (title, icon, items) => `<div class="rv-synth__col"><h3 class="rv-synth__title">${ic(icon, 'i-sm')}${title}</h3>${items.length ? `<ul class="rv-synth__list">${items.map(it => `<li>${esc(it.text)} ${it.cites.map(c => citeBtn(c, num(c))).join('')}</li>`).join('')}</ul>` : '<p class="t-sm muted">Nothing stands out in this matrix.</p>'}</div>`;
+    const col = (title, icon, items) => `<div class="rv-synth__col"><h3 class="rv-synth__title">${ic(icon, 'i-sm')}${title}</h3>${items.length ? `<ul class="rv-synth__list">${items.map(it => `<li>${esc(it.text)} ${it.cites.map(c => citeBtn(c, num(c))).join('')}</li>`).join('')}</ul>` : '<p class="t-sm muted">Nothing stands out in this review.</p>'}</div>`;
     const actions = can ? (stale ? btn('Update', { size: 'sm', icon: 'retry', act: 'rv-synth', data: { w: w.id } }) : '') + iconBtn('x', 'Remove synthesis', { size: 'sm', act: 'rv-synth-hide', data: { w: w.id } }) : '';
-    return `<section class="card rv-synth" aria-label="Synthesis"><div class="card__header"><span class="item-icon item-icon--accent" aria-hidden="true">${ic('sparkles')}</span><div class="grow"><h2 class="card__title">Synthesis</h2><p class="card__description">${stale ? 'The matrix changed since this was written.' : `From ${plural(w.data.papers.length, 'source')} · ${rel(s.at)}`}</p></div><div class="row gap-4 none">${actions}</div></div>
+    // On phones the synthesis folds into one line so the comparison stays on the first screen.
+    const toggle = `<button type="button" class="rv-synth__toggle" data-act="rv-synth-open" data-w="${w.id}" aria-expanded="${!!u.synthOpen}">${ic('chevron-down', 'disclosure__chevron')}<span class="sr-only">Show synthesis</span></button>`;
+    return `<section class="${cx('card rv-synth', u.synthOpen && 'is-open')}" aria-label="Synthesis"><div class="card__header"><span class="item-icon item-icon--accent" aria-hidden="true">${ic('sparkles')}</span><div class="grow"><h2 class="card__title">Synthesis</h2><p class="card__description">${stale ? 'The review changed since this was written.' : `From ${plural(w.data.papers.length, 'source')} · ${rel(s.at)}`}</p></div><div class="row gap-4 none">${actions}${toggle}</div></div>
       <div class="rv-synth__grid">${col('Consensus', 'check-circle', s.consensus)}${col('Disagreements', 'git-compare', s.disagreements)}${col('Gaps', 'target', s.gaps)}</div></section>`;
   }
+  A['rv-synth-open'] = el => { const w = W(el.dataset.w); if (!w) return; const u = rvu(w); u.synthOpen = !u.synthOpen; refresh(); };
+  /** Documents read for context but not compared (e.g. an ADR the options must satisfy). */
+  const contextDocs = w => (w.sources || []).filter(id => !(w.data?.papers || []).includes(id) && docById(id));
 
   /* Header actions + exports */
   function rvActions(w, ctx) {
     const sp = spaceById(w.space);
     const canDraft = !!w.data?.papers?.length && (w.owner === me().id || !!spaceRole(sp) || !sp);
-    return btn('Export CSV', { icon: 'download', act: 'rv-csv', data: { w: w.id } }) + (canDraft ? btn('Draft from this review', { v: 'primary', icon: 'pencil', act: 'rv-draft', data: { w: w.id } }) : '');
+    // CSV sits with the other downloads in ⋯.
+    return canDraft ? btn('Draft from this review', { v: 'primary', icon: 'pencil', act: 'rv-draft', data: { w: w.id } }) : '';
   }
   function csvRows(w) {
     const d = w.data;
     return [['Source', 'Authors', 'Year', ...d.criteria.map(c => c.label)], ...d.papers.map(p => { const pp = paper(p); return [pp.title, pp.authors, pp.year, ...d.criteria.map(c => { const cell = d.cells[p]?.[c.id]; return !cell ? '' : cell.cite ? `${cell.text} (p. ${cell.cite.page})` : cell.text; })]; })];
   }
-  A['rv-csv'] = el => { const w = W(el.dataset.w); if (!w) return; saveCsv(withExt(w.title, '.csv'), csvRows(w), 'Matrix exported as CSV'); audit('Exported review', w.title); };
+  function exportCsv(w) { saveCsv(withExt(w.title, '.csv'), csvRows(w), 'Review exported as CSV'); audit('Exported review', w.title); }
+  A['rv-csv'] = el => { const w = W(el.dataset.w); if (w) exportCsv(w); };
   A['rv-draft'] = el => {
     const w = W(el.dataset.w); if (!w) return;
     // A decision record when the review has architecture decisions as context, else an evidence summary.
     const sources = [...new Set([...w.data.papers, ...(w.sources || [])])].filter(id => docById(id));
     const type = defaultType(spaceById(w.space), sources) === 'decision' ? 'decision' : 'litreview';
-    const title = `${typeLabel(type)} — ${w.title.replace(/\s*[—–-]\s*(evidence matrix|evaluation)$/i, '')}`;
+    const title = `${typeLabel(type)} — ${w.title.replace(/\s*[—–-]\s*(evidence review|evidence matrix|evaluation)$/i, '')}`;
     const opts = { type, tone: 'formal', length: 'medium', fromReview: w.id };
     X.work.create({ kind: 'draft', workflow: 'draft', title, space: w.space, sources, options: opts });
   };
@@ -386,7 +457,7 @@
     const rows = csvRows(w);
     const s = w.data.synthesis;
     const synth = s ? ['consensus', 'disagreements', 'gaps'].map(k => `<h3>${k[0].toUpperCase() + k.slice(1)}</h3><ul>${s[k].map(it => `<li>${esc(it.text)} (${it.cites.map(c => `${esc(paper(c.doc).short)}, p. ${c.page}`).join('; ')})</li>`).join('')}</ul>`).join('') : '';
-    return `${synth ? '<h2>Synthesis</h2>' + synth : ''}<h2>Evidence matrix</h2><table border="1" cellpadding="6" style="border-collapse:collapse"><tr>${rows[0].map(h => `<th>${esc(h)}</th>`).join('')}</tr>${rows.slice(1).map(r => `<tr>${r.map(v => `<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</table>`;
+    return `${synth ? '<h2>Synthesis</h2>' + synth : ''}<h2>Comparison</h2><table border="1" cellpadding="6" style="border-collapse:collapse"><tr>${rows[0].map(h => `<th>${esc(h)}</th>`).join('')}</tr>${rows.slice(1).map(r => `<tr>${r.map(v => `<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</table>`;
   }
   function rvExportLines(w) {
     const d = w.data; const out = [];
@@ -395,13 +466,20 @@
   }
 
   WORK_KINDS.review = {
-    label: 'Literature review', icon: 'table', noun: 'review', layout: 'wide',
+    label: 'Evidence review', icon: 'table', noun: 'review', layout: 'wide', maxSources: MAX_SOURCES,
     options: rvOptions,
-    title: ctx => { const sp = spOf(ctx?.space); return sp ? `${sp.name} — evidence matrix` : 'Evidence matrix'; },
+    title: ctx => { const sp = spOf(ctx?.space); return sp ? `${sp.name} — evidence review` : 'Evidence review'; },
     generate: rvGenerate,
     render: rvRender,
+    panel: rvPanel,
     after: rvAfter,
     actions: rvActions,
+    // A synthesis citation opens in the evidence panel, like a cell.
+    onCite: (w, p) => { rvu(w).sel = { cite: { doc: p.doc, page: p.page, quote: p.quote } }; refresh(); },
+    downloads: w => [{ label: 'Download as CSV', icon: 'table', run: () => exportCsv(w) }],
+    // One unit: rows compared; context documents counted on their own.
+    sourceLine: w => { const n = w.data?.papers?.length || 0, c = contextDocs(w).length; return `${plural(n, 'source')} compared${c ? ` · ${plural(c, 'context document')}` : ''}`; },
+    sourceGroups: w => [{ title: 'Compared', ids: w.data?.papers || [] }, { title: 'Context', ids: contextDocs(w) }],
     summary: w => `${plural(w.data?.papers?.length || 0, 'source')} · ${plural(w.data?.criteria?.length || 0, 'criterion', 'criteria')}${w.data?.synthesis ? ' · synthesized' : ''}`,
     exportHtml: rvExportHtml,
     exportLines: rvExportLines,
@@ -559,13 +637,39 @@
   }
   const words = html => String(html || '').replace(/<[^>]+>/g, ' ').replace(/\[\d+\]/g, '').split(/\s+/).filter(Boolean).length;
 
+  /** Draft review loop: draft → in review (one reviewer from the space's staff) → approved | changes requested → in review again. */
+  const EDITABLE = ['draft', 'changes'];
+  const firstName = id => (actorName(id) || '').trim().split(/\s+/).pop();
+  /** Who reviews a draft: the space's staff other than the author, leads first. */
+  function reviewerFor(w) {
+    const sp = spaceById(w.space); if (!sp) return null;
+    const staff = spaceType(sp.type).staff;
+    const m = (sp.members || []).filter(x => staff.includes(x.role) && x.user !== w.owner).sort((a, b) => staff.indexOf(a.role) - staff.indexOf(b.role))[0];
+    return m?.user || null;
+  }
+  const lastReview = w => (w.reviews || []).at(-1) || null;
+  /** "3 citations from 2 documents": the same words in the header and the rail. */
+  function drSourceLine(w) {
+    const c = w.data?.cites || [], docs = new Set(c.map(x => x.doc)).size;
+    return c.length ? `${plural(c.length, 'citation')} from ${plural(docs, 'document')}` : plural((w.sources || []).length, 'source');
+  }
+  function reviewNote(w, ctx) {
+    const r = lastReview(w), who = r && actorName(r.by), quote = r?.note ? `“${esc(r.note)}”` : '';
+    if (w.status === 'in_review') {
+      if (ctx.isOwner) return alertBox('accent', `${actorName(w.reviewer)} is reviewing it`, `Sent ${esc(rel(r?.at || w.updated).toLowerCase())}. Editing is paused until they approve it or ask for changes.`, '', { icon: 'clock' });
+      if (w.reviewer === me().id || ctx.isReviewer) return alertBox('accent', `${actorName(w.owner)} asked you to review this`, 'Approve it, or request changes with a note. The text stays as they wrote it.', '', { icon: 'send' });
+    }
+    if (w.status === 'changes' && r) return alertBox('warning', ctx.isOwner ? `${who} requested changes` : `You requested changes ${rel(r.at).toLowerCase()}`, quote, '', { icon: 'message' });
+    if (w.status === 'approved' && r?.note) return alertBox('success', `Note from ${who}`, quote, '', { icon: 'check-circle' });
+    return '';
+  }
+
   function drRender(w, ctx) {
-    const d = w.data, can = ctx.canEdit, u = dru(w);
+    const d = w.data, can = ctx.canEdit && EDITABLE.includes(w.status), u = dru(w);
     d.cites ??= []; d.versions ??= [];
     const used = new Set([...String(d.html).matchAll(/\[(\d+)\]/g)].map(m => +m[1]));
     const tool = (label, cmd, o = {}) => `<button type="button" class="${cx('button button--ghost button--sm dr-tool', !label && 'button--icon-only')}" data-act="dr-cmd" data-cmd="${cmd}" ${o.tip ? `data-tip="${esc(o.tip)}" aria-label="${esc(o.tip)}"` : ''}>${o.icon ? ic(o.icon) : ''}${label ? `<span class="${o.cls || ''}">${esc(label)}</span>` : ''}</button>`;
     const toolbar = can ? `<div class="dr-toolbar" role="toolbar" aria-label="Formatting">${tool('Heading', 'heading')}${tool('B', 'bold', { tip: 'Bold', cls: 'strong' })}${tool('', 'bullets', { icon: 'list', tip: 'Bulleted list' })}${tool('', 'undo', { icon: 'undo', tip: 'Undo' })}<span class="grow"></span><span class="dr-saved" id="dr-saved" aria-live="polite">${ic('check', 'i-sm')}Saved</span></div>` : '';
-    const review = w.reviewRequestedAt && w.status === 'ready' ? alertBox('accent', 'Ready for review', `Sent to the space’s staff ${rel(w.reviewRequestedAt)}.`, '', { icon: 'send' }) : '';
     const type = drType(w);
     const quick = (type === 'proposal' ? ['Shorter', 'More formal', 'Add a cost breakdown'] : type === 'decision' ? ['Shorter', 'Longer', 'Add a rollout timeline'] : type === 'announcement' || type === 'email' ? ['Shorter', 'Friendlier', 'More formal'] : ['Shorter', 'Longer', 'More formal']);
     const ask = can ? `<div class="dr-ask">
@@ -573,14 +677,15 @@
         <div class="dr-ask__chips">${quick.map(q => `<button type="button" class="rv-chip" data-act="dr-ask" data-w="${w.id}" data-q="${esc(q)}" ${u.busy ? 'disabled' : ''}>${esc(q)}</button>`).join('')}</div>
         <div class="dr-ask__field">${ic('sparkles', 'dr-ask__icon')}${input({ id: 'dr-ask-' + w.id, bind: `dr:${w.id}.ask`, value: u.ask, placeholder: 'Ask for changes, e.g. add a timeline', onEnter: 'dr-ask', attrs: `data-w="${w.id}" aria-label="Ask for changes" ${u.busy ? 'disabled' : ''}`, cls: 'dr-ask__input' })}${btn('', { v: 'primary', icon: u.busy ? '' : 'arrow-up', loading: u.busy, tip: 'Revise draft', act: 'dr-ask', data: { w: w.id }, disabled: u.busy, size: 'sm' })}</div>
       </div>` : '';
-    const sources = d.cites.length ? d.cites.map((c, i) => { const doc = docById(c.doc); return `<div class="${cx('dr-src', !used.has(i + 1) && 'is-unused')}"><div class="row gap-8"><span class="cite" aria-hidden="true">${i + 1}</span><a class="dr-src__name truncate" href="#${docHref(c)}">${esc(doc?.name || 'Document not available')}</a></div><div class="t-xs muted mt-4">Page ${c.page}${used.has(i + 1) ? '' : ' · not cited in the text'}</div>${c.quote ? `<blockquote class="dr-src__quote">${esc(c.quote)}</blockquote>` : ''}</div>`; }).join('')
+    const sources = d.cites.length ? d.cites.map((c, i) => { const doc = docById(c.doc); return `<div class="${cx('dr-src', !used.has(i + 1) && 'is-unused', u.focus === i + 1 && 'is-focus')}" id="dr-src-${w.id}-${i + 1}"><div class="row gap-8"><span class="cite" aria-hidden="true">${i + 1}</span><a class="dr-src__name truncate" href="#${docHref(c)}">${esc(doc?.name || 'Document not available')}</a></div><div class="t-xs muted mt-4">Page ${c.page}${used.has(i + 1) ? '' : ' · not cited in the text'}</div>${c.quote ? `<blockquote class="dr-src__quote">${esc(c.quote)}</blockquote>` : ''}</div>`; }).join('')
       : emptyState({ icon: 'quote', title: 'No sources cited', desc: 'Ask for changes that draw on your sources.', compact: true });
     const cur = d.html, curIdx = d.versions.map(v => v.html).lastIndexOf(cur);
     const versions = d.versions.length ? [...d.versions].map((v, i) => [v, i]).reverse().map(([v, i]) => `<div class="dr-ver"><div class="grow" style="min-width:0"><div class="medium truncate">${esc(v.note || 'Version')}</div><div class="t-xs muted">${esc(rel(v.at))} · ${plural(words(v.html), 'word')}</div></div>${i === curIdx ? chip('Current', { size: 'sm', variant: 'tertiary' }) : can && v.html !== cur ? btn('Restore', { size: 'sm', v: 'ghost', act: 'dr-restore', data: { w: w.id, i } }) : ''}</div>`).join('')
       : emptyState({ icon: 'history', title: 'No versions yet', desc: 'Each revision you ask for is saved here.', compact: true });
-    return `<div class="dr" data-w="${w.id}">
+    // Content first: the citations and versions rail opens on demand (header "N citations …", ⋯ Version history, or a citation in the text).
+    return `<div class="${cx('dr', u.rail && 'has-rail')}" data-w="${w.id}">
       <div class="dr-main">
-        ${review}
+        ${reviewNote(w, ctx)}
         <div class="dr-paper">
           ${toolbar}
           <div class="dr-body" id="dr-body-${w.id}" data-w="${w.id}" ${can ? `contenteditable="true" data-input="dr-edit" role="textbox" aria-multiline="true" aria-label="Draft text" spellcheck="true"` : ''}${u.busy ? ' aria-busy="true"' : ''}>${bodyHtml(w, can)}</div>
@@ -588,17 +693,26 @@
         </div>
         ${ask}
       </div>
-      <aside class="${cx('dr-rail', u.rail && 'is-open')}" aria-label="Sources and versions">
-        <button type="button" class="dr-rail__toggle" data-act="dr-rail" data-w="${w.id}" aria-expanded="${!!u.rail}">${ic('quote', 'i-sm')}<span class="grow">Sources and versions</span><span class="t-xs muted">${d.cites.length} · ${d.versions.length}</span>${ic('chevron-down', 'dr-rail__chev')}</button>
-        <div class="dr-rail__body">
-          ${seg({ value: u.tab, options: [['sources', `Sources ${d.cites.length}`], ['versions', `Versions ${d.versions.length}`]], act: 'dr-tab', data: { w: w.id }, label: 'Rail', full: true })}
-          <div class="dr-rail__list">${u.tab === 'versions' ? versions : sources}</div>
-        </div>
-      </aside>
+      ${u.rail ? `<aside class="dr-rail" aria-label="Citations and versions">
+        <div class="dr-rail__head">${seg({ value: u.tab, options: [['sources', 'Citations'], ['versions', 'Versions']], act: 'dr-tab', data: { w: w.id }, label: 'Citations and versions', full: true })}${iconBtn('x', 'Close panel', { size: 'sm', act: 'dr-rail', data: { w: w.id } })}</div>
+        <div class="t-xs muted dr-rail__meta">${u.tab === 'versions' ? plural(d.versions.length, 'version') : esc(drSourceLine(w))}</div>
+        <div class="dr-rail__list">${u.tab === 'versions' ? versions : sources}</div>
+      </aside>` : ''}
     </div>`;
   }
+  /** A citation in the text opens the rail on that citation (never a second panel). */
+  function drCite(w, p) {
+    const u = dru(w); u.rail = true; u.tab = 'sources'; u.focus = +p.n || 0; refresh();
+    requestAnimationFrame(() => $(`#dr-src-${w.id}-${u.focus}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
+  }
   A['dr-tab'] = el => { const w = W(el.dataset.w); if (!w) return; dru(w).tab = el.dataset.value; refresh(); };
-  A['dr-rail'] = el => { const w = W(el.dataset.w); if (!w) return; const u = dru(w); u.rail = !u.rail; const r = el.closest('.dr-rail'); r?.classList.toggle('is-open', u.rail); el.setAttribute('aria-expanded', String(u.rail)); };
+  /** Toggle the rail; data-tab opens it on that tab (a click on the tab that is already open closes it). */
+  A['dr-rail'] = el => {
+    const w = W(el.dataset.w || el.dataset.id); if (!w) return; const u = dru(w), tab = el.dataset.tab || (el.dataset.id ? 'sources' : '');
+    u.rail = tab && u.rail && u.tab !== tab ? true : !u.rail;
+    if (tab) u.tab = tab;
+    refresh();
+  };
 
   /* Autosave: the stored HTML updates on every keystroke; persisting and the indicator are debounced. */
   let saveTimer = 0;
@@ -687,23 +801,78 @@
     saveWork(w); refresh(); toast('Version restored');
   };
 
-  /* Status: draft → ready for review */
+  /* Review loop: the author sends, the reviewer approves or requests changes, the author hears back in Inbox. */
   function drActions(w, ctx) {
-    if (!ctx.isOwner && !ctx.canEdit) return '';
-    if (w.status === 'draft' || w.status === 'generating') return btn('Mark ready for review', { v: 'primary', icon: 'send', act: 'dr-ready', data: { w: w.id } });
-    if (w.status === 'ready' && ctx.isOwner) return btn('Back to draft', { icon: 'pencil', act: 'dr-unready', data: { w: w.id } });
+    const st = w.status;
+    if (ctx.isOwner) {
+      const reviewer = reviewerFor(w);
+      if (EDITABLE.includes(st)) return reviewer ? btn(st === 'changes' ? 'Send for review again' : 'Send for review', { v: 'primary', icon: 'send', act: 'dr-send', data: { w: w.id } }) : '';
+      if (st === 'in_review') return btn('Back to draft', { icon: 'pencil', act: 'dr-withdraw', data: { w: w.id } });
+      if (st === 'approved') return btn('Reopen to edit', { icon: 'pencil', act: 'dr-reopen', data: { w: w.id } });
+      return '';
+    }
+    // Reviewers decide: one primary, the other path secondary.
+    if (ctx.isReviewer && st === 'in_review') return btn('Request changes', { v: 'secondary', icon: 'message', act: 'dr-changes', data: { w: w.id } }) + btn('Approve', { v: 'primary', icon: 'check', act: 'dr-approve', data: { w: w.id } });
     return '';
   }
-  A['dr-ready'] = el => {
+  function review(w, kind, note = '', status) {
+    const snap = { status: w.status, reviewer: w.reviewer, visibility: w.visibility, n: (w.reviews ??= []).length };
+    w.reviews.push({ by: me().id, at: Date.now(), kind, ...(note ? { note } : {}) });
+    w.status = status;
+    saveWork(w); refresh();
+    return () => { w.status = snap.status; w.reviewer = snap.reviewer; w.visibility = snap.visibility; w.reviews.length = snap.n; saveWork(w); refresh(); };
+  }
+  A['dr-send'] = el => {
     const w = W(el.dataset.w); if (!w) return; const body = $('#dr-body-' + w.id); if (body) w.data.html = serialize(body);
-    const sp = spaceById(w.space);
-    const staff = sp ? (sp.members || []).filter(m => spaceType(sp.type).staff.includes(m.role) && m.user !== me().id).map(m => D.members.find(x => x.id === m.user)?.name).filter(Boolean) : [];
-    const prev = { status: w.status, at: w.reviewRequestedAt };
-    w.status = 'ready'; w.reviewRequestedAt = Date.now(); w.reviewRequestedBy = me().id; if (sp && w.visibility === 'private') { prev.vis = 'private'; w.visibility = 'space'; }
-    audit('Requested review', w.title); saveWork(w); refresh();
-    toast(staff.length ? `Sent to ${staff.slice(0, 2).join(' and ')} for review` : 'Marked ready for review', { action: { label: 'Undo', run: () => { w.status = prev.status; w.reviewRequestedAt = prev.at; if (prev.vis) w.visibility = prev.vis; saveWork(w); refresh(); } } });
+    const reviewer = reviewerFor(w); if (!reviewer) return;
+    const prevVis = w.visibility;
+    w.reviewer = reviewer; if (w.space) w.visibility = 'space';
+    const undo = review(w, 'requested', '', 'in_review');
+    if (prevVis !== w.visibility) audit('Shared work to space', w.title);
+    audit('Sent a draft for review', `${w.title} → ${actorName(reviewer)}`);
+    toast(`Sent to ${actorName(reviewer)} for review`, { action: { label: 'Undo', run: undo } });
   };
-  A['dr-unready'] = el => { const w = W(el.dataset.w); if (!w) return; w.status = 'draft'; delete w.reviewRequestedAt; saveWork(w); refresh(); toast('Back to draft'); };
+  A['dr-withdraw'] = el => { const w = W(el.dataset.w); if (!w) return; const undo = review(w, 'withdrawn', '', 'draft'); audit('Withdrew a draft from review', w.title); toast('Back to draft. You can edit it again', { action: { label: 'Undo', run: undo } }); };
+  A['dr-reopen'] = el => { const w = W(el.dataset.w); if (!w) return; const undo = review(w, 'reopened', '', 'draft'); audit('Reopened an approved draft', w.title); toast('Reopened. Send it for review again when you’re done', { action: { label: 'Undo', run: undo } }); };
+  A['dr-approve'] = el => {
+    const w = W(el.dataset.w); if (!w || w.status !== 'in_review') return;
+    const undo = review(w, 'approved', '', 'approved');
+    audit('Approved a draft', w.title);
+    toast(`Approved. ${firstName(w.owner)} will be notified`, { action: { label: 'Undo', run: undo } });
+  };
+  /* Request changes: a note is required, so the author knows what to fix. */
+  A['dr-changes'] = el => { S.ui.drChanges = { text: '', err: '' }; openModal('dr-changes', { w: el.dataset.w }); };
+  M['dr-changes'] = p => {
+    const w = W(p.w), f = ui('drChanges', { text: '', err: '' });
+    return {
+      title: 'Request changes', icon: 'message', size: 'md',
+      desc: `${esc(actorName(w?.owner))} sees your note and can edit the draft again.`,
+      body: field({ id: 'dr-changes-text', label: 'What should change?', required: true, error: f.err, control: textarea({ id: 'dr-changes-text', bind: 'drChanges.text', value: f.text, rows: 4, placeholder: 'For example: add the rollback plan and cite the incident runbook.', invalid: !!f.err, attrs: 'data-autofocus' }) }),
+      foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn('Request changes', { v: 'primary', icon: 'send', act: 'dr-changes-ok', data: { w: p.w } }),
+    };
+  };
+  A['dr-changes-ok'] = el => {
+    const w = W(el.dataset.w), f = ui('drChanges'); if (!w) return;
+    const note = String(f.text || '').trim();
+    if (!note) { f.err = 'Say what should change.'; refreshLayer(); $('#dr-changes-text')?.focus(); return; }
+    closeModal();
+    const undo = review(w, 'changes', note, 'changes');
+    audit('Requested changes on a draft', w.title);
+    toast(`Sent to ${firstName(w.owner)}`, { action: { label: 'Undo', run: undo } });
+  };
+  /** Inbox: reviewers hear about drafts waiting for them; authors hear the decision. Ids carry the event so read state sticks. */
+  X.workNotices = () => {
+    if (!hasModule('work')) return [];
+    const out = [], uid_ = me().id;
+    (D.works || []).filter(w => w.kind === 'draft').forEach(w => {
+      const r = lastReview(w); if (!r || r.by === uid_) return;
+      const id = `wrv-${w.id}-${w.reviews.length}-${uid_}`, to = '/work/' + w.id;
+      if (w.status === 'in_review' && r.kind === 'requested' && w.reviewer === uid_) out.push({ id, icon: 'send', tone: 'info', title: `${actorName(w.owner)} sent a draft for your review`, body: w.title, at: r.at, to, needs: true });
+      else if (w.owner === uid_ && r.kind === 'approved' && w.status === 'approved') out.push({ id, icon: 'check-circle', tone: 'ok', title: `${actorName(r.by)} approved your draft`, body: w.title, at: r.at, to });
+      else if (w.owner === uid_ && r.kind === 'changes' && w.status === 'changes') out.push({ id, icon: 'message', tone: 'warn', title: `${actorName(r.by)} requested changes`, body: `${w.title} · “${r.note}”`, at: r.at, to, needs: true });
+    });
+    return out;
+  };
 
   /* Exports (used by the shell's Download menu) */
   function drExportHtml(w) {
@@ -735,7 +904,11 @@
     generate: drGenerate,
     render: drRender,
     actions: drActions,
-    summary: w => `${typeLabel(drType(w))} · ${plural(words(w.data?.html), 'word')}${w.status === 'ready' && w.reviewRequestedAt ? ' · review requested' : ''}`,
+    sourcesAct: 'dr-rail',
+    onCite: drCite,
+    sourceLine: drSourceLine,
+    menu: w => [{ label: 'Version history', icon: 'history', run: () => { const u = dru(w); u.rail = true; u.tab = 'versions'; refresh(); } }],
+    summary: w => `${typeLabel(drType(w))} · ${plural(words(w.data?.html), 'word')}`,
     exportHtml: drExportHtml,
     exportLines: drExportLines,
   };

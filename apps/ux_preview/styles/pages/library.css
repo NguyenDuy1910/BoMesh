@@ -9,8 +9,12 @@
 .lib-col__meta { flex-wrap: wrap; color: var(--muted); }
 .lib-col__meta .i { color: var(--muted); }
 
+/* Each tab's toolbar: its tools on the left, its one action at the end. */
+.lib-bar { margin-bottom: 16px; }
+.lib-bar .search-field { flex: 1 1 200px; max-width: 320px; }
+.lib-private { white-space: nowrap; }
+
 /* Contributions: lifecycle filter, rows with the latest event and one next step */
-.lib-ctb-bar .search-field { flex: 1 1 200px; max-width: 320px; }
 .lib-ctb-seg { min-width: 0; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
 .lib-ctb-seg::-webkit-scrollbar { display: none; }
 .lib-ctb .item__title .chip { flex: none; }
@@ -20,11 +24,18 @@
 /* Collection header meta */
 .lib-col__head-meta { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
 
+/* Library tabs: one row that scrolls (with Foundation's edge fade) on narrow screens instead of wrapping. */
+.lib-tabs { margin-bottom: 20px; }
+
 /* Items the viewer can't open: count only */
 .lib-locked { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 10px 16px; border-radius: var(--radius-xl); background: var(--default-soft); color: var(--muted); font-size: 13px; line-height: 18px; }
 
-/* Edit mode: reorder, note, remove */
-.lib-edit { display: flex; flex-direction: column; background: var(--surface); border-radius: var(--radius-2xl); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); overflow: hidden; }
+/* Edit mode: name and description inline, then reorder, note, remove */
+.lib-edit__meta { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 16px; align-items: start; margin-bottom: 20px; }
+.lib-edit__meta > .field { margin-top: 0; }
+.lib-edit__share { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.lib-edit__share .label { margin: 0; }
+.lib-edit { display: flex; flex-direction: column; background: var(--surface); border-radius: var(--radius-2xl); box-shadow: inset 0 0 0 1px var(--card-border); overflow: hidden; }
 .lib-edit__row { display: flex; align-items: flex-start; gap: 12px; padding: 12px 16px; }
 .lib-edit__row + .lib-edit__row { border-top: 1px solid var(--separator); }
 .lib-edit__order { flex: none; display: flex; align-items: center; gap: 2px; }
@@ -33,7 +44,8 @@
 .lib-edit__body .input { max-width: 520px; }
 
 /* Add resources picker */
-.lib-add { max-height: 360px; overflow-y: auto; }
+.option-list.lib-add { max-height: min(340px, 45vh); }
+.lib-add-none { padding: 20px 12px; border-radius: var(--radius-xl); background: var(--surface-secondary); font-size: 13px; color: var(--muted); text-align: center; }
 
 /* Knowledge base header: owner unit and topics (knowledge.js) */
 .kb-head__meta { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-top: 6px; }
@@ -45,6 +57,8 @@
   .lib-list .item__meta { display: none; }
 }
 @container app (max-width: 679px) {
+  .lib-edit__meta { grid-template-columns: minmax(0, 1fr); }
+  .lib-bar .lib-private { display: none; }
   .lib-edit__row { flex-wrap: wrap; padding: 12px; }
   .lib-edit__order { order: 2; }
   .lib-edit__body { flex-basis: 100%; }
@@ -57,6 +71,5 @@
   .lib-ctb__desc .res-dot { display: none; }
   .lib-ctb__kb { max-width: 100%; }
   .lib-ctb__desc .truncate { white-space: normal; }
-  .lib-ctb-bar .search-field { max-width: none; flex-basis: 100%; }
-  .lib-share span { display: none; }
+  .lib-ctb-bar .search-field, .lib-bar .search-field { max-width: none; flex-basis: 100%; }
 }

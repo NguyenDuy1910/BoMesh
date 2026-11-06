@@ -1,10 +1,12 @@
 /* Curation (/documents) — Manage → Documents: the reviewer's single home for
    curation and publication. Tabs: Review (queue + decision), All documents
-   (every lifecycle state, publishing problems), Quality and Topics (bodies
-   from governance.js: X.gov.quality / X.gov.topics).
+   (every lifecycle state, publishing problems), Quality and — for workspace
+   admins, who decide the taxonomy — Topics (bodies from governance.js:
+   X.gov.quality / X.gov.topics).
    Scope: documents in the knowledge bases the caller owns (workspace admins
    own all) — curatedDocs(). Readers never see any of this.
-   Exports: X.docsBadge(), X.reviewNotices(). Actions: cur-*. Menu: cur-row.
+   Every row opens the same document drawer (cur-doc); a row shows its state's fix.
+   Exports: X.reviewNotices(). Actions: cur-*. Menu: cur-row.
    Drawers: cur-doc, cur-compare. Modal: cur-decide. Model: core/lifecycle.js. */
 (() => {
   'use strict';
@@ -23,17 +25,17 @@
   const hasFlag = (d, type) => flagsOf(d).some(f => f.type === type);
   const srcKey = d => (d.source && d.source !== 'upload' ? d.source : 'upload');
   const drafts = () => ui('curDraft');
-  const accepted = () => ui('curAccepted');
-
+  const tabsAllowed = () => (canManageTaxonomy() ? TABS : TABS.filter(t => t !== 'topics'));
   function tabOf(query) {
     if (LEGACY_SEG[query.tab]) return 'quality';
-    if (TABS.includes(query.tab)) return query.tab;
+    if (tabsAllowed().includes(query.tab)) return query.tab;
     return reviewQueue().length ? 'review' : 'all';
   }
   const onReview = () => S.cur?.r.page === 'documentsAdmin' && tabOf(S.cur.query) === 'review';
 
   /* ═══════════════ Badges and inbox ═══════════════ */
-  X.docsBadge = () => (can('knowledge.manage') ? reviewQueue().length + curatedDocs().filter(d => lifeKey(d) === 'failed').length : 0);
+  /** Documents that couldn't publish: counted on the All documents tab, where their fix is. */
+  const failedCount = () => curatedDocs().filter(d => lifeKey(d) === 'failed').length;
   X.reviewNotices = () => {
     if (!can('knowledge.manage') || !canReview()) return [];
     const out = [], q = reviewQueue();
@@ -51,15 +53,17 @@
     crumbs([{ label: 'Documents' }]);
     const tab = tabOf(query), queue = reviewQueue();
     const q = tab === 'quality' && LEGACY_SEG[query.tab] ? { ...query, tab: 'quality', seg: query.seg || LEGACY_SEG[query.tab] } : query;
-    const upKb = S.ui[AK]?.kb, upload = canContribute() ? btn('Upload', { v: 'primary', icon: 'upload', act: 'contribute', data: upKb ? { kb: upKb } : undefined }) : '';
+    // Contribute belongs to the lists it feeds (Review, All documents); the decision or row fix stays the one primary.
+    const upKb = S.ui[AK]?.kb, upload = canContribute() && (tab === 'review' || tab === 'all') ? btn('Contribute', { icon: 'upload', act: 'contribute', data: upKb ? { kb: upKb } : undefined }) : '';
     const head = pageHeader({ title: 'Documents', extra: X.res.demoChip(), desc: 'Every document in the bases you look after, from submission to publication.', actions: upload });
     const proposals = X.gov?.proposalCount?.() || 0;
     const tabList = [
       { id: 'review', label: 'Review', count: queue.length || '', alert: true },
-      { id: 'all', label: 'All documents' },
+      { id: 'all', label: 'All documents', count: failedCount() || '', alert: true },
       { id: 'quality', label: 'Quality' },
-      { id: 'topics', label: 'Topics', count: proposals || '' },
-    ];
+      // Only workspace admins change topics, so only they get the tab (and its proposals to decide).
+      canManageTaxonomy() && { id: 'topics', label: 'Topics', count: proposals || '' },
+    ].filter(Boolean);
     const body = tab === 'review' ? reviewTab(query)
       : tab === 'all' ? allTab(query)
         : (tab === 'quality' ? X.gov?.quality?.({ query: q }) : X.gov?.topics?.({ query: q })) ?? skelRows(6);
@@ -109,12 +113,15 @@
     const p = Math.round(c * 100);
     return `<span class="cur-conf cur-conf--${p >= 80 ? 'hi' : p >= 60 ? 'mid' : 'lo'}" data-tip="Assistant confidence">${p}%</span>`;
   }
-  const FLAG_META = { duplicate: ['copy', 'Possible duplicate', 'warning'], version: ['history', 'New version', 'accent'], personal: ['shield', 'May contain personal data', 'danger'], format: ['file', 'Can’t be searched', 'default'] };
+  /** Blocking risks get a labelled chip (readable on touch); informational signals stay a small icon with a tooltip. */
+  const FLAG_META = { duplicate: ['copy', 'Possible duplicate', 'warning', true], personal: ['shield', 'Personal data', 'danger', true], version: ['history', 'New version', 'accent'], format: ['file', 'Can’t be searched', 'default'] };
   function flagIcons(d) {
-    const ai = aiOf(d);
-    const out = (ai.flags || []).map(x => { const [icon, tip, tone] = FLAG_META[x.type] || FLAG_META.format; return `<span class="cur-flag cur-flag--${tone}" data-tip="${esc(tip)}" role="img" aria-label="${esc(tip)}">${ic(icon, 'i-xs')}</span>`; });
-    if ((ai.proposed || []).some(id => proposalById(id)?.status === 'open')) out.push(`<span class="cur-flag cur-flag--accent" data-tip="Suggests a new topic" role="img" aria-label="Suggests a new topic">${ic('tag', 'i-xs')}</span>`);
-    return out.join('');
+    const ai = aiOf(d), flags = ai.flags || [];
+    const meta = x => FLAG_META[x.type] || FLAG_META.format;
+    const chips = flags.filter(x => meta(x)[3]).map(x => { const [icon, label, tone] = meta(x); return chip(label, { tone, icon, size: 'sm', tip: x.text }); });
+    const icons = flags.filter(x => !meta(x)[3]).map(x => { const [icon, tip, tone] = meta(x); return `<span class="cur-flag cur-flag--${tone}" data-tip="${esc(tip)}" role="img" aria-label="${esc(tip)}">${ic(icon, 'i-xs')}</span>`; });
+    if ((ai.proposed || []).some(id => proposalById(id)?.status === 'open')) icons.push(`<span class="cur-flag cur-flag--accent" data-tip="Suggests a new topic" role="img" aria-label="Suggests a new topic">${ic('tag', 'i-xs')}</span>`);
+    return chips.join('') + icons.join('');
   }
   function queueItem(d, active) {
     const u = ui(QK), via = d.submission?.via === 'sync';
@@ -123,27 +130,39 @@
       <span class="cur-item__check">${checkbox({ checked: !!u.sel?.[d.id], act: 'sel-toggle', data: { ui: QK, id: d.id }, aria: 'Select ' + d.name })}</span>
       ${fileIcon(d.type)}
       <span class="cur-item__body">
-        <span class="cur-item__title truncate" title="${esc(d.name)}">${esc(d.name)}</span>
+        <span class="cur-item__title truncate" data-tip="${esc(d.name)}">${esc(d.name)}</span>
         <span class="cur-item__meta">${who}</span>
         <span class="cur-item__meta"><span class="truncate">${esc(kbById(d.kb)?.name || '')}</span><span class="cur-item__flags">${analyzing(d) ? lifeChip(d, 'sm') : flagIcons(d)}</span></span>
       </span>
     </div>`;
   }
+  /** Search and filters appear once the queue is long enough to need them (or one is in use); bulk actions once something is selected. */
+  const MANY = 6;
+  const queueKbs = all => [...new Set(all.map(d => d.kb))].map(kbById).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
   function queuePanel(all, rows, cur) {
-    const u = ui(QK), f = u.f || 'all';
-    const chips = FILTERS.map(([k, l]) => `<button type="button" class="cur-fchip" aria-pressed="${f === k}" data-act="cur-filter" data-value="${k}">${esc(l)}<span class="cur-fchip__n num">${all.filter(FILTER_FN[k]).length}</span></button>`).join('');
-    const kbs = [...new Set(all.map(d => d.kb))].map(kbById).filter(Boolean);
+    const u = ui(QK), f = u.f || 'all', filtered = f !== 'all' || !!u.kb, long = all.length > MANY;
+    const canFilter = filtered || queueKbs(all).length > 1 || FILTERS.some(([k]) => k !== 'all' && all.some(FILTER_FN[k]));
+    const fLabel = [f !== 'all' && FILTERS.find(([k]) => k === f)?.[1], u.kb && kbById(u.kb)?.name].filter(Boolean).join(' · ');
+    const filter = (long || filtered) && canFilter ? `<button type="button" class="${cx('filter-button', filtered && 'is-set')}" data-menu="cur-qfilter" aria-haspopup="menu" aria-expanded="false">${filtered ? '' : ic('filter')}<span class="truncate">${esc(fLabel || 'Filter')}</span>${ic('chevron-down')}</button>` : '';
+    const search = long || u.q ? searchField({ uiKey: QK, placeholder: 'Search submissions' }) : '';
+    const tools = search || filter ? `<div class="cur-queue__tools">${search}${filter ? `<div class="cur-queue__filters">${filter}</div>` : ''}</div>` : '';
+    // With a selection, the floating bulk bar (queueBulk) carries the decisions; this row only offers Select all.
     const ids = rows.map(d => d.id), n = ids.filter(id => u.sel?.[id]).length;
-    const selRow = `<div class="cur-queue__sel">${checkbox({ checked: !!n && n === ids.length, indeterminate: !!n && n < ids.length, act: 'sel-all', data: { ui: QK, ids: ids.join(',') }, aria: 'Select all', label: n ? `<span class="medium">${n} selected</span>` : `<span class="muted">${plural(rows.length, 'submission')}</span>` })}<span class="grow"></span>${n
-      ? btn('Decline…', { v: 'ghost', size: 'sm', act: 'cur-bulk-decline' }) + btn('Approve & publish', { v: 'secondary', size: 'sm', icon: 'check', act: 'cur-bulk-approve' })
-      : `<span class="t-xs muted cur-keys">${kbd('J')}${kbd('K')} to move</span>`}</div>`;
+    const selRow = n ? `<div class="cur-queue__sel">${checkbox({ checked: n === ids.length, indeterminate: n < ids.length, act: 'sel-all', data: { ui: QK, ids: ids.join(',') }, aria: 'Select all', label: n === ids.length ? 'All selected' : `Select all ${fmtNum(ids.length)}` })}</div>` : '';
     const list = rows.length ? `<div class="cur-queue__list" id="cur-queue" data-keep-scroll role="list">${rows.map(d => queueItem(d, d.id === cur)).join('')}</div>` : `<div class="cur-queue__none">${noMatches(QK, ['f', 'kb'], 'submissions')}</div>`;
-    return `<div class="cur-queue">
-      <div class="cur-queue__tools">${searchField({ uiKey: QK, placeholder: 'Search submissions' })}
-        <div class="cur-fchips" role="group" aria-label="Show">${chips}</div>
-        ${kbs.length > 1 ? `<div class="row gap-6">${filterButton('Knowledge base', QK, 'kb', kbs.map(k => [k.id, k.name]))}</div>` : ''}
-      </div>${selRow}${list}</div>`;
+    return `<div class="${cx('cur-queue', n && 'has-sel')}">${tools}${selRow}${list}</div>`;
   }
+  /** The queue's bulk decisions, in the same floating bar All documents and Quality use. */
+  const queueBulk = () => bulkBar(QK, btn('Decline…', { v: 'ghost', size: 'sm', icon: 'x-circle', act: 'cur-bulk-decline' }) + btn('Approve & publish', { v: 'secondary', size: 'sm', icon: 'check', act: 'cur-bulk-approve' }));
+  MENUS['cur-qfilter'] = () => {
+    const u = ui(QK), all = reviewQueue(), f = u.f || 'all', kbs = queueKbs(all);
+    const set = (k, v) => { u[k] = v; refresh(); };
+    const show = FILTERS.filter(([k]) => k === 'all' || k === f || all.some(FILTER_FN[k]))
+      .map(([k, l]) => ({ label: l, meta: fmtNum(all.filter(FILTER_FN[k]).length), checked: f === k, run: () => set('f', k) }));
+    const bases = kbs.length > 1 || u.kb ? [{ section: 'Knowledge base' }, { label: 'All knowledge bases', checked: !u.kb, run: () => set('kb', '') }, ...kbs.map(k => ({ label: k.name, checked: u.kb === k.id, run: () => set('kb', k.id) }))] : [];
+    const clear = (u.f && u.f !== 'all') || u.kb ? [{ sep: true }, { label: 'Clear filters', icon: 'x', run: () => { u.f = ''; u.kb = ''; refresh(); } }] : [];
+    return [{ section: 'Show' }, ...show, ...bases, ...clear];
+  };
 
   /* ── Detail ── */
   function noteHtml(d) {
@@ -189,12 +208,10 @@
     const chipsHtml = [...sugg.map(t => tchip(t.id, f.topics.includes(t.id), t.accepted ? '<span class="cur-conf cur-conf--new">New</span>' : confBadge(t.conf))), ...extra.map(id => tchip(id, true, '<span class="cur-conf cur-conf--edited">Added</span>'))].join('');
     const addOpts = [['', 'Add topic…'], ...topicTree().flatMap(dm => dm.children.filter(t => !f.topics.includes(t.id)).map(t => [t.id, `${dm.name} · ${t.name}`]))];
     const topics = sugRow('Topics', '', `<div class="cur-topics">${chipsHtml || '<span class="t-sm muted">No topic suggested</span>'}${addOpts.length > 1 ? select({ id: 'cur-add-topic', value: '', options: addOpts, change: 'cur-topic-add', size: 'sm', cls: 'cur-add-topic', label: 'Add topic', attrs: `data-id="${d.id}"` }) : ''}</div>`);
-    // Proposed new topics: only workspace admins change the taxonomy.
+    // Proposed new topics are decided in one place, Documents → Topics (workspace admins); publishing never waits for them.
     const props = (ai.proposed || []).map(proposalById).filter(p => p && p.status === 'open');
-    const admin = canManageTaxonomy();
-    const proposed = props.length ? sugRow('Proposed new topics', '', props.map(p => `<div class="cur-prop">${itemIcon('sparkles', 'accent', 'sm')}<div class="grow"><div class="medium">${esc(p.name)}</div><div class="t-xs muted">${p.parent ? `In ${esc(topicName(p.parent))}` : 'A new domain'} · suggested for ${plural(p.docs.length, 'document')}</div></div>${admin
-      ? `<div class="row gap-4 none">${btn('Dismiss', { v: 'ghost', size: 'sm', act: 'cur-prop-dismiss', data: { id: p.id } })}${btn('Accept topic', { v: 'secondary', size: 'sm', icon: 'check', act: 'cur-prop-accept', data: { id: p.id, doc: d.id } })}</div>`
-      : `<span class="t-xs muted none cur-prop__wait">${ic('clock', 'i-xs')}Waiting for a workspace admin</span>`}</div>`).join('') + (admin ? '' : '<p class="t-xs muted mt-4">You can publish without it. It’s added once an admin accepts it.</p>')) : '';
+    const decideIn = canManageTaxonomy() ? `<a class="link" href="#${BASE}?tab=topics">Decide in Topics</a>` : '<span>A workspace admin decides.</span>';
+    const proposed = props.length ? `<div class="cur-prop-note">${ic('sparkles', 'i-xs')}<div><span>${props.length === 1 ? 'Suggests a new topic:' : 'Suggests new topics:'}</span> ${props.map(p => `<span class="medium">${esc(p.name)}</span>`).join(', ')}<br><span>You can publish without it.</span> ${decideIn}</div></div>` : '';
     // Knowledge base: where it lives decides who can see it.
     const version = !!(f.asVersionOf || d.submission?.versionOf);
     const kbs = reviewableKbs().filter(k => k.contribute !== false || k.id === d.kb);
@@ -210,17 +227,18 @@
     const hint = !f ? 'Waiting for the assistant…' : o ? `Publishes v${res(o).version + 1} of “${o.name}”` : `Publishes to ${kbById(f.kb)?.name || ''}`;
     return `<div class="cur-decide" role="group" aria-label="Decision">
       <span class="cur-decide__hint truncate">${esc(hint)}</span>
-      ${btn('Request changes', { act: 'cur-changes', data: { id: d.id } })}${btn('Decline', { act: 'cur-decline', data: { id: d.id } })}
+      ${btn('Decline', { v: 'ghost', act: 'cur-decline', data: { id: d.id } })}${btn('Request changes', { icon: 'pencil', act: 'cur-changes', data: { id: d.id } })}
       ${btn(f ? 'Approve & publish' : 'Analyzing…', { v: 'primary', icon: f ? 'check' : '', act: 'cur-approve', data: { id: d.id }, disabled: !f, loading: !f })}
     </div>`;
   }
-  function detailPanel(d, pos, total) {
+  /** With queue items selected, the floating bulk bar replaces the per-item decision bar, so one set of decisions shows at a time. */
+  function detailPanel(d, pos, total, selecting) {
     const sub = d.submission || {}, kb = kbById(d.kb), f = draftOf(d), via = sub.via === 'sync';
     const resub = lastEvent(d).kind === 'resubmitted';
     const meta = [
       `${via ? 'Synced from' : 'From'} <span class="medium">${esc(contributorName(d))}</span>`,
       `${resub ? 'Resubmitted' : 'Submitted'} ${esc(relLow(lastEvent(d).at))}`,
-      `to <a class="link" href="#/knowledge/${kb.id}">${esc(kb.name)}</a>`,
+      `to <a class="link" href="#${canEditKb(kb) ? kbManageHref(kb) : kbHref(kb)}">${esc(kb.name)}</a>`,
     ].join('<span aria-hidden="true"> · </span>');
     const head = `<div class="cur-detail__head">
       ${iconBtn('arrow-left', 'Back to the queue', { act: 'cur-back', cls: 'cur-back' })}
@@ -228,7 +246,7 @@
       <div class="grow"><h2 class="cur-detail__title">${esc(d.name)}</h2><div class="cur-detail__meta">${meta}${analyzing(d) ? lifeChip(d, 'sm') : ''}</div></div>
       <div class="cur-detail__nav"><span class="t-xs muted num">${pos + 1} of ${total}</span>${iconBtn('chevron-up', 'Previous (K)', { size: 'sm', act: 'cur-step', data: { dir: -1 }, disabled: pos <= 0 })}${iconBtn('chevron-down', 'Next (J)', { size: 'sm', act: 'cur-step', data: { dir: 1 }, disabled: pos >= total - 1 })}</div>
     </div>`;
-    return `<section class="cur-detail" id="cur-detail" aria-label="${esc(d.name)}">${head}${noteHtml(d)}${flagsHtml(d, f)}${previewCard(d)}${suggestionsCard(d, f)}${decisionBar(d, f)}</section>`;
+    return `<section class="cur-detail" id="cur-detail" aria-label="${esc(d.name)}">${head}${noteHtml(d)}${flagsHtml(d, f)}${previewCard(d)}${suggestionsCard(d, f)}${selecting ? '' : decisionBar(d, f)}</section>`;
   }
   function reviewTab(query) {
     const caughtUp = () => emptyState({ icon: 'check-circle', tone: 'success', title: 'You’re all caught up', desc: 'New submissions to your knowledge bases show up here.', actions: btn('See all documents', { href: BASE + '?tab=all' }), boxed: true });
@@ -244,8 +262,8 @@
         const u = ui(QK), live = new Set(all.map(d => d.id));
         u.sel = Object.fromEntries(Object.entries(u.sel || {}).filter(([id, on]) => on && live.has(id)));
         const cur = currentId(rows), d = docById(cur), pos = rows.findIndex(x => x.id === cur);
-        const open = !!query.sel && cur === query.sel;
-        return `<div class="${cx('cur-split', open && 'has-sel')}">${queuePanel(all, rows, cur)}${d ? detailPanel(d, pos, rows.length) : '<div class="cur-detail"></div>'}</div>`;
+        const open = !!query.sel && cur === query.sel, selecting = selCount(QK) > 0;
+        return `<div class="${cx('cur-split', open && 'has-sel')}">${queuePanel(all, rows, cur)}${d ? detailPanel(d, pos, rows.length, selecting) : '<div class="cur-detail"></div>'}</div>${queueBulk()}`;
       },
     });
   }
@@ -271,38 +289,10 @@
     if (n && n.id !== rows[i]?.id) pick(n.id);
   }
   A['cur-step'] = el => step(+el.dataset.dir);
-  A['cur-filter'] = el => { const u = ui(QK); u.f = el.dataset.value; refresh(); };
   A['cur-redraw'] = () => refresh();
   A['cur-topic'] = el => { const f = draftOf(docById(el.dataset.id)); if (!f) return; const t = el.dataset.topic; f.topics = f.topics.includes(t) ? f.topics.filter(x => x !== t) : [...f.topics, t]; refresh(); };
   A['cur-topic-add'] = el => { const f = draftOf(docById(el.dataset.id)); if (!f || !el.value) return; if (!f.topics.includes(el.value)) f.topics.push(el.value); refresh(); };
   A['cur-asver'] = el => { const f = draftOf(docById(el.dataset.id)); if (!f) return; f.asVersionOf = f.asVersionOf === el.dataset.other ? '' : el.dataset.other; refresh(); };
-
-  /* Proposed topics (workspace admins). Accepting tags every document that suggested it. */
-  function revertAccept(rec) {
-    const p = proposalById(rec.pid); if (!p || p.status !== 'accepted') return;
-    rec.created.forEach(id => { const i = D.topics.findIndex(t => t.id === id); if (i >= 0) D.topics.splice(i, 1); });
-    p.status = 'open'; delete p.into; delete p.decided; delete p.by;
-    (p.docs || []).map(docById).filter(Boolean).forEach(x => {
-      if (Array.isArray(x.topics)) x.topics = x.topics.filter(id => id !== rec.topic);
-      if (x.ai?.topics) { x.ai.topics = x.ai.topics.filter(t => t.id !== rec.topic); x.ai.proposed = [...new Set([...(x.ai.proposed || []), p.id])]; }
-      const f = drafts()[x.id]; if (f) f.topics = f.topics.filter(id => id !== rec.topic);
-    });
-  }
-  A['cur-prop-accept'] = el => {
-    const p = proposalById(el.dataset.id), docId = el.dataset.doc; if (!p || !canManageTaxonomy()) return;
-    const before = new Set(D.topics.map(t => t.id)), t = acceptProposal(p); if (!t) return;
-    const rec = { pid: p.id, topic: t.id, created: D.topics.filter(x => !before.has(x.id)).map(x => x.id) };
-    (accepted()[docId] ??= []).push(rec);
-    (p.docs || []).forEach(id => { const f = drafts()[id]; if (f && !f.topics.includes(t.id)) f.topics.push(t.id); });
-    refresh();
-    toast(`Added “${t.name}” to the topics`, { action: { label: 'Undo', run: () => { revertAccept(rec); accepted()[docId] = (accepted()[docId] || []).filter(r => r !== rec); refresh(); toast(`“${p.name}” is a proposal again`, { tone: 'accent' }); } } });
-  };
-  A['cur-prop-dismiss'] = el => {
-    const p = proposalById(el.dataset.id); if (!p || !canManageTaxonomy()) return;
-    const prev = (p.docs || []).map(id => [docById(id), docById(id)?.ai?.proposed?.slice()]);
-    dismissProposal(p); refresh();
-    toast(`Dismissed “${p.name}”`, { action: { label: 'Undo', run: () => { p.status = 'open'; delete p.decided; delete p.by; prev.forEach(([x, pr]) => { if (x?.ai && pr) x.ai.proposed = pr; }); refresh(); } } });
-  };
 
   /** Run a decision on queue items with Undo, then move on to the next item. */
   function decide(docs, run, msg) {
@@ -321,7 +311,6 @@
   }
   function undo(snaps, docs) {
     snaps.forEach(([d, s]) => restoreDoc(d, s));
-    docs.forEach(d => { (accepted()[d.id] || []).forEach(revertAccept); delete accepted()[d.id]; });
     if (onReview()) setQuery({ sel: docs[0].id }); else refresh();
     toast(docs.length === 1 ? `“${docs[0].name}” is back in review` : `${plural(docs.length, 'document')} are back in review`, { tone: 'accent' });
   }
@@ -361,15 +350,22 @@
   M['cur-decide'] = ({ mode, ids }) => {
     const f = ui('curDecide'), changes = mode === 'changes', n = ids.length, d = docById(ids[0]);
     const err = f.tried && !f.text.trim() ? (changes ? 'Tell the contributor what to change.' : 'Give a reason. The contributor sees it.') : '';
-    const who = n > 1 ? 'Each contributor sees this message.' : d.submission?.by ? `${esc(contributorName(d))} sees this message.` : 'It’s kept with the document’s history.';
+    const person = n === 1 && d.submission?.by ? contributorName(d) : '';
+    const desc = changes
+      ? (n > 1 ? 'Each contributor gets your message and can resubmit.' : person ? `${esc(person)} gets your message and can resubmit.` : 'Your message is kept with the document’s history.')
+      : (n > 1 ? 'They won’t be published. Each contributor sees your reason.' : person ? `It won’t be published. ${esc(person)} sees your reason.` : 'It won’t be published. Your reason is kept with its history.');
+    const docs = n === 1 ? `<div class="cur-dec-doc">${fileIcon(d.type, 'sm')}<span class="truncate" data-tip="${esc(d.name)}">${esc(d.name)}</span></div>` : '';
+    const quick = QUICK[mode].map(q => `<button type="button" class="cur-quick__opt" aria-pressed="${f.text.trim() === q}" data-act="cur-quick" data-text="${esc(q)}">${ic(f.text.trim() === q ? 'check' : 'quote', 'i-sm')}<span>${esc(q)}</span></button>`).join('');
     return {
-      size: 'md', title: changes ? 'Request changes' : n > 1 ? `Decline ${plural(n, 'submission')}` : 'Decline submission', desc: n === 1 ? esc(d.name) : '',
-      body: field({ id: 'cur-msg', label: changes ? 'What should change?' : 'Reason', required: true, error: err, desc: who, control: textarea({ id: 'cur-msg', bind: 'curDecide.text', value: f.text, rows: 4, invalid: !!err, attrs: 'data-autofocus maxlength="600"' }) })
-        + `<div class="mt-16"><div class="t-label mb-8">Quick replies</div><div class="cur-quick">${QUICK[mode].map(q => btn(q, { v: 'outline', size: 'sm', act: 'cur-quick', data: { text: q } })).join('')}</div></div>`,
-      foot: btn('Cancel', { act: 'close-modal' }) + btn(changes ? 'Send request' : n > 1 ? `Decline ${n}` : 'Decline', { v: changes ? 'primary' : 'danger', act: 'cur-decide-go' }),
+      size: 'md', title: changes ? 'Request changes' : n > 1 ? `Decline ${plural(n, 'submission')}` : 'Decline submission',
+      icon: changes ? 'pencil' : 'x-circle', tone: changes ? 'warning' : 'danger', desc,
+      body: docs + field({ id: 'cur-msg', label: changes ? 'What should change?' : 'Reason', required: true, error: err, control: textarea({ id: 'cur-msg', bind: 'curDecide.text', value: f.text, rows: 4, invalid: !!err, placeholder: changes ? 'Be specific, so they can fix it in one go.' : 'Say why, so they know what to do instead.', attrs: `data-autofocus maxlength="600" ${err ? 'data-live' : ''}` }) })
+        + `<div class="cur-quick" role="group" aria-labelledby="cur-quick-label"><div class="t-label" id="cur-quick-label">Or start from a common reply</div>${quick}</div>`,
+      footStart: 'You can undo right after.',
+      foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn(changes ? 'Send request' : n > 1 ? `Decline ${n}` : 'Decline', { v: changes ? 'primary' : 'danger', icon: changes ? 'send' : 'x-circle', act: 'cur-decide-go' }),
     };
   };
-  A['cur-quick'] = el => { ui('curDecide').text = el.dataset.text; refreshLayer(); const t = $('#cur-msg'); if (t) { t.focus(); t.setSelectionRange(t.value.length, t.value.length); } };
+  A['cur-quick'] = el => { const f = ui('curDecide'); f.text = el.dataset.text; refreshLayer(); const t = $('#cur-msg'); if (t) { t.focus(); t.setSelectionRange(t.value.length, t.value.length); } };
   A['cur-decide-go'] = () => {
     const f = ui('curDecide'), { mode, ids } = S.modal.props; f.tried = true;
     const text = f.text.trim(); if (!text) { refreshLayer(); $('#cur-msg')?.focus(); return; }
@@ -439,25 +435,29 @@
     const on = !!ui(AK).sel?.[d.id];
     return `<tr class="table__row" data-act="cur-doc" data-id="${d.id}" tabindex="0" ${on ? 'aria-selected="true"' : ''}>
       ${selCheck(AK, d.id, 'Select ' + d.name)}
-      <td class="table__cell table__cell--primary"><div class="row gap-12">${fileIcon(d.type)}<div class="grow"><div class="cell-title truncate" title="${esc(d.name)}">${esc(d.name)}</div><div class="cell-sub truncate">${esc(kbById(d.kb)?.name || '')}</div></div></div></td>
+      <td class="table__cell table__cell--primary"><div class="row gap-12">${fileIcon(d.type)}<div class="grow"><div class="cell-title truncate" data-tip="${esc(d.name)}">${esc(d.name)}</div><div class="cell-sub truncate">${esc(kbById(d.kb)?.name || '')}</div></div></div></td>
       <td class="table__cell">${lifeChip(d, 'sm')}</td>
       <td class="table__cell table__cell--hide-sm"><span class="row gap-6">${appIcon(res(d).source.app, 'sm')}<span class="truncate">${esc(contributorName(d))}</span></span></td>
       <td class="table__cell table__cell--hide-sm muted">${esc(kindMeta(res(d).kind).label)}</td>
-      <td class="table__cell muted cur-nowrap" title="${esc(fmtDateTime(d.updated))}">${rel(d.updated)}</td>
-      <td class="table__cell table__cell--actions">${iconBtn('more', 'More actions', { size: 'sm', menu: 'cur-row', data: { id: d.id } })}</td></tr>`;
+      <td class="table__cell muted cur-nowrap" data-tip="${esc(fmtDateTime(d.updated))}">${rel(d.updated)}</td>
+      <td class="table__cell table__cell--actions"><div class="row gap-4 none">${rowFix(d)}<span class="reveal-on-hover">${iconBtn('more', 'More actions', { size: 'sm', menu: 'cur-row', data: { id: d.id, ctx: 'row' } })}</span></div></td></tr>`;
   }
+  const isSynced = d => srcKey(d) !== 'upload';
   function failuresAlert(docs, u) {
     const failed = docs.filter(d => lifeKey(d) === 'failed'); if (!failed.length) return '';
     const locked = failed.filter(isLocked), retry = failed.length - locked.length;
-    const desc = locked.length ? `${locked.length === failed.length ? (failed.length === 1 ? 'The file is' : 'The files are') : `${locked.length} ${locked.length === 1 ? 'file is' : 'files are'}`} password-protected and ${locked.length === 1 ? 'needs' : 'need'} a copy without a password.` : 'Publishing stopped partway. Try again.';
+    const atSource = locked.length && locked.every(isSynced);
+    const fix = atSource ? 'Remove the password at the source, then sync again.' : 'Upload a copy without a password.';
+    const who = locked.length === failed.length ? (failed.length === 1 ? 'The file is password-protected.' : 'The files are password-protected.') : `${plural(locked.length, 'file')} password-protected.`;
+    const desc = locked.length ? `<span>${esc(who)}</span> <span>${esc(fix)}</span>` : 'Publishing stopped partway. Try again.';
     const actions = (u.life !== 'attention' ? btn('Show', { v: 'ghost', size: 'sm', act: 'cur-show-failed' }) : '')
-      + (retry ? btn('Retry all', { v: 'secondary', size: 'sm', icon: 'retry', act: 'cur-retry-all' }) : locked.length === 1 ? btn('Replace file', { v: 'secondary', size: 'sm', icon: 'upload', act: 'doc-replace', data: { id: locked[0].id } }) : '');
+      + (retry ? btn('Retry all', { v: 'secondary', size: 'sm', icon: 'retry', act: 'cur-retry-all' }) : locked.length === 1 && !isSynced(locked[0]) ? btn('Replace file', { v: 'secondary', size: 'sm', icon: 'upload', act: 'doc-replace', data: { id: locked[0].id } }) : '');
     return `<div class="mb-12">${alertBox('danger', `${plural(failed.length, 'document')} couldn’t be published`, desc, actions)}</div>`;
   }
   function allTab(query) {
     const u = ui(AK, { q: '', life: '', kb: '', src: '', kind: '', sort: { key: 'updated', dir: 'desc' }, page: 1, sel: {} });
     syncFromQuery(u, query);
-    const empty = () => emptyState({ icon: 'files', title: 'No documents yet', desc: 'Documents added to the knowledge bases you look after show up here.', actions: canContribute() ? btn('Upload', { v: 'primary', icon: 'upload', act: 'contribute' }) : '', boxed: true });
+    const empty = () => emptyState({ icon: 'files', title: 'No documents yet', desc: 'Documents added to the knowledge bases you look after show up here.', actions: canContribute() ? btn('Contribute', { v: 'primary', icon: 'upload', act: 'contribute' }) : '', boxed: true });
     return gate({
       loading: () => skelRows(8),
       empty,
@@ -466,25 +466,47 @@
         if (!docs.length) return empty();
         const live = new Set(docs.map(d => d.id));
         u.sel = Object.fromEntries(Object.entries(u.sel || {}).filter(([id, on]) => on && live.has(id)));
-        const kbs = [...new Set(docs.map(d => d.kb))].map(kbById).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
-        const srcs = [...new Set(docs.map(srcKey))].filter(k => k !== 'upload').map(srcById).filter(Boolean);
-        const kinds = [...new Set(docs.map(d => res(d).kind))].map(k => [k, kindMeta(k).label]).sort((a, b) => a[1].localeCompare(b[1]));
-        const sortLabel = u.sort?.key === 'name' ? 'Name' : 'Recently updated';
-        const toolbar = `<div class="toolbar">${searchField({ uiKey: AK, placeholder: 'Search documents' })}
-          ${filterButton('Lifecycle', AK, 'life', LIFE_GROUPS.map(([k, l]) => [k, l]))}
-          ${kbs.length > 1 ? filterButton('Knowledge base', AK, 'kb', kbs.map(k => [k.id, k.name])) : ''}
-          ${srcs.length ? filterButton('Source', AK, 'src', [['upload', 'Uploads'], ...srcs.map(s => [s.id, s.name])]) : ''}
-          ${filterButton('Type', AK, 'kind', kinds)}${clearFilters(AK, ['life', 'kb', 'src', 'kind'])}
-          <div class="toolbar__end">${btn(sortLabel, { v: 'ghost', size: 'sm', icon: 'sort', menu: 'cur-sort', aria: `aria-label="Sort: ${esc(sortLabel)}"` })}</div></div>`;
+        const facets = allFacets(docs, u), sortLabel = u.sort?.key === 'name' ? 'Name' : 'Recently updated', FF = ['life', 'kb', 'src', 'kind'];
+        const n = FF.filter(k => u[k]).length;
+        // Wide: one dropdown per facet. Narrow: one Filters button (a bottom sheet on phones) plus removable chips for what's on,
+        // so the first document isn't pushed below the fold. The sort menu stands in for the column headers on narrow screens.
+        const wide = facets.map(f => filterButton(f.label, AK, f.key, f.opts)).join('') + clearFilters(AK, FF);
+        const narrow = facets.length ? `<button type="button" class="${cx('filter-button', n && 'is-set')}" data-popover="cur-filters" aria-haspopup="dialog" aria-expanded="false">${ic('filter')}<span>Filters</span>${n ? badge(n, { tone: 'accent' }) : ''}</button>` : '';
+        const chips = n ? `<div class="cur-fchips">${facets.filter(f => u[f.key]).map(f => `<button type="button" class="chip chip--soft chip--accent cur-fchip" data-act="cur-filter-set" data-field="${f.key}" data-value="" aria-label="${esc(`Remove filter: ${f.label}`)}">${esc(f.opts.find(o => o[0] === u[f.key])?.[1] || u[f.key])}${ic('x', 'i-xs')}</button>`).join('')}</div>` : '';
+        const toolbar = docs.length > MANY || u.q || n ? `<div class="toolbar cur-toolbar">${searchField({ uiKey: AK, placeholder: 'Search documents' })}
+          <div class="cur-filters--wide">${wide}</div><div class="cur-filters--narrow">${narrow}</div>
+          <div class="toolbar__end cur-sortmenu">${btn(sortLabel, { v: 'ghost', size: 'sm', icon: 'sort', menu: 'cur-sort', aria: `aria-label="Sort: ${esc(sortLabel)}"` })}</div></div>${chips}` : '';
         const alert = failuresAlert(docs, u);
-        if (!rows.length) return toolbar + alert + noMatches(AK, ['life', 'kb', 'src', 'kind'], 'documents');
+        // What needs fixing comes before the tools to browse the rest.
+        if (!rows.length) return alert + toolbar + noMatches(AK, ['life', 'kb', 'src', 'kind'], 'documents');
         const page = paginate(rows, AK, PER);
         const bulk = bulkBar(AK, btn('Publish', { v: 'ghost', size: 'sm', icon: 'upload', act: 'cur-bulk-publish' }) + btn('Unpublish', { v: 'ghost', size: 'sm', icon: 'eye-off', act: 'cur-bulk-unpublish' }) + btn('Archive', { v: 'ghost', size: 'sm', icon: 'archive', act: 'cur-bulk-archive' }));
         const head = `${selAllCheck(AK, page.map(d => d.id))}${sortHead('Name', 'name', AK)}${th('Lifecycle')}${th('Contributor / source', 'table__column--hide-sm')}${th('Type', 'table__column--hide-sm')}${sortHead('Updated', 'updated', AK)}${th('<span class="sr-only">Actions</span>', 'table__column--actions')}`;
-        return toolbar + alert + `<div class="cur-all">${table({ label: 'Documents', head, rows: page.map(allRow), foot: pager(rows.length, AK, PER) })}</div>` + bulk;
+        return alert + toolbar + `<div class="cur-all">${table({ label: 'Documents', head, rows: page.map(allRow), foot: pager(rows.length, AK, PER) })}</div>` + bulk;
       },
     });
   }
+  /** Facets the inventory offers, only when they'd split it (or one is in use): [{ key, label, opts }]. */
+  function allFacets(docs, u) {
+    const kbs = [...new Set(docs.map(d => d.kb))].map(kbById).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
+    const srcs = [...new Set(docs.map(srcKey))].filter(k => k !== 'upload').map(srcById).filter(Boolean);
+    const kinds = [...new Set(docs.map(d => res(d).kind))].map(k => [k, kindMeta(k).label]).sort((a, b) => a[1].localeCompare(b[1]));
+    return [
+      { key: 'life', label: 'Lifecycle', opts: LIFE_GROUPS.map(([k, l]) => [k, l]) },
+      (kbs.length > 1 || u.kb) && { key: 'kb', label: 'Knowledge base', opts: kbs.map(k => [k.id, k.name]) },
+      (srcs.length || u.src) && { key: 'src', label: 'Source', opts: [['upload', 'Uploads'], ...srcs.map(s => [s.id, s.name])] },
+      (kinds.length > 1 || u.kind) && { key: 'kind', label: 'Type', opts: kinds },
+    ].filter(Boolean);
+  }
+  /** Filters popover (narrow screens; a bottom sheet on phones): each facet as a group of options, applied as you pick. */
+  PO['cur-filters'] = () => {
+    const u = ui(AK), facets = allFacets(curatedDocs(), u), FF = facets.map(f => f.key);
+    const opt = (f, v, l) => `<button type="button" class="cur-fopt" role="radio" aria-checked="${(u[f.key] || '') === v}" data-act="cur-filter-set" data-field="${f.key}" data-value="${esc(v)}"><span class="cur-fopt__dot" aria-hidden="true"></span><span class="truncate">${esc(l)}</span></button>`;
+    const body = facets.map(f => `<fieldset class="cur-fgroup"><legend class="t-label">${esc(f.label)}</legend><div role="radiogroup" aria-label="${esc(f.label)}">${opt(f, '', 'Any')}${f.opts.map(([v, l]) => opt(f, v, l)).join('')}</div></fieldset>`).join('');
+    return { title: 'Filters', body: `<div class="cur-fgroups">${body}</div>`, foot: FF.some(k => u[k]) ? btn('Clear filters', { v: 'ghost', size: 'sm', act: 'cur-filter-clear' }) : '' };
+  };
+  A['cur-filter-set'] = el => { const u = ui(AK); u[el.dataset.field] = el.dataset.value || ''; u.page = 1; u.sel = {}; refresh(); };
+  A['cur-filter-clear'] = () => { const u = ui(AK); ['life', 'kb', 'src', 'kind'].forEach(k => { u[k] = ''; }); u.page = 1; refresh(); };
   MENUS['cur-sort'] = () => {
     const u = ui(AK), set = (key, dir) => { u.sort = { key, dir }; u.page = 1; refresh(); };
     return [{ section: 'Sort by' }, { label: 'Recently updated', checked: u.sort?.key !== 'name', run: () => set('updated', 'desc') }, { label: 'Name', checked: u.sort?.key === 'name', run: () => set('name', 'asc') }];
@@ -508,20 +530,13 @@
     ui(AK).sel = {}; publishDocs(ok); refresh();
     toast(`Publishing ${plural(ok.length, 'document')}${skipped ? ` · ${skipped} skipped` : ''}`, { tone: 'accent' });
   };
+  /** Unpublishing is reversible: it happens at once, with Undo (no confirmation). */
   function unpublishDocs(docs, onDone) {
     docs = docs.filter(canUnpublish);
     if (!docs.length) { toast('None of these are published', { tone: 'danger' }); return; }
-    const one = docs.length === 1;
-    confirmAction({
-      title: one ? `Unpublish “${docs[0].name}”?` : `Unpublish ${plural(docs.length, 'document')}?`,
-      body: `${one ? 'It' : 'They'} leave${one ? 's' : ''} Browse, search and answers. ${one ? 'It stays' : 'They stay'} here, and you can publish ${one ? 'it' : 'them'} again.`,
-      confirm: 'Unpublish', danger: true,
-      onConfirm: () => {
-        const snaps = docs.map(d => [d, snapDoc(d)]);
-        docs.forEach(d => unpublish(d)); onDone?.(); refresh();
-        toast(one ? `Unpublished “${docs[0].name}”` : `Unpublished ${plural(docs.length, 'document')}`, { action: { label: 'Undo', run: () => { snaps.forEach(([d, s]) => restoreDoc(d, s)); refresh(); toast(one ? `“${docs[0].name}” is published again` : `${plural(docs.length, 'document')} are published again`, { tone: 'accent' }); } } });
-      },
-    });
+    const one = docs.length === 1, snaps = docs.map(d => [d, snapDoc(d)]);
+    docs.forEach(d => unpublish(d)); onDone?.(); refresh();
+    toast(one ? `Unpublished “${docs[0].name}”. It left search and answers.` : `Unpublished ${plural(docs.length, 'document')}. They left search and answers.`, { action: { label: 'Undo', run: () => { snaps.forEach(([d, s]) => restoreDoc(d, s)); refresh(); toast(one ? `“${docs[0].name}” is published again` : `${plural(docs.length, 'document')} are published again`, { tone: 'accent' }); } } });
   }
   A['cur-bulk-unpublish'] = () => unpublishDocs(selectedAll(), () => { ui(AK).sel = {}; });
   A['cur-bulk-archive'] = () => X.archiveDocs(selectedAll(), () => { ui(AK).sel = {}; });
@@ -533,7 +548,9 @@
     publish: { label: 'Publish now', icon: 'play', run: d => X.processDocs([d], { msg: `Publishing ${d.name}` }) },
     retry: { label: 'Retry', icon: 'retry', run: d => X.processDocs([d], { msg: `Publishing ${d.name} again` }) },
     replace: { label: 'Replace file', icon: 'upload', run: d => A['doc-replace']({ dataset: { id: d.id } }) },
+    // Changed at its source: republish from the source (never a file picker for synced documents).
     update: { label: 'Publish update', icon: 'refresh', run: d => X.processDocs([d], { msg: `Publishing the update to ${d.name}` }) },
+    source: { label: 'Open source', icon: 'plug', run: d => { closeDocDrawer(); if (can('source.manage') && A['src-open']) A['src-open']({ dataset: { id: d.source } }); else go('/sources'); } },
     republish: { label: 'Publish again', icon: 'upload', run: d => { const s = snapDoc(d); republish(d); refresh(); toast(`Publishing “${d.name}” again`, { tone: 'accent', action: { label: 'Undo', run: () => { restoreDoc(d, s); refresh(); } } }); } },
     unpublish: { label: 'Unpublish', icon: 'eye-off', run: d => unpublishDocs([d]) },
     edit: { label: 'Edit details…', icon: 'pencil', run: d => A['res-edit']({ dataset: { id: d.id } }) },
@@ -543,19 +560,37 @@
     download: { label: 'Download', icon: 'download', run: d => X.downloadDocument(d) },
     archive: { label: 'Archive', icon: 'archive', danger: true, run: d => X.archiveDocs([d], closeDocDrawer) },
   };
-  /** { main, more } operations for a document's lifecycle state. */
+  /** Fixes a row shows as a visible button (actionable states only); everything else lives in ⋯. */
+  const ROW_FIX = new Set(['publish', 'retry', 'replace', 'update', 'republish', 'source']);
+  /** May the caller open the document drawer? Reviewers of its base; editors for published documents (Quality). */
+  const canOpenDoc = d => { const kb = d && kbById(d.kb); return !!kb && (canReviewKb(kb) || (canEditKb(kb) && isPublishedStage(d))); };
+  /** { main, more, tail } operations for a document's lifecycle state. Editors who don't review the base only open, edit and download. */
   function opsFor(d) {
     const k = lifeKey(d), live = ['published', 'update', 'stored', 'queued', 'failed', 'publishing'].includes(k);
-    const main = { analyzing: 'review', review: 'review', queued: 'publish', failed: isLocked(d) ? 'replace' : 'retry', update: 'update', unpublished: 'republish', merged: d.mergedInto ? 'original' : 'open' }[k] || 'open';
+    if (!canReviewKb(kbById(d.kb))) return { main: 'open', more: live ? ['edit'] : [], tail: ['download'] };
+    const synced = srcKey(d) !== 'upload' && !!srcById(d.source);
+    const main = { analyzing: 'review', review: 'review', queued: 'publish', failed: isLocked(d) ? (synced ? 'source' : 'replace') : 'retry', update: synced ? 'update' : 'replace', unpublished: 'republish', merged: d.mergedInto ? 'original' : 'open' }[k] || 'open';
     const more = [main !== 'open' && 'open', live && 'edit', live && !kbById(d.kb)?.personal && 'move', canUnpublish(d) && 'unpublish'].filter(Boolean);
     return { main, more, tail: ['download', !d.archived && k !== 'merged' && 'archive'].filter(Boolean) };
   }
-  A['cur-op'] = el => { const d = docById(el.dataset.id); if (d && canReviewKb(kbById(d.kb))) OPS[el.dataset.op]?.run(d); };
+  /** The state's fix as a small row button (All documents), or ''. */
+  function rowFix(d) {
+    const { main } = opsFor(d); if (!ROW_FIX.has(main)) return '';
+    return btn(OPS[main].label, { v: 'secondary', size: 'sm', icon: OPS[main].icon, act: 'cur-op', data: { id: d.id, op: main } });
+  }
+  A['cur-op'] = el => {
+    const d = docById(el.dataset.id), op = el.dataset.op; if (!d || !canOpenDoc(d)) return;
+    const { main, more, tail } = opsFor(d);
+    if ([main, ...more, ...tail].includes(op)) OPS[op]?.run(d);
+  };
   A['cur-doc'] = el => openDrawer('cur-doc', { id: el.dataset.id });
+  /** Row ⋯ (the row itself opens the drawer): what the row and the drawer footer don't already show. */
   MENUS['cur-row'] = el => {
-    const d = docById(el.dataset.id); if (!d) return [];
+    const d = docById(el.dataset.id); if (!d || !canOpenDoc(d)) return [];
     const { main, more, tail } = opsFor(d), item = op => ({ label: OPS[op].label, icon: OPS[op].icon, danger: OPS[op].danger, run: () => OPS[op].run(d) });
-    return [{ label: 'Details', icon: 'info', run: () => openDrawer('cur-doc', { id: d.id }) }, item(main), ...more.map(item), { sep: true }, ...tail.map(item)];
+    const shown = el.dataset.ctx === 'drawer' || (el.dataset.ctx === 'row' && ROW_FIX.has(main));
+    const head = [...(shown ? [] : [main]), ...more].map(item);
+    return head.concat(tail.length ? [...(head.length ? [{ sep: true }] : []), ...tail.map(item)] : []);
   };
   const EVENTS = {
     submitted: ['upload', 'Submitted', ''], resubmitted: ['upload', 'Resubmitted', ''], changes: ['pencil', 'Changes requested', 'warning'],
@@ -573,19 +608,21 @@
   }
   DR['cur-doc'] = ({ id }) => {
     const d = docById(id), kb = d && kbById(d.kb);
-    if (!d || !kb || !canReviewKb(kb)) return { title: 'Document not available', body: emptyState({ icon: 'file', title: 'This document isn’t available', desc: 'It may have been moved to a knowledge base you don’t look after.' }) };
-    const l = lifecycleOf(d), { main, more, tail } = opsFor(d), k = l.key;
+    if (!d || !kb || !canOpenDoc(d)) return { title: 'Document not available', body: emptyState({ icon: 'file', title: 'This document isn’t available', desc: 'It may have been moved to a knowledge base you don’t look after.' }) };
+    const l = lifecycleOf(d), { main } = opsFor(d), k = l.key;
     const opBtn = (op, v = 'secondary') => btn(OPS[op].label, { v, icon: OPS[op].icon, act: 'cur-op', data: { id: d.id, op } });
     const last = [...(d.submission?.events || [])].reverse().find(e => ['changes', 'rejected', 'unpublished'].includes(e.kind));
-    const note = k === 'failed' ? alertBox('danger', 'Couldn’t publish', esc(d.error || 'Publishing stopped partway. Try again.'))
-      : k === 'update' ? alertBox('warning', 'The original changed', 'Answers use the previous version until you publish the update.')
-        : k === 'merged' && d.mergedInto ? alertBox('success', `Published as a new version of “${docById(d.mergedInto)?.name || 'a document'}”`)
-          : ['changes', 'rejected', 'unpublished'].includes(k) && last?.text ? `<blockquote class="cur-tl__text">“${esc(last.text)}” — ${esc(actorName(last.by))}</blockquote>` : '';
+    // The chip names the state; one note says why and what fixes it (never a second title repeating the chip).
+    const fixHint = main === 'source' ? ' Remove the password at the source, then sync again.' : main === 'replace' ? ' Replace the file with a copy without a password.' : '';
+    const saysFix = /remove the password|copy without|sync again|try again/i.test(d.error || '');
+    const note = k === 'failed' ? alertBox('danger', '', esc((d.error || 'Publishing stopped partway. Try again.') + (isLocked(d) && !saysFix ? fixHint : '')))
+      : k === 'merged' && d.mergedInto ? alertBox('success', '', esc(`It replaced the earlier version of “${docById(d.mergedInto)?.name || 'a document'}”.`))
+        : ['changes', 'rejected', 'unpublished'].includes(k) && last?.text ? `<blockquote class="cur-tl__text">“${esc(last.text)}” — ${esc(actorName(last.by))}</blockquote>` : '';
     const published = stageOf(d) === 'published';
-    const body = `<div class="drawer__section"><div class="row gap-8 wrap">${lifeChip(d)}</div><p class="t-sm muted mt-8">${esc(l.desc)}</p>${note ? `<div class="mt-12">${note}</div>` : ''}</div>
+    const body = `<div class="drawer__section"><div class="row gap-8 wrap">${lifeChip(d)}</div>${note ? `<div class="mt-12">${note}</div>` : `<p class="t-sm muted mt-8">${esc(l.desc)}</p>`}</div>
       <div class="drawer__section"><h3 class="drawer__section-title">History</h3>${timeline(d)}</div>
       <div class="drawer__section"><h3 class="drawer__section-title">Details</h3>${published ? X.res.details(d) : kv([
-        ['Knowledge base', `<a class="link" href="#/knowledge/${kb.id}">${esc(kb.name)}</a>`],
+        ['Knowledge base', `<a class="link" href="#${canEditKb(kb) ? kbManageHref(kb) : kbHref(kb)}">${esc(kb.name)}</a>`],
         ['Contributor', esc(contributorName(d))],
         ['Type', esc(kindMeta(res(d).kind).label)],
         ['Size', `${esc(fmtSize(d.size))} · ${plural(d.pages || 1, 'page')}`],
@@ -593,9 +630,8 @@
       ])}</div>`;
     return {
       title: d.name, lead: fileIcon(d.type, 'lg'), desc: esc(kb.name), size: 'lg', body,
-      headActions: (main !== 'open' ? iconBtn('external', 'Open', { act: 'cur-op', data: { id: d.id, op: 'open' } }) : '') + (tail.includes('download') ? iconBtn('download', 'Download', { act: 'cur-op', data: { id: d.id, op: 'download' } }) : ''),
-      footStart: tail.includes('archive') ? btn('Archive', { v: 'ghost', icon: 'archive', act: 'cur-op', data: { id: d.id, op: 'archive' } }) : '',
-      foot: more.filter(op => op !== 'open' && op !== 'move').map(op => opBtn(op, 'tertiary')).join('') + opBtn(main, 'primary'),
+      headActions: iconBtn('more', 'More actions', { menu: 'cur-row', data: { id: d.id, ctx: 'drawer' } }),
+      foot: opBtn(main, 'primary'),
     };
   };
 })();

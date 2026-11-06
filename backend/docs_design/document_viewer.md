@@ -149,8 +149,9 @@ until a bucket rule exists; `rustfs-init` applies one
 ## Reading (web)
 
 - One shared document view renders a rendition for the full document viewer,
-  the chat source panel and the chat file panel; PDFs keep page images, with
-  the text view available beside them.
+  the chat source panel and the chat file panel, in the file's native format
+  (PDF and Word pages, slides, a spreadsheet grid, web-like formats as one
+  continuous page); there is no separate text view. PDFs keep page images.
 - The full viewer is the web route `/doc/{item}`. It reads `GetItem`
   (name, parent collection, size, `indexingState`, `indexedRevision`),
   `GetItem` on the parent collection (name and the caller's `access`) and

@@ -196,7 +196,6 @@ seedWorkspace('ws-finx', () => {
 
   /* ═══════════════ Activity ═══════════════ */
   D.audit = [
-    [5 * MIN, 'u-fx-lan', 'Signed in', 'Sign-in', 'Microsoft', 'success'],
     [1 * HOUR, 'system', 'Sync finished', 'Sources', 'payments-docs repository', 'success'],
     [3 * HOUR, 'u-fx-quan', 'Approved a request', 'Requests', 'Production access — Trần Minh Khoa', 'success'],
     [4 * HOUR, 'u-fx-ha', 'Created an evidence review', 'Work', 'Event streaming platform — evaluation', 'success'],
@@ -204,7 +203,7 @@ seedWorkspace('ws-finx', () => {
     [26 * HOUR, 'u-fx-lan', 'Verified a document', 'Knowledge', 'Access Control Policy.pdf', 'success'],
     [2 * DAY, 'u-fx-bao', 'Published a document', 'Knowledge', 'Fraud model v2 — Model card.pdf', 'success'],
     [3 * DAY, 'u-fx-lan', 'Added request type', 'Requests', 'Access to unmasked customer data', 'success'],
-    [5 * DAY, 'u-fx-lan', 'Suspended member', 'People & access', 'Ngô Hoàng Sơn', 'success'],
+    [5 * DAY, 'u-fx-lan', 'Suspended member', 'People', 'Ngô Hoàng Sơn', 'success'],
     [6 * DAY, 'u-fx-ha', 'Created space', 'Spaces', 'Core Banking Modernization', 'success'],
     [8 * DAY, 'u-fx-lan', 'Updated assistant instructions', 'Settings', 'Assistant', 'success'],
   ].map(([t, actor, action, type, target, outcome], i) => ({ id: 'ev-fx-' + (700 - i), at: ago(t), actor, action, type, target, outcome, ip: '10.40.' + (2 + i) + '.' + (14 + i * 3), device: i % 3 ? 'Chrome on macOS' : 'Edge on Windows' }));
@@ -232,23 +231,24 @@ seedWorkspace('ws-finx', () => {
       { title: 'Check a cut-off', prompt: 'What is the cut-off for interbank transfers?' },
       { title: 'Workplace', prompt: 'How many office days are required?' },
     ],
-    roleStarters: {
-      engineer: [
+    /* Starters for one role or group (keyed by its id); everyone else sees `starters`. A group list wins over a role list. */
+    audienceStarters: {
+      'r-member': [
         { title: 'Get access', prompt: 'How do I get production access?' },
         { title: 'Architecture', prompt: 'What does ADR-031 say about idempotency?' },
         { title: 'On call', prompt: 'What do I do when the payment gateway times out?' },
       ],
-      lead: [
+      'r-km': [
         { title: 'Incidents', prompt: 'When must we notify the SBV about an incident?' },
         { title: 'Decide', prompt: 'Compare the event streaming options on data residency and 3-year cost.' },
         { title: 'Access review', prompt: 'What do system owners have to do in the quarterly access review?' },
       ],
-      analyst: [
+      'g-fx-data': [
         { title: 'Define a metric', prompt: 'How do we define a monthly active customer?' },
         { title: 'Data access', prompt: 'What do I need to query unmasked customer data?' },
         { title: 'Find a table', prompt: 'Which warehouse table has the settlement status of each transaction?' },
       ],
-      wsadmin: [
+      'r-admin': [
         { title: 'Answer consistently', prompt: 'When must we notify the SBV about an incident?' },
         { title: 'Spot gaps', prompt: 'What did people ask about production access this week that we couldn’t answer?' },
         { title: 'Draft a notice', prompt: 'Draft a reminder about the quarterly access review deadline.' },

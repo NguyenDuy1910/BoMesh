@@ -42,7 +42,7 @@ D.workspaces = [
 /* Permissions in product language. Codes stay internal (tooltip only). */
 D.permCatalog = [
   { group: 'Workspace', items: [['tenant.read', 'View the workspace overview'], ['tenant.manage', 'Change workspace settings and assistant setup']] },
-  { group: 'People & access', items: [['user.manage', 'Add, suspend and remove members'], ['group.manage', 'Create and manage groups'], ['role.manage', 'Create and edit roles'], ['access.manage', 'Approve or deny access requests']] },
+  { group: 'People', items: [['user.manage', 'Add, suspend and remove members'], ['group.manage', 'Create and manage groups'], ['role.manage', 'Create and edit roles'], ['access.manage', 'Approve or deny access requests']] },
   { group: 'Knowledge', items: [['knowledge.read', 'Ask questions and browse knowledge'], ['knowledge.contribute', 'Contribute documents for review'], ['knowledge.manage', 'Create knowledge bases; review and publish what is submitted to bases they own']] },
   { group: 'Sources', items: [['source.manage', 'Connect and manage sources and schedules'], ['ingestion.read', 'View sync history'], ['ingestion.run', 'Start syncs and reprocess documents'], ['ingestion.manage', 'Cancel any running sync']] },
   { group: 'Activity', items: [['audit.read', 'View the activity log and sign-ins']] },
@@ -160,27 +160,25 @@ D.requests = [
   { id: 'req-3', user: 'u-omar', kb: 'kb-product', role: 'editor', note: 'I own the API reference pages and want to upload the new webhook docs.', at: ago(3 * DAY), status: 'pending' },
 ];
 D.audit = [
-  [3 * MIN, 'u-linh', 'Signed in', 'Sign-in', 'Google', 'success'],
   [12 * MIN, 'u-an', 'Uploaded 2 documents', 'Knowledge', 'HR Policies', 'success'],
   [40 * MIN, 'u-ben', 'Started a sync', 'Sources', 'Product Docs space', 'success'],
   [2 * HOUR, 'system', 'Sync finished with issues', 'Sources', 'People Ops space', 'failure'],
-  [3 * HOUR, 'u-linh', 'Changed role to Knowledge manager', 'People & access', 'Ben Walker', 'success'],
+  [3 * HOUR, 'u-linh', 'Changed role to Knowledge manager', 'People', 'Ben Walker', 'success'],
   [5 * HOUR, 'u-tuan', 'Shared knowledge base with Engineering', 'Knowledge', 'Engineering Runbooks', 'success'],
   [6 * HOUR, 'u-tuan', 'Created knowledge base', 'Knowledge', 'Engineering Runbooks', 'success'],
   [9 * HOUR, 'u-sara', 'Paused a source', 'Sources', 'Executed contracts', 'success'],
-  [20 * HOUR, 'u-hoa', 'Sign-in blocked — account suspended', 'Sign-in', 'Password', 'failure'],
   [26 * HOUR, 'system', 'Sync failed', 'Sources', 'Sales Enablement', 'failure'],
-  [28 * HOUR, 'u-linh', 'Suspended member', 'People & access', 'Hoa Vu', 'success'],
-  [2 * DAY, 'u-linh', 'Updated assistant instructions', 'Settings', 'Assistant setup', 'success'],
-  [2 * DAY, 'u-mai', 'Approved access request', 'People & access', 'James Carter → Finance & Procurement', 'success'],
+  [28 * HOUR, 'u-linh', 'Suspended member', 'People', 'Hoa Vu', 'success'],
+  [2 * DAY, 'u-linh', 'Updated assistant instructions', 'Settings', 'Assistant', 'success'],
+  [2 * DAY, 'u-mai', 'Approved access request', 'People', 'James Carter → Finance & Procurement', 'success'],
   [3 * DAY, 'u-mai', 'Uploaded 4 documents', 'Knowledge', 'Finance & Procurement', 'success'],
   [4 * DAY, 'u-linh', 'Cancelled a sync', 'Sources', 'Sales Enablement', 'success'],
   [5 * DAY, 'u-chi', 'Uploaded a document', 'Knowledge', 'HR Policies', 'success'],
-  [6 * DAY, 'u-tuan', 'Created group', 'People & access', 'Leadership', 'success'],
-  [7 * DAY, 'u-linh', 'Created role', 'People & access', 'Auditor', 'success'],
+  [6 * DAY, 'u-tuan', 'Created group', 'People', 'Leadership', 'success'],
+  [7 * DAY, 'u-linh', 'Created role', 'People', 'Auditor', 'success'],
   [9 * DAY, 'u-linh', 'Renamed workspace', 'Settings', 'Northwind Group', 'success'],
   [12 * DAY, 'u-sara', 'Started a sync', 'Sources', 'Executed contracts', 'success'],
-  [14 * DAY, 'u-linh', 'Added member', 'People & access', 'Omar Haddad', 'success'],
+  [14 * DAY, 'u-linh', 'Added member', 'People', 'Omar Haddad', 'success'],
   [15 * DAY, 'u-linh', 'Archived document', 'Knowledge', 'Travel Policy 2024.pdf', 'success'],
 ].map(([t, actor, action, type, target, outcome], i) => ({ id: 'ev-' + (900 - i), at: ago(t), actor, action, type, target, outcome, ip: '10.4.' + (12 + i) + '.' + (30 + i * 3), device: 'Chrome on macOS' }));
 D.signins = [

@@ -2,7 +2,7 @@
    Used by Home, Browse, Library, collections, knowledge bases, spaces and the reader. */
 
 /* ───── Knowledge area section nav (X.res.hubHeader) ───── */
-.hub-nav { margin: -12px 0 24px; overflow-x: auto; scrollbar-width: none; }
+.hub-nav { margin: -8px 0 24px; overflow-x: auto; scrollbar-width: none; }
 .hub-nav::-webkit-scrollbar { display: none; }
 .hub-tabs .tabs__tab { white-space: nowrap; }
 
@@ -14,7 +14,10 @@
 .res-row.is-active { background: var(--accent-soft); }
 .res-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .res-row__check { flex: none; padding-top: 6px; }
+/* Ordered reading list (collections): the position leads the row. */
+.res-row__pos { flex: none; width: 20px; padding-top: 7px; text-align: right; font-size: 13px; line-height: 18px; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; }
 .res-row__lead { flex: none; padding-top: 2px; }
+.res-row__read { flex: none; display: inline-flex; align-items: center; gap: 3px; font-size: 12px; line-height: 16px; font-weight: 400; color: var(--success-soft-foreground); }
 .res-row__body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .res-row__title { display: flex; align-items: center; gap: 8px; min-width: 0; font-weight: 500; line-height: 20px; }
 .res-row__meta { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; line-height: 16px; color: var(--muted); white-space: nowrap; overflow: hidden; }
@@ -93,23 +96,51 @@
 /* No rendition (unsupported or not readable): a calm, typed tile. */
 .doc-thumb--blank { display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-end; gap: 6px; padding: 14px 16px; }
 .doc-thumb--blank .file-icon { margin-bottom: auto; }
-.doc-thumb__title { font-size: 14px; line-height: 19px; font-weight: 600; color: var(--foreground); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.doc-thumb--blank .doc-thumb__kind { font-size: 12px; line-height: 16px; }
 .doc-thumb__kind { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; line-height: 14px; color: var(--muted); }
 .doc-thumb--danger { background: color-mix(in oklab, var(--danger-soft) 60%, var(--surface-secondary)); }
 .doc-thumb--accent { background: color-mix(in oklab, var(--accent-soft) 60%, var(--surface-secondary)); }
 .doc-thumb--success { background: color-mix(in oklab, var(--success-soft) 60%, var(--surface-secondary)); }
 .doc-thumb--warning { background: color-mix(in oklab, var(--warning-soft) 60%, var(--surface-secondary)); }
 
+/* ───── Knowledge dialogs: one vertical rhythm (the stack owns the spacing, not .field + .field) ───── */
+.kn-form { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.kn-form > :is(.field, .fieldset, .disclosure), .kn-form .kb-create-row > .field, .kn-form .res-more > .field { margin-top: 0; }
+
 /* ───── Pickers in dialogs (collections, spaces, topics) ───── */
+/* Legacy bordered picker (still used by spaces.js). New pickers use the shared .option-list. */
 .res-picks { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius-xl); max-height: 300px; overflow: auto; }
 .res-pick { padding: 10px 12px; }
 .res-pick + .res-pick { border-top: 1px solid var(--separator); }
-.res-tgroups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-xl); max-height: 280px; overflow: auto; }
+/* Option rows: name over a quiet meta line, optionally led by a mark (space, file type). */
+.option-list .checkbox__label { flex: 1 1 auto; min-width: 0; }
+.res-opt { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.res-opt--mark { flex-direction: row; align-items: center; gap: 10px; }
+.res-opt__text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.res-opt__name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.res-opt__meta { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: 12px; line-height: 16px; color: var(--muted); }
+.res-opt__meta .i { flex: none; }
+.option-list .checkbox:has(input:disabled) { cursor: default; }
+.option-list .checkbox:has(input:disabled) .checkbox__control { opacity: .55; }
+/* Topics (Edit details): domain groups inside a disclosure. */
+.res-tgroups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 24px; max-height: 280px; overflow: auto; padding: 4px 2px 2px; }
 .res-tgroup { display: flex; flex-direction: column; gap: 6px; }
-.res-tgroup__items { display: flex; flex-direction: column; gap: 4px; }
+.res-tgroup__title { font-size: 12px; line-height: 16px; font-weight: 600; color: var(--muted); }
+.res-tgroup__items { display: flex; flex-direction: column; gap: 6px; }
+.res-tgroup__items .checkbox__label { font-size: 13px; line-height: 20px; }
+.res-more { gap: 16px; padding-top: 4px; }
+.res-newcol { margin-left: -8px; }
+
+/* New / edit collection: who can see it */
+.col-space { margin-top: 12px; animation: rise var(--dur) var(--ease-out); }
+.col-only { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
 
 @container app (max-width: 679px) {
   .res-row { padding: 12px; gap: 10px; }
-  .res-row__trail .res-save:not(.is-on) { display: none; }
+  .res-row__pos { width: 16px; }
+  .res-row__title { flex-wrap: wrap; row-gap: 2px; }
+  .res-row__title .truncate { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; flex-basis: 100%; }
   .res-tgroups { grid-template-columns: minmax(0, 1fr); }
+  .res-more { grid-template-columns: minmax(0, 1fr); }
+  .col-scope .choice-group { grid-template-columns: minmax(0, 1fr) !important; }
 }

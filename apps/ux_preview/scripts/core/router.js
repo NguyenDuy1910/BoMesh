@@ -3,7 +3,7 @@
    every screen, its mode (auth | workspace | platform | proto), its nav
    item, and the permission that gates it. Feature modules register the
    page renderer as P[page]. */
-const P = {}, A = {}, M = {}, DR = {}, MENUS = {}, AFTER = {};
+const P = {}, A = {}, M = {}, DR = {}, PO = {}, MENUS = {}, AFTER = {};
 /** Cross-module functions (e.g. X.inboxUnread, X.openCitation). Features own their keys. */
 const X = {};
 const ROUTES = [];
@@ -27,22 +27,23 @@ route('/requests', { page: 'requests', mode: 'workspace', nav: 'requests', title
 route('/requests/new', { page: 'requestNew', mode: 'workspace', nav: 'requests', title: 'New request', module: 'requests' });
 route('/requests/:id', { page: 'requestItem', mode: 'workspace', nav: 'requests', title: 'Request', module: 'requests' });
 route('/chat', { page: 'chatHome', mode: 'workspace', nav: 'chat', title: 'New chat', bare: true });
-route('/chat/:id', { page: 'chatThread', mode: 'workspace', nav: 'chat', title: 'Chat', bare: true });
+route('/chat/:id', { page: 'chatThread', mode: 'workspace', nav: 'chat', title: 'Conversation', bare: true });
 route('/project/:id', { page: 'project', mode: 'workspace', nav: 'projects', title: 'Project' });
 route('/chats', { page: 'chats', mode: 'workspace', nav: 'chats', title: 'Conversations', simLoad: true });
 route('/inbox', { page: 'inbox', mode: 'workspace', nav: 'inbox', title: 'Inbox', simLoad: true });
 route('/search', { page: 'search', mode: 'workspace', nav: 'search', title: 'Search' });
-// Knowledge: Browse (one catalog for search and filters) → Reader; Library is personal; bases are the governed homes. Discovery lives on Home.
+// Knowledge: Browse (the organization's knowledge: search, topics, collections shared with you) → Reader; My library is personal. Discovery also starts on Home.
 route('/knowledge', { page: 'catalog', mode: 'workspace', nav: 'knowledge', title: 'Knowledge', simLoad: true });
 route('/knowledge/library', { page: 'library', mode: 'workspace', nav: 'knowledge', title: 'My library', simLoad: true });
-route('/knowledge/bases', { page: 'kbList', mode: 'workspace', nav: 'knowledge', title: 'Knowledge bases', simLoad: true });
 route('/knowledge/collections/:id', { page: 'collection', mode: 'workspace', nav: 'knowledge', title: 'Collection', simLoad: true });
-route('/knowledge/:id', { page: 'kbDetail', mode: 'workspace', nav: 'knowledge', title: 'Knowledge base', simLoad: true });
 route('/doc/:id', { page: 'docViewer', mode: 'workspace', nav: 'knowledge', title: 'Document', bare: true });
 // Workspace admin
 route('/overview', { page: 'overview', mode: 'workspace', nav: 'overview', title: 'Overview', perm: 'tenant.manage', simLoad: true });
 // Curation and publication: review queue, every document's lifecycle, quality and topics (reviewers = owners of the bases).
 route('/documents', { page: 'documentsAdmin', mode: 'workspace', nav: 'documents', title: 'Documents', perm: 'knowledge.manage', simLoad: true });
+// Knowledge bases: the governed homes — who can see each one, the sources that feed it, its details (their owners and editors).
+route('/bases', { page: 'kbList', mode: 'workspace', nav: 'bases', title: 'Knowledge bases', simLoad: true });
+route('/bases/:id', { page: 'kbDetail', mode: 'workspace', nav: 'bases', title: 'Knowledge base', simLoad: true });
 route('/sources', { page: 'sources', mode: 'workspace', nav: 'sources', title: 'Sources', perm: 'source.manage', simLoad: true });
 route('/connections', { page: 'connections', mode: 'workspace', nav: 'connections', title: 'Connections', perm: 'source.manage', simLoad: true });
 route('/people', { page: 'people', mode: 'workspace', nav: 'people', title: 'People', perm: 'user.manage', simLoad: true });

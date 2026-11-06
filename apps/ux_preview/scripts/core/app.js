@@ -7,7 +7,7 @@ function render() {
   const cur = parseHash(); S.cur = cur;
   const changed = cur.path !== S.lastPath;
   if (changed) {
-    S.lastPath = cur.path; S.pageState = 'live'; S.menu = null; S.navOpen = false; S.palette = null; S.drawer = null; S.modal = null;
+    S.lastPath = cur.path; S.pageState = 'live'; S.menu = null; S.navOpen = false; S.palette = null; S.drawer = null; S.modal = null; S.popover = null;
     if (cur.r.simLoad && !S.visited.has(cur.path)) { S.navLoading = true; setTimeout(() => { S.navLoading = false; render(); }, 380); }
     S.visited.add(cur.path);
   }
@@ -35,12 +35,27 @@ function render() {
   renderProto();
   if (!changed) restoreFocus(snap, '#app');
   else { const sc = $('#scroll'); if (sc) sc.scrollTop = 0; $$('#app input[data-indeterminate]').forEach(el => (el.indeterminate = true)); }
+  syncOverflow(changed);
+  if (S.popover) positionPopover();   // after scroll positions are restored, so it stays on its trigger
   document.title = (cur.r.title || 'BoMesh') + ' · BoMesh';
   try { AFTER[cur.r.page]?.({ params: cur.params, query: cur.query, changed }); } catch (e) { console.error(e); }
   if (changed) { const af = $('#app [data-autofocus]'); if (af) af.focus(); }
   persist();
 }
 const refresh = () => render();
+/** Scrollable strips (tabs; any [data-overflow]) get an edge fade on the side that has more; the current tab stays in view. */
+function syncOverflow(reveal) {
+  $$('[data-overflow]').forEach(el => {
+    if (reveal) { const cur = el.querySelector('[aria-current="page"],[aria-selected="true"],[aria-pressed="true"]'); if (cur && el.scrollWidth > el.clientWidth) el.scrollLeft = Math.max(0, cur.offsetLeft - el.clientWidth / 2 + cur.offsetWidth / 2); }
+    overflowEdges(el);
+  });
+}
+function overflowEdges(el) {
+  const more = el.scrollWidth - el.clientWidth > 1;
+  el.classList.toggle('is-fade-start', more && el.scrollLeft > 1);
+  el.classList.toggle('is-fade-end', more && el.scrollLeft < el.scrollWidth - el.clientWidth - 1);
+}
+document.addEventListener('scroll', e => { if (e.target.matches?.('[data-overflow]')) overflowEdges(e.target); }, true);
 
 /* ── Generic actions ── */
 A['close-modal'] = () => closeModal();
@@ -52,13 +67,17 @@ A.go = el => go(el.dataset.to);
 A['retry-load'] = () => { S.pageState = 'live'; S.navLoading = true; refresh(); setTimeout(() => { S.navLoading = false; refresh(); }, 600); };
 A.sort = el => { const u = ui(el.dataset.ui); const k = el.dataset.key; u.sort = u.sort?.key === k ? (u.sort.dir === 'asc' ? { key: k, dir: 'desc' } : null) : { key: k, dir: 'asc' }; refresh(); };
 A['ui-clear-q'] = el => { const u = ui(el.dataset.ui); u.q = ''; u.page = 1; refresh(); $('#' + el.dataset.ui + '-q')?.focus(); };
+/** searchField's × (and Escape): empty the input and replay the input event, so uiKey / bind / act handlers all see it. */
+function clearSearchInput(inp) { if (!inp) return; inp.value = ''; inp.focus(); inp.dispatchEvent(new Event('input', { bubbles: true })); }
+A['search-clear'] = el => clearSearchInput(el.closest('.search-field')?.querySelector('input'));
 A['ui-clear'] = el => { const u = ui(el.dataset.ui); (el.dataset.fields || '').split(',').filter(Boolean).forEach(f => (u[f] = '')); u.q = ''; u.page = 1; refresh(); };
 A['ui-page'] = el => { ui(el.dataset.ui).page = +el.dataset.page; refresh(); $('#scroll')?.scrollTo({ top: 0 }); };
+A['ui-toggle'] = el => { const p = el.dataset.path; setPath(p, !getPath(p)); S.modal || S.drawer ? refreshLayer() : refresh(); };
 A['sel-toggle'] = (el, e) => { e?.stopPropagation(); const u = ui(el.dataset.ui); u.sel = u.sel || {}; u.sel[el.dataset.id] = !u.sel[el.dataset.id]; refresh(); };
 A['sel-all'] = (el, e) => { e?.stopPropagation(); const u = ui(el.dataset.ui); const ids = el.dataset.ids.split(',').filter(Boolean); const all = ids.every(id => u.sel?.[id]); u.sel = all ? {} : Object.fromEntries(ids.map(id => [id, true])); refresh(); };
 A['sel-clear'] = el => { ui(el.dataset.ui).sel = {}; refresh(); };
-A['toast-close'] = el => { S.toasts = S.toasts.filter(t => t.id !== el.dataset.id); renderLayer(); };
-A['toast-action'] = el => { const t = S.toasts.find(t => t.id === el.dataset.id); S.toasts = S.toasts.filter(x => x !== t); renderLayer(); t?.action?.run(); };
+A['toast-close'] = el => dismissToast(el.dataset.id);
+A['toast-action'] = el => { const t = S.toasts.find(t => t.id === el.dataset.id); dismissToast(el.dataset.id); t?.action?.run(); };
 A.copy = el => copyText(el.dataset.text || '', el.dataset.msg || 'Copied');
 
 /* ── Event delegation ── */
@@ -68,6 +87,13 @@ document.addEventListener('click', e => {
   const pi = e.target.closest('[data-pi]');
   if (pi && S.palette) { const it = S.palette.flat[+pi.dataset.pi]; S.palette = null; renderLayer(); it?.run(); return; }
   if (S.menu && !e.target.closest('#menu')) { const same = e.target.closest('[data-menu]') === S.menu.trigger; closeMenu(false); if (same) return; }
+  if (S.popover && !e.target.closest('#popover')) {
+    const tg = e.target.closest('[data-popover]'), same = tg && tg === popoverTrigger();
+    // A click outside closes the popover; the trigger itself toggles it. Clicks on the sheet backdrop are handled by its data-act.
+    if (!e.target.closest('[data-act="popover-close"]')) { closePopover(same); if (same) return; }
+  }
+  const po = e.target.closest('[data-popover]');
+  if (po && !po.disabled && !e.target.closest('#popover')) { e.preventDefault(); e.stopPropagation(); if (PO[po.dataset.popover]) openPopover(po); return; }
   const m = e.target.closest('[data-menu]');
   if (m && !m.disabled) { e.preventDefault(); e.stopPropagation(); const items = MENUS[m.dataset.menu]?.(m); if (items?.length) openMenu(m, items, m.dataset.menu + ':' + (m.dataset.id || '')); return; }
   const a = e.target.closest('[data-act]');
@@ -103,6 +129,8 @@ document.addEventListener('keydown', e => {
     if (k === 'Enter') { e.preventDefault(); const it = S.palette.flat?.[S.palette.sel]; S.palette = null; renderLayer(); it?.run(); return; }
     return;
   }
+  if (S.popover && !S.menu && k === 'Escape') { e.preventDefault(); closePopover(true); return; }
+  if (k === 'Escape' && e.target.matches?.('.search-field input') && e.target.value) { e.preventDefault(); clearSearchInput(e.target); return; }
   if (S.menu) {
     const items = $$('#menu .menu-item:not([disabled])'); const i = items.indexOf(document.activeElement);
     if (k === 'Escape' || k === 'Tab') { e.preventDefault(); closeMenu(true); return; }
@@ -132,7 +160,7 @@ document.addEventListener('keydown', e => {
   if ((k === 'Enter' || k === ' ') && t.matches?.('[data-act][role="button"],tr[data-act],.card--action[data-act]:not(button)')) { e.preventDefault(); A[t.dataset.act]?.(t, e); }
 });
 window.addEventListener('hashchange', render);
-window.addEventListener('resize', () => S.menu && closeMenu(false));
+window.addEventListener('resize', () => { if (S.menu) closeMenu(false); if (S.popover) renderLayer(); syncOverflow(false); });
 
 /* ── Boot (runs after every feature module registered its pages) ── */
 function boot() {

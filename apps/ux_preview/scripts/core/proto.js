@@ -8,11 +8,11 @@ const JOURNEYS = [
   { ws: 'ws-northwind', who: 'member', title: 'Start from Home: ask, find or pick up', run: () => go('/home') },
   { ws: 'ws-northwind', who: 'member', title: 'Verify where an answer came from', run: () => goThen('/chat/c1', () => A['cite-open']?.({ dataset: { msg: 'm2', n: '1' } })) },
   { ws: 'ws-northwind', who: 'member', title: 'Find verified sales material', run: () => go('/knowledge?topic=d-sales&trust=verified') },
-  { ws: 'ws-northwind', who: 'member', title: 'Request access to restricted knowledge', run: () => go('/knowledge/bases') },
+  { ws: 'ws-northwind', who: 'member', title: 'Request access to restricted knowledge', run: () => goThen('/knowledge', () => A['kb-locked']?.()) },
   { ws: 'ws-northwind', who: 'member', title: 'Contribute a document and track it', run: () => goThen('/knowledge', () => A['contribute']?.()) },
   { ws: 'ws-northwind', who: 'member', title: 'Revise a document a reviewer sent back', run: () => go('/knowledge/library?tab=contributions&open=d-sub-2') },
   { ws: 'ws-northwind', who: 'member', title: 'First-run product tour', run: () => X.startTour?.() },
-  { ws: 'ws-northwind', who: 'admin', title: 'Create a knowledge base and add files', run: () => goThen('/knowledge/bases', () => A['kb-create']?.()) },
+  { ws: 'ws-northwind', who: 'admin', title: 'Create a knowledge base and add files', run: () => goThen('/bases', () => A['kb-create']?.()) },
   { ws: 'ws-northwind', who: 'admin', title: 'Review and publish submissions', run: () => go('/documents?tab=review') },
   { ws: 'ws-northwind', who: 'admin', title: 'Merge a duplicate document', run: () => go('/documents?tab=quality&seg=duplicates') },
   { ws: 'ws-northwind', who: 'admin', title: 'Connect a source', run: () => goThen('/sources', () => A['src-connect']?.()) },
@@ -31,6 +31,7 @@ const JOURNEYS = [
   { ws: 'ws-finx', who: 'lead', title: 'Review contributions to Payments Platform', run: () => go('/documents?tab=review') },
   { ws: 'ws-finx', who: 'lead', title: 'Compare event streaming platforms', run: () => go('/work/w-review-stream') },
   { ws: 'ws-finx', who: 'lead', title: 'Curate the payments on-call kit', run: () => go('/knowledge/collections/col-fx-oncall') },
+  { ws: 'ws-finx', who: 'lead', title: 'Manage who can see Payments Platform', run: () => go('/bases/kb-fx-pay') },
   { ws: 'ws-finx', who: 'analyst', title: 'Find how a metric is defined', run: () => go('/knowledge?topic=t-metrics') },
   { ws: 'ws-finx', who: 'analyst', title: 'Ask about active customers', run: () => go('/chat/fx-c3') },
   { ws: 'ws-finx', who: 'analyst', title: 'Request production access without the training', run: () => go('/requests/new?type=rt-prod') },
@@ -56,7 +57,7 @@ function renderProto() {
   document.body.classList.add('has-proto'); // the bar always owns its band below the product
   if (S.protoMin) { root.innerHTML = `<div class="proto proto--min"><button type="button" class="proto__btn" data-act="proto-max" aria-label="Show prototype controls"><span class="proto__dot"></span>Prototype</button></div>`; return; }
   const stateable = ['workspace', 'platform'].includes(S.cur?.r.mode);
-  const pb = (label, act, o = {}) => `<button type="button" class="proto__btn ${o.icon && !label ? 'proto__btn--icon' : ''}" ${act ? `data-act="${act}"` : ''} ${o.menu ? `data-menu="${o.menu}" aria-haspopup="menu" aria-expanded="false"` : ''} ${o.value ? `data-value="${o.value}"` : ''} ${o.pressed != null ? `aria-pressed="${o.pressed}"` : ''} ${o.tip ? `aria-label="${o.tip}" title="${o.tip}"` : ''}>${o.icon ? ic(o.icon, 'i-sm') : ''}${label ? esc(label) : ''}</button>`;
+  const pb = (label, act, o = {}) => `<button type="button" class="proto__btn ${o.icon && !label ? 'proto__btn--icon' : ''}" ${act ? `data-act="${act}"` : ''} ${o.menu ? `data-menu="${o.menu}" aria-haspopup="menu" aria-expanded="false"` : ''} ${o.value ? `data-value="${o.value}"` : ''} ${o.pressed != null ? `aria-pressed="${o.pressed}"` : ''} ${o.tip ? `aria-label="${esc(o.tip)}" data-tip="${esc(o.tip)}"` : ''}>${o.icon ? ic(o.icon, 'i-sm') : ''}${label ? esc(label) : ''}</button>`;
   root.innerHTML = `<div class="proto" role="toolbar" aria-label="Prototype controls">
     <span class="proto__label"><span class="proto__dot" style="display:inline-block;margin-right:6px"></span>Prototype</span>
     ${DEMO_WORKSPACES.map(([id, l]) => pb(l, 'proto-ws', { value: id, pressed: S.ws === id || (id === 'ws-northwind' && S.ws === 'ws-nwfin') })).join('')}

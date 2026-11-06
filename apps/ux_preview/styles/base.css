@@ -5,8 +5,10 @@ html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
   font-family: var(--font-sans);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--text-md);
+  line-height: var(--leading-md);
+  font-weight: var(--weight-regular);
+  text-rendering: optimizeLegibility;
   color: var(--foreground);
   background: var(--background);
   -webkit-font-smoothing: antialiased;
@@ -37,15 +39,17 @@ table { border-collapse: separate; border-spacing: 0; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* Typography */
-.t-display { font-size: 28px; line-height: 36px; font-weight: 600; letter-spacing: -0.02em; }
-.t-title { font-size: 20px; line-height: 28px; font-weight: 600; letter-spacing: -0.01em; }
-.t-heading { font-size: 16px; line-height: 24px; font-weight: 600; }
-.t-subheading { font-size: 14px; line-height: 20px; font-weight: 600; }
-.t-body { font-size: 14px; line-height: 20px; }
-.t-sm { font-size: 13px; line-height: 18px; }
-.t-xs { font-size: 12px; line-height: 16px; }
-.t-label { font-size: 12px; line-height: 16px; font-weight: 500; color: var(--muted); }
-.t-num { font-size: 24px; line-height: 32px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.t-display { font-size: var(--text-3xl); line-height: var(--leading-3xl); font-weight: var(--weight-semibold); letter-spacing: -0.022em; text-wrap: balance; }
+.t-title { font-size: var(--text-2xl); line-height: var(--leading-2xl); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tight); }
+.t-heading { font-size: var(--text-lg); line-height: var(--leading-lg); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-snug); }
+.t-subheading { font-size: var(--text-md); line-height: var(--leading-md); font-weight: var(--weight-semibold); }
+.t-body { font-size: var(--text-md); line-height: var(--leading-md); }
+.t-sm { font-size: var(--text-sm); line-height: var(--leading-sm); }
+.t-xs { font-size: var(--text-xs); line-height: var(--leading-xs); }
+.t-label { font-size: var(--text-xs); line-height: var(--leading-xs); font-weight: var(--weight-medium); color: var(--muted); }
+.t-num { font-size: 24px; line-height: 32px; font-weight: var(--weight-semibold); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+h1, h2, h3 { text-wrap: balance; }
+p { text-wrap: pretty; }
 .muted { color: var(--muted); }
 .fg { color: var(--foreground); }
 .strong { font-weight: 600; }

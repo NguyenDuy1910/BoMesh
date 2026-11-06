@@ -34,16 +34,39 @@ function canSeeDoc(d) {
   return stageOf(d) === 'published' ? canReadKb(kb) : isMine(d) || canReviewKb(kb);
 }
 
+/* ═══════════════ Knowledge base access (one vocabulary everywhere) ═══════════════
+   General access and roles use these words in every surface: create dialog, chips, the Access tab,
+   filters, Share, Request access and the connect-source wizard. */
+const KB_ACCESS = {
+  workspace: { label: 'Everyone', icon: 'globe' },
+  restricted: { label: 'Restricted', icon: 'users' },
+  private: { label: 'Private', icon: 'lock' },
+};
+/** The long description of a general-access level. space = the owning space's name, when there is one. */
+function kbAccessDesc(key, space = '') {
+  if (key === 'workspace') return `Anyone in ${curWs()?.name || 'the workspace'} can find it and ask about it.`;
+  if (key === 'private') return 'Only its owners.';
+  return space ? `Only the people and groups you add, plus members of ${space}.` : 'Only the people and groups you add.';
+}
+/** Filter / Select options: [[key, label]]. */
+const KB_ACCESS_OPTIONS = Object.entries(KB_ACCESS).map(([k, a]) => [k, a.label]);
+const KB_ROLES = {
+  viewer: { label: 'Viewer', icon: 'eye', desc: 'Can search and read its documents.' },
+  editor: { label: 'Editor', icon: 'pencil', desc: 'Can also add documents and edit their details.' },
+  owner: { label: 'Owner', icon: 'shield', desc: 'Can also review submissions and manage access and settings.' },
+};
+const KB_ROLE_OPTIONS = Object.entries(KB_ROLES).map(([k, r]) => [k, r.label]);
+
 /* ═══════════════ Lifecycle (one label for people) ═══════════════ */
 const LIFECYCLE = {
   analyzing: { tone: 'accent', label: 'Analyzing', icon: 'sparkles', live: true, desc: 'Reading the file and suggesting a type, topics and a knowledge base.' },
   review: { tone: 'accent', label: 'In review', icon: 'clock', desc: 'A reviewer will check it before it’s published.' },
   changes: { tone: 'warning', label: 'Changes requested', icon: 'pencil', desc: 'A reviewer asked for changes before it can be published.' },
-  rejected: { tone: 'danger', label: 'Not approved', icon: 'x-circle', desc: 'It won’t be published.' },
+  rejected: { tone: 'danger', label: 'Declined', icon: 'x-circle', desc: 'A reviewer declined it. It won’t be published.' },
   queued: { tone: 'default', label: 'Waiting to publish', icon: 'clock', desc: 'Approved. It becomes searchable once it’s published.' },
   publishing: { tone: 'accent', label: 'Publishing', icon: 'loader', live: true, desc: 'It will be searchable in a few minutes.' },
   published: { tone: 'success', label: 'Published', icon: 'check-circle', quiet: true, desc: 'Searchable and available to the assistant.' },
-  update: { tone: 'warning', label: 'Update available', icon: 'refresh', desc: 'The original changed. Answers use the previous version until it’s republished.' },
+  update: { tone: 'warning', label: 'Update available', icon: 'refresh', desc: 'The original changed at its source. Answers use the previous version until you publish the update.' },
   failed: { tone: 'danger', label: 'Couldn’t publish', icon: 'alert-circle', desc: 'It was approved but couldn’t be made searchable.' },
   merged: { tone: 'success', label: 'Published as new version', icon: 'check-circle', quiet: true, desc: 'It replaced the earlier version of the document.' },
   stored: { tone: 'default', label: 'Stored, not searchable', icon: 'file', desc: 'This file type can’t be searched. People can still download it.' },
@@ -68,7 +91,7 @@ const lifeChip = (d, size) => { const l = lifecycleOf(d); return chip(l.label, {
 /** Groups for filters: [key, label, lifecycle keys]. */
 const LIFE_GROUPS = [
   ['review', 'In review', ['analyzing', 'review']], ['changes', 'Changes requested', ['changes']], ['attention', 'Needs attention', ['failed', 'queued', 'update']],
-  ['publishing', 'Publishing', ['publishing']], ['published', 'Published', ['published', 'stored']], ['rejected', 'Not approved', ['rejected']], ['unpublished', 'Unpublished', ['unpublished']],
+  ['publishing', 'Publishing', ['publishing']], ['published', 'Published', ['published', 'stored']], ['rejected', 'Declined', ['rejected']], ['unpublished', 'Unpublished', ['unpublished']],
 ];
 
 /* ═══════════════ Queries ═══════════════ */

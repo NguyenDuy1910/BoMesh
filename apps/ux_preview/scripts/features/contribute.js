@@ -41,7 +41,7 @@
     if (base && (!canShare() || !canSeeDoc(base))) { toast('You can’t submit a new version of this document', { tone: 'danger' }); return; }
     const share = !!base || (canShare() && ds.private !== '1' && !kb?.personal);
     if (!share && !personalKb()) { toast('You can’t add files to any knowledge base', { tone: 'danger' }); return; }
-    S.ui.ctb = { mode: share ? 'share' : 'private', kb: kb && contributionTargets().includes(kb) ? kb.id : '', note: '', files: [], busy: false, versionOf: base?.id || '', touched: false };
+    S.ui.ctb = { mode: share ? 'share' : 'private', kb: kb && contributionTargets().includes(kb) ? kb.id : '', note: '', files: [], busy: false, versionOf: base?.id || '', touched: false, showNote: false };
     openModal('contribute', {});
   };
   M['contribute'] = () => {
@@ -49,7 +49,7 @@
     const valid = f.files.filter(x => !x.err), skipped = f.files.length - valid.length;
     const full = !!base && valid.length > 0;
     const have = new Set(f.files.map(x => x.name));
-    const current = base ? `<div class="ctb-current">${fileIcon(base.type)}<div class="grow"><div class="medium truncate">${esc(base.name)}</div><div class="t-xs muted">Current version v${res(base).version} · ${esc(kbById(base.kb)?.name || '')}</div></div></div>` : '';
+    const current = base ? `<div class="ctb-current">${fileIcon(base.type)}<div class="grow"><div class="medium truncate">${esc(docTitle(base))}</div><div class="t-xs muted">Current version v${res(base).version} · ${esc(kbById(base.kb)?.name || '')}</div></div></div>` : '';
     const drop = f.busy || full ? '' : `<button type="button" class="ctb-drop" id="ctb-drop" data-act="ctb-browse" aria-describedby="ctb-drop-hint"><span class="ctb-drop__icon">${ic('upload', 'i-lg')}</span><span class="medium">${base ? 'Drop the new file here or' : 'Drop files here or'} <span class="text-accent">browse</span></span><span class="description" id="ctb-drop-hint">PDF, Word, Excel, PowerPoint, text, Markdown, HTML or ZIP · up to 100 MB${base ? '' : ' each'}</span></button>`;
     const row = x => item({
       lead: fileIcon(x.type), title: esc(x.name),
@@ -57,32 +57,37 @@
       trail: f.busy ? (x.err ? '<span class="t-xs muted">Skipped</span>' : x.pct >= 100 ? ic('check-circle', 'text-success') : '') : iconBtn('x', 'Remove ' + x.name, { size: 'sm', act: 'ctb-remove', data: { id: x.id } }),
     });
     const files = f.files.length ? `<div class="${f.busy && !base ? '' : 'mt-12'}">${list(f.files.map(row))}</div>` : '';
+    const fileErr = f.touched && !f.busy && !valid.length ? `<div class="field-error mt-8" role="alert">${ic('alert-circle')}<span>${f.files.length ? 'None of these files can be added. Add a supported file.' : 'Add at least one file.'}</span></div>` : '';
     const pool = base ? [{ name: `${stemOf(base.name)} (v${res(base).version + 1}).${base.type}`, size: Math.max(base.size || 0, 180e3) }] : samples();
     const sampleList = pool.filter(s => !have.has(s.name));
     const sampleHtml = f.busy || full || !sampleList.length ? '' : `<div class="ctb-samples"><span class="t-xs muted">Or try a sample:</span>${sampleList.map(s => btn(s.name, { v: 'outline', size: 'sm', icon: 'plus', act: 'ctb-sample', data: { name: s.name, size: Math.round(s.size) } })).join('')}</div>`;
-    const choose = !base && !f.busy && canShare() && personalKb() ? `<div class="field ctb-dest"><span class="label">Where should it go?</span>${choiceGroup({ name: 'ctb-dest', value: f.mode, act: 'ctb-dest', cols: 2, options: [['share', 'Share as knowledge', 'A reviewer checks it before it’s published.'], ['private', 'Keep private in My files', 'Only you can use it, e.g. in chat.']] })}</div>` : '';
+    // Destination first, as a choice the rest of the dialog follows (title, description, fields, button).
+    const choose = !base && !f.busy && canShare() && personalKb() ? `<div class="field ctb-dest"><span class="label">Where should it go?</span>${choiceGroup({ name: 'ctb-dest', value: f.mode, act: 'ctb-dest', cols: 2, options: [['share', 'Contribute to a knowledge base', 'Your team can find it once a reviewer publishes it.', 'share'], ['private', 'Upload to My files', 'Only you can see it. Ask about it in chat.', 'lock']] })}</div>` : '';
     const kbOpts = [['', 'Let the assistant suggest'], ...contributionTargets().map(k => [k.id, k.name])];
     const target = kbById(f.kb);
+    const note = f.note.trim();
     const shareFields = !base && !priv && !f.busy ? `<div class="ctb-fields">
       ${field({ id: 'ctb-kb', label: 'Knowledge base', desc: target ? `Reviewed by the owners of ${esc(target.name)}.` : 'The assistant picks the best fit. A reviewer confirms it.', control: select({ id: 'ctb-kb', bind: 'ctb.kb', value: f.kb, options: kbOpts, change: 'ctb-kb' }) })}
-      ${field({ id: 'ctb-note', label: 'Note for reviewers', optional: true, control: textarea({ id: 'ctb-note', bind: 'ctb.note', value: f.note, rows: 2, placeholder: 'What it covers and who it helps', attrs: 'maxlength="400"' }) })}</div>` : '';
-    const noteErr = base && f.touched && !f.note.trim() ? 'Say what changed.' : '';
-    const versionFields = base && !f.busy ? `<div class="ctb-fields">${field({ id: 'ctb-note', label: 'What changed?', required: true, error: noteErr, desc: 'Reviewers see this next to the current version.', control: textarea({ id: 'ctb-note', bind: 'ctb.note', value: f.note, rows: 3, placeholder: 'e.g. Corrected section 2 and updated the dates', invalid: !!noteErr, attrs: 'maxlength="400"' }) })}</div>` : '';
-    const busyNote = f.busy ? `<p class="t-sm muted mb-12">${priv ? 'Adding to My files…' : base ? `Uploading the new version of ${esc(base.name)}…` : target ? `Uploading for review in ${esc(target.name)}…` : 'Uploading for review…'}</p>` : '';
+      ${disclosure({ path: 'ctb.showNote', icon: 'note', title: 'Note for reviewers', summary: note ? esc(note.length > 40 ? note.slice(0, 40) + '…' : note) : 'Optional', body: textarea({ id: 'ctb-note', bind: 'ctb.note', value: f.note, rows: 2, placeholder: 'What it covers and who it helps', attrs: 'maxlength="400" aria-label="Note for reviewers"' }) })}</div>` : '';
+    const noteErr = base && f.touched && !note ? 'Say what changed.' : '';
+    const versionFields = base && !f.busy ? `<div class="ctb-fields">${field({ id: 'ctb-note', label: 'What changed?', required: true, error: noteErr, desc: 'Reviewers see this next to the current version.', control: textarea({ id: 'ctb-note', bind: 'ctb.note', value: f.note, rows: 3, placeholder: 'e.g. Corrected section 2 and updated the dates', invalid: !!noteErr, attrs: 'maxlength="400" data-input="kn-revalidate" data-form="ctb"' }) })}</div>` : '';
+    const busyNote = f.busy ? `<p class="t-sm muted mb-12">${priv ? 'Adding to My files…' : base ? `Uploading the new version of ${esc(docTitle(base))}…` : target ? `Uploading for review in ${esc(target.name)}…` : 'Uploading for review…'}</p>` : '';
     const n = valid.length;
     const label = base ? 'Submit new version' : priv ? (n > 1 ? `Add ${n} files` : 'Add to My files') : n > 1 ? `Submit ${n} for review` : 'Submit for review';
+    const hint = skipped ? `${plural(skipped, 'file')} will be skipped` : priv ? 'Only you can see them.' : 'You can withdraw it while it’s in review.';
     return {
-      size: 'lg', guard: f.busy,
-      title: base ? 'Submit a new version' : canShare() ? 'Contribute' : 'Upload to My files',
-      desc: base ? 'A reviewer checks it before it replaces the current version.' : canShare() ? '' : 'Only you can see these files.',
-      body: current + busyNote + drop + files + sampleHtml + choose + shareFields + versionFields,
-      footStart: skipped && !f.busy ? `<span class="t-sm muted">${plural(skipped, 'file')} will be skipped</span>` : '',
-      foot: btn('Cancel', { act: 'close-modal', disabled: f.busy }) + btn(label, { v: 'primary', icon: priv ? 'upload' : 'send', act: 'ctb-go', disabled: !n, loading: f.busy }),
+      size: 'lg', guard: f.busy, icon: priv ? 'lock' : 'upload',
+      title: base ? 'Submit a new version' : priv ? 'Upload to My files' : 'Contribute documents',
+      desc: base ? 'A reviewer checks it before it replaces the current version.' : priv ? 'Only you can see these files. Ask about them in chat.' : 'Share what your team should know. A reviewer checks it before it’s published.',
+      body: current + choose + busyNote + drop + fileErr + files + sampleHtml + shareFields + versionFields,
+      footStart: f.busy ? '' : hint,
+      foot: btn('Cancel', { v: 'ghost', act: 'close-modal', disabled: f.busy }) + btn(label, { v: 'primary', icon: priv ? 'upload' : 'send', act: 'ctb-go', loading: f.busy }),
     };
   };
   const addFiles = list => {
     const f = ui('ctb');
     list.forEach(x => f.files.push(fileEntry(x.name, x.size)));
+    if (f.files.some(x => !x.err)) f.touched = false;
     // A new version takes one file: keep the latest valid one.
     if (f.versionOf) { const ok = f.files.filter(x => !x.err); if (ok.length > 1) f.files = f.files.filter(x => x.err || x === ok.at(-1)); }
     refreshLayer();
@@ -105,7 +110,8 @@
   });
   A['ctb-go'] = () => {
     const f = ui('ctb'); if (f.busy) return;
-    const valid = f.files.filter(x => !x.err); if (!valid.length) return;
+    const valid = f.files.filter(x => !x.err);
+    if (!valid.length) { f.touched = true; refreshLayer(); $('#ctb-drop')?.focus(); return; }
     if (f.versionOf && !f.note.trim()) { f.touched = true; refreshLayer(); $('#ctb-note')?.focus(); return; }
     f.busy = true; refreshLayer();
     const timer = setInterval(() => {
@@ -121,7 +127,7 @@
     const docs = submitFiles(valid.map(x => ({ name: x.name, size: x.size, type: x.type })), { kb: f.kb || undefined, note: f.note, versionOf: f.versionOf || undefined });
     refresh();
     const review = can('knowledge.manage') && docs.every(d => canReviewKb(kbById(d.kb)));
-    toast(f.versionOf ? 'Submitted the new version for review' : docs.length === 1 ? `Submitted “${docs[0].name}” for review` : `Submitted ${plural(docs.length, 'document')} for review`, {
+    toast(f.versionOf ? 'Submitted the new version for review' : docs.length === 1 ? `Submitted “${docTitle(docs[0])}” for review` : `Submitted ${plural(docs.length, 'document')} for review`, {
       action: review ? { label: 'Review now', run: () => go('/documents?tab=review&sel=' + docs[0].id) } : { label: 'Track', run: () => go(href()) },
     });
   }
@@ -141,7 +147,7 @@
 
   /* ═══════════════ How a contribution reads ═══════════════ */
   const who = (by, d) => (by === me().id ? 'You' : by ? actorName(by) : contributorName(d));
-  const VERB = { submitted: 'submitted it', resubmitted: 'resubmitted it', changes: 'asked for changes', rejected: 'didn’t approve it', approved: 'approved it', published: 'published it again', unpublished: 'unpublished it', withdrawn: 'withdrew it' };
+  const VERB = { submitted: 'submitted it', resubmitted: 'resubmitted it', changes: 'asked for changes', rejected: 'declined it', approved: 'approved it', published: 'published it again', unpublished: 'unpublished it', withdrawn: 'withdrew it' };
   const STEP = { submitted: ['upload', ''], resubmitted: ['refresh', ''], changes: ['pencil', 'warning'], rejected: ['x-circle', 'danger'], approved: ['check', 'success'], published: ['check-circle', 'success'], unpublished: ['eye-off', ''], withdrawn: ['undo', ''] };
   const lastBy = (d, kind) => [...(d.submission?.events || [])].reverse().find(e => e.kind === kind);
   /** One line for lists: the latest thing that happened, in plain language. */
@@ -176,22 +182,23 @@
       default: return null;
     }
   }
-  /** Vertical history: who did what, when, and what reviewers wrote. */
-  function timeline(d, { compact = false } = {}) {
+  /** Vertical history: who did what, when, and what reviewers wrote. quoted: the event whose message is already shown above (its alert). */
+  function timeline(d, { compact = false, quoted = null } = {}) {
     const steps = (d.submission?.events || []).map(e => {
       const [icon, tone] = STEP[e.kind] || ['circle-dashed', ''];
-      return { icon, tone, title: `${who(e.by, d)} ${VERB[e.kind] || 'updated it'}`, at: e.at, quote: e.text };
+      return { icon, tone, title: `${who(e.by, d)} ${VERB[e.kind] || 'updated it'}`, at: e.at, quote: e === quoted ? '' : e.text };
     });
     const t = tail(d); if (t) steps.push(t);
     if (!steps.length) return '<p class="t-sm muted">No history yet.</p>';
     return `<ol class="${cx('ctb-tl', compact && 'ctb-tl--compact')}">${steps.map(s => `<li class="${cx('ctb-tl__step', s.tone && 'ctb-tl__step--' + s.tone, s.next && 'is-next')}">
       <span class="ctb-tl__dot" aria-hidden="true">${s.live ? spinner('sm') : ic(s.icon)}</span>
-      <div class="ctb-tl__body"><div class="ctb-tl__title">${esc(s.title)}</div>${s.desc ? `<div class="ctb-tl__desc">${esc(s.desc)}</div>` : ''}${s.at ? `<div class="ctb-tl__meta" title="${esc(fmtDateTime(s.at))}">${esc(rel(s.at))}</div>` : ''}${s.quote ? `<blockquote class="ctb-quote">${esc(s.quote)}</blockquote>` : ''}</div></li>`).join('')}</ol>`;
+      <div class="ctb-tl__body"><div class="ctb-tl__title">${esc(s.title)}</div>${s.desc ? `<div class="ctb-tl__desc">${esc(s.desc)}</div>` : ''}${s.at ? `<div class="ctb-tl__meta" data-tip="${esc(fmtDateTime(s.at))}">${esc(rel(s.at))}</div>` : ''}${s.quote ? `<blockquote class="ctb-quote">${esc(s.quote)}</blockquote>` : ''}</div></li>`).join('')}</ol>`;
   }
   X.ctb = { eventLine, timeline, href };
 
   /* ═══════════════ Contribution panel ═══════════════ */
-  const pctOf = c => `<span class="ctb-conf">${Math.round((c || 0) * 100)}%</span>`;
+  /** Confidence is reviewer information: contributors see what was suggested, not how sure the assistant was. */
+  const pctOf = (c, d) => (isMine(d) ? '' : `<span class="ctb-conf">${Math.round((c || 0) * 100)}%</span>`);
   /** Read-only and transparent: what the assistant suggested (or, once published, how it's classified). */
   function suggestion(d) {
     const st = stageOf(d), kb = kbById(d.kb);
@@ -207,11 +214,11 @@
     const ai = aiOf(d);
     const head = '<h3 class="ctb-sec__title">What the assistant suggested</h3>';
     if (ai.status === 'analyzing') return `<section>${head}<div class="ctb-reading">${spinner('sm')}<span>Reading the file…</span></div></section>`;
-    const topics = [...ai.topics.map(t => chip(topicName(t.id), { size: 'sm' }) + pctOf(t.conf)), ...(ai.proposed || []).map(proposalById).filter(Boolean).map(p => chip(p.name, { size: 'sm', tone: 'accent', icon: 'plus', tip: 'Proposed new topic. A workspace admin decides whether to add it.' }))];
+    const topics = [...ai.topics.map(t => chip(topicName(t.id), { size: 'sm' }) + pctOf(t.conf, d)), ...(ai.proposed || []).map(proposalById).filter(Boolean).map(p => chip(p.name, { size: 'sm', tone: 'accent', icon: 'plus', tip: 'Proposed new topic. A workspace admin decides whether to add it.' }))];
     const kbBy = ai.kb.by === 'ai' ? 'Suggested by the assistant' : `Chosen by ${isMine(d) ? 'you' : contributorName(d)}`;
     const flags = (ai.flags || []).length ? `<ul class="ctb-flags">${ai.flags.map(f => `<li>${ic(f.type === 'personal' ? 'shield' : f.type === 'format' ? 'file' : 'git-compare', 'i-sm')}<span>${esc(f.text)}</span></li>`).join('')}</ul>` : '';
     return `<section>${head}${kv([
-      ['Type', `<span class="row gap-6">${esc(kindMeta(ai.kind.value).label)}${pctOf(ai.kind.conf)}</span>`],
+      ['Type', `<span class="row gap-6">${esc(kindMeta(ai.kind.value).label)}${pctOf(ai.kind.conf, d)}</span>`],
       ['Topics', topics.length ? `<span class="ctb-topics">${topics.join('')}</span>` : '<span class="muted">No clear topic</span>'],
       ['Knowledge base', `<span class="stack gap-2"><span>${esc(kb?.name || '—')}</span><span class="t-xs muted">${esc(kbBy)}</span></span>`],
     ])}${flags}<p class="t-xs muted mt-8">Reviewers can change these before publishing.</p></section>`;
@@ -227,31 +234,33 @@
       <div class="field"><span class="label">Replacement file<span class="label__opt">(optional)</span></span>${file}${r.file ? '' : '<div class="description">Keep the current file if you only need to explain something.</div>'}</div>
       ${field({ id: 'ctb-rev-note', label: 'What did you change?', required: true, error: err, control: textarea({ id: 'ctb-rev-note', bind: revKey(d.id) + '.note', value: r.note, rows: 3, placeholder: 'e.g. Removed the full answers and kept my approach', invalid: !!err, attrs: 'maxlength="400"' }) })}</section>`;
   }
+  /** Where it stands, said once: an alert when someone decided something (with their message — the history doesn't repeat it), else
+      the status chip and what it means. Returns the event the alert quotes. */
   function stateBlock(d) {
     const l = lifecycleOf(d), st = stageOf(d);
-    const head = `<div class="ctb-state">${lifeChip(d)}<span class="t-sm muted">${esc(l.desc)}</span></div>`;
     const quote = e => (e?.text ? `<blockquote class="ctb-quote">${esc(e.text)}</blockquote>` : '');
-    if (st === 'changes') { const e = lastBy(d, 'changes'); return head + alertBox('warning', `${who(e?.by, d)} asked for changes`, quote(e)); }
-    if (st === 'rejected') { const e = lastBy(d, 'rejected'); return head + alertBox('danger', `${who(e?.by, d)} didn’t approve it`, quote(e) || 'It won’t be published.'); }
-    if (st === 'unpublished') { const e = lastBy(d, 'unpublished'); return head + alertBox('default', `${who(e?.by, d)} unpublished it`, quote(e)); }
-    if (l.key === 'failed') return head + alertBox('danger', 'Couldn’t publish — the reviewers have been told', 'It was approved, but the file couldn’t be made searchable. You don’t need to do anything.');
-    return head;
+    if (st === 'changes') { const e = lastBy(d, 'changes'); return { html: alertBox('warning', `${who(e?.by, d)} asked for changes`, quote(e)), quoted: e }; }
+    if (st === 'rejected') { const e = lastBy(d, 'rejected'); return { html: alertBox('danger', `${who(e?.by, d)} declined it`, quote(e) || 'It won’t be published.'), quoted: e }; }
+    if (st === 'unpublished') { const e = lastBy(d, 'unpublished'); return { html: alertBox('default', `${who(e?.by, d)} unpublished it`, quote(e)), quoted: e }; }
+    if (l.key === 'failed') return { html: alertBox('danger', 'Couldn’t publish — the reviewers have been told', 'It was approved, but the file couldn’t be made searchable. You don’t need to do anything.') };
+    return { html: `<div class="ctb-state">${lifeChip(d)}<span class="t-sm muted">${esc(l.desc)}</span></div>` };
   }
+  /** One contribution. Each fact appears once: the file and (when no section names it) the knowledge base in the subtitle, the status
+      in the state block, the reviewer's message in its alert, dates in the history. */
   DR['ctb'] = ({ id }) => {
     const d = docById(id);
     if (!d || !canSeeDoc(d)) return { title: 'Contribution not available', body: emptyState({ icon: 'file', title: 'This contribution isn’t available', desc: 'It may have been withdrawn.', compact: true }) };
     const l = lifecycleOf(d), kb = kbById(d.kb), sub = d.submission || {}, mine = isMine(d);
     const orig = sub.versionOf ? docById(sub.versionOf) : null;
-    const details = kv([
-      ['Knowledge base', esc(kb?.name || '—')],
-      ['File', `${esc((d.type || 'file').toUpperCase())} · ${fmtSize(d.size || 0)}`],
-      ['Submitted', esc(fmtDateTime(sub.at || d.updated))],
-      !mine && ['Contributed by', esc(contributorName(d))],
-      orig && ['New version of', `<a class="link" href="#/doc/${orig.id}">${esc(orig.name)}</a>`],
-    ]);
-    const body = `<div class="ctb-panel">${stateBlock(d)}${l.key === 'changes' && mine ? reviseForm(d) : ''}
-      <section><h3 class="ctb-sec__title">History</h3>${timeline(d)}</section>${suggestion(d)}
-      <section><h3 class="ctb-sec__title">Details</h3>${details}</section></div>`;
+    const state = stateBlock(d), sugg = suggestion(d);
+    const desc = [
+      !sugg && kb && esc(kb.name),
+      `${esc((d.type || 'file').toUpperCase())} · ${fmtSize(d.size || 0)}`,
+      !mine && `Contributed by ${esc(contributorName(d))}`,
+      orig && `New version of <a class="link" href="#/doc/${orig.id}">${esc(docTitle(orig))}</a>`,
+    ].filter(Boolean).join(' · ');
+    const body = `<div class="ctb-panel">${state.html}${l.key === 'changes' && mine ? reviseForm(d) : ''}
+      <section><h3 class="ctb-sec__title">History</h3>${timeline(d, { quoted: state.quoted })}</section>${sugg}</div>`;
     const did = { id: d.id }, openId = d.mergedInto || d.id;
     const withdrawBtn = btn('Withdraw', { v: 'ghost', icon: 'undo', act: 'ctb-withdraw', data: did });
     let foot = '', footStart = '';
@@ -260,9 +269,9 @@
       case 'changes': footStart = withdrawBtn; foot = btn('Resubmit', { v: 'primary', icon: 'send', act: 'ctb-resubmit', data: did }); break;
       case 'published': case 'publishing': case 'queued': case 'update': case 'stored': case 'merged':
         foot = (canShare() ? btn('Submit a new version', { icon: 'upload', act: 'ctb-new-version', data: { id: openId } }) : '') + btn('Open', { v: 'primary', icon: 'file-text', act: 'ctb-doc', data: { id: openId } }); break;
-      case 'rejected': foot = btn('Remove', { v: 'secondary', icon: 'trash', act: 'ctb-withdraw', data: did }); break;
+      case 'rejected': foot = btn('Remove', { v: 'danger-soft', icon: 'trash', act: 'ctb-withdraw', data: did }); break;
     }
-    return { size: 'lg', title: d.name, lead: fileIcon(d.type), desc: esc(kb?.name || ''), body, foot, footStart };
+    return { size: 'lg', title: docTitle(d), lead: fileIcon(d.type), desc, body, foot, footStart };
   };
 
   /* ═══════════════ Actions ═══════════════ */
@@ -270,18 +279,14 @@
   A['ctb-revise'] = el => { openDrawer('ctb', { id: el.dataset.id }); requestAnimationFrame(() => $('#ctb-rev-note')?.focus()); };
   A['ctb-doc'] = el => go('/doc/' + el.dataset.id);
   A['ctb-new-version'] = el => { if (S.drawer) closeDrawer(); A['contribute']({ dataset: { versionOf: el.dataset.id } }); };
-  /** Withdraw (in review / changes requested: confirm) or remove (not approved). Tombstone, with Undo. */
+  /** Withdraw (in review / changes requested) or remove (not approved). Cheap to reverse: a tombstone with Undo, no confirmation. */
   A['ctb-withdraw'] = el => {
     const d = docById(el.dataset.id); if (!d || !isMine(d) || d.archived) return;
-    const removing = stageOf(d) === 'rejected';
-    const run = () => {
-      const snap = snapDoc(d); withdraw(d);
-      if (S.drawer?.name === 'ctb' && S.drawer.props?.id === d.id) S.drawer = null;
-      refresh();
-      toast(removing ? `Removed “${d.name}”` : `Withdrew “${d.name}”`, { action: { label: 'Undo', run: () => { restoreDoc(d, snap); refresh(); } } });
-    };
-    if (removing) { run(); return; }
-    confirmAction({ title: 'Withdraw this submission?', body: `Reviewers won’t see “${esc(d.name)}” anymore. You can contribute it again later.`, confirm: 'Withdraw', danger: true, delay: 300, onConfirm: run });
+    const removing = stageOf(d) === 'rejected', snap = snapDoc(d);
+    withdraw(d);
+    if (S.drawer?.name === 'ctb' && S.drawer.props?.id === d.id) S.drawer = null;
+    refresh();
+    toast(removing ? `Removed “${docTitle(d)}”` : `Withdrew “${docTitle(d)}”`, { action: { label: 'Undo', run: () => { restoreDoc(d, snap); refresh(); } } });
   };
   const revDoc = el => { const d = docById(el.dataset.id); return d && isMine(d) && stageOf(d) === 'changes' ? d : null; };
   A['ctb-rev-browse'] = el => {
@@ -310,26 +315,30 @@
   /* ── Share a private file as knowledge (My files → review) ── */
   A['ctb-share'] = el => {
     const d = docById(el.dataset.id); if (!d || !kbById(d.kb)?.personal || !canShare()) return;
-    S.ui.ctbShare = { id: d.id, kb: (suggestKb(d.name) || contributionTargets()[0]).id, note: '' };
+    const hint = suggestKb(d.name);
+    S.ui.ctbShare = { id: d.id, kb: (hint || contributionTargets()[0]).id, suggested: hint?.id || '', note: '', busy: false };
     openModal('ctb-share', {});
   };
   M['ctb-share'] = () => {
-    const f = ui('ctbShare'), d = docById(f.id);
+    const f = ui('ctbShare'), d = docById(f.id), dis = f.busy ? 'disabled' : '';
     if (!d) return { title: 'Share as knowledge', body: '', foot: btn('Close', { act: 'close-modal' }) };
     return {
-      size: 'sm', title: 'Share as knowledge', desc: esc(d.name),
-      body: `<div class="stack gap-16">${field({ id: 'ctbs-kb', label: 'Knowledge base', desc: 'Suggested by the assistant. A reviewer confirms it.', control: select({ id: 'ctbs-kb', bind: 'ctbShare.kb', value: f.kb, options: contributionTargets().map(k => [k.id, k.name]) }) })}
-        ${field({ id: 'ctbs-note', label: 'Note for reviewers', optional: true, control: textarea({ id: 'ctbs-note', bind: 'ctbShare.note', value: f.note, rows: 2, attrs: 'maxlength="400"' }) })}
-        <p class="t-xs muted">It moves out of My files. Until it’s published, only you and the reviewers can see it.</p></div>`,
-      foot: btn('Cancel', { act: 'close-modal' }) + btn('Send for review', { v: 'primary', icon: 'send', act: 'ctb-share-go' }),
+      size: 'md', title: 'Share as knowledge', icon: 'share',
+      desc: `Send “${esc(docTitle(d))}” for review. It leaves My files; once published, your team can find it.`,
+      body: `<div class="kn-form">${field({ id: 'ctbs-kb', label: 'Knowledge base', desc: f.suggested && f.kb === f.suggested ? 'Suggested by the assistant. A reviewer confirms it.' : `Reviewed by the owners of ${esc(kbById(f.kb)?.name || '')}.`, control: select({ id: 'ctbs-kb', bind: 'ctbShare.kb', value: f.kb, change: 'ctb-share-kb', options: contributionTargets().map(k => [k.id, k.name]), attrs: dis }) })}
+        ${field({ id: 'ctbs-note', label: 'Note for reviewers', optional: true, control: textarea({ id: 'ctbs-note', bind: 'ctbShare.note', value: f.note, rows: 2, placeholder: 'What it covers and who it helps', attrs: `maxlength="400" ${dis}` }) })}</div>`,
+      footStart: 'Until it’s published, only you and the reviewers can see it.',
+      foot: btn('Cancel', { v: 'ghost', act: 'close-modal', disabled: f.busy }) + btn('Send for review', { v: 'primary', icon: 'send', act: 'ctb-share-go', loading: f.busy }),
     };
   };
-  A['ctb-share-go'] = () => {
+  A['ctb-share-kb'] = () => refreshLayer();
+  A['ctb-share-go'] = async () => {
     const f = ui('ctbShare'), d = docById(f.id), kb = kbById(f.kb);
-    if (!d || !kb || !contributionTargets().includes(kb)) return;
+    if (f.busy || !d || !kb || !contributionTargets().includes(kb)) return;
+    f.busy = true; S.modal.props.guard = true; refreshLayer(); await sleep(500);
     submitPrivate(d, kb.id, (f.note || '').trim());
     closeModal(); refresh();
-    toast('Sent for review', { action: { label: 'Track', run: () => go(href(d.id)) } });
+    toast(`Sent “${docTitle(d)}” for review`, { action: { label: 'Track', run: () => go(href(d.id)) } });
   };
 
   /* ═══════════════ Inbox ═══════════════ */
@@ -338,14 +347,14 @@
   X.contribNotices = () => myContributions().flatMap(d => {
     const evs = d.submission?.events || [], to = href(d.id), out = [];
     let i = evs.length - 1; while (i >= 0 && !(evs[i].by !== me().id && NOTICE[evs[i].kind])) i--;
-    const e = evs[i], name = d.name;
+    const e = evs[i], name = docTitle(d);
     const live = d.mergedInto ? docById(d.mergedInto) : d;
     const ready = e?.kind === 'approved' && live && isPublishedStage(live) && live.status === 'ready';
     if (ready) {
       out.push({ id: `ctb-${d.id}-pub`, icon: 'check-circle', tone: 'ok', title: `${name} is published`, body: e.text ? `${actorName(e.by)}: “${e.text}”` : `Searchable in ${kbById(live.kb)?.name || 'its knowledge base'}.`, at: Math.max(e.at, live.updated || 0), to });
     } else if (e) {
       const [icon, tone] = NOTICE[e.kind], by = actorName(e.by);
-      const title = e.kind === 'changes' ? `${by} asked for changes to ${name}` : e.kind === 'rejected' ? `${name} wasn’t approved` : `${by} approved ${name}`;
+      const title = e.kind === 'changes' ? `${by} asked for changes to ${name}` : e.kind === 'rejected' ? `${name} was declined` : `${by} approved ${name}`;
       const body = e.text ? `“${e.text}”` : e.kind === 'approved' ? (live?.status === 'failed' ? 'It couldn’t be published. The reviewers have been told.' : 'It’s being published now.') : '';
       out.push({ id: `ctb-${d.id}-${i}`, icon, tone, title, body, at: e.at, to, ...(e.kind === 'changes' && stageOf(d) === 'changes' ? { cta: 'Revise' } : {}) });
     }

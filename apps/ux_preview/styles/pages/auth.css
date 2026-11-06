@@ -14,10 +14,19 @@
 .au-forgot { margin: 8px 0 20px; font-size: 13px; }
 .au-form-error { margin-bottom: 16px; }
 .au-foot { margin-top: 24px; text-align: center; font-size: 13px; color: var(--muted); }
-.au-foot--start { text-align: left; }
 .au-foot .link-button { font-size: 13px; }
-.au-hint { margin-top: 12px; text-align: center; font-size: 12px; line-height: 18px; color: var(--muted); text-wrap: balance; }
-.au-hint .link-button { font-size: 12px; font-family: var(--font-mono); overflow-wrap: anywhere; }
+
+/* Demo accounts: a folded prototype aid under the form (disclosure); one-click identities inside */
+.au-demo { margin-top: 28px; }
+.au-demo__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.au-demo__btn { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 10px 6px 6px; border-radius: var(--radius-xl); background: var(--surface); box-shadow: inset 0 0 0 1px var(--card-border); text-align: left; cursor: pointer; transition: box-shadow var(--dur-fast) var(--ease-out), background-color var(--dur-fast), transform var(--dur-fast) var(--ease-out); }
+@media (hover: hover) { .au-demo__btn:hover { box-shadow: var(--lift-shadow), inset 0 0 0 1px color-mix(in oklab, var(--foreground) 11%, transparent); } }
+.au-demo__btn:active { transform: scale(0.98); }
+.au-demo__btn[aria-pressed="true"] { box-shadow: inset 0 0 0 1.5px var(--accent); background: color-mix(in oklab, var(--accent) 5%, var(--surface)); }
+.au-demo__btn:focus-visible { outline: none; box-shadow: inset 0 0 0 1.5px var(--focus), 0 0 0 3px var(--focus-halo); }
+.au-demo__text { display: flex; flex-direction: column; min-width: 0; }
+.au-demo__name { font-size: 13px; line-height: 18px; font-weight: 500; color: var(--foreground); }
+.au-demo__ws { font-size: 11px; line-height: 14px; color: var(--muted); }
 
 /* Password strength */
 .au-strength { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
@@ -41,12 +50,22 @@
 .au-proof__caption { font-size: 15px; line-height: 22px; color: var(--muted); text-align: center; text-wrap: balance; }
 
 /* Workspace chooser */
-.au-chev { color: var(--muted); }
+.au-chev { color: var(--muted); transition: transform var(--dur-fast) var(--ease-out), color var(--dur-fast); }
+@media (hover: hover) { .item[data-act]:hover .au-chev { color: var(--foreground); transform: translateX(2px); } }
 .au-console-mark { background: var(--foreground); color: var(--background); }
+.au-who { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; }
+.au-who__email { color: var(--foreground); overflow-wrap: anywhere; }
+.au-who .link-button { font-size: inherit; }
+.au-group { margin-top: 24px; }
+.au-group__label { margin: 0 0 8px 4px; }
+/* An archived workspace: listed so people know where it went, but not enterable */
+.au-ws-off .item__title { color: var(--muted); }
 
 @container app (max-width: 679px) {
+  .au-demo__grid { grid-template-columns: minmax(0, 1fr); }
   .au-brand { margin-bottom: 24px; }
   .au-title { margin-bottom: 20px; }
+  .au-ws .item__meta { display: none; }   /* names first; “last opened” is a nice-to-have on phones */
 }
 
 /* Interface-language picker on pages without the app shell. */

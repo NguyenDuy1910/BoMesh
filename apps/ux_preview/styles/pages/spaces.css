@@ -4,14 +4,19 @@
 /* ───── Space mark ───── */
 .sp-mark { --sp-mark: 36px; display: inline-grid; place-items: center; width: var(--sp-mark); height: var(--sp-mark); border-radius: calc(var(--sp-mark) * 0.28); flex: none; color: var(--white); }
 
-/* ───── List cards ───── */
-.sp-card { gap: 12px; min-height: 176px; }
+/* ───── List cards ─────
+   The name is the link, stretched over the whole card; the call to action sits above it (no nested controls). */
+.sp-card { position: relative; gap: 12px; min-height: 176px; }
 .sp-card__top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .sp-card__type { font-size: 12px; line-height: 16px; color: var(--muted); }
-.sp-card__name { font-size: 15px; line-height: 22px; font-weight: 600; }
+.sp-card__name { font-size: 15px; line-height: 22px; font-weight: 600; color: var(--foreground); }
+.sp-card__link { outline: none; }
+.sp-card__link::after { content: ""; position: absolute; inset: 0; border-radius: inherit; }
+.sp-card:has(.sp-card__link:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
 .sp-card__sub { font-size: 12px; line-height: 16px; color: var(--muted); }
-.sp-card__desc { font-size: 13px; line-height: 18px; color: var(--muted); }
+.sp-card__desc { font-size: 13px; line-height: 20px; color: var(--muted); }
 .sp-card__foot { margin-top: auto; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 12px; min-height: 32px; font-size: 12px; line-height: 16px; color: var(--muted); }
+.sp-card__cta { position: relative; z-index: 1; display: inline-flex; }
 .sp-card__note { font-size: 12px; line-height: 16px; color: var(--muted); text-align: right; }
 
 /* ───── Create ───── */
@@ -27,42 +32,45 @@ a.sp-head__people:hover { color: var(--foreground); }
 .sp-head__people .avatar-group .avatar + .avatar { margin-left: 0; }
 
 /* ───── Overview ───── */
-.sp-overview { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 340px); gap: 32px; align-items: start; }
+.sp-overview { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 320px); gap: 32px; align-items: start; }
 .sp-overview__main > .section:first-child, .sp-overview__side > .section:first-child { margin-top: 0; }
 .sp-overview__side .section { margin-top: 28px; }
-.sp-side-list .item { padding: 10px 14px; align-items: flex-start; }
+.sp-side-list .item { padding: 12px 16px; align-items: flex-start; }
 .sp-side-list .item__lead { margin-top: 2px; }
 
-.sp-ann { gap: 10px; }
-.sp-ann__head { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.sp-ann__by { font-size: 13px; line-height: 18px; font-weight: 500; }
+.sp-ann { gap: 12px; }
+.sp-ann__head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.sp-ann__by { font-size: 13px; line-height: 20px; font-weight: 500; }
 .sp-ann__at { font-size: 12px; line-height: 16px; color: var(--muted); }
 .sp-ann__title { font-size: 15px; line-height: 22px; font-weight: 600; }
-.sp-ann__text { font-size: 14px; line-height: 21px; color: var(--foreground); white-space: pre-line; overflow-wrap: anywhere; }
+.sp-ann__text { font-size: 14px; line-height: 22px; color: var(--foreground); white-space: pre-line; overflow-wrap: anywhere; }
 
-/* ───── Materials ───── */
-.sp-mat__head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; min-width: 0; }
-.sp-mat__name { font-size: 14px; line-height: 20px; font-weight: 600; min-width: 0; }
-.sp-mat__name:hover { text-decoration: underline; text-underline-offset: 3px; }
-.sp-nowrap { white-space: nowrap; }
+/* ───── Materials (shared resource rows, grouped by base) ───── */
+.sp-mats { display: flex; flex-direction: column; gap: 28px; }
+.sp-mat__head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; padding: 0 4px; min-width: 0; }
+.sp-mat__name { font-size: 14px; line-height: 20px; font-weight: 600; min-width: 0; color: var(--foreground); }
+a.sp-mat__name:hover { text-decoration: underline; text-underline-offset: 3px; }
+/* Selecting rows is secondary: the checkbox shows on hover or focus, stays once anything is selected, and is always there on touch. */
+@media (hover: hover) {
+  .sp-mats:not(.has-sel) .res-row__check { opacity: 0; transition: opacity var(--dur-fast); }
+  .sp-mats .res-row:hover .res-row__check, .sp-mats .res-row:focus-within .res-row__check { opacity: 1; }
+}
 
-/* ───── Queue ───── */
-.sp-late { color: var(--danger); font-weight: 500; }
-
-/* ───── People ───── */
-.sp-add-q { max-width: none; }
-.sp-picks { display: flex; flex-direction: column; max-height: 300px; overflow-y: auto; margin: 4px 0 16px; padding: 4px; border-radius: var(--radius-xl); box-shadow: inset 0 0 0 1px var(--border); }
-.sp-pick { padding: 6px 8px; border-radius: var(--radius-lg); }
-.sp-pick:hover { background: var(--default); }
-.sp-pick .checkbox { width: 100%; align-items: center; }
-.sp-pick .checkbox__label { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
-.sp-pick__text { min-width: 0; }
-.sp-picks__empty { padding: 12px 8px; }
+/* ───── Dialog pickers (Add people, Link documents) ───── */
+.sp-options { max-height: 300px; }
+.sp-options .checkbox { align-items: center; }
+.sp-options .checkbox__label { flex: 1 1 auto; min-width: 0; }
+.sp-opt { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.sp-opt__text { display: flex; flex-direction: column; min-width: 0; }
+.sp-opt__title { font-size: 14px; line-height: 20px; font-weight: 500; }
+.sp-opt__meta { font-size: 12px; line-height: 16px; color: var(--muted); }
+.sp-options__empty { padding: 20px 4px 8px; text-align: center; }
+.sp-role-field > .toggle-group { align-self: flex-start; }
 
 /* ───── Settings ───── */
 .sp-settings { max-width: 880px; }
 .sp-settings + .savebar { margin-top: 24px; max-width: 880px; }
-.sp-danger { box-shadow: var(--surface-shadow), inset 0 0 0 1px color-mix(in oklab, var(--danger) 35%, transparent); }
+.sp-danger { box-shadow: var(--surface-shadow), inset 0 0 0 1px color-mix(in oklab, var(--danger) 30%, transparent); }
 .sp-danger .card__header { align-items: center; }
 
 /* ───── Responsive ───── */
@@ -74,6 +82,10 @@ a.sp-head__people:hover { color: var(--foreground); }
   .sp-settings .form-section { grid-template-columns: minmax(0, 1fr); gap: 12px; }
 }
 @container app (max-width: 679px) {
+  /* Content first: the space's name and actions lead; the colored tile and faces step back. */
+  .page-header:has(.sp-head__meta) .page-header__lead { display: none; }
+  .sp-head__people { margin-top: 4px; }
+  .sp-head__people .avatar-group { display: none; }
   .sp-card { min-height: 0; }
   .sp-types .choice-group { grid-template-columns: minmax(0, 1fr) !important; }
   .sp-create-row { grid-template-columns: minmax(0, 1fr); }
@@ -81,5 +93,3 @@ a.sp-head__people:hover { color: var(--foreground); }
   .sp-danger .card__header .button { margin-left: 48px; }
 }
 
-/* Link resources picker */
-.sp-link-picks { max-height: 360px; overflow-y: auto; }

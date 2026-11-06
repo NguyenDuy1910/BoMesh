@@ -3,13 +3,12 @@
    documents.js), evidence marks, selection toolbar, rail (Ask · About · Related). Tokens only. */
 
 /* ───── Shell ───── */
-.rdr { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.rdr { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; }
 .rdr-msg { height: 100%; overflow: auto; padding: 48px 24px; }
 
 /* Header */
-.rdr-head { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 12px 20px; border-bottom: 1px solid var(--separator); background: var(--background); }
-.rdr-back { font-size: 13px; width: fit-content; gap: 4px; color: var(--muted); }
-.rdr-back:hover { color: var(--foreground); }
+.rdr-head { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 12px 20px; border-bottom: 1px solid var(--separator); background: var(--background); transition: margin-top var(--dur) var(--ease-out); }
+.rdr-back { flex: none; margin-left: -6px; }
 .rdr-head__row { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .rdr-head__main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .rdr-head__title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; }
@@ -17,10 +16,7 @@
 .rdr-head__title-row .chip { flex: none; }
 .rdr-head__meta { display: flex; align-items: center; flex-wrap: wrap; gap: 0 6px; font-size: 13px; line-height: 18px; color: var(--muted); min-width: 0; }
 .rdr-head__meta .res-dot { color: var(--muted); }
-.rdr-head__actions { display: flex; align-items: center; gap: 4px; flex: none; }
-.rdr-head__actions .rdr-ask-btn { margin-right: 4px; }
-.rdr-wrap { display: contents; }
-.rdr-outline-btn { display: none; }
+.rdr-head__actions { display: flex; align-items: center; gap: 8px; flex: none; }
 .rdr-hits { display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 12px; border-radius: var(--radius-xl); background: var(--evidence); font-size: 13px; font-weight: 500; }
 .rdr-hits .button--ghost { --button-bg-hover: var(--evidence-strong); }
 
@@ -38,8 +34,11 @@
 
 /* ───── Rail ───── */
 .rdr-rail { flex: none; width: 360px; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--separator); background: var(--surface); animation: slidein var(--dur) var(--ease-out-fluid); }
-.rdr-rail__head { flex: none; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--separator); }
-.rdr-rail__head .tabs { flex: 1 1 auto; border-bottom: 0; }
+.rdr-rail__head { flex: none; display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--separator); }
+/* Ask · About · Related: underline tabs that sit on the panel's own divider. */
+.rdr-rail__head .tabs { flex: 1 1 auto; min-width: 0; border-bottom: 0; align-self: stretch; display: flex; align-items: flex-end; }
+.rdr-rail__head .tabs__tab { height: 47px; padding: 0 8px; font-size: 13px; }
+.rdr-rail__title { flex: 1 1 auto; min-width: 0; font-size: 14px; line-height: 20px; font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .rdr-rail__body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 20px; }
 .rdr-scrim { display: none; }
 .rdr-sec { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
@@ -53,7 +52,7 @@
 .rdr-none { font-size: 13px; line-height: 18px; color: var(--muted); }
 .rdr-list .item { padding: 8px 0; }
 .rdr-list .item__title { font-size: 13px; }
-.rdr-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: -8px; }
+.rdr-acts { display: flex; flex-wrap: wrap; gap: 2px 4px; margin: -10px 0 0 -10px; }
 
 /* Version history */
 .rdr-vers { list-style: none; display: flex; flex-direction: column; }
@@ -67,9 +66,8 @@
 .rdr-ver__trail { flex: none; font-size: 13px; }
 
 /* Ask */
-.rdr-ask-empty { display: flex; flex-direction: column; gap: 12px; }
-.rdr-ask-empty__title { display: flex; align-items: center; gap: 8px; font-size: 14px; line-height: 20px; font-weight: 600; }
-.rdr-ask-empty__title .i { color: var(--accent); }
+.rdr-ask-empty { display: flex; flex-direction: column; gap: 8px; }
+.rdr-ask-empty__title { font-size: 12px; line-height: 16px; font-weight: 500; color: var(--muted); }
 .rdr-prompts { display: flex; flex-direction: column; gap: 6px; }
 .rdr-prompt { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; text-align: left; padding: 9px 12px; border-radius: var(--radius-xl); border: 1px solid var(--border); background: var(--surface); font-size: 13px; line-height: 18px; color: var(--foreground); transition: background-color var(--dur-fast), border-color var(--dur-fast); }
 .rdr-prompt .i { color: var(--muted); flex: none; }
@@ -100,25 +98,51 @@
 .rdr-composer { flex: none; display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--separator); }
 .rdr-composer .input { flex: 1 1 auto; min-width: 0; }
 
-/* ───── Page canvas (rendition markup) ───── */
+/* ───── Pages (rendition markup, shared with previews and thumbnails) ───── */
 .doc-page { max-width: 760px; margin: 0 auto 8px; padding: 56px 64px; border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); font-size: 15px; line-height: 1.75; color: var(--foreground); overflow-wrap: anywhere; }
 .doc-page h2 { font-size: 22px; line-height: 30px; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 8px; }
-.doc-page h3 { font-size: 16px; line-height: 24px; font-weight: 600; margin: 24px 0 8px; scroll-margin-top: 24px; }
+.doc-page h3 { font-size: 16px; line-height: 24px; font-weight: 600; margin: 24px 0 8px; scroll-margin-top: 64px; }
 .doc-page h2 + h3, .doc-page .doc-sub + h3 { margin-top: 20px; }
 .doc-page p { margin: 0 0 12px; }
 .doc-page ul { padding-left: 22px; margin: 0 0 12px; }
 .doc-page li + li { margin-top: 4px; }
 .doc-page table { width: 100%; border-collapse: collapse; margin: 8px 0 16px; font-size: 14px; line-height: 20px; }
-.doc-page th, .doc-page td { border: 1px solid var(--border); padding: 8px 10px; text-align: left; }
+.doc-page th, .doc-page td { border: 1px solid var(--border); padding: 8px 10px; text-align: left; overflow-wrap: break-word; }
 .doc-page th { background: var(--surface-secondary); font-weight: 600; }
 .doc-page mark.evidence { scroll-margin: 120px; }
 .doc-sub { font-size: 13px; line-height: 18px; color: var(--muted); }
-.doc-page .doc-demo { display: flex; align-items: center; gap: 6px; margin: 28px 0 0; padding-top: 12px; border-top: 1px solid var(--separator); font-size: 12px; line-height: 16px; color: var(--muted); }
-.doc-page--sheet .doc-demo { margin: 0; padding: 8px 18px; }
-.doc-page-no, .doc-gap { text-align: center; font-size: 12px; line-height: 16px; color: var(--muted); font-variant-numeric: tabular-nums; margin: 0 0 20px; }
-.doc-gap { padding: 8px 0; }
-.doc-page--slide { aspect-ratio: 16 / 9; display: flex; flex-direction: column; justify-content: center; padding: 40px 56px; }
-.doc-page--slide h2 { font-size: 26px; line-height: 34px; }
+.doc-gap { max-width: 816px; margin: 0 auto 20px; padding: 10px; border: 1px dashed var(--border-secondary); border-radius: 4px; text-align: center; font-size: 12px; line-height: 16px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.doc-state { display: grid; place-items: center; min-height: 100%; }
+
+/* PDF and Word: white paper with print margins, a running header (PDF) and a page footer — in every theme. */
+.doc-page--pdf, .doc-page--docx { position: relative; max-width: 816px; min-height: 0; aspect-ratio: 8.5 / 11; margin: 0 auto 20px; padding: 72px 80px 64px; border-radius: 2px; background: var(--paper); color: var(--paper-ink); box-shadow: var(--paper-shadow); }
+.doc-page--pdf th, .doc-page--pdf td, .doc-page--docx th, .doc-page--docx td { border-color: var(--paper-rule); }
+.doc-page--pdf th, .doc-page--docx th { background: color-mix(in oklab, var(--paper-rule) 45%, var(--paper)); }
+.doc-page--pdf .doc-sub, .doc-page--docx .doc-sub { color: var(--paper-muted); }
+.doc-page--pdf { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; font-size: 14px; line-height: 1.62; }
+.doc-page--pdf h2 { font-size: 24px; line-height: 30px; font-weight: 700; letter-spacing: -0.01em; }
+.doc-page--pdf h3 { font-size: 15px; line-height: 22px; font-weight: 700; margin-top: 22px; }
+.doc-page--docx { font-family: Aptos, Calibri, Carlito, "Segoe UI", sans-serif; font-size: 14.5px; line-height: 1.55; }
+.doc-page--docx h2 { font-size: 30px; line-height: 38px; font-weight: 400; letter-spacing: -0.015em; margin-bottom: 4px; }
+.doc-page--docx h3 { font-size: 19px; line-height: 26px; font-weight: 500; color: var(--docx-heading); margin: 22px 0 6px; }
+.doc-run { position: absolute; top: 30px; left: 80px; right: 80px; display: flex; justify-content: space-between; gap: 16px; padding-bottom: 6px; border-bottom: 1px solid var(--paper-rule); font-size: 10px; line-height: 14px; color: var(--paper-muted); }
+.doc-run span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.doc-foot { position: absolute; left: 0; right: 0; bottom: 24px; text-align: center; font-size: 10px; line-height: 14px; color: var(--paper-muted); font-variant-numeric: tabular-nums; }
+
+/* Slides: a 16:9 deck with a title slide, slide titles and slide numbers. */
+.doc-page--slide { position: relative; max-width: 960px; aspect-ratio: 16 / 9; margin: 0 auto 24px; display: flex; flex-direction: column; justify-content: flex-start; padding: 44px 64px 48px; border-radius: 4px; background: var(--paper); color: var(--paper-ink); box-shadow: var(--paper-shadow); font-size: 17px; line-height: 1.5; overflow: hidden; }
+.doc-page--slide h3 { margin: 0 0 20px; padding-bottom: 12px; font-size: 26px; line-height: 32px; font-weight: 600; color: var(--slide-ink); border-bottom: 3px solid color-mix(in oklab, var(--slide-ink) 18%, transparent); }
+.doc-page--slide ul { padding-left: 24px; }
+.doc-page--slide li + li { margin-top: 8px; }
+.doc-page--slide th, .doc-page--slide td { border-color: var(--paper-rule); }
+.doc-page--slide th { background: color-mix(in oklab, var(--slide-ink) 8%, var(--paper)); }
+.doc-page--slide .doc-foot { left: auto; right: 24px; bottom: 16px; font-size: 11px; }
+.doc-page.doc-slide--title { justify-content: center; background: var(--slide-title-bg); color: var(--paper); }
+.doc-slide--title h2 { font-size: 40px; line-height: 48px; font-weight: 600; letter-spacing: -0.02em; }
+.doc-slide--title .doc-sub { color: color-mix(in oklab, var(--paper) 72%, transparent); font-size: 16px; line-height: 24px; }
+.doc-slide--title .doc-foot { color: color-mix(in oklab, var(--paper) 60%, transparent); }
+
+/* Spreadsheet: gridlines, column letters, row numbers and sheet tabs. */
 .doc-page--sheet { padding: 0; overflow: hidden; font-size: 13px; line-height: 1.45; max-width: 960px; }
 .doc-sheet { overflow: auto; }
 .doc-page .doc-sheet table { margin: 0; font-size: 13px; }
@@ -133,7 +157,58 @@
 .doc-sheet__tabs { display: flex; gap: 2px; padding: 6px 10px; border-top: 1px solid var(--separator); background: var(--surface-secondary); font-size: 12px; }
 .doc-sheet__tabs span { padding: 3px 12px; border-radius: var(--radius-md); color: var(--muted); }
 .doc-sheet__tabs span.is-on { background: var(--surface); color: var(--foreground); box-shadow: var(--surface-shadow); font-weight: 500; }
-.doc-state { display: grid; place-items: center; min-height: 100%; }
+
+/* Email: subject, sender and recipients above the message. */
+.doc-mail { margin: 0 0 20px; padding-bottom: 16px; border-bottom: 1px solid var(--separator); }
+.doc-mail h2 { margin-bottom: 12px; }
+.doc-mail__from { display: flex; align-items: center; gap: 10px; font-size: 13px; line-height: 18px; }
+.doc-mail__who { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.doc-mail__name { font-weight: 600; }
+.doc-mail__to, .doc-mail__date { color: var(--muted); }
+.doc-mail__date { flex: none; font-size: 12px; }
+
+/* ───── Native viewer (reader) ───── */
+/* The canvas follows the file: a neutral desk under paged files, the page itself for web-like files and sheets. */
+.rdr-canvas:has(.doc-viewer--pdf, .doc-viewer--docx, .doc-viewer--slide) { background: var(--viewer-canvas); padding-top: 0; }
+.rdr-canvas:has(.doc-viewer--flow) { background: var(--surface); }
+.rdr-canvas:has(.doc-viewer--sheet) { background: var(--surface); padding: 0; }
+.rdr-canvas:has(.doc-viewer) > .rdr-banners { padding-top: 16px; }
+.rdr-canvas:has(.doc-viewer--sheet) > .rdr-banners { padding: 16px 16px 0; }
+.doc-viewer__bar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 -28px 24px; padding: 6px 12px 6px 20px; border-bottom: 1px solid var(--separator); background: color-mix(in oklab, var(--viewer-canvas) 86%, transparent); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); font-size: 12px; line-height: 16px; color: var(--muted); }
+.doc-viewer__where { font-variant-numeric: tabular-nums; }
+.doc-viewer__where .num { color: var(--foreground); font-weight: 500; }
+.doc-viewer__zoom { display: flex; align-items: center; gap: 2px; }
+.doc-viewer__pct { min-width: 52px; height: 28px; padding: 0 6px; border-radius: var(--radius-lg); font-size: 12px; font-weight: 500; color: var(--foreground); transition: background-color var(--dur-fast); }
+.doc-viewer__pct:hover { background: var(--default); }
+.doc-viewer__pages { zoom: var(--doc-zoom, 1); padding-bottom: 24px; }
+/* Web-like files read as one continuous page — no paper, no page breaks. */
+.doc-viewer--flow { max-width: 780px; margin: 0 auto; padding: 16px 8px 48px; }
+.doc-viewer--flow .doc-page { max-width: none; margin: 0; padding: 0; border-radius: 0; background: transparent; box-shadow: none; }
+/* Format typography applies wherever the page appears (reader, quick preview, review, thumbnails). */
+.doc-page--markdown { font-size: 16px; line-height: 1.6; }
+.doc-page--markdown h2 { font-size: 30px; line-height: 38px; font-weight: 600; padding-bottom: 10px; margin-bottom: 16px; border-bottom: 1px solid var(--separator); }
+.doc-page--markdown h3 { font-size: 22px; line-height: 30px; font-weight: 600; padding-bottom: 6px; margin: 28px 0 14px; border-bottom: 1px solid var(--separator); }
+.doc-page--markdown .doc-sub { font-size: 14px; margin: -8px 0 16px; }
+.doc-page--markdown tbody tr:nth-child(even) td { background: var(--surface-secondary); }
+.doc-page--web { font-size: 15px; line-height: 1.7; }
+.doc-page--web h2 { font-size: 32px; line-height: 40px; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 6px; }
+.doc-page--web .doc-sub { margin-bottom: 24px; }
+.doc-page--web h3 { font-size: 20px; line-height: 28px; margin: 32px 0 10px; }
+.doc-page--text { font-family: var(--font-mono); font-size: 13px; line-height: 1.65; white-space: pre-wrap; }
+.doc-page--text h2, .doc-page--text h3 { font-size: inherit; line-height: inherit; font-weight: 600; margin: 18px 0 6px; letter-spacing: 0; }
+.doc-page--text .doc-sub { font-size: inherit; }
+.doc-page--email { font-size: 15px; line-height: 1.65; }
+/* Spreadsheet: full-bleed grid with a formula bar; selecting a cell shows its reference and value. */
+.doc-viewer--sheet { display: flex; flex-direction: column; min-height: 100%; }
+.doc-fx { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 0; height: 36px; border-bottom: 1px solid var(--separator); background: var(--surface); font-size: 13px; }
+.doc-fx__ref { flex: none; width: 76px; padding: 0 12px; border-right: 1px solid var(--separator); font-variant-numeric: tabular-nums; font-weight: 500; }
+.doc-fx__fn { flex: none; padding: 0 12px; border-right: 1px solid var(--separator); font-style: italic; color: var(--muted); }
+.doc-fx__val { flex: 1 1 auto; min-width: 0; padding: 0 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.doc-viewer--sheet .doc-page--sheet { flex: 1 1 auto; max-width: none; margin: 0; border-radius: 0; box-shadow: none; display: flex; flex-direction: column; }
+.doc-viewer--sheet .doc-sheet { flex: 1 1 auto; }
+.doc-viewer--sheet .doc-sheet td { cursor: cell; }
+.doc-viewer--sheet .doc-sheet td.is-sel { box-shadow: inset 0 0 0 2px var(--accent); }
+.doc-viewer--sheet .doc-sheet__tabs { position: sticky; bottom: 0; }
 
 /* Ask-about-a-selection toolbar */
 .doc-sel { position: absolute; z-index: var(--z-popover); display: flex; gap: 2px; padding: 4px; border-radius: var(--radius-3xl); background: var(--foreground); color: var(--background); box-shadow: var(--overlay-shadow); animation: rise var(--dur) var(--ease-out); }
@@ -141,28 +216,40 @@
 
 /* ───── Responsive ───── */
 @container app (max-width: 1023px) {
-  .rdr-squeeze > span { display: none; }
-  .rdr-squeeze { padding-inline: 9px; gap: 2px; }
   .rdr-rail { position: absolute; z-index: var(--z-sidebar); top: 0; right: 0; bottom: 0; width: min(380px, 100%); box-shadow: var(--overlay-shadow); }
   .rdr-scrim { display: block; position: absolute; inset: 0; z-index: calc(var(--z-sidebar) - 1); background: var(--backdrop); animation: fade var(--dur) var(--ease-out); }
   .doc-page { padding: 40px 40px; }
+  .doc-page--pdf, .doc-page--docx { padding: 64px 56px 56px; }
+  .doc-run { left: 56px; right: 56px; }
 }
+/* Narrow: no outline column; its sections are under ⋯ → Contents. */
 @container app (max-width: 760px) {
   .rdr-outline { display: none; }
-  .rdr-outline-btn { display: inline-flex; }
 }
+/* Phones: one compact row — (Back) · title on one line · Ask, Save and ⋯ as icons. The meta lives in About, the zoom stays in the
+   file's own app (only "Page n of N" remains), and the header slides away while reading down (.is-collapsed, set on scroll). */
 @container app (max-width: 679px) {
-  .rdr-head { padding: 10px 14px; gap: 6px; }
-  .rdr-head__row { flex-wrap: wrap; gap: 8px 12px; }
-  .rdr-head__row > .file-icon { display: none; }
-  .rdr-head__main { flex-basis: 100%; }
-  .rdr-head__title-row { flex-wrap: wrap; }
-  .rdr-head__title { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; flex-basis: 100%; font-size: 16px; }
-  .rdr-head__actions { width: 100%; }
-  .rdr-head__actions .rdr-ask-btn { flex: 1; }
-  .rdr-wide, .rdr-head__actions .rdr-wide { display: none; }
+  .rdr-head { padding: 6px 8px 6px 12px; gap: 6px; }
+  .rdr-head__row { gap: 4px; }
+  .rdr-head__row > .file-icon, .rdr-head__meta, .rdr-head__title-row .chip { display: none; }
+  .rdr-head__title { font-size: 15px; line-height: 22px; }
+  .rdr-head__actions { gap: 2px; }
+  .rdr-head__actions .button { min-width: 40px; height: 40px; padding: 0 10px; }
+  .rdr-head__actions .button > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .rdr-head__actions .res-save:not(.is-on) { background: transparent; box-shadow: none; }
+  .rdr-back { margin-left: -8px; min-width: 40px; height: 40px; }
+  .rdr.is-collapsed .rdr-head { margin-top: calc(-1 * var(--rdr-head-h, 53px)); }
+  .doc-viewer__zoom { display: none; }
+  .doc-viewer__bar { justify-content: center; }
   .rdr-rail { width: 100%; border-left: 0; }
   .rdr-canvas { padding: 12px; }
+  .doc-viewer__bar { margin: 0 -12px 16px; }
   .doc-page { padding: 24px 20px; font-size: 14px; }
-  .doc-page--slide { padding: 24px; aspect-ratio: auto; min-height: 220px; }
+  /* Phones scale pages to the screen instead of keeping the paper ratio. */
+  .doc-page--pdf, .doc-page--docx { aspect-ratio: auto; padding: 44px 22px 40px; }
+  .doc-run { top: 16px; left: 22px; right: 22px; }
+  .doc-foot { bottom: 14px; }
+  .doc-page--slide { padding: 24px 24px 32px; aspect-ratio: auto; min-height: 220px; font-size: 15px; }
+  .doc-page--slide h3 { font-size: 20px; line-height: 26px; }
+  .doc-slide--title h2 { font-size: 28px; line-height: 34px; }
 }

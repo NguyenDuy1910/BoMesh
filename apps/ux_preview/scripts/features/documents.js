@@ -107,24 +107,32 @@
   const moveTargets = from => visibleKbs().filter(k => k.id !== from && !k.personal && canEditKb(k));
   A['doc-move'] = el => {
     const ids = (el.dataset.ids || el.dataset.id || '').split(',').filter(Boolean); if (!ids.length) return;
-    const from = docById(ids[0])?.kb;
-    setPath('docMove', { to: moveTargets(from)[0]?.id || '' });
+    const from = docById(ids[0])?.kb, targets = moveTargets(from);
+    // One possible destination is the obvious choice; with several, the caller picks on purpose.
+    setPath('docMove', { to: targets.length === 1 ? targets[0].id : '', tried: false });
     openModal('doc-move', { ids, from });
   };
   M['doc-move'] = ({ ids, from }) => {
-    const targets = moveTargets(from), f = ui('docMove');
-    const n = ids.length;
+    const targets = moveTargets(from), f = ui('docMove'), n = ids.length, src = kbById(from);
+    const title = n === 1 ? 'Move document' : `Move ${plural(n, 'document')}`;
+    if (!targets.length) return { title, icon: 'folder', size: 'sm', body: emptyState({ icon: 'folder', title: 'Nowhere to move it', desc: 'There’s no other knowledge base you can edit.', compact: true }), foot: btn('Close', { v: 'primary', act: 'close-modal' }) };
+    const err = f.tried && !f.to ? 'Choose a knowledge base.' : '';
+    const opt = k => {
+      const w = X.whoCanSee(k);
+      return `<label class="radio mv-opt"><input type="radio" name="doc-move-to" value="${esc(k.id)}" ${f.to === k.id ? 'checked' : ''} data-change="doc-move-pick" data-value="${esc(k.id)}"><span class="radio__control" aria-hidden="true"></span>${X.kbMark ? X.kbMark(k, 24) : ''}<span class="grow"><span class="radio__label mv-opt__name">${esc(k.name)}</span><span class="radio__desc mv-opt__who">${ic(w.icon, 'i-xs')}<span class="truncate">${esc(w.label)}</span></span></span></label>`;
+    };
     return {
-      size: 'sm', title: n === 1 ? `Move “${docById(ids[0])?.name}”` : `Move ${plural(n, 'document')}`,
-      desc: `From ${esc(kbById(from)?.name || '')}`,
-      body: targets.length
-        ? field({ id: 'doc-move-to', label: 'Move to', desc: 'People with access to that knowledge base will see these documents.', control: select({ id: 'doc-move-to', bind: 'docMove.to', value: f.to, options: targets.map(k => [k.id, k.name]) }) })
-        : `<p class="muted">There’s no other knowledge base you can edit.</p>`,
-      foot: btn('Cancel', { act: 'close-modal' }) + (targets.length ? btn('Move', { v: 'primary', act: 'doc-move-go' }) : ''),
+      title, icon: 'folder', size: 'md',
+      desc: n === 1 ? `“${esc(docById(ids[0])?.name || '')}” · from ${esc(src?.name || '')}` : `From ${esc(src?.name || '')}`,
+      body: `<div class="field"><span class="label" id="doc-move-label">Move to</span><div class="option-list mv-list" role="radiogroup" aria-labelledby="doc-move-label" ${err ? 'aria-invalid="true" aria-describedby="doc-move-err"' : ''}>${targets.map(opt).join('')}</div>${err ? `<div class="field-error" id="doc-move-err" role="alert">${ic('alert-circle')}<span>${esc(err)}</span></div>` : `<div class="description">Who can see ${n === 1 ? 'it' : 'them'} follows the new knowledge base.</div>`}</div>`,
+      footStart: 'You can undo right after.',
+      foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn('Move', { v: 'primary', icon: 'folder', act: 'doc-move-go' }),
     };
   };
+  A['doc-move-pick'] = el => { const f = ui('docMove'); f.to = el.dataset.value; refreshLayer(); };
   A['doc-move-go'] = () => {
-    const { ids, from } = S.modal.props, target = kbById(ui('docMove').to); if (!target) return;
+    const { ids, from } = S.modal.props, f = ui('docMove'), target = kbById(f.to);
+    if (!target) { f.tried = true; refreshLayer(); $('#layer .mv-list input')?.focus(); return; }
     const docs = ids.map(docById).filter(Boolean);
     docs.forEach(d => (d.kb = target.id)); target.updated = Date.now();
     closeModal(); S.drawer = null; refresh();
@@ -136,7 +144,8 @@
   X.docFix = (d, { v = 'secondary', size } = {}) => {
     const b = (label, icon, act) => btn(label, { v, size, icon, act, data: { id: d.id } });
     const own = kbById(d.kb)?.personal;
-    if (d.status === 'failed') return stillLocked(d) ? b('Replace file', 'upload', 'doc-replace') : b('Try again', 'retry', 'doc-process');
+    // A new file only for uploads; a synced file is fixed at its source, then tried again.
+    if (d.status === 'failed') return stillLocked(d) && res(d).source.key === 'upload' ? b('Replace file', 'upload', 'doc-replace') : b('Try again', 'retry', 'doc-process');
     if (d.status === 'pending') return b(own ? 'Make searchable' : 'Publish now', 'play', 'doc-process');
     if (d.status === 'outdated') return b(own ? 'Update' : 'Publish update', 'retry', 'doc-process');
     return '';
@@ -833,11 +842,46 @@
       secs.forEach((s, i) => { if (i % per === 0) { b.page(Math.floor(i / per) + 1); if (!i) b.title(base, `${kb?.name || ''} · Updated ${fmtDate(doc.updated)}`); } b.h(s[0]); if (s[1]) s[1].forEach(x => b.p(x)); if (s[2]) b.ul(s[2]); });
     });
   }
-  /** Rendition of a resource: { pages:[{no, cls, html}], outline:[{id, title, page}], text, blocks:[{page, heading, text, quote}] }.
-      Demo workspaces mark the first page as fictional (HTML only — not part of the text). */
+  /* ═══════════════ Native format ═══════════════
+     A document opens the way its own app shows it — PDF pages, a Word page, slides, a spreadsheet, a rendered
+     Markdown file, a web page, plain text or an email — never as a separate text rendition. The rendition model
+     (pages, outline, blocks) stays the same so search, citations and highlights keep working; the format only
+     decides the page chrome (running header, page/slide numbers) and, in the reader, the viewer around it. */
+  const FORMAT = { pdf: 'pdf', doc: 'docx', docx: 'docx', ppt: 'slide', pptx: 'slide', xls: 'sheet', xlsx: 'sheet', csv: 'sheet', md: 'markdown', html: 'web', htm: 'web', txt: 'text', log: 'text', json: 'text', msg: 'email', eml: 'email' };
+  const formatOf = doc => FORMAT[String(doc?.type || '').toLowerCase()] || 'web';
+  X.docFormat = formatOf;
+  /** Prose built as pages, shown as a deck: every section becomes a slide (the title page becomes the title slide). */
+  function asSlides(pages) {
+    const out = [];
+    pages.forEach(p => p.html.split(/(?=<h3 )/).filter(s => s.trim()).forEach(html => out.push({ no: p.no, cls: 'doc-page--slide', html })));
+    return out;
+  }
+  /** Rendition of a resource: { format, count, pages:[{no, cls, html}], outline:[{id, title, page}], text, blocks:[{page, heading, text, quote}] }. */
   function model(doc) {
-    const m = rendition(doc);
-    if (isDemoWs() && m.pages[0]) m.pages[0].html += `<p class="doc-demo">${ic('info', 'i-xs')}<span>Demo document — fictional content for the BoMesh prototype.</span></p>`;
+    const m = rendition(doc), f = formatOf(doc);
+    m.format = f;
+    if (f === 'slide' && !m.pages.some(p => p.cls === 'doc-page--slide')) m.pages = asSlides(m.pages);
+    if (f === 'sheet' && !m.pages.some(p => p.cls === 'doc-page--sheet')) m.format = 'pdf';
+    // Web-like files have no pages: one continuous page everywhere (passages keep their page for citations).
+    if (['markdown', 'web', 'text', 'email'].includes(m.format) && m.pages.length > 1) m.pages = [{ no: 1, cls: m.pages[0].cls || '', html: m.pages.map(p => p.html).join('') }];
+    const total = m.format === 'slide' ? m.pages.length : Math.max(doc.pages || 1, ...m.pages.map(p => p.no));
+    m.count = total;
+    const base = doc.name.replace(/\.[^.]+$/, '');
+    m.pages.forEach((p, i) => {
+      if (!String(p.cls || '').includes('doc-page--' + m.format)) p.cls = cx(p.cls, 'doc-page--' + m.format);
+      // Page chrome lives on the page, like the file's own app prints it — not as labels between pages.
+      if (m.format === 'pdf' && i) p.html = `<div class="doc-run" aria-hidden="true"><span>${esc(base)}</span><span>${esc(curWs()?.name || '')}</span></div>` + p.html;
+      if (m.format === 'pdf') p.html += `<div class="doc-foot" aria-hidden="true">${p.no}</div>`;
+      if (m.format === 'docx') p.html += `<div class="doc-foot" aria-hidden="true">Page ${p.no} of ${total}</div>`;
+      if (m.format === 'slide') p.html += `<div class="doc-foot" aria-hidden="true">${i + 1}</div>`;
+    });
+    if (m.format === 'slide' && m.pages[0]?.html.includes('<h2')) m.pages[0].cls += ' doc-slide--title';
+    // An email opens as a message: subject, sender, recipients and date above the body.
+    if (m.format === 'email' && m.pages[0]) {
+      const from = res(doc).owner || doc.addedBy || curWs()?.name || '', to = kbById(doc.kb)?.name || curWs()?.name || '';
+      m.pages[0].html = m.pages[0].html.replace(/^<h2>([\s\S]*?)<\/h2>(<p class="doc-sub">[\s\S]*?<\/p>)?/, (_, subj) =>
+        `<header class="doc-mail"><h2>${subj}</h2><div class="doc-mail__from">${avatar(from, 'sm')}<div class="doc-mail__who"><span class="doc-mail__name">${esc(from)}</span><span class="doc-mail__to">To ${esc(to)}</span></div><span class="doc-mail__date">${esc(fmtDateTime(doc.updated))}</span></div></header>`);
+    }
     return m;
   }
   X.docModel = model;

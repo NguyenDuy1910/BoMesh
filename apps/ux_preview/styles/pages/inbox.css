@@ -1,0 +1,10 @@
+/* Inbox (features/inbox.js): "Needs you" then "Updates". Rows come from item(); this file only sets the message
+   layout (one body line + time), quiet read rows and the trailing chevron. Dismiss uses .reveal-on-hover. Prefix: inbox-. */
+.inbox-line { display: block; }
+.inbox-time { display: block; margin-top: 2px; font-size: var(--text-xs); line-height: var(--leading-xs); color: var(--muted); }
+.inbox-item:not(.item--unread) .item__title { font-weight: var(--weight-regular); }
+.inbox-go { color: var(--muted); flex: none; }
+.inbox-foot { display: flex; justify-content: center; margin-top: var(--space-4); }
+@container app (max-width: 679px) {
+  .inbox-go { display: none; }
+}

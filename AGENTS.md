@@ -159,6 +159,22 @@ Do not create parallel design concepts or UX-flow documents under `docs/`,
 `apps/web/`, or `apps/mobile/`. Update the canonical files in
 `apps/ux_preview/` instead.
 
+### Product design rules (binding)
+
+Before any UX/UI design or implementation — in `apps/ux_preview`,
+`apps/web` or `apps/mobile` — read and follow
+`apps/ux_preview/PRODUCT_DESIGN_RULES.md` and apply it to every page and
+component you touch:
+
+* run its UX review first (primary intent, shortest journey, audit, remove
+  redundant or competing elements, simplest pattern, verify hierarchy);
+* one clear purpose per page, one responsibility per component, one primary
+  action per context; secondary and advanced actions stay subtle or in menus;
+* HeroUI (https://heroui.com/docs/react) is the component source of truth;
+* prioritize real user behavior and minimal cognitive load; never introduce
+  UI complexity without a user benefit — preserve functionality by
+  simplifying its presentation, not by adding elements.
+
 ---
 
 ## Required workflow

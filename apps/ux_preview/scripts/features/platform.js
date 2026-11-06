@@ -57,48 +57,50 @@
     return w ? `<span class="row gap-8">${wsMark(w, 20)}<span class="truncate">${esc(w.name)}</span></span>` : `<span class="row gap-8"><span class="pf-plat">${ic('layers', 'i-xs')}</span><span class="muted">Platform</span></span>`;
   };
 
-  /* ── Platform audit log (separate from the workspace activity log) ── */
+  /* ── Platform audit log: platform-level events only (workspaces, accounts, connectors, indexing, console sign-ins).
+     What happens inside a workspace (documents, sources, members' sign-ins) stays in that workspace's Activity. ── */
   D.pAudit ??= (() => {
     const PLAT = [
       [26 * HOUR, null, 'Kenji Mori', 'Sign-in blocked — not a platform admin', 'Sign-in', 'Platform console', 'failure'],
       [2 * DAY + 3 * HOUR, 'ws-litware', 'Jordan Blake', 'Created workspace', 'Workspaces', 'Litware Labs', 'success'],
-      [5 * DAY, null, 'Alex Rivera', 'Made platform admin', 'People & access', 'Jordan Blake', 'success'],
-      [12 * DAY, null, 'Jordan Blake', 'Suspended account', 'People & access', 'Nora Quinn', 'success'],
+      [5 * DAY, null, 'Alex Rivera', 'Made platform admin', 'People', 'Jordan Blake', 'success'],
+      [12 * DAY, null, 'Jordan Blake', 'Suspended account', 'People', 'Nora Quinn', 'success'],
       [18 * DAY, 'ws-adatum', 'Alex Rivera', 'Suspended workspace', 'Workspaces', 'Adatum Health', 'success'],
+      [18 * DAY, 'ws-adatum', 'Alex Rivera', 'Paused indexing', 'Indexing', 'Adatum Health', 'success'],
       [33 * DAY, null, 'Alex Rivera', 'Turned on connector', 'Connectors', 'Confluence', 'success'],
       [42 * DAY, null, 'Alex Rivera', 'Updated connector settings', 'Connectors', 'Google Drive', 'success'],
     ];
-    const KB = ['Policies', 'Customer contracts', 'Product docs', 'Runbooks', 'Sales playbooks', 'Clinical guidelines', 'Branch procedures', 'Supplier specs'];
+    /* Recurring platform events, spread over the live workspaces. who: 0 = workspace owner, 1 = platform admin, 'sys' = BoMesh. */
+    const ADMINS = ['Alex Rivera', 'Jordan Blake'];
     const T = [
-      ['Sign-in', 'Signed in', () => 'Google', 'success', 0],
-      ['Knowledge', 'Uploaded 3 documents', k => k, 'success', 0],
-      ['Sources', 'Sync failed', () => 'Shared drive — Operations', 'failure', 'sys'],
-      ['People & access', 'Added member', (k, p) => p, 'success', 0],
-      ['Sources', 'Connected a source', () => 'Google Drive — Shared drives', 'success', 0],
-      ['People & access', 'Changed role to Workspace admin', (k, p) => p, 'success', 0],
-      ['Sign-in', 'Sign-in blocked — wrong password', () => 'Password', 'failure', 1],
-      ['Knowledge', 'Created knowledge base', k => k, 'success', 0],
-      ['Settings', 'Updated assistant instructions', () => 'Assistant setup', 'success', 0],
-      ['People & access', 'Approved access request', (k, p) => `${p} → ${k}`, 'success', 0],
-      ['Sources', 'Paused a source', () => 'Confluence — Team space', 'success', 1],
-      ['Knowledge', 'Archived document', () => 'Pricing 2025.pdf', 'success', 1],
+      ['Sign-in', 'Signed in to the platform console', () => 'Platform console', 'success', 1, true],
+      ['People', 'Invited account', (w, p) => emailOf(p, wsDomain(w)), 'success', 0],
+      ['Indexing', 'Retried failed jobs', w => w.name, 'success', 1],
+      ['Workspaces', 'Changed workspace web address', w => wsUrl(w), 'success', 0],
+      ['Indexing', 'Indexing slowed down', w => w.name, 'failure', 'sys'],
+      ['People', 'Added workspace admin', (w, p) => p, 'success', 0],
+      ['Sign-in', 'Sign-in blocked — wrong password', () => 'Platform console', 'failure', 1, true],
+      ['Workspaces', 'Changed workspace template', w => `${w.name} · ${wsTemplate(w).label}`, 'success', 0],
     ];
     const live = D.pWorkspaces.filter(w => w.status !== 'new');
     const out = PLAT.map(([t, ws, actor, action, area, target, outcome], i) => ({ id: 'pev-p' + i, at: ago(t), ws, actor, action, area, target, outcome, ip: `10.0.${8 + i}.${21 + i * 9}`, device: DEVICES[i % DEVICES.length] }));
-    for (let i = 0; i < 34; i++) {
-      const t = (i + 1) * (i + 1) * 55 * MIN;
+    for (let i = 0; i < 30; i++) {
+      const t = (i + 1) * (i + 1) * 60 * MIN;
       let w = live[(i * 5 + 2) % live.length]; if (w.id === 'ws-adatum' && t < 18 * DAY) w = wsById('ws-woodgrove');
-      const h = hashOf(w.id); const [area, action, tgt, outcome, who] = T[i % T.length];
-      const people = [w.owner, NAMES[(h + i) % NAMES.length], NAMES[(h + i * 7 + 3) % NAMES.length]];
-      const actor = who === 'sys' ? 'BoMesh' : people[who ? 1 + (i % 2) : i % 3 === 2 ? 1 : 0];
-      out.push({ id: 'pev-' + i, at: ago(t), ws: w.id, actor, action, area, target: tgt(KB[(h + i) % KB.length], people[2]), outcome, ip: `10.${20 + (h % 200)}.${(i * 7) % 250}.${(i * 13 + 40) % 250}`, device: DEVICES[(h + i) % DEVICES.length] });
+      const h = hashOf(w.id); const [area, action, tgt, outcome, who, platform] = T[i % T.length];
+      const actor = who === 'sys' ? 'BoMesh' : who === 1 ? ADMINS[i % 2] : w.owner;
+      out.push({ id: 'pev-' + i, at: ago(t), ws: platform ? null : w.id, actor, action, area, target: tgt(w, NAMES[(h + i) % NAMES.length]), outcome, ip: `10.${20 + (h % 200)}.${(i * 7) % 250}.${(i * 13 + 40) % 250}`, device: DEVICES[(h + i) % DEVICES.length] });
     }
     return out.sort((a, b) => b.at - a.at);
   })();
   DATA_KEYS.push('pAudit');
 
   /* ═══════════════════════ Workspaces ═══════════════════════ */
-  const WS_STATUS = [['active', 'Active'], ['new', 'Setting up'], ['suspended', 'Suspended'], ['archiving', 'Archive requested']];
+  STATUS.ws.archiving ??= ['warning', 'Archive requested'];
+  STATUS.ws.archived ??= ['default', 'Archived'];
+  const WS_STATUS = [['active', 'Active'], ['new', 'Setting up'], ['suspended', 'Suspended'], ['archiving', 'Archive requested'], ['archived', 'Archived']];
+  /** Archive requests wait on an operator: the Workspaces nav badge counts them. */
+  X.pWsAttention = () => D.pWorkspaces.filter(w => w.status === 'archiving').length;
   /** Created workspaces finish setup a few seconds after creation (also after a reload). */
   function settleNew() {
     D.pWorkspaces.forEach(w => {
@@ -120,38 +122,48 @@
   const TPL_ICON = { enterprise: 'building', campus: 'graduation' };
   const tplChip = w => chip(wsTemplate(w).label, { size: 'sm', icon: TPL_ICON[wsTemplateId(w)] || 'layers', tip: wsTemplate(w).desc });
 
+  /** What needs an operator first: archive requests, then new, then suspended, then the steady state, archived last. */
+  const WS_RANK = { archiving: 0, new: 1, suspended: 2, active: 3, archived: 4 };
+  /** One line under the title: how many workspaces, and which ones aren't simply active. */
+  function wsSummary(all) {
+    const n = st => all.filter(w => w.status === st).length;
+    const arc = n('archiving'), sus = n('suspended'), fresh = n('new'), gone = n('archived');
+    const parts = [plural(all.length, 'workspace')];
+    if (arc) parts.push(arc === 1 ? '1 archive request' : `${arc} archive requests`);
+    if (sus) parts.push(`${sus} suspended`);
+    if (fresh) parts.push(`${fresh} setting up`);
+    if (gone) parts.push(`${gone} archived`);
+    if (parts.length === 1) parts.push('all active');
+    return esc(parts.join(' · '));
+  }
+
   P.pWorkspaces = () => {
     settleNew();
     const u = ui('pws', { q: '', status: '' });
     const all = D.pWorkspaces;
-    const sum = k => all.reduce((a, w) => a + (w[k] || 0), 0);
-    const kpis = `<div class="grid cols-4 pf-kpis">${[
-      statCard({ icon: 'building', label: 'Active workspaces', value: fmtNum(all.filter(w => w.status === 'active').length), meta: `of ${fmtNum(all.length)}` }),
-      statCard({ icon: 'users', label: 'Members', value: fmtNum(sum('members')) }),
-      statCard({ icon: 'files', label: 'Documents', value: fmtCompact(sum('docs')) }),
-      statCard({ icon: 'message', label: 'Questions, 30 days', value: fmtCompact(sum('questions30')) }),
-    ].join('')}</div>`;
-    const toolbar = `<div class="toolbar">${searchField({ uiKey: 'pws', placeholder: 'Search workspaces' })}${filterButton('Status', 'pws', 'status', WS_STATUS)}${filterButton('Template', 'pws', 'template', TEMPLATE_OPTS())}${clearFilters('pws', ['status', 'template'])}</div>`;
+    // Templates only help when workspaces differ; otherwise the chip and filter are noise.
+    const mixed = new Set(all.map(w => wsTemplateId(w))).size > 1;
+    const filtered = !!(u.q || u.status || u.template);
+    const toolbar = all.length > 6 || filtered ? `<div class="toolbar">${searchField({ uiKey: 'pws', placeholder: 'Search workspaces' })}${filterButton('Status', 'pws', 'status', WS_STATUS)}${mixed || u.template ? filterButton('Template', 'pws', 'template', TEMPLATE_OPTS()) : ''}${clearFilters('pws', ['status', 'template'])}</div>` : '';
     const tbl = () => {
       let rows = all.filter(w => matchesQ('pws', w.name, w.code, w.owner) && (!u.status || w.status === u.status) && (!u.template || wsTemplateId(w) === u.template));
       if (!rows.length) return noMatches('pws', ['status', 'template'], 'workspaces');
-      rows = u.sort ? applySort(rows, 'pws', { name: w => w.name.toLowerCase() }) : [...rows].sort((a, b) => b.created - a.created);
+      rows = u.sort ? applySort(rows, 'pws', { name: w => w.name.toLowerCase() }) : [...rows].sort((a, b) => (WS_RANK[a.status] ?? 3) - (WS_RANK[b.status] ?? 3) || b.created - a.created);
       return table({
         label: 'Workspaces',
-        head: sortHead('Workspace', 'name', 'pws') + th('Template') + th('Owner', 'hide-md') + sortHead('Members', 'members', 'pws', 'table__column--num') + sortHead('Documents', 'docs', 'pws', 'table__column--num hide-md') + sortHead('Questions, 30 days', 'questions30', 'pws', 'table__column--num') + th('Status'),
+        head: sortHead('Workspace', 'name', 'pws') + th('Owner', 'hide-md') + sortHead('Members', 'members', 'pws', 'table__column--num') + sortHead('Questions, 30 days', 'questions30', 'pws', 'table__column--num') + th('Status'),
         rows: rows.map(w => `<tr class="${cx('table__row', w.id === newId && 'table__row--new')}" data-act="pws-open" data-id="${w.id}" tabindex="0">
-          <td class="table__cell table__cell--primary"><div class="row gap-12">${wsMark(w, 32)}<div class="stack"><span class="cell-title truncate">${esc(w.name)}</span><span class="cell-sub mono truncate">${esc(wsUrl(w))}</span></div></div></td>
-          <td class="table__cell" data-label="Template">${tplChip(w)}</td>
+          <td class="table__cell table__cell--primary"><div class="row gap-12">${wsMark(w, 32)}<div class="stack"><span class="cell-title row gap-8"><span class="truncate">${esc(w.name)}</span>${mixed ? tplChip(w) : ''}</span><span class="cell-sub mono truncate">${esc(wsUrl(w))}</span></div></div></td>
           <td class="table__cell table__cell--hide-sm hide-md"><span class="row gap-8">${avatar(w.owner, 'xs')}<span class="truncate">${esc(w.owner)}</span></span></td>
           <td class="table__cell table__cell--num num" data-label="Members">${fmtNum(w.members)}</td>
-          <td class="table__cell table__cell--num num hide-md">${fmtNum(w.docs)}</td>
           <td class="table__cell table__cell--num num" data-label="Questions">${fmtNum(w.questions30)}</td>
           <td class="table__cell">${status('ws', w.status)}</td></tr>`),
-        foot: `<div class="table-foot"><span class="num">${plural(rows.length, 'workspace')}</span></div>`,
+        foot: filtered ? `<div class="table-foot"><span class="num">${plural(rows.length, 'workspace')}</span></div>` : '',
       });
     };
-    return `<div class="page">${pageHeader({ title: 'Workspaces', extra: PREVIEW, actions: btn('Create workspace', { v: 'primary', icon: 'plus', act: 'pws-create' }) })}
-      ${gate({ ok: () => kpis + toolbar + tbl(), loading: () => skelRows(7), empty: () => emptyState({ icon: 'building', title: 'No workspaces yet', desc: 'Create one for each customer or team. Its first admin sets up the rest.', actions: btn('Create workspace', { icon: 'plus', act: 'pws-create' }), boxed: true }) })}</div>`;
+    const live = S.pageState === 'live' && !S.navLoading;
+    return `<div class="page">${pageHeader({ title: 'Workspaces', desc: live && all.length ? wsSummary(all) : 'Every customer and team on this deployment.', extra: PREVIEW, actions: btn('Create workspace', { v: 'primary', icon: 'plus', act: 'pws-create' }) })}
+      ${gate({ ok: () => toolbar + tbl(), loading: () => skelRows(7), empty: () => emptyState({ icon: 'building', title: 'No workspaces yet', desc: 'Create one for each customer or team. Its first admin sets up the rest.', actions: btn('Create workspace', { icon: 'plus', act: 'pws-create' }), boxed: true }) })}</div>`;
   };
   AFTER.pWorkspaces = () => { if (newId) $('tr.table__row--new')?.scrollIntoView({ block: 'nearest' }); };
 
@@ -159,43 +171,99 @@
     if (!isMemberWs(w)) { toast(`You’re not a member of ${w.name}`, { tone: 'accent' }); return; }
     enterWorkspace(w.id, { quiet: true }); go('/overview'); toast(`Switched to ${w.name}`, { tone: 'accent' });
   }
+  /** The workspace's own Activity log also records platform decisions about it (its admins see them). */
+  const wsLog = (w, action) => DB.ws[w.id]?.audit?.unshift({ id: uid('ev'), at: Date.now(), actor: me().id, action, type: 'Settings', target: w.name, outcome: 'success', ip: '10.4.0.12', device: 'Chrome on macOS' });
+  /** Suspending is reversible (nothing is deleted): it applies at once with Undo; so does reactivating. */
   function suspendWs(w) {
-    if (w.status === 'suspended') {
-      confirmAction({ title: `Reactivate ${w.name}?`, body: 'Members can sign in again right away.', confirm: 'Reactivate',
-        onConfirm: () => { w.status = 'active'; log('Reactivated workspace', 'Workspaces', w.name, w.id); refresh(); toast(`Reactivated ${w.name}`); } });
-      return;
-    }
-    confirmAction({ title: `Suspend ${w.name}?`, body: `Members can’t sign in while it’s suspended. Nothing is deleted.${isMemberWs(w) ? ' You’ll lose access too.' : ''}`, confirm: 'Suspend workspace', danger: true,
-      onConfirm: () => { w.status = 'suspended'; log('Suspended workspace', 'Workspaces', w.name, w.id); refresh(); toast(`Suspended ${w.name}`); } });
+    const before = w.status, on = before !== 'suspended';
+    w.status = on ? 'suspended' : 'active';
+    log(on ? 'Suspended workspace' : 'Reactivated workspace', 'Workspaces', w.name, w.id); refresh(); refreshLayer();
+    toast(on ? `Suspended ${w.name}. Members can’t sign in.` : `Reactivated ${w.name}`, { action: { label: 'Undo', run: () => { w.status = before; log(on ? 'Reactivated workspace' : 'Suspended workspace', 'Workspaces', w.name, w.id); refresh(); refreshLayer(); } } });
+  }
+  /** Complete an archive request: typed confirmation (high-risk), then restorable for 30 days from the drawer. */
+  function archiveWs(w) {
+    if (w.status !== 'archiving') return;
+    confirmAction({
+      title: `Archive ${w.name}?`, danger: true, icon: 'archive', confirm: 'Archive workspace', typeText: w.code,
+      body: `<span>${esc(w.archiveRequest?.actor || 'Its admin')} asked for this.</span> <span>Members lose access and source syncs stop. Its data is kept, and you can restore it until ${esc(fmtDate(Date.now() + 30 * DAY))}.</span>`,
+      onConfirm: () => {
+        w.archiveDecision = { outcome: 'archived', by: me().name, at: Date.now() };
+        delete w.archiveRequest; w.status = 'archived';
+        log('Archived workspace', 'Workspaces', w.name, w.id); wsLog(w, 'Archived workspace'); refresh(); refreshLayer();
+        toast(`Archived ${w.name}. You can restore it for 30 days.`);
+      },
+    });
+  }
+  function restoreWs(w) {
+    if (w.status !== 'archived') return;
+    const dec = w.archiveDecision; w.status = 'active'; delete w.archiveDecision;
+    log('Restored workspace', 'Workspaces', w.name, w.id); wsLog(w, 'Restored workspace'); refresh(); refreshLayer();
+    toast(`Restored ${w.name}`, { action: { label: 'Undo', run: () => { w.status = 'archived'; w.archiveDecision = dec; log('Archived workspace', 'Workspaces', w.name, w.id); refresh(); refreshLayer(); } } });
   }
   A['pws-open'] = el => { if (wsById(el.dataset.id)) openDrawer('pf-ws', { id: el.dataset.id }); };
   A['pf-ws-enter'] = el => { const w = wsById(el.dataset.id); if (w) openWs(w); };
   A['pf-ws-copy'] = el => { const w = wsById(el.dataset.id); if (w) copyText('https://' + wsUrl(w), 'Copied workspace URL'); };
   A['pf-ws-suspend'] = el => { const w = wsById(el.dataset.id); if (w) suspendWs(w); };
+  A['pf-ws-archive'] = el => { const w = wsById(el.dataset.id); if (w) archiveWs(w); };
+  A['pf-ws-restore'] = el => { const w = wsById(el.dataset.id); if (w) restoreWs(w); };
+  A['pf-ws-decline'] = el => { const w = wsById(el.dataset.id); if (w?.status === 'archiving') { S.ui.pfDecline = { reason: '', tried: false }; openModal('pf-ws-decline', { id: w.id }); } };
+  /** Declining needs a reason: it's shown to the workspace admin in Settings. */
+  M['pf-ws-decline'] = ({ id }) => {
+    const w = wsById(id), f = ui('pfDecline'), err = f.tried && !f.reason.trim() ? 'Say why, so the workspace admin knows what to do next.' : '';
+    return {
+      title: `Decline the archive request for ${w?.name}?`, icon: 'x-circle', tone: 'default', size: 'md',
+      desc: 'The workspace stays active. Its admins see your reason in Settings.',
+      body: field({ id: 'pf-decline-reason', label: 'Reason', required: true, error: err, control: textarea({ id: 'pf-decline-reason', bind: 'pfDecline.reason', value: f.reason, rows: 3, invalid: !!err, placeholder: 'e.g. The contract runs until March. Talk to your account manager first.' }) }),
+      foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn('Decline request', { v: 'primary', act: 'pf-ws-decline-send', data: { id } }),
+    };
+  };
+  A['pf-ws-decline-send'] = el => {
+    const w = wsById(el.dataset.id), f = ui('pfDecline'); if (!w || w.status !== 'archiving') return;
+    f.tried = true; if (!f.reason.trim()) { refreshLayer(); $('#pf-decline-reason')?.focus(); return; }
+    w.archiveDecision = { outcome: 'declined', reason: f.reason.trim(), by: me().name, at: Date.now() };
+    delete w.archiveRequest; w.status = 'active';
+    log('Declined archive request', 'Workspaces', w.name, w.id); wsLog(w, 'Archive request declined');
+    closeModal(); refresh(); refreshLayer();
+    toast(`Declined. ${w.name}’s admins see your reason.`);
+  };
+  /* Rare and administrative: copy the address, suspend. The status's own next step is the drawer's footer instead. */
+  MENUS['pf-ws-more'] = el => {
+    const w = wsById(el.dataset.id); if (!w) return [];
+    return [
+      { label: 'Copy URL', icon: 'copy', run: () => A['pf-ws-copy']({ dataset: { id: w.id } }) },
+      ...(['active', 'new'].includes(w.status) ? [{ sep: true }, { label: 'Suspend workspace', icon: 'pause', danger: true, run: () => suspendWs(w) }] : []),
+    ];
+  };
 
   DR['pf-ws'] = ({ id }) => {
     const w = wsById(id);
     if (!w) return { title: 'Workspace not found', body: emptyState({ icon: 'building', title: 'This workspace no longer exists', compact: true }) };
-    const h = hashOf(w.id), off = w.status === 'suspended';
+    const h = hashOf(w.id), off = w.status === 'suspended' || w.status === 'archived';
     const vals = off ? Array(14).fill(0) : series(h, 14, Math.round((w.questions30 * 14) / 30));
     const labels = dayLabels(14), total = vals.reduce((a, b) => a + b, 0);
     const admins = wsAdmins(w);
-    const archive = w.status === 'archiving' && w.archiveRequest ? `<div class="drawer__section">${alertBox('warning', 'Archive requested', `${esc(actorName(w.archiveRequest.actor))} asked to archive this workspace ${esc(rel(w.archiveRequest.at).toLowerCase())}.`)}</div>` : '';
+    const req = w.status === 'archiving' && w.archiveRequest, dec = w.archiveDecision;
+    const notice = req ? alertBox('warning', 'Archive requested', `${esc(req.actor)} asked to archive this workspace ${esc(rel(req.at).toLowerCase())}. Archive it, or decline and say why.`)
+      : w.status === 'archived' ? alertBox('default', 'Archived', `${esc(dec?.by || 'A platform admin')} archived it ${esc(rel(dec?.at || Date.now()).toLowerCase())}. You can restore it until ${esc(fmtDate((dec?.at || Date.now()) + 30 * DAY))}.`, '', { icon: 'archive' }) : '';
+    /* One way forward per status: decide an archive request, restore an archived one, reactivate a suspended one, otherwise open it (members only). */
+    const foot = req ? btn('Decline request', { v: 'ghost', act: 'pf-ws-decline', data: { id: w.id } }) + btn('Archive workspace', { v: 'danger', icon: 'archive', act: 'pf-ws-archive', data: { id: w.id } })
+      : w.status === 'archived' ? btn('Restore workspace', { v: 'primary', icon: 'undo', act: 'pf-ws-restore', data: { id: w.id } })
+        : w.status === 'suspended' ? btn('Reactivate', { v: 'primary', icon: 'play', act: 'pf-ws-suspend', data: { id: w.id } })
+          : isMemberWs(w) ? btn('Open workspace', { v: 'primary', iconRight: 'arrow-right', act: 'pf-ws-enter', data: { id: w.id } }) : '';
     return {
       title: w.name, lead: wsMark(w, 40), desc: `<span class="mono">${esc(wsUrl(w))}</span>`,
-      body: `${archive}<div class="drawer__section">${kv([
+      body: `${notice ? `<div class="drawer__section">${notice}</div>` : ''}<div class="drawer__section">${kv([
         ['Status', status('ws', w.status)],
         ['Template', tplChip(w)],
-        ['Owner', `<span class="row gap-8">${avatar(w.owner, 'xs')}${esc(w.owner)}</span>`],
         ['Created', esc(fmtDate(w.created))],
         ['Members', `<span class="num">${fmtNum(w.members)}</span>`],
         ['Documents', `<span class="num">${fmtNum(w.docs)}</span>`],
       ])}</div>
         <div class="drawer__section"><div class="pf-sec-head"><h3 class="drawer__section-title">Questions, last 14 days</h3><span class="t-xs muted num">${fmtNum(total)}</span></div>
-          ${off ? '<p class="t-sm muted">No questions while suspended.</p>' : sparkline(vals, { height: 48 }) + axis(labels[0], 'Today')}</div>
+          ${off ? `<p class="t-sm muted">No questions while ${w.status === 'archived' ? 'archived' : 'suspended'}.</p>` : sparkline(vals, { height: 48 }) + axis(labels[0], 'Today')}</div>
         <div class="drawer__section"><h3 class="drawer__section-title">Admins</h3>${list(admins.map(a => item({ lead: avatar(a.name, 'sm'), title: esc(a.name), desc: esc(a.email), trail: a.owner ? chip('Owner', { size: 'sm' }) : '' })))}</div>`,
-      footStart: off ? btn('Reactivate', { icon: 'play', act: 'pf-ws-suspend', data: { id: w.id } }) : btn('Suspend', { v: 'danger-soft', icon: 'pause', act: 'pf-ws-suspend', data: { id: w.id } }),
-      foot: btn('Copy URL', { icon: 'copy', act: 'pf-ws-copy', data: { id: w.id } }) + btn('Open workspace', { v: 'primary', iconRight: 'arrow-right', act: 'pf-ws-enter', data: { id: w.id } }),
+      headActions: iconBtn('more', 'More actions', { menu: 'pf-ws-more', data: { id: w.id } }),
+      foot,
     };
   };
 
@@ -222,16 +290,19 @@
     if (!f.codeEdited) f.code = slug(f.name);
     const v = newVisible(f);
     const email = f.email.trim(), acct = EMAIL_RE.test(email) ? accountFor(email) : null;
-    const emailDesc = !EMAIL_RE.test(email) ? 'They become the first admin and invite everyone else.'
+    const emailDesc = !EMAIL_RE.test(email) ? 'They become its first admin and invite everyone else.'
       : acct ? `<span class="row gap-6">${avatar(acct.name, 'xs')}${esc(acct.name)} already has an account.</span>` : 'We’ll email them an invite to create an account.';
+    const dis = f.busy ? 'disabled' : '';
     return {
-      title: 'Create workspace', size: 'md', guard: f.busy,
-      body: `${field({ id: 'pf-new-name', label: 'Name', required: true, error: v.name, control: input({ id: 'pf-new-name', bind: 'pfNew.name', value: f.name, placeholder: 'Litware Labs', autofocus: true, attrs: 'data-live', invalid: !!v.name, onEnter: 'pf-ws-new-submit' }) })}
+      title: 'Create workspace', size: 'md', guard: f.busy, icon: TPL_ICON[f.template] || 'building',
+      desc: 'A private home for one customer or team. Its first admin sets up the rest.',
+      body: `<div class="field"><span class="label">Template</span><div class="pf-tpl">${choiceGroup({ name: 'pf-new-tpl', value: f.template, act: 'pf-ws-tpl', cols: 2, options: Object.entries(TEMPLATES).map(([id, t]) => [id, t.label, esc(t.desc), TPL_ICON[id] || 'layers']) })}</div></div>
+        ${field({ id: 'pf-new-name', label: 'Name', required: true, error: v.name, control: input({ id: 'pf-new-name', bind: 'pfNew.name', value: f.name, placeholder: f.template === 'campus' ? 'e.g. Hanoi University' : 'e.g. Litware Labs', autofocus: true, attrs: `data-live maxlength="60" ${dis}`, invalid: !!v.name, onEnter: 'pf-ws-new-submit' }) })}
         ${field({ id: 'pf-new-code', label: 'Web address', required: true, error: v.code, desc: f.codeEdited ? 'People sign in at this address.' : 'Filled in from the name. You can change it.',
-          control: `<div class="pf-prefix"><span class="pf-prefix__text" aria-hidden="true">bomesh.app/</span>${input({ id: 'pf-new-code', bind: 'pfNew.code', value: f.code, placeholder: 'litware', cls: 'mono', attrs: 'data-input="pf-ws-code" spellcheck="false"', invalid: !!v.code, onEnter: 'pf-ws-new-submit' })}</div>` })}
-        ${field({ id: 'pf-new-email', label: 'First admin email', required: true, error: v.email, desc: emailDesc, control: input({ id: 'pf-new-email', bind: 'pfNew.email', value: f.email, placeholder: 'name@company.com', attrs: 'data-live inputmode="email" spellcheck="false" autocapitalize="off"', invalid: !!v.email, onEnter: 'pf-ws-new-submit' }) })}
-        <div class="field mt-16"><span class="label">Template</span><div class="pf-tpl">${choiceGroup({ name: 'pf-new-tpl', value: f.template, act: 'pf-ws-tpl', cols: 2, options: Object.entries(TEMPLATES).map(([id, t]) => [id, t.label, esc(t.desc)]) })}</div><div class="description mt-4">Decides the modules it starts with. The admin can change it in Settings.</div></div>`,
-      foot: btn('Cancel', { act: 'close-modal', disabled: f.busy }) + btn('Create workspace', { v: 'primary', act: 'pf-ws-new-submit', loading: f.busy, disabled: f.busy }),
+          control: `<div class="pf-prefix"><span class="pf-prefix__text" aria-hidden="true">bomesh.app/</span>${input({ id: 'pf-new-code', bind: 'pfNew.code', value: f.code, placeholder: 'litware', cls: 'mono', attrs: `data-input="pf-ws-code" spellcheck="false" ${dis}`, invalid: !!v.code, onEnter: 'pf-ws-new-submit' })}</div>` })}
+        ${field({ id: 'pf-new-email', label: 'First admin', required: true, error: v.email, desc: emailDesc, control: input({ id: 'pf-new-email', bind: 'pfNew.email', value: f.email, placeholder: 'name@company.com', autocomplete: 'off', attrs: `data-live inputmode="email" spellcheck="false" autocapitalize="off" ${dis}`, invalid: !!v.email, onEnter: 'pf-ws-new-submit' }) })}`,
+      footStart: 'Ready in a few seconds. The admin can change the template later.',
+      foot: btn('Cancel', { v: 'ghost', act: 'close-modal', disabled: f.busy }) + btn('Create workspace', { v: 'primary', icon: 'plus', act: 'pf-ws-new-submit', loading: f.busy }),
     };
   };
   A['pf-ws-code'] = () => { const f = newForm(); f.codeEdited = f.code.trim() !== ''; refreshLayer(); };
@@ -269,48 +340,53 @@
     for (let i = 0; out.length < u.ws && i < pool.length * 2; i++) add(pool[(h + i * 3) % pool.length], 'Member');
     return out;
   }
+  /** Granting platform admin is high-risk (every workspace, user and connector): it asks once. Taking it away is reversible: at once, with Undo. */
   function toggleAdmin(u) {
     if (isSelf(u)) return;
-    if (u.platformAdmin) confirmAction({ title: `Remove ${u.name} as platform admin?`, body: 'They lose access to the platform console. Their workspace roles stay the same.', confirm: 'Remove platform admin', danger: true,
-      onConfirm: () => { u.platformAdmin = false; log('Removed platform admin', 'People & access', u.name); refresh(); toast(`${u.name} is no longer a platform admin`); } });
-    else confirmAction({ title: `Make ${u.name} a platform admin?`, body: 'They’ll manage every workspace, user and connector on this deployment.', confirm: 'Make platform admin',
-      onConfirm: () => { u.platformAdmin = true; log('Made platform admin', 'People & access', u.name); refresh(); toast(`${u.name} is now a platform admin`); } });
+    if (!u.platformAdmin) {
+      confirmAction({ title: `Make ${u.name} a platform admin?`, body: 'They’ll manage every workspace, user and connector on this deployment.', confirm: 'Make platform admin',
+        onConfirm: () => { u.platformAdmin = true; log('Made platform admin', 'People', u.name); refresh(); refreshLayer(); toast(`${u.name} is now a platform admin`); } });
+      return;
+    }
+    u.platformAdmin = false; log('Removed platform admin', 'People', u.name); refresh(); refreshLayer();
+    toast(`${u.name} is no longer a platform admin`, { action: { label: 'Undo', run: () => { u.platformAdmin = true; log('Made platform admin', 'People', u.name); refresh(); refreshLayer(); } } });
   }
+  /** Suspending an account deletes nothing: at once, with Undo; reactivating likewise. */
   function suspendUser(u) {
     if (isSelf(u)) return;
-    const first = esc(u.name.split(' ')[0]);
-    if (u.status === 'suspended') confirmAction({ title: `Reactivate ${u.name}?`, body: `${first} can sign in to their workspaces again.`, confirm: 'Reactivate account',
-      onConfirm: () => { u.status = 'active'; log('Reactivated account', 'People & access', u.name); refresh(); toast(`Reactivated ${u.name}`); } });
-    else confirmAction({ title: `Suspend ${u.name}?`, body: `${first} can’t sign in to any workspace until you reactivate the account. Nothing is deleted.`, confirm: 'Suspend account', danger: true,
-      onConfirm: () => { u.status = 'suspended'; log('Suspended account', 'People & access', u.name); refresh(); toast(`Suspended ${u.name}`); } });
+    const before = u.status, on = before !== 'suspended';
+    u.status = on ? 'suspended' : 'active';
+    log(on ? 'Suspended account' : 'Reactivated account', 'People', u.name); refresh(); refreshLayer();
+    toast(on ? `Suspended ${u.name}. They can’t sign in to any workspace.` : `Reactivated ${u.name}`, { action: { label: 'Undo', run: () => { u.status = before; log(on ? 'Reactivated account' : 'Suspended account', 'People', u.name); refresh(); refreshLayer(); } } });
   }
   const lastActive = u => u.last ? rel(u.last) : 'Never';
 
   P.pUsers = () => {
     const f = ui('pfu', { q: '', role: '', status: '' });
-    const toolbar = `<div class="toolbar">${searchField({ uiKey: 'pfu', placeholder: 'Search by name or email' })}${filterButton('Platform role', 'pfu', 'role', [['admin', 'Platform admin'], ['standard', 'Standard']])}${filterButton('Status', 'pfu', 'status', [['active', 'Active'], ['invited', 'Invited'], ['suspended', 'Suspended']])}${clearFilters('pfu', ['role', 'status'])}</div>`;
+    const filtered = !!(f.q || f.role || f.status);
+    const toolbar = D.pUsers.length > 6 || filtered ? `<div class="toolbar">${searchField({ uiKey: 'pfu', placeholder: 'Search by name or email' })}${filterButton('Platform role', 'pfu', 'role', [['admin', 'Platform admin'], ['standard', 'Standard']])}${filterButton('Status', 'pfu', 'status', [['active', 'Active'], ['invited', 'Invited'], ['suspended', 'Suspended']])}${clearFilters('pfu', ['role', 'status'])}</div>` : '';
     const tbl = () => {
       let rows = D.pUsers.filter(u => matchesQ('pfu', u.name, u.email) && (!f.role || (f.role === 'admin') === u.platformAdmin) && (!f.status || u.status === f.status));
       if (!rows.length) return noMatches('pfu', ['role', 'status'], 'people');
       rows = f.sort ? applySort(rows, 'pfu', { name: u => u.name.toLowerCase(), last: u => u.last || 0 }) : [...rows].sort((a, b) => a.name.localeCompare(b.name));
       return table({
         label: 'Users',
-        head: sortHead('Person', 'name', 'pfu') + sortHead('Workspaces', 'ws', 'pfu', 'table__column--num') + th('Platform role') + sortHead('Last active', 'last', 'pfu', 'hide-md') + th('Status'),
+        head: sortHead('Person', 'name', 'pfu') + sortHead('Workspaces', 'ws', 'pfu', 'table__column--num') + sortHead('Last active', 'last', 'pfu', 'hide-md'),
+        /* Same rule as People: status sits next to the name, only when it isn't the usual "Active". */
         rows: rows.map(u => `<tr class="table__row" data-act="pu-open" data-id="${u.id}" tabindex="0">
-          <td class="table__cell table__cell--primary"><div class="row gap-12">${avatar(u.name)}<div class="stack"><span class="cell-title truncate">${esc(u.name)}${isSelf(u) ? ' <span class="muted t-sm">(you)</span>' : ''}</span><span class="cell-sub truncate">${esc(u.email)}</span></div></div></td>
+          <td class="table__cell table__cell--primary"><div class="row gap-12">${avatar(u.name)}<div class="stack"><span class="cell-title row gap-8 wrap"><span class="truncate">${esc(u.name)}${isSelf(u) ? ' <span class="muted t-sm">(you)</span>' : ''}</span>${u.status !== 'active' ? status('member', u.status) : ''}${u.platformAdmin ? chip('Platform admin', { tone: 'accent', size: 'sm', icon: 'shield' }) : ''}</span><span class="cell-sub truncate">${esc(u.email)}</span></div></div></td>
           <td class="table__cell table__cell--num num" data-label="Workspaces">${fmtNum(u.ws)}</td>
-          <td class="table__cell">${u.platformAdmin ? chip('Platform admin', { tone: 'accent', size: 'sm', icon: 'shield' }) : '<span class="muted hide-sm">Standard</span>'}</td>
-          <td class="table__cell hide-md muted">${esc(lastActive(u))}</td>
-          <td class="table__cell">${status('member', u.status)}</td></tr>`),
+          <td class="table__cell hide-md muted">${esc(u.status === 'invited' ? 'Not signed up yet' : lastActive(u))}</td></tr>`),
         foot: `<div class="table-foot"><span class="num">${plural(rows.length, 'account')}</span></div>`,
       });
     };
-    return `<div class="page">${pageHeader({ title: 'Users', extra: PREVIEW })}
+    return `<div class="page">${pageHeader({ title: 'Users', desc: 'Everyone with a BoMesh account, across all workspaces.', extra: PREVIEW })}
       ${gate({ ok: () => toolbar + tbl(), loading: () => skelRows(8), empty: () => emptyState({ icon: 'users', title: 'No accounts yet', desc: 'People appear here once they sign up or are invited to a workspace.', boxed: true }) })}</div>`;
   };
   A['pu-open'] = el => { if (userById(el.dataset.id)) openDrawer('pf-user', { id: el.dataset.id }); };
   A['pf-user-admin'] = el => { const u = userById(el.dataset.id); if (u) toggleAdmin(u); };
   A['pf-user-suspend'] = el => { const u = userById(el.dataset.id); if (u) suspendUser(u); };
+  MENUS['pf-user-more'] = el => { const u = userById(el.dataset.id); return u && !isSelf(u) && u.status !== 'suspended' ? [{ label: 'Suspend account', icon: 'pause', danger: true, run: () => suspendUser(u) }] : []; };
   DR['pf-user'] = ({ id }) => {
     const u = userById(id);
     if (!u) return { title: 'Account not found', body: emptyState({ icon: 'user', title: 'This account no longer exists', compact: true }) };
@@ -318,12 +394,13 @@
     return {
       title: u.name + (self ? ' (you)' : ''), desc: esc(u.email), lead: avatar(u.name, 'lg'),
       body: `<div class="drawer__section">${kv([['Status', status('member', u.status)], ['Last active', esc(lastActive(u))]])}</div>
-        <div class="drawer__section"><div class="pf-sec-head"><h3 class="drawer__section-title">Workspaces</h3><span class="t-xs muted num">${fmtNum(mships.length)}</span></div>
+        <div class="drawer__section"><h3 class="drawer__section-title">Workspaces</h3>
           ${mships.length ? list(mships.map(({ w, role }) => item({ lead: wsMark(w, 28), title: esc(w.name), desc: `<span class="mono">${esc(wsUrl(w))}</span>`, meta: esc(role), trail: ic('chevron-right', 'i-sm muted'), act: 'pws-open', data: { id: w.id } })))
             : emptyState({ icon: 'building', title: 'Not in any workspace', desc: 'Platform admins can manage workspaces without joining them.', compact: true, boxed: true })}</div>
         <div class="drawer__section">${switchRow({ title: 'Platform admin', desc: self ? 'You can’t change your own platform role.' : 'Can manage every workspace, user and connector.', on: u.platformAdmin, act: 'pf-user-admin', data: { id: u.id }, disabled: self })}</div>`,
-      footStart: self ? '' : u.status === 'suspended' ? btn('Reactivate account', { icon: 'play', act: 'pf-user-suspend', data: { id: u.id } }) : btn('Suspend account', { v: 'danger-soft', icon: 'pause', act: 'pf-user-suspend', data: { id: u.id } }),
-      foot: btn('Done', { act: 'close-drawer' }),
+      // Suspending is rare and destructive (⋯); a suspended account's way forward is reactivating it.
+      headActions: self || u.status === 'suspended' ? '' : iconBtn('more', 'More actions', { menu: 'pf-user-more', data: { id: u.id } }),
+      foot: !self && u.status === 'suspended' ? btn('Reactivate account', { v: 'primary', icon: 'play', act: 'pf-user-suspend', data: { id: u.id } }) : '',
     };
   };
 
@@ -332,58 +409,60 @@
     gdrive: { updated: ago(42 * DAY), by: 'Alex Rivera' },
     confluence: { updated: ago(88 * DAY), by: 'Jordan Blake' },
   };
+  /* One card pattern for every installed connector: the whole card opens its drawer (status, who uses it, the
+     "Available to workspaces" switch). Requested ones aren't installed: their card opens who asked. */
   P.pConnectors = () => {
-    const conCard = c => {
-      const meta = c.status === 'unavailable' ? linkBtn(`Requested by ${plural(c.requests || 0, 'workspace')}`, { act: 'pf-con-demand', data: { key: c.key } })
-        : `<span class="t-sm muted">${c.status === 'disabled' ? 'Workspaces can’t connect it' : `Used by ${plural(c.workspaces || 0, 'workspace')}`}</span>`;
-      const action = c.status === 'enabled' ? btn('Configure', { size: 'sm', act: 'pf-con-open', data: { key: c.key } })
-        : c.status === 'disabled' ? btn('Enable', { size: 'sm', v: 'secondary', act: 'pf-con-enable', data: { key: c.key } }) : '';
-      return `<div class="card pf-con"><div class="row gap-12">${appIcon(c.key, 'lg')}<div class="stack gap-4 grow"><span class="card__title truncate">${esc(c.name)}</span><span>${status('connector', c.status)}</span></div></div><div class="pf-con__foot">${meta}${action}</div></div>`;
+    const head = (c, sub) => `<span class="row gap-12 pf-con__head">${appIcon(c.key, 'lg')}<span class="stack gap-4 grow"><span class="card__title truncate">${esc(c.name)}</span><span class="pf-con__sub">${sub}</span></span>${ic('chevron-right', 'pf-con__chev')}</span>`;
+    const used = c => c.status === 'disabled' ? 'Workspaces can’t connect it' : c.status === 'builtin' ? `Always on · used by ${plural(c.workspaces || 0, 'workspace')}` : `Used by ${plural(c.workspaces || 0, 'workspace')}`;
+    const availableCard = c => `<button type="button" class="card card--action pf-con" data-act="pf-con-open" data-key="${esc(c.key)}">${head(c, status('connector', c.status))}<span class="pf-con__foot t-sm muted">${esc(used(c))}</span></button>`;
+    const requestedCard = c => `<button type="button" class="card card--action pf-con" data-act="pf-con-demand" data-key="${esc(c.key)}">${head(c, status('connector', c.status))}<span class="pf-con__foot t-sm muted">${esc(`Requested by ${plural(c.requests || 0, 'workspace')}`)}</span></button>`;
+    const ok = () => {
+      const avail = D.pConnectors.filter(c => c.status !== 'unavailable'), asked = D.pConnectors.filter(c => c.status === 'unavailable').sort((a, b) => (b.requests || 0) - (a.requests || 0));
+      return section('Available to workspaces', `<div class="grid cols-3">${avail.map(availableCard).join('')}</div>`, { desc: 'Workspace admins can connect these as sources. Open one to turn it on or off.' })
+        + (asked.length ? section('Requested', `<div class="grid cols-3">${asked.map(requestedCard).join('')}</div>`, { desc: 'Not on this deployment yet. Open one to see who asked.' }) : '');
     };
     return `<div class="page">${pageHeader({ title: 'Connectors', desc: 'Apps that workspaces can connect.', extra: PREVIEW })}
-      ${gate({ ok: () => `<div class="grid cols-3">${D.pConnectors.map(conCard).join('')}</div>`, loading: () => skelCards(6), empty: () => emptyState({ icon: 'plug', title: 'No connectors installed', desc: 'Connectors appear once they’re part of this deployment.', boxed: true }) })}</div>`;
+      ${gate({ ok, loading: () => skelCards(6), empty: () => emptyState({ icon: 'plug', title: 'No connectors installed', desc: 'Connectors appear once they’re part of this deployment.', boxed: true }) })}</div>`;
   };
-  function setConnector(c, on, { undo = true } = {}) {
+  /** On/off is reversible (documents stay searchable): at once, with Undo. */
+  function setConnector(c, on) {
     const before = c.status;
     c.status = on ? 'enabled' : 'disabled';
     log(on ? 'Turned on connector' : 'Turned off connector', 'Connectors', c.name);
-    refresh();
-    toast(on ? `${c.name} is available to workspaces` : `Turned off ${c.name}`, undo ? { action: { label: 'Undo', run: () => { c.status = before; log(on ? 'Turned off connector' : 'Turned on connector', 'Connectors', c.name); refresh(); } } } : {});
+    refresh(); refreshLayer();
+    toast(on ? `${c.name} is available to workspaces` : `Turned off ${c.name}. Workspaces stop syncing from it.`, { action: { label: 'Undo', run: () => { c.status = before; log(on ? 'Turned off connector' : 'Turned on connector', 'Connectors', c.name); refresh(); refreshLayer(); } } });
   }
   A['pf-con-open'] = el => { if (conByKey(el.dataset.key)) openDrawer('pf-con', { key: el.dataset.key }); };
-  A['pf-con-enable'] = el => { const c = conByKey(el.dataset.key); if (c) setConnector(c, true); };
-  A['pf-con-toggle'] = el => {
-    const c = conByKey(el.dataset.key); if (!c) return;
-    if (c.status !== 'enabled') { setConnector(c, true); return; }
-    confirmAction({ title: `Turn off ${c.name}?`, body: `${plural(c.workspaces || 0, 'workspace')} will stop syncing from it. Their documents stay searchable.`, confirm: 'Turn off', danger: true,
-      onConfirm: () => setConnector(c, false, { undo: false }) });
-  };
+  A['pf-con-toggle'] = el => { const c = conByKey(el.dataset.key); if (c && c.status !== 'builtin') setConnector(c, c.status !== 'enabled'); };
   DR['pf-con'] = ({ key }) => {
     const c = conByKey(key);
     if (!c) return { title: 'Connector not found', body: '' };
-    const cfg = CON_CFG[key], on = c.status === 'enabled';
+    const cfg = CON_CFG[key], on = c.status !== 'disabled', builtin = c.status === 'builtin';
+    const desc = builtin ? 'Built in. Every workspace can upload files, so it can’t be turned off.' : on ? 'Workspace admins can connect it as a source.' : `Workspaces can’t connect it. ${plural(c.workspaces || 0, 'workspace')} stopped syncing; their documents stay searchable.`;
     return {
       title: c.name, lead: appIcon(key, 'lg'), desc: esc(c.desc),
       body: `<div class="drawer__section">${kv([
         ['Status', status('connector', c.status)],
-        ['Sign-in method', esc(c.auth || '—')],
+        c.auth && ['Sign-in method', esc(c.auth)],
         ['Used by', plural(c.workspaces || 0, 'workspace')],
         cfg && ['Last changed', `${esc(cfg.by)} · ${esc(fmtDate(cfg.updated))}`],
       ])}</div>
-        <div class="drawer__section">${switchRow({ title: 'Available to workspaces', desc: on ? 'Workspace admins can connect it as a source.' : 'Workspaces can’t connect it. Existing documents stay searchable.', on, act: 'pf-con-toggle', data: { key } })}</div>`,
-      foot: btn('Done', { act: 'close-drawer' }),
+        <div class="drawer__section">${switchRow({ title: 'Available to workspaces', desc: esc(desc), on, act: 'pf-con-toggle', data: { key }, disabled: builtin })}</div>`,
     };
   };
-  A['pf-con-demand'] = el => openModal('pf-con-demand', { key: el.dataset.key });
+  A['pf-con-demand'] = el => { if (conByKey(el.dataset.key)) openModal('pf-con-demand', { key: el.dataset.key }); };
+  A['pf-con-demand-ws'] = el => { if (!wsById(el.dataset.id)) return; closeModal(); openDrawer('pf-ws', { id: el.dataset.id }); };
   M['pf-con-demand'] = ({ key }) => {
     const c = conByKey(key);
     const pool = D.pWorkspaces.filter(w => NOW - w.created > 7 * DAY);
     const reqs = [...pool].sort((a, b) => hashOf(key + a.id) - hashOf(key + b.id)).slice(0, c.requests || 0)
       .map(w => ({ w, at: Math.max(w.created + DAY, ago((2 + (hashOf(key + w.code) % 70)) * DAY)) })).sort((a, b) => b.at - a.at);
     return {
-      title: `${c.name} requests`, desc: `${plural(reqs.length, 'workspace')} asked for this connector.`,
-      body: reqs.length ? list(reqs.map(({ w, at }) => item({ lead: wsMark(w, 28), title: esc(w.name), desc: `Requested by ${esc(w.owner)}`, meta: esc(fmtDate(at)) })))
-        : emptyState({ icon: 'plug', title: 'No requests yet', compact: true }),
+      title: `${c.name} requests`, icon: APPS[key]?.glyph(20) || 'plug', tone: 'default',
+      desc: `${plural(reqs.length, 'workspace')} asked for this connector. It isn’t on this deployment yet.`,
+      body: reqs.length ? list(reqs.map(({ w, at }) => item({ lead: wsMark(w, 28), title: esc(w.name), desc: `Requested by ${esc(w.owner)}`, meta: esc(fmtDate(at)), trail: ic('chevron-right', 'i-sm muted'), act: 'pf-con-demand-ws', data: { id: w.id } })))
+        : emptyState({ icon: 'plug', title: 'No requests yet', desc: 'Workspaces that ask for it appear here.', compact: true }),
+      footStart: 'Connectors are added in the deployment configuration.',
       foot: btn('Done', { v: 'primary', act: 'close-modal' }),
     };
   };
@@ -398,23 +477,23 @@
     return { w, questions, active, processed };
   }
   const usageRows = n => D.pWorkspaces.map(w => usageOf(w, n));
-  function delta(v, n, k) {
-    const p = Math.round(v * (0.84 + 0.12 * r01(n, k))); const d = p ? Math.round(((v - p) / p) * 100) : 0;
-    return `<span class="${d >= 0 ? 'text-success' : 'text-danger'}">${d >= 0 ? '+' : '−'}${Math.abs(d)}%</span> vs previous ${n} days`;
-  }
+  /** Change vs the previous window, as a signed percentage. */
+  function deltaPct(v, n, k) { const p = Math.round(v * (0.84 + 0.12 * r01(n, k))); return p ? Math.round(((v - p) / p) * 100) : 0; }
+  const signed = d => `${d >= 0 ? '+' : '−'}${Math.abs(d)}%`;
   P.pUsage = () => {
     const u = ui('pfus', { win: '30' }); const n = +u.win;
-    const header = pageHeader({ title: 'Usage', extra: PREVIEW, actions: seg({ value: u.win, options: WINDOWS, act: 'pf-usage-win', label: 'Time range' }) + btn('Export CSV', { icon: 'download', act: 'pf-usage-export' }) });
+    const header = pageHeader({ title: 'Usage', desc: 'Questions, active people and processed documents across workspaces.', extra: PREVIEW, actions: btn('Export CSV', { icon: 'download', act: 'pf-usage-export' }) });
     const ok = () => {
       const rows = usageRows(n);
       const tot = k => rows.reduce((a, r) => a + r[k], 0);
       const Q = tot('questions'), AP = tot('active'), DP = tot('processed');
       const qs = series(n * 13, n, Q), labels = dayLabels(n);
-      const stat = (icon, label, v, k, seed) => statCard({ icon, label, value: fmtNum(v), meta: delta(v, n, k), extra: `<div class="pf-spark">${sparkline(series(seed, n, Math.max(v, n)), { height: 32 })}</div>` });
+      /* Totals are one sentence next to the range they describe (no stat-card wall); the table and chart carry the detail. */
+      const dq = deltaPct(Q, n, 1);
+      const summary = `<p class="pf-usage-sum"><span><span class="medium num">${fmtNum(Q)}</span> questions <span class="${dq >= 0 ? 'text-success' : 'text-danger'} num">${signed(dq)}</span></span><span aria-hidden="true">·</span><span><span class="medium num">${fmtNum(AP)}</span> active people</span><span aria-hidden="true">·</span><span><span class="medium num">${fmtNum(DP)}</span> documents processed</span></p>`;
+      const range = `<div class="toolbar pf-usage-bar">${seg({ value: u.win, options: WINDOWS, act: 'pf-usage-win', label: 'Time range' })}${summary}</div>`;
       const sorted = u.sort ? applySort(rows, 'pfus', { name: r => r.w.name.toLowerCase(), questions: r => r.questions, active: r => r.active, processed: r => r.processed }) : [...rows].sort((a, b) => b.questions - a.questions);
-      return `<div class="grid cols-3">${stat('message', 'Questions', Q, 1, n * 13)}${stat('users', 'Active people', AP, 2, n * 17 + 3)}${stat('file-text', 'Documents processed', DP, 3, n * 29 + 5)}</div>
-        <div class="mt-16">${card(`${bars(qs, { height: 140, labels })}${axis(labels[0], labels[n - 1])}`, { title: 'Questions per day', actions: `<span class="t-sm muted num">${fmtNum(Q)} total</span>` })}</div>
-        ${section('By workspace', table({
+      return `${range}${table({
           label: 'Usage by workspace',
           head: sortHead('Workspace', 'name', 'pfus') + sortHead('Questions', 'questions', 'pfus', 'table__column--num') + sortHead('Active people', 'active', 'pfus', 'table__column--num') + sortHead('Documents processed', 'processed', 'pfus', 'table__column--num hide-md'),
           rows: sorted.map(r => { const share = Q ? (r.questions / Q) * 100 : 0; return `<tr class="table__row" data-act="pws-open" data-id="${r.w.id}" tabindex="0">
@@ -422,9 +501,10 @@
             <td class="table__cell table__cell--num"><div class="pf-share" data-tip="${share.toFixed(1)}% of all questions"><span class="num">${fmtNum(r.questions)}</span>${progress(share, '', 'Share of all questions')}</div></td>
             <td class="table__cell table__cell--num num" data-label="Active people">${fmtNum(r.active)}</td>
             <td class="table__cell table__cell--num num hide-md">${fmtNum(r.processed)}</td></tr>`; }),
-        }))}`;
+        })}
+        ${section('Questions per day', `${bars(qs, { height: 120, labels })}${axis(labels[0], labels[n - 1])}`)}`;
     };
-    return `<div class="page">${header}${gate({ ok, loading: () => skelCards(3) + `<div class="mt-16">${skelRows(6)}</div>`, empty: () => emptyState({ icon: 'chart', title: 'No usage yet', desc: 'Usage appears once people start asking questions.', boxed: true }) })}</div>`;
+    return `<div class="page">${header}${gate({ ok, loading: () => skelRows(6), empty: () => emptyState({ icon: 'chart', title: 'No usage yet', desc: 'Usage appears once people start asking questions.', boxed: true }) })}</div>`;
   };
   A['pf-usage-win'] = el => { ui('pfus').win = el.dataset.value; refresh(); };
   A['pf-usage-export'] = () => {
@@ -434,37 +514,30 @@
     `Saved usage for the last ${n} days`);
   };
 
-  /* ═══════════════════════ Audit log ═══════════════════════ */
-  const AUD_WIN = [['1', '24 hours'], ['7', '7 days'], ['30', '30 days'], ['90', '90 days']];
-  const audUi = () => ui('pfa', { q: '', ws: '', outcome: '', win: '30' });
+  /* ═══════════════════════ Audit log ═══════════════════════
+     Built with the same toolbar, table and drawer as workspace Activity (X.auditLog, activity.js), plus a Workspace column. */
+  const AUD_AREAS = ['Workspaces', 'People', 'Connectors', 'Indexing', 'Sign-in'];
+  const audUi = () => ui('pfa', { q: '', ws: '', area: '', outcome: '', win: '30', page: 1 });
+  const pWho = e => e.actor;
   function auditRows() {
     const f = audUi();
-    return D.pAudit.filter(e => Date.now() - e.at <= +f.win * DAY && (!f.ws || (f.ws === 'platform' ? !e.ws : e.ws === f.ws)) && (!f.outcome || e.outcome === f.outcome)
+    const rows = D.pAudit.filter(e => X.auditLog.inWindow('pfa', e.at) && (!f.ws || (f.ws === 'platform' ? !e.ws : e.ws === f.ws)) && (!f.area || e.area === f.area) && (!f.outcome || e.outcome === f.outcome)
       && matchesQ('pfa', e.actor, e.action, e.target, e.area, wsById(e.ws)?.name || 'Platform'));
+    return X.auditLog.sorted(rows, 'pfa', pWho);
   }
+  const AUD_FIELDS = ['ws', 'area', 'outcome'];
   P.pAudit = () => {
-    const f = audUi();
-    const toolbar = `<div class="toolbar">${searchField({ uiKey: 'pfa', placeholder: 'Search events' })}${filterButton('Workspace', 'pfa', 'ws', [['platform', 'Platform'], ...D.pWorkspaces.map(w => [w.id, w.name])])}${filterButton('Outcome', 'pfa', 'outcome', [['success', 'Succeeded'], ['failure', 'Failed']])}${clearFilters('pfa', ['ws', 'outcome'])}<div class="toolbar__end">${seg({ value: f.win, options: AUD_WIN, act: 'pf-audit-win', label: 'Time window' })}</div></div>`;
-    const tbl = () => {
-      const rows = auditRows();
-      if (!rows.length) return noMatches('pfa', ['ws', 'outcome'], 'events');
-      const page = paginate(rows, 'pfa', 15);
-      return table({
-        label: 'Audit events',
-        head: th('When') + th('Person', 'hide-md') + th('Action') + th('Workspace', 'hide-sm') + th('Outcome'),
-        rows: page.map(e => `<tr class="table__row" data-act="pf-ev-open" data-id="${e.id}" tabindex="0">
-          <td class="table__cell muted num pf-nowrap" data-tip="${esc(fmtDateTime(e.at))}">${esc(rel(e.at))}</td>
-          <td class="table__cell hide-md"><span class="row gap-8">${avatar(e.actor, 'xs')}<span class="truncate">${esc(e.actor)}</span></span></td>
-          <td class="table__cell table__cell--primary"><div class="stack"><span class="cell-title">${esc(e.action)}</span><span class="cell-sub truncate pf-target">${esc(e.target)}</span></div></td>
-          <td class="table__cell table__cell--hide-sm hide-sm">${wsCell(e.ws)}</td>
-          <td class="table__cell">${status('outcome', e.outcome)}</td></tr>`),
-        foot: pager(rows.length, 'pfa', 15),
-      });
-    };
-    return `<div class="page">${pageHeader({ title: 'Audit log', extra: PREVIEW, actions: btn('Export CSV', { icon: 'download', act: 'pf-audit-export' }) })}
-      ${gate({ ok: () => toolbar + tbl(), loading: () => skelRows(8), empty: () => emptyState({ icon: 'activity', title: 'No events recorded yet', desc: 'Changes to workspaces, people and connectors appear here.', boxed: true }) })}</div>`;
+    audUi();
+    const live = S.pageState === 'live' && !S.navLoading;
+    const rows = auditRows();
+    const filters = [['Workspace', 'ws', [['platform', 'Platform'], ...D.pWorkspaces.map(w => [w.id, w.name])]], ['Area', 'area', AUD_AREAS.map(a => [a, a])], ['Outcome', 'outcome', [['success', 'Succeeded'], ['failure', 'Failed']]]];
+    const tools = X.auditLog.toolbar({ uiKey: 'pfa', placeholder: 'Search events', filters, count: live ? plural(rows.length, 'event') : '' });
+    const tbl = () => rows.length ? X.auditLog.table({ rows, uiKey: 'pfa', label: 'Audit events', who: pWho, where: e => wsCell(e.ws), open: 'pf-ev-open' })
+      : emptyState({ icon: 'search', boxed: true, compact: true, title: 'No events match', desc: 'Try a longer time window or clear the filters.', actions: btn('Reset filters', { act: 'pf-audit-reset' }) });
+    return `<div class="page">${pageHeader({ title: 'Audit log', desc: 'Changes to workspaces, accounts, connectors and indexing. What happens inside a workspace stays in its own Activity.', extra: PREVIEW, actions: X.auditLog.exportActions('pf-audit-export', live) })}
+      ${gate({ ok: () => tools + tbl(), loading: () => skelRows(8), empty: () => emptyState({ icon: 'activity', title: 'No events recorded yet', desc: 'Changes to workspaces, accounts, connectors and indexing appear here.', boxed: true }) })}</div>`;
   };
-  A['pf-audit-win'] = el => { const f = audUi(); f.win = el.dataset.value; f.page = 1; refresh(); };
+  A['pf-audit-reset'] = () => { X.auditLog.reset('pfa', AUD_FIELDS); refresh(); };
   A['pf-ev-open'] = el => { if (D.pAudit.some(e => e.id === el.dataset.id)) openDrawer('pf-ev', { id: el.dataset.id }); };
   A['pf-audit-export'] = () => {
     const rows = auditRows();
@@ -473,25 +546,21 @@
       ...rows.map(e => [new Date(e.at).toISOString(), wsById(e.ws)?.name || 'Platform', e.actor, e.area, e.action, e.target, e.outcome, e.ip, e.device])],
     `Saved ${plural(rows.length, 'event')} to platform-audit.csv`);
   };
+  /** The object a platform event is about, when it still exists. */
+  function pRelated(e) {
+    if (e.area === 'Connectors') { const c = D.pConnectors.find(x => x.name === e.target); if (c) return { label: `Open ${c.name}`, run: () => (c.status === 'unavailable' ? openModal('pf-con-demand', { key: c.key }) : openDrawer('pf-con', { key: c.key })) }; }
+    if (e.area === 'People') { const u = userByName(e.target) || D.pUsers.find(x => x.email === e.target); if (u) return { label: `View ${u.name}`, run: () => openDrawer('pf-user', { id: u.id }) }; }
+    if (e.area === 'Indexing') return { label: 'Open indexing', run: () => { closeDrawer(); go('/p/indexing'); } };
+    const w = e.ws && wsById(e.ws); if (w) return { label: 'View workspace', run: () => openDrawer('pf-ws', { id: w.id }) };
+    return null;
+  }
   DR['pf-ev'] = ({ id }) => {
     const e = D.pAudit.find(x => x.id === id);
-    if (!e) return { title: 'Event not found', body: '' };
-    const w = e.ws && wsById(e.ws);
-    return {
-      title: e.action, desc: esc(fmtDateTime(e.at)),
-      body: kv([
-        ['Outcome', status('outcome', e.outcome)],
-        ['When', `${esc(fmtDateTime(e.at))} <span class="muted">· ${esc(rel(e.at))}</span>`],
-        ['Workspace', wsCell(e.ws)],
-        ['Person', `<span class="row gap-8">${avatar(e.actor, 'xs')}${esc(e.actor)}</span>`],
-        ['Area', esc(e.area)],
-        ['Target', esc(e.target)],
-        ['IP address', `<span class="mono">${esc(e.ip)}</span>`],
-        ['Device', esc(e.device)],
-      ]),
-      foot: w ? btn('View workspace', { act: 'pws-open', data: { id: w.id } }) : btn('Done', { act: 'close-drawer' }),
-    };
+    if (!e) return { title: 'Event not found', body: emptyState({ icon: 'activity', title: 'This event is no longer in the log', compact: true }) };
+    const to = pRelated(e);
+    return X.auditLog.drawer({ ev: e, who: e.actor, area: e.area, where: wsCell(e.ws), related: to && { label: to.label, act: 'pf-ev-related', data: { id } } });
   };
+  A['pf-ev-related'] = el => { const e = D.pAudit.find(x => x.id === el.dataset.id); pRelated(e)?.run(); };
 
   /* ═══════════════════════ System health + AI capabilities ═══════════════════════ */
   const INCIDENTS = [
@@ -505,15 +574,18 @@
   P.pHealth = () => {
     const u = ui('pfh', { inc: false, busy: false, updated: Date.now(), open: {} });
     const bad = D.pServices.filter(s => s.status !== 'operational');
+    /* The banner says what's wrong and, when indexing is the cause, where to act on it. */
     const banner = () => {
       if (!bad.length) return alertBox('success', 'All systems operational', '');
       const [title, desc] = BANNER[bad[0].id] || [`${bad[0].name} is ${STATUS.service[bad[0].status]?.[1].toLowerCase() || 'affected'}`, esc(bad[0].note || '')];
-      return alertBox(bad.some(s => s.status === 'down') ? 'danger' : 'warning', bad.length > 1 ? `${plural(bad.length, 'service')} need attention` : title, bad.length > 1 ? bad.map(s => esc(s.name)).join(', ') : desc);
+      const act = bad.some(s => s.id === 'processing') ? linkBtn('Indexing by workspace', { href: '/p/indexing', icon: 'arrow-up-right' }) : '';
+      return alertBox(bad.some(s => s.status === 'down') ? 'danger' : 'warning', bad.length > 1 ? `${plural(bad.length, 'service')} need attention` : title, bad.length > 1 ? bad.map(s => esc(s.name)).join(', ') : desc, act);
     };
+    const rank = s => (s.status === 'down' ? 0 : s.status === 'operational' ? 2 : 1);
     const services = () => table({
       label: 'Services',
       head: th('Service') + th('Status') + th('Response', 'table__column--num hide-sm') + th('Uptime, 30 days', 'table__column--num'),
-      rows: D.pServices.map(s => {
+      rows: [...D.pServices].sort((a, b) => rank(a) - rank(b)).map(s => {
         const open = s.note && (u.open[s.id] ?? s.status !== 'operational');
         return `<tr class="table__row" ${s.note ? `data-act="pf-svc-toggle" data-id="${s.id}" tabindex="0" aria-expanded="${!!open}"` : ''}>
           <td class="table__cell table__cell--primary"><div class="stack"><span class="cell-title pf-svc">${esc(s.name)}${s.note ? ic(open ? 'chevron-up' : 'chevron-down', 'i-sm muted') : ''}</span>${open ? `<span class="pf-note">${esc(s.note)}</span>` : ''}</div></td>
@@ -528,19 +600,16 @@
       desc: `${esc(m.desc)}<span class="pf-setting">Configured via <code class="mono">${esc(m.setting)}</code></span>`,
       trail: `<span class="pf-model-trail">${status('service', m.status)}<span class="t-xs muted num">${esc(m.p50)}</span></span>`,
     })), 'pf-models');
-    const incidents = () => section('Recent incidents', u.inc ? list(INCIDENTS.map(x => item({
-      lead: itemIcon('check-circle', 'success', 'sm'), title: esc(x.title), desc: esc(x.impact),
-      meta: `${esc(fmtDate(x.at))} · ${esc(fmtDur(x.dur))}`,
-    }))) : '', { desc: `${plural(INCIDENTS.length, 'incident')} resolved in the last 30 days`, actions: btn(u.inc ? 'Hide' : 'Show', { v: 'ghost', size: 'sm', iconRight: u.inc ? 'chevron-up' : 'chevron-down', act: 'pf-inc-toggle', aria: `aria-expanded="${u.inc}"` }) });
+    const incidents = () => `<section class="section" aria-label="Recent incidents">${disclosure({ path: 'pfh.inc', icon: 'check-circle', title: 'Recent incidents', summary: esc(`${plural(INCIDENTS.length, 'incident')} resolved in the last 30 days`),
+      body: list(INCIDENTS.map(x => item({ lead: itemIcon('check-circle', 'success', 'sm'), title: esc(x.title), desc: esc(x.impact), meta: `${esc(fmtDate(x.at))} · ${esc(fmtDur(x.dur))}` }))) })}</section>`;
     return `<div class="page">${pageHeader({ title: 'System health', desc: `Updated ${esc(rel(u.updated).toLowerCase())}`, extra: PREVIEW, actions: btn('Refresh', { icon: 'refresh', act: 'pf-health-refresh', loading: u.busy, disabled: u.busy }) })}
       ${gate({
-        ok: () => `<div class="pf-banner">${banner()}</div>${section('Services', services(), { actions: linkBtn('Indexing by workspace', { href: '/p/indexing', icon: 'arrow-up-right' }) })}${section('AI capabilities', models(), { desc: 'Models are set in the deployment configuration and change on restart.' })}${incidents()}`,
+        ok: () => `<div class="pf-banner">${banner()}</div>${section('Services', services())}${section('AI capabilities', models(), { desc: 'Models are set in the deployment configuration and change on restart.' })}${incidents()}`,
         loading: () => skelRows(7),
         empty: () => emptyState({ icon: 'server', title: 'No services reporting', desc: 'Status appears once the deployment reports in.', boxed: true }),
       })}</div>`;
   };
   A['pf-svc-toggle'] = el => { const u = ui('pfh'); const s = D.pServices.find(x => x.id === el.dataset.id); if (!s) return; u.open[s.id] = !(u.open[s.id] ?? s.status !== 'operational'); refresh(); };
-  A['pf-inc-toggle'] = () => { const u = ui('pfh'); u.inc = !u.inc; refresh(); };
   A['pf-health-refresh'] = async () => {
     const u = ui('pfh'); if (u.busy) return;
     u.busy = true; refresh(); await sleep(800);
