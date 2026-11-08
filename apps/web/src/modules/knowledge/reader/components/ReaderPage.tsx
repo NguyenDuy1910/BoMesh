@@ -33,6 +33,7 @@ import { AskPane, type AskTurn } from "./AskPane";
 import { NotReady, NothingToShow, PanelToggle, RAIL_MIN, Rail, RailSkeleton, ReaderHead, SkeletonPage, Unavailable, Updated, useWidth, DownloadButton } from "./ReaderParts";
 import { RelatedPane } from "./RelatedPane";
 import { RenditionView } from "./RenditionView";
+import { PageImageView } from "./PageImageView";
 import { SelectionToolbar } from "./SelectionToolbar";
 import { SubmissionView } from "./SubmissionView";
 import { useRendition } from "./useRendition";
@@ -204,6 +205,13 @@ function Reader({ resource: r }: { resource: Resource }) {
   const outline = useMemo(() => (rd ? renditionOutline(rd).filter((o) => o.id !== (rd.blocks[0]?.kind === "heading" ? rd.blocks[0].id : "")) : []), [rd]);
   const hasOutline = readable && !sheet && outline.length > 1;
   const pageCount = Math.max(content.data?.pageAssets?.length ?? 0, ...(rd?.blocks.map((b) => b.page ?? 0) ?? [0]));
+  // Page images of the current revision, in page order: the document's own pages.
+  const pageImages = useMemo(
+    () => [...(content.data?.pageAssets ?? [])].filter((p) => p.imageUri).sort((a, b) => (a.pageNumber ?? 0) - (b.pageNumber ?? 0)),
+    [content.data],
+  );
+  // Which page to open on: `?page=`, else the first cited passage's page.
+  const citedPage = Number(query.page) || resolved.find((p) => p.boundingBoxes?.[0]?.pageNumber)?.boundingBoxes?.[0]?.pageNumber || 0;
   const [activeHeading, setActiveHeading] = useState("");
 
   const jump = (id: string) => {
@@ -289,12 +297,11 @@ function Reader({ resource: r }: { resource: Resource }) {
   /* ── Header ── */
   const status = indexStatusOf(r);
   const meta = [
-    r.kindMeta.label,
+    r.typeLabel,
     r.base?.displayName && <span translate="no">{r.base.displayName}</span>,
     owner && <span translate="no">{owner}</span>,
     <Updated key="u" at={r.updated} />,
     `v${current}`,
-    readable && !sheet && pageCount > 0 && plural(pageCount, "page"),
   ];
   const actions = (
     <>
@@ -492,6 +499,10 @@ function Reader({ resource: r }: { resource: Resource }) {
     );
   } else if (!rd?.blocks.length) {
     canvas = <NothingToShow />;
+  } else if (pageImages.length) {
+    // The document as it is (document_viewer.md: PDFs keep page images). The rendition stays
+    // loaded for the outline, Ask, citations and search — reading and indexing are separate concerns.
+    canvas = <PageImageView pages={pageImages} pageCount={pageCount} focusPage={citedPage} />;
   } else {
     canvas = <RenditionView rendition={rd} marks={marks} focusHit={focusHit} sheet={sheet} pageCount={pageCount} />;
   }
@@ -546,7 +557,7 @@ function Reader({ resource: r }: { resource: Resource }) {
 
   const crumbs = [
     { label: "Knowledge", href: "/knowledge" },
-    ...(r.base ? [{ label: r.base.displayName || "Knowledge base", href: r.isPersonal ? "/knowledge/library?tab=files" : `/knowledge/${r.base.id}` }] : []),
+    ...(r.base ? [{ label: r.base.displayName || "Knowledge base", href: r.isPersonal ? "/knowledge/library?tab=files" : `/bases/${r.base.id}` }] : []),
     { label: r.title },
   ];
 

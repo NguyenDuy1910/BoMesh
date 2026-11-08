@@ -11,6 +11,7 @@ import {
   ACCENTS,
   accentHex,
   BASES,
+  DEFAULT_LOOK,
   ensureFont,
   FONTS,
   getAppearance,
@@ -210,6 +211,8 @@ function Controls() {
 export function AppearanceDrawer() {
   const { open } = useShellOverlays();
   const isOpen = open === "appearance";
+  const { look } = useAppearance();
+  const isDefaultLook = (["theme", "accent", "base", "radius", "font"] as const).every((k) => look[k] === DEFAULT_LOOK[k]);
 
   useEffect(() => {
     if (isOpen) for (const f of FONTS) ensureFont(f.id);
@@ -218,7 +221,7 @@ export function AppearanceDrawer() {
   const reset = () => {
     const before = getAppearance();
     resetLook();
-    toast("Appearance reset to BoMesh", { undo: () => setAppearance(before) });
+    toast(`Appearance reset to ${themeLabel(DEFAULT_LOOK)}`, { undo: () => setAppearance(before) });
   };
 
   return (
@@ -233,10 +236,12 @@ export function AppearanceDrawer() {
           <Drawer.Body>{isOpen && <Controls />}</Drawer.Body>
           <Drawer.Footer>
             <div className="drawer__footer-start row gap-8">
-              <Button variant="ghost" onPress={reset}>
-                <RefreshCw className="i" aria-hidden />
-                Reset to BoMesh
-              </Button>
+              {isDefaultLook ? null : (
+                <Button variant="ghost" onPress={reset}>
+                  <RefreshCw className="i" aria-hidden />
+                  Reset to {themeLabel(DEFAULT_LOOK)}
+                </Button>
+              )}
             </div>
             <Button slot="close" variant="primary">
               Done

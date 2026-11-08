@@ -46,7 +46,7 @@ export function useBaseIndex() {
 export function KbLink({ base, name }: { base: Item | undefined; name: string }) {
   if (!name) return <span className="muted">Removed</span>;
   return (
-    <Link className="src-kb" href={`/knowledge/${resourceId(name)}`} onClick={(e) => e.stopPropagation()}>
+    <Link className="src-kb" href={`/bases/${resourceId(name)}`} onClick={(e) => e.stopPropagation()}>
       <span className="src-kb__dot" style={{ background: baseColor(name) }} aria-hidden />
       <span className="truncate" translate="no">
         {base?.displayName ?? "Knowledge base"}

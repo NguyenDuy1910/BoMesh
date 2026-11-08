@@ -156,7 +156,7 @@ export function ResourceMenu({ resource: r, size = "sm", hideOpen = false, q = "
       icon: Upload,
       run: () => openContribute({ item: r.name }),
     },
-    can("contributions.review") && perms.can("contributions.review") && {
+    can("contributions.review") && !r.isPersonal && perms.can("contributions.review") && {
       id: "manage",
       label: "Manage in Documents",
       icon: Files,

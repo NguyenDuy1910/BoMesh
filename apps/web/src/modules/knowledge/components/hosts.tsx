@@ -8,6 +8,8 @@ import { LinkToSpacesDialog } from "./LinkToSpacesDialog";
 import { MoveDialog } from "./MoveDialog";
 import { ReadingListDialog } from "./ReadingListDialog";
 
+export { DocumentPreviewHost } from "../preview/DocumentPreview";
+
 /** Renders the Contribute dialog opened with `openContribute()`. Mount once inside the workspace shell. */
 export function ContributeHost() {
   const request = useContributeRequest();

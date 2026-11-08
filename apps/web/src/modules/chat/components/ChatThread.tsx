@@ -15,6 +15,7 @@ import { toast } from "@/components/ui/Toast";
 import { ApiError, errorMessage, resourceId } from "@/lib/api/client";
 import { useWorkspace } from "@/lib/workspace";
 import { confirmLeaveFileEdit, FilePanel, useComposerFiles, useFileDrop } from "@/modules/artifacts";
+import { openDocumentPreview } from "@/modules/knowledge/preview/store";
 import { ConversationMenu, useConversationProject } from "@/modules/projects";
 import { useMySpaces } from "@/modules/spaces";
 
@@ -23,13 +24,13 @@ import { useConversation, useMessages } from "../queries";
 import { dismissTurn, sendTurn, sentFiles, stopTurn, useLiveTurn, useStreamingConversation, type AnswerAttempt, type SentFile } from "../runtime";
 import { buildThread, RETRY_MODIFIER, type AnswerView } from "../thread";
 import type { AnswerSource } from "../turn";
-import { CitationPanel } from "./CitationPanel";
 import { Composer, useDraft } from "./Composer";
 import { FeedbackDialog } from "./FeedbackDialog";
 import { ShareConversationDialog } from "./ShareConversationDialog";
 import { Answer, UserMessage, type RetryMode } from "./ThreadMessages";
 
-type Panel = { kind: "cite"; answer: string; n: number; sources: AnswerSource[] } | { kind: "file"; artifact: string };
+/** The side panel is only ever a generated file now: citations open the shared document preview. */
+type Panel = { kind: "file"; artifact: string };
 
 const RETRY_SUFFIX: Record<RetryMode, string> = { again: "", all: "", ...RETRY_MODIFIER };
 
@@ -55,7 +56,7 @@ function ThreadSkeleton() {
 
 /**
  * `/chat/[id]` (preview `P.chatThread`): the thread, the docked follow-up
- * composer, and the side panel (a citation's passages or a file).
+ * composer, and the side panel (a generated file).
  */
 export function ChatThread({ id }: { id: string }) {
   const { id: ws } = useWorkspace();
@@ -176,9 +177,19 @@ export function ChatThread({ id }: { id: string }) {
   };
 
   /* ─── Panel ─── */
+  /** A citation opens the shared document preview on the cited passage (preview `chat.js` → `X.preview.open`). */
   const openCite = async (n: number, answer: AnswerView) => {
-    if (panel?.kind === "file" && !(await confirmLeaveFileEdit())) return;
-    setPanel({ kind: "cite", answer: answer.key, n, sources: answer.sources.filter((s) => s.available) });
+    const sources = answer.sources.filter((s) => s.available);
+    if (!sources.length) return;
+    openDocumentPreview({
+      from: id,
+      n,
+      citations: sources.flatMap((s) =>
+        s.passages.length
+          ? s.passages.map((pg) => ({ item: s.item, passage: pg.passage, excerpt: pg.excerpt, page: pg.page ?? undefined, n: s.n }))
+          : [{ item: s.item, n: s.n }],
+      ),
+    });
   };
   const openFile = async (artifact: string) => {
     if (panel?.kind === "file" && panel.artifact !== artifact && !(await confirmLeaveFileEdit())) return;
@@ -312,7 +323,7 @@ export function ChatThread({ id }: { id: string }) {
                       showSteps={showSteps}
                       busy={busy}
                       scoped={scoped}
-                      activeCite={panel?.kind === "cite" && panel.answer === a.key ? panel.n : null}
+                      activeCite={null}
                       activeArtifact={panel?.kind === "file" ? panel.artifact : null}
                       onCite={(n, answer) => void openCite(n, answer)}
                       onOpenArtifact={(name) => void openFile(name)}
@@ -342,9 +353,6 @@ export function ChatThread({ id }: { id: string }) {
           </div>
         </div>
       </div>
-      {panel?.kind === "cite" && panel.sources.length ? (
-        <CitationPanel conversation={id} sources={panel.sources} n={panel.n} onShow={(n) => setPanel({ ...panel, n })} onClose={() => void closePanel()} />
-      ) : null}
       {panel?.kind === "file" ? <FilePanel key={panel.artifact} artifact={panel.artifact} onClose={() => setPanel(null)} /> : null}
       {conv ? <ShareConversationDialog conversation={id} title={title} isOpen={sharing} onClose={() => setSharing(false)} /> : null}
       <FeedbackDialog

@@ -13,7 +13,7 @@ import { FileIcon } from "@/components/ui/FileIcon";
 import { KeyValue } from "@/components/ui/KeyValue";
 import { StatusChip } from "@/components/ui/StatusChip";
 import { ApiError, resourceId } from "@/lib/api/client";
-import { fmtDateTime, fmtSize, plural } from "@/lib/format";
+import { fmtDateTime, fmtSize } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 
 import type { Contribution } from "../../api";
@@ -98,11 +98,10 @@ export function SubmissionView({ resource: r, contribution: c }: { resource: Res
 
   /* Header */
   const meta = [
-    r.kindMeta.label,
+    r.typeLabel,
     base !== "its knowledge base" && <span translate="no">{base}</span>,
     mine ? "Contributed by you" : <span>Contributed by {names.get(contributor) || "someone"}</span>,
     c?.createTime && <Updated key="s" at={c.createTime} prefix="Submitted" />,
-    preview && !sheet && pageCount > 0 && plural(pageCount, "page"),
   ];
   const main =
     reviewer && stage === "review" && c ? (

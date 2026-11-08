@@ -35,7 +35,11 @@ export interface ResourceCardProps {
 export function ResourceCard({ resource: r, q = "", passage, hide = [], onOpen, loadPreview = true }: ResourceCardProps) {
   const router = useRouter();
   const { ctx } = useKnowledgeModel();
-  const glance = useGlance(r, { enabled: loadPreview });
+  // The cover and the extent come with the item itself. Reading the document's content is only
+  // worth a request when searching, where the card must show the matching section — otherwise a
+  // grid of N documents would issue N content requests to render N pictures the list already has.
+  const needsContent = loadPreview && !!q && !r.thumbnailUri;
+  const glance = useGlance(r, { enabled: needsContent });
   const reader = `/doc/${r.id}${q ? `?q=${encodeURIComponent(q)}` : ""}`;
   const open = () => (onOpen ? onOpen(r) : router.push(reader));
   const onKeyDown = (e: KeyboardEvent) => {
@@ -49,18 +53,16 @@ export function ResourceCard({ resource: r, q = "", passage, hide = [], onOpen, 
   const where = !hide.includes("topic") && topic ? (ctx.topicNames?.get(topic) ?? "") : !hide.includes("kb") ? (r.base?.displayName ?? "") : "";
   const about = r.summary || glance?.opening || "";
   const status = indexStatusOf(r);
+  const hasPreview = !!r.thumbnailUri || !!glance || !!passage;
   const KindIcon = r.kindMeta.icon;
   return (
     <article className="doc-card" role="button" tabIndex={0} aria-label={r.title} onClick={open} onDoubleClick={() => router.push(reader)} onKeyDown={onKeyDown}>
       <div className="doc-card__media">
         <CardPreview resource={r} glance={glance} q={q} passage={passage} />
-        {glance || passage ? (
-          <>
-            <span className="doc-card__type">
-              <FileIcon type={r.ext} mime={r.mime} size="sm" />
-            </span>
-            {glance ? <span className="doc-card__extent">{glance.extent}</span> : null}
-          </>
+        {hasPreview ? (
+          <span className="doc-card__type">
+            <FileIcon type={r.ext} mime={r.mime} size="sm" />
+          </span>
         ) : null}
         <div className="doc-card__actions" onClick={stop} onKeyDown={stop} onDoubleClick={stop}>
           <ResourceActions resource={r} q={q} />
@@ -79,7 +81,7 @@ export function ResourceCard({ resource: r, q = "", passage, hide = [], onOpen, 
           <span className="doc-card__kind">
             <KindIcon className="i i-xs" aria-hidden />
             <span className="truncate">
-              {r.kindMeta.label}
+              {r.typeLabel}
               {where ? (
                 <>
                   <ResDot />
@@ -97,16 +99,22 @@ export function ResourceCard({ resource: r, q = "", passage, hide = [], onOpen, 
 }
 
 /**
- * Card preview: sheets and slides show their first page; text documents their most useful section at a
- * readable size (the matching one when searching); a search passage when content isn't available yet;
- * else a tinted type tile. Decorative: the card's text says the same for assistive tech.
+ * Card preview: the document's own first page whenever ingestion rendered one — a cover, a title page
+ * or a figure says what a file is faster than any sentence from it. Only when there is no page image
+ * do we fall back to the most useful section at a readable size (the matching one when searching),
+ * then a search passage, then a tinted type tile.
+ * Decorative: the card's text says the same for assistive tech.
  */
 function CardPreview({ resource: r, glance: g, q, passage }: { resource: Resource; glance: Glance | null; q: string; passage?: { text: string; where?: string } | null }) {
-  if (g && g.layout !== "text" && g.pageImage) {
+  // While searching, what matched is the point of the card, so the passage the search already
+  // returned (or a section from loaded content) outranks the cover. Browsing shows the cover.
+  const searching = !!q && (!!passage?.text || !!g?.sections.length);
+  const cover = r.thumbnailUri ?? g?.pageImage;
+  if (cover && !searching) {
     return (
-      <div className={g.layout === "slides" ? "doc-thumb doc-thumb--slide" : "doc-thumb"} aria-hidden inert>
+      <div className={g?.layout === "slides" ? "doc-thumb doc-thumb--slide" : "doc-thumb"} aria-hidden inert>
         {/* eslint-disable-next-line @next/next/no-img-element -- signed, short-lived page image */}
-        <img src={g.pageImage} alt="" className="h-full w-full object-cover object-top" />
+        <img src={cover} alt="" className="h-full w-full object-cover object-top" decoding="async" />
       </div>
     );
   }
@@ -190,7 +198,7 @@ function CardPreview({ resource: r, glance: g, q, passage }: { resource: Resourc
       </span>
       <span className="doc-thumb__kind">
         <KindIcon className="i i-xs" aria-hidden />
-        {r.kindMeta.label}
+        {r.typeLabel}
       </span>
     </div>
   );

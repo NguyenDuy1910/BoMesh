@@ -70,6 +70,12 @@ export const MORE_PAGES: readonly NavItem[] = [
 /** Spaces index (sidebar group label link and ⌘K page). */
 export const SPACES_NAV: NavItem = { id: "spaces", label: "Spaces", icon: Layers, href: "/spaces", module: "spaces" };
 
+/** Manage → Knowledge bases (preview `/bases`): shown to whoever owns or edits at least one base, or holds
+ *  `items.create` — a per-base grant, not a single workspace permission, so it's rendered by `Sidebar.tsx`
+ *  (which checks base ownership) rather than filtered by `manageNav()`. KNOWLEDGE_HUB.md: a knowledge base is
+ *  managed here by its owners/editors; readers meet it only as a Browse filter, never as a Knowledge hub tab. */
+export const BASES_NAV: NavItem = { id: "bases", label: "Knowledge bases", icon: BookOpen, href: "/bases" };
+
 /** The Manage group: only what the caller may open is listed. */
 export const MANAGE_NAV: readonly NavItem[] = [
   { id: "overview", label: "Overview", icon: House, href: "/overview", permission: "workspaces.getOverview" },
@@ -151,9 +157,9 @@ export const ROUTES: readonly RouteDef[] = [
   { pattern: "/search", title: "Search", mode: "workspace", nav: "search" },
   { pattern: "/knowledge", title: "Knowledge", mode: "workspace", nav: "knowledge" },
   { pattern: "/knowledge/library", title: "My library", mode: "workspace", nav: "knowledge" },
-  { pattern: "/knowledge/bases", title: "Knowledge bases", mode: "workspace", nav: "knowledge" },
+  { pattern: "/bases", title: "Knowledge bases", mode: "workspace", nav: "bases" },
   { pattern: "/knowledge/collections/:id", title: "Collection", mode: "workspace", nav: "knowledge" },
-  { pattern: "/knowledge/:id", title: "Knowledge base", mode: "workspace", nav: "knowledge" },
+  { pattern: "/bases/:id", title: "Knowledge base", mode: "workspace", nav: "bases" },
   { pattern: "/doc/:id", title: "Document", mode: "workspace", nav: "knowledge", bare: true },
   { pattern: "/overview", title: "Overview", mode: "workspace", nav: "overview", permission: "workspaces.getOverview" },
   { pattern: "/documents", title: "Documents", mode: "workspace", nav: "documents", permission: "contributions.review" },

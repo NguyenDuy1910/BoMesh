@@ -55,7 +55,7 @@ export function OverviewPage() {
         actions={
           <>
             {can("items.create") ? (
-              <LinkButton href="/knowledge/bases?new=1" variant="primary" size="md" icon={Plus}>
+              <LinkButton href="/bases?new=1" variant="primary" size="md" icon={Plus}>
                 Create knowledge base
               </LinkButton>
             ) : null}

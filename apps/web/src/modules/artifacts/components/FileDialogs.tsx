@@ -132,7 +132,7 @@ export function PublishDialog({ artifact, version, isOpen, onClose }: { artifact
       onClose();
       const kb = target.item.displayName ?? "knowledge";
       toast(`Saved to ${target.personal ? "My files" : kb}`, {
-        action: { label: "Open", onPress: () => router.push(target.personal ? "/knowledge/library" : `/knowledge/${resourceId(target.item.name)}`) },
+        action: { label: "Open", onPress: () => router.push(target.personal ? "/knowledge/library" : `/bases/${resourceId(target.item.name)}`) },
       });
     } catch (e) {
       setError(errorMessage(e));

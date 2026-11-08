@@ -160,7 +160,7 @@ function SourceSheet({
             contentTitle
             description={kb.data?.collection?.childCount != null ? plural(kb.data.collection.childCount, "item") : undefined}
             actions={kb.data ? <ChevronRight className="i muted" aria-hidden /> : undefined}
-            href={kb.data ? `/knowledge/${resourceId(source.targetCollection)}?tab=documents` : undefined}
+            href={kb.data ? `/bases/${resourceId(source.targetCollection)}?tab=documents` : undefined}
           />
         </List>
       </SheetSection>

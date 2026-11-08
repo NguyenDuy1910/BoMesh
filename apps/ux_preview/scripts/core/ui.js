@@ -30,7 +30,7 @@ function badge(n, { tone = 'default', label = '', dot = false, cls = '' } = {}) 
   return dot ? `<span class="${cx('badge-dot', 'badge-dot--' + tone, cls)}" role="img" aria-label="${esc(aria)}"></span>`
     : `<span class="${cx('badge', tone !== 'default' && 'badge--' + tone, cls)}" aria-label="${esc(aria)}">${n > 99 ? '99+' : fmtNum(n)}</span>`;
 }
-/** Does typed text read like a question? Then Ask AI ranks first; otherwise Search documents does (Home box, ⌘K). */
+/** Does typed text read like a question? Then Ask AI ranks first; otherwise Search documents does (⌘K). */
 const QUESTION_RE = /^(how|what|when|where|why|who|whom|whose|which|can|could|would|do|does|did|is|are|was|were|should|tell me|explain|summari[sz]e|compare|show me|help me|làm sao|làm thế nào|tại sao|vì sao|khi nào|bao giờ|ở đâu|ai|cái gì|thế nào|như thế nào|có nên|giải thích|tóm tắt|so sánh)(\s|$)/i;
 const isQuestion = q => { const s = String(q || '').trim(); return !!s && (/[?？]$/.test(s) || QUESTION_RE.test(s) || /\s(không|chưa|gì|nào|sao)$/i.test(s)); };
 

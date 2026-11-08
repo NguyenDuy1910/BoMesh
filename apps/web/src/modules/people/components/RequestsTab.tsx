@@ -40,7 +40,7 @@ export function RequestsTab({ dir }: { dir: Directory | undefined }) {
         </span>{" "}
         wants <span className="medium">{ACCESS[r.requestedRole ?? ""] ?? "Viewer"}</span> access to{" "}
         {base ? (
-          <Link className="link" href={`/knowledge/${resourceId(base.name)}`} translate="no">
+          <Link className="link" href={`/bases/${resourceId(base.name)}`} translate="no">
             {base.displayName}
           </Link>
         ) : (

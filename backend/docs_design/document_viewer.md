@@ -3,6 +3,16 @@
 Status: target design. Methods and fields: `openapi.yaml` (Knowledge),
 `api_design.md` §5.
 
+> A proposal to decouple **file preview** from RAG ingestion and serve the
+> original file to the browser instead of rendering page images is in
+> [`docs/universal-file-preview.md`](../../docs/universal-file-preview.md).
+> It measures the current WebP pipeline at **2.34× the original's bytes** (up
+> to 6.36×) for output that cannot be zoomed, selected or searched, and would
+> delete it: `alt=media` already serves the original with `Range` support and
+> working CORS. This document's scope would narrow to the citation substrate
+> (the rendition). Not implemented; this document still describes the built
+> system.
+
 ## Problem
 
 People must be able to read a whole knowledge document in BoMesh — from a
@@ -122,6 +132,21 @@ request after the `items.get` check, short-lived. Object storage must allow
 cross-origin `GET` from the web origin. Local RustFS sends no CORS headers
 until a bucket rule exists; `rustfs-init` applies one
 (`RUSTFS_CORS_ALLOWED_ORIGINS`). An S3/R2 bucket needs the same rule.
+
+### Cover on the Item
+
+A list must show what a document looks like without reading each document's
+content, so the Item carries `document.thumbnailUri`: the signed first page
+image of the current revision, read from the revision's preview manifest.
+It is output-only, absent for a format with no page images, and reset when
+approval or rollback changes the current revision. A grid of N documents
+therefore costs **one list call**, not N+1: `GetItemContent` stays for reading
+a document, not for drawing its card.
+
+**No page count is exposed.** It would have to be derived per document, it is
+not a fact anyone acts on, and it exists today only because rasterizing a PDF
+happens to count pages on the way past. A viewer with the content open numbers
+its own pages.
 
 ## Producing renditions
 

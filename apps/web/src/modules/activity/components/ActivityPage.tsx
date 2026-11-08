@@ -132,7 +132,7 @@ function related(ev: AuditEvent, names: Names, canPeople: boolean): { label: str
     case "role":
       return canPeople ? { label: `Open ${label}`, href: `/people?tab=roles&role=${id}` } : null;
     case "item":
-      return names.isBase(id) ? { label: `Open ${label}`, href: `/knowledge/${id}` } : { label: "Open document", href: `/doc/${id}` };
+      return names.isBase(id) ? { label: `Open ${label}`, href: `/bases/${id}` } : { label: "Open document", href: `/doc/${id}` };
     case "space":
       return { label: `Open ${label}`, href: `/space/${id}` };
     case "source":

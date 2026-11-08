@@ -67,7 +67,7 @@ export function CreateBaseDialog({ isOpen, onClose }: { isOpen: boolean; onClose
       }
       invalidateKnowledge(qc, id);
       close();
-      router.push(`/knowledge/${resourceId(item.name)}`);
+      router.push(`/bases/${resourceId(item.name)}`);
       toast(`Created “${item.displayName ?? name.trim()}”`);
     } catch (e) {
       toast(errorMessage(e), { tone: "danger" });

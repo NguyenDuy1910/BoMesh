@@ -89,7 +89,7 @@ export function AddResourcesDialog({
                       {r.title}
                     </span>
                     <span className="t-xs muted">
-                      {r.kindMeta.label} · <span translate="no">{r.base?.displayName ?? ""}</span>
+                      {r.typeLabel} · <span translate="no">{r.base?.displayName ?? ""}</span>
                     </span>
                   </span>
                 </Checkbox.Content>

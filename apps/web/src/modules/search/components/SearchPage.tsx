@@ -261,7 +261,7 @@ function Results({ q, tab, page, setPage, setTab, onClear }: { q: string; tab: s
                     plural(k.collection?.documentCount ?? 0, "document")
                   )
                 }
-                href={`/knowledge/${resourceId(k.name)}`}
+                href={`/bases/${resourceId(k.name)}`}
               />
             );
           })}

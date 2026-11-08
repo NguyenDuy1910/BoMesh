@@ -77,7 +77,7 @@ export function AboutPane({ resource: r, canEdit, revisions, viewing, current, o
       </Button>
     ),
     owner && r.base && (
-      <NextLink key="access" href={`/knowledge/${r.base.id}?tab=access`} className={buttonVariants({ variant: "secondary", size: "sm" })}>
+      <NextLink key="access" href={`/bases/${r.base.id}?tab=access`} className={buttonVariants({ variant: "secondary", size: "sm" })}>
         <Lock className="i" aria-hidden />
         Manage access
       </NextLink>

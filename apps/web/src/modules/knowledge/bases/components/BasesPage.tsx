@@ -12,15 +12,16 @@ import { FilterButton } from "@/components/ui/FilterButton";
 import { Gate } from "@/components/ui/Gate";
 import { NoMatches } from "@/components/ui/NoMatches";
 import { Page } from "@/components/ui/Page";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { SkeletonCards } from "@/components/ui/SkeletonCards";
+import { StatusChip } from "@/components/ui/StatusChip";
 import { PageChrome } from "@/components/shell/page-chrome";
 import { resourceId } from "@/lib/api/client";
 import { plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 
 import { openContribute } from "../../components/Contribute";
-import { KnowledgeHeader } from "../../components/KnowledgeHeader";
 import { updatedLabel } from "../../components/ResourceRow";
 import { fold } from "../../model";
 import { useKnowledgeBases } from "../../queries";
@@ -64,9 +65,9 @@ function sortBases(rows: Item[], by: SortKey) {
   return [...rows].sort((a, b) => Number(isPersonal(b)) - Number(isPersonal(a)) || cmp[by](a, b));
 }
 
-/** `/knowledge/bases` (preview `P.kbList`). */
+/** `/bases` (preview `P.kbList`). */
 export function BasesPage() {
-  const { can } = useWorkspace();
+  const { can, workspace } = useWorkspace();
   const bases = useVisibleBases();
   const policies = useBasePolicies(bases.data ?? []);
   const [q, setQ] = useState("");
@@ -98,8 +99,13 @@ export function BasesPage() {
 
   return (
     <Page>
-      <PageChrome crumbs={[{ label: "Knowledge", href: "/knowledge" }, { label: "Knowledge bases" }]} />
-      <KnowledgeHeader active="bases" actions={createButton} />
+      <PageChrome crumbs={[{ label: "Knowledge bases" }]} />
+      <PageHeader
+        title="Knowledge bases"
+        description="The knowledge bases you own or edit: their access, sources and settings."
+        chips={workspace.demo ? <StatusChip label="Demo data" tone="default" dot={false} size="sm" tooltip="This workspace holds fictional demo content." /> : null}
+        actions={createButton}
+      />
       <Gate
         query={bases}
         skeleton={<SkeletonCards cards={6} columns="cols-3" />}
@@ -168,7 +174,7 @@ function BaseCard({ base, policy }: { base: Item; policy?: Policy }) {
   const router = useRouter();
   const space = useBaseSpace(base);
   const locked = isLocked(base);
-  const href = `/knowledge/${resourceId(base.name)}`;
+  const href = `/bases/${resourceId(base.name)}`;
   const desc = base.collection?.description || (isPersonal(base) ? MY_FILES_DESC : "No description");
   const top = (
     <div className="kb-card__top">

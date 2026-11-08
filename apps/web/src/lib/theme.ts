@@ -44,6 +44,7 @@ export interface NamedTheme {
 
 /** Accent palette. */
 export const ACCENTS: readonly Accent[] = [
+  { id: "sage", label: "Sage", l: 54, c: 0.115, h: 156, ink: "light" },
   { id: "green", label: "Green", l: 62.04, c: 0.195, h: 139.21, ink: "light" },
   { id: "emerald", label: "Emerald", l: 60, c: 0.145, h: 163, ink: "light" },
   { id: "teal", label: "Teal", l: 58, c: 0.105, h: 186, ink: "light" },
@@ -93,7 +94,8 @@ export const FONTS = [
 
 /** Named themes: complete looks people can pick in one click. */
 export const THEMES: readonly NamedTheme[] = [
-  { id: "bomesh", label: "BoMesh", note: "HeroUI CRM · default", accent: "green", base: "default", radius: "md", font: "google" },
+  { id: "bomesh", label: "BoMesh", note: "Calm sage", accent: "sage", base: "subtle", radius: "md", font: "google" },
+  { id: "crm", label: "Fresh green", note: "HeroUI CRM green", accent: "green", base: "default", radius: "md", font: "google" },
   { id: "heroui", label: "HeroUI", note: "Blue on neutral gray", accent: "blue", base: "none", radius: "md", font: "inter" },
   { id: "ocean", label: "Ocean", note: "Calm cyan", accent: "cyan", base: "subtle", radius: "lg", font: "inter" },
   { id: "sky", label: "Sky", note: "Bright and airy", accent: "sky", base: "subtle", radius: "md", font: "google" },
@@ -113,7 +115,7 @@ export const THEMES: readonly NamedTheme[] = [
   { id: "graphite", label: "Graphite", note: "Monochrome", accent: "graphite", base: "none", radius: "sm", font: "inter" },
 ];
 
-export const DEFAULT_LOOK: Look = { theme: "bomesh", accent: "green", hue: 200, base: "default", radius: "md", font: "google" };
+export const DEFAULT_LOOK: Look = { theme: "midnight", accent: "indigo", hue: 200, base: "subtle", radius: "md", font: "plex" };
 export const DEFAULT_MODE: ThemeMode = "light";
 
 export const MODE_LABEL: Record<ThemeMode, string> = { light: "Light", dark: "Dark", system: "System" };

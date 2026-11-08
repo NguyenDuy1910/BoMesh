@@ -138,8 +138,8 @@ function ProjectFolder({
 }
 
 /**
- * Sidebar conversation groups (preview `X.projects.sidebar`): Projects (expandable folders
- * with their chats) and Recent (chats in no project), so each conversation appears once.
+ * Sidebar conversation groups (preview `X.projects.sidebar`): New chat, then Projects (expandable
+ * folders with their chats) and Recent (chats in no project), so each conversation appears once.
  * Without projects (production API) the Projects header shows a disabled + with the reason.
  * Also mounts the shared project dialogs.
  */
@@ -161,6 +161,18 @@ export function SidebarConversations() {
 
   return (
     <>
+      {/* Starting a conversation is its own destination, above the folders it will be filed into. */}
+      <div className="sidebar__group side-new">
+        <Link
+          className="nav-item"
+          id="side-new-chat"
+          href="/chat"
+          aria-current={pathname === "/chat" ? "page" : undefined}
+        >
+          <MessageSquarePlus className="i" aria-hidden />
+          <span className="nav-item__label">New chat</span>
+        </Link>
+      </div>
       {projectsAvailable ? (
         <div className="sidebar__group">
           <div className="sidebar__group-label">

@@ -40,6 +40,9 @@ import {
 import { fmtDate } from "@/lib/format";
 
 import type { Contribution, Item, ItemContent, SearchItemsFacet, SearchItemsRequest, SearchItemsResult, Topic } from "./api";
+import { pickTypeLabel, readableTitle } from "./title";
+
+export { pickTypeLabel, readableTitle };
 
 /**
  * The knowledge resource model (preview `core/catalog.js` + `core/lifecycle.js`)
@@ -113,7 +116,7 @@ export function kindMeta(kind: string, labels?: DocumentTypeLabels): KindMeta {
 
 /* ═══════════════ Formats (what the file is, not what it's for) ═══════════════ */
 
-export type FormatKey = "pdf" | "word" | "sheet" | "slides" | "text" | "image" | "archive" | "other";
+export type FormatKey = "pdf" | "word" | "sheet" | "slides" | "text" | "code" | "image" | "archive" | "other";
 
 export const FORMATS: Readonly<Record<FormatKey, { label: string; mimes: readonly string[] }>> = {
   pdf: { label: "PDF", mimes: ["application/pdf"] },
@@ -121,6 +124,7 @@ export const FORMATS: Readonly<Record<FormatKey, { label: string; mimes: readonl
   sheet: { label: "Spreadsheet", mimes: ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-excel", "text/csv", "text/tab-separated-values"] },
   slides: { label: "Slides", mimes: ["application/vnd.openxmlformats-officedocument.presentationml.presentation", "application/vnd.ms-powerpoint"] },
   text: { label: "Text", mimes: ["text/markdown", "text/plain", "text/html", "application/json", "text/x-rst", "application/xml", "application/yaml"] },
+  code: { label: "Code", mimes: ["text/x-python", "text/javascript", "application/javascript", "text/x-java-source", "text/x-c", "text/x-csrc", "text/x-sh", "application/sql", "text/x-sql"] },
   image: { label: "Image", mimes: ["image/png", "image/jpeg"] },
   archive: { label: "Archive", mimes: ["application/zip"] },
   other: { label: "Other", mimes: [] },
@@ -129,7 +133,9 @@ export const FORMATS: Readonly<Record<FormatKey, { label: string; mimes: readonl
 const EXT_FORMAT: Readonly<Record<string, FormatKey>> = {
   pdf: "pdf", doc: "word", docx: "word", xls: "sheet", xlsx: "sheet", csv: "sheet", tsv: "sheet", ppt: "slides", pptx: "slides",
   md: "text", markdown: "text", txt: "text", html: "text", htm: "text", json: "text", rst: "text", xml: "text", yaml: "text", yml: "text",
-  png: "image", jpg: "image", jpeg: "image", zip: "archive",
+  py: "code", js: "code", ts: "code", tsx: "code", jsx: "code", java: "code", c: "code", h: "code", cpp: "code", cs: "code", go: "code", rs: "code", rb: "code", php: "code", sh: "code", sql: "code",
+  png: "image", jpg: "image", jpeg: "image", gif: "image", webp: "image", svg: "image",
+  zip: "archive", tar: "archive", gz: "archive", rar: "archive", "7z": "archive",
 };
 
 export function formatOf(ext: string, mime?: string): FormatKey {
@@ -340,6 +346,8 @@ export interface Resource {
   format: FormatKey;
   kind: string;
   kindMeta: KindMeta;
+  /** What to call it in one phrase: its purpose when set, else its format. For display only. */
+  typeLabel: string;
   /** Topic names (resource names). */
   topics: string[];
   /** The knowledge base (root collection) or the parent collection when the root isn't known. */
@@ -359,6 +367,7 @@ export interface Resource {
   /** Caller can edit (from `access`; confirm with testIamPermissions for actions). */
   editable: boolean;
   deleted: boolean;
+  /** First page of the current revision, signed. Present without reading the document's content. */
   thumbnailUri?: string;
 }
 
@@ -371,17 +380,42 @@ function baseOf(item: Item, ctx: ModelContext): Resource["base"] {
   return { name, id: lastSegment(name), displayName };
 }
 
+/**
+ * What to call this document in one phrase: its purpose when someone set one ("Policy",
+ * "Lecture slides"), else its format ("Slides", "Spreadsheet", "PDF").
+ */
+function typeLabelOf(kind: string, documentType: string | undefined, format: FormatKey, kindLabel: string): string {
+  return pickTypeLabel(documentType, {
+    kindLabel,
+    formatLabel: FORMATS[format].label,
+    // `reference` is inferKind's catch-all: it says nothing the format doesn't say better.
+    kindIsSpecific: !!RESOURCE_KINDS[kind] && kind !== "reference",
+  });
+}
+
+/**
+ * What to call a document in one phrase, for callers that have only the raw facts (Home's read
+ * model, not a full `Resource`): its purpose when someone set one, else its format.
+ */
+export function typeLabelFor(documentType: string | undefined, fileName: string, mime: string | undefined, labels?: ReadonlyMap<string, string>): string {
+  const ext = (/\.([a-z0-9]{1,5})$/i.exec(fileName ?? "")?.[1] ?? "").toLowerCase();
+  const kind = documentType && documentType !== "markdown" ? documentType : inferKind(fileName ?? "", ext);
+  return typeLabelOf(kind, documentType, formatOf(ext, mime), kindMeta(kind, labels).label);
+}
+
 /** Everything the knowledge UI shows about a document. Cheap; call freely. */
 export function toResource(item: Item, ctx: ModelContext, extra: { contribution?: Contribution | null; verifierName?: string } = {}): Resource {
   const doc = item.document;
   const fileName = doc?.fileName || item.displayName || "";
   const ext = (/\.([a-z0-9]{1,5})$/i.exec(fileName)?.[1] ?? "").toLowerCase();
-  const title = (item.displayName || fileName).replace(/\.[a-z0-9]{1,5}$/i, "");
+  const title = readableTitle((item.displayName || fileName).replace(/\.[a-z0-9]{1,5}$/i, ""));
   const kind = doc?.documentType && doc.documentType !== "markdown" ? doc.documentType : inferKind(title, ext);
   const base = baseOf(item, ctx);
   const isPersonal = !!ctx.personalCollection && (base?.name === ctx.personalCollection || item.parentItem === ctx.personalCollection);
   const origin = doc?.origin;
   const index = doc?.indexingState;
+  const fmt = formatOf(ext, doc?.mimeType);
+  const meta = kindMeta(kind, ctx.documentTypes);
   return {
     item,
     name: item.name ?? "",
@@ -390,9 +424,10 @@ export function toResource(item: Item, ctx: ModelContext, extra: { contribution?
     fileName,
     ext,
     mime: doc?.mimeType ?? "",
-    format: formatOf(ext, doc?.mimeType),
+    format: fmt,
     kind,
-    kindMeta: kindMeta(kind, ctx.documentTypes),
+    kindMeta: meta,
+    typeLabel: typeLabelOf(kind, doc?.documentType, fmt, meta.label),
     topics: doc?.topics ?? [],
     base: base && isPersonal ? { ...base, displayName: base.displayName || "My files" } : base,
     isPersonal,
@@ -742,8 +777,6 @@ export interface Glance {
   /** First page image (sheets, slides) — a signed, short-lived URL. */
   pageImage?: string;
   count: number;
-  /** "6 pages", "4 slides", "Spreadsheet". */
-  extent: string;
   /** The opening paragraph (card "what it's for" when there is no summary). */
   opening: string;
 }
@@ -803,7 +836,6 @@ export function glanceOf(content: ItemContent | undefined, format: FormatKey): G
     blocks,
     pageImage: first?.imageUri,
     count: pages,
-    extent: layout === "sheet" ? "Spreadsheet" : `${pages} ${layout === "slides" ? (pages === 1 ? "slide" : "slides") : pages === 1 ? "page" : "pages"}`,
     opening: blocks.find((b) => b.kind === "p")?.text ?? "",
   };
 }

@@ -14,7 +14,6 @@ import { openContribute } from "./Contribute";
 const HUB_TABS = [
   { id: "browse", label: "Browse", href: "/knowledge" },
   { id: "library", label: "My library", href: "/knowledge/library" },
-  { id: "bases", label: "Knowledge bases", href: "/knowledge/bases" },
 ] as const;
 
 export type KnowledgeSection = (typeof HUB_TABS)[number]["id"];

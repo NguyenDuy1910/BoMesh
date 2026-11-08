@@ -21,8 +21,10 @@ DEV_TENANT_ID ?= 00000000-0000-0000-0000-000000000001
 DEV_USER_ID ?= 00000000-0000-0000-0000-000000000002
 DEV_TENANT_ADMIN_ASSIGNMENT_ID ?= 00000000-0000-0000-0000-000000000003
 DEV_PLATFORM_ADMIN_ASSIGNMENT_ID ?= 00000000-0000-0000-0000-000000000004
-DEV_TENANT_CODE ?= local
-DEV_USER_EMAIL ?= local-admin@bomesh.dev
+DEV_TENANT_CODE ?= hcmute
+DEV_TENANT_NAME ?= Trường Đại học Sư phạm Kỹ thuật TP. Hồ Chí Minh
+DEV_USER_EMAIL ?= admin@hcmute.edu.vn
+DEV_USER_NAME ?= Quản trị hệ thống
 DEV_USER_IS_PLATFORM_ADMIN ?= true
 
 FLUTTER ?= flutter
@@ -55,7 +57,7 @@ init: reset-all ## Initialize the complete local BoMesh environment.
 	@echo
 	@echo "Start the local services, API, and ingestion worker with: cd backend && uv run main.py"
 
-reset-all: _temporal-reset db-reset db-seed-accounts qdrant-init status ## Reset all databases and Qdrant, apply the current design, and seed full-access test accounts.
+reset-all: _temporal-reset db-reset db-seed-accounts qdrant-init status ## Reset all databases and Qdrant, apply the current design, and seed the role-matrix test accounts.
 	@echo "PostgreSQL, Temporal, and Qdrant reset is complete."
 
 config: ## Create the root environment file, enforce local endpoints, and default storage to local RustFS.
@@ -168,21 +170,21 @@ db-init: services ## Apply the current database design and the IAM catalog (perm
 	@cd backend && DATABASE_URL="$(LOCAL_DATABASE_URL)" uv run python -c 'import asyncio; from bomesh.db.engine import get_engine, get_session_factory; from bomesh.db.models import Base; from bomesh.iam.sync import sync_catalog; exec("async def initialize():\n    engine = get_engine()\n    async with engine.begin() as connection:\n        await connection.run_sync(Base.metadata.create_all)\n    async with get_session_factory()() as session:\n        async with session.begin():\n            await sync_catalog(session)\n    await engine.dispose()") ; asyncio.run(initialize())'
 	@echo "PostgreSQL schema, permissions, and predefined roles are initialized."
 
-db-seed: services ## Create or refresh the deterministic local admin identity.
+db-seed: services ## Create or refresh the HCMUTE workspace and its system administrator.
 	@set -euo pipefail
-	@tenant_id="$$( $(COMPOSE) exec -T postgres sh -c 'psql -Atq -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "$$1"' _ "INSERT INTO tenants (id, code, name, status, settings) VALUES ('$(DEV_TENANT_ID)', '$(DEV_TENANT_CODE)', 'BoMesh Local', 'active', '{}'::jsonb) ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, status = 'active', updated_at = now() RETURNING id" )"; \
-	user_id="$$( $(COMPOSE) exec -T postgres sh -c 'psql -Atq -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "$$1"' _ "INSERT INTO users (id, email, display_name, status, preferences) VALUES ('$(DEV_USER_ID)', '$(DEV_USER_EMAIL)', 'Local Administrator', 'active', '{}'::jsonb) ON CONFLICT (email) DO UPDATE SET display_name = EXCLUDED.display_name, status = 'active', updated_at = now() RETURNING id" )"; \
+	@tenant_id="$$( $(COMPOSE) exec -T postgres sh -c 'psql -Atq -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "$$1"' _ "INSERT INTO tenants (id, code, name, template, status, settings) VALUES ('$(DEV_TENANT_ID)', '$(DEV_TENANT_CODE)', '$(DEV_TENANT_NAME)', 'campus', 'active', '{}'::jsonb) ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, template = EXCLUDED.template, status = 'active', updated_at = now() RETURNING id" )"; \
+	user_id="$$( $(COMPOSE) exec -T postgres sh -c 'psql -Atq -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "$$1"' _ "INSERT INTO users (id, email, display_name, status, preferences) VALUES ('$(DEV_USER_ID)', '$(DEV_USER_EMAIL)', '$(DEV_USER_NAME)', 'active', '{}'::jsonb) ON CONFLICT (email) DO UPDATE SET display_name = EXCLUDED.display_name, status = 'active', updated_at = now() RETURNING id" )"; \
 	$(COMPOSE) exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "$$1"' _ "INSERT INTO tenant_memberships (user_id, tenant_id, status, joined_at, deleted_at) VALUES ('$$user_id', '$$tenant_id', 'active', now(), NULL) ON CONFLICT (user_id, tenant_id) DO UPDATE SET status = 'active', deleted_at = NULL" >/dev/null; \
 	$(COMPOSE) exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "$$1"' _ "INSERT INTO role_assignments (id, user_id, role_id, tenant_id) SELECT '$(DEV_TENANT_ADMIN_ASSIGNMENT_ID)', '$$user_id', role.id, '$$tenant_id' FROM roles role WHERE role.is_system AND role.code = 'workspaceAdmin' ON CONFLICT DO NOTHING" >/dev/null; \
 	if [[ "$(DEV_USER_IS_PLATFORM_ADMIN)" == "true" ]]; then \
 		$(COMPOSE) exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "$$1"' _ "INSERT INTO role_assignments (id, user_id, role_id) SELECT '$(DEV_PLATFORM_ADMIN_ASSIGNMENT_ID)', '$$user_id', role.id FROM roles role WHERE role.is_system AND role.code = 'platformAdmin' ON CONFLICT DO NOTHING" >/dev/null; \
 	fi; \
-	echo "Local admin identity is ready: $$user_id"
+	echo "HCMUTE system administrator is ready: $$user_id"
 
-db-reset: db-init db-seed ## Rebuild PostgreSQL from the current ORM and reseed the local admin identity.
+db-reset: db-init db-seed ## Rebuild PostgreSQL from the current ORM and reseed the HCMUTE workspace.
 	@echo "PostgreSQL reset is complete."
 
-db-seed-accounts: db-reset ## Seed three full-access local test accounts.
+db-seed-accounts: db-reset ## Seed the HCMUTE role-matrix accounts, one per IAM role (password 19102003).
 	@set -euo pipefail
 	@cd backend && DATABASE_URL="$(LOCAL_DATABASE_URL)" uv run python script/seed_account.py
 

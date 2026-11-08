@@ -213,7 +213,7 @@ function BaseGroup({ base, q, multi, pick, selected, onSelected }: BaseGroupProp
   const head = (
     <div className="sp-mat__head">
       <ItemIcon icon={BookOpen} size="sm" />
-      <NextLink className="sp-mat__name truncate" href={`/knowledge/${resourceId(base.name)}`} translate="no">
+      <NextLink className="sp-mat__name truncate" href={`/bases/${resourceId(base.name)}`} translate="no">
         {base.displayName}
       </NextLink>
       <span className="t-sm muted none">{plural(docs.data?.length ?? base.collection?.documentCount ?? 0, "document")}</span>
@@ -395,7 +395,7 @@ function LinkResourcesDialog({ view, exclude, ownBases, onClose }: LinkResources
                         {r.title}
                       </span>
                       <span className="t-xs muted">
-                        {r.kindMeta.label} · <span translate="no">{r.base?.displayName ?? ""}</span>
+                        {r.typeLabel} · <span translate="no">{r.base?.displayName ?? ""}</span>
                       </span>
                     </span>
                   </Checkbox.Content>

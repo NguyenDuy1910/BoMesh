@@ -16,7 +16,7 @@
   --snow: oklch(99.11% 0 0);
   --eclipse: oklch(21.03% 0.0059 285.89);
 
-  --font-sans: "Google Sans Flex", "Google Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
 
   /* Type scale (size / line height). Weights: 400 body, 500 labels and controls, 600 headings — never heavier. */
@@ -86,11 +86,11 @@
    fixed: they carry meaning, not brand. */
 :root {
   --accent-l: 54%;
-  --accent-c: 0.115;
-  --accent-h: 156;
+  --accent-c: 0.2;
+  --accent-h: 275;
   --accent-fg: var(--snow);
   --accent-ink: 70%;
-  --base-hue: 156;
+  --base-hue: 275;
   --tint: 0.5;
 }
 

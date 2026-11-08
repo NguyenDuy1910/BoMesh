@@ -60,7 +60,7 @@
       title: 'Appearance', clear: true,
       desc: 'Changes the whole app right away. Saved for you on this device.',
       body: controls(),
-      footStart: isDefaultLook() ? '' : btn('Reset to BoMesh', { v: 'ghost', icon: 'refresh', act: 'look-reset' }),
+      footStart: isDefaultLook() ? '' : btn(`Reset to ${themeLabel(DEFAULT_LOOK)}`, { v: 'ghost', icon: 'refresh', act: 'look-reset' }),
       foot: btn('Done', { v: 'primary', act: 'close-drawer' }),
     };
   };
@@ -101,5 +101,5 @@
   A['look-base'] = el => setLook({ base: el.dataset.value });
   A['look-radius'] = el => setLook({ radius: el.dataset.value });
   A['look-font'] = el => setLook({ font: el.dataset.value });
-  A['look-reset'] = () => { const before = { ...S.look }; resetLook(); toast('Appearance reset to BoMesh', { action: { label: 'Undo', run: () => { S.look = before; applyTheme(); persist(); refresh(); } } }); };
+  A['look-reset'] = () => { const before = { ...S.look }; resetLook(); toast(`Appearance reset to ${themeLabel(DEFAULT_LOOK)}`, { action: { label: 'Undo', run: () => { S.look = before; applyTheme(); persist(); refresh(); } } }); };
 })();

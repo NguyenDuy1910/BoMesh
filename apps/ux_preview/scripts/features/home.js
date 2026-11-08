@@ -1,11 +1,12 @@
-/* Home (/home): the intent-driven entry to the workspace. One box to ask a
-   question or find a document (typing shows the two actions, matching
-   documents and your earlier questions), then — only when there's something
-   to show — where you left off, what changed that's worth knowing, a few
-   documents to read, and topic shortcuts into Knowledge. Home points into
-   Knowledge, Inbox and Conversations; it doesn't reproduce them.
+/* Home (/home): Discover & Start — the workspace's front page, not a second
+   chat composer. A greeting with what this workspace holds for you; three
+   intent cards (find a document → Knowledge, ask a question → New chat,
+   contribute → review); then, only when there's something to show, what
+   needs you, what you were reading (with Ask about it), what changed at the
+   source, a map of the knowledge by topic and a few documents to read.
+   Home points into Knowledge, Chat and the Inbox; it doesn't reproduce them.
    Shared: X.upNext({space?, limit?, queue?}), X.upNextList(items, {empty?, space?}).
-   Menus: home-featured, home-scope. Prefix: home-. */
+   Drawer: home-featured. Prefix: home-. */
 (() => {
   'use strict';
 
@@ -109,9 +110,6 @@
   /* ═══════════════ Signals (deterministic, permission-filtered) ═══════════════ */
   /** Published, readable, shared documents: the only pool Home draws from. */
   const publishedPool = sharedPool;
-  const readableBases = () => visibleKbs().filter(k => !k.personal && canReadKb(k));
-  const starters = () => (X.assistantStarters?.() || D.assistant?.starters || []).map(s => (typeof s === 'string' ? s : s?.prompt)).filter(Boolean);
-  const myQuestions = () => [...myConvs()].sort((a, b) => b.at - a.at);
   /** Topics the caller has been reading or saving: what "relevant to you" means here. */
   function myTopics() {
     const t = new Map();
@@ -119,131 +117,79 @@
     savedResources().forEach(d => res(d).topics.flatMap(topicLineage).forEach(id => t.set(id, (t.get(id) || 0) + 1)));
     return t;
   }
+  /** Readable document counts per topic (domains and their topics), from the same facets Knowledge shows. */
+  const topicCounts = () => new Map((catalogSearch(parseCatalogQuery({}), publishedPool()).facets.topic || []).map(o => [o.value, o.count]));
+  /** Domains that hold at least one readable document, each with its readable topics (most documents first). */
+  function domains() {
+    const counts = topicCounts();
+    return topicTree().filter(dm => counts.get(dm.id)).map(dm => ({ ...dm, count: counts.get(dm.id), subs: dm.children.filter(t => counts.get(t.id)).sort((a, b) => counts.get(b.id) - counts.get(a.id)) }));
+  }
+  const sec = (key, title, body, { action = '' } = {}) =>
+    `<section class="home-sec home-sec--${key}" aria-labelledby="home-${key}-h"><div class="home-sec__head"><h2 class="home-sec__title" id="home-${key}-h">${esc(title)}</h2><span class="grow"></span>${action}</div>${body}</section>`;
 
-  /* ═══════════════ Hero: one box to ask or find ═══════════════ */
+  /* ═══════════════ Header: who you are here, and what this workspace holds ═══════════════ */
   const callName = n => { const p = String(n || '').trim().split(/\s+/); return p.length >= 3 ? p[p.length - 1] : p[0]; };
   function greeting() { const h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'; }
-  /** Text that reads like a question defaults to Ask (global isQuestion, shared with ⌘K); anything else defaults to searching documents. */
-  const hui = () => ui('home', { q: '', scope: '', open: false, active: 0 });
-  /** Scope: the whole workspace, one readable knowledge base or one of my spaces. Secondary: a quiet menu inside the box. */
-  function scopeLabel(f) {
-    if (f.scope.startsWith('kb:')) { const k = kbById(f.scope.slice(3)); if (k && canReadKb(k)) return k.name; }
-    if (f.scope.startsWith('sp:')) { const s = spaceById(f.scope.slice(3)); if (s && spaceRole(s)) return s.name; }
-    f.scope = ''; return `All of ${curWs().name}`;
+  /** One line of scale, computed from what the caller can read: "214 documents you can read, across 6 topics · 12 updated in the last 30 days". */
+  function lede(pool) {
+    if (!pool.length) return '<p class="home-lede">Find documents, ask questions answered from them and share what you know.</p>';
+    const n = domains().length, fresh = pool.filter(d => NOW - d.updated < 30 * DAY).length;
+    return `<p class="home-lede"><span>${n ? `${plural(pool.length, 'document')} you can read, across ${plural(n, 'topic')}` : `${plural(pool.length, 'document')} you can read`}</span>${fresh ? `<span class="home-lede__fresh">${fresh} updated in the last 30 days</span>` : ''}</p>`;
   }
-  const scopeOf = () => { const s = hui().scope || ''; return s.startsWith('kb:') ? { kb: s.slice(3) } : s.startsWith('sp:') ? { space: s.slice(3) } : {}; };
-  const scopeFilters = () => { const s = scopeOf(); return s.kb ? { kb: [s.kb] } : s.space ? { space: [s.space] } : {}; };
-  /** What the box offers for the current text: the two actions first (the likely one leads), then matching documents and earlier
-      questions. Empty text: your recent questions, then a few the workspace suggests. Each option: { act, html, …data }. */
-  function options(q) {
-    const text = q.trim(), out = [];
-    if (text) {
-      const ask = { kind: 'ask', q: text, icon: 'sparkles', html: `<span class="home-opt__main">Ask AI <span class="home-opt__q">“${esc(text)}”</span></span><span class="home-opt__hint">Answer with sources</span>` };
-      const find = { kind: 'find', q: text, icon: 'search', html: `<span class="home-opt__main">Search documents for <span class="home-opt__q">“${esc(text)}”</span></span><span class="home-opt__hint">In Knowledge</span>` };
-      out.push(...(isQuestion(text) ? [ask, find] : [find, ask]));
-      const toks = tokens(text);
-      catalogSearch({ q: text, filters: scopeFilters(), view: 'grid' }).rows.filter(x => isShared(x.doc)).slice(0, 4).forEach(({ doc }) => out.push({
-        kind: 'doc', id: doc.id, q: text, group: 'Documents',
-        lead: fileIcon(doc.type, 'sm'), html: `<span class="home-opt__main">${markTokens(bare(doc.name), toks)}</span><span class="home-opt__hint">${esc(kindMeta(res(doc).kind).label)}</span>`,
-      }));
-      myQuestions().filter(c => toks.length && toks.every(t => fold(c.title).includes(t))).slice(0, 2).forEach(c => out.push({
-        kind: 'conv', id: c.id, group: 'You asked', icon: 'message', html: `<span class="home-opt__main">${markTokens(c.title, toks)}</span><span class="home-opt__hint">${esc(relLow(c.at))}</span>`,
-      }));
-    } else {
-      const recent = myQuestions().slice(0, 3);
-      recent.forEach(c => out.push({ kind: 'conv', id: c.id, group: 'Continue a conversation', icon: 'message', html: `<span class="home-opt__main">${esc(c.title)}</span><span class="home-opt__hint">${esc(relLow(c.at))}</span>` }));
-      const seen = new Set(recent.map(c => fold(c.title)));
-      starters().filter(s => !seen.has(fold(s))).slice(0, 4 - Math.min(recent.length, 2)).forEach(s => out.push({ kind: 'ask', q: s, group: 'Ask', icon: 'sparkles', html: `<span class="home-opt__main">${esc(s)}</span>` }));
-    }
-    return out;
-  }
-  function panelHtml(f) {
-    const opts = options(f.q || '');
-    if (!f.open || !opts.length) return '';
-    f.active = Math.min(f.active || 0, opts.length - 1);
-    let last = '';
-    const rows = opts.map((o, i) => {
-      const head = o.group && o.group !== last ? `<div class="home-opt__group" role="presentation">${esc(o.group)}</div>` : '';
-      last = o.group || '';
-      return `${head}<div class="${cx('home-opt', `home-opt--${o.kind}`, i === f.active && 'is-active')}" role="option" id="home-opt-${i}" aria-selected="${i === f.active}" data-act="home-pick" data-i="${i}">${o.lead || `<span class="home-opt__icon" aria-hidden="true">${ic(o.icon, 'i-sm')}</span>`}<span class="home-opt__body">${o.html}</span>${i === f.active ? `<span class="home-opt__key" aria-hidden="true">${kbd('↵')}</span>` : ''}</div>`;
-    }).join('');
-    return `<div class="home-sug__list" role="listbox" id="home-sug-list" aria-label="Suggestions">${rows}</div>`;
-  }
-  /** Redraw only the suggestions (typing must not re-render the page or move focus). */
-  function syncPanel() {
-    const f = hui(), box = $('#home-sug'), inp = $('#home-q'); if (!box || !inp) return;
-    box.innerHTML = panelHtml(f);
-    const open = !!box.innerHTML;
-    box.hidden = !open;
-    inp.setAttribute('aria-expanded', String(open));
-    if (open) inp.setAttribute('aria-activedescendant', 'home-opt-' + f.active); else inp.removeAttribute('aria-activedescendant');
-  }
-  /** Autofocus only where it helps: a wide window with a fine pointer. On phones it would pop the keyboard over the page. */
-  const wideFine = () => ($('#frame')?.clientWidth || innerWidth) >= 680 && matchMedia('(hover: hover) and (pointer: fine)').matches;
-  function hero(f, firstVisit) {
-    const sps = hasModule('spaces') ? mySpaces() : [], scoped = readableBases().length + sps.length > 1, label = scopeLabel(f);
-    // Scope: a quiet menu inside the box on wide screens; on phones a labelled chip under the box (never a bare icon).
-    const scope = scoped ? `<button type="button" class="home-box__scope hide-sm" data-menu="home-scope" aria-haspopup="menu" aria-label="Search in: ${esc(label)}">${ic('filter', 'i-xs')}<span class="truncate">${esc(label)}</span>${ic('chevron-down', 'i-xs')}</button>` : '';
-    const chip = scoped ? `<button type="button" class="home-scope-chip only-sm" data-menu="home-scope" aria-haspopup="menu" aria-label="Search in: ${esc(label)}"><span class="home-scope-chip__in">In:</span><span class="truncate">${esc(label)}</span>${ic('chevron-down', 'i-xs')}</button>` : '';
-    // First visit only: three questions people actually ask here, so the box is never a blank page. Returning people get them on focus.
-    const tries = firstVisit ? starters().slice(0, 3) : [];
-    const suggest = tries.length ? `<div class="home-suggest" role="group" aria-label="Suggested questions" data-overflow><span class="home-suggest__label">Try asking</span>${tries.map(s => `<button type="button" class="home-suggest__chip" data-act="home-suggest" data-q="${esc(s)}" data-tip="${esc(s)}"><span class="truncate">${esc(s)}</span></button>`).join('')}</div>` : '';
-    return `<section class="home-hero" aria-labelledby="home-title">
-      <h1 class="home-title" id="home-title">${esc(greeting())}, ${esc(callName(me().name))}</h1>
-      <div class="home-search">
-        <div class="home-box" role="search">
-          ${ic('search', 'home-box__icon')}
-          ${input({ id: 'home-q', bind: 'home.q', value: f.q, type: 'search', placeholder: 'Ask a question or find a document', onEnter: 'home-go', cls: 'home-box__input', autofocus: wideFine(), attrs: `data-input="home-type" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="home-sug-list" aria-label="Ask a question or find a document" enterkeyhint="go"` })}
-          ${scope}
-        </div>
-        <div class="home-sug" id="home-sug" hidden></div>
-      </div>
-      ${chip}
-      ${suggest}
-    </section>`;
-  }
-  MENUS['home-scope'] = () => {
-    const f = hui(), set = v => { f.scope = v; refresh(); requestAnimationFrame(() => $('#home-q')?.focus()); };
-    const sps = hasModule('spaces') ? mySpaces() : [];
-    return [
-      { section: 'Search and answer from' },
-      { label: `All of ${curWs().name}`, icon: 'globe', checked: !f.scope, run: () => set('') },
-      ...(readableBases().length ? [{ section: 'Knowledge bases' }, ...readableBases().map(k => ({ label: k.name, checked: f.scope === 'kb:' + k.id, run: () => set('kb:' + k.id) }))] : []),
-      ...(sps.length ? [{ section: 'My spaces' }, ...sps.map(s => ({ label: s.name, checked: f.scope === 'sp:' + s.id, run: () => set('sp:' + s.id) }))] : []),
+  /** The three things people come here to do, each one click into the page that owns it. Not a composer: nothing is typed on Home. */
+  function starts(pool) {
+    const n = pool.length;
+    const cards = [
+      { icon: 'search', title: 'Find a document', desc: n ? `Search ${plural(n, 'document')} by title, topic or content` : 'Search by title, topic or content', href: '/knowledge', act: 'home-find' },
+      { icon: 'sparkles', tone: 'accent', title: 'Ask a question', desc: `Answers from ${curWs().name} documents, with citations`, href: '/chat' },
+      canContribute()
+        ? { icon: 'upload', title: 'Contribute knowledge', desc: 'Share a document; a reviewer publishes it', act: 'contribute' }
+        : { icon: 'bookmark', title: 'Your library', desc: 'Saved documents, recent reads and collections', href: '/knowledge/library' },
     ];
-  };
+    const card = c => {
+      const inner = `${itemIcon(c.icon, c.tone || '')}<span class="home-start__body"><span class="home-start__title">${esc(c.title)}</span><span class="home-start__desc">${esc(c.desc)}</span></span>${ic('arrow-right', 'i-sm home-start__go')}`;
+      return c.href ? `<a class="home-start" href="#${c.href}"${c.act ? ` data-act="${c.act}"` : ''}>${inner}</a>` : `<button type="button" class="home-start" data-act="${c.act}">${inner}</button>`;
+    };
+    return `<nav class="home-starts" aria-label="Get started">${cards.map(card).join('')}</nav>`;
+  }
 
-  /* ═══════════════ Waiting for you · Continue reading ═══════════════ */
-  /** Two rows, each with its own honest title: what is waiting on you (changes requested, your review queue, a reply or today's
-      deadline — three at most), then the documents you read last. Conversations live in the sidebar's Recent and in the box. */
+  /* ═══════════════ Needs your attention · Continue reading ═══════════════ */
+  /** What is waiting on you (changes requested, your review queue, a reply or today's deadline — three at most). */
   function waitingItems() {
     const out = [];
     myContributions().filter(d => lifecycleOf(d).key === 'changes').slice(0, 1).forEach(d => out.push({
       href: `/knowledge/library?tab=contributions&open=${d.id}`, lead: fileIcon(d.type, 'sm'), title: bare(d.name), sub: 'Changes requested', tone: 'warning',
     }));
     const n = canReview() ? reviewQueue().length : 0;
-    if (n) out.push({ href: '/documents?tab=review', lead: `<span class="home-cont__icon" aria-hidden="true">${ic('inbox', 'i-sm')}</span>`, title: `${plural(n, 'document')} to review`, sub: 'Waiting for your decision', tone: 'accent' });
+    if (n) out.push({ href: '/documents?tab=review', lead: itemIcon('inbox', 'accent', 'sm'), title: `${plural(n, 'document')} to review`, sub: 'Waiting for your decision' });
     if (hasModule('spaces') || hasModule('requests')) X.upNext({ limit: 4 }).filter(it => it.kind === 'reply' || (it.at - NOW < 2 * DAY && it.at > NOW - DAY)).slice(0, 1).forEach(it => out.push({
-      href: it.action?.href || '/inbox', act: it.action?.act, data: it.action?.data, lead: `<span class="home-cont__icon" aria-hidden="true">${ic(KIND_ICON[it.kind] || 'calendar', 'i-sm')}</span>`, title: it.title, sub: when(it).text, tone: 'warning',
+      href: it.action?.href || '/inbox', act: it.action?.act, data: it.action?.data, lead: itemIcon(KIND_ICON[it.kind] || 'calendar', 'warning', 'sm'), title: it.title, sub: when(it).text, tone: 'warning',
     }));
     return out.slice(0, 3);
   }
-  function readingItems(n) {
-    return recentResources(8).filter(x => isReaderVisible(x.doc)).slice(0, n).map(({ doc, at }) => ({ href: '/doc/' + doc.id, lead: fileIcon(doc.type, 'sm'), title: bare(doc.name), sub: `Opened ${relLow(at)}` }));
-  }
-  function contSection(id, title, items) {
+  function attentionSection() {
+    const items = waitingItems();
     if (!items.length) return '';
-    const card = it => {
-      const inner = `${it.lead}<span class="home-cont__body"><span class="home-cont__title">${esc(it.title)}</span><span class="home-cont__sub">${esc(it.sub)}</span></span>${ic('arrow-right', 'i-sm home-cont__go')}`;
-      return it.act ? `<button type="button" class="${cx('home-cont', it.tone && 'home-cont--' + it.tone)}" data-act="${it.act}" ${dataAttrs(it.data)}>${inner}</button>` : `<a class="${cx('home-cont', it.tone && 'home-cont--' + it.tone)}" href="#${esc(it.href)}">${inner}</a>`;
-    };
-    return `<section class="home-sec" aria-labelledby="${id}"><div class="home-sec__head"><h2 class="home-sec__title" id="${id}">${title}</h2></div><div class="home-conts">${items.map(card).join('')}</div></section>`;
+    const row = it => item({ lead: it.lead, title: esc(it.title), desc: `<span class="${cx(it.tone && 'home-tone--' + it.tone)}">${esc(it.sub)}</span>`, ...(it.act ? { act: it.act, data: it.data } : { href: it.href }) });
+    return sec('attention', 'Needs your attention', list(items.map(row), 'home-list'));
+  }
+  /** The documents you opened last → the Reader where you left off; Ask continues from the document (Reader's Ask, then Continue in chat). */
+  function continueSection() {
+    const all = recentResources(40).filter(x => isReaderVisible(x.doc)), rows = all.slice(0, 4);
+    if (!rows.length) return '';
+    const more = all.length > rows.length ? linkBtn('View all', { href: '/knowledge/library?tab=recent', size: 'sm' }) : '';
+    return sec('continue', 'Continue reading', list(rows.map(({ doc, at }) => item({
+      lead: fileIcon(doc.type, 'sm'), title: esc(bare(doc.name)), titleExtra: okMark(doc),
+      desc: `Opened ${esc(relLow(at))}<span class="res-dot" aria-hidden="true">·</span>${esc(kindMeta(res(doc).kind).label)}`,
+      href: '/doc/' + doc.id,
+      trail: `<span class="reveal-on-hover">${iconBtn('sparkles', 'Ask about this document', { href: `/doc/${doc.id}?ask=1` })}</span>`,
+    })), 'home-list'), { action: more });
   }
 
-  /* ═══════════════ Worth knowing: what changed, from the source ═══════════════ */
+  /* ═══════════════ What's new: what changed, from the source ═══════════════ */
   /** Source-backed updates people may have missed: a new version of a document with its owner's change note ("Batch cut-off moved
       from 16:00 to 15:30"), or an announcement with its summary. Only text written in or for the document; nothing generated. Skips
-      what you already read after it changed. Ranked by your topics and spaces, then recency; three at most. */
+      what you already read after it changed. Ranked by your topics and spaces, then recency; four at most. */
   function insights() {
     const read = new Map(recentResources(40).map(x => [x.doc.id, x.at])), mine = myTopics(), spaces = new Set(hasModule('spaces') ? mySpaces().map(s => s.id) : []);
     const out = [];
@@ -259,20 +205,20 @@
       it.score = Math.min(rel, 6) + (isVerified(d) ? 1 : 0) + Math.max(0, 3 - (NOW - it.at) / (30 * DAY));
       out.push(it);
     });
-    return out.sort((a, b) => b.score - a.score || b.at - a.at).slice(0, 3);
+    return out.sort((a, b) => b.score - a.score || b.at - a.at).slice(0, 4);
   }
-  function insightsSection(list) {
-    if (!list.length) return '';
-    const card = it => `<a class="home-insight" href="#/doc/${esc(it.doc.id)}" data-act="doc-preview" data-id="${esc(it.doc.id)}">
-      <span class="home-insight__label">${ic(it.icon, 'i-xs')}${esc(it.label)}<span class="res-dot" aria-hidden="true">·</span>${esc(relLow(it.at))}</span>
-      <span class="home-insight__text">${esc(it.text)}</span>
-      <span class="home-insight__src">${fileIcon(it.doc.type, 'sm')}<span class="truncate">${esc(bare(it.doc.name))}${it.source ? ` · ${esc(it.source)}` : ''}</span>${okMark(it.doc)}</span></a>`;
-    return `<section class="home-sec" aria-labelledby="home-know-h"><div class="home-sec__head"><h2 class="home-sec__title" id="home-know-h">Worth knowing</h2><span class="home-sec__note">What changed in documents you can read</span></div><div class="home-grid3">${list.map(card).join('')}</div></section>`;
+  function newsSection(items) {
+    if (!items.length) return '';
+    const row = it => `<a class="home-news" href="#/doc/${esc(it.doc.id)}" data-act="doc-preview" data-id="${esc(it.doc.id)}">
+      <span class="home-news__meta">${ic(it.icon, 'i-xs')}<span>${esc(it.label)}</span><span class="res-dot" aria-hidden="true">·</span><span>${esc(relLow(it.at))}</span></span>
+      <span class="home-news__text">${esc(it.text)}</span>
+      <span class="home-news__src">${fileIcon(it.doc.type, 'sm')}<span class="truncate">${esc(bare(it.doc.name))}${it.source ? ` · ${esc(it.source)}` : ''}</span>${okMark(it.doc)}</span></a>`;
+    return sec('news', 'What’s new', `<div class="home-feed">${items.map(row).join('')}</div>`);
   }
 
   /* ═══════════════ Reading: start here (new) · for you (returning) ═══════════════ */
   /** New people: what admins featured, topped up with the most-opened verified documents. Returning people: related to what they read,
-      from their spaces, on topics they save — never what they've opened or what Worth knowing already shows. Three, each with its reason. */
+      from their spaces, on topics they save — never what they've opened or what What's new already shows. Three, each with its reason. */
   function reading(firstVisit, exclude) {
     const pool = publishedPool().filter(d => d.status === 'ready' && !d.dupOf && !exclude.has(d.id));
     const ok = new Set(pool.map(d => d.id));
@@ -298,34 +244,42 @@
     if (out.length < 3) out.push(...ranked.filter(x => !out.includes(x)).slice(0, 3 - out.length));
     return out;
   }
-  function readingSection(list, firstVisit) {
-    if (!list.length) return '';
-    // Admins curate what Home features — the tool sits on the row only when that row shows featured documents.
-    const manage = isAdmin() && (firstVisit || list.some(x => isFeatured(x.doc.id))) ? iconBtn('sliders', 'Edit featured documents', { size: 'sm', act: 'home-featured' }) : '';
-    const card = ({ doc, reason }) => `<a class="home-read" href="#/doc/${esc(doc.id)}" data-act="doc-preview" data-id="${esc(doc.id)}">
-      <span class="home-read__head">${fileIcon(doc.type, 'sm')}<span class="home-read__title">${esc(bare(doc.name))}</span>${okMark(doc)}</span>
-      ${X.res.blurb(doc) ? `<span class="home-read__about">${esc(X.res.blurb(doc))}</span>` : ''}
-      <span class="home-read__why">${esc(reason)}</span></a>`;
-    return `<section class="home-sec" aria-labelledby="home-read-h"><div class="home-sec__head"><h2 class="home-sec__title" id="home-read-h">${firstVisit ? 'Start here' : 'Recommended for you'}</h2><span class="grow"></span>${manage}</div><div class="home-grid3">${list.map(card).join('')}</div></section>`;
+  function readingSection(rows, firstVisit) {
+    if (!rows.length) return '';
+    // Admins curate what Home features — the tool sits on the section only when it shows featured documents.
+    const manage = isAdmin() && (firstVisit || rows.some(x => isFeatured(x.doc.id))) ? iconBtn('sliders', 'Edit featured documents', { size: 'sm', act: 'home-featured' }) : '';
+    const row = ({ doc, reason }) => `<a class="item item--action home-rec" href="#/doc/${esc(doc.id)}" data-act="doc-preview" data-id="${esc(doc.id)}">
+      <span class="item__lead">${fileIcon(doc.type, 'sm')}</span>
+      <span class="home-rec__body"><span class="home-rec__title"><span class="truncate">${esc(bare(doc.name))}</span>${okMark(doc)}</span>
+      ${X.res.blurb(doc) ? `<span class="home-rec__about">${esc(X.res.blurb(doc))}</span>` : ''}
+      <span class="home-rec__why">${esc(reason)}</span></span></a>`;
+    return sec(firstVisit ? 'start' : 'rec', firstVisit ? 'Start here' : 'Recommended for you', list(rows.map(row), 'home-list'), { action: manage });
   }
 
-  /* ═══════════════ Topic shortcuts into Knowledge ═══════════════ */
+  /* ═══════════════ Explore knowledge: a map of what's here ═══════════════ */
   const HEX = /^#[0-9a-f]{3,8}$/i;
-  /** The same domains and filter links as Knowledge's topic pills; hierarchy and counts stay in Knowledge (one sidebar click away, so no extra link here). */
-  function topicsSection() {
-    const counts = new Map((catalogSearch(parseCatalogQuery({})).facets.topic || []).map(o => [o.value, o.count]));
-    const domains = topicTree().filter(dm => counts.get(dm.id));
-    if (!domains.length) return '';
-    return `<section class="home-sec" aria-labelledby="home-topics-h"><div class="home-sec__head"><h2 class="home-sec__title" id="home-topics-h">Explore by topic</h2></div>
-      <div class="home-topics">${domains.map(dm => `<a class="home-topic" href="#${catalogHref({ filters: { topic: [dm.id] } })}" ${HEX.test(dm.color || '') ? `style="--tone:${dm.color}"` : ''}><span class="home-topic__icon" aria-hidden="true">${ic(dm.icon || 'tag', 'i-sm')}</span>${esc(dm.name)}</a>`).join('')}</div></section>`;
+  /** One card per domain: what it covers (its description), how much there is, and its largest topics. The card opens Knowledge
+      filtered to the domain; a topic opens it filtered to that topic. Browsing, filters and the full hierarchy stay in Knowledge. */
+  function exploreSection() {
+    const list_ = domains();
+    if (!list_.length) return '';
+    const card = dm => `<article class="home-topic"${HEX.test(dm.color || '') ? ` style="--tone:${dm.color}"` : ''}>
+      <span class="home-topic__icon" aria-hidden="true">${ic(dm.icon || 'tag', 'i-sm')}</span>
+      <div class="home-topic__body">
+        <h3 class="home-topic__head"><a class="home-topic__link" href="#${catalogHref({ filters: { topic: [dm.id] } })}">${esc(dm.name)}</a><span class="home-topic__count num">${plural(dm.count, 'document')}</span></h3>
+        ${dm.desc ? `<p class="home-topic__desc">${esc(dm.desc)}</p>` : ''}
+        ${dm.subs.length ? `<p class="home-topic__subs">${dm.subs.slice(0, 3).map(t => `<a class="home-topic__sub" href="#${catalogHref({ filters: { topic: [t.id] } })}">${esc(t.name)}</a>`).join('')}</p>` : ''}
+      </div></article>`;
+    return sec('explore', 'Explore knowledge', `<div class="home-topics">${list_.map(card).join('')}</div>`, { action: linkBtn('All knowledge', { href: '/knowledge', icon: 'arrow-right', size: 'sm' }) });
   }
 
   /* ═══════════════ States ═══════════════ */
   function loadingBody() {
-    const row = `<div class="home-cont home-skel" aria-hidden="true"><span class="skeleton home-skel__icon"></span><span class="home-cont__body"><span class="skeleton skeleton--line" style="width:70%"></span><span class="skeleton skeleton--line" style="width:40%;height:10px"></span></span></div>`;
-    const card = `<div class="home-insight home-skel" aria-hidden="true"><span class="skeleton skeleton--line" style="width:45%;height:10px"></span><span class="skeleton skeleton--line" style="width:95%"></span><span class="skeleton skeleton--line" style="width:70%"></span><span class="skeleton skeleton--line" style="width:55%;height:10px"></span></div>`;
+    const rows = n => `<div class="list home-list home-skel" aria-hidden="true">${`<div class="item"><span class="skeleton home-skel__icon"></span><span class="item__body"><span class="skeleton skeleton--line" style="width:62%"></span><span class="skeleton skeleton--line" style="width:34%;height:10px"></span></span></div>`.repeat(n)}</div>`;
+    const topic = `<div class="home-topic home-skel" aria-hidden="true"><span class="skeleton home-skel__icon"></span><div class="home-topic__body"><span class="skeleton skeleton--line" style="width:45%"></span><span class="skeleton skeleton--line" style="width:90%;height:10px"></span><span class="skeleton skeleton--line" style="width:60%;height:10px"></span></div></div>`;
     const head = w => `<div class="home-sec__head"><span class="skeleton skeleton--title" style="width:${w}px"></span></div>`;
-    return `<div class="home-body" aria-busy="true" aria-label="Loading"><section class="home-sec">${head(200)}<div class="home-conts">${row.repeat(4)}</div></section><section class="home-sec">${head(150)}<div class="home-grid3">${card.repeat(3)}</div></section></div>`;
+    return `<div class="home-body" aria-busy="true" aria-label="Loading"><div class="home-main"><section class="home-sec home-sec--continue">${head(160)}${rows(3)}</section><section class="home-sec home-sec--explore">${head(180)}<div class="home-topics">${topic.repeat(4)}</div></section></div>
+      <aside class="home-aside"><section class="home-sec home-sec--news">${head(110)}${rows(3)}</section></aside></div>`;
   }
   const emptyBody = () => `<section class="home-sec">${emptyState({
     icon: 'book', title: 'Your workspace has no published knowledge yet', boxed: true,
@@ -334,72 +288,39 @@
   })}</section>`;
 
   P.home = () => {
-    const f = hui();
-    f.open = false;
-    const live = S.pageState === 'live' && !S.navLoading;
+    const st = S.navLoading ? 'loading' : S.pageState, pool = st === 'live' ? publishedPool() : [];
+    const empty = st === 'empty' || (st === 'live' && !pool.length);
     const firstVisit = !recentResources(1).length && !myConvs().length;
     const body = gate({
       loading: loadingBody,
       empty: emptyBody,
       error: () => `<section class="home-sec">${errorState()}</section>`,
       ok: () => {
-        if (!publishedPool().length) return emptyBody();
-        const wait = waitingItems(), reads = readingItems(wait.length ? 3 : 4), know = insights();
-        const shown = new Set([...know.map(x => x.doc.id)]);
-        return `<div class="home-body">${contSection('home-wait-h', 'Waiting for you', wait)}${contSection('home-cont-h', 'Continue reading', reads)}${insightsSection(know)}${readingSection(reading(firstVisit, shown), firstVisit)}${topicsSection()}</div>`;
+        if (!pool.length) return emptyBody();
+        const news = insights(), shown = new Set(news.map(x => x.doc.id)), reads = readingSection(reading(firstVisit, shown), firstVisit);
+        // Main: carry on, then discover. Aside: what is timely. Phones and tablets interleave them (CSS order) so what needs you comes first.
+        const main = `${continueSection()}${firstVisit ? reads : ''}${exploreSection()}${firstVisit ? '' : reads}`;
+        const aside = `${attentionSection()}${newsSection(news)}`;
+        return `<div class="${cx('home-body', !aside && 'home-body--single')}"><div class="home-main">${main}</div>${aside ? `<aside class="home-aside" aria-label="For you now">${aside}</aside>` : ''}</div>`;
       },
     });
-    return `<div class="page home">${hero(f, live && firstVisit)}${body}</div>`;
+    return `<div class="page home">
+      <header class="home-head"><h1 class="home-title">${esc(greeting())}, ${esc(callName(me().name))}</h1>${lede(pool)}</header>
+      ${empty ? '' : starts(pool)}
+      ${body}</div>`;
   };
 
   /* ═══════════════ Actions ═══════════════ */
-  const typed = () => String(hui().q ?? $('#home-q')?.value ?? '').trim();
-  function ask(q) {
-    if (!q) { $('#home-q')?.focus(); return; }
-    Object.assign(hui(), { q: '', open: false });
-    if (A['chat-ask']) A['chat-ask']({ dataset: { q, ...scopeOf() } }); else go('/chat');
-  }
-  function find(q) {
-    Object.assign(hui(), { q: '', open: false });
-    go(catalogHref({ q, filters: scopeFilters() }));
-  }
-  function pick(o) {
-    if (!o) return;
-    if (o.kind === 'ask') ask(o.q);
-    else if (o.kind === 'find') find(o.q);
-    else if (o.kind === 'doc') { Object.assign(hui(), { q: '', open: false }); X.preview.open({ id: o.id, q: o.q || '' }); }
-    else if (o.kind === 'conv') { hui().open = false; go('/chat/' + o.id); }
-  }
-  /** Enter runs the highlighted option: Ask for question-like text, Find otherwise — the box always shows which. */
-  A['home-go'] = () => { const f = hui(), q = typed(); if (!q && !f.open) return; pick(options(q)[f.open ? f.active : 0]); };
-  A['home-pick'] = el => pick(options(typed())[+el.dataset.i]);
-  A['home-type'] = () => { const f = hui(); f.open = true; f.active = 0; syncPanel(); };
-  A['home-suggest'] = el => ask(el.dataset.q || '');
+  /** Find a document: Knowledge → Browse with its search field ready to type in (once the page has finished loading). */
+  A['home-find'] = () => {
+    go('/knowledge');
+    const until = Date.now() + 2000, focus = () => { const el = !S.navLoading && S.cur?.r.page === 'catalog' && $('#cat-q'); if (el) el.focus(); else if (Date.now() < until) setTimeout(focus, 50); };
+    setTimeout(focus, 0);
+  };
   A['home-request'] = el => {
     const type = el?.dataset?.type;
     if (A['rq-new']) A['rq-new']({ dataset: { type } }); else go('/requests/new' + (type ? '?type=' + type : ''));
   };
-  /* Open the suggestions when someone clicks into the box or presses ↓ (not on autofocus, so the page isn't covered on arrival);
-     ↑/↓ move, Escape closes, leaving the box closes. Options keep focus in the input (mousedown is cancelled). */
-  const onHome = () => S.cur?.r.page === 'home';
-  document.addEventListener('mousedown', e => {
-    if (!onHome()) return;
-    if (e.target.closest?.('#home-sug [data-act]')) { e.preventDefault(); return; }
-    if (e.target.id === 'home-q') { const f = hui(); if (!f.open) { f.open = true; f.active = 0; requestAnimationFrame(syncPanel); } }
-  });
-  document.addEventListener('keydown', e => {
-    if (!onHome() || e.target.id !== 'home-q') return;
-    const f = hui(), n = options(f.q || '').length;
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      e.preventDefault();
-      if (!f.open) { f.open = true; f.active = 0; } else if (n) f.active = (f.active + (e.key === 'ArrowDown' ? 1 : -1) + n) % n;
-      syncPanel(); $('#home-opt-' + f.active)?.scrollIntoView({ block: 'nearest' });
-    } else if (e.key === 'Escape' && f.open) { e.preventDefault(); e.stopPropagation(); f.open = false; syncPanel(); }
-  }, true);
-  document.addEventListener('focusout', e => {
-    if (!onHome() || e.target.id !== 'home-q') return;
-    setTimeout(() => { if (document.activeElement?.id !== 'home-q') { hui().open = false; syncPanel(); } }, 0);
-  });
   /* ═══════════════ Featured on Home (admins) ═══════════════
      A small drawer: featured rows open the document, a trailing × takes one off (with Undo), and "Add documents" switches the
      drawer to a searchable picker of published shared documents. Also reachable from ⌘K ("Edit featured documents"). */

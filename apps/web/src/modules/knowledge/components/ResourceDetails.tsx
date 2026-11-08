@@ -64,7 +64,7 @@ export function ResourceDetails({ resource: r }: ResourceDetailsProps) {
           "Type",
           <span key="t" className="row gap-6">
             <KindIcon className="i i-sm muted" aria-hidden />
-            {r.kindMeta.label}
+            {r.typeLabel}
           </span>,
         ],
         [
@@ -105,7 +105,7 @@ export function ResourceDetails({ resource: r }: ResourceDetailsProps) {
             r.isPersonal ? (
               "My files"
             ) : (
-              <NextLink className="link" href={`/knowledge/${r.base.id}`} translate="no">
+              <NextLink className="link" href={`/bases/${r.base.id}`} translate="no">
                 {r.base.displayName || "Knowledge base"}
               </NextLink>
             )

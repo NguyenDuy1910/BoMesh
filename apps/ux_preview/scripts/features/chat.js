@@ -882,9 +882,9 @@ A['esc-page'] = () => {
 DATA_KEYS.push('tourSeen');
 const touch = () => matchMedia('(hover: none)').matches;
 const TOUR = [
-  { sel: '.home-box', title: 'Ask or find, in one box', body: () => 'Ask a question to get an answer that cites its sources, or type a few words to find a document.' },
-  { sel: '.home-box__scope, .home-scope-chip', title: 'Choose where to look', body: () => `Look in all of ${curWs().name}, one knowledge base or one of your spaces.` },
-  { sel: '.home-body > .home-sec', title: 'Pick up where you left off', body: () => 'What’s waiting for you, what changed in documents you can read, and what to read next.' },
+  { sel: '.home-starts', title: 'Start from what you need', body: () => `Find a document, ask a question answered from ${curWs().name} documents with citations, or share what you know.` },
+  { sel: '.home-sec--attention, .home-sec--continue', title: 'Pick up where you left off', body: () => ($('.home-sec--continue') ? 'What needs you and the documents you were reading. Ask about a document right from its row.' : 'What needs you shows up here, with the documents you were reading once you start.') },
+  { sel: '.home-sec--explore', title: 'Explore what’s here', body: () => 'Each topic shows what it covers and how much there is. Open one to browse it in Knowledge.' },
   { sel: '#side-new-chat', title: 'Start a conversation', body: () => 'Open a new chat to attach files or choose exactly what to search. Conversations and projects stay in the sidebar.' },
   { sel: '#topbar-search', title: 'Find anything', body: () => touch() ? 'Search conversations, documents and pages.' : 'Search conversations, documents and pages, or press ⌘K.' },
 ];
@@ -944,15 +944,15 @@ X.startTour = () => {
 function tourAuto() {
   if (tourAt != null || !S.signedIn || S.cur?.r.page !== 'home' || S.pageState !== 'live' || S.modal || S.drawer || S.palette || S.menu) return;
   if (tourSeen()[tourKey()]) return;
-  if (S.navLoading || !$('.home-box')) { setTimeout(tourAuto, 300); return; }
+  if (S.navLoading || !$('.home-starts')) { setTimeout(tourAuto, 300); return; }
   tourBegin();
 }
-/* Home re-renders (typing, scope, workspace switch) keep the tour on its target. */
+/* Home re-renders (workspace switch, page state) keep the tour on its target. */
 new MutationObserver(() => { if (tourAt != null) requestAnimationFrame(() => tourPaint(false)); }).observe(document.getElementById('app'), { childList: true });
-const tourDone = () => { tourClose(); if (!touch()) $('#home-q')?.focus(); };
+const tourDone = () => tourClose();
 A['chat-tour-step'] = el => {
   const n = tourAt + +el.dataset.d;
-  if (n >= tourSteps().length) { tourDone(); toast('You’re all set. Ask your first question in the box.'); return; }
+  if (n >= tourSteps().length) { tourDone(); toast('You’re all set. Start with a topic or ask a question.'); return; }
   tourAt = Math.max(0, n); tourPaint(true);
 };
 A['chat-tour-skip'] = tourDone;

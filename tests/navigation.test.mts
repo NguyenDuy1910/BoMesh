@@ -5,7 +5,7 @@ import test from "node:test";
 import "../apps/web/tests/support/register-aliases.mjs";
 import type { NavAccess } from "../apps/web/src/lib/navigation.ts";
 
-const { MANAGE_NAV, MEMBER_NAV, PLATFORM_NAV, ROUTES, isNavItemActive, manageNav, matchRoute, memberNav, routeGate } = await import(
+const { BASES_NAV, MANAGE_NAV, MEMBER_NAV, PLATFORM_NAV, ROUTES, isNavItemActive, manageNav, matchRoute, memberNav, routeGate } = await import(
   "../apps/web/src/lib/navigation.ts"
 );
 
@@ -51,7 +51,7 @@ test("routes carry the preview's titles, modes and nav items", () => {
   assert.deepEqual(matchRoute("/home"), { title: "Home", mode: "workspace", nav: "home" });
   assert.equal(matchRoute("/knowledge/library").nav, "knowledge");
   assert.equal(matchRoute("/knowledge/collections/abc").title, "Collection");
-  assert.equal(matchRoute("/knowledge/abc").title, "Knowledge base");
+  assert.equal(matchRoute("/bases/abc").title, "Knowledge base");
   assert.equal(matchRoute("/work/new").title, "New work");
   assert.equal(matchRoute("/work/w1").bare, true);
   assert.equal(matchRoute("/chat/c1").bare, true);
@@ -69,10 +69,11 @@ test("unknown addresses are Not found, in the console for /p/…", () => {
 });
 
 test("exactly one sidebar item is current per screen", () => {
-  const all = [...MEMBER_NAV, ...MANAGE_NAV, ...PLATFORM_NAV];
+  const all = [...MEMBER_NAV, ...MANAGE_NAV, ...PLATFORM_NAV, BASES_NAV];
   for (const [path, id] of [
     ["/home", "home"],
-    ["/knowledge/bases", "knowledge"],
+    ["/bases", "bases"],
+    ["/bases/abc", "bases"],
     ["/doc/x", "knowledge"],
     ["/requests/new", "requests"],
     ["/people", "people"],
@@ -97,7 +98,7 @@ test("permission is checked before the module, and gated routes render a state i
 });
 
 test("every sidebar destination has a route with the same gate", () => {
-  for (const item of [...MEMBER_NAV, ...MANAGE_NAV, ...PLATFORM_NAV]) {
+  for (const item of [...MEMBER_NAV, ...MANAGE_NAV, ...PLATFORM_NAV, BASES_NAV]) {
     const route = matchRoute(item.href);
     assert.notEqual(route.title, "Not found", item.href);
     assert.equal(route.nav, item.id, item.href);

@@ -7,7 +7,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useLanguage } from "@/lib/i18n";
 import { matchRoute, routeGate, type RouteInfo, type ShellMode } from "@/lib/navigation";
 import { useWorkspace } from "@/lib/workspace";
-import { ContributeHost, KnowledgeDialogsHost } from "@/modules/knowledge/components/hosts";
+import { ContributeHost, DocumentPreviewHost, KnowledgeDialogsHost } from "@/modules/knowledge/components/hosts";
 
 import { AppearanceDrawer } from "./AppearanceDrawer";
 import { CommandPalette } from "./CommandPalette";
@@ -119,6 +119,7 @@ export function AppShell({ mode, children }: { mode: Exclude<ShellMode, "auth">;
           <ProductTour onStart={closeNav} />
           <ContributeHost />
           <KnowledgeDialogsHost />
+          <DocumentPreviewHost />
         </>
       )}
     </PageChromeProvider>

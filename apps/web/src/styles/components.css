@@ -79,8 +79,8 @@
 .card--transparent { background: transparent; }
 .card__title { font-weight: 600; }
 .card__description { font-size: 13px; line-height: 18px; }
-.card--action { cursor: pointer; text-align: left; color: inherit; transition: background-color var(--dur-fast), transform var(--dur) var(--ease-out); }
-@media (hover: hover) { .card--action:hover { background: var(--surface-hover); } }
+.card--action { cursor: pointer; text-align: left; color: inherit; transition: background-color var(--dur-fast), box-shadow var(--dur-fast), transform var(--dur) var(--ease-out); }
+@media (hover: hover) { .card--action:hover { background: var(--surface-hover); box-shadow: var(--lift-shadow), inset 0 0 0 1px color-mix(in oklab, var(--foreground) 11%, transparent); transform: translateY(-1px); } }
 .card--action:active { transform: scale(0.995); }
 .card--lg { padding: 24px; gap: 16px; }
 /* Preview card header (`icon · .grow(title, description) · actions`) is a row; HeroUI's
@@ -336,6 +336,14 @@
 .item__meta { font-size: 12px; color: var(--muted); flex: none; white-space: nowrap; }
 .item__trail { flex: none; display: flex; align-items: center; gap: 8px; position: relative; z-index: 1; }
 .item--unread .item__title::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; }
+/* Reveal row actions on hover/focus only (preview `.reveal-on-hover`); always visible on touch, and a
+   control that is toggled on stays visible so its state is never hidden. */
+.reveal-on-hover { display: inline-flex; align-items: center; gap: 4px; }
+@media (hover: hover) {
+  .reveal-on-hover > :where(:not(.is-on, [aria-pressed="true"], [aria-expanded="true"])) { opacity: 0; transition: opacity var(--dur-fast); }
+  :is(.item, .res-row, .table__row, .card:not(:has(.item, .res-row, .table__row)), [data-reveal-root]):is(:hover, :focus-within) .reveal-on-hover > *,
+  .reveal-on-hover > :focus-visible { opacity: 1; }
+}
 .item-icon { width: 36px; height: 36px; border-radius: var(--radius-xl); display: grid; place-items: center; background: var(--default); color: var(--default-foreground); flex: none; }
 .item-icon--sm { width: 28px; height: 28px; border-radius: var(--radius-lg); }
 .item-icon--accent { background: var(--accent-soft); color: var(--accent-soft-foreground); }

@@ -30,6 +30,29 @@ export function useLastViews() {
   return { ...recent, views };
 }
 
+/**
+ * How many readable documents changed in the last 30 days (preview `lede()`'s `fresh`), as the
+ * second half of Home's lede. The Home read model carries no such count, so it is one `pageSize: 1`
+ * search read for its `totalSize` — the same way Browse counts its Updated windows.
+ */
+export function useFreshCount({ enabled = true }: { enabled?: boolean } = {}) {
+  const { id } = useWorkspace();
+  // Rounded to the hour so the query key is stable and the request actually settles.
+  const since = useMemo(() => new Date(Math.floor((Date.now() - 30 * DAY) / 3_600_000) * 3_600_000).toISOString(), []);
+  const query = useQuery({
+    queryKey: [...homeKeys.home(id), "fresh", since],
+    enabled,
+    staleTime: 5 * 60_000,
+    retry: false,
+    queryFn: () =>
+      searchItems(id, {
+        filter: `itemType = DOCUMENT AND document.publicationState = PUBLISHED AND updateTime >= "${since}"`,
+        pageSize: 1,
+      }),
+  });
+  return query.data?.totalSize ?? 0;
+}
+
 export interface Insight {
   resource: Resource;
   at: string;

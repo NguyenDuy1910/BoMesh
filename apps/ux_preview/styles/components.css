@@ -634,7 +634,7 @@ a.item:focus-visible, .item--action:has(> .item__body .item__action:focus-visibl
 mark.evidence { background: var(--evidence); color: inherit; border-radius: 3px; padding: 1px 0; box-shadow: 0 0 0 2px var(--evidence); }
 mark.evidence.is-focus { background: var(--evidence-strong); box-shadow: 0 0 0 2px var(--evidence-strong); }
 
-/* Search hit highlight (one rule everywhere: Home box, ⌘K, /search, Knowledge) — neutral, never the evidence amber. */
+/* Search hit highlight (one rule everywhere: ⌘K, /search, Knowledge) — neutral, never the evidence amber. */
 mark.srch-hl { background: var(--highlight); color: var(--highlight-foreground); border-radius: 3px; padding: 0 1px; font-weight: inherit; }
 
 /* /search overview (features/search.js) */
@@ -646,7 +646,7 @@ mark.srch-hl { background: var(--highlight); color: var(--highlight-foreground);
 
 /* Touch screens: every target at least --touch-min tall, and no hover-only affordances. */
 @media (pointer: coarse) {
-  .button, .filter-button, .menu-item, .tabs__tab, .toggle-group button, .nav-item, .palette__item, .home-scope-chip { min-height: var(--touch-min); }
+  .button, .filter-button, .menu-item, .tabs__tab, .toggle-group button, .nav-item, .palette__item { min-height: var(--touch-min); }
   .button--icon-only { min-width: var(--touch-min); }
   .button.button--link { min-height: 32px; }
 }

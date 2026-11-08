@@ -360,6 +360,14 @@ exactly one facet:
   `verification`, `origin`, `qualityIssues[]` (editors), `thumbnailUri`,
   `uploadUri` (`PENDING`, creator).
 
+`thumbnailUri` rides on every Item, so a list renders a document's cover
+without a content read: N documents cost one list call, not N+1.
+
+There is deliberately **no page count on the Item**. It is not an insight
+anyone acts on, it exists only as a by-product of rasterizing a PDF, and
+computing it for other formats would cost a read per document. A viewer that
+has the content open numbers its own pages; nothing else needs the total.
+
 Deletion, content, publication and indexing are four independent fields;
 review state lives on the Contribution. A document is visible when it and its
 ancestors are `ACTIVE`, the caller holds `items.get` on its governing

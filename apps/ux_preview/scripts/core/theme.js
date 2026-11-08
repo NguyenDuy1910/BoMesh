@@ -66,7 +66,7 @@ const THEMES = [
   { id: 'lime', label: 'Lime', note: 'Fresh lime', accent: 'lime', base: 'subtle', radius: 'sm', font: 'inter' },
   { id: 'graphite', label: 'Graphite', note: 'Monochrome', accent: 'graphite', base: 'none', radius: 'sm', font: 'inter' },
 ];
-const DEFAULT_LOOK = { theme: 'bomesh', accent: 'sage', hue: 200, base: 'subtle', radius: 'md', font: 'google' };
+const DEFAULT_LOOK = { theme: 'midnight', accent: 'indigo', hue: 200, base: 'subtle', radius: 'md', font: 'plex' };
 S.look = { ...DEFAULT_LOOK };
 
 const themeOpt = (list, id) => list.find(x => x[0] === id);

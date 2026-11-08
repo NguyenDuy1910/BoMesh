@@ -89,12 +89,12 @@ How suggestions are made (prototype rules, deterministic):
 
 ### Contributor
 1. **Share.** Knowledge → *Contribute* (or ⌘K, or a base page) → *Contribute to a knowledge base* is preselected (or *Upload to My files* to keep it private) → drop a file → the knowledge base is "Let the assistant suggest" or a chosen base → title and description → Submit. Toast: *Submitted for review · Track*.
-2. **Track.** My library → *Contributions*: every submission with its lifecycle label and its latest event in words ("Lê Thu Hà asked for changes · 2 days ago"). Filters: Needs your action · In review · Published · Declined. Home's *Waiting for you* shows a contribution with changes requested.
+2. **Track.** My library → *Contributions*: every submission with its lifecycle label and its latest event in words ("Lê Thu Hà asked for changes · 2 days ago"). Filters: Needs your action · In review · Published · Declined. Home's *Needs your attention* shows a contribution with changes requested.
 3. **Revise.** Inbox → *Changes requested* → the contribution drawer shows the reviewer's message in its alert → attach a revised file and say what changed → *Resubmit*. It goes back to the reviewer, re-analysed. A declined contribution shows the reason the same way.
 4. **See it published.** Inbox → *Published* → open it in the Reader. Later, for uploads, ⋯ → *Submit a new version…* sends an update to review while the current version stays published.
 
 ### Reviewer (base owner)
-1. **Notice.** The sidebar badge on Manage → Documents (it counts exactly the review queue), an Inbox item and *Waiting for you* on Home say how many documents wait.
+1. **Notice.** The sidebar badge on Manage → Documents (it counts exactly the review queue), an Inbox item and *Needs your attention* on Home say how many documents wait.
 2. **Review.** The Review tab is a queue and a detail panel:
    - Preview of the first page.
    - The contributor's note.

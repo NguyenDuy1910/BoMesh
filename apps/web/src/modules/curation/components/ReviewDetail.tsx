@@ -63,7 +63,7 @@ export function ReviewDetail(p: ReviewDetailProps) {
     v.base ? (
       <span key="to">
         to{" "}
-        <NextLink className="link" href={`/knowledge/${resourceId(v.base)}`} translate="no">
+        <NextLink className="link" href={`/bases/${resourceId(v.base)}`} translate="no">
           {v.baseName}
         </NextLink>
       </span>

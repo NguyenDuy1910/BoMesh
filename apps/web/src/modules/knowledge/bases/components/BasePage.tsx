@@ -34,7 +34,7 @@ import { connectHref, SourcesTab } from "./SourcesTab";
 
 type TabId = "documents" | "sources" | "access" | "settings";
 
-const crumbsFor = (label: string): Crumb[] => [{ label: "Knowledge", href: "/knowledge" }, { label: "Knowledge bases", href: "/knowledge/bases" }, { label }];
+const crumbsFor = (label: string): Crumb[] => [{ label: "Knowledge bases", href: "/bases" }, { label }];
 
 /** `/knowledge/[id]` (preview `P.kbDetail`). */
 export function BasePage({ id }: { id: string }) {
@@ -79,7 +79,7 @@ function Unavailable() {
         title="This knowledge base isn’t available"
         description="It may have been archived, or it isn’t shared with you."
         actions={
-          <Button variant="primary" onPress={() => router.push("/knowledge/bases")}>
+          <Button variant="primary" onPress={() => router.push("/bases")}>
             Go to Knowledge bases
           </Button>
         }
@@ -129,7 +129,7 @@ function BaseDetail({ base }: { base: Item }) {
   const space = useBaseSpace(base);
   const ops = useBaseOperations();
   const baseId = resourceId(base.name);
-  const href = `/knowledge/${baseId}`;
+  const href = `/bases/${baseId}`;
   const title = personal ? "My files" : (base.displayName ?? "");
   const docCount = base.collection?.documentCount ?? 0;
   // Preview `hasDocs`: published resources the caller can see (same query as the Resources list).

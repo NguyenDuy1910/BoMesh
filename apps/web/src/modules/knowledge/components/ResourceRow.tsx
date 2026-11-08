@@ -115,7 +115,7 @@ export function ResourceRow({ resource: r, q = "", snippet, onOpen, active, note
         </span>
         <span className="res-row__meta">
           <SourceIcon source={r.source.isUpload ? undefined : r.source.key} />
-          {r.kindMeta.label}
+          {r.typeLabel}
           {r.base?.displayName ? (
             <>
               <ResDot />

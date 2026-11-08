@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "@heroui/react";
-import { CheckCheck, CheckCircle2, Settings, X } from "lucide-react";
+import { CheckCheck, CheckCircle2, ChevronRight, Settings, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -129,6 +129,8 @@ function InboxRow({ notification: n, view }: { notification: Notification; view:
 
   const a = view.action;
   const pending = m.decide.isPending;
+  // Preview `inlineAction`: only in-place decisions get buttons (Approve/Deny, Reconnect); every
+  // other row opens by clicking it and shows a quiet chevron instead of a redundant Open button.
   const inline =
     a.kind === "decide" ? (
       <>
@@ -143,15 +145,7 @@ function InboxRow({ notification: n, view }: { notification: Notification; view:
       <Button size="sm" variant="secondary" onPress={() => open(a.href)}>
         Reconnect
       </Button>
-    ) : a.kind === "cta" ? (
-      <Button size="sm" variant="secondary" onPress={() => open(a.href)}>
-        {a.label}
-      </Button>
-    ) : (
-      <Button size="sm" variant="tertiary" className="hide-sm" onPress={() => open(a.href)}>
-        Open
-      </Button>
-    );
+    ) : null;
 
   return (
     <ListItem
@@ -172,7 +166,10 @@ function InboxRow({ notification: n, view }: { notification: Notification; view:
       actions={
         <>
           {inline}
-          <IconButton icon={X} tip="Dismiss" size="sm" onPress={dismiss} />
+          <span className="reveal-on-hover">
+            <IconButton icon={X} tip="Dismiss" size="sm" onPress={dismiss} />
+          </span>
+          {inline ? null : <ChevronRight className="i i-sm inbox-go" aria-hidden />}
         </>
       }
     />

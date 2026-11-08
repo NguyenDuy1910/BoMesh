@@ -25,6 +25,8 @@
 .inbox-time { display: block; font-size: 12px; line-height: 16px; color: var(--muted); margin-top: 2px; }
 .inbox-item:not(.item--unread) .item__title { font-weight: 400; }
 .inbox-foot { display: flex; justify-content: center; margin-top: 16px; }
+/* Quiet chevron on rows that open their object (no in-place decision to make). */
+.inbox-go { color: var(--muted); flex: none; }
 
 /* ───── Assistant ───── */
 .asst-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); gap: 24px; align-items: start; }

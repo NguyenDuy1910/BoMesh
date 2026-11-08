@@ -160,17 +160,35 @@ and `platformRole`, never an authorization layer; every request is still
 authorized by the API. Addresses the caller may not open render a no-access
 page.
 
-## Local full-access test accounts
+## Seeded role accounts
 
-`backend/script/seed_account.py` is an idempotent local-development utility,
-not an API. It creates the sample administrator accounts `admin1@gamil.com`,
-`admin2@gamil.com` and `admin3@gamil.com` (usernames `sample-admin-1..3`) when
-absent, gives each platform administration, and makes each a workspace admin
-member of every active workspace. This combines platform administration with
-workspace data access without weakening the separation of those scopes.
+`backend/script/seed_account.py` is an idempotent seeding utility, not an API.
+It seeds the HCMUTE workspace (code `hcmute`, CAMPUS template, *Trường Đại học
+Sư phạm Kỹ thuật TP. Hồ Chí Minh*) with one account per predefined role, all
+with password `19102003` (`--password` overrides). Staff sign in as
+`{handle}@hcmute.edu.vn`, students as `{studentId}@student.hcmute.edu.vn`; the
+username is the part before `@`.
 
-New accounts use `DEFAULT_PASSWORD` unless `--password` is supplied; re-runs
-preserve passwords unless `--reset-password` is given. If no active workspace
-exists, it creates one with code `DEFAULT_WORKSPACE_CODE`. `make reset-all`
-runs this seeder after database initialization.
+| Username | Person | Grants |
+| --- | --- | --- |
+| `admin` | Quản trị hệ thống (Trung tâm Thông tin – Máy tính) | `platformAdmin` + `workspaceAdmin` |
+| `longnh` | Nguyễn Hoàng Long, platform engineer | `platformAdmin`, no membership |
+| `quantm` | Trần Minh Quân, operations engineer | `platformOperator`, no membership |
+| `hapt` | Phạm Thu Hà, Library knowledge administrator | `workspaceAdmin` |
+| `22110345` | Võ Minh Khang, IT student | `workspaceMember` |
+| `maint` | Nguyễn Thị Mai, Library digital collections | `workspaceMember` + `collectionOwner` on *Kho bài giảng nội bộ* |
+| `baohq` | Huỳnh Quốc Bảo, IT lecturer | `workspaceMember` + `collectionEditor` on *Kho bài giảng nội bộ* |
+| `anhln` | Lâm Ngọc Anh, Economics lecturer | `workspaceMember` + `collectionViewer` on *Kho bài giảng nội bộ* |
+| `sonpt` | Phan Thanh Sơn, Dean of IT | `workspaceMember` + `spaceLead` on *Khoa Công nghệ Thông tin* (`khoa-cntt`) |
+| `lannt` | Ngô Thị Lan, IT faculty office | `workspaceMember` + `spaceStaff` on `khoa-cntt` |
+| `22110289` | Đặng Gia Huy, IT student | `workspaceMember` + `spaceMember` on `khoa-cntt` |
+| `18110123` | Bùi Anh Tuấn, alumnus | active account, no membership |
+| `21110567` | Trịnh Văn Phúc, student | `workspaceMember`, account `SUSPENDED` |
+
+*Kho bài giảng nội bộ* is a restricted root collection (no `workspaceMembers`
+grant), so a plain member cannot read it. `make db-seed` creates the workspace
+and `admin`; `make reset-all` runs this seeder after database initialization.
+Every run restores the matrix: names and passwords are reset, members get their
+PERSONAL collection, and each account's direct bindings on the workspace, the
+collection and the space become exactly the listed roles.
 

@@ -3,6 +3,8 @@
    HeroUI tokens only. */
 
 /* ───── Sidebar: folders and conversations ───── */
+/* New chat sits directly above Projects, so it keeps the group's own bottom gap. */
+.side-new { padding-bottom: 0; }
 .sidebar__group-label .side-add { width: 24px; height: 24px; min-width: 24px; margin: -4px -4px -4px 0; }
 .side-conv { position: relative; display: flex; align-items: center; min-width: 0; }
 .side-conv > .nav-item { flex: 1 1 auto; min-width: 0; }

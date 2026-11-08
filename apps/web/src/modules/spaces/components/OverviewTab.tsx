@@ -97,7 +97,7 @@ export function OverviewTab({ view, actions }: { view: SpaceView; actions: Overv
                   title={b.displayName}
                   contentTitle
                   description={ok ? plural(b.collection?.documentCount ?? 0, "document") : "Locked"}
-                  href={`/knowledge/${resourceId(b.name)}`}
+                  href={`/bases/${resourceId(b.name)}`}
                 />
               );
             })}

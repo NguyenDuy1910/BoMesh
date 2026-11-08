@@ -16,7 +16,7 @@
   --snow: oklch(99.11% 0 0);
   --eclipse: oklch(21.03% 0.0059 285.89);
 
-  --font-sans: "Google Sans Flex", "Google Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
 
   /* Radius (HeroUI scale; --radius = Medium) */
@@ -61,13 +61,13 @@
    --base-hue, which follows the accent hue. Status and evidence colors are
    fixed: they carry meaning, not brand. */
 :root {
-  --accent-l: 62.04%;
-  --accent-c: 0.195;
-  --accent-h: 139.21;
+  --accent-l: 54%;
+  --accent-c: 0.2;
+  --accent-h: 275;
   --accent-fg: var(--snow);
   --accent-ink: 70%;
-  --base-hue: 139.21;
-  --tint: 1;
+  --base-hue: 275;
+  --tint: 0.5;
 }
 
 :root,
@@ -105,6 +105,8 @@
   --backdrop: rgba(0, 0, 0, 0.4);
 
   --surface-shadow: 0 2px 4px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.06), 0 0 1px 0 rgba(0, 0, 0, 0.06);
+  /* Lift: the raised state of an interactive card on hover (preview `--lift-shadow`). */
+  --lift-shadow: 0 2px 4px -1px rgba(16, 24, 20, 0.05), 0 8px 20px -6px rgba(16, 24, 20, 0.10);
   --overlay-shadow: 0 2px 8px 0 rgba(0, 0, 0, 0.06), 0 -6px 12px 0 rgba(0, 0, 0, 0.03), 0 14px 28px 0 rgba(0, 0, 0, 0.08);
   --field-shadow: 0 2px 4px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.06), 0 0 1px 0 rgba(0, 0, 0, 0.06);
   --card-border: transparent;
@@ -157,6 +159,7 @@
   --backdrop: rgba(0, 0, 0, 0.6);
 
   --surface-shadow: 0 0 0 0 transparent;
+  --lift-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.5);
   --overlay-shadow: 0 0 1px 0 rgba(255, 255, 255, 0.3) inset, 0 16px 40px -12px rgba(0, 0, 0, 0.6);
   --field-shadow: 0 0 0 0 transparent;
   --card-border: var(--border);
@@ -191,4 +194,7 @@
   /* Evidence highlight: a fixed, non-themeable marker for cited passages. */
   --evidence: color-mix(in oklab, var(--warning) 28%, transparent);
   --evidence-strong: color-mix(in oklab, var(--warning) 48%, transparent);
+  /* Search highlight: matched words in search results and suggestions — neutral accent tint, never the evidence amber. */
+  --highlight: color-mix(in oklab, var(--accent) 18%, transparent);
+  --highlight-foreground: var(--foreground);
 }

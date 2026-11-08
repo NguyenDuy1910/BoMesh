@@ -93,7 +93,7 @@ export function viewOf(n: Notification, subjects: Subjects): InboxView {
       const pending = r && OPEN_REQUEST[r.state ?? ""];
       // Base access: admins decide in People › Requests, owners on the base's Access tab. Space membership: the request page.
       const base = r?.kind === "COLLECTION_ACCESS" ? r.collection : undefined;
-      const decideHref = base ? (subjects.admin ? "/people?tab=requests" : `/knowledge/${resourceId(base)}?tab=access`) : href;
+      const decideHref = base ? (subjects.admin ? "/people?tab=requests" : `/bases/${resourceId(base)}?tab=access`) : href;
       return { icon: UserPlus, tone: "warning", href: decideHref, action: pending ? { kind: "decide", request: r } : { kind: "open", href: decideHref } };
     }
     case "contribution_submitted":

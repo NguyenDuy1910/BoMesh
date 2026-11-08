@@ -217,7 +217,7 @@ function useWorkspaceGroups(ws: WorkspaceContextValue, q: string, enabled: boole
           icon: k.collection?.kind === "PERSONAL" ? User : BookOpen,
           meta: plural(k.collection?.documentCount ?? 0, "document"),
           content: k.collection?.kind !== "PERSONAL",
-          run: () => go(`/knowledge/${resourceId(k.name)}`),
+          run: () => go(`/bases/${resourceId(k.name)}`),
         })),
     );
     if (query && ws.can("members.create"))
@@ -273,7 +273,7 @@ function useWorkspaceGroups(ws: WorkspaceContextValue, q: string, enabled: boole
     const vi = language === "vi";
     const actions: (PaletteItem | false)[] = [
       { id: "new-chat", label: "New chat", icon: MessageSquarePlus, run: () => go("/chat") },
-      ws.can("items.create") && { id: "kb-create", label: "Create knowledge base", icon: BookOpen, run: () => go("/knowledge/bases?create=1") },
+      ws.can("items.create") && { id: "kb-create", label: "Create knowledge base", icon: BookOpen, run: () => go("/bases?create=1") },
       { id: "col-new", label: "New collection", icon: ListPlus, run: () => openReadingListEditor() },
       { id: "contribute", label: "Contribute a document", icon: Upload, run: () => openContribute() },
       ws.can("sources.create") && { id: "src-connect", label: "Connect a source", icon: Plug, run: () => go("/sources?connect=1") },

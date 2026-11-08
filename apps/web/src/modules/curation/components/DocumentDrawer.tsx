@@ -174,7 +174,7 @@ function PendingDetails({ row, contributorName, typeLabel }: { row: DocRow; cont
         [
           "Knowledge base",
           row.base ? (
-            <NextLink className="link" href={`/knowledge/${resourceId(row.base)}`} translate="no">
+            <NextLink className="link" href={`/bases/${resourceId(row.base)}`} translate="no">
               {row.baseName}
             </NextLink>
           ) : (

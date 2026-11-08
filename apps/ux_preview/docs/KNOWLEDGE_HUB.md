@@ -38,8 +38,8 @@ The resource type ("Policy", "Procedure", "Spec"…) maps to `items.document_typ
 ## Information architecture
 
 ```text
-Home (/home, core) ─── one box to search documents or ask AI (scope, suggestions) · Waiting for you · Continue reading
-                       · Worth knowing (source-backed changes) · Start here / Recommended for you · Explore by topic  (see HOME.md)
+Home (/home, core) ─── Discover & Start: intent cards (Find a document → Browse · Ask a question → New chat · Contribute) · Needs your attention
+                       · Continue reading · What's new (source-backed changes) · Explore knowledge (domain cards) · Start here / Recommended for you  (see HOME.md)
 Knowledge (one sidebar item) ─ section tabs, one per intent:
 ├── Browse (/knowledge) ─ the organization's knowledge: one search field (Ask AI appears beside it once there is a query)
 │                      · topic pills (domains, then a domain's topics) · Shared with you (collections, landing only)

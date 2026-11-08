@@ -40,13 +40,11 @@ import {
 import { ContinueReading } from "./ContinueReading";
 import { FiltersDrawer } from "./FiltersDrawer";
 import { useFacetLabel } from "./labels";
-import { QuickPreview, readerHref, type PeekTarget } from "./QuickPreview";
+import { openDocumentPreview } from "../preview/store";
 import { SaveViewDialog } from "./SaveViewDialog";
 import { useCatalog, type BrowseOption } from "./useCatalog";
 
 const TOPIC_PILLS = 6;
-/** Below this width the quick preview adds a step without adding room: cards open the Reader directly. */
-const PEEK_MIN_WIDTH = 760;
 
 /** Plain text of an API snippet (highlighting is applied locally). */
 const plainSnippet = (s: string | null) => (s ? s.replace(/<\/?(?:b|mark|em|strong)>/gi, "") : null);
@@ -159,7 +157,7 @@ function EmptyKnowledge() {
       actions={
         <>
           <ContributeButton variant="primary" />
-          <NextLink className="button button--secondary" href="/knowledge/bases">
+          <NextLink className="button button--secondary" href="/bases">
             Knowledge bases
           </NextLink>
         </>
@@ -186,8 +184,7 @@ export function BrowsePage() {
 
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
-  const [peek, setPeek] = useState<PeekTarget | null>(null);
-
+  
   const apply = (next: BrowseParams) => router.replace(browseHref(next), { scroll: false });
 
   /* Search: typing searches documents (debounced into the URL). */
@@ -200,6 +197,21 @@ export function BrowsePage() {
       setText(p.q);
     }
   }, [p.q]);
+  /* Arriving from Home's "Find a document" card: focus the search field, retrying briefly while the
+     first load's skeleton (no input yet) is still showing; then drop the marker from the URL. */
+  useEffect(() => {
+    if (search.get("focus") !== "1") return;
+    const qs = new URLSearchParams(search);
+    qs.delete("focus");
+    router.replace(`/knowledge${qs.toString() ? `?${qs}` : ""}`, { scroll: false });
+    const deadline = Date.now() + 2000;
+    const tryFocus = () => {
+      if (inputRef.current) inputRef.current.focus();
+      else if (Date.now() < deadline) setTimeout(tryFocus, 50);
+    };
+    tryFocus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on arrival
+  }, []);
   useEffect(() => {
     if (text.trim() === p.q) return;
     const t = setTimeout(() => {
@@ -243,10 +255,17 @@ export function BrowsePage() {
     router.push(`/chat?${qs}`);
   };
 
-  /** Click, Enter or Space: quick preview; a narrow window goes straight to the Reader. */
+  /** Click, Enter or Space: the shared document preview (a near-full-screen sheet on phones). */
   const select = (r: Resource, result: SearchItemsResult) => {
-    if (window.innerWidth < PEEK_MIN_WIDTH) router.push(readerHref(r, p.q));
-    else setPeek({ resource: r, passage: passageOf(result) ?? (snippetOf(result) ? { text: plainSnippet(snippetOf(result))! } : null) });
+    const passage = passageOf(result);
+    const item = r.item?.name ?? r.id;
+    openDocumentPreview({
+      item,
+      q: p.q,
+      passages: passage?.passage ? [passage.passage] : undefined,
+      // No resolvable passage name: show the snippet the search returned, so the match is still visible.
+      citations: !passage?.passage && (passage?.text || snippetOf(result)) ? [{ item, excerpt: passage?.text ?? plainSnippet(snippetOf(result)) ?? undefined }] : undefined,
+    });
   };
 
   const sort = (p.sort || defaultSort(p)) as CatalogSort;
@@ -509,7 +528,7 @@ export function BrowsePage() {
             )}
           </section>
           {locked ? (
-            <NextLink className="cat-locked" href="/knowledge/bases">
+            <NextLink className="cat-locked" href="/bases">
               <Lock className="i i-sm" aria-hidden />
               <span>Some knowledge bases aren’t shared with you</span>
               <ArrowRight className="i i-sm" aria-hidden />
@@ -531,7 +550,6 @@ export function BrowsePage() {
         onApply={apply}
         onClear={clearFilters}
       />
-      <QuickPreview target={peek} q={p.q} onClose={() => setPeek(null)} />
       <SaveViewDialog isOpen={saveOpen} onClose={() => setSaveOpen(false)} params={p} suggestion={suggestion} description={describeParams(p, optLabel)} />
     </Page>
   );

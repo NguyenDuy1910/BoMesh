@@ -50,7 +50,7 @@ export function useBaseOperations() {
         try {
           await deleteItem(ws, base.name ?? "", { force: true });
           refresh();
-          router.push("/knowledge/bases");
+          router.push("/bases");
           toast(`Archived “${name}”`, { undo: () => void restore(base) });
           return true;
         } catch (error) {

@@ -84,7 +84,7 @@ export function KnowledgeAccessList({ access, empty, linkTab, showVia = true }: 
           contentTitle
           description={showVia ? <span translate={a.via === "Shared directly" || a.via === "Everyone" ? undefined : "no"}>{a.via}</span> : undefined}
           meta={CAN[a.role] ?? "Can view"}
-          href={`/knowledge/${a.id}${linkTab ? `?tab=${linkTab}` : ""}`}
+          href={`/bases/${a.id}${linkTab ? `?tab=${linkTab}` : ""}`}
         />
       ))}
     </List>

@@ -103,6 +103,11 @@
 
 /* ───── Page canvas (rendition markup) ───── */
 .doc-page { max-width: 760px; margin: 0 auto 8px; padding: 56px 64px; border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); font-size: 15px; line-height: 1.75; color: var(--foreground); overflow-wrap: anywhere; }
+/* A rendered source page: the document's own pixels, so it keeps its typography, figures and
+   layout. No padding (the page image carries its own margins) and white regardless of theme —
+   a scanned page is not themeable. */
+.doc-page--image { padding: 0; overflow: hidden; background: #fff; line-height: 0; }
+.doc-page__img { display: block; width: 100%; height: auto; }
 .doc-page h2 { font-size: 22px; line-height: 30px; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 8px; }
 .doc-page h3 { font-size: 16px; line-height: 24px; font-weight: 600; margin: 24px 0 8px; scroll-margin-top: 24px; }
 .doc-page h2 + h3, .doc-page .doc-sub + h3 { margin-top: 20px; }
