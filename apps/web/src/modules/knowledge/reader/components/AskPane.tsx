@@ -2,13 +2,16 @@
 
 import { Button } from "@heroui/react";
 import { ArrowRight, MessageSquare, RotateCcw, Sparkles } from "lucide-react";
+import dynamic from "next/dynamic";
 
 import { Callout } from "@/components/ui/Callout";
 import { resourceId } from "@/lib/api/client";
 import type { AnswerSource, Turn } from "@/modules/chat/turn";
-import { AnswerMarkdown } from "@/modules/chat/components/AnswerMarkdown";
 
 import { clip } from "../../model";
+
+/** The markdown + math stack loads with the first answer, not with the reader. */
+const AnswerMarkdown = dynamic(() => import("@/modules/chat/components/AnswerMarkdown").then((m) => m.AnswerMarkdown), { ssr: false });
 
 /** Suggested questions per resource type (preview `PROMPTS`). */
 const GUIDE = ["What are the key steps?", "What are the deadlines?", "Summarize this"];

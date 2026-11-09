@@ -5,7 +5,6 @@ import { api, call, listAll, resourceId, type Schema } from "@/lib/api/client";
 /** Conversation API used by the conversation lists (`/chats`, sidebar, projects). */
 
 export type Conversation = Schema<"Conversation">;
-export type Message = Schema<"Message">;
 
 /** Every conversation the caller owns, most recently active first (ListConversations). */
 export function listConversations(workspace: string): Promise<Conversation[]> {
@@ -25,6 +24,22 @@ export function listConversations(workspace: string): Promise<Conversation[]> {
       ),
     (page) => page.conversations,
   );
+}
+
+/** The caller's `pageSize` most recently active conversations (one ListConversations page). */
+export async function listRecentConversations(
+  workspace: string,
+  pageSize: number,
+): Promise<Conversation[]> {
+  const page = await call(
+    api.GET("/api/v1/workspaces/{workspace}/conversations", {
+      params: {
+        path: { workspace },
+        query: { pageSize, orderBy: "lastMessageTime desc" },
+      },
+    }),
+  );
+  return page.conversations ?? [];
 }
 
 /** UpdateConversation with an explicit field mask. */
@@ -72,29 +87,6 @@ export function undeleteConversation(
   );
 }
 
-/** The latest completed assistant answer of a conversation, if any (ListMessages, newest first, one result). */
-export async function getLastAnswer(
-  workspace: string,
-  conversation: string,
-): Promise<Message | null> {
-  const page = await call(
-    api.GET(
-      "/api/v1/workspaces/{workspace}/conversations/{conversation}/messages",
-      {
-        params: {
-          path: { workspace, conversation: resourceId(conversation) },
-          query: {
-            pageSize: 1,
-            orderBy: "createTime desc",
-            filter: 'role = "ASSISTANT" AND state = "COMPLETED"',
-          },
-        },
-      },
-    ),
-  );
-  return page.messages?.[0] ?? null;
-}
-
 /** Title shown for a conversation (server `displayName`; untitled ones read "New chat"). */
 export function conversationTitle(conversation: Conversation): string {
   return conversation.displayName?.trim() || "New chat";
@@ -112,14 +104,15 @@ export function conversationTime(conversation: Conversation): number {
 }
 
 /**
- * First readable line of an answer for list previews (preview `lastLine`): markdown and
- * citation markers removed, a trailing colon dropped.
+ * First readable line of an answer for list previews (preview `lastLine`), from the server's
+ * `lastAnswerSnippet`: markdown and citation markers removed, a code block cut off by the
+ * snippet dropped, a trailing colon dropped.
  */
 export function answerFirstLine(markdown: string | undefined): string {
   if (!markdown) return "";
   const line =
     markdown
-      .replace(/```[\s\S]*?```/g, "")
+      .replace(/```[\s\S]*?(```|$)/g, "")
       .split("\n")
       .map((l) =>
         l

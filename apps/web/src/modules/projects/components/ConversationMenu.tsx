@@ -71,7 +71,8 @@ function ConversationMenuItems({
 }: Pick<ConversationMenuProps, "conversation" | "onDeleted"> & {
   title: string;
 }) {
-  const model = useConversationModel();
+  // Without projects there is nothing to join, so the menu never loads every conversation.
+  const model = useConversationModel(projectsAvailable);
   const actions = useProjectActions();
   const current = model.projectOf.get(conversation.name ?? "") ?? null;
   const others = projectsAvailable

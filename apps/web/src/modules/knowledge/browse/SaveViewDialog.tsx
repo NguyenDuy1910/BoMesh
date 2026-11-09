@@ -8,7 +8,7 @@ import { errorMessage } from "@/lib/api/client";
 import { useWorkspace } from "@/lib/workspace";
 
 import { KnowledgeModal } from "../components/KnowledgeModal";
-import { useSavedSearchMutations, useTopics } from "../queries";
+import { useSavedSearchMutations } from "../queries";
 import { savedSearchOf, unsavable, type BrowseParams } from "./catalog";
 
 export interface SaveViewDialogProps {
@@ -28,7 +28,6 @@ export function SaveViewDialog({ isOpen, onClose, params, suggestion, descriptio
 
 function SaveViewForm({ onClose, params, suggestion, description }: Omit<SaveViewDialogProps, "isOpen">) {
   const { id: ws } = useWorkspace();
-  const topics = useTopics();
   const { create, remove } = useSavedSearchMutations();
   const [name, setName] = useState(suggestion);
   const [touched, setTouched] = useState(false);
@@ -41,7 +40,7 @@ function SaveViewForm({ onClose, params, suggestion, description }: Omit<SaveVie
     const n = name.trim();
     if (!n) return;
     try {
-      const view = await create.mutateAsync(savedSearchOf(params, ws, topics.data ?? [], n));
+      const view = await create.mutateAsync(savedSearchOf(params, ws, n));
       onClose();
       toast(`Saved view “${n}”`, { undo: () => view.name && remove.mutate(view.name) });
     } catch (err) {

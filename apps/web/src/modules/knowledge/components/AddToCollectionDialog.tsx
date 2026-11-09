@@ -1,8 +1,8 @@
 "use client";
 
 import { Button, Checkbox, Description, Input, Label, Link, TextField } from "@heroui/react";
-import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Globe, Lock, Plus, Users, type LucideIcon } from "lucide-react";
+import { useQueries, useQueryClient } from "@tanstack/react-query";
+import { Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
@@ -11,20 +11,10 @@ import { errorMessage, resourceId } from "@/lib/api/client";
 import { plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 
-import { createReadingList, createReadingListEntry, deleteReadingListEntry, listReadingListEntries, listSpaces, type ReadingList } from "../api";
+import { createReadingList, createReadingListEntry, deleteReadingListEntry, listReadingListEntries, type ReadingList } from "../api";
 import { knowledgeKeys, useEditableReadingLists, useItem } from "../queries";
 import { KnowledgeModal } from "./KnowledgeModal";
-
-/** Who a reading list is shared with (preview `shareLabel`). */
-export function useShareLabel() {
-  const { id, workspace, hasModule } = useWorkspace();
-  const spaces = useQuery({ queryKey: [id, "spaces", "all"], queryFn: () => listSpaces(id), enabled: hasModule("spaces"), staleTime: 5 * 60_000 });
-  return (list: Pick<ReadingList, "audience" | "space">): { icon: LucideIcon; label: string } => {
-    if (list.audience === "WORKSPACE") return { icon: Globe, label: `Everyone in ${workspace.displayName}` };
-    if (list.audience === "SPACE") return { icon: Users, label: spaces.data?.find((s) => s.name === list.space)?.displayName ?? "A space" };
-    return { icon: Lock, label: "Only you" };
-  };
-}
+import { useShareLabel } from "./share-label";
 
 export interface AddToCollectionDialogProps {
   /** Item names or IDs to add. */

@@ -9,7 +9,7 @@ import { EmptyState, ErrorState, IconButton, List, ListItem, SkeletonRows, toast
 import { errorMessage } from "@/lib/api/client";
 import { useWorkspace } from "@/lib/workspace";
 import { deleteItem, uploadDocument } from "@/modules/knowledge/api";
-import { openContribute } from "@/modules/knowledge/components/Contribute";
+import { openContribute } from "@/modules/knowledge/components/contribute-store";
 import { KnowledgeModal } from "@/modules/knowledge/components/KnowledgeModal";
 import { useItemPermissions, useKnowledgeModel } from "@/modules/knowledge/queries";
 import { createIngestionRun } from "@/modules/curation/api";

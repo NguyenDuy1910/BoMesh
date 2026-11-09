@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,11 +25,13 @@ async def space_id_of(session: AsyncSession, workspace_id: UUID, name: str) -> U
     return space_id
 
 
-async def space_name_of(session: AsyncSession, workspace_id: UUID, space_id: UUID) -> str | None:
-    """The resource name of space ``space_id``, deleted spaces included."""
+async def space_names(
+    session: AsyncSession, workspace_id: UUID, space_ids: Iterable[UUID]
+) -> dict[UUID, str]:
+    """The resource name of each existing space, deleted spaces included."""
 
-    code = (await space_codes(session, [space_id])).get(space_id)
-    return space_name(workspace_id, code) if code is not None else None
+    codes = await space_codes(session, space_ids)
+    return {space_id: space_name(workspace_id, code) for space_id, code in codes.items()}
 
 
-__all__ = ["space_id_of", "space_name_of"]
+__all__ = ["space_id_of", "space_names"]

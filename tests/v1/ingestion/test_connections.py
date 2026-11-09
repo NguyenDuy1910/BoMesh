@@ -379,6 +379,31 @@ async def test_list_returns_readable_shared_and_own_personal_connections(
     assert (await outsider.get(url)).status_code == 403
 
 
+async def test_attention_badge_total_size_counts_every_visible_match(
+    client: ApiClient, world: World, sessions: Sessions
+) -> None:
+    """The shell badge: ``pageSize=1`` + a state filter; ``totalSize`` counts all matches."""
+    admin, workspace, member = await _workspace(world)
+    await insert_connection(sessions, workspace, "ok")
+    await insert_connection(sessions, workspace, "authorizing", status="authorizing")
+    await insert_connection(sessions, workspace, "reauth", status="reauthorization_required")
+    await insert_connection(sessions, workspace, "failed-a", status="failed")
+    await insert_connection(sessions, workspace, "failed-b", status="failed")
+    await insert_connection(sessions, workspace, "member-failed", owner=member, status="failed")
+    await insert_connection(
+        sessions, workspace, "gone", status="failed", deleted_at=datetime.now(UTC)
+    )
+    badge = {"pageSize": 1, "filter": 'state = "FAILED" OR state = "REAUTHORIZATION_REQUIRED"'}
+    url = connections_url(workspace)
+
+    as_admin = (await (await client.as_(admin)).get(url, params=badge)).json()
+    as_member = (await (await client.as_(member)).get(url, params=badge)).json()
+
+    assert (len(as_admin["connections"]), as_admin["totalSize"]) == (1, 3)
+    assert "nextPageToken" in as_admin
+    assert (len(as_member["connections"]), as_member["totalSize"]) == (1, 1)
+
+
 # -- Update and Delete ----------------------------------------------------------
 
 

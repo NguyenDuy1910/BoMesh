@@ -95,8 +95,11 @@ function WorkspaceNav({ route }: { route: RouteInfo }) {
   const manage = manageNav(access);
   // Knowledge bases is a per-base grant (owner/editor), not a workspace permission, so it's shown
   // alongside `manageNav()`'s permission-filtered items rather than inside them (KNOWLEDGE_HUB.md).
-  const bases = useKnowledgeBases();
-  const showBases = access.can("items.create") || (bases.data ?? []).some((b) => b.access === "OWNER" || b.access === "EDITOR");
+  // Every member owns their personal collection, a root collection (item_model.md §4.4), so only a
+  // caller with neither `items.create` nor one needs the root collections list to decide.
+  const owned = access.can("items.create") || Boolean(access.member.personalCollection);
+  const bases = useKnowledgeBases({ enabled: !owned });
+  const showBases = owned || (bases.data ?? []).some((b) => b.access === "OWNER" || b.access === "EDITOR");
   const manageItems = showBases ? insertAfter(manage, "documents", BASES_NAV) : manage;
   const count = (b?: NavBadge) => (b ? badges[b] : undefined);
   return (

@@ -112,6 +112,16 @@ also reaches every collection and space. Owner and self rules in
 
 Custom roles live at `workspaces/{workspace}/roles/{role}`.
 
+**Performance observability.** Every response carries
+`Server-Timing: app;dur=<ms>, db;dur=<ms>` (time to response start and the
+request's cumulative PostgreSQL statement time; never counts, names or
+statement text, so it reveals nothing beyond the response time). Browser
+origins listed in `BOMESH_WEB_ORIGINS` receive `Timing-Allow-Origin` (echoed
+origin, `Vary: Origin`), so Resource Timing phases and `serverTiming` of API
+calls are readable from the web client; the same list is the CORS allowlist.
+Unset means any origin (local development): identity is only the bearer
+token, so no ambient credential is exposed.
+
 ## 2. Interfaces and resource tree
 
 Interfaces (OpenAPI tags) are `UpperCamelCase` nouns (AIP-190). The tree
@@ -378,8 +388,8 @@ collection, and it is `PUBLISHED` (or the caller holds `items.update` there).
 | CreateItem | `POST …/items` (`requestId`) → documents return `PENDING` + signed `uploadUri`; `POST /upload/api/v1/workspaces/{workspace}/items` multipart for one-call upload | `items.create` on `parentItem` (on the workspace for a root collection). Documents only under collections; new documents are `PUBLISHED`; non-editors contribute instead |
 | CompleteItemUpload | `POST …/items/{item}:completeUpload` (validates the stored object) | creator |
 | GetItem | `GET …/items/{item}` (`view`), `?alt=media` → 302 to the signed original | `items.get` |
-| ListItems | `GET …/items` — `filter` over `parentItem` (`""` = roots), `ancestors:` (subtree), `itemType`, `displayName`, `document.*` (type, topics, owner, purpose, states, origin, verification, quality issues); `orderBy`; `showDeleted`; `showLocked` | `items.list` (visible items only) |
-| SearchItems | `POST …/items:search` `{query, filter, facetSpecs[], orderBy, relatedItem, contentSearchSpec, pageSize, pageToken}` → documents with snippets/passages, permission-filtered facets | `items.search`. The one catalog and retrieval search; hits are re-authorized in PostgreSQL |
+| ListItems | `GET …/items` — `filter` over `name` (batch read: `name = "…/items/a" OR name = "…/items/b"`; names the caller cannot read, or that do not exist, are simply absent, as GetItem would deny them), `parentItem` (`""` = roots), `ancestors:` (subtree), `itemType`, `displayName`, `document.*` (type, topics, owner, purpose, states, origin, verification, quality issues); `orderBy`; `showDeleted`; `showLocked` | `items.list` (visible items only) |
+| SearchItems | `POST …/items:search` `{query, filter, facetSpecs[], orderBy, relatedItem, contentSearchSpec, pageSize, pageToken}` → documents with snippets/passages, permission-filtered facets (value facets, and `intervals` buckets for `updateTime`) | `items.search`. The one catalog and retrieval search; hits are re-authorized in PostgreSQL |
 | UpdateItem | `PATCH` — `displayName`, collection settings, document metadata; `collection.inheritAccess` also needs `items.setIamPolicy` | `items.update` |
 | DeleteItem / UndeleteItem | `DELETE` (`force` for a non-empty collection; the live subtree is deleted together) / `POST …:undelete` (restores that cohort and its search visibility; 30-day retention). DELETED items are shown only to `items.undelete` holders and never serve content | `items.delete` / `.undelete` on every access boundary in the cohort (`SUBTREE_HAS_FOREIGN_BOUNDARY`); personal collections cannot be deleted |
 | MoveItem | `POST …:move` `{destinationParent, etag}` | `items.move` + `items.create` on the destination; crossing an access boundary also needs `items.setIamPolicy` on the source boundary; not for source-managed items, candidates of open contributions (`CONTRIBUTION_OPEN`), conversation attachments, personal collections, or into another member's personal collection |
@@ -398,6 +408,23 @@ An item link shows one canonical document inside another collection
 `ancestors`, subtree filters, conversation scope, ingestion or counts other
 than `linkCount`. Deleting the container removes its links in the same
 cohort; a deleted target hides its links until undelete.
+
+SearchItems facets follow Vertex AI Search `FacetSpec`: one response
+carries every facet of a catalog view. Each facet counts the matching
+documents the caller can see (the same visibility predicate as the results)
+and, with `excludedFromFilter` (default), ignores its own filter clause
+(disjunctive). `updateTime` is an interval facet: `intervals[]` of
+`{minimum, maximum}` RFC 3339 bounds (inclusive, either open) return one
+value each, in request order, with `interval` instead of `value`.
+
+Topics are a two-level taxonomy (DOMAIN → TOPIC), and `document.topics`
+is hierarchical in both the filter and the facet, like `ancestors:` for
+collections: `document.topics:"…/topics/{domain}"` matches documents tagged
+with the domain or with any topic under it, and the domain's facet value
+counts those documents once. A TOPIC has no children, so it matches only
+its own tags. Every consumer of the filter (Browse, saved searches, ListItems,
+Manage) wants the domain's documents; agent retrieval does not filter by
+topic.
 
 Asking for access is `CreateRequest` with `kind: COLLECTION_ACCESS`.
 Reviewers of an open contribution may `GetItem`, `GetItemContent` and
@@ -569,7 +596,9 @@ always reviewed), `rejectedRetentionDuration`, `etag`. Get/List/Update
 
 **Conversation** `…/conversations/{conversation}` — owner-private.
 `displayName`, `owner`, `pinned`, `scope {collections[] (collection
-subtrees), spaces[]}`, `lastMessageTime`, `createTime`,
+subtrees), spaces[]}`, `lastMessageTime`, `lastAnswerSnippet` (output:
+the first 300 characters of the latest COMPLETED answer, so lists show a
+preview without a ListMessages call per row), `createTime`,
 `updateTime`, `deleteTime`. Create (client may choose the ID with
 `conversationId`), Get, List (own), Update (`displayName`, `pinned`,
 `scope`), Delete/`:undelete`.

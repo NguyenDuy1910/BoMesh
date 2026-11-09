@@ -8,6 +8,7 @@ import {
   MessageSquarePlus,
   Plus,
 } from "lucide-react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -23,11 +24,13 @@ import {
   projectsAvailable,
 } from "../adapter";
 import { conversationTitle, type Conversation } from "../conversations";
-import { useConversationModel, type ProjectView } from "../queries";
+import { useConversationModel, useRecentConversations, type ProjectView } from "../queries";
 import { openProjectDialog, setFolderOpen, useProjectsUi } from "../store";
 import { ConversationMenu } from "./ConversationMenu";
-import { ProjectDialogs } from "./ProjectDialogs";
 import { ProjectMenu } from "./ProjectMenu";
+
+/** Loads on first open: the rename/new-project dialog is never on screen at first paint. */
+const ProjectDialogs = dynamic(() => import("./ProjectDialogs").then((m) => m.ProjectDialogs), { ssr: false });
 
 /** Chats shown under an expanded folder before "See all" (preview `KIDS`). */
 const KIDS = 6;
@@ -146,8 +149,10 @@ function ProjectFolder({
 export function SidebarConversations() {
   const { id: ws } = useWorkspace();
   const pathname = usePathname();
-  const model = useConversationModel();
-  const { folders } = useProjectsUi();
+  // Folders need every conversation; without projects only Recent shows, so one small page is enough.
+  const model = useConversationModel(projectsAvailable);
+  const latest = useRecentConversations(RECENT, !projectsAvailable);
+  const { folders, dialog } = useProjectsUi();
 
   const openChat = pathname.startsWith("/chat/")
     ? `workspaces/${ws}/conversations/${pathname.slice(6)}`
@@ -157,7 +162,7 @@ export function SidebarConversations() {
     : openChat
       ? model.projectOf.get(openChat)?.id
       : undefined;
-  const recent = model.loose.slice(0, RECENT);
+  const recent = (projectsAvailable ? model.loose : (latest.data ?? [])).slice(0, RECENT);
 
   return (
     <>
@@ -253,7 +258,7 @@ export function SidebarConversations() {
           ))}
         </div>
       ) : null}
-      <ProjectDialogs />
+      {dialog && <ProjectDialogs />}
     </>
   );
 }

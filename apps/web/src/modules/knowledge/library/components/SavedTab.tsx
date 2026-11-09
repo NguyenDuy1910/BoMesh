@@ -20,8 +20,7 @@ import { createSavedItem, deleteSavedItem } from "../../api";
 import { openAddToCollection } from "../../components/dialogs";
 import { ResourceList, ResourceRow } from "../../components/ResourceRow";
 import { fold, tokens, type Resource } from "../../model";
-import { knowledgeKeys, useKnowledgeModel, useSavedItems } from "../../queries";
-import { useItemsByName } from "../queries";
+import { knowledgeKeys, useItemsByName, useKnowledgeModel, useSavedItems } from "../../queries";
 import { BulkBar, SortMenu } from "./parts";
 
 const SAVED_SORTS = { saved: "Recently saved", updated: "Recently updated", title: "Title A–Z" } as const;

@@ -127,12 +127,12 @@ export function viewSummary(p: BrowseParams, label: Label): string {
 const LAYOUT: Readonly<Record<string, "grid" | "list">> = { GRID: "grid", LIST: "list", TABLE: "list" };
 
 /** What a saved view stores: the query, the API filter, the order and the layout. Space, Language and "saved" aren't API filters. */
-export function savedSearchOf(p: BrowseParams, ws: string, topics: readonly Topic[], displayName: string): SavedSearch {
+export function savedSearchOf(p: BrowseParams, ws: string, displayName: string): SavedSearch {
   const sort = p.sort || defaultSort(p);
   return {
     displayName,
     query: p.q || undefined,
-    filter: catalogFilter(apiParams(p), ws, { topics }) || undefined,
+    filter: catalogFilter(apiParams(p), ws) || undefined,
     orderBy: ORDER_BY[sort] || undefined,
     layout: p.view === "list" ? "LIST" : "GRID",
   };
@@ -148,9 +148,10 @@ const TRUST_KEY: Readonly<Record<string, string>> = { VERIFIED: "verified", REVI
 const unquote = (v: string) => (v.startsWith('"') ? v.slice(1, -1).replace(/\\(.)/g, "$1") : v);
 
 /**
- * A saved view back to Browse params. Parses the AIP-160 filter `catalogFilter` writes: a selected domain
- * expands to its topics, so topics whose domain is also present collapse back into the domain; the Updated
- * window is the one closest to the timestamp's age when the view was saved.
+ * A saved view back to Browse params. Parses the AIP-160 filter `catalogFilter` writes. `document.topics`
+ * is hierarchical, but views saved before it was also list a selected domain's topics, so topics whose
+ * domain is also present collapse back into the domain; the Updated window is the one closest to the
+ * timestamp's age when the view was saved.
  */
 export function savedSearchParams(s: SavedSearch, topics: readonly Topic[] = []): BrowseParams {
   const filters: Partial<Record<BrowseFacetId, string[]>> = {};

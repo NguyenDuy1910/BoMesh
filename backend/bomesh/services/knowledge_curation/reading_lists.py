@@ -45,7 +45,11 @@ from bomesh.services.knowledge_curation.records import (
     reading_list_name,
 )
 from bomesh.services.knowledge_curation.support import CurationDeps, now
-from bomesh.services.knowledge_items.summary import ItemSummary, get_item_summary
+from bomesh.services.knowledge_items.summary import (
+    ItemSummary,
+    get_item_summaries,
+    get_item_summary,
+)
 
 FEATURED = "featured"
 PUBLISH = "readingLists.publish"
@@ -528,17 +532,17 @@ def _entry_record(row: ReadingList, entry: ReadingListEntry, summary: ItemSummar
 async def _readable_entries(
     session: AsyncSession, authorizer: Authorizer, principal: Principal, row: ReadingList
 ) -> list[tuple[ReadingListEntry, ItemSummary]]:
-    entries = await session.scalars(
-        select(ReadingListEntry)
-        .where(ReadingListEntry.reading_list_id == row.id)
-        .order_by(ReadingListEntry.position, ReadingListEntry.created_at)
+    entries = list(
+        await session.scalars(
+            select(ReadingListEntry)
+            .where(ReadingListEntry.reading_list_id == row.id)
+            .order_by(ReadingListEntry.position, ReadingListEntry.created_at)
+        )
     )
-    readable = []
-    for entry in entries:
-        summary = await get_item_summary(session, authorizer, principal, row.tenant_id, entry.item_id)
-        if summary is not None:
-            readable.append((entry, summary))
-    return readable
+    summaries = await get_item_summaries(
+        session, authorizer, principal, row.tenant_id, (entry.item_id for entry in entries)
+    )
+    return [(entry, summaries[entry.item_id]) for entry in entries if entry.item_id in summaries]
 
 
 async def _visible_entry(

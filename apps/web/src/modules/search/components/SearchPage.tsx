@@ -14,7 +14,7 @@ import { useWorkspace } from "@/lib/workspace";
 import { BaseMark } from "@/modules/knowledge/bases/components/BaseMark";
 import { HighlightText } from "@/modules/knowledge/components/HighlightText";
 import { ResourceList, ResourceRow } from "@/modules/knowledge/components/ResourceRow";
-import { useShareLabel } from "@/modules/knowledge/components/AddToCollectionDialog";
+import { useShareLabel } from "@/modules/knowledge/components/share-label";
 import { catalogHref, catalogSearchRequest, fold, parseCatalogQuery, snippetOf, type Resource } from "@/modules/knowledge/model";
 import { useKnowledgeBases, useKnowledgeModel, useReadingLists, useSearchItems } from "@/modules/knowledge/queries";
 
@@ -139,8 +139,8 @@ function Results({ q, tab, page, setPage, setTab, onClear }: { q: string; tab: s
   const [docTokens, setDocTokens] = useState<string[]>([""]);
   const docPage = tab === "docs" ? Math.min(page, docTokens.length) : 1;
   const request = useMemo(
-    () => catalogSearchRequest(parseCatalogQuery({ q }), ws.id, { topics: model.topics, facets: false, pageSize: PER_PAGE, pageToken: docTokens[docPage - 1] || undefined }),
-    [q, ws.id, model.topics, docTokens, docPage],
+    () => catalogSearchRequest(parseCatalogQuery({ q }), ws.id, { facets: false, pageSize: PER_PAGE, pageToken: docTokens[docPage - 1] || undefined }),
+    [q, ws.id, docTokens, docPage],
   );
   const docs = useSearchItems(request);
   const next = docs.data?.nextPageToken;

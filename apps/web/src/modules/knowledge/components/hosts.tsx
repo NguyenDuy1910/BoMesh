@@ -1,14 +1,19 @@
 "use client";
 
-import { AddToCollectionDialog } from "./AddToCollectionDialog";
-import { closeContribute, ContributeDialog, useContributeRequest } from "./Contribute";
-import { knowledgeDialogs } from "./dialogs";
-import { EditDetailsDialog } from "./EditDetailsDialog";
-import { LinkToSpacesDialog } from "./LinkToSpacesDialog";
-import { MoveDialog } from "./MoveDialog";
-import { ReadingListDialog } from "./ReadingListDialog";
+import dynamic from "next/dynamic";
 
-export { DocumentPreviewHost } from "../preview/DocumentPreview";
+import { closeDocumentPreview, useDocumentPreview } from "../preview/store";
+import { closeContribute, useContributeRequest } from "./contribute-store";
+import { knowledgeDialogs } from "./dialogs";
+
+/* The dialogs load on first open: none of them is on screen at first paint, so the shell stays light. */
+const ContributeDialog = dynamic(() => import("./Contribute").then((m) => m.ContributeDialog), { ssr: false });
+const AddToCollectionDialog = dynamic(() => import("./AddToCollectionDialog").then((m) => m.AddToCollectionDialog), { ssr: false });
+const EditDetailsDialog = dynamic(() => import("./EditDetailsDialog").then((m) => m.EditDetailsDialog), { ssr: false });
+const LinkToSpacesDialog = dynamic(() => import("./LinkToSpacesDialog").then((m) => m.LinkToSpacesDialog), { ssr: false });
+const MoveDialog = dynamic(() => import("./MoveDialog").then((m) => m.MoveDialog), { ssr: false });
+const ReadingListDialog = dynamic(() => import("./ReadingListDialog").then((m) => m.ReadingListDialog), { ssr: false });
+const DocumentPreview = dynamic(() => import("../preview/DocumentPreview").then((m) => m.DocumentPreview), { ssr: false });
 
 /** Renders the Contribute dialog opened with `openContribute()`. Mount once inside the workspace shell. */
 export function ContributeHost() {
@@ -35,4 +40,12 @@ export function KnowledgeDialogsHost() {
     case "readingList":
       return <ReadingListDialog key={dialog.key} list={dialog.list} items={dialog.items} isOpen onClose={close} />;
   }
+}
+
+/** Renders the preview opened with `openDocumentPreview()`. Mount once inside the workspace shell. */
+export function DocumentPreviewHost() {
+  const request = useDocumentPreview();
+  if (!request) return null;
+  const { key, ...options } = request;
+  return <DocumentPreview key={key} request={options} onClose={closeDocumentPreview} />;
 }

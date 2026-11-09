@@ -144,7 +144,7 @@ class TopicService:
         async with transaction_scope(self._deps.sessions) as session:
             total = int(await session.scalar(query.count(statement)) or 0)
             topics = list(await session.scalars(query.apply(counted)))
-            return [await self._record(session, ctx, topic) for topic in topics], total
+            return await topic_records(session, ctx.authorizer, ctx.principal, topics), total
 
     async def update(
         self,
@@ -323,57 +323,80 @@ def topic_etag(topic: Topic) -> str:
 async def topic_record(
     session: AsyncSession, authorizer: Authorizer, principal: Principal, topic: Topic
 ) -> TopicRecord:
-    workspace_id = topic.tenant_id
-    parent_code = None
-    if topic.parent_topic_id is not None:
-        parent_code = await session.scalar(select(Topic.code).where(Topic.id == topic.parent_topic_id))
-    evidence = await session.scalars(
-        select(Contribution.id)
+    return (await topic_records(session, authorizer, principal, [topic]))[0]
+
+
+async def topic_records(
+    session: AsyncSession,
+    authorizer: Authorizer,
+    principal: Principal,
+    topics: Sequence[Topic],
+) -> list[TopicRecord]:
+    """Records of ``topics`` (one workspace); parents, evidence and counts load once for all."""
+    if not topics:
+        return []
+    workspace_id = topics[0].tenant_id
+    ids = [topic.id for topic in topics]
+    parent_ids = {topic.parent_topic_id for topic in topics if topic.parent_topic_id is not None}
+    parents: dict[UUID, str] = {}
+    if parent_ids:
+        parents = dict(
+            (await session.execute(select(Topic.id, Topic.code).where(Topic.id.in_(parent_ids))))
+            .tuples()
+            .all()
+        )
+    evidence: dict[UUID, list[UUID]] = {}
+    rows = await session.execute(
+        select(ContributionTopic.topic_id, Contribution.id)
         .join(ContributionTopic, ContributionTopic.contribution_id == Contribution.id)
         .where(
-            ContributionTopic.topic_id == topic.id,
+            ContributionTopic.topic_id.in_(ids),
             ContributionTopic.relation == "proposed",
             Contribution.deleted_at.is_(None),
             await readable_clause(authorizer, principal, workspace_id),
         )
         .order_by(Contribution.created_at, Contribution.id)
     )
-    in_review = None
+    for topic_id, contribution_id in rows:
+        evidence.setdefault(topic_id, []).append(contribution_id)
+    in_review: dict[UUID, int] | None = None
     if await is_any_reviewer(authorizer, principal, workspace_id):
-        in_review = int(
-            await session.scalar(
-                select(func.count(distinct(Contribution.id)))
-                .join(ContributionTopic, ContributionTopic.contribution_id == Contribution.id)
-                .where(
-                    ContributionTopic.topic_id == topic.id,
-                    Contribution.state.in_(OPEN_CONTRIBUTION_STATES),
-                    Contribution.deleted_at.is_(None),
-                    await reviewer_clause(authorizer, principal, workspace_id),
-                )
+        reviewed = await session.execute(
+            select(ContributionTopic.topic_id, func.count(distinct(Contribution.id)))
+            .join(ContributionTopic, ContributionTopic.contribution_id == Contribution.id)
+            .where(
+                ContributionTopic.topic_id.in_(ids),
+                Contribution.state.in_(OPEN_CONTRIBUTION_STATES),
+                Contribution.deleted_at.is_(None),
+                await reviewer_clause(authorizer, principal, workspace_id),
             )
-            or 0
+            .group_by(ContributionTopic.topic_id)
         )
-    counts = await document_counts(session, authorizer, principal, workspace_id, [topic.id])
-    return TopicRecord(
-        workspace_id=workspace_id,
-        id=topic.id,
-        code=topic.code,
-        display_name=topic.display_name,
-        description=topic.description,
-        kind=topic.kind,
-        parent_code=parent_code,
-        icon=topic.icon,
-        color=topic.color,
-        state=_state(topic),
-        evidence=tuple(evidence),
-        document_count=counts.get(topic.id, 0),
-        in_review_count=in_review,
-        create_time=topic.created_at,
-        update_time=topic.updated_at,
-        delete_time=topic.deleted_at,
-        purge_time=purge_time(topic.deleted_at),
-        etag=topic_etag(topic),
-    )
+        in_review = {topic_id: int(count) for topic_id, count in reviewed}
+    counts = await document_counts(session, authorizer, principal, workspace_id, ids)
+    return [
+        TopicRecord(
+            workspace_id=workspace_id,
+            id=topic.id,
+            code=topic.code,
+            display_name=topic.display_name,
+            description=topic.description,
+            kind=topic.kind,
+            parent_code=parents.get(topic.parent_topic_id) if topic.parent_topic_id else None,
+            icon=topic.icon,
+            color=topic.color,
+            state=_state(topic),
+            evidence=tuple(evidence.get(topic.id, ())),
+            document_count=counts.get(topic.id, 0),
+            in_review_count=in_review.get(topic.id, 0) if in_review is not None else None,
+            create_time=topic.created_at,
+            update_time=topic.updated_at,
+            delete_time=topic.deleted_at,
+            purge_time=purge_time(topic.deleted_at),
+            etag=topic_etag(topic),
+        )
+        for topic in topics
+    ]
 
 
 async def document_counts(
@@ -577,14 +600,28 @@ async def topic_summaries(
     )
     counts = await document_counts(session, authorizer, principal, workspace_id, [t.id for t in children])
     visible = await _visible_documents(authorizer, principal, workspace_id)
+    domain_ids = [domain.id for domain in domains]
+    domain_of = func.coalesce(Topic.parent_topic_id, Topic.id)
+    totals = dict(
+        (
+            await session.execute(
+                select(domain_of, func.count(distinct(ItemTopic.item_id)))
+                .select_from(ItemTopic)
+                .join(Topic, Topic.id == ItemTopic.topic_id)
+                .join(Item, Item.id == ItemTopic.item_id)
+                .where(
+                    live,
+                    Topic.id.in_(domain_ids) | Topic.parent_topic_id.in_(domain_ids),
+                    visible,
+                )
+                .group_by(domain_of)
+            )
+        )
+        .tuples()
+        .all()
+    )
     summaries = []
     for domain in domains:
-        members = [domain.id] + [t.id for t in children if t.parent_topic_id == domain.id]
-        total = await session.scalar(
-            select(func.count(distinct(ItemTopic.item_id)))
-            .join(Item, Item.id == ItemTopic.item_id)
-            .where(ItemTopic.topic_id.in_(members), visible)
-        )
         top = sorted(
             (
                 TopicSummary(t.id, t.code, t.display_name, counts.get(t.id, 0))
@@ -594,7 +631,9 @@ async def topic_summaries(
             key=lambda s: (-s.document_count, s.display_name),
         )[:5]
         summaries.append(
-            TopicDomainSummary(domain.id, domain.code, domain.display_name, int(total or 0), top)
+            TopicDomainSummary(
+                domain.id, domain.code, domain.display_name, int(totals.get(domain.id, 0)), top
+            )
         )
     summaries.sort(key=lambda s: (-s.document_count, s.display_name))
     return summaries[:limit]

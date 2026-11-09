@@ -12,7 +12,7 @@ import { EmptyState, ErrorState, Page, PageHeader, SectionTabs, SkeletonRows, Us
 import { ApiError, errorMessage, resourceId } from "@/lib/api/client";
 import { plural, rel } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
-import { openContribute } from "@/modules/knowledge/components/Contribute";
+import { openContribute } from "@/modules/knowledge/components/contribute-store";
 import { AskSpaceDialog } from "@/modules/requests/components/AskSpaceDialog";
 import { newWorkHref, workflowsFor } from "@/modules/work/kinds";
 

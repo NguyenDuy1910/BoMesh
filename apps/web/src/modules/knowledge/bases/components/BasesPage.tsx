@@ -21,7 +21,7 @@ import { resourceId } from "@/lib/api/client";
 import { plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 
-import { openContribute } from "../../components/Contribute";
+import { openContribute } from "../../components/contribute-store";
 import { updatedLabel } from "../../components/ResourceRow";
 import { fold } from "../../model";
 import { useKnowledgeBases } from "../../queries";

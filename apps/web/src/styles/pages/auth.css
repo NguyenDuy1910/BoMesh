@@ -17,6 +17,15 @@
 .au-foot { margin-top: 24px; text-align: center; font-size: 13px; color: var(--muted); }
 .au-foot--start { text-align: left; }
 .au-foot .link-button { font-size: 13px; }
+/* Why the person is on Sign in (?reason=expired). */
+.au-notice { margin: -8px 0 24px; }
+/* Session expired: the sign-in form inside a small dialog over the page that stays open. */
+.au-reauth__icon { background: var(--accent-soft); color: var(--accent-soft-foreground); border-radius: var(--radius-xl); }
+.au-reauth__icon .i { width: 20px; height: 20px; }
+.au-reauth .au-or { margin: 16px 0; }
+.au-reauth .au-form-error { margin: 16px 0 0; }
+.au-reauth form > .button--primary { margin-top: 20px; }
+.au-reauth .au-foot { margin-top: 16px; }
 .au-google { min-height: 40px; }
 /* Auth forms space their children with a flex gap; don't stack .field + .field margins on it. */
 .au-page form.gap-16 > .field + .field { margin-top: 0; }

@@ -34,11 +34,12 @@ import { isPlatformOperator, useSession } from "@/lib/session";
 import { resolvedMode, setMode } from "@/lib/theme";
 import { useOptionalWorkspace, type WorkspaceContextValue } from "@/lib/workspace";
 import { roleLabel } from "@/modules/auth/api";
-import { openContribute } from "@/modules/knowledge/components/Contribute";
+import { openContribute } from "@/modules/knowledge/components/contribute-store";
 import { openReadingListEditor } from "@/modules/knowledge/components/dialogs";
 import { spaceType } from "@/modules/spaces";
+import { spacesListQuery } from "@/modules/spaces/queries";
 
-import { changeLanguage } from "./LanguagePicker";
+import { changeLanguage } from "./language";
 import { closeOverlay, openAppearance, useShellOverlays } from "./overlays";
 
 interface PaletteItem {
@@ -89,10 +90,9 @@ function useWorkspaceSources(ws: WorkspaceContextValue, enabled: boolean, q: str
     queryFn: () => call(api.GET("/api/v1/workspaces/{workspace}/items", { params: { path, query: { pageSize: 200, filter: 'parentItem = ""' } } })),
   });
   const spaces = useQuery({
-    queryKey: [ws.id, "spaces", "palette"],
+    ...spacesListQuery(ws.id),
+    select: (list) => list.filter((s) => s.state !== "DELETED"),
     enabled: enabled && ws.hasModule("spaces"),
-    staleTime: STALE,
-    queryFn: () => call(api.GET("/api/v1/workspaces/{workspace}/spaces", { params: { path, query: { pageSize: 200 } } })),
   });
   const people = useQuery({
     queryKey: [ws.id, "members", "palette"],
@@ -120,7 +120,7 @@ function useWorkspaceSources(ws: WorkspaceContextValue, enabled: boolean, q: str
     conversations: conversations.data?.conversations ?? [],
     collections: collections.data?.readingLists ?? [],
     bases: (bases.data?.items ?? []).filter((i) => i.itemType === "COLLECTION"),
-    spaces: spaces.data?.spaces ?? [],
+    spaces: spaces.data ?? [],
     people: people.data ?? [],
     work: work.data?.artifacts ?? [],
     documents: (documents.data?.results ?? []).map((r) => r.item).filter((i): i is Schema<"Item"> => Boolean(i)),

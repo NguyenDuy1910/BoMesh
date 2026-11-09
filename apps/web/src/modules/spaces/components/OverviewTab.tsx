@@ -11,7 +11,7 @@ import { Callout, EmptyState, ErrorState, ItemIcon, List, ListItem, Section, Ske
 import { errorMessage, resourceId } from "@/lib/api/client";
 import { plural, rel } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
-import { openContribute } from "@/modules/knowledge/components/Contribute";
+import { openContribute } from "@/modules/knowledge/components/contribute-store";
 import { useMemberNames, useReadingLists } from "@/modules/knowledge/queries";
 import { newWorkHref, workflowsFor } from "@/modules/work/kinds";
 

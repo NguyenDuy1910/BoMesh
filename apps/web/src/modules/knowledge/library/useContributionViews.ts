@@ -6,9 +6,8 @@ import { useWorkspace } from "@/lib/workspace";
 
 import type { Contribution, Item } from "../api";
 import type { LifecycleKey } from "../model";
-import { useKnowledgeModel, useMemberNames } from "../queries";
+import { useItemsByName, useKnowledgeModel, useMemberNames } from "../queries";
 import { contributionLife, type ContributionContext } from "./contributions";
-import { useItemsByName } from "./queries";
 
 /** What the contributions list and panel show about one contribution. */
 export interface ContributionView {
@@ -41,7 +40,10 @@ export interface ContributionView {
 export function useContributionViews(contributions: readonly Contribution[]) {
   const { member } = useWorkspace();
   const { ctx: model } = useKnowledgeModel();
-  const items = useItemsByName(contributions.flatMap((c) => [c.item, c.replacesItem]));
+  const items = useItemsByName(
+    contributions.flatMap((c) => [c.item, c.replacesItem]),
+    { reviewerReads: true },
+  );
   const names = useMemberNames(
     contributions.flatMap((c) => [c.contributor, c.decision?.reviewer, ...(c.events ?? []).map((e) => e.actor)]),
   );

@@ -19,13 +19,12 @@ import { fmtDateTime, fmtSize } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 
 import type { Contribution } from "../../api";
-import { openContribute } from "../../components/Contribute";
+import { openContribute } from "../../components/contribute-store";
 import { LifecycleChip } from "../../components/LifecycleChip";
 import { CONTRIBUTE_TYPES, fileProblem, kindMeta, LIFECYCLE } from "../../model";
-import { useContribution, useKnowledgeModel } from "../../queries";
+import { useContribution, useItemsByName, useKnowledgeModel } from "../../queries";
 import { getTopic } from "../api";
 import { flagText, lastEvent, PUBLISHED_KEYS, who } from "../contributions";
-import { useItemsByName } from "../queries";
 import { useContributionActions } from "../useContributionActions";
 import { useContributionViews, type ContributionView } from "../useContributionViews";
 import { TimelineSteps } from "./ContributionTimeline";
@@ -349,7 +348,10 @@ function Suggestions({ view: v }: { view: ContributionView }) {
   const { ctx } = useKnowledgeModel();
   const c = v.contribution;
   const s = c.suggestions;
-  const related = useItemsByName((c.flags ?? []).map((f) => f.relatedItem));
+  const related = useItemsByName(
+    (c.flags ?? []).map((f) => f.relatedItem),
+    { view: "BASIC" },
+  );
   const proposed = useQueries({
     queries: (s?.proposedTopics ?? []).map((t) => ({ queryKey: [ws, "topics", "one", resourceId(t)], queryFn: () => getTopic(ws, t), retry: false, staleTime: 5 * 60_000 })),
   });

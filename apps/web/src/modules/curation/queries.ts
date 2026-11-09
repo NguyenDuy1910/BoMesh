@@ -4,7 +4,7 @@ import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-quer
 import { useCallback, useMemo } from "react";
 
 import { useWorkspace } from "@/lib/workspace";
-import { getItem } from "@/modules/knowledge/api";
+import { batchGetItems, getItem } from "@/modules/knowledge/api";
 import { invalidateKnowledge, knowledgeKeys, useKnowledgeBases } from "@/modules/knowledge/queries";
 
 import { listAllContributions, listAllTopics, listCuratedItems, listReviewQueue, type Contribution, type Item } from "./api";
@@ -38,12 +38,18 @@ export interface Submission {
   item: Item | null;
 }
 
-/** Candidates for contributions, fetched one by one (reviewers may read open candidates only through GetItem). */
+/**
+ * Candidates for contributions: one batch read (ListItems by name), then GetItem only for the
+ * ones it leaves out — open candidates a reviewer reads through the reviewer exception, which
+ * applies to GetItem alone.
+ */
 async function withCandidates(ws: string, contributions: Contribution[], known: ReadonlyMap<string, Item> = new Map()): Promise<Submission[]> {
-  const items = await Promise.all(
-    contributions.map((c) => (c.item && known.get(c.item)) || (c.item ? getItem(ws, c.item, "FULL").catch(() => null) : Promise.resolve(null))),
-  );
-  return contributions.map((contribution, i) => ({ contribution, item: items[i] }));
+  const found = new Map(known);
+  const wanted = [...new Set(contributions.flatMap((c) => (c.item && !known.has(c.item) ? [c.item] : [])))];
+  for (const item of await batchGetItems(ws, wanted, { view: "FULL" })) if (item.name) found.set(item.name, item);
+  const read = await Promise.all(wanted.filter((n) => !found.has(n)).map((n) => getItem(ws, n, "FULL").catch(() => null)));
+  for (const item of read) if (item?.name) found.set(item.name, item);
+  return contributions.map((contribution) => ({ contribution, item: (contribution.item && found.get(contribution.item)) || null }));
 }
 
 /** The review queue: open submissions (analyzing + in review), oldest first. */

@@ -9,7 +9,7 @@ import { Callout, ClearFilters, DataTable, EmptyState, ErrorState, FileIcon, Fil
 import { resourceId } from "@/lib/api/client";
 import { fmtDateTime, plural, rel } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
-import { openContribute } from "@/modules/knowledge/components/Contribute";
+import { openContribute } from "@/modules/knowledge/components/contribute-store";
 import { LifecycleChip } from "@/modules/knowledge/components/LifecycleChip";
 import { SourceIcon } from "@/modules/knowledge/components/SourceIcon";
 import { fold, kindMeta } from "@/modules/knowledge/model";

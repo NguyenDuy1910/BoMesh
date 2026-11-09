@@ -21,6 +21,7 @@ import { toast } from "@/components/ui/Toast";
 import { errorMessage, resourceId } from "@/lib/api/client";
 import { plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
+import { useSpaces } from "@/modules/spaces/queries";
 import { newWorkHref, workflowsFor } from "@/modules/work/kinds";
 
 import {
@@ -33,12 +34,11 @@ import {
   type ReadingList,
   type ReadingListEntry,
 } from "../../api";
-import { useShareLabel } from "../../components/AddToCollectionDialog";
+import { useShareLabel } from "../../components/share-label";
 import { openReadingListEditor } from "../../components/dialogs";
 import { ResourceList, ResourceRow } from "../../components/ResourceRow";
 import type { Resource } from "../../model";
-import { knowledgeKeys, useKnowledgeModel, useMember, useReadingList, useReadingListEntries } from "../../queries";
-import { useItemsByName, useSpaces } from "../queries";
+import { knowledgeKeys, useItemsByName, useKnowledgeModel, useMember, useReadingList, useReadingListEntries } from "../../queries";
 import { AddResourcesDialog } from "./AddResourcesDialog";
 import { updatedLow } from "./CollectionsTab";
 

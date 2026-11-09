@@ -14,7 +14,7 @@ import { toast } from "@/components/ui/Toast";
 import { useWorkspace } from "@/lib/workspace";
 
 import type { Item } from "../../api";
-import { openContribute } from "../../components/Contribute";
+import { openContribute } from "../../components/contribute-store";
 import { LifecycleChip } from "../../components/LifecycleChip";
 import { ResourceList, ResourceRow } from "../../components/ResourceRow";
 import { tokens, type Resource } from "../../model";

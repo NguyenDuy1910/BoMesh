@@ -1,26 +1,30 @@
 "use client";
 
 import clsx from "clsx";
+import dynamic from "next/dynamic";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 
 import { useLanguage } from "@/lib/i18n";
+import { useOpened } from "@/lib/lazy";
 import { matchRoute, routeGate, type RouteInfo, type ShellMode } from "@/lib/navigation";
 import { useWorkspace } from "@/lib/workspace";
 import { ContributeHost, DocumentPreviewHost, KnowledgeDialogsHost } from "@/modules/knowledge/components/hosts";
 
-import { AppearanceDrawer } from "./AppearanceDrawer";
-import { CommandPalette } from "./CommandPalette";
 import { ModuleOff } from "./ModuleOff";
 import { NoAccess } from "./NoAccess";
 import { closeOverlay, openCommandPalette, useShellOverlays } from "./overlays";
 import { PageChromeProvider } from "./page-chrome";
-import { PreferencesDialog } from "./PreferencesDialog";
 import { usePreferencesSync } from "./preferences";
-import { ProductTour } from "./ProductTour";
-import { ShortcutsDialog } from "./ShortcutsDialog";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
+
+/* Shell overlays load on first open (none is on screen at first paint); `useOpened` keeps them mounted afterwards so they animate closed. */
+const CommandPalette = dynamic(() => import("./CommandPalette").then((m) => m.CommandPalette), { ssr: false });
+const PreferencesDialog = dynamic(() => import("./PreferencesDialog").then((m) => m.PreferencesDialog), { ssr: false });
+const AppearanceDrawer = dynamic(() => import("./AppearanceDrawer").then((m) => m.AppearanceDrawer), { ssr: false });
+const ShortcutsDialog = dynamic(() => import("./ShortcutsDialog").then((m) => m.ShortcutsDialog), { ssr: false });
+const ProductTour = dynamic(() => import("./ProductTour").then((m) => m.ProductTour), { ssr: false });
 
 const COLLAPSED_KEY = "bomesh.sidebarCollapsed";
 /** Below this width the sidebar is an off-canvas sheet (layout.css `@container app (max-width: 1023px)`). */
@@ -45,6 +49,10 @@ export function AppShell({ mode, children }: { mode: Exclude<ShellMode, "auth">;
   const router = useRouter();
   const route = matchRoute(pathname);
   const overlays = useShellOverlays();
+  const paletteOpened = useOpened(overlays.open === "palette");
+  const preferencesOpened = useOpened(overlays.open === "preferences");
+  const appearanceOpened = useOpened(overlays.open === "appearance");
+  const shortcutsOpened = useOpened(overlays.open === "shortcuts");
   const [collapsed, setCollapsed] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   usePreferencesSync();
@@ -110,13 +118,13 @@ export function AppShell({ mode, children }: { mode: Exclude<ShellMode, "auth">;
         </main>
         {navOpen && <div className="sidebar-backdrop" onClick={closeNav} aria-hidden />}
       </div>
-      <CommandPalette mode={mode} />
-      <PreferencesDialog />
-      <AppearanceDrawer />
-      <ShortcutsDialog />
+      {paletteOpened && <CommandPalette mode={mode} />}
+      {preferencesOpened && <PreferencesDialog />}
+      {appearanceOpened && <AppearanceDrawer />}
+      {shortcutsOpened && <ShortcutsDialog />}
       {mode === "workspace" && (
         <>
-          <ProductTour onStart={closeNav} />
+          {overlays.tour != null && <ProductTour onStart={closeNav} />}
           <ContributeHost />
           <KnowledgeDialogsHost />
           <DocumentPreviewHost />

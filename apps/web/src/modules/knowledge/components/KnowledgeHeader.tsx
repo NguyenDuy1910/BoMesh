@@ -9,7 +9,7 @@ import { SectionTabs } from "@/components/ui/SectionTabs";
 import { StatusChip } from "@/components/ui/StatusChip";
 import { useWorkspace } from "@/lib/workspace";
 
-import { openContribute } from "./Contribute";
+import { openContribute } from "./contribute-store";
 
 const HUB_TABS = [
   { id: "browse", label: "Browse", href: "/knowledge" },

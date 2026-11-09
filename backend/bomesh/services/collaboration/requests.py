@@ -74,11 +74,7 @@ from bomesh.services.collaboration.support import (
     now,
     replay,
 )
-from bomesh.services.conversations.citations import (
-    citation_record,
-    readable_source,
-    readable_summaries,
-)
+from bomesh.services.conversations.citations import citation_record, readable_source
 from bomesh.services.conversations.records import StoredCitation
 from bomesh.services.conversations.references import source_message_context
 from bomesh.services.kernel.audit import Audit
@@ -93,6 +89,8 @@ from bomesh.services.knowledge_items.items import KnowledgeItemService, create_d
 from bomesh.services.knowledge_items.names import parse_item
 from bomesh.services.knowledge_items.records import UploadedFile
 from bomesh.services.knowledge_items.summary import (
+    ItemSummary,
+    get_item_summaries,
     get_item_summary,
     visible_or_discoverable_summary,
 )
@@ -499,9 +497,9 @@ class RequestService:
         query: ListQuery,
         *,
         filtered_spaces: Iterable[str] = (),
-    ) -> list[RequestRecord]:
-        """Requests the caller filed or may decide; ``filtered_spaces`` are the space IDs
-        the filter names (PERMISSION_DENIED for one the caller cannot read)."""
+    ) -> tuple[list[RequestRecord], int]:
+        """Requests the caller filed or may decide, and their total; ``filtered_spaces`` are
+        the space IDs the filter names (PERMISSION_DENIED for one the caller cannot read)."""
         parent = f"workspaces/{workspace_id}"
         await self._gate.workspace(
             ctx, workspace_id, "requests", "requests.list", parent, write=False
@@ -517,8 +515,9 @@ class RequestService:
         )
         statement = select(Request).where(Request.tenant_id == workspace_id, visible)
         async with transaction_scope(self._sessions) as session:
+            total = int(await session.scalar(query.count(statement)) or 0)
             rows = list(await session.scalars(query.apply(statement)))
-            return [await _record(session, ctx, workspace_id, row) for row in rows]
+            return await _records(session, ctx, workspace_id, rows), total
 
     async def _readable_space(
         self, ctx: RequestContext, workspace_id: UUID, code: str
@@ -1062,42 +1061,91 @@ async def _decider_candidates(
 async def _record(
     session: AsyncSession, ctx: RequestContext, workspace_id: UUID, request: Request
 ) -> RequestRecord:
-    space_code = None
-    if request.space_id is not None:
-        space_code = await session.scalar(
-            select(Space.code).where(Space.id == request.space_id)
-        )
-    type_code = None
-    if request.request_type_id is not None:
-        type_code = await session.scalar(
-            select(RequestType.code).where(RequestType.id == request.request_type_id)
-        )
-    requested_role = (
-        await _role_name(session, request.requested_role_id)
-        if request.requested_role_id is not None
-        else None
-    )
-    return RequestRecord(
-        workspace_id=workspace_id,
-        request=request,
-        space_code=space_code,
-        request_type_code=type_code,
-        requested_role=requested_role,
-        overdue=_is_overdue(request),
-        assistant_context=await _render_context(session, ctx, workspace_id, request),
-        eligibility=await _eligibility_for_reader(session, ctx, workspace_id, request),
-    )
+    return (await _records(session, ctx, workspace_id, [request]))[0]
 
 
-async def _eligibility_for_reader(
-    session: AsyncSession, ctx: RequestContext, workspace_id: UUID, request: Request
+async def _records(
+    session: AsyncSession,
+    ctx: RequestContext,
+    workspace_id: UUID,
+    requests: Sequence[Request],
+) -> list[RequestRecord]:
+    """Records of ``requests`` for this reader; references and citations load once for all."""
+    space_codes = await _codes(
+        session, Space.id, Space.code, (r.space_id for r in requests)
+    )
+    type_codes = await _codes(
+        session, RequestType.id, RequestType.code, (r.request_type_id for r in requests)
+    )
+    role_codes = await _codes(
+        session, Role.id, Role.code, (r.requested_role_id for r in requests)
+    )
+    cited = {
+        request.id: [
+            StoredCitation.from_json(entry)
+            for entry in (request.assistant_context or {}).get("citations") or ()
+        ]
+        for request in requests
+    }
+    summaries = await get_item_summaries(
+        session,
+        ctx.authorizer,
+        ctx.principal,
+        workspace_id,
+        (citation.item_id for citations in cited.values() for citation in citations),
+    )
+    readable = await readable_citations(
+        session,
+        ctx,
+        workspace_id,
+        [
+            result
+            for request in requests
+            for result in (request.eligibility or {}).get("results") or ()
+        ],
+    )
+    return [
+        RequestRecord(
+            workspace_id=workspace_id,
+            request=request,
+            space_code=space_codes.get(request.space_id),
+            request_type_code=type_codes.get(request.request_type_id),
+            requested_role=(
+                f"roles/{role_codes.get(request.requested_role_id)}"
+                if request.requested_role_id is not None
+                else None
+            ),
+            overdue=_is_overdue(request),
+            assistant_context=_render_context(
+                workspace_id, request, cited[request.id], summaries
+            ),
+            eligibility=_eligibility_for_reader(request, readable),
+        )
+        for request in requests
+    ]
+
+
+async def _codes(
+    session: AsyncSession,
+    key: Any,
+    code: Any,
+    ids: Iterable[UUID | None],
+) -> dict[UUID, str]:
+    """``code`` by ``key`` for the non-null ``ids`` (one query)."""
+    wanted = {value for value in ids if value is not None}
+    if not wanted:
+        return {}
+    return dict((await session.execute(select(key, code).where(key.in_(wanted)))).tuples().all())
+
+
+def _eligibility_for_reader(
+    request: Request, readable: frozenset[str]
 ) -> dict[str, Any] | None:
     """Stored eligibility with each ``policyCitation`` the reader cannot read dropped."""
     stored = request.eligibility
     if not stored:
         return None
     results = stored.get("results") or []
-    readable = await readable_citations(session, ctx, workspace_id, results)
     return {
         **stored,
         "results": [
@@ -1132,8 +1180,11 @@ async def _assistant_context(
     }
 
 
-async def _render_context(
-    session: AsyncSession, ctx: RequestContext, workspace_id: UUID, request: Request
+def _render_context(
+    workspace_id: UUID,
+    request: Request,
+    cited: Sequence[StoredCitation],
+    summaries: Mapping[UUID, ItemSummary],
 ) -> AssistantContext | None:
     """``assistantContext`` for this reader (the share rule).
 
@@ -1144,10 +1195,6 @@ async def _render_context(
     stored = request.assistant_context
     if not stored:
         return None
-    cited = [StoredCitation.from_json(entry) for entry in stored.get("citations") or ()]
-    summaries = await readable_summaries(
-        session, ctx.authorizer, ctx.principal, workspace_id, (c.item_id for c in cited)
-    )
     answer = stored.get("answer") or ""
     if not all(readable_source(summaries, citation.item_id) for citation in cited):
         answer = ""

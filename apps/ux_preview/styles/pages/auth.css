@@ -15,6 +15,13 @@
 .au-form-error { margin-bottom: 16px; }
 .au-foot { margin-top: 24px; text-align: center; font-size: 13px; color: var(--muted); }
 .au-foot .link-button { font-size: 13px; }
+/* Why the person is on Sign in (?reason=expired); replaces the welcome line. */
+.au-notice { margin: -8px 0 24px; }
+/* Session expired: the sign-in form inside a small dialog over the page that stays open. */
+.au-reauth .au-or { margin: 16px 0; }
+.au-reauth .au-form-error { margin: 16px 0 0; }
+.au-reauth > .button--primary { margin-top: 20px; }
+.au-reauth .au-foot { margin-top: 16px; }
 
 /* Demo accounts: a folded prototype aid under the form (disclosure); one-click identities inside */
 .au-demo { margin-top: 28px; }

@@ -10,10 +10,11 @@ import { EmptyState, ErrorState, List, ListItem, NoMatches, SkeletonRows, toast,
 import { api, call, resourceId, type Schema } from "@/lib/api/client";
 import { rel } from "@/lib/format";
 import { useLanguage } from "@/lib/i18n";
-import { isPlatformOperator, useSession } from "@/lib/session";
+import { isPlatformOperator, useSession, useSessionExpired } from "@/lib/session";
 import { listMyWorkspaces } from "@/lib/workspace";
 import { openWorkspace, roleDisplayName, signOut, TEMPLATE_LABEL, workspacesOpened } from "@/modules/auth/api";
 import { AuthLayout } from "@/modules/auth/components/AuthLayout";
+import { signInHref } from "@/modules/auth/next";
 
 interface Choice {
   id: string;
@@ -41,22 +42,26 @@ export function WorkspaceChooserPage() {
   const router = useRouter();
   const next = useSearchParams().get("next");
   const session = useSession();
+  const expired = useSessionExpired();
   // Re-render on a language switch so "Last opened …" follows it (`rel` reads the interface language).
   useLanguage();
   const [signedOutChecked, setSignedOutChecked] = useState(false);
   const [q, setQ] = useState("");
   const [opening, setOpening] = useState<string | null>(null);
 
-  // useSession is null during server render; check after mount before redirecting.
+  // useSession is null during server render; check after mount before redirecting. An expired session has
+  // nothing to keep on this page: Sign in explains and comes back here.
   useEffect(() => setSignedOutChecked(true), []);
   useEffect(() => {
-    if (signedOutChecked && !session) router.replace("/signin");
-  }, [signedOutChecked, session, router]);
+    if (!signedOutChecked) return;
+    if (expired) router.replace(signInHref(`${window.location.pathname}${window.location.search}`, "expired"));
+    else if (!session) router.replace("/signin");
+  }, [signedOutChecked, session, expired, router]);
 
   const query = useQuery({
     queryKey: ["my-workspaces", session?.user.name],
     queryFn: loadChoices,
-    enabled: !!session,
+    enabled: !!session && !expired,
   });
 
   const rows = useMemo(() => {

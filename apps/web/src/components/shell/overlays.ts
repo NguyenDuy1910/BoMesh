@@ -62,6 +62,11 @@ export function setTourStep(step: number | null): void {
   set({ tour: step });
 }
 
+/** Opens the chat home and starts the product tour there. */
+export function startTour(): void {
+  setTourStep(0);
+}
+
 export function getTourStep(): number | null {
   return state.tour;
 }

@@ -20,14 +20,8 @@
 .rdr-hits { display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 12px; border-radius: var(--radius-xl); background: var(--evidence); font-size: 13px; font-weight: 500; }
 .rdr-hits .button--ghost { --button-bg-hover: var(--evidence-strong); }
 
-/* Body: outline · canvas · rail */
+/* Body: canvas · rail */
 .rdr-body { position: relative; flex: 1 1 auto; min-height: 0; display: flex; }
-.rdr-outline { flex: none; width: 220px; padding: 12px; border-right: 1px solid var(--separator); overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
-.rdr-outline--closed { width: auto; padding: 12px 6px; }
-.rdr-outline__head { display: flex; align-items: center; justify-content: space-between; padding: 0 0 6px 10px; }
-.rdr-outline__link { display: block; width: 100%; text-align: left; padding: 6px 10px; border-radius: var(--radius-lg); font-size: 13px; line-height: 18px; color: var(--muted); }
-.rdr-outline__link:hover { background: var(--default); color: var(--foreground); }
-.rdr-outline__link.is-on { color: var(--foreground); font-weight: 500; background: var(--default); }
 .rdr-canvas { flex: 1 1 auto; min-width: 0; overflow: auto; padding: 28px; background: var(--surface-secondary); }
 .rdr-banners { max-width: 760px; margin: 0 auto 16px; display: flex; flex-direction: column; gap: 8px; }
 .rdr-sub-quote { margin: 4px 0 6px; padding: 6px 10px; border-left: 2px solid var(--border-secondary); border-radius: 0 var(--radius-lg) var(--radius-lg) 0; background: color-mix(in oklab, var(--surface) 60%, transparent); color: var(--foreground); white-space: pre-line; }
@@ -221,10 +215,6 @@
   .doc-page { padding: 40px 40px; }
   .doc-page--pdf, .doc-page--docx { padding: 64px 56px 56px; }
   .doc-run { left: 56px; right: 56px; }
-}
-/* Narrow: no outline column; its sections are under ⋯ → Contents. */
-@container app (max-width: 760px) {
-  .rdr-outline { display: none; }
 }
 /* Phones: one compact row — (Back) · title on one line · Ask, Save and ⋯ as icons. The meta lives in About, the zoom stays in the
    file's own app (only "Page n of N" remains), and the header slides away while reading down (.is-collapsed, set on scroll). */

@@ -2,7 +2,7 @@
 
 import { Button, Dropdown, Header, Input, Label, TextField } from "@heroui/react";
 import clsx from "clsx";
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, History, List as ListIcon, ListPlus, Quote, Search, Send, ShieldCheck, Sparkles, X, Zap, RotateCcw } from "lucide-react";
+import { ChevronDown, ChevronUp, History, ListPlus, Quote, Search, Send, ShieldCheck, Sparkles, X, Zap, RotateCcw } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -26,7 +26,7 @@ import { ResourceMenu, SaveButton, useUseInEntries } from "../../components/Reso
 import { TrustChip, useTrust } from "../../components/TrustChip";
 import { documentMarks, renditionText, searchNeedles, NO_MARKS } from "../marks";
 import { explainPassagePrompt, parseReaderQuery, readerHref, revisionNumber } from "../links";
-import { isSpreadsheetType, RenditionLoadError, renditionOutline } from "../rendition";
+import { isSpreadsheetType, RenditionLoadError } from "../rendition";
 import { useCanProcess, useConversationCitations, usePassages, useProcessDocument, useReaderContent, useReaderItem, useRevisions, useSubmission } from "../queries";
 import { AboutPane } from "./AboutPane";
 import { AskPane, type AskTurn } from "./AskPane";
@@ -39,7 +39,7 @@ import { SubmissionView } from "./SubmissionView";
 import { useRendition } from "./useRendition";
 
 /**
- * The Reader (`/doc/[id]`, preview `P.docViewer`): header with trust and actions, outline,
+ * The Reader (`/doc/[id]`, preview `P.docViewer`): header with trust and actions,
  * the page canvas with cited-passage and search highlights, and a rail (Ask · About · Related).
  * Deep links: `?q=&page=&passage=&from=&v=` (document_viewer.md).
  */
@@ -155,8 +155,14 @@ function Reader({ resource: r }: { resource: Resource }) {
   const content = useReaderContent(r.id, viewing === current ? undefined : String(viewing), { enabled: readable });
   const passages = usePassages(r.id, passageIds);
 
-  /* ── Rendition ── */
-  const rendition = useRendition(r.id, content.data);
+  // Page images of the viewed revision, in page order: the document's own pages.
+  const pageImages = useMemo(
+    () => [...(content.data?.pageAssets ?? [])].filter((p) => p.imageUri).sort((a, b) => (a.pageNumber ?? 0) - (b.pageNumber ?? 0)),
+    [content.data],
+  );
+
+  /* ── Rendition: only downloaded when it is what the canvas shows (no page images) ── */
+  const rendition = useRendition(r.id, content.data, { enabled: !pageImages.length });
   const rd = rendition.doc;
 
   /* ── Highlights ── */
@@ -200,42 +206,10 @@ function Reader({ resource: r }: { resource: Resource }) {
   const open = railPref ?? (width === 0 || width >= RAIL_MIN);
   const [tab, setTab] = useState<Tab>("ask");
   const activeTab: Tab = !readable && tab === "ask" ? "about" : tab;
-  const [outlineOpen, setOutlineOpen] = useState(true);
   const sheet = isSpreadsheetType(r.mime);
-  const outline = useMemo(() => (rd ? renditionOutline(rd).filter((o) => o.id !== (rd.blocks[0]?.kind === "heading" ? rd.blocks[0].id : "")) : []), [rd]);
-  const hasOutline = readable && !sheet && outline.length > 1;
   const pageCount = Math.max(content.data?.pageAssets?.length ?? 0, ...(rd?.blocks.map((b) => b.page ?? 0) ?? [0]));
-  // Page images of the current revision, in page order: the document's own pages.
-  const pageImages = useMemo(
-    () => [...(content.data?.pageAssets ?? [])].filter((p) => p.imageUri).sort((a, b) => (a.pageNumber ?? 0) - (b.pageNumber ?? 0)),
-    [content.data],
-  );
   // Which page to open on: `?page=`, else the first cited passage's page.
   const citedPage = Number(query.page) || resolved.find((p) => p.boundingBoxes?.[0]?.pageNumber)?.boundingBoxes?.[0]?.pageNumber || 0;
-  const [activeHeading, setActiveHeading] = useState("");
-
-  const jump = (id: string) => {
-    const sc = scrollRef.current;
-    const h = sc?.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(id)}"]`);
-    if (!sc || !h) return;
-    sc.scrollTo({ top: sc.scrollTop + h.getBoundingClientRect().top - sc.getBoundingClientRect().top - 24, behavior: "smooth" });
-  };
-  useEffect(() => {
-    const sc = scrollRef.current;
-    if (!sc || !hasOutline) return;
-    const track = () => {
-      const top = sc.getBoundingClientRect().top + sc.clientHeight / 3;
-      let on = outline[0]?.id ?? "";
-      for (const o of outline) {
-        const h = sc.querySelector(`[data-block-id="${CSS.escape(o.id)}"]`);
-        if (h && h.getBoundingClientRect().top <= top) on = o.id;
-      }
-      setActiveHeading(on);
-    };
-    track();
-    sc.addEventListener("scroll", track, { passive: true });
-    return () => sc.removeEventListener("scroll", track);
-  }, [hasOutline, outline, rd]);
 
   /* ── Ask (in place, through the conversation API) ── */
   const [thread, setThread] = useState<AskTurn[]>([]);
@@ -351,26 +325,6 @@ function Reader({ resource: r }: { resource: Resource }) {
         </Dropdown>
       ) : null}
       <DownloadButton onPress={() => void ops.download(r)} />
-      {hasOutline ? (
-        <Dropdown>
-          <Button isIconOnly variant="ghost" className="button--muted rdr-outline-btn" aria-label="Outline">
-            <ListIcon aria-hidden />
-          </Button>
-          <Dropdown.Popover placement="bottom end">
-            <Dropdown.Menu aria-label="On this page" onAction={(key) => jump(String(key))}>
-              <Dropdown.Section>
-                <Header>On this page</Header>
-                {outline.map((o) => (
-                  <Dropdown.Item key={o.id} id={o.id} textValue={o.title}>
-                    <ChevronRight className="i" aria-hidden />
-                    <Label translate="no">{o.title}</Label>
-                  </Dropdown.Item>
-                ))}
-              </Dropdown.Section>
-            </Dropdown.Menu>
-          </Dropdown.Popover>
-        </Dropdown>
-      ) : null}
       <PanelToggle open={open} onToggle={() => setRailPref(!open)} />
       <ResourceMenu resource={r} size="md" hideOpen q={query.q} />
     </>
@@ -497,12 +451,11 @@ function Reader({ resource: r }: { resource: Resource }) {
         }}
       />
     );
+  } else if (pageImages.length) {
+    // The document as it is (document_viewer.md: PDFs keep page images); the rendition isn't downloaded.
+    canvas = <PageImageView pages={pageImages} pageCount={pageCount} focusPage={citedPage} />;
   } else if (!rd?.blocks.length) {
     canvas = <NothingToShow />;
-  } else if (pageImages.length) {
-    // The document as it is (document_viewer.md: PDFs keep page images). The rendition stays
-    // loaded for the outline, Ask, citations and search — reading and indexing are separate concerns.
-    canvas = <PageImageView pages={pageImages} pageCount={pageCount} focusPage={citedPage} />;
   } else {
     canvas = <RenditionView rendition={rd} marks={marks} focusHit={focusHit} sheet={sheet} pageCount={pageCount} />;
   }
@@ -580,31 +533,6 @@ function Reader({ resource: r }: { resource: Resource }) {
         {hits}
       </ReaderHead>
       <div className={clsx("rdr-body", open && "has-rail")}>
-        {hasOutline ? (
-          outlineOpen ? (
-            <nav className="rdr-outline" aria-label="Outline">
-              <div className="rdr-outline__head">
-                <span className="t-label">On this page</span>
-                <IconButton icon={ChevronLeft} tip="Hide outline" size="sm" onPress={() => setOutlineOpen(false)} />
-              </div>
-              {outline.map((o, i) => (
-                <button
-                  key={o.id}
-                  type="button"
-                  className={clsx("rdr-outline__link", (activeHeading ? activeHeading === o.id : !i) && "is-on")}
-                  onClick={() => jump(o.id)}
-                  translate="no"
-                >
-                  {o.title}
-                </button>
-              ))}
-            </nav>
-          ) : (
-            <nav className="rdr-outline rdr-outline--closed" aria-label="Outline">
-              <IconButton icon={ListIcon} tip="Show outline" size="sm" onPress={() => setOutlineOpen(true)} />
-            </nav>
-          )
-        ) : null}
         <div className="rdr-canvas" id="rdr-scroll" ref={scrollRef}>
           {verBanner || trustBanner ? (
             <div className="rdr-banners">

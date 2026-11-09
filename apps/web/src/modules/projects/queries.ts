@@ -1,25 +1,23 @@
 "use client";
 
 import {
-  useQueries,
   useQuery,
   useQueryClient,
   type QueryClient,
 } from "@tanstack/react-query";
 import { useEffect, useMemo } from "react";
 
-import { ApiError, resourceId } from "@/lib/api/client";
+import { resourceId } from "@/lib/api/client";
 import { getSession, useSession } from "@/lib/session";
 import { useWorkspace } from "@/lib/workspace";
-import { getItem, type Item } from "@/modules/knowledge/api";
-import { knowledgeKeys } from "@/modules/knowledge/queries";
+import type { Item } from "@/modules/knowledge/api";
+import { useItemsByName } from "@/modules/knowledge/queries";
 
 import { projectsAdapter } from "./adapter";
 import {
-  answerFirstLine,
   conversationTime,
-  getLastAnswer,
   listConversations,
+  listRecentConversations,
   type Conversation,
 } from "./conversations";
 import type { Project, ProjectScope } from "./types";
@@ -28,8 +26,8 @@ import type { Project, ProjectScope } from "./types";
 export const conversationKeys = {
   all: (ws: string) => [ws, "conversations"] as const,
   list: (ws: string) => [ws, "conversations", "list"] as const,
-  lastAnswer: (ws: string, conversation: string, at: string) =>
-    [ws, "conversations", "lastAnswer", conversation, at] as const,
+  /** The newest conversations only (sidebar Recent); suffixed with the page size. */
+  recent: (ws: string) => [ws, "conversations", "recent"] as const,
 };
 export const projectKeys = {
   all: (ws: string) => [ws, "projects"] as const,
@@ -48,12 +46,24 @@ export function invalidateConversations(qc: QueryClient, ws: string) {
 }
 
 /** Every conversation the caller owns. */
-export function useConversations() {
+export function useConversations(enabled = true) {
   const { id } = useWorkspace();
   return useQuery({
     queryKey: conversationKeys.list(id),
     queryFn: () => listConversations(id),
+    enabled,
     staleTime: 30_000,
+  });
+}
+
+/** The caller's `pageSize` most recently active conversations; creating, renaming or deleting one invalidates it. */
+export function useRecentConversations(pageSize: number, enabled = true) {
+  const { id } = useWorkspace();
+  return useQuery({
+    queryKey: [...conversationKeys.recent(id), pageSize],
+    queryFn: () => listRecentConversations(id, pageSize),
+    enabled,
+    staleTime: 5 * 60_000,
   });
 }
 
@@ -102,9 +112,12 @@ export interface ConversationModel {
   refetch: () => void;
 }
 
-/** Conversations joined with projects: each conversation appears once, in its project or in Recent. */
-export function useConversationModel(): ConversationModel {
-  const conversations = useConversations();
+/**
+ * Conversations joined with projects: each conversation appears once, in its project or in Recent.
+ * Loads every conversation; `enabled = false` skips that (empty model).
+ */
+export function useConversationModel(enabled = true): ConversationModel {
+  const conversations = useConversations(enabled);
   const projects = useProjects();
   const model = useMemo(() => {
     const list = [...(conversations.data ?? [])].sort(
@@ -164,20 +177,6 @@ export function useConversationProject(
   );
 }
 
-/** First line of the conversation's latest answer, loaded on demand and cached per activity time. */
-export function useLastAnswer(conversation: Conversation): string {
-  const { id } = useWorkspace();
-  const at = conversation.lastMessageTime ?? "";
-  const query = useQuery({
-    queryKey: conversationKeys.lastAnswer(id, conversation.name ?? "", at),
-    queryFn: () => getLastAnswer(id, conversation.name ?? ""),
-    enabled: !!at && !!conversation.name,
-    staleTime: Infinity,
-    retry: false,
-  });
-  return answerFirstLine(query.data?.text);
-}
-
 /**
  * Knowledge references of a project the caller can open now (never the others), in the
  * project's order. Unreadable or deleted items are dropped silently.
@@ -186,27 +185,18 @@ export function useProjectReferences(projectId: string | undefined | null): {
   items: Item[];
   isPending: boolean;
 } {
-  const { id: ws } = useWorkspace();
   const projects = useProjects();
   const refs = projects.data?.find((p) => p.id === projectId)?.references ?? [];
-  const results = useQueries({
-    queries: refs.map((ref) => ({
-      queryKey: knowledgeKeys.item(ws, resourceId(ref)),
-      queryFn: () => getItem(ws, resourceId(ref)),
-      retry: (count: number, error: unknown) =>
-        !(error instanceof ApiError && error.status < 500) && count < 2,
-      staleTime: 60_000,
-    })),
-  });
-  const items = results
-    .map((r) => r.data)
+  const loaded = useItemsByName(refs);
+  const items = refs
+    .map((ref) => loaded.items.get(ref))
     .filter(
       (item): item is Item =>
         !!item && item.state !== "DELETED" && item.itemType === "DOCUMENT",
     );
   return {
     items,
-    isPending: projects.isPending || results.some((r) => r.isPending),
+    isPending: projects.isPending || loaded.isPending,
   };
 }
 

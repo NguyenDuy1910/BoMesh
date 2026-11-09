@@ -7,7 +7,7 @@ import { useSearchParams } from "next/navigation";
 import { Page, PageHeader, PreviewChip, SectionTabs } from "@/components/ui";
 import { PageChrome } from "@/components/shell/page-chrome";
 import { useWorkspace } from "@/lib/workspace";
-import { openContribute } from "@/modules/knowledge/components/Contribute";
+import { openContribute } from "@/modules/knowledge/components/contribute-store";
 
 import { DOCS_BASE, TABS, type CurationTab } from "../model";
 import { useAllTopics, useReviewQueue } from "../queries";

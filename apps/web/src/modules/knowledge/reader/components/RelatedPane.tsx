@@ -11,7 +11,7 @@ import { resourceId } from "@/lib/api/client";
 
 import type { Resource } from "../../model";
 import { useKnowledgeModel } from "../../queries";
-import { useShareLabel } from "../../components/AddToCollectionDialog";
+import { useShareLabel } from "../../components/share-label";
 import { openAddToCollection } from "../../components/dialogs";
 import { ResourceList, ResourceRow } from "../../components/ResourceRow";
 import { useCollectionsIncluding, useRelated } from "../queries";

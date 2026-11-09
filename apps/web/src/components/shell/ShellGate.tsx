@@ -1,17 +1,23 @@
 "use client";
 
 import { Skeleton } from "@heroui/react";
+import dynamic from "next/dynamic";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 
 import { ErrorState } from "@/components/ui/ErrorState";
 import { Page } from "@/components/ui/Page";
 import { SkeletonRows } from "@/components/ui/SkeletonRows";
-import { isPlatformOperator, useSession } from "@/lib/session";
+import { useOpened } from "@/lib/lazy";
+import { isPlatformOperator, useSession, useSessionExpired } from "@/lib/session";
 import { WorkspaceProvider } from "@/lib/workspace";
+import { signInHref } from "@/modules/auth/next";
 
 import { AppShell } from "./AppShell";
 import { NoAccess } from "./NoAccess";
+
+/** Loads once a session expires (it carries the sign-in form); stays mounted afterwards so it animates closed. */
+const SessionExpiredDialog = dynamic(() => import("./SessionExpiredDialog").then((m) => m.SessionExpiredDialog), { ssr: false });
 
 const subscribeNever = () => () => undefined;
 
@@ -61,14 +67,38 @@ function Redirect({ to }: { to: string }) {
   return <ShellSkeleton />;
 }
 
-/** Signed-out visitors go to Sign in, then come back here. */
+/** Another account signed in over this page: a full load of Home, so nothing of the previous one stays in memory. */
+function SwitchAccount() {
+  useEffect(() => {
+    window.location.replace("/home");
+  }, []);
+  return <ShellSkeleton />;
+}
+
+/**
+ * Signed-out visitors go to Sign in, then come back here. A session that expires while
+ * the page is open keeps the page (and its client state) behind `SessionExpiredDialog`;
+ * one already expired when the page loads has nothing to keep, so Sign in explains instead.
+ */
 function RequireSession({ children }: { children: ReactNode }) {
   const hydrated = useHydrated();
   const session = useSession();
+  const expired = useSessionExpired();
   const href = useCurrentHref();
+  const expiredOpened = useOpened(expired);
+  // The user this page is rendered for: whoever had a working session when it first rendered.
+  const [owner, setOwner] = useState<string | null>(null);
+  if (hydrated && session && !expired && owner === null) setOwner(session.user.name);
   if (!hydrated) return <ShellSkeleton />;
-  if (!session) return <Redirect to={`/signin?next=${encodeURIComponent(href)}`} />;
-  return <>{children}</>;
+  if (!session) return <Redirect to={signInHref(href)} />;
+  if (owner === null) return expired ? <Redirect to={signInHref(href, "expired")} /> : <ShellSkeleton />;
+  if (session.user.name !== owner) return <SwitchAccount />;
+  return (
+    <>
+      {children}
+      {expiredOpened ? <SessionExpiredDialog session={expired ? session : null} href={href} /> : null}
+    </>
+  );
 }
 
 /** `(app)` layout body: session → active workspace → workspace shell. */

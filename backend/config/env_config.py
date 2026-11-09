@@ -110,6 +110,20 @@ def email_set(name: str) -> frozenset[str]:
     return emails
 
 
+def origin_list(name: str) -> tuple[str, ...]:
+    """Read comma-separated web origins (``scheme://host[:port]``, no path)."""
+
+    raw_values = (os.getenv(name) or "").split(",")
+    origins = tuple(dict.fromkeys(v.strip().rstrip("/") for v in raw_values if v.strip()))
+    for origin in origins:
+        scheme, _, rest = origin.partition("://")
+        if scheme not in ("http", "https") or not rest or "/" in rest:
+            raise RuntimeError(
+                f"{name} must contain comma-separated origins like https://app.example.com"
+            )
+    return origins
+
+
 def number(name: str, *, default: float) -> float:
     """Read one floating point setting."""
 
@@ -129,11 +143,14 @@ def number(name: str, *, default: float) -> float:
 
 @dataclass(frozen=True, slots=True)
 class ServerConfig:
-    """Uvicorn bootstrap settings."""
+    """Uvicorn bootstrap settings and the browser origins the API trusts."""
 
     host: str = "127.0.0.1"
     port: int = 8000
     log_level: str = "INFO"
+    #: Web origins allowed by CORS and ``Timing-Allow-Origin``; empty = any origin
+    #: (local development; identity is only ever the bearer token).
+    web_origins: tuple[str, ...] = ()
 
     @classmethod
     def from_environment(cls) -> ServerConfig:
@@ -141,6 +158,7 @@ class ServerConfig:
             host=text("BOMESH_HOST", "127.0.0.1"),
             port=integer("BOMESH_PORT", default=8000),
             log_level=text("BOMESH_LOG_LEVEL", "INFO").upper(),
+            web_origins=origin_list("BOMESH_WEB_ORIGINS"),
         )
 
 
@@ -961,6 +979,7 @@ __all__ = [
     "get_config",
     "integer",
     "number",
+    "origin_list",
     "optional_number",
     "optional_text",
     "reset_config",

@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh.db.models import Item
-from bomesh.iam.authorizer import Authorizer, ItemRef, Principal, item_ancestry
+from bomesh.iam.authorizer import Authorizer, ItemRef, Principal, item_ancestries
 from bomesh.iam.visibility import is_visible
 from bomesh.services.knowledge_items.item_store import (
     HIDDEN_KINDS,
@@ -62,17 +62,51 @@ async def get_item_summary(
     item_id: UUID,
 ) -> ItemSummary | None:
     """The summary of ``item_id`` for ``principal``, or ``None`` when it must look absent."""
-    referenced = await session.get(Item, item_id)
-    if referenced is None or referenced.tenant_id != workspace_id:
-        return None
-    item = await _merge_target(session, referenced)
-    if item is None:
-        return None
-    if not await is_visible(authorizer, principal, ItemRef(workspace_id, item.id)):
-        return None
-    if any(node.system_kind in HIDDEN_KINDS for node in await authorizer.ancestry(item.id)):
-        return None
-    return _summary(item, merged_from=referenced.id if item.id != referenced.id else None)
+    summaries = await get_item_summaries(session, authorizer, principal, workspace_id, (item_id,))
+    return summaries.get(item_id)
+
+
+async def get_item_summaries(
+    session: AsyncSession,
+    authorizer: Authorizer,
+    principal: Principal,
+    workspace_id: UUID,
+    item_ids: Iterable[UUID],
+) -> dict[UUID, ItemSummary]:
+    """:func:`get_item_summary` of each readable item, keyed by the referenced ID.
+
+    Rows, ancestries and grants load once for all ids; unreadable ids are absent.
+    """
+    ids = list(dict.fromkeys(item_ids))
+    if not ids:
+        return {}
+    referenced = {
+        row.id: row
+        for row in await session.scalars(
+            select(Item).where(Item.id.in_(ids), Item.tenant_id == workspace_id)
+        )
+    }
+    targets: dict[UUID, Item] = {}
+    for item_id, row in referenced.items():
+        target = await _merge_target(session, row)
+        if target is not None:
+            targets[item_id] = target
+    target_ids = list(dict.fromkeys(target.id for target in targets.values()))
+    paths = await authorizer.ancestries(target_ids)
+    await authorizer.collection_permissions_many(
+        principal, [(target_id, False) for target_id in target_ids]
+    )
+    summaries: dict[UUID, ItemSummary] = {}
+    for item_id in ids:
+        item = targets.get(item_id)
+        if item is None:
+            continue
+        if not await is_visible(authorizer, principal, ItemRef(workspace_id, item.id)):
+            continue
+        if any(node.system_kind in HIDDEN_KINDS for node in paths[item.id]):
+            continue
+        summaries[item_id] = _summary(item, merged_from=item_id if item.id != item_id else None)
+    return summaries
 
 
 async def visible_or_discoverable_summary(
@@ -200,14 +234,15 @@ async def collection_ids_for_spaces(
 
 async def _hidden_or_dead(session: AsyncSession, collection_ids: list[UUID]) -> frozenset[UUID]:
     """Collections under a hidden system collection or a deleted ancestor."""
-    excluded: set[UUID] = set()
-    for collection_id in collection_ids:
-        path = await item_ancestry(session, collection_id)
+    paths = await item_ancestries(session, collection_ids)
+    return frozenset(
+        collection_id
+        for collection_id in collection_ids
         if any(
-            node.deleted_at is not None or node.system_kind in HIDDEN_KINDS for node in path
-        ):
-            excluded.add(collection_id)
-    return frozenset(excluded)
+            node.deleted_at is not None or node.system_kind in HIDDEN_KINDS
+            for node in paths.get(collection_id, ())
+        )
+    )
 
 
 async def _merge_target(session: AsyncSession, item: Item) -> Item | None:

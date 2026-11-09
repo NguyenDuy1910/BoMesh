@@ -38,10 +38,13 @@ export function useProjectActions() {
   const scope = useProjectScope();
   const ws = scope.workspace;
 
+  /** Applies `update` to every cached conversation list (all, and the sidebar's recent page). */
+  const updateLists = (update: (list: Conversation[]) => Conversation[]) => {
+    for (const queryKey of [conversationKeys.list(ws), conversationKeys.recent(ws)])
+      qc.setQueriesData<Conversation[]>({ queryKey }, (list) => list && update(list));
+  };
   const patchCached = (name: string, patch: Partial<Conversation>) =>
-    qc.setQueryData<Conversation[]>(conversationKeys.list(ws), (list) =>
-      list?.map((c) => (c.name === name ? { ...c, ...patch } : c)),
-    );
+    updateLists((list) => list.map((c) => (c.name === name ? { ...c, ...patch } : c)));
 
   async function setTitle(conversation: Conversation, displayName: string) {
     const name = conversation.name ?? "";
@@ -82,9 +85,7 @@ export function useProjectActions() {
     } catch (error) {
       return fail(error);
     }
-    qc.setQueryData<Conversation[]>(conversationKeys.list(ws), (list) =>
-      list?.filter((c) => c.name !== name),
-    );
+    updateLists((list) => list.filter((c) => c.name !== name));
     invalidateConversations(qc, ws);
     onDeleted?.();
     if (wasOpen) router.push("/chat");

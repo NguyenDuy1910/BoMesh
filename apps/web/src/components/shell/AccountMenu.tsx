@@ -13,9 +13,8 @@ import { accentColor, setMode, themeLabel, type ThemeMode } from "@/lib/theme";
 import { useOptionalWorkspace } from "@/lib/workspace";
 import { signOut, useRoleDisplayName } from "@/modules/auth/api";
 
-import { changeLanguage } from "./LanguagePicker";
-import { openAppearance, openPreferences, openShortcuts } from "./overlays";
-import { startTour } from "./ProductTour";
+import { changeLanguage } from "./language";
+import { openAppearance, openPreferences, openShortcuts, startTour } from "./overlays";
 import { useAppearance } from "./useAppearance";
 
 const MODES: { mode: ThemeMode; label: string; icon: LucideIcon }[] = [

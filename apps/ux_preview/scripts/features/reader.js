@@ -1,7 +1,8 @@
 /* Reader — the universal resource reader (/doc/:id?q&page&from&v&ask).
    Content first: one header row carries Ask (primary), Save and ⋯ (on phones it
-   shrinks to title + icons and slides away while reading down); the outline and
-   the page canvas (cited-passage and search highlights) show by default, and one
+   shrinks to title + icons and slides away while reading down); the page canvas
+   (cited-passage and search highlights) fills the reader — no outline column:
+   the document's own pages and the viewer bar are the navigation — and one
    side panel opens on demand with Tabs Ask · About · Related: Ask answers in
    place from the document's own passages and cites them (the header's Ask, the
    selection toolbar, and ?ask=1 — "Ask about this document" from anywhere);
@@ -17,11 +18,10 @@
 (() => {
   'use strict';
 
-  const RAIL_MIN = 1024, OUTLINE_MIN = 760;
+  const RAIL_MIN = 1024;
   const frameW = () => $('#frame')?.clientWidth || innerWidth;
-  /** Content first: the side panel (Ask · About · Related) opens on demand and closes when another document opens. The outline is
-      the only other panel: open by default for longer documents (outline: null = automatic), and never alongside the side panel. */
-  const rdrUi = () => ui('rdr', { outline: null, rail: false, tab: 'ask', hit: 0, hitKey: '', doc: '' });
+  /** Content first: the side panel (Ask · About · Related) opens on demand and closes when another document opens. */
+  const rdrUi = () => ui('rdr', { rail: false, tab: 'ask', hit: 0, hitKey: '', doc: '' });
   const railOpen = u => !!u.rail;
   /** A new document starts with the panel closed. */
   const forDoc = (u, id) => { if (u.doc !== id) Object.assign(u, { doc: id, rail: false, tab: 'ask' }); return u; };
@@ -389,7 +389,7 @@
   }
 
   /* ═══════════════ Page ═══════════════ */
-  let lastNeedles = [], shownOutline = false;
+  let lastNeedles = [];
   P.docViewer = ({ params, query }) => {
     lastNeedles = [];
     const doc = docById(params.id), kb = doc && kbById(doc.kb);
@@ -409,8 +409,6 @@
     const total = m ? ns.reduce((a, n) => a + countIn(m.text, n.text), 0) : 0;
     const hitKey = S.cur.full; if (u.hitKey !== hitKey) { u.hitKey = hitKey; u.hit = 0; }
     const conv = query.from ? convById(query.from) : null;
-    const isSheet = m?.format === 'sheet';
-    const hasOutline = readable && !isSheet && m.outline.length > 1;
     // An older version (?v=): the header, trust and Ask follow it — Ask and Save work on the current version only.
     const vq = +query.v, ver = vq && vq !== r.version ? r.versions.find(x => x.v === vq) : null;
     const askable = readable && !ver;
@@ -458,12 +456,6 @@
       error: () => errorState({ title: 'This document didn’t load' }),
     });
 
-    /* Outline: open by default for longer documents; it gives way to the side panel (one extra panel at a time). */
-    const outlineOpen = shownOutline = hasOutline && !open && (u.outline ?? m.outline.length >= 4);
-    const outline = !hasOutline ? '' : outlineOpen
-      ? `<nav class="rdr-outline" aria-label="Outline"><div class="rdr-outline__head"><span class="t-label">${m.format === 'slide' ? 'Slides' : 'On this page'}</span>${iconBtn('chevron-left', 'Hide outline', { size: 'sm', act: 'rdr-outline' })}</div>${m.outline.map((o, i) => `<button type="button" class="${cx('rdr-outline__link', !i && 'is-on')}" data-act="rdr-jump" data-h="${o.id}">${esc(o.title)}</button>`).join('')}</nav>`
-      : `<nav class="rdr-outline rdr-outline--closed" aria-label="Outline">${iconBtn('list', 'Show outline', { size: 'sm', act: 'rdr-outline' })}</nav>`;
-
     /* Side panel: closed by default; once open, Tabs switch between Ask · About · Related (Ask from the header, About from ⋯). */
     const paneTabs = [askable && { id: 'ask', label: 'Ask' }, { id: 'about', label: 'About' }, { id: 'related', label: 'Related' }].filter(Boolean);
     const paneBody = () => (u.tab === 'ask' ? askPane(doc) : u.tab === 'related' ? relatedPane(doc) : aboutPane(doc, query));
@@ -472,7 +464,7 @@
     const rail = open ? `<aside class="rdr-rail" aria-label="Document panel"><div class="rdr-rail__head">${tabs(paneTabs, u.tab, '', { act: 'rdr-tab' })}${iconBtn('x', 'Close panel', { size: 'sm', act: 'rdr-rail' })}</div>
       <div class="rdr-rail__body" id="rdr-rail-body" data-keep-scroll>${railBody}</div>${composer}</aside><div class="rdr-scrim" data-act="rdr-rail" aria-hidden="true"></div>` : '';
 
-    return `<div class="${cx('rdr', headHidden && 'is-collapsed')}">${head}<div class="${cx('rdr-body', open && 'has-rail')}">${outline}<div class="rdr-canvas" id="rdr-scroll" data-keep-scroll>${banners}${canvas}</div>${rail}</div></div>`;
+    return `<div class="${cx('rdr', headHidden && 'is-collapsed')}">${head}<div class="${cx('rdr-body', open && 'has-rail')}"><div class="rdr-canvas" id="rdr-scroll" data-keep-scroll>${banners}${canvas}</div>${rail}</div></div>`;
   };
 
   let lastScrolled = '';
@@ -497,8 +489,6 @@
         }
       }
     }
-    const links = $$('.rdr-outline__link[data-h]');
-    const track = () => { const top = sc.getBoundingClientRect().top + sc.clientHeight / 3; let on = 0; links.forEach((a, i) => { const h = document.getElementById(a.dataset.h); if (h && h.getBoundingClientRect().top <= top) on = i; }); links.forEach((a, i) => a.classList.toggle('is-on', i === on)); };
     // Viewer bar: the page (or slide) in view, like the file's own app.
     const pages = $$('.doc-viewer__pages .doc-page[data-n]', sc), where = $('#doc-page-n');
     const trackPage = () => { const top = sc.getBoundingClientRect().top + sc.clientHeight / 3; let n = pages[0]?.dataset.n || 1; pages.forEach(p => { if (p.getBoundingClientRect().top <= top) n = p.dataset.n; }); if (where && where.dataset.n !== String(n)) { where.dataset.n = n; where.textContent = `${where.dataset.label} ${n} of ${where.dataset.count}`; } };
@@ -512,8 +502,8 @@
       const want = t <= 48 ? false : dy > 4 ? true : dy < -4 ? false : headHidden;
       if (want !== headHidden) { headHidden = want; rd?.classList.toggle('is-collapsed', want); }
     };
-    sc.onscroll = () => { collapse(); if (links.length) track(); if (pages.length) trackPage(); };
-    if (links.length) track(); if (pages.length) trackPage();
+    sc.onscroll = () => { collapse(); if (pages.length) trackPage(); };
+    if (pages.length) trackPage();
     // ?ask=1 opened the Ask panel (P.docViewer); keep the address clean and put the cursor in the question box.
     if (S.cur.query.ask) {
       const q = { ...S.cur.query }; delete q.ask; const qs = new URLSearchParams(q).toString();
@@ -538,12 +528,9 @@
 
   /* ═══════════════ Actions ═══════════════ */
   const curDoc = () => docById(S.cur?.params?.id);
-  const jump = id => { const sc = $('#rdr-scroll'), h = document.getElementById(id); if (!sc || !h) return; sc.scrollTo({ top: sc.scrollTop + h.getBoundingClientRect().top - sc.getBoundingClientRect().top - 24, behavior: 'smooth' }); };
   A['rdr-back'] = () => go(origin || '/knowledge');
   A['rdr-hit'] = el => { rdrUi().hit += +el.dataset.dir; refresh(); };
   A['rdr-clear'] = () => setQuery({ q: '', page: '' });
-  A['rdr-outline'] = () => { const u = rdrUi(); u.outline = !shownOutline; if (u.outline) u.rail = false; refresh(); };
-  A['rdr-jump'] = el => jump(el.dataset.h);
   A['rdr-rail'] = () => { const u = rdrUi(); u.rail = !railOpen(u); refresh(); };
   /** Open the side panel on one view: Ask from the header, About and Related from ⋯. */
   function openPane(tab) {
@@ -565,16 +552,9 @@
   /** A citation in the rail: highlight and scroll to that passage (closes the overlay rail on narrow screens). */
   A['rdr-cite'] = el => { if (frameW() < RAIL_MIN) rdrUi().rail = false; setQuery({ q: el.dataset.q, page: el.dataset.page || '' }); };
   A['rdr-tab'] = el => openPane(el.dataset.value);
-  /** Reader entries in the document's ⋯ menu (resources.js): About opens the side panel (its tabs lead to Ask and Related); on narrow
-      screens, where the outline column is hidden, Contents opens the document's sections as their own menu. */
+  /** Reader entries in the document's ⋯ menu (resources.js): About opens the side panel (its tabs lead to Ask and Related). */
   X.rdr = {
-    panels: (d, el) => {
-      const m = frameW() <= OUTLINE_MIN && isSearchable(d) ? X.docModel(d) : null;
-      const contents = m && m.format !== 'sheet' && m.outline.length > 1
-        ? { label: 'Contents…', icon: 'list', run: () => openMenu(el, [{ section: m.format === 'slide' ? 'Slides' : 'On this page' }, ...m.outline.map(o => ({ label: o.title, run: () => jump(o.id) }))], 'rdr-contents:' + d.id) }
-        : null;
-      return [{ label: 'About this document', icon: 'info', run: () => openPane('about') }, contents].filter(Boolean);
-    },
+    panels: () => [{ label: 'About this document', icon: 'info', run: () => openPane('about') }],
     /** The document preview overlay (preview.js) renders the same native pages and highlights the same way. */
     viewer: (m, opts) => viewerHtml(m, {}, opts),
     needles: (doc, query, m) => needles(doc, query, m),

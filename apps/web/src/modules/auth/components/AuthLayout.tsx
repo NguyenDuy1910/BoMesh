@@ -51,11 +51,11 @@ export function AuthLink({ href, children }: { href: string; children: ReactNode
 }
 
 /** Password input with a show/hide icon button (`.au-pw`); render inside a HeroUI TextField. */
-export function PasswordInput({ autoComplete }: { autoComplete: string }) {
+export function PasswordInput({ autoComplete, autoFocus }: { autoComplete: string; autoFocus?: boolean }) {
   const [show, setShow] = useState(false);
   return (
     <InputGroup className="au-pw" fullWidth>
-      <InputGroup.Input type={show ? "text" : "password"} autoComplete={autoComplete} />
+      <InputGroup.Input type={show ? "text" : "password"} autoComplete={autoComplete} autoFocus={autoFocus} />
       <InputGroup.Suffix>
         <Button
           isIconOnly

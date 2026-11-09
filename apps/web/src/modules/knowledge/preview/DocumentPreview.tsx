@@ -24,7 +24,7 @@ import { PageImageView } from "../reader/components/PageImageView";
 import { useRendition } from "../reader/components/useRendition";
 import { useReaderContent, usePassages } from "../reader/queries";
 import { useItem, useKnowledgeModel } from "../queries";
-import { closeDocumentPreview, useDocumentPreview, type PreviewCitation, type PreviewRequest } from "./store";
+import type { PreviewCitation, PreviewRequest } from "./store";
 
 const relLow = (t?: string) => rel(t).replace(/^(Just now|Yesterday)$/, (m) => m.toLowerCase());
 
@@ -54,7 +54,12 @@ function showing(request: PreviewRequest, index: number): Showing | null {
 function PreviewDocument({ show, onFocus }: { show: Showing; onFocus: (focus: { hit: number; total: number }) => void }) {
   const itemId = resourceId(show.item);
   const content = useReaderContent(itemId, undefined);
-  const rendition = useRendition(itemId, content.data);
+  // Page images are the document's own pages; the rendition is downloaded only when it is what the preview shows.
+  const pageImages = useMemo(
+    () => [...(content.data?.pageAssets ?? [])].filter((p) => p.imageUri).sort((a, b) => (a.pageNumber ?? 0) - (b.pageNumber ?? 0)),
+    [content.data],
+  );
+  const rendition = useRendition(itemId, content.data, { enabled: !pageImages.length });
   const rd = rendition.doc;
   const passages = usePassages(itemId, show.passages);
   const resolved = useMemo(() => passages.data.filter((p): p is NonNullable<typeof p> => !!p), [passages.data]);
@@ -129,10 +134,18 @@ function PreviewDocument({ show, onFocus }: { show: Showing; onFocus: (focus: { 
     );
   }
 
-  if (rendition.loading || content.isPending || item.isPending) {
+  if (content.isPending || item.isPending || rendition.loading) {
     return (
       <div className="pv-doc" ref={scroll} aria-busy="true" aria-label="Loading">
         <span className="skeleton block" style={{ height: 420, borderRadius: "var(--radius-lg)" }} />
+      </div>
+    );
+  }
+
+  if (pageImages.length) {
+    return (
+      <div className="pv-doc" ref={scroll}>
+        <PageImageView pages={pageImages} pageCount={pageImages.length} focusPage={show.page ?? 0} />
       </div>
     );
   }
@@ -146,16 +159,6 @@ function PreviewDocument({ show, onFocus }: { show: Showing; onFocus: (focus: { 
           {r?.summary ? <p className="pv-none__about">{r.summary}</p> : null}
           <p className="pv-none__hint">Open it to read or download it.</p>
         </div>
-      </div>
-    );
-  }
-
-  // Same rule as the Reader: show the document's own pages when ingestion rendered them.
-  const pageImages = [...(content.data?.pageAssets ?? [])].filter((p) => p.imageUri).sort((a, b) => (a.pageNumber ?? 0) - (b.pageNumber ?? 0));
-  if (pageImages.length) {
-    return (
-      <div className="pv-doc" ref={scroll}>
-        <PageImageView pages={pageImages} pageCount={pageImages.length} focusPage={show.page ?? 0} />
       </div>
     );
   }
@@ -337,12 +340,4 @@ export function DocumentPreview({ request, onClose }: { request: PreviewRequest;
       </Modal.Container>
     </Modal.Backdrop>
   );
-}
-
-/** Renders the preview opened with `openDocumentPreview()`. Mount once inside the workspace shell. */
-export function DocumentPreviewHost() {
-  const request = useDocumentPreview();
-  if (!request) return null;
-  const { key, ...options } = request;
-  return <DocumentPreview key={key} request={options} onClose={closeDocumentPreview} />;
 }

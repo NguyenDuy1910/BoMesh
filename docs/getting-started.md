@@ -69,11 +69,20 @@ starting the API does not reset or create those schemas. For deployments with
 externally managed dependencies, run the API and worker separately instead of
 using this local entrypoint.
 
-Start the WebUI in a separate terminal:
+Start the WebUI in a separate terminal, in development mode for editing:
 
 ```bash
-bun run web
+bun run web        # make web-dev: HMR, unminified, source maps
 ```
+
+or as the optimized production build for anything shared, demoed or measured:
+
+```bash
+bun run web:prod   # make web-prod: next build && next start
+```
+
+Never take performance numbers from the development server; `.next/dev` and the
+Turbopack HMR client in the network panel mean you are measuring dev mode.
 
 The WebUI loads its public configuration from the same root `.env`. Every API
 request authenticates with a bearer access token (`auth_contract.md`); there is

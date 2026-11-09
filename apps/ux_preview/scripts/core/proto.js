@@ -5,6 +5,7 @@
 const DEMO_WORKSPACES = [['ws-northwind', 'Northwind'], ['ws-finx', 'Finx']];
 const JOURNEYS = [
   { ws: 'ws-northwind', who: 'member', title: 'Sign in and ask a question', run: () => { S.signedIn = false; go('/signin'); } },
+  { ws: 'ws-northwind', who: 'member', title: 'Session expires while you work', run: () => goThen('/knowledge', () => X.expireSession?.()) },
   { ws: 'ws-northwind', who: 'member', title: 'Start from Home: ask, find or pick up', run: () => go('/home') },
   { ws: 'ws-northwind', who: 'member', title: 'Verify where an answer came from', run: () => goThen('/chat/c1', () => A['cite-open']?.({ dataset: { msg: 'm2', n: '1' } })) },
   { ws: 'ws-northwind', who: 'member', title: 'Find verified sales material', run: () => go('/knowledge?topic=d-sales&trust=verified') },

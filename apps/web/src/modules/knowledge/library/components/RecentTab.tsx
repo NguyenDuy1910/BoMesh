@@ -16,9 +16,8 @@ import { useWorkspace } from "@/lib/workspace";
 
 import { clearRecentItems } from "../../api";
 import { ResourceList, ResourceRow } from "../../components/ResourceRow";
-import { knowledgeKeys, useKnowledgeModel, useRecentItems } from "../../queries";
+import { knowledgeKeys, useItemsByName, useKnowledgeModel, useRecentItems } from "../../queries";
 import { restoreRecentItem } from "../api";
-import { useItemsByName } from "../queries";
 
 const DAY = 86_400_000;
 

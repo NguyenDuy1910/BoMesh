@@ -199,7 +199,10 @@ class ContributionService:
         async with transaction_scope(self._deps.sessions) as session:
             total = int(await session.scalar(query.count(statement)) or 0)
             rows = list(await session.scalars(query.apply(statement)))
-            return [await self._record(session, ctx, row, full=full) for row in rows], total
+            records = await contribution_records(
+                session, ctx.authorizer, ctx.principal, rows, full=full
+            )
+            return records, total
 
     # -- Contributor methods -------------------------------------------------------
 
@@ -503,103 +506,148 @@ async def contribution_record(
     *,
     full: bool,
 ) -> ContributionRecord:
-    workspace_id = contribution.tenant_id
-    topics = await session.execute(
-        select(Topic.code, ContributionTopic.relation)
-        .join(Topic, Topic.id == ContributionTopic.topic_id)
-        .where(ContributionTopic.contribution_id == contribution.id)
-        .order_by(Topic.code)
-    )
-    suggested: list[str] = []
-    proposed: list[str] = []
-    for code, relation in topics:
-        (proposed if relation == "proposed" else suggested).append(code)
-    flags = []
-    for flag in contribution.flags or []:
-        related = flag.get("related_item_id")
-        related_id = UUID(related) if related else None
-        if related_id is not None and not await is_visible(
-            authorizer, principal, ItemRef(workspace_id, related_id)
-        ):
-            related_id = None
-        flags.append(FlagRecord(kind=flag["flag"], related_item_id=related_id))
-    source_code = None
-    if contribution.ingestion_source_id is not None:
-        codes = await source_codes(session, [contribution.ingestion_source_id])
-        source_code = codes.get(contribution.ingestion_source_id)
-    values = contribution.suggestions or {}
-    decision = None
-    if contribution.decided_at is not None:
-        decision = DecisionRecord(
-            reviewer_id=contribution.decided_by_user_id,
-            message=contribution.decision_note,
-            decide_time=contribution.decided_at,
+    records = await contribution_records(session, authorizer, principal, [contribution], full=full)
+    return records[0]
+
+
+async def contribution_records(
+    session: AsyncSession,
+    authorizer: Authorizer,
+    principal: Principal,
+    contributions: Sequence[Contribution],
+    *,
+    full: bool,
+) -> list[ContributionRecord]:
+    """Records of ``contributions`` (one workspace); topics, related items, source codes
+    and target titles load once for all of them."""
+    ids = [contribution.id for contribution in contributions]
+    topics: dict[UUID, tuple[list[str], list[str]]] = {i: ([], []) for i in ids}
+    if ids:
+        rows = await session.execute(
+            select(ContributionTopic.contribution_id, Topic.code, ContributionTopic.relation)
+            .join(Topic, Topic.id == ContributionTopic.topic_id)
+            .where(ContributionTopic.contribution_id.in_(ids))
+            .order_by(Topic.code)
         )
-    return ContributionRecord(
-        workspace_id=workspace_id,
-        id=contribution.id,
-        kind=contribution.kind,
-        origin=contribution.origin,
-        item_id=contribution.item_id,
-        target_id=contribution.target_item_id,
-        replaces_id=contribution.replaces_item_id,
-        contributor_id=contribution.contributor_user_id,
-        source_code=source_code,
-        external_version=contribution.external_version,
-        note=contribution.note,
-        change_summary=contribution.change_summary,
-        suggestions=SuggestionsRecord(
-            document_type=values.get("document_type"),
-            document_type_confidence=values.get("document_type_confidence"),
-            topic_codes=tuple(suggested),
-            topics_confidence=values.get("topics_confidence"),
-            proposed_topic_codes=tuple(proposed),
-            proposed_topics_confidence=values.get("proposed_topics_confidence"),
-            collection_id=suggested_collection(contribution),
-            collection_confidence=values.get("collection_confidence"),
-            summary=values.get("summary"),
-            summary_confidence=values.get("summary_confidence"),
-        ),
-        flags=tuple(flags),
-        audience_summary=await _audience_summary(session, contribution),
-        state=contribution.state,
-        decision=decision,
-        events=await _events(session, contribution) if full else None,
-        create_time=contribution.created_at,
-        update_time=contribution.updated_at,
-        etag=contribution_etag(contribution),
+        for contribution_id, code, relation in rows:
+            suggested, proposed = topics[contribution_id]
+            (proposed if relation == "proposed" else suggested).append(code)
+    related = {
+        UUID(flag["related_item_id"])
+        for contribution in contributions
+        for flag in contribution.flags or []
+        if flag.get("related_item_id")
+    }
+    if related:
+        await authorizer.ancestries(related)
+        await authorizer.collection_permissions_many(principal, [(i, False) for i in related])
+    sources = await source_codes(
+        session, (c.ingestion_source_id for c in contributions if c.ingestion_source_id)
     )
+    targets = {c.target_item_id for c in contributions if c.target_item_id is not None}
+    titles: dict[UUID, str] = {}
+    if targets:
+        titles = dict(
+            (await session.execute(select(Item.id, Item.title).where(Item.id.in_(targets))))
+            .tuples()
+            .all()
+        )
+    events = await _events(session, contributions) if full else {}
+    records = []
+    for contribution in contributions:
+        workspace_id = contribution.tenant_id
+        flags = []
+        for flag in contribution.flags or []:
+            related_id = UUID(flag["related_item_id"]) if flag.get("related_item_id") else None
+            if related_id is not None and not await is_visible(
+                authorizer, principal, ItemRef(workspace_id, related_id)
+            ):
+                related_id = None
+            flags.append(FlagRecord(kind=flag["flag"], related_item_id=related_id))
+        suggested, proposed = topics[contribution.id]
+        values = contribution.suggestions or {}
+        decision = None
+        if contribution.decided_at is not None:
+            decision = DecisionRecord(
+                reviewer_id=contribution.decided_by_user_id,
+                message=contribution.decision_note,
+                decide_time=contribution.decided_at,
+            )
+        title = titles.get(contribution.target_item_id) if contribution.target_item_id else None
+        records.append(
+            ContributionRecord(
+                workspace_id=workspace_id,
+                id=contribution.id,
+                kind=contribution.kind,
+                origin=contribution.origin,
+                item_id=contribution.item_id,
+                target_id=contribution.target_item_id,
+                replaces_id=contribution.replaces_item_id,
+                contributor_id=contribution.contributor_user_id,
+                source_code=sources.get(contribution.ingestion_source_id)
+                if contribution.ingestion_source_id is not None
+                else None,
+                external_version=contribution.external_version,
+                note=contribution.note,
+                change_summary=contribution.change_summary,
+                suggestions=SuggestionsRecord(
+                    document_type=values.get("document_type"),
+                    document_type_confidence=values.get("document_type_confidence"),
+                    topic_codes=tuple(suggested),
+                    topics_confidence=values.get("topics_confidence"),
+                    proposed_topic_codes=tuple(proposed),
+                    proposed_topics_confidence=values.get("proposed_topics_confidence"),
+                    collection_id=suggested_collection(contribution),
+                    collection_confidence=values.get("collection_confidence"),
+                    summary=values.get("summary"),
+                    summary_confidence=values.get("summary_confidence"),
+                ),
+                flags=tuple(flags),
+                audience_summary=f"Readers of {title}" if title else None,
+                state=contribution.state,
+                decision=decision,
+                events=events.get(contribution_name(workspace_id, contribution.id), ())
+                if full
+                else None,
+                create_time=contribution.created_at,
+                update_time=contribution.updated_at,
+                etag=contribution_etag(contribution),
+            )
+        )
+    return records
 
 
-async def _audience_summary(session: AsyncSession, contribution: Contribution) -> str | None:
-    if contribution.target_item_id is None:
-        return None
-    title = await session.scalar(select(Item.title).where(Item.id == contribution.target_item_id))
-    return f"Readers of {title}" if title else None
-
-
-async def _events(session: AsyncSession, contribution: Contribution) -> tuple[EventRecord, ...]:
+async def _events(
+    session: AsyncSession, contributions: Sequence[Contribution]
+) -> dict[str, tuple[EventRecord, ...]]:
+    """Timeline events by contribution name (one query for all ``contributions``)."""
+    names = {contribution_name(c.tenant_id, c.id): c.tenant_id for c in contributions}
+    if not names:
+        return {}
     rows = await session.scalars(
         select(AuditLog)
         .where(
-            AuditLog.tenant_id == contribution.tenant_id,
-            AuditLog.target_name == contribution_name(contribution.tenant_id, contribution.id),
+            AuditLog.tenant_id.in_(set(names.values())),
+            AuditLog.target_name.in_(names),
             AuditLog.details["event"].astext.is_not(None),
         )
         .order_by(AuditLog.created_at)
     )
-    events = [
-        EventRecord(
-            kind=row.details["event"],
-            actor_id=row.actor_user_id,
-            message=row.details.get("message"),
-            create_time=row.created_at,
+    events: dict[str, list[EventRecord]] = {}
+    for row in rows:
+        events.setdefault(row.target_name, []).append(
+            EventRecord(
+                kind=row.details["event"],
+                actor_id=row.actor_user_id,
+                message=row.details.get("message"),
+                create_time=row.created_at,
+            )
         )
-        for row in rows
-    ]
     # One transaction stamps its events with one time; ANALYZED follows the submission.
-    events.sort(key=lambda event: (event.create_time, event.kind == "ANALYZED"))
-    return tuple(events)
+    return {
+        name: tuple(sorted(found, key=lambda event: (event.create_time, event.kind == "ANALYZED")))
+        for name, found in events.items()
+    }
 
 
 # -- Helpers -------------------------------------------------------------------------

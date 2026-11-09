@@ -25,13 +25,13 @@ import {
   projectsAvailable,
 } from "../adapter";
 import {
+  answerFirstLine,
   conversationTime,
   conversationTitle,
   type Conversation,
 } from "../conversations";
 import {
   useConversationModel,
-  useLastAnswer,
   useProjectReferences,
   type ProjectView,
 } from "../queries";
@@ -48,7 +48,7 @@ function HomeButton() {
 }
 
 function ChatRow({ conversation }: { conversation: Conversation }) {
-  const last = useLastAnswer(conversation);
+  const last = answerFirstLine(conversation.lastAnswerSnippet);
   const title = conversationTitle(conversation);
   return (
     <div className="proj-chat">

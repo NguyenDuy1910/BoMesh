@@ -38,7 +38,7 @@ MODE ?= debug
 FLUTTER_RUN_FLAGS ?=
 FLUTTER_RUN := $(FLUTTER) run --$(MODE) --no-pub --dart-define-from-file=env/$(APP_ENV).json $(FLUTTER_RUN_FLAGS)
 
-.PHONY: help init reset-all config services storage-migrate-minio _temporal-reset db-init db-seed db-seed-accounts qdrant-init status app-deps app-run app-web app-devices _app-env
+.PHONY: help init reset-all config services storage-migrate-minio _temporal-reset db-init db-seed db-seed-accounts qdrant-init status web-dev web-build web-prod app-deps app-run app-web app-devices _app-env
 
 help: ## Show available local-development commands.
 	@echo "BoMesh local development"
@@ -209,6 +209,15 @@ status: ## Show the current local dependency and application health.
 	@echo
 	@curl --silent --show-error --max-time 10 http://127.0.0.1:8000/health || echo "API is not running yet."
 	@echo
+
+web-dev: ## Run the WebUI in development mode (HMR, unminified; editing only, never for benchmarks or shared use).
+	@cd apps/web && bun run dev
+
+web-build: ## Build the optimized production WebUI into apps/web/.next.
+	@cd apps/web && bun run build
+
+web-prod: web-build ## Build and serve the production WebUI on :3000 (what users and performance measurements use).
+	@cd apps/web && bun run start
 
 app-deps: $(APP_PACKAGE_CONFIG) ## Run flutter pub get only when pubspec.yaml/pubspec.lock changed.
 

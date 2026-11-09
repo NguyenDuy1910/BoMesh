@@ -30,7 +30,7 @@ import { useWorkspace } from "@/lib/workspace";
 import type { Resource } from "../model";
 import { useDocumentOperations } from "../operations";
 import { useFeaturedIds, useItemPermissions, useSavedItems } from "../queries";
-import { openContribute } from "./Contribute";
+import { openContribute } from "./contribute-store";
 import { openAddToCollection, openEditDetails, openLinkToSpaces } from "./dialogs";
 
 /* ═══════════════ Save toggle ═══════════════ */

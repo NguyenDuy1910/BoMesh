@@ -351,22 +351,24 @@ async def test_content_without_rendition(client, world, knowledge, sessions):
     assert len(response.json()["pageAssets"]) == 1
 
 
-async def test_content_elements_of_indexed_revision(client, world, knowledge, sessions):
+async def test_content_never_reads_the_index(client, world, knowledge, sessions, fakes, monkeypatch):
     _, _, collection, api = await _setup(world, client)
     document = await _uploaded(api, knowledge, collection)
     await _write_preview(sessions, document, 1, _manifest(document))
     await knowledge.index(document, ["first paragraph", "second paragraph"], page=1)
 
+    async def unavailable(*args, **kwargs):
+        raise AssertionError("GetItemContent must not read the search index")
+
+    monkeypatch.setattr(fakes.index_backend, "get_item_points", unavailable)
+    monkeypatch.setattr(fakes.index_backend, "search_item_points", unavailable)
+
     response = await api.get(item_url(document, "/content"))
     assert response.status_code == 200, response.text
-    elements = response.json()["elements"]
-    assert [e["text"] for e in elements] == ["first paragraph", "second paragraph"]
-    assert [e["passage"] for e in elements] == [
-        f"{item_name(document)}/passages/{chunk_id(document, 0)}",
-        f"{item_name(document)}/passages/{chunk_id(document, 1)}",
-    ]
-    assert [e["elementId"] for e in elements] == ["element-0", "element-1"]
-    assert all(e["pageNumber"] == 1 for e in elements)
+    body = response.json()
+    assert "elements" not in body
+    assert body["rendition"]["blockCount"] == 4
+    assert len(body["pageAssets"]) == 1
 
 
 async def test_content_of_older_revision(client, world, knowledge, sessions, fakes):
@@ -384,8 +386,7 @@ async def test_content_of_older_revision(client, world, knowledge, sessions, fak
     assert older.status_code == 200, older.text
     assert older.json()["revision"] == _revision(document, 1)
     assert len(older.json()["pageAssets"]) == 1
-    # Revision 1 is still the indexed revision: its elements are served.
-    assert [e["text"] for e in older.json()["elements"]] == ["first version text"]
+    assert "elements" not in older.json()
 
     missing = await api.get(item_url(document, "/content"), params={"revision": "5"})
     assert missing.status_code == 404, missing.text

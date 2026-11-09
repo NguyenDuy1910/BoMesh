@@ -20,7 +20,7 @@ from bomesh.services.conversations.records import (
     StoredCitation,
 )
 from bomesh.services.knowledge_items.names import item_name, passage_name
-from bomesh.services.knowledge_items.summary import ItemSummary, get_item_summary
+from bomesh.services.knowledge_items.summary import ItemSummary, get_item_summaries
 
 
 async def render_citations(
@@ -31,26 +31,10 @@ async def render_citations(
     citations: Sequence[StoredCitation],
 ) -> list[CitationRecord]:
     """``citations`` as ``principal`` may see them; unreadable ones keep only ``available``."""
-    summaries = await readable_summaries(
+    summaries = await get_item_summaries(
         session, authorizer, principal, workspace_id, (c.item_id for c in citations)
     )
     return [citation_record(workspace_id, citation, summaries) for citation in citations]
-
-
-async def readable_summaries(
-    session: AsyncSession,
-    authorizer: Authorizer,
-    principal: Principal,
-    workspace_id: UUID,
-    item_ids: Iterable[UUID],
-) -> dict[UUID, ItemSummary]:
-    """The summary of every item ``principal`` can read now, keyed by the cited ID."""
-    summaries: dict[UUID, ItemSummary] = {}
-    for item_id in dict.fromkeys(item_ids):
-        summary = await get_item_summary(session, authorizer, principal, workspace_id, item_id)
-        if summary is not None:
-            summaries[item_id] = summary
-    return summaries
 
 
 async def unreadable_items(
@@ -81,7 +65,7 @@ async def unreadable_items(
 def citation_record(
     workspace_id: UUID, citation: StoredCitation, summaries: Mapping[UUID, ItemSummary]
 ) -> CitationRecord:
-    """``citation`` for a reader whose readable items are ``summaries`` (``readable_summaries``).
+    """``citation`` for a reader whose readable items are ``summaries`` (``get_item_summaries``).
 
     A cited duplicate merged into another document resolves to that target,
     but the cited passage and its excerpt are content of the DELETED
@@ -110,7 +94,6 @@ def readable_source(summaries: Mapping[UUID, ItemSummary], item_id: UUID) -> boo
 __all__ = [
     "citation_record",
     "readable_source",
-    "readable_summaries",
     "render_citations",
     "unreadable_items",
 ]

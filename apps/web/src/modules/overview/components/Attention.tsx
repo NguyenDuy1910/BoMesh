@@ -8,7 +8,7 @@ import { EmptyState, ItemIcon, List, ListItem, toast, type Tone } from "@/compon
 import { errorMessage, resourceId, type Schema } from "@/lib/api/client";
 import { plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
-import { openContribute } from "@/modules/knowledge/components/Contribute";
+import { openContribute } from "@/modules/knowledge/components/contribute-store";
 import { appKeyOf } from "@/modules/knowledge/components/SourceIcon";
 import { useKnowledgeModel, useMemberNames } from "@/modules/knowledge/queries";
 import { APPS } from "@/components/ui";

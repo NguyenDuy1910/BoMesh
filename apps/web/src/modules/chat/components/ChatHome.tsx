@@ -6,9 +6,10 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import { PageChrome } from "@/components/shell/page-chrome";
+import { resourceId } from "@/lib/api/client";
 import { useWorkspace } from "@/lib/workspace";
 import { useComposerFiles, useFileDrop } from "@/modules/artifacts";
-import { getItem, itemName } from "@/modules/knowledge/api";
+import { batchGetItems, itemName } from "@/modules/knowledge/api";
 import { useMySpaces } from "@/modules/spaces";
 import { newWorkHref, workflowsFor } from "@/modules/work/kinds";
 
@@ -66,7 +67,8 @@ export function ChatHome() {
     const projectId = params.get("project");
     router.replace("/chat");
     void (async () => {
-      const items = (await Promise.all(docIds.map((d) => getItem(ws, d).catch(() => null)))).filter((i) => !!i && i.itemType === "DOCUMENT");
+      const loaded = new Map((await batchGetItems(ws, docIds, { view: "FULL" }).catch(() => [])).map((i) => [resourceId(i.name), i]));
+      const items = docIds.map((d) => loaded.get(resourceId(d))).filter((i) => !!i && i.itemType === "DOCUMENT");
       if (q && params.get("send") === "1") {
         await start({
           question: q,

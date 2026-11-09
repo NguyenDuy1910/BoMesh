@@ -142,16 +142,6 @@ class PassageRecord:
 
 
 @dataclass(frozen=True, slots=True)
-class ContentElement:
-    element_id: str
-    kind: str
-    text: str
-    level: int | None
-    page_number: int | None
-    chunk_id: str | None
-
-
-@dataclass(frozen=True, slots=True)
 class PageAsset:
     page_number: int | None
     image_uri: str
@@ -173,7 +163,6 @@ class ContentRecord:
     workspace_id: UUID
     item_id: UUID
     revision: int
-    elements: tuple[ContentElement, ...]
     page_assets: tuple[PageAsset, ...]
     rendition: Rendition | None
 
@@ -216,12 +205,22 @@ class SearchResult:
 
 
 @dataclass(frozen=True, slots=True)
-class FacetValue:
-    """``value`` is the raw key: an item or member ID, a topic or source code, or a literal."""
+class Interval:
+    """An interval facet bucket: inclusive bounds, ``None`` = unbounded."""
 
-    value: str
+    minimum: datetime | None
+    maximum: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class FacetValue:
+    """``value`` is the raw key: an item or member ID, a topic or source code, or a
+    literal; interval facets carry ``interval`` instead (``value`` is ``None``)."""
+
+    value: str | None
     display_name: str | None
     document_count: int
+    interval: Interval | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -320,18 +319,20 @@ class FacetRequest:
     field: str
     where: Any
     limit: int
+    #: Buckets of an interval facet (``updateTime``); empty for value facets.
+    intervals: tuple[Interval, ...] = ()
 
 
 __all__ = [
     "Ancestor",
     "BoundingBox",
     "CollectionFacet",
-    "ContentElement",
     "ContentRecord",
     "DocumentFacet",
     "Facet",
     "FacetRequest",
     "FacetValue",
+    "Interval",
     "ItemPage",
     "ItemRecord",
     "LinkRecord",

@@ -14,6 +14,7 @@ import {
   toRemoteAppearance,
   type AppearanceState,
 } from "@/lib/theme";
+import { preferencesQuery, preferencesQueryKey } from "@/lib/workspace";
 
 /**
  * The caller's account preferences (`users/me/preferences`): interface
@@ -23,16 +24,10 @@ import {
  */
 export type UserPreferences = Schema<"UserPreferences">;
 
-export const preferencesQueryKey = ["users", "me", "preferences"] as const;
-
+/** Shares its cache entry with workspace resolution (`lib/workspace`), so the shell reads it once. */
 export function useMyPreferences() {
   const session = useSession();
-  return useQuery({
-    queryKey: [...preferencesQueryKey, session?.user.name],
-    queryFn: () => call(api.GET("/api/v1/users/{user}/preferences", { params: { path: { user: "me" } } })),
-    enabled: Boolean(session),
-    staleTime: 5 * 60_000,
-  });
+  return useQuery({ ...preferencesQuery(session?.user.name), enabled: Boolean(session) });
 }
 
 /** Whether answers show their work steps (Preferences → "Show how answers were found"). Defaults to on. */

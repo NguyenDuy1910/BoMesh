@@ -1,12 +1,12 @@
 "use client";
 
-import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { queryOptions, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 
 import { ApiError, resourceId } from "@/lib/api/client";
 import { plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
-import { getItem, listMaterials, listRootCollections, type Item } from "@/modules/knowledge/api";
+import { batchGetItems, listMaterials, listRootCollections, type Item } from "@/modules/knowledge/api";
 
 import {
   listAnnouncements,
@@ -54,15 +54,21 @@ export function useInvalidateSpaces() {
   return useCallback(() => invalidateSpaces(qc, id), [qc, id]);
 }
 
+/**
+ * Every space the caller can see, as ListSpaces returns them: the one request and cache entry
+ * behind `useSpaces`, `useMySpaces` and any `fetchQuery` that needs the list.
+ */
+export function spacesListQuery(ws: string) {
+  return queryOptions({ queryKey: spacesKeys.list(ws), queryFn: () => listSpaces(ws), staleTime: 5 * 60_000 });
+}
+
 /** Every space the caller can see (their own, open and discoverable ones), live only. */
 export function useSpaces() {
   const { id, hasModule } = useWorkspace();
   return useQuery({
-    queryKey: spacesKeys.list(id),
-    queryFn: () => listSpaces(id),
+    ...spacesListQuery(id),
     select: (spaces: Space[]) => spaces.filter((s) => s.state !== "DELETED"),
     enabled: hasModule("spaces"),
-    staleTime: 30_000,
   });
 }
 
@@ -75,14 +81,12 @@ export function useMySpaces() {
     return i < 0 ? order.length : i;
   };
   return useQuery({
-    queryKey: spacesKeys.list(id),
-    queryFn: () => listSpaces(id),
+    ...spacesListQuery(id),
     select: (spaces: Space[]) =>
       spaces
         .filter((s) => s.state !== "DELETED" && !!s.callerRole)
         .sort((a, b) => rank(a) - rank(b) || (a.displayName ?? "").localeCompare(b.displayName ?? "")),
     enabled: hasModule("spaces"),
-    staleTime: 30_000,
   });
 }
 
@@ -276,7 +280,10 @@ export function useSpaceBases(space: Space | undefined) {
   return useQuery({
     queryKey: [id, "spaces", "bases", resourceId(space?.name), names.join(",")],
     enabled: !!space,
-    queryFn: async () => (await Promise.all(names.map((n) => getItem(id, resourceId(n), "BASIC").catch(() => null)))).filter((b): b is Item => !!b),
+    queryFn: async () => {
+      const found = new Map((await batchGetItems(id, names, { showLocked: true })).map((b) => [resourceId(b.name), b]));
+      return names.flatMap((n) => found.get(resourceId(n)) ?? []);
+    },
   });
 }
 
@@ -293,13 +300,11 @@ export function useSpaceMaterials(spaceId: string, enabled = true) {
     enabled,
     queryFn: async (): Promise<SpaceMaterial[]> => {
       const materials = await listMaterials(id, spaceId);
-      const rows = await Promise.all(
-        materials.map(async (m) => {
-          const item = await getItem(id, resourceId(m.item), "FULL").catch(() => null);
-          return item && m.name ? { material: m.name, item } : null;
-        }),
-      );
-      return rows.filter((r): r is SpaceMaterial => !!r);
+      const items = new Map((await batchGetItems(id, materials.map((m) => m.item ?? ""), { view: "FULL" })).map((i) => [resourceId(i.name), i]));
+      return materials.flatMap((m) => {
+        const item = items.get(resourceId(m.item));
+        return item && m.name ? [{ material: m.name, item }] : [];
+      });
     },
   });
 }

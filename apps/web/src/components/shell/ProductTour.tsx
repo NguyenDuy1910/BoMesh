@@ -25,11 +25,6 @@ const TOUR = [
 ];
 const TOUR_PATH = "/chat";
 
-/** Opens the chat home and starts the tour there. */
-export function startTour(): void {
-  setTourStep(0);
-}
-
 function visibleSteps() {
   const width = document.body.clientWidth;
   return TOUR.filter((s) => {

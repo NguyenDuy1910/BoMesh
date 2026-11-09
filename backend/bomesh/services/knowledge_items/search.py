@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, select, true, union
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh.db.engine import transaction_scope
@@ -34,6 +34,7 @@ from bomesh.services.knowledge_items.records import (
     Facet,
     FacetRequest,
     FacetValue,
+    ItemRecord,
     SearchPage,
     SearchPassage,
     SearchRequest,
@@ -58,7 +59,10 @@ _SCALAR_FACETS: dict[str, Any] = {
     "document.origin.source": SOURCE_CODE,
     "document.verification.state": VERIFICATION_STATE,
 }
-FACET_FIELDS = frozenset({*_SCALAR_FACETS, "document.topics", "ancestors"})
+#: Interval facets (``FacetSpec.intervals``): field → the timestamp they bucket.
+_INTERVAL_FACETS: dict[str, Any] = {"updateTime": Item.updated_at}
+INTERVAL_FACET_FIELDS = frozenset(_INTERVAL_FACETS)
+FACET_FIELDS = frozenset({*_SCALAR_FACETS, *_INTERVAL_FACETS, "document.topics", "ancestors"})
 
 
 @dataclass(slots=True)
@@ -115,9 +119,8 @@ class ItemSearchService:
             )
             rows = await self._page(session, matching, request, hits)
             projector = Projector(session, ctx, workspace_id, self._deps, visibility=visibility)
-            results = [
-                await self._result(projector, row, hits, request) for row in rows
-            ]
+            records = await projector.project_many(rows)
+            results = [self._result(record, hits, request) for record in records]
             facets = [
                 await self._facet(session, workspace_id, visibility, scope, facet)
                 for facet in request.facets
@@ -165,15 +168,11 @@ class ItemSearchService:
         ranked = sorted(rows, key=lambda item_id: (-hits[item_id].score, str(item_id)))
         return [rows[item_id] for item_id in ranked[request.offset : request.offset + request.limit]]
 
-    async def _result(
-        self,
-        projector: Projector,
-        item: Item,
-        hits: dict[UUID, _Hit] | None,
-        request: SearchRequest,
+    @staticmethod
+    def _result(
+        record: ItemRecord, hits: dict[UUID, _Hit] | None, request: SearchRequest
     ) -> SearchResult:
-        record = await projector.project(item)
-        hit = hits.get(item.id) if hits is not None else None
+        hit = hits.get(record.item_id) if hits is not None else None
         if hit is None:
             return SearchResult(item=record, score=None)
         chunks = sorted(hit.chunks, key=lambda chunk: -(chunk.relevance_score or 0.0))
@@ -200,9 +199,15 @@ class ItemSearchService:
         scope: Any,
         facet: FacetRequest,
     ) -> Facet:
-        """Disjunctive counts: the facet's own clause is left out of ``facet.where``."""
+        """Disjunctive counts: the facet's own clause is left out of ``facet.where``.
+
+        One grouped statement per facet over the same visible, matching documents.
+        """
         matching = select(Item.id).where(scope, facet.where).subquery()
         limit = facet.limit or DEFAULT_FACET_LIMIT
+        if facet.field in _INTERVAL_FACETS:
+            values = await self._interval_facet(session, matching, facet)
+            return Facet(field=facet.field, values=values)
         if facet.field in _SCALAR_FACETS:
             expression = _SCALAR_FACETS[facet.field]
             rows = await session.execute(
@@ -221,25 +226,61 @@ class ItemSearchService:
                 for value, count in rows
             )
         elif facet.field == "document.topics":
-            rows = await session.execute(
-                select(Topic.code, Topic.display_name, func.count())
-                .join(ItemTopic, ItemTopic.topic_id == Topic.id)
-                .where(ItemTopic.item_id.in_(select(matching.c.id)))
-                .group_by(Topic.code, Topic.display_name)
-                .order_by(func.count().desc(), Topic.code)
-                .limit(limit)
-            )
-            values = tuple(
-                FacetValue(
-                    value=code,
-                    display_name=display_name,
-                    document_count=int(count),
-                )
-                for code, display_name, count in rows
-            )
+            values = await self._topic_facet(session, matching, limit)
         else:
             values = await self._ancestor_facet(session, workspace_id, visibility, matching, limit)
         return Facet(field=facet.field, values=values)
+
+    async def _interval_facet(
+        self, session: AsyncSession, matching: Any, facet: FacetRequest
+    ) -> tuple[FacetValue, ...]:
+        """One count per requested interval (inclusive bounds), in request order."""
+        expression = _INTERVAL_FACETS[facet.field]
+        counts = [
+            func.count().filter(
+                and_(
+                    expression >= interval.minimum if interval.minimum is not None else true(),
+                    expression <= interval.maximum if interval.maximum is not None else true(),
+                )
+            )
+            for interval in facet.intervals
+        ]
+        row = (
+            await session.execute(select(*counts).where(Item.id.in_(select(matching.c.id))))
+        ).one()
+        return tuple(
+            FacetValue(value=None, display_name=None, document_count=int(count), interval=interval)
+            for interval, count in zip(facet.intervals, row, strict=True)
+        )
+
+    async def _topic_facet(
+        self, session: AsyncSession, matching: Any, limit: int
+    ) -> tuple[FacetValue, ...]:
+        """Counts per topic; a DOMAIN counts documents tagged with it or any topic under it
+        (each once), as the hierarchical ``document.topics:`` filter matches them."""
+        tags = (
+            select(ItemTopic.item_id, ItemTopic.topic_id, Topic.parent_topic_id)
+            .join(Topic, Topic.id == ItemTopic.topic_id)
+            .where(ItemTopic.item_id.in_(select(matching.c.id)))
+            .cte("facet_tags")
+        )
+        # UNION (not ALL) keeps one (document, topic) pair when a document carries
+        # both a domain and one of its topics.
+        rolled = union(
+            select(tags.c.item_id, tags.c.topic_id),
+            select(tags.c.item_id, tags.c.parent_topic_id).where(tags.c.parent_topic_id.is_not(None)),
+        ).subquery("facet_topics")
+        rows = await session.execute(
+            select(Topic.code, Topic.display_name, func.count())
+            .join(rolled, rolled.c.topic_id == Topic.id)
+            .group_by(Topic.id, Topic.code, Topic.display_name)
+            .order_by(func.count().desc(), Topic.code)
+            .limit(limit)
+        )
+        return tuple(
+            FacetValue(value=code, display_name=display_name, document_count=int(count))
+            for code, display_name, count in rows
+        )
 
     async def _ancestor_facet(
         self,
@@ -311,4 +352,4 @@ class _Scope:
     collection_item_ids: tuple[str, ...]
 
 
-__all__ = ["FACET_FIELDS", "ItemSearchService", "retrieve_passages"]
+__all__ = ["FACET_FIELDS", "INTERVAL_FACET_FIELDS", "ItemSearchService", "retrieve_passages"]

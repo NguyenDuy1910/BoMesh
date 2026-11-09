@@ -9,7 +9,7 @@ import { errorMessage, resourceId } from "@/lib/api/client";
 import { plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { publishItem, unpublishItem } from "@/modules/knowledge/api";
-import { openContribute } from "@/modules/knowledge/components/Contribute";
+import { openContribute } from "@/modules/knowledge/components/contribute-store";
 import { openEditDetails, openMoveItems } from "@/modules/knowledge/components/dialogs";
 import { useDocumentOperations } from "@/modules/knowledge/operations";
 

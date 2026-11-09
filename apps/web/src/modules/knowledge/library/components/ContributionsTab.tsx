@@ -15,7 +15,7 @@ import { Segmented } from "@/components/ui/Segmented";
 import { SkeletonRows } from "@/components/ui/SkeletonRows";
 import { useWorkspace } from "@/lib/workspace";
 
-import { openContribute } from "../../components/Contribute";
+import { openContribute } from "../../components/contribute-store";
 import { LifecycleChip } from "../../components/LifecycleChip";
 import { ResDot } from "../../components/ResourceRow";
 import { fold, tokens } from "../../model";

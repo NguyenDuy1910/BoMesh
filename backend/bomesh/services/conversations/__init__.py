@@ -16,7 +16,7 @@ caller's session):
   ``conversation_codes``, ``conversation_id_by_code`` (SQL);
 - messages: ``source_message_context`` (a caller-owned message's text and
   ``StoredCitation`` list);
-- citations (:mod:`.citations`): ``render_citations`` / ``readable_summaries`` +
+- citations (:mod:`.citations`): ``render_citations`` +
   ``citation_record`` (per-reader re-check), ``unreadable_items``
   (``AUDIENCE_CANNOT_READ_SOURCES``);
 - :mod:`.queries`: SQL builders over conversation tables.

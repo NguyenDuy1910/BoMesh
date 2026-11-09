@@ -24,6 +24,12 @@ export function listRequests(workspace: string): Promise<Request[]> {
   );
 }
 
+/** How many requests matching `filter` the caller may see (`pageSize=1`, read from `totalSize`). */
+export async function countRequests(workspace: string, filter: string): Promise<number> {
+  const page = await call(api.GET("/api/v1/workspaces/{workspace}/requests", { params: { path: { workspace }, query: { pageSize: 1, filter } } }));
+  return page.totalSize ?? 0;
+}
+
 export function getRequest(workspace: string, request: string): Promise<Request> {
   return call(api.GET("/api/v1/workspaces/{workspace}/requests/{request}", { params: { path: rq(workspace, request) } }));
 }

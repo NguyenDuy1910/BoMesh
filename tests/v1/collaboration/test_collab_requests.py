@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import select, update
 
-from bomesh.db.models import Item, Request
+from bomesh.db.models import Item, Request, Role, User
 from collab_support import (
     item_name,
     member_name,
@@ -19,7 +19,7 @@ from collab_support import (
     space_path,
     ws_path,
 )
-from harness import ApiClient, World
+from harness import ApiClient, Sessions, World
 
 pytestmark = pytest.mark.asyncio
 
@@ -234,6 +234,93 @@ async def test_visibility_and_listing(client: ApiClient, world: World) -> None:
     assert (await outsider.get(path_of(question["name"]))).status_code == 403
     stranger = await client.as_(other_user)
     assert (await stranger.get(path_of(question["name"]))).status_code == 404
+
+
+async def test_badge_total_size_counts_every_visible_match(
+    client: ApiClient, world: World, sessions: Sessions
+) -> None:
+    """The shell badges: ``pageSize=1`` + a filter; ``totalSize`` counts every match the
+    caller may see, never only the page."""
+    workspace, space, _, staff_user, requester_user, other_user = await _setup(world)
+    it_space = await world.make_space(workspace, other_user, code="it")
+    kb = await world.make_collection(workspace, grants={staff_user: "roles/collectionOwner"})
+    archive = await world.make_collection(workspace)
+    async with sessions.begin() as session:
+        viewer = await session.scalar(
+            select(Role.id).where(Role.tenant_id.is_(None), Role.code == "collectionViewer")
+        )
+        member = await session.scalar(
+            select(Role.id).where(Role.tenant_id.is_(None), Role.code == "spaceMember")
+        )
+        for asker, where, state in (
+            (requester_user, space, "open"),
+            (requester_user, space, "needs_info"),
+            (requester_user, space, "approved"),
+            (requester_user, space, "closed"),
+            (requester_user, it_space, "open"),
+            (staff_user, space, "needs_info"),
+            (staff_user, space, "open"),
+        ):
+            session.add(
+                Request(
+                    tenant_id=workspace.id,
+                    kind="question",
+                    space_id=where.id,
+                    question="Why?",
+                    requester_user_id=asker.id,
+                    state=state,
+                )
+            )
+        session.add(
+            Request(
+                tenant_id=workspace.id,
+                kind="space_membership",
+                space_id=space.id,
+                requested_role_id=member,
+                requester_user_id=other_user.id,
+            )
+        )
+        for asker, collection, state in (
+            (requester_user, kb, "open"),
+            (requester_user, archive, "open"),
+            (other_user, kb, "open"),
+            (other_user, archive, "denied"),
+        ):
+            session.add(
+                Request(
+                    tenant_id=workspace.id,
+                    kind="collection_access",
+                    collection_item_id=collection.id,
+                    requested_role_id=viewer,
+                    requester_user_id=asker.id,
+                    state=state,
+                )
+            )
+    url = f"{ws_path(workspace)}/requests"
+
+    async def count(user: User, filter: str) -> tuple[int, int]:
+        response = await (await client.as_(user)).get(
+            url, params={"pageSize": 1, "filter": filter}
+        )
+        assert response.status_code == 200, response.text
+        return len(response.json()["requests"]), response.json().get("totalSize", 0)
+
+    access = 'kind = "COLLECTION_ACCESS" AND state = "OPEN"'
+    assert await count(staff_user, access) == (1, 2)
+    assert await count(requester_user, access) == (1, 2)
+
+    def actionable(user: User) -> str:
+        me = member_name(workspace, user)
+        return (
+            '(kind = "SERVICE" OR kind = "QUESTION") AND '
+            f'((requester = "{me}" AND state = "NEEDS_INFO") OR '
+            f'(requester != "{me}" AND (state = "OPEN" OR state = "APPROVED")))'
+        )
+
+    # Staff: the requester's OPEN and APPROVED questions in hr, and their own NEEDS_INFO one.
+    assert await count(staff_user, actionable(staff_user)) == (1, 3)
+    # The requester sees only their own requests: one NEEDS_INFO.
+    assert await count(requester_user, actionable(requester_user)) == (1, 1)
 
 
 async def test_transitions_and_messages(

@@ -40,6 +40,7 @@ import {
 import { fmtDate } from "@/lib/format";
 
 import type { Contribution, Item, ItemContent, SearchItemsFacet, SearchItemsRequest, SearchItemsResult, Topic } from "./api";
+import type { DocumentRendition } from "./reader/rendition";
 import { pickTypeLabel, readableTitle } from "./title";
 
 export { pickTypeLabel, readableTitle };
@@ -469,8 +470,8 @@ export type FacetId = "topic" | "kind" | "owner" | "src" | "kb" | "trust" | "upd
 export interface FacetDef {
   id: FacetId;
   label: string;
-  /** SearchItems facet field; `null` when computed locally (Updated). */
-  field: string | null;
+  /** SearchItems facet field (`updateTime` is an interval facet over UPDATED_WINDOWS). */
+  field: string;
   single?: boolean;
 }
 
@@ -486,7 +487,7 @@ export const FACETS: readonly FacetDef[] = [
   { id: "src", label: "Source", field: "document.origin.source" },
   { id: "kb", label: "Knowledge base", field: "ancestors" },
   { id: "trust", label: "Trust", field: "document.verification.state" },
-  { id: "upd", label: "Updated", field: null, single: true },
+  { id: "upd", label: "Updated", field: "updateTime", single: true },
   { id: "fmt", label: "Format", field: "document.mimeType" },
 ];
 
@@ -560,19 +561,12 @@ const TRUST_KEY: Readonly<Record<string, TrustState>> = { VERIFIED: "verified", 
 const lit = (v: string) => `"${v.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 
 /** The AIP-160 clause for one facet's selected values (OR within a facet). */
-function facetClause(id: FacetId, values: readonly string[], ws: string, topics?: readonly Topic[]): string {
+function facetClause(id: FacetId, values: readonly string[], ws: string): string {
   const any = (parts: string[]) => (parts.length > 1 ? `(${parts.join(" OR ")})` : parts[0] ?? "");
   switch (id) {
-    case "topic": {
-      // Selecting a domain matches everything under it (preview topicLineage).
-      const names = new Set<string>();
-      for (const v of values) {
-        const name = `workspaces/${ws}/topics/${v}`;
-        names.add(name);
-        for (const t of topics ?? []) if (t.parentTopic === name && t.name) names.add(t.name);
-      }
-      return any([...names].map((n) => `document.topics:${lit(n)}`));
-    }
+    case "topic":
+      // Hierarchical on the server: a domain also matches everything under it.
+      return any(values.map((v) => `document.topics:${lit(`workspaces/${ws}/topics/${v}`)}`));
     case "kind":
       return any(values.map((v) => `document.documentType = ${lit(v)}`));
     case "owner":
@@ -593,21 +587,26 @@ function facetClause(id: FacetId, values: readonly string[], ws: string, topics?
 }
 
 /** AIP-160 filter for the selected facets (AND across facets); `base` adds extra clauses (e.g. a subtree). */
-export function catalogFilter(p: CatalogParams, ws: string, { topics, base }: { topics?: readonly Topic[]; base?: string } = {}): string {
-  const clauses = FACETS.map((f) => (p.filters[f.id]?.length ? facetClause(f.id, p.filters[f.id]!, ws, topics) : "")).filter(Boolean);
+export function catalogFilter(p: CatalogParams, ws: string, { base }: { base?: string } = {}): string {
+  const clauses = FACETS.map((f) => (p.filters[f.id]?.length ? facetClause(f.id, p.filters[f.id]!, ws) : "")).filter(Boolean);
   if (base) clauses.unshift(base);
   return clauses.join(" AND ");
 }
 
 export const ORDER_BY: Readonly<Record<CatalogSort, string>> = { relevance: "", updated: "updateTime desc", title: "displayName" };
 
-/** SearchItems request for Browse (facets disjunctive, snippets + passages for previews). */
+/**
+ * SearchItems request for Browse (facets disjunctive, snippets + passages for previews). Updated is an
+ * interval facet: one `updateTime` interval per window, in UPDATED_WINDOWS order.
+ */
 export function catalogSearchRequest(
   p: CatalogParams,
   ws: string,
-  options: { topics?: readonly Topic[]; base?: string; pageSize?: number; pageToken?: string; facets?: boolean } = {},
+  options: { base?: string; pageSize?: number; pageToken?: string; facets?: boolean } = {},
 ): SearchItemsRequest {
   const sort = p.sort || (p.q ? "relevance" : "updated");
+  // Window starts are floored to the hour so requests built within the hour stay equal (cache keys).
+  const hour = Math.floor(Date.now() / 3_600_000) * 3_600_000;
   return {
     query: p.q || undefined,
     filter: catalogFilter(p, ws, options) || undefined,
@@ -615,7 +614,11 @@ export function catalogSearchRequest(
     facetSpecs:
       options.facets === false
         ? undefined
-        : FACETS.filter((f) => f.field).map((f) => ({ field: f.field!, limit: f.id === "topic" ? 100 : 30, excludedFromFilter: true })),
+        : FACETS.map((f) =>
+            f.id === "upd"
+              ? { field: f.field, intervals: UPDATED_WINDOWS.map(([, , days]) => ({ minimum: new Date(hour - days * 86_400_000).toISOString() })), excludedFromFilter: true }
+              : { field: f.field, limit: f.id === "topic" ? 100 : 30, excludedFromFilter: true },
+          ),
     contentSearchSpec: p.q ? { snippets: true, passages: 1 } : undefined,
     pageSize: options.pageSize ?? 30,
     pageToken: options.pageToken,
@@ -646,7 +649,7 @@ export function facetOptions(
       counts.set(value, { label: prev?.label || label, count: (prev?.count ?? 0) + count });
     };
     const api = facets?.find((f) => f.field === def.field);
-    for (const v of api?.values ?? []) {
+    for (const [i, v] of (api?.values ?? []).entries()) {
       const raw = v.value ?? "";
       const n = v.documentCount ?? 0;
       switch (def.id) {
@@ -671,6 +674,10 @@ export function facetOptions(
           add(key, FORMATS[key].label, n);
           break;
         }
+        case "upd":
+          // Interval values come back in request order: one per window.
+          if (UPDATED_WINDOWS[i]) add(UPDATED_WINDOWS[i][0], UPDATED_WINDOWS[i][1], n);
+          break;
       }
     }
     if (def.id === "upd") for (const [key, label] of UPDATED_WINDOWS) add(key, label, 0);
@@ -781,55 +788,40 @@ export interface Glance {
   opening: string;
 }
 
-const cellsOf = (line: string) =>
-  line
-    .replace(/^\s*\|/, "")
-    .replace(/\|\s*$/, "")
-    .split(/\s*\|\s*|\t/)
-    .map((c) => c.trim());
-
-/** Builds the glance of a document from its reader content; `null` without readable content. */
-export function glanceOf(content: ItemContent | undefined, format: FormatKey): Glance | null {
-  const elements = content?.elements ?? [];
-  if (!elements.length) return null;
+/** Builds the glance of a document from its stored rendition and page images; `null` without readable content. */
+export function glanceOf(rendition: DocumentRendition | undefined, pageAssets: ItemContent["pageAssets"], format: FormatKey): Glance | null {
+  const source = rendition?.blocks ?? [];
+  if (!source.length) return null;
   const blocks: GlanceBlock[] = [];
   const sections: GlanceSection[] = [];
   let heading = "";
   let pages = 1;
-  for (const el of elements) {
-    const page = el.pageNumber ?? 1;
+  const push = (b: GlanceBlock) => {
+    blocks.push(b);
+    let s = sections.find((x) => x.title === b.heading);
+    if (!s) sections.push((s = { title: b.heading, page: b.page, blocks: [] }));
+    s.blocks.push(b);
+  };
+  for (const block of source) {
+    const page = block.page ?? 1;
     pages = Math.max(pages, page);
-    const text = (el.text ?? "").trim();
-    if (!text) continue;
-    if (el.kind === "HEADING") {
-      heading = text;
-      continue;
-    }
-    const push = (b: GlanceBlock) => {
-      blocks.push(b);
-      let s = sections.find((x) => x.title === b.heading);
-      if (!s) sections.push((s = { title: b.heading, page: b.page, blocks: [] }));
-      s.blocks.push(b);
-    };
-    if (el.kind === "LIST") {
-      for (const line of text.split(/\n+/)) {
-        const item = line.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, "").trim();
-        if (item) push({ kind: "li", text: item, page, heading });
+    if (block.kind === "heading") {
+      if (block.text.trim()) heading = block.text.trim();
+    } else if (block.kind === "table") {
+      for (const row of block.rows) {
+        const cells = row.map((c) => c.trim());
+        push({ kind: "row", text: cells.map((c, i) => (block.columns[i] ? `${block.columns[i]}: ${c}` : c)).join(" · "), page, heading, cells: block.columns.length ? cells : undefined });
       }
-    } else if (el.kind === "TABLE") {
-      const rows = text.split(/\n+/).filter((l) => !/^\s*\|?\s*:?-{2,}/.test(l));
-      const head = rows[0] ? cellsOf(rows[0]) : [];
-      for (const line of rows.slice(1)) {
-        const cells = cellsOf(line);
-        push({ kind: "row", text: cells.map((c, i) => (head[i] ? `${head[i]}: ${c}` : c)).join(" · "), page, heading, cells: head.length ? cells : undefined });
-      }
-    } else if (el.kind === "PARAGRAPH" || el.kind === "CODE") {
-      push({ kind: "p", text, page, heading });
+    } else if (block.kind === "paragraph" || block.kind === "code") {
+      const text = block.text.trim();
+      const items = text.split(/\n+/).filter((line) => /^\s*(?:[-*•]|\d+[.)])\s+/.test(line));
+      if (items.length > 1) for (const line of items) push({ kind: "li", text: line.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, "").trim(), page, heading });
+      else if (text) push({ kind: "p", text, page, heading });
     }
   }
   const layout = format === "sheet" ? "sheet" : format === "slides" ? "slides" : "text";
-  const first = [...(content?.pageAssets ?? [])].sort((a, b) => (a.pageNumber ?? 0) - (b.pageNumber ?? 0))[0];
-  pages = Math.max(pages, content?.pageAssets?.length ?? 0);
+  const first = [...(pageAssets ?? [])].sort((a, b) => (a.pageNumber ?? 0) - (b.pageNumber ?? 0))[0];
+  pages = Math.max(pages, pageAssets?.length ?? 0);
   return {
     layout,
     sections,

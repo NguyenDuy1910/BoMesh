@@ -14,7 +14,7 @@ import { plural, rel } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 
 import type { ReadingList } from "../../api";
-import { useShareLabel } from "../../components/AddToCollectionDialog";
+import { useShareLabel } from "../../components/share-label";
 import { openReadingListEditor } from "../../components/dialogs";
 import { ResDot } from "../../components/ResourceRow";
 import { useMemberNames, useReadingLists } from "../../queries";

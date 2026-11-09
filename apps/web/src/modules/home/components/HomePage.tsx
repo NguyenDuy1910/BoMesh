@@ -4,7 +4,8 @@ import { Button, Dropdown, Header, Label, Separator } from "@heroui/react";
 import { useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import { ArrowRight, BookOpen, Calendar, History, Inbox, Megaphone, MessageSquare, Search, ShieldCheck, SlidersHorizontal, Sparkles, Tag, Upload, X, type LucideIcon } from "lucide-react";
-import { DynamicIcon, type IconName } from "lucide-react/dynamic";
+import type { IconName } from "lucide-react/dynamic";
+import dynamic from "next/dynamic";
 import NextLink from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
@@ -14,7 +15,7 @@ import { EmptyState, ErrorState, FileIcon, ItemIcon, List, ListItem, Tip, toast 
 import { errorMessage, resourceId } from "@/lib/api/client";
 import { plural, rel } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
-import { openContribute } from "@/modules/knowledge/components/Contribute";
+import { openContribute } from "@/modules/knowledge/components/contribute-store";
 import { openDocumentPreview } from "@/modules/knowledge/preview/store";
 import { ContributeButton } from "@/modules/knowledge/components/KnowledgeHeader";
 import { deleteReadingListEntry, featureItem, FEATURED_LIST } from "@/modules/knowledge/api";
@@ -27,6 +28,9 @@ import { upNextWhen, useUpNext } from "@/modules/spaces";
 import type { MemberHome, MemberHomeItem } from "../api";
 import { callName, greeting } from "../intent";
 import { homeKeys, useCardDetails, useFreshCount, useInsights, useLastViews, useMemberHome, type Insight } from "../queries";
+
+/** Topic icons are any Lucide name an admin picked: the name → icon loader table loads after first paint. */
+const DynamicIcon = dynamic(() => import("lucide-react/dynamic").then((m) => m.DynamicIcon), { ssr: false, loading: () => <Tag className="i i-sm" /> });
 
 const DAY = 86_400_000;
 const bare = (n?: string) => String(n ?? "").replace(/\.[a-z0-9]{1,5}$/i, "");
@@ -263,7 +267,7 @@ function AttentionSection({ onVisible }: { onVisible?: (visible: boolean) => voi
 /** The last documents you opened → the Reader where you left off; Ask continues from the document. */
 function ContinueSection({ home, views, onVisible }: { home: MemberHome; views: ReadonlyMap<string, string>; onVisible?: (visible: boolean) => void }) {
   const recent = (home.continue?.recentItems ?? []).slice(0, 4);
-  const details = useCardDetails(recent.map((doc) => resourceId(doc.item)));
+  const details = useCardDetails(home);
   const { ctx } = useKnowledgeModel();
   useReportVisible(onVisible, recent.length > 0);
   if (!recent.length) return null;
@@ -398,7 +402,7 @@ function ReadingSection({ home, firstVisit, exclude, views, onVisible }: { home:
     list.push(...first.slice(0, 3), ...unique.filter((x) => !first.slice(0, 3).includes(x)));
   }
   const cards = list.slice(0, 3);
-  const details = useCardDetails(cards.map((c) => resourceId(c.item.item)));
+  const details = useCardDetails(home);
   useReportVisible(onVisible, cards.length > 0);
   if (!cards.length) return null;
 

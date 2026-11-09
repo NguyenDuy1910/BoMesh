@@ -50,7 +50,7 @@ Knowledge (one sidebar item) ─ section tabs, one per intent:
 ├── My library ─────── Saved · Recent · Contributions · My files · My collections
 └── Collection (/knowledge/collections/:id) ─ numbered reading order with notes · Ask about this collection · Use in… · Edit mode (order, notes, add resources)
 Document preview ───── shared modal from every document row, card and citation: native rendering, highlighted passage · Ask about this document · Open full document
-Reader (/doc/:id) ──── document · outline · Ask | About | Related rail (closed by default; ?ask=1 opens Ask) · Save · Add to collection · Use in… (submissions: preview banner, no Ask)
+Reader (/doc/:id) ──── document (no outline column) · Ask | About | Related rail (closed by default; ?ask=1 opens Ask) · Save · Add to collection · Use in… (submissions: preview banner, no Ask)
 Manage › Documents ─── Review · All documents · Quality · Topics (admins) (see DOCUMENT_LIFECYCLE.md)
 Manage › Knowledge bases (/bases) ─ the bases you own or edit · Create knowledge base
      └── Knowledge base (/bases/:id) ─ Access (owners) · Sources · Settings (owners) · View documents · what's waiting in review

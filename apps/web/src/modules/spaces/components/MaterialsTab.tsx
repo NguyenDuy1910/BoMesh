@@ -12,7 +12,7 @@ import { errorMessage, resourceId } from "@/lib/api/client";
 import { plural, rel } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { createMaterial, deleteMaterial, listAllItems, quote, type Item } from "@/modules/knowledge/api";
-import { openContribute } from "@/modules/knowledge/components/Contribute";
+import { openContribute } from "@/modules/knowledge/components/contribute-store";
 import { KnowledgeModal } from "@/modules/knowledge/components/KnowledgeModal";
 import { LifecycleChip } from "@/modules/knowledge/components/LifecycleChip";
 import { ResourceList, ResourceRow } from "@/modules/knowledge/components/ResourceRow";

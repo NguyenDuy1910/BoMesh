@@ -3,6 +3,7 @@
 import { Button, Skeleton } from "@heroui/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { MessageSquare, MessageSquarePlus, RotateCcw, Share } from "lucide-react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
@@ -13,8 +14,9 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { toast } from "@/components/ui/Toast";
 import { ApiError, errorMessage, resourceId } from "@/lib/api/client";
+import { useOpened } from "@/lib/lazy";
 import { useWorkspace } from "@/lib/workspace";
-import { confirmLeaveFileEdit, FilePanel, useComposerFiles, useFileDrop } from "@/modules/artifacts";
+import { confirmLeaveFileEdit, useComposerFiles, useFileDrop } from "@/modules/artifacts";
 import { openDocumentPreview } from "@/modules/knowledge/preview/store";
 import { ConversationMenu, useConversationProject } from "@/modules/projects";
 import { useMySpaces } from "@/modules/spaces";
@@ -25,9 +27,12 @@ import { dismissTurn, sendTurn, sentFiles, stopTurn, useLiveTurn, useStreamingCo
 import { buildThread, RETRY_MODIFIER, type AnswerView } from "../thread";
 import type { AnswerSource } from "../turn";
 import { Composer, useDraft } from "./Composer";
-import { FeedbackDialog } from "./FeedbackDialog";
-import { ShareConversationDialog } from "./ShareConversationDialog";
 import { Answer, UserMessage, type RetryMode } from "./ThreadMessages";
+
+/* The file panel and dialogs load on first open; the thread's first paint needs none of them. */
+const FilePanel = dynamic(() => import("@/modules/artifacts/components/FilePanel").then((m) => m.FilePanel), { ssr: false });
+const FeedbackDialog = dynamic(() => import("./FeedbackDialog").then((m) => m.FeedbackDialog), { ssr: false });
+const ShareConversationDialog = dynamic(() => import("./ShareConversationDialog").then((m) => m.ShareConversationDialog), { ssr: false });
 
 /** The side panel is only ever a generated file now: citations open the shared document preview. */
 type Panel = { kind: "file"; artifact: string };
@@ -76,6 +81,8 @@ export function ChatThread({ id }: { id: string }) {
   const [editing, setEditing] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
   const [commentFor, setCommentFor] = useState<string | null>(null);
+  const sharingOpened = useOpened(sharing);
+  const feedbackOpened = useOpened(commentFor != null);
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
 
@@ -354,12 +361,14 @@ export function ChatThread({ id }: { id: string }) {
         </div>
       </div>
       {panel?.kind === "file" ? <FilePanel key={panel.artifact} artifact={panel.artifact} onClose={() => setPanel(null)} /> : null}
-      {conv ? <ShareConversationDialog conversation={id} title={title} isOpen={sharing} onClose={() => setSharing(false)} /> : null}
-      <FeedbackDialog
-        isOpen={!!commentFor}
-        onClose={() => setCommentFor(null)}
-        onSubmit={(comment) => (commentFor ? onFeedback(commentFor, "UNHELPFUL", undefined, comment.slice(0, 1000)) : Promise.resolve())}
-      />
+      {conv && sharingOpened ? <ShareConversationDialog conversation={id} title={title} isOpen={sharing} onClose={() => setSharing(false)} /> : null}
+      {feedbackOpened ? (
+        <FeedbackDialog
+          isOpen={!!commentFor}
+          onClose={() => setCommentFor(null)}
+          onSubmit={(comment) => (commentFor ? onFeedback(commentFor, "UNHELPFUL", undefined, comment.slice(0, 1000)) : Promise.resolve())}
+        />
+      ) : null}
     </div>
   );
 }

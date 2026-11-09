@@ -60,7 +60,7 @@ export function itemName(workspace: string, item: string): string {
 
 export type ItemContent = Schema<"ItemContent">;
 
-/** Reader representation (elements with page numbers, page images); `REVISION_NOT_RENDERED` until processed. `revision` = an older revision name/ID. */
+/** Reader representation (signed page images and rendition URL; never the search index); `REVISION_NOT_RENDERED` until processed. `revision` = an older revision name/ID. */
 export function getItemContent(workspace: string, item: string, revision?: string): Promise<ItemContent> {
   return call(
     api.GET("/api/v1/workspaces/{workspace}/items/{item}/content", {
@@ -74,7 +74,7 @@ export function getItem(workspace: string, item: string, view: ItemView = "FULL"
 }
 
 export interface ListItemsOptions {
-  /** AIP-160 filter (`parentItem`, `ancestors:`, `itemType`, `document.*`, `updateTime`). */
+  /** AIP-160 filter (`name`, `parentItem`, `ancestors:`, `itemType`, `document.*`, `updateTime`). */
   filter?: string;
   orderBy?: string;
   pageSize?: number;
@@ -91,6 +91,29 @@ export function listItems(workspace: string, options: ListItemsOptions = {}): Pr
 /** Every item matching the options (follows page tokens, up to `limit`). */
 export function listAllItems(workspace: string, options: Omit<ListItemsOptions, "pageToken"> = {}, limit = 1000): Promise<Item[]> {
   return listAll((pageToken) => listItems(workspace, { pageSize: 200, ...options, pageToken }), (page) => page.items, limit);
+}
+
+/** Names per batch read: `name = "…"` terms stay under the server's 4096-character filter limit. */
+const BATCH_NAMES = 35;
+
+/**
+ * Many items by name in one ListItems call per {@link BATCH_NAMES} names (`name = … OR …`).
+ * Items the caller can't read under the visibility rule, deleted ones and missing ones are simply
+ * absent (never the reviewer exception: candidates under review are GetItem-only). `showLocked`
+ * returns named discoverable roots the caller can't read as LOCKED, as GetItem does.
+ */
+export async function batchGetItems(
+  workspace: string,
+  items: readonly string[],
+  { view = "BASIC", showLocked }: { view?: ItemView; showLocked?: boolean } = {},
+): Promise<Item[]> {
+  const names = [...new Set(items.filter(Boolean).map((i) => itemName(workspace, i)))];
+  const chunks: string[][] = [];
+  for (let i = 0; i < names.length; i += BATCH_NAMES) chunks.push(names.slice(i, i + BATCH_NAMES));
+  const pages = await Promise.all(
+    chunks.map((chunk) => listItems(workspace, { filter: chunk.map((n) => `name = ${quote(n)}`).join(" OR "), pageSize: chunk.length, view, showLocked })),
+  );
+  return pages.flatMap((page) => page.items ?? []);
 }
 
 /** AIP-160 string literal. */
@@ -579,13 +602,6 @@ export function getMember(workspace: string, member: string): Promise<Member> {
 
 export function getSource(workspace: string, source: string): Promise<Source> {
   return call(api.GET("/api/v1/workspaces/{workspace}/sources/{source}", { params: { path: { workspace, source: resourceId(source) } } }));
-}
-
-export function listSpaces(workspace: string): Promise<Space[]> {
-  return listAll(
-    (pageToken) => call(api.GET("/api/v1/workspaces/{workspace}/spaces", { params: { path: ws(workspace), query: { pageSize: 200, pageToken } } })),
-    (page) => page.spaces,
-  );
 }
 
 export async function testSpacePermissions(workspace: string, space: string, permissions: readonly string[]): Promise<string[]> {

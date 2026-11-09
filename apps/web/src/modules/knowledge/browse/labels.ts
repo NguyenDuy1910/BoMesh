@@ -1,12 +1,13 @@
 "use client";
 
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useQueries } from "@tanstack/react-query";
 import { useCallback } from "react";
 
 import { resourceId } from "@/lib/api/client";
 import { useWorkspace } from "@/lib/workspace";
+import { useSpaces } from "@/modules/spaces/queries";
 
-import { getSource, listSpaces } from "../api";
+import { getSource } from "../api";
 import { FORMATS, kindMeta, languageName, TRUST, UPDATED_WINDOWS, type FormatKey, type TrustState } from "../model";
 import { knowledgeKeys, useKnowledgeBases, useMemberNames, useTopics } from "../queries";
 import type { BrowseFacetId } from "./catalog";
@@ -19,10 +20,10 @@ export type FacetLabel = (facet: BrowseFacetId, value: string, fallback?: string
  * names) and `sources` (bare IDs) are resolved on demand.
  */
 export function useFacetLabel({ owners = [], sources = [] }: { owners?: readonly string[]; sources?: readonly string[] } = {}): FacetLabel {
-  const { id: ws, settings, member, hasModule } = useWorkspace();
+  const { id: ws, settings, member } = useWorkspace();
   const topics = useTopics();
   const bases = useKnowledgeBases();
-  const spaces = useQuery({ queryKey: [ws, "spaces", "all"], queryFn: () => listSpaces(ws), enabled: hasModule("spaces"), staleTime: 5 * 60_000 });
+  const spaces = useSpaces();
   const memberNames = useMemberNames(owners);
   const sourceResults = useQueries({
     queries: sources.map((sid) => ({ queryKey: knowledgeKeys.source(ws, sid), queryFn: () => getSource(ws, sid), staleTime: 10 * 60_000, retry: false })),

@@ -38,7 +38,7 @@ ingestion: original file ── parse once (Docling) ──► DocumentItem.cont
                                    ▼                       ▼
                        page images (WebP)        document rendition (JSON, gzip)
                                    └──── preview manifest (item_revisions.exports.preview) ────┘
-read:  GetItemContent (?revision=) ── authorize ──► elements + signed URLs (pages, rendition)
+read:  GetItemContent (?revision=) ── authorize ──► signed URLs (pages, rendition); no index read
        GetPassage / ListPassages (indexedRevision) ──► citation geometry
 browser: fetch rendition directly from storage ─► render blocks ─► highlight cited element/rows
 ```
@@ -113,10 +113,12 @@ regenerating one keeps the other when the source has not changed.
 
 - `GetItemContent` (`GET …/items/{item}/content`, `items.get`) returns the
   reader representation of the current revision, or of `?revision=`; the
-  response's `revision` names the revision rendered. It carries `elements`
-  (kind, text, level, `pageNumber`, `elementId`, owning `passage`), signed
+  response's `revision` names the revision rendered. It carries signed
   `pageAssets` and `rendition` (`uri`, `version`, `sizeBytes`, `blockCount`,
-  `truncated`; gzip JSON `application/vnd.bomesh.document+json`). A revision without a stored
+  `truncated`; gzip JSON `application/vnd.bomesh.document+json`). It reads
+  PostgreSQL and signs storage URLs only: opening or previewing a document
+  never reads the search index (thousands of chunks for a long document);
+  the document's text is its rendition. A revision without a stored
   preview is `FAILED_PRECONDITION` reason `REVISION_NOT_RENDERED`; a document
   never rendered at all is `FAILED_PRECONDITION`; a COLLECTION is
   `INVALID_ARGUMENT`; a DELETED item is `NOT_FOUND`.
@@ -160,8 +162,8 @@ its own pages.
   renditions for documents indexed before this design: it re-parses the stored
   original (no embeddings, no model calls) and merges the manifest. It is
   idempotent and skips documents whose rendition is current.
-- Rendition failure never fails ingestion; the viewer falls back to the cited
-  passage.
+- Rendition failure never fails ingestion; the viewer then shows the page
+  images when the revision has them, else offers the original.
 - **Conversation artifacts.** A file the agent produced is never ingested,
   so its revision is previewed on first view instead: `ArtifactService`
   parses the revision's original with the same `StoredFileContent` parser and
@@ -180,10 +182,13 @@ its own pages.
 - The full viewer is the web route `/doc/{item}`. It reads `GetItem`
   (name, parent collection, size, `indexingState`, `indexedRevision`),
   `GetItem` on the parent collection (name and the caller's `access`) and
-  `GetItemContent` (elements, page assets, rendition), and lays the rendition
-  out as one sheet per source page with an outline of its top two heading
-  levels. A revision with no rendition is shown from `elements` (the indexed
-  passages under their sections). Viewing an older revision passes
+  `GetItemContent` (page assets, rendition). A revision with page images
+  shows them (the document's own pages, opened at `?page=` or the first cited
+  page) and does not download the rendition; otherwise the rendition is laid
+  out as one sheet per source page; with neither, the original is offered
+  (`?alt=media`). There is no outline: the pages are the navigation, and a
+  panel beside them would cost a rendition download for every PDF.
+  Viewing an older revision passes
   `?v=<revision number>` (sent to the API as `revision`);
   `REVISION_NOT_RENDERED` shows the revision's metadata and a
   download through `?alt=media`.
@@ -208,11 +213,13 @@ its own pages.
 - "Ask about this document" and "Ask about this" on a text selection ask in
   place, in the viewer's Ask rail (`Converse` with the document attached);
   "Continue in chat" opens that conversation at `/chat/{conversation}`.
-  `?q=` highlights matches with previous/next; `?page=` opens a page.
+  `?q=` highlights matches with previous/next in a rendition (page images
+  carry no text marks; a citation opens at its page); `?page=` opens a page.
 - Performance:
-  - The rendition is fetched once per document version and kept in an
-    in-memory cache keyed by `item:version`; stepping between citations of one
-    document never downloads it again, and concurrent requests share one fetch.
+  - The rendition is downloaded only when it is what the canvas shows (no
+    page images), once per document version, and kept in an in-memory cache
+    keyed by `item:version`; stepping between citations of one document never
+    downloads it again, and concurrent requests share one fetch.
   - Long documents and large sheets render with CSS `content-visibility: auto`
     on blocks and on row groups (100 rows each), so the browser lays out only
     what is on screen without a virtualization library. Tables are CSS grids

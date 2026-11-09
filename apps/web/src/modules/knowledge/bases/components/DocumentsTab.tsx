@@ -19,7 +19,7 @@ import { resourceId } from "@/lib/api/client";
 import { useWorkspace } from "@/lib/workspace";
 
 import { listAllItems, quote } from "../../api";
-import { openContribute } from "../../components/Contribute";
+import { openContribute } from "../../components/contribute-store";
 import { ResourceList, ResourceRow } from "../../components/ResourceRow";
 import { catalogHref, fold, type Resource } from "../../model";
 import { useContributions, useKnowledgeModel } from "../../queries";

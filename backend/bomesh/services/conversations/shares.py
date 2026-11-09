@@ -33,7 +33,6 @@ from bomesh.iam.authorizer import WorkspaceRef
 from bomesh.services.conversations.citations import (
     citation_record,
     readable_source,
-    readable_summaries,
     unreadable_items,
 )
 from bomesh.services.conversations.conversations import (
@@ -54,6 +53,7 @@ from bomesh.services.kernel.audit import Audit
 from bomesh.services.kernel.context import RequestContext
 from bomesh.services.kernel.idempotency import Idempotency
 from bomesh.services.kernel.workspaces import WorkspaceResolver
+from bomesh.services.knowledge_items.summary import get_item_summaries
 from bomesh.services.workspaces.members import active_member_ids
 from bomesh.services.workspaces.records import parse_member_name
 
@@ -287,7 +287,7 @@ async def _render(
         (turn, tuple(StoredCitation.from_json(value) for value in turn.get("citations") or ()))
         for turn in share.snapshot.get("messages") or ()
     ]
-    summaries = await readable_summaries(
+    summaries = await get_item_summaries(
         session,
         ctx.authorizer,
         ctx.principal,

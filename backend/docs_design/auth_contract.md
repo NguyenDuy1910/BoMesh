@@ -139,15 +139,33 @@ and compiled-in user/workspace identifiers are not supported. Flutter persists
 the token in platform secure storage, namespaced by API origin, and revalidates
 it with GetSession (`sessions/current`) on startup and foreground resume.
 
-A `401` for the current token clears the authenticated UI; a late response for
-a replaced token cannot invalidate a newer session. Switching workspace
-discards open resource routes and workspace-scoped caches; pending work for the
-previous workspace keeps addressing that workspace by name and is authorized
-on its own. Conversation and other local caches are separated by account and
-workspace. Unauthenticated clients show sign-in/sign-up and never create a
-session automatically. Sign-out calls DeleteSession and clears local
+A `401` for the current token ends the authenticated session on the client; a
+late response for a replaced token cannot invalidate a newer session. Switching
+workspace discards open resource routes and workspace-scoped caches; pending
+work for the previous workspace keeps addressing that workspace by name and is
+authorized on its own. Conversation and other local caches are separated by
+account and workspace. Unauthenticated clients show sign-in/sign-up and never
+create a session automatically. Sign-out calls DeleteSession and clears local
 credentials even when the server is unreachable; an offline failure is
 reported, not shown as confirmed revocation.
+
+The web client treats the end of the current session — `expireTime` passing
+(a timer on the device clock, with `expireTime - createTime` counted from
+sign-in so clock skew cannot end a fresh session) or a `401` for the current
+token — as **expired**, not signed out. The session record is kept and marked
+expired (other tabs follow through storage events); the open page and its
+client state and caches stay; no further request is sent with or without the
+dead token (the API boundary answers it locally with `401 UNAUTHENTICATED`,
+which is never retried) except the public identity methods. A blocking
+"Your session expired" dialog offers the regular password/Google sign-in in
+place: a new session for the same user resumes the page at the same address
+and refetches its data; a session for a different user drops all cached data
+and reloads Home. The dialog also offers the full Sign in page
+(`/signin?next=<page>&reason=expired`, which explains the expiry and returns
+to `next` — a same-origin path only — for the same user) and Sign out. A page
+opened with an already expired session goes straight to that Sign in page.
+Sign-out keeps clearing the session in every tab. Renewal without
+re-authentication is not supported: there is no refresh method.
 
 The web client initializes the page-global Google Identity client once and
 uses Google's rendered popup button without the optional FedCM button flow.

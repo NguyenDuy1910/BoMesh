@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import Select, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh.agent import AgentStreamEvent
@@ -58,6 +58,8 @@ if TYPE_CHECKING:
     from bomesh.runtime import AppRuntime
 
 MAX_DISPLAY_NAME = 512
+#: Characters of the latest completed answer a Conversation carries for list previews.
+ANSWER_SNIPPET_LENGTH = 300
 _ANSWER_LENGTH_GUIDANCE = {
     "concise": "Keep answers short: lead with the answer and only the essential detail.",
     "detailed": "Give thorough answers with the relevant detail and context.",
@@ -175,7 +177,8 @@ class ConversationResourceService:
             names = await _space_names(
                 session, workspace_id, {s for row in rows for s in row.scope_space_ids}
             )
-        return [ConversationRecord.of(row, names) for row in rows], total
+            snippets = await _answer_snippets(session, [row.id for row in rows])
+        return [ConversationRecord.of(row, names, snippets) for row in rows], total
 
     async def update(
         self,
@@ -356,8 +359,30 @@ def _owned(workspace_id: UUID, user_id: UUID, *, show_deleted: bool) -> Select[t
 
 async def _record(session: AsyncSession, row: Conversation) -> ConversationRecord:
     return ConversationRecord.of(
-        row, await _space_names(session, row.tenant_id, row.scope_space_ids)
+        row,
+        await _space_names(session, row.tenant_id, row.scope_space_ids),
+        await _answer_snippets(session, [row.id]),
     )
+
+
+async def _answer_snippets(
+    session: AsyncSession, conversation_ids: Sequence[UUID]
+) -> dict[UUID, str]:
+    """Opening text of each conversation's latest completed answer, in one query."""
+    if not conversation_ids:
+        return {}
+    rows = await session.execute(
+        select(Message.conversation_id, func.left(Message.content, ANSWER_SNIPPET_LENGTH))
+        .where(
+            Message.conversation_id.in_(conversation_ids),
+            Message.status == "active",
+            Message.role == "assistant",
+            Message.generation_state == "completed",
+        )
+        .distinct(Message.conversation_id)
+        .order_by(Message.conversation_id, Message.sequence_number.desc())
+    )
+    return {conversation_id: text for conversation_id, text in rows.tuples() if text}
 
 
 async def _space_names(

@@ -9,8 +9,8 @@ export function getMemberHome(workspace: string, member: string): Promise<Member
   return call(api.GET("/api/v1/workspaces/{workspace}/members/{member}/home", { params: { path: { workspace, member } } }));
 }
 
-/** A document's revisions, newest first (Worth knowing reads the latest change note and the version number). */
-export async function listItemRevisions(workspace: string, item: string): Promise<ItemRevision[]> {
-  const page = await call(api.GET("/api/v1/workspaces/{workspace}/items/{item}/revisions", { params: { path: { workspace, item }, query: { pageSize: 100 } } }));
-  return page.revisions ?? [];
+/** One document revision by name (`workspaces/{w}/items/{i}/revisions/{n}`); Worth knowing reads the current one's change note. */
+export function getItemRevision(workspace: string, revision: string): Promise<ItemRevision> {
+  const [, , , item, , number] = revision.split("/");
+  return call(api.GET("/api/v1/workspaces/{workspace}/items/{item}/revisions/{revision}", { params: { path: { workspace, item, revision: number } } }));
 }

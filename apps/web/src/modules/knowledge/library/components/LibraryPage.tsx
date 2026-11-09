@@ -9,7 +9,7 @@ import { Page } from "@/components/ui/Page";
 import { SectionTabs, type SectionTab } from "@/components/ui/SectionTabs";
 import { useWorkspace } from "@/lib/workspace";
 
-import { openContribute } from "../../components/Contribute";
+import { openContribute } from "../../components/contribute-store";
 import { openReadingListEditor } from "../../components/dialogs";
 import { KnowledgeHeader } from "../../components/KnowledgeHeader";
 import { useMyContributions, useReadingLists, useRecentItems, useSavedItems, useSavedSearches } from "../../queries";

@@ -274,24 +274,55 @@ class _Composer:
     async def _recommended(
         self, recent: Sequence[HomeItem], viewed: set[UUID]
     ) -> tuple[HomeRecommended, ...]:
-        """Unread documents next to what the member read (BECAUSE_YOU_READ), then POPULAR."""
+        """Unread documents next to what the member read (BECAUSE_YOU_READ), then POPULAR.
+
+        Each read collection (first read first) contributes its newest unread
+        documents; one windowed query fetches them for every read collection.
+        """
         recommended: list[HomeRecommended] = []
         shown = set(viewed)
+        reads: dict[UUID, HomeItem] = {}
         for read in recent:
-            if read.collection_id is None:
-                continue
-            ids = await self._session.scalars(
-                select(Item.id)
-                .where(
-                    self._published_documents(),
-                    Item.parent_item_id == read.collection_id,
-                    Item.id.not_in(shown) if shown else true(),
-                )
-                .order_by(Item.created_at.desc(), Item.id)
-                .limit(SECTION_LIMIT)
+            if read.collection_id is not None:
+                reads.setdefault(read.collection_id, read)
+        rank = (
+            func.row_number()
+            .over(
+                partition_by=Item.parent_item_id,
+                order_by=(Item.created_at.desc(), Item.id),
             )
-            for card in await self._cards_of(list(ids)):
-                shown.add(card.item_id)
+            .label("rank")
+        )
+        newest = (
+            select(Item.id, Item.parent_item_id, rank)
+            .where(
+                self._published_documents(),
+                Item.parent_item_id.in_(reads),
+                Item.id.not_in(shown) if shown else true(),
+            )
+            .subquery()
+        )
+        by_collection: dict[UUID, list[UUID]] = {}
+        if reads:
+            rows = await self._session.execute(
+                select(newest.c.id, newest.c.parent_item_id)
+                .where(newest.c.rank <= SECTION_LIMIT)
+                .order_by(newest.c.parent_item_id, newest.c.rank)
+            )
+            for item_id, collection_id in rows.tuples():
+                by_collection.setdefault(collection_id, []).append(item_id)
+        cards = {
+            card.item_id: card
+            for card in await self._cards_of(
+                [item_id for ids in by_collection.values() for item_id in ids]
+            )
+        }
+        for collection_id, read in reads.items():
+            for item_id in by_collection.get(collection_id, ()):
+                card = cards.get(item_id)
+                if card is None:
+                    continue
+                shown.add(item_id)
                 recommended.append(
                     HomeRecommended(
                         item=card,
@@ -361,32 +392,36 @@ class _Composer:
     async def _cards_of(
         self, item_ids: Sequence[UUID], merged_from: dict[UUID, UUID | None] | None = None
     ) -> list[HomeItem]:
-        """Cards of the visible documents among ``item_ids``, in that order."""
+        """Cards of the visible documents among ``item_ids``, in that order.
+
+        Rows and ancestries load once; ``governing_collection`` and ``item_thumbnail``
+        then read the authorizer memo and the session identity map.
+        """
         if not item_ids:
             return []
         rows = await self._session.execute(
-            select(
-                Item.id, Item.title, Item.document_type, VERIFICATION_STATE, PUBLISH_TIME
-            ).where(
+            select(Item, VERIFICATION_STATE, PUBLISH_TIME).where(
                 Item.id.in_(item_ids), Item.item_type == "document", self._visibility.clause()
             )
         )
-        found = {row[0]: row for row in rows}
+        found = {row[0].id: row for row in rows}
+        await self._ctx.authorizer.ancestries(found)
         cards: list[HomeItem] = []
         for item_id in dict.fromkeys(item_ids):
             row = found.get(item_id)
             if row is None:
                 continue
+            item, verification_state, publish_time = row
             cards.append(
                 HomeItem(
                     workspace_id=self._workspace_id,
                     item_id=item_id,
                     merged_from=(merged_from or {}).get(item_id),
-                    display_name=row[1],
+                    display_name=item.title,
                     collection_id=await self._ctx.authorizer.governing_collection(item_id),
-                    document_type=row[2],
-                    verification_state=row[3],
-                    publish_time=row[4],
+                    document_type=item.document_type,
+                    verification_state=verification_state,
+                    publish_time=publish_time,
                     thumbnail_uri=await item_thumbnail(
                         self._session,
                         self._thumbnails.preview,

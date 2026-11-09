@@ -10,8 +10,9 @@ import { toast } from "@/components/ui/Toast";
 import { errorMessage, resourceId } from "@/lib/api/client";
 import { plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
+import { spacesListQuery } from "@/modules/spaces/queries";
 
-import { createReadingList, createReadingListEntry, listSpaces, testSpacePermissions, updateReadingList, type ReadingList } from "../api";
+import { createReadingList, createReadingListEntry, testSpacePermissions, updateReadingList, type ReadingList } from "../api";
 import { knowledgeKeys } from "../queries";
 import { KnowledgeModal } from "./KnowledgeModal";
 
@@ -41,7 +42,7 @@ export function ReadingListDialog({ list, items = [], isOpen, onClose }: Reading
     queryKey: [ws, "spaces", "curated"],
     enabled: isOpen && hasModule("spaces"),
     queryFn: async () => {
-      const all = (await listSpaces(ws)).filter((s) => s.callerRole === "roles/spaceLead" || s.callerRole === "roles/spaceStaff");
+      const all = (await qc.fetchQuery(spacesListQuery(ws))).filter((s) => s.callerRole === "roles/spaceLead" || s.callerRole === "roles/spaceStaff");
       const ok = await Promise.all(all.map((s) => testSpacePermissions(ws, s.name ?? "", ["materials.create"]).then((p) => p.length > 0, () => false)));
       return all.filter((_, i) => ok[i]);
     },

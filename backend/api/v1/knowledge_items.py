@@ -35,6 +35,7 @@ from api.dto.knowledge_items import (
     MergeItemRequest,
     MoveItemRequest,
     PolicyMessage,
+    SearchItemsFacetSpec,
     SearchItemsRequest,
     SearchItemsResponse,
     SetIamPolicyRequest,
@@ -65,10 +66,15 @@ from bomesh.services.knowledge_items.links import ItemLinkService
 from bomesh.services.knowledge_items.names import item_name, parse_item, parse_revision
 from bomesh.services.knowledge_items.records import (
     FacetRequest,
+    Interval,
     SearchRequest,
     UploadedFile,
 )
-from bomesh.services.knowledge_items.search import FACET_FIELDS, ItemSearchService
+from bomesh.services.knowledge_items.search import (
+    FACET_FIELDS,
+    INTERVAL_FACET_FIELDS,
+    ItemSearchService,
+)
 
 router = APIRouter(tags=["Knowledge"])
 upload_router = APIRouter(tags=["Knowledge"])
@@ -487,6 +493,7 @@ async def search_items(
                         else node
                     ),
                     limit=spec.limit or 0,
+                    intervals=_facet_intervals(spec),
                 )
                 for spec in facet_specs
             ],
@@ -502,3 +509,23 @@ async def search_items(
     )
     window = paging.page(page.results)
     return search_response(workspace, page, window.items, window.next_page_token)
+
+
+def _facet_intervals(spec: SearchItemsFacetSpec) -> tuple[Interval, ...]:
+    """``FacetSpec.intervals``: required for interval fields, refused for the others."""
+    intervals = spec.intervals or []
+    if (spec.field in INTERVAL_FACET_FIELDS) != bool(intervals):
+        raise InvalidArgument.for_field(
+            "facetSpecs.intervals",
+            f"Facet {spec.field!r} needs intervals."
+            if spec.field in INTERVAL_FACET_FIELDS
+            else f"Facet {spec.field!r} takes no intervals.",
+        )
+    for interval in intervals:
+        if interval.minimum is None and interval.maximum is None:
+            raise InvalidArgument.for_field("facetSpecs.intervals", "An interval needs a bound.")
+        if interval.minimum is not None and interval.maximum is not None and interval.minimum > interval.maximum:
+            raise InvalidArgument.for_field(
+                "facetSpecs.intervals", "An interval's minimum is after its maximum."
+            )
+    return tuple(Interval(minimum=i.minimum, maximum=i.maximum) for i in intervals)

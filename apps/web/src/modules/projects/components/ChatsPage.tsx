@@ -28,11 +28,12 @@ import { useSpaces } from "@/modules/spaces/queries";
 import { spaceType } from "@/modules/spaces/types";
 
 import {
+  answerFirstLine,
   conversationTime,
   conversationTitle,
   type Conversation,
 } from "../conversations";
-import { useConversationModel, useLastAnswer } from "../queries";
+import { useConversationModel } from "../queries";
 import { ConversationMenu } from "./ConversationMenu";
 
 const PER = 20;
@@ -82,7 +83,7 @@ function TitleCell({
   conversation: Conversation;
   context: ReactNode;
 }) {
-  const last = useLastAnswer(conversation);
+  const last = answerFirstLine(conversation.lastAnswerSnippet);
   return (
     <>
       <div className="row gap-8">
@@ -104,7 +105,7 @@ function TitleCell({
 }
 
 function LastAnswerCell({ conversation }: { conversation: Conversation }) {
-  const last = useLastAnswer(conversation);
+  const last = answerFirstLine(conversation.lastAnswerSnippet);
   return (
     <span className="muted truncate" translate="no">
       {last}
