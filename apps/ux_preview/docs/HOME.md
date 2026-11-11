@@ -10,10 +10,11 @@ Home is where every person lands in every workspace (`/home`, first sidebar item
 | --- | --- | --- |
 | **Home** | Orientation, continuity, what changed, discovery shortcuts | Discover & start |
 | **Knowledge** | Searching, filtering, previewing and reading documents ([KNOWLEDGE_HUB.md](KNOWLEDGE_HUB.md)) | Find & explore |
-| **New chat** / conversations | Asking, grounded answers with citations ([PRODUCT_FLOW.md](PRODUCT_FLOW.md#1-sign-in-and-ask)) | Ask & understand |
-| **Inbox** (topbar bell) · **Search** (topbar, ⌘K) | Notifications and decisions · jump to anything | — |
+| **AI Chat** | Asking — the composer and every earlier conversation; grounded answers with citations ([PRODUCT_FLOW.md](PRODUCT_FLOW.md#1-sign-in-and-ask)) | Ask & understand |
+| **Your work** (Recent · Projects · My contributions) | Everything you touched, organised and submitted, in full ([PRODUCT_FLOW.md](PRODUCT_FLOW.md#information-architecture)) | Pick up & track |
+| **Inbox** (top-row bell) · **Search** (sidebar search row, ⌘K) | Notifications and decisions · jump to anything | — |
 
-Nothing is typed on Home. Searching belongs to Knowledge (and ⌘K), asking belongs to New chat; Home sends people to them in one click.
+Nothing is typed on Home. Searching belongs to Knowledge (and ⌘K), asking belongs to AI Chat; Home sends people to them in one click. Home shows only the few items that matter now and links to the page that holds the rest: *View all* → Recent, a contribution → My contributions, *Ask a question* → AI Chat (the single entry; Home has no composer).
 
 ```text
 Home
@@ -33,7 +34,7 @@ Every section after the intent cards appears only when it has something real to 
 
 | Before | Problem | Now |
 | --- | --- | --- |
-| Centered greeting and one large "Ask a question or find a document" box with a scope menu and suggested questions | Looked and behaved like New chat ("What can I help you find?" + composer) and duplicated topbar ⌘K. Home had no identity of its own; the first viewport was an empty input | Left-aligned greeting with one line of scale, then three intent cards that open the page owning the task (Knowledge, New chat, Contribute) |
+| Centered greeting and one large "Ask a question or find a document" box with a scope menu and suggested questions | Looked and behaved like the chat page ("What can I help you find?" + composer) and duplicated ⌘K. Home had no identity of its own; the first viewport was an empty input | Left-aligned greeting with one line of scale, then three intent cards that open the page owning the task (Knowledge, AI Chat, Contribute) |
 | Nothing said what the workspace holds | People had to guess what they could ask or find | The lede counts readable documents, topics and recent updates; Explore knowledge shows each domain with what it covers |
 | Four or five stacked rows of same-weight cards (Waiting, Continue, Worth knowing, Recommended) | Flat hierarchy; timely items competed with discovery | Two columns: carry on and discover on the left, what is timely on the right |
 | Explore by topic: small pills at the bottom | Discovery was the least visible element and showed no scope | Domain cards: name, document count, description and the largest topics, each a filtered Knowledge link |
@@ -51,17 +52,17 @@ Three equal cards, each one target with a title and a one-line hint from real da
 | Card | Hint | Opens |
 | --- | --- | --- |
 | Find a document | *Search {n} documents by title, topic or content* | Knowledge → Browse with its search field focused (`home-find`) |
-| Ask a question | *Answers from {workspace} documents, with citations* | New chat (`/chat`), its scope and starters as they are |
+| Ask a question | *Answers from {workspace} documents, with citations* | AI Chat (`/chat`), its scope and starters as they are |
 | Contribute knowledge (`knowledge.contribute`) | *Share a document; a reviewer publishes it* | The Contribute dialog |
-| Your library (everyone else) | *Saved documents, recent reads and collections* | Knowledge → My library |
+| Your library (everyone else) | *Saved documents, your files and collections* | Knowledge → My library |
 
 Hidden in the Empty state (the empty state carries Contribute and Browse knowledge instead).
 
 ### Needs your attention (aside)
-At most three: one contribution with changes requested (opens it in My library → Contributions), the review queue for reviewers (*9 documents to review*, the same count as the Manage → Documents badge → Review), and a request that needs your reply or something due within two days (Spaces/Requests modules). Absent when nothing waits.
+At most three: one contribution with changes requested (opens it in My contributions, `/contributions?open=id`), the review queue for reviewers (*9 documents to review*, the same count as the Manage › Knowledge Studio badge → Review), and a request that needs your reply or something due within two days (Spaces/Requests modules). Absent when nothing waits.
 
 ### Continue reading (main)
-The last four documents you opened (*Opened 1 h ago · Policy*), opening the Reader where you left off. A revealed-on-hover (always visible on touch) *Ask about this document* opens the Reader with its Ask panel (`/doc/{id}?ask=1`); from there *Continue in chat* moves the thread to a conversation. *View all* → My library → Recent when there are more. Conversations are not repeated: the sidebar's *Recent* has them.
+The last four documents you opened (*Opened 1 h ago · Policy*), opening the Reader where you left off. A revealed-on-hover (always visible on touch) *Ask about this document* opens the Reader with its Ask panel (`/doc/{id}?ask=1`); from there *Continue in chat* moves the thread to a conversation. *View all* → Your work → Recent (`/recent`) when there are more. Conversations are not repeated: AI Chat and Recent have them.
 
 ### What's new (aside)
 Source-backed changes, never generated statements: a document's new version with its owner's change note (*Standing production access removed; just-in-time access for up to 8 hours* — Access Control Policy · Version 4), or a recent announcement with its summary. Ready, published documents the person can read; changes older than 120 days and announcements older than 60 days drop off; a change disappears once you've opened the document after it. Ranked by your reading and saved topics, your spaces, verification and recency; four at most. The change is the headline, kind and date above, source document and version below. Opens the document preview.
@@ -76,11 +77,11 @@ Three documents, each with title, what it's for (summary or opening paragraph) a
 
 | Person wants to… | Path from Home |
 | --- | --- |
-| Get oriented (first visit) | Product tour (intent cards → Needs your attention / Continue → Explore → New chat → Search) · *Start here* · topic cards |
+| Get oriented (first visit) | Product tour (intent cards → Needs your attention / Continue → Explore → AI Chat → Search) · *Start here* · topic cards |
 | Continue a task | Needs your attention, or Continue reading → Reader |
 | Find a specific document | *Find a document* → Knowledge search focused (or ⌘K from anywhere) |
 | Explore an unfamiliar topic | Explore knowledge → domain or topic → Browse filtered → preview |
-| Ask AI | *Ask a question* → New chat; or sidebar New chat |
+| Ask AI | *Ask a question* → AI Chat; or sidebar AI Chat |
 | Move from a document to AI | Continue reading ✦ → Reader Ask → *Continue in chat*; or any preview → *Ask about this document* |
 
 ## Trust and permissions

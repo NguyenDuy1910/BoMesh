@@ -1,15 +1,15 @@
-/* Manage → Documents: Quality and Topics tabs (rendered inside P.documentsAdmin).
-   Quality keeps published documents trustworthy: re-verification cycles, missing details
-   and possible duplicates. Topics is the workspace taxonomy plus the assistant's proposed
-   topics (only workspace admins accept, merge or dismiss them). Scope: published documents
-   in the knowledge bases the caller can edit (admins: all).
-   Exports: X.gov = { quality({query}), topics({query}), qualityCount(), proposalCount() },
-   X.khReview(). Actions: kh-*, gov-*. Menus: kh-review, kh-topic, kh-dup, gov-prop-more.
-   Drawer: kh-dup. Models: core/catalog.js, core/lifecycle.js. */
+/* Knowledge Studio → Review, the "To keep right" queues (rendered inside the Review workbench, curation.js): keeps
+   published documents trustworthy and findable — topics to confirm (first syncs at scale: published, but filed with
+   low confidence or without a topic; decided per group, D.classGroups), re-verification cycles, missing details
+   (topics, owner, summary) and possible duplicates. The topics themselves are the taxonomy (features/masterdata.js).
+   Scope: published documents in the knowledge bases the caller can edit (admins: all).
+   Exports: X.gov = { queues, counts(), queue(id) }, X.khReview(). Actions: kh-*, cg-*.
+   Menus: kh-review, kh-topic, kh-dup, cg-more (its Move to another topic… opens the topic list). Drawer: kh-dup. Models: core/catalog.js, core/lifecycle.js. */
 (() => {
   'use strict';
 
-  const SEGS = ['reverify', 'details', 'duplicates'];
+  /** Review queue ids, in the order the queue chooser lists them. */
+  const QUEUES = ['confirm', 'reverify', 'details', 'duplicates'];
   function audit(action, target) {
     D.audit.unshift({ id: uid('ev'), at: Date.now(), actor: me().id, action, type: 'Knowledge', target, outcome: 'success', ip: '10.4.12.30', device: 'Chrome on macOS' });
   }
@@ -17,7 +17,6 @@
   const ownerOf = d => res(d).owner || 'the knowledge base owner';
   /** Keep a selection bucket in step with rows that still exist (rows are derived and vanish once fixed). */
   function pruneSel(u, valid) { Object.keys(u.sel || {}).forEach(id => { if (!valid.has(id)) delete u.sel[id]; }); }
-  const live = () => S.pageState === 'live' && !S.navLoading;
 
   /* ═══════════════ Signals ═══════════════ */
   /** Published documents the caller looks after: editable, non-personal knowledge bases. */
@@ -27,7 +26,7 @@
     never: { label: 'Never verified', icon: 'circle-dashed', rank: 1 },
   };
   /** { d, reason, note, due } when a document needs its owner to re-verify it, else null.
-      A document that changed at its source is a publishing state (fix: Publish update in All documents), not a trust check. */
+      A document that changed at its source is a publishing state (fix: Publish update in Review → Publishing problems), not a trust check. */
   function reviewItem(d) {
     if (d.status === 'outdated') return null;
     const t = trustOf(d);
@@ -41,56 +40,28 @@
   const GAPS = { topic: { label: 'No topic', icon: 'tag', noun: 'a topic' }, owner: { label: 'No owner', icon: 'user', noun: 'an owner' }, summary: { label: 'No summary', icon: 'note', noun: 'a summary' } };
   const detailItems = (pool = scope()) => pool.map(d => ({ d, gaps: metadataGaps(d) })).filter(x => x.gaps.length);
 
-  /** Published documents per topic and per domain (distinct, over what the caller can read) and submissions in review the assistant tagged with it. */
-  function topicCounts() {
-    const byTopic = new Map(), byDomain = new Map(), rv = new Map(), rvDomain = new Map();
-    const add = (m, id) => m.set(id, (m.get(id) || 0) + 1);
-    readableResources().forEach(d => {
-      const doms = new Set();
-      res(d).topics.forEach(id => { add(byTopic, id); doms.add(topicById(id)?.parent || id); });
-      doms.forEach(id => add(byDomain, id));
-    });
-    reviewQueue().forEach(d => {
-      const ids = (aiOf(d).topics || []).map(t => t.id), doms = new Set(ids.map(id => topicById(id)?.parent || id));
-      ids.forEach(id => add(rv, id)); doms.forEach(id => add(rvDomain, id));
-    });
-    return { topic: id => byTopic.get(id) || 0, domain: id => byDomain.get(id) || 0, review: id => rv.get(id) || 0, reviewDomain: id => rvDomain.get(id) || 0 };
-  }
-
   X.khReview = () => (can('knowledge.manage') ? reviewItems() : []);
-  /** What has gone stale (verification expired) plus possible duplicates. "Never verified" is backlog, not an alert. */
-  const qualityCount = () => (can('knowledge.manage') ? reviewItems().filter(x => x.reason !== 'never').length + duplicateCandidates().length : 0);
-  const proposalCount = () => (canManageTaxonomy() ? openProposals().length : 0);
 
-  /* ═══════════════ Quality tab ═══════════════ */
-  /** One line under the check switcher: what the check finds and what to do about it (counts live on the switcher). */
-  const SEG_HINT = {
+  /* ═══════════════ Review queues ═══════════════ */
+  /** One line above each queue: what it finds and what to do about it (counts live on the queue chooser). */
+  const HINT = {
+    confirm: 'Published, but filed with low confidence. Confirm in bulk; nobody is blocked meanwhile.',
     reverify: 'Verification expired or never happened. Verify what’s still right, or ask the owner to check.',
     details: 'Documents without a topic, owner or summary are harder to find. Fill in what’s missing.',
     duplicates: 'Near-identical documents compete in answers. Compare each pair and keep one.',
   };
-  function summary(pool, s, rv, dt, dp) {
-    if (!pool.length) return 'You don’t look after any published documents yet.';
-    if (!rv.length && !dt.length && !dp.length) return esc(`${plural(pool.length, 'published document')} across ${plural(new Set(pool.map(d => d.kb)).size, 'knowledge base')} — all verified, described and unique.`);
-    return SEG_HINT[s];
+  /** Items per queue: documents in topic groups to confirm, documents due, documents missing details, duplicate pairs. */
+  function counts() {
+    if (!can('knowledge.manage')) return { confirm: 0, reverify: 0, details: 0, duplicates: 0 };
+    const pool = scope();
+    return { confirm: openClassGroups().reduce((s, g) => s + g.n, 0), reverify: reviewItems(pool).length, details: detailItems(pool).length, duplicates: duplicateCandidates().length };
   }
-  function quality({ query = {} } = {}) {
-    return gate({
-      loading: () => skelRows(6),
-      error: () => errorState({ title: 'Quality checks didn’t load' }),
-      empty: () => emptyState({ icon: 'shield-check', tone: 'success', title: 'Every document is in good shape', desc: 'Nothing is due for re-verification, missing details or duplicated.', boxed: true }),
-      ok: () => {
-        const pool = scope(), rv = reviewItems(pool), dt = detailItems(pool), dp = duplicateCandidates();
-        const counts = { reverify: rv.length, details: dt.length, duplicates: dp.length };
-        const want = query.seg === 'review' ? 'reverify' : query.seg;
-        const s = SEGS.includes(want) ? want : SEGS.find(k => counts[k]) || 'reverify';
-        const control = seg({ value: s, act: 'gov-seg', label: 'Quality checks', options: [['reverify', `Due for re-verification · ${fmtNum(rv.length)}`], ['details', `Missing details · ${fmtNum(dt.length)}`], ['duplicates', `Possible duplicates · ${fmtNum(dp.length)}`]] });
-        const body = s === 'reverify' ? tabReview(rv) : s === 'details' ? tabDetails(dt) : tabDups(dp);
-        return `<div class="kh gov"><div class="gov-seg">${control}</div><p class="gov-summary">${summary(pool, s, rv, dt, dp)}</p>${body}</div>`;
-      },
-    });
+  /** One queue's body (the Review workbench owns the page state and the chooser). */
+  function queue(id) {
+    const pool = scope();
+    const body = id === 'confirm' ? tabConfirm(openClassGroups()) : id === 'reverify' ? tabReview(reviewItems(pool)) : id === 'details' ? tabDetails(detailItems(pool)) : tabDups(duplicateCandidates());
+    return `<div class="kh gov"><p class="gov-summary">${esc(HINT[id])}</p>${body}</div>`;
   }
-  A['gov-seg'] = el => { const v = el.dataset.value; ['khReview', 'khDetails'].forEach(k => { if (S.ui[k]) { S.ui[k].page = 1; S.ui[k].sel = {}; } }); if (S.cur?.r.page === 'documentsAdmin') setQuery({ tab: 'quality', seg: v }); else go(`/documents?tab=quality&seg=${v}`); };
 
   /* ── Due for re-verification ── */
   function tabReview(all) {
@@ -118,7 +89,7 @@
   function reviewRow(x) {
     const d = x.d, R = REASONS[x.reason];
     const req = d.reviewRequested ? chip('Requested', { size: 'sm', icon: 'send', tip: `Asked ${rel(d.reviewRequested).toLowerCase()}` }) : '';
-    // Like every Documents row, the row opens the document drawer; the fix (Verify) sits on the row.
+    // Like every Library row, the row opens the document drawer; the fix (Verify) sits on the row.
     return `<tr class="table__row" data-act="cur-doc" data-id="${esc(d.id)}" tabindex="0">
       ${selCheck('khReview', d.id, 'Select ' + d.name)}
       <td class="table__cell table__cell--primary"><div class="row gap-12">${fileIcon(d.type)}<div class="grow kh-min"><div class="cell-title truncate" data-tip="${esc(d.name)}">${esc(d.name)}</div><div class="cell-sub truncate">${esc(kbName(d))}</div></div></div></td>
@@ -347,200 +318,101 @@
     toast('Marked as not duplicates', { action: { label: 'Undo', run: () => { D.dupDismissed = (D.dupDismissed || []).filter(k => k !== key); refresh(); } } });
   }
 
-  /* ═══════════════ Topics tab ═══════════════ */
-  function topics() {
-    return gate({
-      loading: () => skelRows(6),
-      error: () => errorState({ title: 'Topics didn’t load' }),
-      empty: () => emptyState({ icon: 'tag', title: 'No topics yet', desc: canManageTaxonomy() ? 'Add a domain, then the topics people browse by.' : 'A workspace admin can add topics.', boxed: true }),
-      ok: () => {
-        const n = topicCounts();
-        return `<div class="kh gov">${proposalsHtml()}${taxonomyHtml(n)}</div>`;
-      },
-    });
+  /* ── Topics to confirm: what a first sync published with a low-confidence topic or none, decided per group ──
+     Every decision moves the run's counters (run.backfill.topics), the one source of truth Sources and the run read. */
+  const groupById = id => (D.classGroups || []).find(g => g.id === id);
+  const confRange = ([a, b] = []) => (a == null ? '' : `${Math.round(a * 100)}–${Math.round(b * 100)}% confidence`);
+  const sampleDisclosure = g => disclosure({
+    path: `cgSample.${g.id}`, title: 'Sample documents', summary: esc(`${(g.sample || []).length} of ${plural(g.n, 'document')}`),
+    body: `<ul class="cg-sample">${(g.sample || []).map(name => `<li class="cg-sample__row">${fileIcon(name.split('.').pop(), 'sm')}<span class="truncate" translate="no" data-tip="${esc(name)}">${esc(name)}</span></li>`).join('')}</ul>`,
+  });
+  const SEP = '<span aria-hidden="true"> · </span>';
+  function topicCard(g) {
+    const t = topicById(g.topic), dm = t && topicById(t.parent);
+    const meta = [plural(g.n, 'document'), confRange(g.conf), g.keywords?.length && `matched ${g.keywords.map(k => `“${k}”`).join(', ')}`].filter(Boolean);
+    return `<section class="cg-card" aria-label="${esc(t?.name || 'Topic')}">
+      <div class="cg-card__head">${itemIcon('tag', 'accent')}
+        <div class="cg-card__main"><div class="cg-card__title"><span class="medium" translate="no">${esc(t?.name || 'Untitled topic')}</span>${t?.code ? `<span class="md-code md-code--domain" translate="no">${esc(t.code)}</span>` : ''}${dm ? `<span class="t-sm muted" translate="no">${esc(dm.name)}</span>` : ''}</div>
+          <div class="cg-card__meta">${meta.map(x => `<span>${esc(x)}</span>`).join(SEP)}</div></div>
+        <div class="cg-card__acts">${btn('Confirm topic', { v: 'secondary', size: 'sm', icon: 'check', act: 'cg-confirm', data: { id: g.id } })}${iconBtn('more', 'More actions', { size: 'sm', menu: 'cg-more', data: { id: g.id } })}</div>
+      </div>${sampleDisclosure(g)}</section>`;
   }
-
-  /* ── Proposed by the assistant (decided only here, by workspace admins) ── */
-  /** Every open proposal. Proposals come from all open submissions (names only); document titles are listed only for documents the caller can see. */
-  const visibleProposals = () => { D.docs.filter(d => !d.archived && stageOf(d) === 'review' && !d.ai).forEach(aiOf); return openProposals(); };
-  const domains = () => (D.topics || []).filter(t => !t.parent && !t.archived);
-  /** Working copy of a proposal: edit = '' (as suggested) | 'name' | 'domain' | 'merge'. */
-  function propForm(p) {
-    const all = ui('govProp', {});
-    return (all[p.id] ??= { name: p.name, parent: p.parent && topicById(p.parent) && !topicById(p.parent).archived ? p.parent : '__new', dname: p.name, into: '', err: '', edit: '' });
+  /** No topic matched: the assistant's proposals (an admin creates the topic and tags them in one go), then what's left. */
+  function noneCard(g) {
+    const admin = canManageTaxonomy(), props = g.proposals || [];
+    const left = Math.max(0, g.n - props.reduce((s, p) => s + p[1], 0));
+    const rows = props.map(([name, n, kws]) => `<li class="cg-prop">${itemIcon('sparkles', '', 'sm')}
+      <div class="cg-prop__main"><div class="cg-prop__title"><span class="medium" translate="no">${esc(name)}</span>${SEP}<span class="muted">${esc(`${plural(n, 'document')} mention it`)}</span></div>
+        <div class="cg-prop__kw" translate="no">${kws.map(k => chip(k, { size: 'sm' })).join('')}</div></div>
+      ${admin ? `<div class="cg-prop__acts">${btn('Create topic & tag', { v: 'secondary', size: 'sm', icon: 'plus', act: 'cg-create', data: { id: g.id, name } })}</div>` : ''}</li>`).join('');
+    const rest = left ? `<div class="cg-rest">${ic('info', 'i-sm')}<span>${esc(`${fmtNum(left)} still without a topic`)}</span>${admin
+      ? `<span aria-hidden="true">—</span><a class="link" href="#${studioHref('taxonomy')}">add keywords in Taxonomy</a>`
+      : '<span class="muted">A workspace admin can add keywords in Taxonomy.</span>'}</div>` : '';
+    return `<section class="cg-card cg-card--none" aria-label="No topic">
+      <div class="cg-card__head">${itemIcon('help', 'warning')}<div class="cg-card__main"><div class="cg-card__title"><span class="medium">No topic</span></div>
+        <div class="cg-card__meta"><span>${esc(plural(g.n, 'document'))}</span>${SEP}<span>No topic in the taxonomy matched</span></div></div></div>
+      ${props.length ? `<div class="cg-props"><div class="t-label">The assistant suggests</div><ul class="cg-prop-list">${rows}</ul></div>` : ''}${rest}${sampleDisclosure(g)}</section>`;
   }
-  function propDocs(p) {
-    const docs = (p.docs || []).map(docById).filter(Boolean), seen = docs.filter(canSeeDoc), hidden = docs.length - seen.length;
-    const link = d => {
-      const href = stageOf(d) === 'review' ? `/documents?tab=review&sel=${d.id}` : `/documents?tab=all&sel=${d.id}`;
-      return `<a class="gov-prop__doc link" href="#${esc(href)}"><span class="truncate">${esc(d.name)}</span></a>`;
-    };
-    return `<span class="gov-prop__docs"><span>${esc(`Suggested by ${plural(docs.length, 'document')}`)}${seen.length ? ':' : ''}</span>${seen.map(link).join('<span aria-hidden="true">,</span>')}${hidden && seen.length ? `<span>${esc(`+${hidden} more`)}</span>` : ''}</span>`;
+  function tabConfirm(groups) {
+    if (!groups.length) return emptyState({ icon: 'tag', tone: 'success', title: 'Every topic is confirmed', desc: 'Documents from first syncs are filed where people browse them.', boxed: true });
+    return `<div class="cg-list">${groups.filter(g => g.topic).map(topicCard).join('')}${groups.filter(g => !g.topic).map(noneCard).join('')}</div>`;
   }
-  /** A proposal reads as a sentence (name, in which domain, why) with Accept; editing opens only when Rename, Change domain or Merge is chosen. */
-  function propCard(p) {
-    const f = propForm(p), id = esc(p.id);
-    const dom = f.parent !== '__new' && topicById(f.parent);
-    const where = dom ? `in ${esc(dom.name)}` : `as a new domain${f.dname && f.dname !== f.name ? ` “${esc(f.dname)}”` : ''}`;
-    let editor = '';
-    if (f.edit === 'name') editor = field({ id: `gov-pn-${id}`, label: 'Topic name', error: f.err, control: input({ id: `gov-pn-${id}`, bind: `govProp.${p.id}.name`, value: f.name, size: 'sm', invalid: !!f.err, onEnter: 'gov-prop-accept', attrs: `maxlength="60" data-id="${id}" data-autofocus` }) });
-    else if (f.edit === 'domain') editor = field({ id: `gov-pd-${id}`, label: 'Domain', error: f.err, control: select({ id: `gov-pd-${id}`, bind: `govProp.${p.id}.parent`, value: f.parent, options: [...domains().map(d => [d.id, d.name]), ['__new', 'New domain…']], change: 'gov-prop-domain', size: 'sm' }) })
-      + (f.parent === '__new' ? field({ id: `gov-pdn-${id}`, label: 'New domain name', control: input({ id: `gov-pdn-${id}`, bind: `govProp.${p.id}.dname`, value: f.dname, size: 'sm', attrs: 'maxlength="60"' }) }) : '');
-    else if (f.edit === 'merge') editor = field({ id: `gov-pm-${id}`, label: 'Merge into', error: f.err, control: select({ id: `gov-pm-${id}`, bind: `govProp.${p.id}.into`, value: f.into, size: 'sm', change: 'gov-prop-domain', options: [['', 'Choose a topic'], ...topicTree().flatMap(dm => dm.children.map(t => [t.id, `${dm.name} · ${t.name}`]))] }) });
-    const main = f.edit === 'merge'
-      ? btn('Merge', { v: 'secondary', size: 'sm', icon: 'git-compare', act: 'gov-prop-merge-go', data: { id: p.id } })
-      : btn('Accept', { v: 'secondary', size: 'sm', icon: 'check', act: 'gov-prop-accept', data: { id: p.id } });
-    const acts = (f.edit ? btn('Cancel', { v: 'ghost', size: 'sm', act: 'gov-prop-cancel', data: { id: p.id } }) : '') + main + iconBtn('more', 'More actions', { size: 'sm', menu: 'gov-prop-more', data: { id: p.id } });
-    return `<li class="gov-prop" data-id="${id}">
-      <span class="item-icon item-icon--accent item-icon--sm" aria-hidden="true">${ic('sparkles')}</span>
-      <div class="gov-prop__main"><div class="gov-prop__title"><span class="medium">${esc(f.name)}</span> <span class="muted">${where}</span></div>${propDocs(p)}${editor ? `<div class="gov-prop__edit">${editor}</div>` : ''}</div>
-      <div class="gov-prop__acts">${acts}</div></li>`;
+  /** Confirm the suggested topic, or move the group to another one: the documents count as confidently filed. */
+  function settleGroup(id, status, to) {
+    const g = groupById(id); if (!g || g.status !== 'open' || !g.topic || !canEditKb(kbById(g.kb))) return;
+    const delta = { 'topics.confirm': -g.n, 'topics.confident': g.n }, from = g.topic;
+    g.status = status; if (to) g.movedTo = to; g.decided = { by: me().id, at: Date.now() };
+    shiftBackfill(g.run, delta);
+    audit(status === 'moved' ? 'Moved documents to another topic' : 'Confirmed a topic for documents', `${topicName(to || from)} → ${plural(g.n, 'document')}`);
+    refresh();
+    toast(status === 'moved' ? `Moved ${plural(g.n, 'document')} to “${topicName(to)}”` : `Confirmed “${topicName(from)}” for ${plural(g.n, 'document')}`, { action: { label: 'Undo', run: () => {
+      if (g.status !== status) return;
+      g.status = 'open'; delete g.movedTo; delete g.decided; shiftBackfill(g.run, delta, -1); refresh();
+      toast(`${plural(g.n, 'document')} are back in Topics to confirm`, { tone: 'accent' });
+    } } });
   }
-  function proposalsHtml() {
-    const list = visibleProposals(); if (!list.length || !canManageTaxonomy()) return '';
-    return section('Proposed by the assistant', `<ul class="gov-props">${list.map(propCard).join('')}</ul>`, {
-      desc: 'Accepting adds the topic and tags the documents that suggested it. Submissions can be published without waiting for it.',
-    });
+  A['cg-confirm'] = el => settleGroup(el.dataset.id, 'confirmed');
+  /** Every other topic, the suggested topic's domain first (like Add topic). */
+  function moveItems(g) {
+    const parent = topicById(g.topic)?.parent;
+    const tree = topicTree().map(dm => ({ ...dm, children: dm.children.filter(c => c.id !== g.topic) })).filter(dm => dm.children.length)
+      .sort((a, b) => (b.id === parent) - (a.id === parent));
+    return tree.flatMap(dm => [{ section: dm.name }, ...dm.children.map(c => ({ label: c.name, icon: 'tag', run: () => settleGroup(g.id, 'moved', c.id) }))]);
   }
-  MENUS['gov-prop-more'] = el => {
-    const p = propOf(el); if (!p || !canManageTaxonomy()) return [];
-    const f = propForm(p), edit = mode => () => { Object.assign(f, { edit: mode, err: '' }); refresh(); };
+  MENUS['cg-more'] = el => {
+    const g = groupById(el.dataset.id); if (!g || g.status !== 'open' || !g.topic) return [];
     return [
-      { label: 'Rename…', icon: 'pencil', run: edit('name') },
-      { label: 'Change domain…', icon: 'folder', run: edit('domain') },
-      { label: 'Merge into…', icon: 'git-compare', run: edit('merge') },
-      { sep: true },
-      { label: 'Dismiss', icon: 'x', danger: true, run: () => A['gov-prop-dismiss']({ dataset: { id: p.id } }) },
+      { label: 'Move to another topic…', icon: 'folder', run: () => openMenu(el, moveItems(g), 'cg-move:' + g.id) },
+      ...(canManageTaxonomy() && A['md-edit'] ? [{ label: 'Edit topic keywords…', icon: 'pencil', run: () => A['md-edit']({ dataset: { id: g.topic } }) }] : []),
     ];
   };
-  A['gov-prop-cancel'] = el => { const p = proposalById(el.dataset.id); if (p) delete S.ui.govProp?.[p.id]; refresh(); };
-  /** Snapshot of everything a proposal decision touches (Undo). */
-  function propSnap(p) {
-    return { topics: [...(D.topics || [])], p: { ...p, docs: [...(p.docs || [])] }, docs: (p.docs || []).map(docById).filter(Boolean).map(d => [d, snapDoc(d)]) };
+  /** The next free code in a domain (OPS-05 after OPS-04), as the taxonomy numbers its topics. */
+  function nextTopicCode(dm) {
+    if (!dm.code) return '';
+    const nums = (D.topics || []).filter(t => t.parent === dm.id).map(t => +String(t.code || '').split('-')[1] || 0);
+    return `${dm.code}-${String(Math.max(0, ...nums) + 1).padStart(2, '0')}`;
   }
-  function propUndo(p, snap, msg) {
-    return { label: 'Undo', run: () => {
-      D.topics = snap.topics;
-      Object.keys(p).forEach(k => delete p[k]); Object.assign(p, snap.p);
-      snap.docs.forEach(([d, s]) => restoreDoc(d, s));
-      audit('Undid a topic decision', p.name); refresh(); toast(msg, { tone: 'accent' });
-    } };
-  }
-  const propOf = el => { const p = proposalById(el.dataset.id || el.closest?.('[data-id]')?.dataset.id); return p && p.status === 'open' ? p : null; };
-  A['gov-prop-domain'] = () => refresh();
-  A['gov-prop-accept'] = el => {
-    const p = propOf(el); if (!p || !canManageTaxonomy()) return;
-    const f = propForm(p), name = (f.name || '').trim().replace(/\s+/g, ' ');
-    const newDom = f.parent === '__new' || !topicById(f.parent), dname = (f.dname || '').trim().replace(/\s+/g, ' ') || name;
-    // Errors open the editor that fixes them.
-    const fail = (msg, edit = 'name') => { Object.assign(f, { err: msg, edit }); refresh(); requestAnimationFrame(() => $(`#gov-${edit === 'name' ? 'pn' : 'pd'}-${p.id}`)?.focus()); };
-    if (!name) return fail('Enter a name.');
-    if (!newDom && (D.topics || []).some(t => !t.archived && t.parent === f.parent && fold(t.name) === fold(name))) return fail(`${topicName(f.parent)} already has “${name}”. Merge into it instead.`);
-    if (newDom && domains().some(d => fold(d.name) === fold(dname))) return fail(`A domain called “${dname}” already exists. Pick it from the list.`, 'domain');
-    const snap = propSnap(p);
-    let parent = newDom ? null : f.parent;
-    if (newDom) { const dm = { id: uid('d'), name: dname }; D.topics.push(dm); parent = dm.id; }
-    const t = acceptProposal(p, { name, parent });
-    if (!t) { D.topics = snap.topics; return; }
-    delete S.ui.govProp?.[p.id];
-    const n = snap.docs.length;
+  /** Create the proposed topic (with its keywords, so the next sync files these itself) and tag the documents that mention it. */
+  A['cg-create'] = el => {
+    const g = groupById(el.dataset.id), i = (g?.proposals || []).findIndex(p => p[0] === el.dataset.name);
+    if (!g || g.status !== 'open' || i < 0 || !canManageTaxonomy()) return;
+    const p = g.proposals[i], [name, n, keywords] = p;
+    // Banking Operations is where the archive's documents belong; any domain when a workspace has no such domain.
+    const dm = topicById('d-ops') || topicTree()[0]; if (!dm) return;
+    const same = (D.topics || []).find(t => t.parent && !t.archived && fold(t.name) === fold(name));
+    const t = same || { id: uid('t'), name, parent: dm.id, code: nextTopicCode(dm), keywords: [...keywords] };
+    if (!same) (D.topics ??= []).push(t);
+    const delta = { 'topics.none': -n, 'topics.confident': n };
+    g.proposals.splice(i, 1); g.n -= n; shiftBackfill(g.run, delta);
+    audit(same ? 'Tagged documents with a topic' : 'Created a topic and tagged documents', `${t.name}${t.code ? ` (${t.code})` : ''} → ${plural(n, 'document')}`);
     refresh();
-    toast(`Added “${t.name}” to ${topicName(parent)}${n ? ` · ${plural(n, 'document')} tagged` : ''}`, { action: propUndo(p, snap, `“${name}” removed`) });
+    let undone = false;
+    toast(same ? `Tagged ${plural(n, 'document')} with “${t.name}”` : `Created “${t.name}” in ${topicName(t.parent)} · ${plural(n, 'document')} tagged`, { action: { label: 'Undo', run: () => {
+      if (undone) return; undone = true;
+      if (!same) D.topics = D.topics.filter(x => x !== t);
+      g.proposals.splice(Math.min(i, g.proposals.length), 0, p); g.n += n; shiftBackfill(g.run, delta, -1); refresh();
+      toast(same ? `${plural(n, 'document')} are back in Topics to confirm` : `“${t.name}” removed`, { tone: 'accent' });
+    } } });
   };
-  A['gov-prop-dismiss'] = el => {
-    const p = propOf(el); if (!p || !canManageTaxonomy()) return;
-    const snap = propSnap(p);
-    dismissProposal(p); delete S.ui.govProp?.[p.id]; refresh();
-    toast(`Dismissed “${p.name}”`, { action: propUndo(p, snap, `“${p.name}” is proposed again`) });
-  };
-  A['gov-prop-merge-go'] = el => {
-    const p = propOf(el); if (!p || !canManageTaxonomy()) return;
-    const f = propForm(p), t = topicById(f.into);
-    if (!t) { f.err = 'Choose the topic to merge into.'; refresh(); return; }
-    const snap = propSnap(p);
-    mergeProposal(p, t.id); delete S.ui.govProp?.[p.id]; refresh();
-    toast(`Merged “${p.name}” into ${t.name}${snap.docs.length ? ` · ${plural(snap.docs.length, 'document')} tagged` : ''}`, { action: propUndo(p, snap, `“${p.name}” is proposed again`) });
-  };
-
-  /* ── Taxonomy editor ── */
-  function taxonomyHtml(n) {
-    const u = ui('khTopics', { edit: '', name: '', err: '' }), admin = canManageTaxonomy();
-    const all = D.topics || [], doms = all.filter(t => !t.parent && !t.archived);
-    const add = admin ? btn('Add domain', { size: 'sm', icon: 'plus', act: 'kh-domain-add', disabled: u.edit === 'new:' }) : '';
-    const desc = 'What documents are about (types like Policy say what they are)' + (admin ? '' : ' · Only workspace admins change topics.');
-    const blocks = doms.map(dm => domainBlock(dm, all.filter(t => t.parent === dm.id && (admin || !t.archived)), n, u, admin));
-    if (u.edit === 'new:') blocks.push(`<section class="kh-domain"><div class="kh-domain__head">${editor(u, 'Domain name')}</div></section>`);
-    const body = blocks.length ? `<div class="kh-domains">${blocks.join('')}</div>`
-      : emptyState({ icon: 'tag', title: 'No topics yet', desc: admin ? 'Add a domain, then the topics people browse by.' : 'A workspace admin can add topics.', actions: admin ? btn('Add domain', { v: 'primary', icon: 'plus', act: 'kh-domain-add' }) : '', boxed: true });
-    return section('Topics', body, { desc, actions: add });
-  }
-  function editor(u, label) {
-    return `<div class="kh-edit"><div class="kh-edit__row">${input({ id: 'kh-topic-name', bind: 'khTopics.name', value: u.name, size: 'sm', onEnter: 'kh-topic-save', invalid: !!u.err, attrs: `maxlength="60" aria-label="${esc(label)}"`, placeholder: label })}${btn('Save', { size: 'sm', v: 'primary', act: 'kh-topic-save' })}${btn('Cancel', { size: 'sm', v: 'ghost', act: 'kh-topic-cancel' })}</div>${u.err ? `<div class="field-error" id="kh-topic-name-err" role="alert">${ic('alert-circle')}<span>${esc(u.err)}</span></div>` : ''}</div>`;
-  }
-  /** "12 published · 2 in review" — published links to Browse, in review to the queue. */
-  function countLinks(id, pub, rv) {
-    const a = pub ? `<a class="kh-count link" href="#${catalogHref({ filters: { topic: [id] } })}">${esc(`${fmtNum(pub)} published`)}</a>` : '';
-    const b = rv ? `<a class="kh-count link gov-inreview" href="#/documents?tab=review">${esc(`${fmtNum(rv)} in review`)}</a>` : '';
-    return a || b ? `<span class="gov-counts">${[a, b].filter(Boolean).join('<span class="kh-count muted" aria-hidden="true">·</span>')}</span>` : '<span class="kh-count muted">Unused</span>';
-  }
-  function domainBlock(dm, list, n, u, admin) {
-    const head = u.edit === dm.id ? editor(u, 'Domain name')
-      : `<h3 class="kh-domain__name">${esc(dm.name)}</h3>${countLinks(dm.id, n.domain(dm.id), n.reviewDomain(dm.id))}<span class="grow"></span>${admin ? iconBtn('pencil', 'Rename domain', { size: 'sm', act: 'kh-topic-rename', data: { id: dm.id } }) + btn('Add topic', { size: 'sm', v: 'ghost', icon: 'plus', act: 'kh-topic-add', data: { id: dm.id } }) : ''}`;
-    const rows = list.map(t => {
-      if (u.edit === t.id) return `<li class="kh-topic">${editor(u, 'Topic name')}</li>`;
-      const c = n.topic(t.id), r = n.review(t.id);
-      if (t.archived) return `<li class="kh-topic is-archived">${ic('archive', 'i-sm muted')}<span class="grow truncate">${esc(t.name)}</span>${chip('Archived', { size: 'sm' })}${btn('Restore', { size: 'sm', v: 'ghost', act: 'kh-topic-restore', data: { id: t.id } })}</li>`;
-      const used = c + r;
-      const archive = used
-        ? `<span class="kh-tipwrap" data-tip="${esc(`Used by ${plural(used, 'document')}. Move them to another topic first.`)}" tabindex="0">${btn('', { v: 'ghost', size: 'sm', icon: 'archive', muted: true, disabled: true, aria: 'aria-label="Archive topic"' })}</span>`
-        : iconBtn('archive', 'Archive topic', { size: 'sm', act: 'kh-topic-archive', data: { id: t.id } });
-      const acts = admin ? `<span class="kh-topic__acts">${iconBtn('pencil', 'Rename topic', { size: 'sm', act: 'kh-topic-rename', data: { id: t.id } })}${archive}</span>` : '';
-      return `<li class="kh-topic">${ic('tag', 'i-sm muted')}<span class="grow truncate kh-topic__name">${esc(t.name)}</span>${countLinks(t.id, c, r)}${acts}</li>`;
-    });
-    if (u.edit === 'new:' + dm.id) rows.push(`<li class="kh-topic">${editor(u, 'Topic name')}</li>`);
-    return `<section class="kh-domain"><div class="kh-domain__head">${head}</div>${rows.length ? `<ul class="kh-topics">${rows.join('')}</ul>` : '<p class="kh-domain__empty t-sm muted">No topics yet.</p>'}</section>`;
-  }
-  const focusEditor = () => requestAnimationFrame(() => { const el = $('#kh-topic-name'); if (el) { el.focus(); el.select?.(); } });
-  function startEdit(edit, name = '') { if (!canManageTaxonomy()) return; Object.assign(ui('khTopics'), { edit, name, err: '' }); refresh(); focusEditor(); }
-  A['kh-domain-add'] = () => startEdit('new:');
-  A['kh-topic-add'] = el => startEdit('new:' + el.dataset.id);
-  A['kh-topic-rename'] = el => { const t = topicById(el.dataset.id); if (t) startEdit(t.id, t.name); };
-  A['kh-topic-cancel'] = () => { Object.assign(ui('khTopics'), { edit: '', name: '', err: '' }); refresh(); };
-  A['kh-topic-save'] = () => {
-    if (!canManageTaxonomy()) return;
-    const u = ui('khTopics'), name = (u.name || '').trim().replace(/\s+/g, ' ');
-    const isNew = u.edit.startsWith('new:'), cur = isNew ? null : topicById(u.edit);
-    if (!isNew && !cur) return A['kh-topic-cancel']();
-    const parent = isNew ? u.edit.slice(4) || null : cur.parent || null;
-    const fail = msg => { u.err = msg; refresh(); focusEditor(); };
-    if (!name) return fail('Enter a name.');
-    if ((D.topics || []).some(t => !t.archived && (t.parent || null) === parent && t.id !== u.edit && fold(t.name) === fold(name))) return fail(parent ? `${topicName(parent)} already has “${name}”.` : `A domain called “${name}” already exists.`);
-    Object.assign(u, { edit: '', name: '', err: '' });
-    if (cur) {
-      const before = cur.name; if (before === name) return refresh();
-      cur.name = name; audit(parent ? 'Renamed a topic' : 'Renamed a domain', `${before} → ${name}`); refresh();
-      toast(`Renamed to “${name}”`, { action: { label: 'Undo', run: () => { cur.name = before; refresh(); } } });
-      return;
-    }
-    const t = { id: uid(parent ? 't' : 'd'), name, ...(parent ? { parent } : {}) };
-    D.topics ??= [];
-    const last = parent ? D.topics.map(x => x.parent === parent || x.id === parent).lastIndexOf(true) : D.topics.length - 1;
-    D.topics.splice(last + 1, 0, t);
-    audit(parent ? 'Added a topic' : 'Added a domain', parent ? `${name} → ${topicName(parent)}` : name); refresh();
-    toast(parent ? `Added “${name}” to ${topicName(parent)}` : `Added the domain “${name}”`, { action: { label: 'Undo', run: () => { const c = topicCounts(); if (c.topic(t.id) || c.review(t.id)) t.archived = true; else D.topics = D.topics.filter(x => x !== t); refresh(); } } });
-  };
-  A['kh-topic-archive'] = el => {
-    const t = topicById(el.dataset.id); if (!t || !canManageTaxonomy()) return;
-    const c = topicCounts(); if (c.topic(t.id) || c.review(t.id)) return;
-    t.archived = true; audit('Archived a topic', t.name); refresh();
-    toast(`Archived “${t.name}”`, { action: { label: 'Undo', run: () => { delete t.archived; refresh(); } } });
-  };
-  A['kh-topic-restore'] = el => {
-    const t = topicById(el.dataset.id); if (!t || !canManageTaxonomy()) return;
-    delete t.archived; audit('Restored a topic', t.name); refresh(); toast(`Restored “${t.name}”`);
-  };
-  const prevEsc = A['esc-page'];
-  A['esc-page'] = () => { if (S.cur?.r.page === 'documentsAdmin' && S.ui.khTopics?.edit) { A['kh-topic-cancel'](); return true; } return prevEsc ? prevEsc() : false; };
-
-  X.gov = { quality, topics, qualityCount, proposalCount };
+  X.gov = { queues: QUEUES, counts, queue };
 })();

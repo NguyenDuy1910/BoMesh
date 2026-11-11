@@ -2,7 +2,7 @@
    archive, download) and the rendition model — the readable text of a
    resource, split into pages, outline and passages — used by the reader
    (reader.js), the review preview (curation.js), search snippets and answers.
-   The document inventory itself lives in Manage → Documents (curation.js).
+   The document inventory itself lives in Knowledge Studio → Library (curation.js).
    Exports: X.whoCanSee, X.downloadDocument, X.processDocs, X.archiveDocs,
    X.docFix, X.docModel, X.docText. */
 (() => {
@@ -62,7 +62,7 @@
       const okOwn = ok.filter(own), okPub = ok.filter(d => !own(d));
       const done = (list, verb) => list.length && toast(list.length === 1 ? `${list[0].name} is ${verb}` : `${plural(list.length, list === okOwn ? 'file' : 'document')} are ${verb}`, { action: list.length === 1 ? { label: 'Open', run: () => go('/doc/' + list[0].id) } : undefined });
       done(okPub, 'published'); done(okOwn, 'ready');
-      bad.forEach(d => toast(own(d) ? `Couldn’t prepare ${d.name}` : `Couldn’t publish ${d.name}`, { tone: 'danger', action: { label: own(d) ? 'Open' : 'Review', run: () => go(!own(d) && can('knowledge.manage') && canReviewKb(kbById(d.kb)) ? '/documents?tab=all&life=attention' : '/doc/' + d.id) } }));
+      bad.forEach(d => toast(own(d) ? `Couldn’t prepare ${d.name}` : `Couldn’t publish ${d.name}`, { tone: 'danger', action: { label: own(d) ? 'Open' : 'Review', run: () => go(!own(d) && can('knowledge.manage') && canReviewKb(kbById(d.kb)) ? studioHref('review', { queue: 'problems' }) : '/doc/' + d.id) } }));
     }, 2600);
     return docs.length;
   }

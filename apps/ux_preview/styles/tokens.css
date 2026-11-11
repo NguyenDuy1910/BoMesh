@@ -67,9 +67,10 @@
   --dur-slow: 320ms;
 
   /* Layout */
-  --sidebar-w: 256px;
+  --sidebar-w: 248px;
+  --rail-w: 56px;
   --content-max: 1200px;
-  --header-h: 56px;
+  --header-h: 48px;
 
   /* Z-index */
   --z-sticky: 10;

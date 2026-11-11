@@ -1,11 +1,6 @@
 /* Resources — shared resource row, document card, chips and pickers (features/resources.js).
    Used by Home, Browse, Library, collections, knowledge bases, spaces and the reader. */
 
-/* ───── Knowledge area section nav (X.res.hubHeader) ───── */
-.hub-nav { margin: -8px 0 24px; overflow-x: auto; scrollbar-width: none; }
-.hub-nav::-webkit-scrollbar { display: none; }
-.hub-tabs .tabs__tab { white-space: nowrap; }
-
 /* ───── List row ───── */
 .res-list { display: flex; flex-direction: column; background: var(--surface); border-radius: var(--radius-2xl); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); overflow: hidden; }
 .res-row { position: relative; display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; min-width: 0; cursor: pointer; transition: background-color var(--dur-fast); }

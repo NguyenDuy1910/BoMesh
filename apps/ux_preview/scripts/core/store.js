@@ -8,10 +8,10 @@ const S = {
   ui: {},                         // per-screen view state, see ui()
   modal: null, drawer: null, menu: null, palette: null, toasts: [],
   navOpen: false,                 // mobile sidebar
-  collapsed: false,               // desktop sidebar hidden
+  collapsed: false,               // desktop sidebar as the 56 px icon rail
   pageState: 'live',              // prototype state: live | loading | empty | error
   navLoading: false, visited: new Set(),
-  cur: null, lastPath: null, crumbs: null,
+  cur: null, lastPath: null, crumbs: null, head: null,   // head: the page's pageHeader() declaration for the top row
   device: 'desktop', protoMin: false,
   inbox: { read: new Set(), dismissed: new Set() },
 };
@@ -29,7 +29,7 @@ const isAdmin = () => can('tenant.manage');
 const isOperator = () => S.persona === 'operator';
 
 /* ── Persistence ── */
-const STORE_KEY = 'bomesh-prototype-v7';
+const STORE_KEY = 'bomesh-prototype-v8';
 /** Persisted collections. Keys in WS_DATA_KEYS are saved per workspace, the rest globally.
     Feature modules may push extra keys (e.g. 'pAudit'); new workspace collections go in WS_DATA_KEYS too. */
 const DATA_KEYS = ['workspaces', 'pWorkspaces', 'pUsers', 'pConnectors', 'pModels', 'pServices', ...WS_DATA_KEYS];
@@ -38,8 +38,8 @@ function snapshot() {
   const pick = (src, keys) => Object.fromEntries(keys.filter(k => src[k] !== undefined).map(k => [k, src[k]]));
   const globalKeys = DATA_KEYS.filter(k => !WS_DATA_KEYS.has(k)), wsKeys = DATA_KEYS.filter(k => WS_DATA_KEYS.has(k));
   return {
-    version: 7, savedAt: Date.now(),
-    context: { persona: S.persona, ws: S.ws, signedIn: S.signedIn, theme: S.theme, look: S.look, lang: S.lang, collapsed: S.collapsed, protoMin: S.protoMin, manageOpen: !!S.manageOpen, read: [...S.inbox.read], dismissed: [...S.inbox.dismissed] },
+    version: 8, savedAt: Date.now(),
+    context: { persona: S.persona, ws: S.ws, signedIn: S.signedIn, theme: S.theme, look: S.look, lang: S.lang, collapsed: S.collapsed, protoMin: S.protoMin, read: [...S.inbox.read], dismissed: [...S.inbox.dismissed] },
     profiles: Object.fromEntries(Object.entries(PERSONAS).map(([id, p]) => [id, { name: p.name }])),
     data: { global: pick(DB.global, globalKeys), ws: Object.fromEntries(Object.entries(DB.ws).map(([id, store]) => [id, pick(store, wsKeys)])) },
   };
@@ -48,7 +48,7 @@ function persistNow() { clearTimeout(_persistTimer); try { localStorage.setItem(
 function persist() { clearTimeout(_persistTimer); _persistTimer = setTimeout(persistNow, 300); }
 function hydrate() {
   let saved; try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || 'null'); } catch (_) { return; }
-  if (!saved || saved.version !== 7 || !saved.data?.global) return;
+  if (!saved || saved.version !== 8 || !saved.data?.global) return;
   Object.entries(saved.data.global).forEach(([k, v]) => { if (DATA_KEYS.includes(k)) DB.global[k] = v; });
   Object.entries(saved.data.ws || {}).forEach(([id, store]) => { DB.ws[id] ??= {}; Object.entries(store).forEach(([k, v]) => { if (WS_DATA_KEYS.has(k)) DB.ws[id][k] = v; }); });
   // Member workspaces are the same records as the platform list.
@@ -62,7 +62,7 @@ function hydrate() {
   // A named theme is its bundle: a stored BoMesh look always follows the current default definition.
   if (validLook(c.look)) S.look = c.look.theme === 'bomesh' ? { ...DEFAULT_LOOK } : { ...DEFAULT_LOOK, ...c.look };
   if (UI_LANGS.some(l => l[0] === c.lang)) S.lang = c.lang;
-  S.collapsed = !!c.collapsed; S.protoMin = !!c.protoMin; S.manageOpen = !!c.manageOpen;
+  S.collapsed = !!c.collapsed; S.protoMin = !!c.protoMin;
   S.inbox.read = new Set(c.read || []); S.inbox.dismissed = new Set(c.dismissed || []);
 }
 function resetPrototype() {

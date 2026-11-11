@@ -11,6 +11,23 @@
   /** Merge metadata into existing documents: { id: {…fields} }. */
   const meta = map => Object.entries(map).forEach(([id, o]) => { const d = D.docs.find(x => x.id === id); if (d) Object.assign(d, o); });
   const views = () => Math.round(5 + rnd() * 400);
+  /** Taxonomy (Knowledge Studio → Taxonomy): domain codes, topic codes (DOMAIN-nn in order) and the keywords the
+      assistant classifies incoming documents by, plus the import history. */
+  const master = (codes, keywords, imports = []) => {
+    D.topics.filter(t => !t.parent).forEach(dm => {
+      dm.code = codes[dm.id];
+      D.topics.filter(t => t.parent === dm.id).forEach((t, i) => { t.code = `${dm.code}-${String(i + 1).padStart(2, '0')}`; if (keywords[t.id]) t.keywords = keywords[t.id]; });
+    });
+    D.masterImports = imports;
+  };
+  /** Taxonomy detail per topic (Knowledge Studio → Taxonomy): business description (desc), guidance for the assistant,
+      synonyms, rules and example documents (ids or titles, resolved once the catalog exists — call after the documents). */
+  const taxonomy = map => Object.entries(map).forEach(([id, o]) => {
+    const t = D.topics.find(x => x.id === id); if (!t) return;
+    const { examples, ...rest } = o;
+    Object.assign(t, rest);
+    if (examples) t.examples = examples.map(n => D.docs.find(d => d.id === n || d.name === n)?.id).filter(Boolean);
+  });
 
   /* ═══════════════════════════ Northwind (Enterprise) ═══════════════════════════ */
   seedWorkspace('ws-northwind', () => {
@@ -22,6 +39,12 @@
       { id: 'd-legal', name: 'Legal', icon: 'key', color: '#6B4FBF', desc: 'Customer and vendor agreements.' }, { id: 't-custagr', name: 'Customer agreements', parent: 'd-legal' }, { id: 't-vendagr', name: 'Vendor agreements', parent: 'd-legal' },
       { id: 'd-eng', name: 'Engineering', icon: 'terminal', color: '#1F7A8C', desc: 'Runbooks, incidents and on-call.' }, { id: 't-incidents', name: 'Incidents & on-call', parent: 'd-eng' },
     ];
+    // Topics were added by hand: no import yet, few keywords (the Studio offers Import).
+    master({ 'd-people': 'PPL', 'd-sales': 'SAL', 'd-product': 'PRD', 'd-finance': 'FIN', 'd-legal': 'LEG', 'd-eng': 'ENG' }, {
+      't-travel': ['business trip', 'per diem', 'expense claim'], 't-leave': ['parental leave', 'vacation', 'benefits'],
+      't-pricing': ['price list', 'discount'], 't-compete': ['battlecard', 'competitor'], 't-api': ['api', 'webhook', 'sdk'],
+      't-releases': ['release notes', 'changelog'], 't-security': ['security whitepaper', 'retention'], 't-incidents': ['incident', 'on-call', 'runbook'],
+    });
     const units = { 'kb-hr': 'People Ops', 'kb-sales': 'Sales Enablement', 'kb-product': 'Product', 'kb-fin': 'Finance', 'kb-legal': 'Legal', 'kb-eng': 'Engineering' };
     D.kbs.forEach(k => { if (units[k.id]) k.unit = units[k.id]; });
     D.docs.push(mkDoc('kb-sales', 'd-sales-dup', 'Enterprise Pricing Guide (copy).pdf', { source: 'src-sales', addedBy: 'Sales Enablement', updated: ago(40 * DAY) }));
@@ -44,6 +67,13 @@
       if (d.kb === 'kb-legal') d.verify = V('Legal', 12 + Math.round(rnd() * 60));
     });
     D.docs.find(d => d.id === 'd-sales-dup').dupOf = 'd-sales-0';
+    taxonomy({
+      't-travel': { desc: 'Booking business trips, per diems and claiming expenses back.', synonyms: ['reimbursement', 'travel policy'] },
+      't-leave': { desc: 'Time off of every kind and the benefits that come with working here.', synonyms: ['time off', 'pto'] },
+      't-pricing': { desc: 'List prices, discount rules and who approves a deal below them.', synonyms: ['rate card', 'price book'] },
+      't-api': { desc: 'Building on the product: REST API, webhooks, SDKs and integration guides.', synonyms: ['rest api', 'integration guide'] },
+      't-incidents': { desc: 'Keeping the service up: on-call rotations, runbooks and what we learn from incidents.', synonyms: ['outage', 'postmortem'] },
+    });
     meta({
       'd-hr-travel': { kind: 'policy', topics: ['t-travel'], summary: 'How to plan business travel, what Northwind pays for (flights, hotels, per diem) and how to claim it back within 30 days.', version: 6, versions: [{ v: 6, at: ago(18 * DAY), by: 'People Ops', note: 'Per diem raised to USD 75 for international trips' }, { v: 5, at: ago(380 * DAY), by: 'People Ops', note: 'High-cost city list (Appendix B) added' }, { v: 4, at: ago(760 * DAY), by: 'People Ops', note: 'Booking moved to the travel tool' }], path: 'People Ops / Policies / Travel & Expense Policy', verify: V('People Ops', 18, 165) },
       'd-hr-handbook': { kind: 'handbook', topics: ['t-onboarding', 't-conduct'], summary: 'Everything about working at Northwind in one place: hours, leave, expenses and equipment, with links to the full policies.', version: 3 },
@@ -89,6 +119,19 @@
       { id: 'd-people', name: 'Internal Policies & Guidelines', icon: 'users', color: '#B4467A', desc: 'Leave, travel, conduct, hybrid work and onboarding.' },
       { id: 't-hr', name: 'Leave & benefits', parent: 'd-people' }, { id: 't-travel', name: 'Travel & expenses', parent: 'd-people' }, { id: 't-conduct', name: 'Code of conduct', parent: 'd-people' }, { id: 't-hybrid', name: 'Hybrid work', parent: 'd-people' }, { id: 't-onboarding', name: 'Onboarding', parent: 'd-people' },
     ];
+    master({ 'd-eng': 'ENG', 'd-data': 'DAT', 'd-ops': 'OPS', 'd-sec': 'SEC', 'd-product': 'PRD', 'd-people': 'POL' }, {
+      't-arch': ['adr', 'architecture decision', 'design review', 'target architecture'], 't-api': ['api', 'webhook', 'idempotency', 'endpoint', 'openapi'],
+      't-reliability': ['runbook', 'on-call', 'slo', 'failover'], 't-cloud': ['kubernetes', 'aws', 'terraform', 'kafka', 'infrastructure'], 't-devex': ['ci cd', 'code review', 'developer tooling'],
+      't-dwh': ['warehouse', 'dbt', 'data dictionary', 'data pipeline'], 't-metrics': ['metric definition', 'kpi', 'active customers', 'dashboard'],
+      't-models': ['fraud model', 'credit score', 'model monitoring', 'scorecard'], 't-datagov': ['data lineage', 'data quality', 'masking', 'data owner'],
+      't-payments': ['napas', 'settlement', 'cut-off', 'transfer limit', 'qr payment'], 't-recon': ['reconciliation', 'statement file', 'break', 'matching'],
+      't-cards': ['chargeback', 'dispute', 'card scheme', 'visa', 'mastercard'], 't-kyc': ['kyc', 'aml', 'account opening'],
+      't-infosec': ['access control', 'least privilege', 'mfa', 'vulnerability'], 't-pci': ['pci dss', 'pci', 'cardholder data'], 't-regulatory': ['sbv', 'circular', 'state bank', 'decree'],
+      't-privacy': ['personal data', 'decree 13', 'privacy', 'pii', 'consent'], 't-incident': ['incident response', 'postmortem', 'sev 1', 'breach'],
+      't-roadmap': ['roadmap', 'okr', 'strategy', 'prd'], 't-pricing': ['fee', 'pricing', 'tariff'], 't-customers': ['customer research', 'survey', 'market'], 't-partners': ['partner', 'merchant', 'vendor'],
+      't-hr': ['leave', 'benefits', 'insurance', 'parental'], 't-travel': ['travel', 'per diem', 'expense claim', 'business trip'], 't-conduct': ['code of conduct', 'gift', 'conflict of interest', 'whistleblowing'],
+      't-hybrid': ['hybrid', 'office days', 'remote work', 'team days'], 't-onboarding': ['new joiner', 'onboarding', 'first month', 'buddy'],
+    }, [{ id: 'mdi-fx-1', file: 'finx-master-data-2026-10.xlsx', by: 'u-fx-lan', at: P(12, 3), mode: 'merge', counts: { added: 4, updated: 9, archived: 0 } }]);
     const UNIT = { 'kb-fx-eng': 'Platform Engineering', 'kb-fx-pay': 'Payments Platform', 'kb-fx-data': 'Data Platform', 'kb-fx-ops': 'Banking Operations', 'kb-fx-sec': 'Risk & Compliance', 'kb-fx-prod': 'Product', 'kb-fx-pol': 'People & Culture', 'kb-fx-lead': 'Finance' };
     const KB_TOPICS = { 'kb-fx-eng': ['t-arch'], 'kb-fx-pay': ['t-payments'], 'kb-fx-data': ['t-dwh'], 'kb-fx-ops': ['t-payments'], 'kb-fx-sec': ['t-infosec'], 'kb-fx-prod': ['t-roadmap'], 'kb-fx-pol': ['t-hr'], 'kb-fx-lead': ['t-roadmap'] };
     D.kbs.forEach(k => { if (UNIT[k.id]) Object.assign(k, { unit: UNIT[k.id], topics: KB_TOPICS[k.id] }); });
@@ -391,6 +434,72 @@
       ['Strategic partnerships pipeline — confidential.pdf', 'report', 't-partners', 'Partnership discussions in progress and where each one stands.', { verify: false }],
     ]);
     D.docs.forEach(d => { if (d.views == null && !kbById(d.kb)?.personal) d.views = views(); });
+    // Chargeback procedures live in their own folder of the operations library (Taxonomy rule on t-cards).
+    D.docs.filter(d => /^SOP — Chargeback evidence pack|^Dispute reason codes/.test(d.name)).forEach(d => { d.path = `Banking Operations / Procedures / Chargebacks / ${d.name}`; });
+
+    /* ── Taxonomy detail: what each topic means, how the assistant should use it, synonyms, examples, rules ── */
+    taxonomy({
+      't-cards': {
+        desc: 'Card products and what happens when a cardholder disputes a payment: chargebacks, scheme rules, reason codes, card replacement.',
+        guidance: 'Use for card disputes, chargebacks, scheme timelines, card replacement and PINs.\nNot for merchant fees (Pricing & fees) or payment cut-offs (Payments & settlement).',
+        synonyms: ['card complaint', 'reason code', 'cardholder dispute'],
+        examples: ['fx-ops-dispute', 'SOP — Chargeback evidence pack.pdf', 'Dispute reason codes — Visa & Mastercard.xlsx'],
+        rules: [{ field: 'path', op: 'contains', value: 'Chargebacks' }],
+      },
+      't-pci': {
+        desc: 'The Payment Card Industry Data Security Standard at Finx: scope, controls, evidence and the yearly assessment.',
+        guidance: 'Use for anything about protecting cardholder data and the PCI DSS assessment.\nNot for general security policies (Information security) unless they define PCI scope.',
+        synonyms: ['card data security', 'cardholder data environment'],
+        examples: ['fx-sec-pci', 'fx-sec-scope', 'PCI DSS — Requirement 8 implementation notes.md'],
+        rules: [{ field: 'source', op: 'is', value: 'src-fx-sec' }],
+      },
+      't-kyc': {
+        desc: 'Knowing who the customer is: identity checks when an account opens, eKYC exceptions, AML screening and account closure.',
+        guidance: 'Use for identity verification, eKYC reviews, AML and suspicious-transaction escalation.\nNot for card disputes or general customer complaints.',
+        synonyms: ['eKYC', 'customer due diligence', 'know your customer'],
+        examples: ['SOP — KYC document review.pdf', 'SOP — eKYC manual review queue.pdf', 'KYC risk rating matrix.xlsx'],
+      },
+      't-payments': {
+        desc: 'How money moves: NAPAS 247 and batch transfers, QR and card settlement, cut-off times and limits.',
+        guidance: 'Use for transfers, settlement windows, cut-offs and payment limits.\nNot for reconciling the ledger afterwards (Reconciliation).',
+        synonyms: ['interbank transfer', 'settlement window'],
+        examples: ['fx-ops-cutoff', 'fx-pay-rb-napas'],
+      },
+      't-recon': {
+        desc: 'Matching the ledger against NAPAS, acquirer and bank statement files every day, and clearing the breaks.',
+        synonyms: ['nostro', 'suspense account'],
+        examples: ['fx-ops-recon', 'SOP — End-of-day balancing.pdf'],
+      },
+      't-arch': {
+        desc: 'Decisions that shape Finx systems for years: ADRs, target architecture and design reviews.',
+        guidance: 'Use for decision records and design reviews.\nNot for how-to guides on one tool (Developer tooling, Cloud & infrastructure).',
+        synonyms: ['architecture decision record', 'design decision'],
+        examples: ['fx-eng-adr027', 'fx-eng-adr031'],
+        rules: [{ field: 'path', op: 'contains', value: 'Architecture decisions' }],
+      },
+      't-incident': {
+        desc: 'Declaring, running and learning from incidents: severity levels, communication, SBV notification and postmortems.',
+        synonyms: ['outage', 'post-incident review'],
+        examples: ['fx-sec-incident', 'fx-pay-postmortem', 'fx-eng-sev'],
+        rules: [{ field: 'path', op: 'contains', value: 'postmortems' }],
+      },
+      't-privacy': {
+        desc: 'Protecting customers’ personal data: Decree 13 obligations, masking, consent and access to PII.',
+        synonyms: ['data protection', 'pdpd'],
+        examples: ['fx-sec-privacy'],
+      },
+      't-hybrid': {
+        desc: 'Where and how we work: office days, team days, home office equipment and the offices themselves.',
+        guidance: 'Use for office attendance, remote work and office guides.\nNot for leave or holidays (Leave & benefits).',
+        synonyms: ['work from home', 'wfh'],
+        examples: ['fx-pol-hybrid', 'Home office equipment allowance.pdf'],
+      },
+      't-metrics': {
+        desc: 'The official definitions behind every number Finx reports, and the dashboards that show them.',
+        synonyms: ['metric dictionary', 'kpi definition'],
+        examples: ['fx-data-mau'],
+      },
+    });
 
     /* ── Collections, saved, recent, views ── */
     D.collections = [

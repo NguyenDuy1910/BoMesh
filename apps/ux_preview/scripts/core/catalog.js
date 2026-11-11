@@ -162,8 +162,11 @@ const kbHref = kb => (!kb ? '/knowledge' : kb.personal ? '/knowledge/library?tab
 /** Bases the caller manages (owner or editor) — Manage → Knowledge bases. */
 const managedKbs = () => visibleKbs().filter(k => !k.personal && canEditKb(k));
 const canManageKbs = () => can('knowledge.manage') || managedKbs().length > 0;
-/** A managed base's page (access, sources, settings). */
-const kbManageHref = (kb, tab = '') => '/bases/' + kb.id + (tab ? '?tab=' + tab : '');
+/** A managed base's page (access, sources, settings), under Knowledge Studio → Knowledge bases. */
+const kbManageHref = (kb, tab = '') => '/studio/bases/' + kb.id + (tab ? '?tab=' + tab : '');
+/** Knowledge Studio addresses: a tab, optionally with a view (Sources: sources | history | accounts) and more query. */
+const studioHref = (tab, q = {}) => '/studio?' + new URLSearchParams({ tab, ...q });
+const onStudioTab = (tab, view) => S.cur?.r.page === 'studio' && S.cur.query.tab === tab && (!view || (S.cur.query.view || '') === view);
 
 /* ═══════════════ Search ═══════════════ */
 const _textCache = new Map();

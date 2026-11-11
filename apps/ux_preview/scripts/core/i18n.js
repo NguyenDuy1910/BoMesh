@@ -20,7 +20,7 @@ S.lang = 'en';
 const SKIP_SEL = '[translate="no"], .chat-answer, .chat-bubble, .doc-page, .doc-note, .pv-quote, .chat-starter__prompt, script, style, textarea, code, pre, [contenteditable="true"]';
 const ATTRS = ['placeholder', 'aria-label', 'title', 'data-tip', 'alt'];
 /** Chrome where a word is always interface copy, even if a workspace record has the same name. */
-const CHROME_SEL = '.sidebar, .topbar, .menu, .palette, .tabs, [role="tablist"], .page-header, .modal__heading, .drawer__heading, #proto-root, .button, .toggle-group';
+const CHROME_SEL = '.sidebar, .topbar, .menu, .palette, .tabs, [role="tablist"], .page-hero, .ctx-bar, .modal__heading, .drawer__heading, #proto-root, .button, .toggle-group';
 const _dicts = {};
 let _names = null, _namesWs = null;
 /** Names authored in the workspace (topics, knowledge bases, spaces, collections, documents): content, never translated. */

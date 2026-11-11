@@ -217,16 +217,16 @@ function paletteResults(raw) {
     return out;
   }
   const unread = X.inboxUnread?.() || 0;
-  // Off-sidebar destinations lead (Inbox, All conversations), then the sidebar's own pages.
-  const pages = [...MORE_PAGES.map(p => (p.to === '/inbox' && unread ? { ...p, meta: `${unread} unread` } : p)), ...memberNav(), ...(hasModule('spaces') ? [{ label: 'Spaces', to: '/spaces', icon: 'layers' }] : []), ...MANAGE_NAV.filter(n => (n.show ? n.show() : can(n.perm))), ...(isOperator() ? [{ label: 'Platform console', to: '/p/workspaces', icon: 'layers' }] : [])].filter(n => n.to);
+  // Off-sidebar destinations lead (Inbox), then the sidebar's own pages in its order: Workspace, Your work, Manage.
+  const pages = [...MORE_PAGES.map(p => (p.to === '/inbox' && unread ? { ...p, meta: `${unread} unread` } : p)), ...memberNav(), ...yourWorkNav(), ...manageNav(), ...(isOperator() ? [{ label: 'Platform console', to: '/p/workspaces', icon: 'layers' }] : [])].filter(n => n.to);
   const goTo = pages.filter(p => m(p.label) || m(tr(p.label) || '')).sort((a, b) => strong(b.label) - strong(a.label)).slice(0, q ? 6 : 4).map(p => ({ label: p.label, icon: p.icon, meta: p.meta, run: () => go(p.to), hit: strong(p.label) }));
   const actions = [
     { label: 'New chat', icon: 'message-plus', run: () => go('/chat') },
     canContribute() && { label: 'Contribute a document', icon: 'upload', run: () => A['contribute']?.() },
     { label: 'New collection', icon: 'list-plus', run: () => A['col-new']?.() },
-    can('knowledge.manage') && { label: 'Create knowledge base', icon: 'book', run: () => goThen('/bases', () => A['kb-create']?.()) },
+    can('knowledge.manage') && { label: 'Create knowledge base', icon: 'book', run: () => goThen(studioHref('bases'), () => A['kb-create']?.()) },
     isAdmin() && X.homeFeatured && { label: 'Edit featured documents', icon: 'sliders', run: () => X.homeFeatured() },
-    can('source.manage') && { label: 'Connect a source', icon: 'plug', run: () => goThen('/sources', () => A['src-connect']?.()) },
+    can('source.manage') && { label: 'Connect a source', icon: 'plug', run: () => goThen(studioHref('sources'), () => A['src-connect']?.()) },
     can('user.manage') && { label: 'Add people', icon: 'user-plus', run: () => goThen('/people', () => A['member-add']?.()) },
     { label: resolvedTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode', icon: resolvedTheme() === 'dark' ? 'sun' : 'moon', run: () => setTheme(resolvedTheme() === 'dark' ? 'light' : 'dark') },
     { label: 'Appearance', icon: 'palette', meta: themeLabel(), run: () => X.appearance.open() },

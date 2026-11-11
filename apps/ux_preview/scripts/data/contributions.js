@@ -55,8 +55,9 @@
       summary: 'Where each fraud model v2 feature comes from, with table, refresh time and masking.',
       events: [ev(P(9), BAO, 'approved')],
     });
-    // Sources decide whether synced files publish directly (trusted systems) or wait for review: repository docs go through review.
-    D.sources.forEach(s => { s.publish = s.id === 'src-fx-pay' ? 'review' : 'auto'; });
+    // Sources decide how synced files publish: trusted systems directly, the repository docs through review, and the
+    // 100k-file archive only what's uncertain (personal data, duplicates, new versions) — the policy built for scale.
+    D.sources.forEach(s => { s.publish = s.id === 'src-fx-pay' ? 'review' : s.id === 'src-fx-archive' ? 'uncertain' : 'auto'; });
     D.topicProposals = [];
   });
 

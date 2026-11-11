@@ -131,9 +131,4 @@
   .cat-bar .cat-views > span, .cat-bar .cat-sort > span, .cat-bar .cat-sort > .i:last-of-type, .cat-bar .cat-views > .i:last-of-type { display: none; }
   .cat-chips { margin-left: 0; flex-basis: 100%; order: 3; }
   .cat-cards { grid-template-columns: minmax(0, 1fr); gap: 14px; }
-  /* Knowledge header: Contribute as an icon button in the title row (the label stays for assistive tech). */
-  .cat .page-header { flex-wrap: nowrap; align-items: center; }
-  .cat .page-header__actions { width: auto; }
-  .cat .page-header__actions .button { width: 40px; height: 40px; padding: 0; justify-content: center; }
-  .cat .page-header__actions .button > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 }

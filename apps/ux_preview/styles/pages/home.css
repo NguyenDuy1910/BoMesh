@@ -4,12 +4,13 @@
    up-next list used by space pages. Prefix: home-. HeroUI tokens only;
    domain colours come from data (--tone). */
 
-.home { display: flex; flex-direction: column; gap: 32px; padding-top: 40px; }
+/* The greeting is Home's only header (the top row stays empty): one notch above section titles, close to the top row. */
+.home { display: flex; flex-direction: column; gap: 28px; padding-top: var(--space-6); }
 
 /* ───── Header ───── */
 .home-head { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.home-title { font-size: var(--text-3xl); line-height: var(--leading-3xl); font-weight: 600; letter-spacing: -0.02em; text-wrap: balance; }
-.home-lede { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 0; font-size: 15px; line-height: 22px; color: var(--muted); }
+.home-title { font-size: var(--text-2xl); line-height: var(--leading-2xl); font-weight: 600; letter-spacing: -0.015em; text-wrap: balance; }
+.home-lede { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 0; font-size: var(--text-md); line-height: var(--leading-md); color: var(--muted); }
 .home-lede__fresh::before { content: "·"; margin: 0 8px; }
 
 /* ───── Intent cards: find · ask · contribute ───── */
@@ -109,7 +110,7 @@
 /* ───── Responsive ───── */
 /* Tablets and phones: one column. Main and aside dissolve into it so what needs you leads, then where you left off. */
 @container app (max-width: 1023px) {
-  .home { gap: 28px; padding-top: 32px; }
+  .home { gap: 28px; padding-top: var(--space-5); }
   .home-body { display: flex; flex-direction: column; align-items: stretch; gap: 32px; }
   .home-main, .home-aside { display: contents; }
   .home-sec--attention { order: 1; }
@@ -124,10 +125,10 @@
   .home-start__go { display: none; }
 }
 @container app (max-width: 679px) {
-  .home { gap: 24px; padding-top: 16px; }
+  .home { gap: 24px; padding-top: var(--space-3); }
   .home-body { gap: 28px; }
-  .home-title { font-size: var(--text-2xl); line-height: var(--leading-2xl); }
-  .home-lede { flex-direction: column; font-size: 14px; line-height: 20px; }
+  .home-title { font-size: var(--text-xl); line-height: var(--leading-xl); }
+  .home-lede { flex-direction: column; }
   .home-lede__fresh::before { content: none; }
   /* Intent cards become one compact list: icon, title and a one-line hint. */
   .home-starts { grid-template-columns: minmax(0, 1fr); gap: 0; margin-top: -4px; border-radius: var(--radius-2xl); background: var(--surface); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); overflow: hidden; }

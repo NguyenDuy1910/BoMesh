@@ -1,7 +1,4 @@
-/* My library and collections (features/library.js). Resource rows come from resources.css. */
-
-/* Recent: date groups */
-.lib-group__title { margin: 0 0 8px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+/* My library, My contributions and collections (features/library.js). Resource rows come from resources.css. */
 
 /* Collection and saved-view lists */
 .lib-list { background: var(--surface); border-radius: var(--radius-2xl); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); overflow: hidden; }
@@ -14,7 +11,7 @@
 .lib-bar .search-field { flex: 1 1 200px; max-width: 320px; }
 .lib-private { white-space: nowrap; }
 
-/* Contributions: lifecycle filter, rows with the latest event and one next step */
+/* My contributions: lifecycle filter, rows with the latest event and one next step */
 .lib-ctb-seg { min-width: 0; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
 .lib-ctb-seg::-webkit-scrollbar { display: none; }
 .lib-ctb .item__title .chip { flex: none; }
@@ -23,9 +20,6 @@
 
 /* Collection header meta */
 .lib-col__head-meta { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
-
-/* Library tabs: one row that scrolls (with Foundation's edge fade) on narrow screens instead of wrapping. */
-.lib-tabs { margin-bottom: 20px; }
 
 /* Items the viewer can't open: count only */
 .lib-locked { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 10px 16px; border-radius: var(--radius-xl); background: var(--default-soft); color: var(--muted); font-size: 13px; line-height: 18px; }

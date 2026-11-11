@@ -34,6 +34,8 @@
 .src-sched-grid--3 { grid-template-columns: minmax(0, 0.8fr) minmax(0, 0.8fr) minmax(0, 1.4fr); }
 
 .src-sched-grid > .field { margin: 0; }
+/* Sources table: when it runs and how the last run went stay on one line each, so rows keep one height. */
+.src-when { white-space: nowrap; }
 /* Run counts */
 .src-counts { display: grid; grid-template-columns: repeat(auto-fit, minmax(88px, 1fr)); gap: 8px; }
 .src-counts__tile { padding: 12px 14px; border-radius: var(--radius-xl); background: var(--surface-secondary); }

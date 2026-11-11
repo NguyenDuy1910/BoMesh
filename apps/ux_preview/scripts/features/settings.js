@@ -138,8 +138,8 @@
     /* Archiving lives under General › Advanced; the old Danger zone link opens it there. */
     if (query.tab === 'danger') ui('setAdv', {}).open = true;
     const tab = query.tab === 'setup' ? 'setup' : 'general';
-    const head = pageHeader({ title: 'Settings', desc: `How ${esc(curWs().name)} is named, reached and set up.` });
-    const t = `<div class="page-tabs">${tabs([{ id: 'general', label: 'General' }, { id: 'setup', label: 'Workspace setup' }], tab, '/settings')}</div>`;
+    const head = pageHeader({ title: 'Settings' });
+    const t = contextBar(tabs([{ id: 'general', label: 'General' }, { id: 'setup', label: 'Workspace setup' }], tab, '/settings'));
     const body = gate({
       loading: () => `<div class="card stack gap-16" aria-busy="true">${[30, 60, 45].map(w => `<span class="skeleton skeleton--line" style="width:${w}%"></span><span class="skeleton" style="height:36px"></span>`).join('')}</div>`,
       error: () => errorState({ title: 'Settings didn’t load', desc: 'Try again. Your settings haven’t changed.' }),

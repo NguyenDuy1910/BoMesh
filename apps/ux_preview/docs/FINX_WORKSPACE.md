@@ -17,10 +17,10 @@ The demo workspace that shows BoMesh as a company's central knowledge platform. 
 
 | Persona | Person | Signs in as | Sees |
 | --- | --- | --- | --- |
-| Engineer | Trần Minh Khoa, Backend Engineer · Payments Platform | khoa.tran@finx.vn | Home, Knowledge, Work, Requests, Payments / Data / CBM spaces; contributes; has Secure coding and Data privacy training |
-| Lead | Lê Thu Hà, Engineering Manager · Payments Platform | ha.le@finx.vn | + reviews contributions to Engineering Handbook & Architecture and Payments Platform |
-| Analyst | Phạm Quốc Bảo, Senior Data Analyst · Data Platform | bao.pham@finx.vn | + reviews Data Platform & Analytics; no Secure coding training, so production access is blocked |
-| Admin | Võ Thị Lan, Knowledge & Compliance Lead | lan.vo@finx.vn | Everything: Manage, Documents (all bases), taxonomy, Featured on Home, Risk & Compliance queue |
+| Engineer | Trần Minh Khoa, Backend Engineer · Payments Platform | khoa.tran@finx.vn | Workspace: Home, Knowledge, AI Chat, Work, Requests · Your work: Recent, Projects, Spaces (Payments / Data / CBM), My contributions · Manage: Knowledge Studio → Knowledge bases as an editor of Payments Platform; contributes; has Secure coding and Data privacy training |
+| Lead | Lê Thu Hà, Engineering Manager · Payments Platform | ha.le@finx.vn | + Manage › Knowledge Studio (Review · Library · Knowledge bases) for Engineering Handbook & Architecture and Payments Platform |
+| Analyst | Phạm Quốc Bảo, Senior Data Analyst · Data Platform | bao.pham@finx.vn | + Manage › Knowledge Studio (Review · Library · Knowledge bases) for Data Platform & Analytics; no Secure coding training, so production access is blocked |
+| Admin | Võ Thị Lan, Knowledge & Compliance Lead | lan.vo@finx.vn | Everything: Manage (Overview · Knowledge Studio 14 · People · Assistant · Activity · Settings), every Studio tab including Taxonomy, Featured on Home, Risk & Compliance queue |
 
 Password `demo`. Platform operator Alex Rivera can also open Finx.
 
@@ -37,7 +37,7 @@ Password `demo`. Platform operator Alex Rivera can also open Finx.
 | Internal Policies & Guidelines | People & Culture | Everyone | SharePoint |
 | Leadership & Finance | Finance | Restricted; locked for the Engineer, hidden from the Analyst | Uploads |
 
-The six topic domains in the taxonomy are Engineering & Architecture, Data Platform & Analytics, Banking Operations, Security & Compliance, Product & Business, and Internal Policies & Guidelines. They hold 27 topics, such as Architecture decisions, Reliability & on-call, Metrics & definitions, Payments & settlement, PCI DSS, SBV regulations, Roadmap & strategy and Hybrid work.
+The six topic domains in the taxonomy are Engineering & Architecture, Data Platform & Analytics, Banking Operations, Security & Compliance, Product & Business, and Internal Policies & Guidelines. They hold 27 topics, such as Architecture decisions, Reliability & on-call, Metrics & definitions, Payments & settlement, PCI DSS, SBV regulations, Roadmap & strategy and Hybrid work. Every domain and topic has a code and every topic has keywords; ten topics also have a description, synonyms and examples, six have guidance for the assistant, and four have rules (Cards & disputes: folder path contains "Chargebacks"; PCI DSS: source is GRC policies; Architecture decisions: path contains "Architecture decisions"; incidents: path contains "postmortems"). Lan last imported them from `finx-master-data-2026-10.xlsx`.
 
 There are about 250 documents. They include 34 ADRs, runbooks, API references, postmortems, data tables and metric definitions, operations procedures, control descriptions, SBV and PCI DSS summaries, product briefs, partner guides and HR/IT policies. Nine titles are in Vietnamese, some verifications have expired, and there are three duplicate pairs.
 
@@ -49,23 +49,27 @@ The contribution queue has 9 items. Two of them propose new topics: *Open bankin
 
 ## Journeys
 
-1. **Engineer, first minute.** The product tour walks Home once (intent cards, where you left off, Explore knowledge, New chat, Search). Home shows what needs Khoa, what he was reading, what changed at the source, the six domains and recommended documents. *Ask a question* → New chat → "How do I get production access?" and the cited answer quotes the Access Control Policy; a citation opens the document preview at the passage. *Request production access* opens the IT Service Desk request, which checks the Secure coding training and the 8-hour limit before sending.
+1. **Engineer, first minute.** The product tour walks Home once (intent cards, where you left off, Explore knowledge, AI Chat, Search). Home shows what needs Khoa, what he was reading, what changed at the source, the six domains and recommended documents. *Ask a question* → AI Chat → "How do I get production access?" and the cited answer quotes the Access Control Policy; a citation opens the document preview at the passage. *Request production access* opens the IT Service Desk request, which checks the Secure coding training and the 8-hour limit before sending.
 2. **Engineer, on call.** Search "gateway timeouts" → *Runbook — Payment gateway timeouts* in the preview → *Open full document* → Reader with Ask beside it → Payments on-call kit collection (Browse → Shared with you).
-3. **Engineer, contributing.** Contribute a Kafka consumer retry guide to a knowledge base; it goes into review. Fix the contribution the lead sent back with changes requested, then resubmit; the declined one shows the reviewer's reason.
-4. **Lead.** Reviews Payments and Engineering contributions in Manage → Documents. Compares Confluent Cloud, Pulsar and MSK in the *Event streaming platform — evaluation* evidence review (every cell cited, evidence in a side panel), drafts a decision record from it and approves teammates' drafts sent for review. Curates the on-call kit in its Edit mode and decides access requests to Payments Platform in the base's Access tab.
+3. **Engineer, contributing.** Contribute a Kafka consumer retry guide to a knowledge base: Analyzing, then Check the details (type, topics with evidence, Payments Platform and who will see it, summary) → Submit for review. Track it in Your work → My contributions (stepper). Fix the contribution the lead sent back with changes requested, then resubmit; the declined one shows the reviewer's reason.
+4. **Lead.** Reviews Payments and Engineering contributions in Knowledge Studio → Review → Submissions, where the Classification card shows what the contributor confirmed and why each topic matched. Compares Confluent Cloud, Pulsar and MSK in the *Event streaming platform — evaluation* evidence review (every cell cited, evidence in a side panel), drafts a decision record from it and approves teammates' drafts sent for review. Curates the on-call kit in its Edit mode and decides access requests to Payments Platform in the base's Access tab.
 5. **Analyst.** Explores Data Platform & Analytics → Metrics & definitions. Asks how a monthly active customer is defined (*Ask about this document* → the Reader's Ask panel). A production access request is blocked because the training is missing, and the check says how to fix it. The PII access request goes to Risk & Compliance.
 6. **Admin.**
    - Features documents on Home (Featured documents drawer).
    - Publishes the chargeback procedure update as a new version.
-   - Accepts or merges the proposed *Open banking* / *AI governance* topics in Documents → Topics.
+   - Accepts or merges the proposed *Open banking* / *AI governance* topics in Knowledge Studio → Taxonomy (a merge adds the name as a synonym).
+   - Follows every document through the Studio flow: the flow strip in the Library, then a document's Progress in its drawer.
    - Fixes the password-protected file (Open source, then sync again).
-   - Publishes updates for documents changed at the source, keeps policies verified, works the Risk & Compliance queue (the space opens on it) and its request types, and closes knowledge gaps from Overview.
+   - Starts from Overview → Knowledge health, whose metrics open the Review queues: publishes updates for documents changed at the source (Publishing problems), keeps policies verified (Re-verification due), works the Risk & Compliance queue (the space opens on it) and its request types, and closes knowledge gaps from Overview.
+   - Watches the 100,000-file first sync of **Operations archive** (SharePoint → Banking Operations, *Review only what's uncertain*): Knowledge Studio → Sources shows *First sync 61k/96k*; the run drawer (`run-fx-419`) shows the pipeline, issues and classification split. She decides the three review batches (2,140 duplicates, 610 personal data, 200 new versions) in Review → Sync batches and the topic groups in Review → Topics to confirm. Full walkthrough: [KNOWLEDGE_STUDIO.md](KNOWLEDGE_STUDIO.md#the-100000-document-walkthrough).
+
+   Who sees it: only the Admin. Sources needs `source.manage`, and the batches and topic groups belong to Banking Operations, which Lan owns (workspace admins own every base); the Lead and Analyst see neither, and the Lead's badge counts only her own bases' decisions.
 
 Every journey is in the prototype bar under **Journeys** (Finx).
 
 ## Data files
 
 - `scripts/data/finx.js`: people, workspace, bases, key documents, sources, spaces, events, work, requests, conversations, assistant.
-- Finx sections of `scripts/data/knowledge.js`: taxonomy, metadata, catalog, collections, saved/recent/views, featured.
+- Finx sections of `scripts/data/knowledge.js`: taxonomy (topics with codes, keywords, synonyms, examples, guidance and rules via `taxonomy()`; one import), metadata, catalog, collections, saved/recent/views, featured.
 - Finx sections of `scripts/data/contributions.js`: lifecycle seeds.
 - Renditions in `scripts/features/documents.js`; Finx chat answers in `chat.js`; review evidence in `work-research.js`.

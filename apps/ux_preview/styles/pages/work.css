@@ -65,8 +65,7 @@ button.work-steps__btn:hover { background: var(--default); color: var(--foregrou
 .work-split { position: relative; }
 .work-split > .split__main { min-height: 0; }
 .work-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; }
-.work-page { max-width: 880px; }
-.work-head { align-items: flex-start; }
+.main:has(.work-page) { --page-max: 880px; }
 .work-title { min-width: 0; overflow-wrap: anywhere; }
 .work-title__btn { display: inline; text-align: left; font: inherit; color: inherit; border-radius: var(--radius-sm); padding: 0 2px; margin: 0 -2px; }
 .work-title__btn:hover { background: var(--default); }
@@ -208,7 +207,6 @@ button.work-steps__btn:hover { background: var(--default); color: var(--foregrou
   .work-pick__bar .search-field { flex: 1 1 100%; }
   .work-pick__meta { display: none; }
   .work-new__foot { flex-wrap: wrap; }
-  .work-head .page-header__lead { display: none; }
   .quiz-key, .quiz-q__explain, .quiz-q__foot { padding-left: 0; }
   .quiz-stats { grid-template-columns: minmax(0, 1fr); }
   .quiz-score__row { gap: 16px; }

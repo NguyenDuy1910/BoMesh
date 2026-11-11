@@ -279,7 +279,7 @@
         ${btn(dark ? 'Light mode' : 'Dark mode', { size: 'sm', icon: dark ? 'sun' : 'moon', act: 'ds-theme' })}
       </div></header>
       <div class="ds-wrap">
-        ${pageHeader({ title: 'BoMesh design system', desc: 'HeroUI v3 components as built in <span class="mono">ui.js</span>. Every example is live.' })}
+        <header class="page-hero"><div class="page-hero__body"><h1 class="page-hero__title">BoMesh design system</h1><p class="page-hero__meta">HeroUI v3 components as built in <span class="mono">ui.js</span>. Every example is live.</p></div></header>
         <div class="ds-layout">
           <nav class="ds-nav" aria-label="Design system sections">${SECTIONS.map(([id, l]) => `<button type="button" class="ds-nav__link" data-act="ds-jump" data-id="${id}">${esc(l)}</button>`).join('')}</nav>
           <div class="ds-main">${foundations()}${buttons()}${chips()}${forms()}${primitives()}${patterns()}${navigation()}${dataDisplay()}${feedback()}${evidence()}</div>

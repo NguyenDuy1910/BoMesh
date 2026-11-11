@@ -110,10 +110,10 @@
     const live = S.pageState === 'live' && !S.navLoading;
     const tab = TABS.includes(query.tab) ? query.tab : 'workspaces';
     const failed = failedJobs().length;
-    const t = `<div class="page-tabs">${tabs([{ id: 'workspaces', label: 'Workspaces', count: X.pIndexAlerts() || null, alert: true }, { id: 'jobs', label: 'Jobs', count: failed || null }, { id: 'policies', label: 'Policies' }], tab, '/p/indexing')}</div>`;
+    const t = contextBar(tabs([{ id: 'workspaces', label: 'Workspaces', count: X.pIndexAlerts() || null, alert: true }, { id: 'jobs', label: 'Jobs', count: failed || null }, { id: 'policies', label: 'Policies' }], tab, '/p/indexing'));
     // Privacy is stated where file metadata appears (Jobs, the drawers), not as a page banner.
     const ok = () => `<div class="pix">${{ workspaces: () => wsSection() + errSection(), jobs: jobsSection, policies: policySection }[tab]()}</div>`;
-    return `<div class="page">${pageHeader({ title: 'Indexing', extra: PREVIEW, desc: live ? summary() : 'How documents are processed across workspaces.' })}${t}
+    return `<div class="page">${pageHeader({ title: 'Indexing', extra: PREVIEW, meta: live ? summary() : '' })}${t}
       ${gate({
         ok,
         loading: () => skelRows(8),

@@ -1,99 +1,157 @@
 /*
- * App shell — HeroUI CRM layout: sidebar on the background, a topbar with
- * the sidebar toggle and breadcrumbs, pages on the same background with
- * surface cards. #frame is the responsive container (container queries) and
- * the containing block for fixed overlays, so the device preview is honest.
+ * AppShell — content first, ChatGPT-style chrome: the sidebar (expanded, or a 56 px icon rail on desktop; off-canvas below
+ * 1024 px) and the main column, whose only chrome is one 48 px top row (CompactHeader) on the page background, a hairline
+ * appearing once content scrolls under it. Pages add at most one sticky row (ContextualToolbar: section tabs). The top
+ * row's inner row and the page share one content column (--page-max, --page-px), so titles, tabs and content align.
+ * #frame is the responsive container (container queries) and the containing block for fixed overlays.
  */
-#frame { container: app / inline-size; contain: layout; position: relative; height: 100vh; height: 100dvh; overflow: hidden; background: var(--background); }
+/* --frame-h: the product's visible height (pages that fill the screen, like the Review workbench, size against it). */
+#frame { --frame-h: 100dvh; container: app / inline-size; contain: layout; position: relative; height: 100vh; height: var(--frame-h); overflow: hidden; background: var(--background); }
 /* The prototype bar lives in its own band below the product, never over it. */
-body.has-proto #frame:not(.is-device) { height: calc(100vh - 52px); height: calc(100dvh - 52px); }
-#frame.is-device { transform: translateZ(0); margin: 16px auto; height: calc(100vh - 96px); border-radius: 28px; box-shadow: 0 0 0 1px var(--border), 0 24px 60px -24px rgba(0,0,0,.35); }
+body.has-proto #frame:not(.is-device) { --frame-h: calc(100dvh - 52px); }
+#frame.is-device { --frame-h: calc(100dvh - 96px); transform: translateZ(0); margin: 16px auto; border-radius: 28px; box-shadow: 0 0 0 1px var(--border), 0 24px 60px -24px rgba(0,0,0,.35); }
 #frame.is-tablet { width: 834px; max-width: calc(100vw - 32px); }
 #frame.is-phone { width: 390px; max-width: calc(100vw - 32px); }
 body.is-device { background: var(--surface-secondary); }
 #app { height: 100%; }
 
-.app { display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); height: 100%; }
-.app.is-collapsed { grid-template-columns: 0 minmax(0, 1fr); }
-.app.is-collapsed .sidebar { visibility: hidden; }
+.app { --sidebar-w: 248px; display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); height: 100%; transition: grid-template-columns var(--dur-slow) var(--ease-out-fluid); }
+.app.is-collapsed { --sidebar-w: var(--rail-w); }
+@media (prefers-reduced-motion: reduce) { .app { transition: none; } }
 
-/* Sidebar */
+/* Sidebar — calm and dense: 8 px grid, 13 px rows (32 px), 16 px icons, 11 px uppercase group labels. Hover and the current
+   page are neutral tints (the current page adds medium weight and an accent icon); focus is a 2 px inset ring that never clips. */
 .sidebar { display: flex; flex-direction: column; min-height: 0; min-width: 0; height: 100%; background: var(--background); border-right: 1px solid var(--separator); overflow: hidden; }
-.sidebar__header { display: flex; align-items: center; gap: 4px; padding: 12px 12px 8px; }
-.sidebar__content { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 4px 12px 12px; display: flex; flex-direction: column; gap: 2px; }
-.sidebar__group { display: flex; flex-direction: column; gap: 2px; }
-.sidebar__group + .sidebar__group { margin-top: 12px; }
-.sidebar__group-label { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--muted); }
-.sidebar__group-label a { font-weight: 500; color: var(--muted); border-radius: var(--radius-sm); }
-.sidebar__group-label a:hover { color: var(--foreground); }
-.sidebar__group-toggle { width: 100%; gap: 6px; border-radius: var(--radius-lg); text-align: left; transition: color var(--dur-fast), background-color var(--dur-fast); }
-.sidebar__group-toggle > span:first-child { flex: 1 1 auto; }
+.sidebar__header { display: flex; align-items: center; gap: 2px; height: var(--header-h); padding: 0 8px; flex: none; }
+.sidebar__toggle { flex: none; }
+.sidebar__search { padding: 4px 8px 8px; }
+.sidebar__content { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 8px 8px; display: flex; flex-direction: column; }
+.sidebar__group { display: flex; flex-direction: column; gap: 1px; }
+.sidebar__group + .sidebar__group { margin-top: 16px; }
+.sidebar__group-label { display: flex; align-items: center; gap: 4px; height: 28px; padding: 0 8px; font-size: var(--text-2xs); line-height: var(--leading-2xs); font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.sidebar__group-toggle { width: 100%; border-radius: var(--radius-lg); text-align: left; transition: color var(--dur-fast), background-color var(--dur-fast); }
+.sidebar__group-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar__group-toggle:not([aria-disabled="true"]):hover { color: var(--foreground); background: var(--default-soft); }
 .sidebar__group-toggle[aria-disabled="true"] { cursor: default; }
-.sidebar__group-toggle .badge-dot { margin-right: 2px; }
-.nav-item .badge--accent { background: var(--accent-soft); color: var(--accent-soft-foreground); }
-.sidebar__footer { padding: 8px 12px 12px; border-top: 1px solid var(--separator); }
+/* The chevron shows on hover/focus while open, always while collapsed (and on touch), turned to say "collapsed". */
+.sidebar__group-chev { opacity: 0; transition: opacity var(--dur-fast), transform var(--dur-fast) var(--ease-out); }
+.sidebar__group-toggle:is(:hover, :focus-visible) .sidebar__group-chev, .sidebar__group-toggle[aria-expanded="false"] .sidebar__group-chev { opacity: 1; }
+.sidebar__group-toggle[aria-expanded="false"] .sidebar__group-chev { transform: rotate(-90deg); }
+@media (hover: none) { .sidebar__group-chev { opacity: 1; } }
+.sidebar__group-toggle .badge-dot { margin-right: 4px; }
+.sidebar__footer { padding: 8px; border-top: 1px solid var(--separator); }
 
-.ws-switch { display: flex; align-items: center; gap: 10px; flex: 1 1 auto; min-width: 0; height: 44px; padding: 6px 8px; border-radius: var(--radius-xl); text-align: left; }
-.ws-switch:hover { background: var(--default-soft-hover); }
-.ws-switch__name { font-weight: 600; font-size: 14px; line-height: 18px; }
-.ws-switch__meta { font-size: 12px; line-height: 16px; color: var(--muted); }
+.ws-switch { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; height: 40px; padding: 0 8px; border-radius: var(--radius-lg); text-align: left; transition: background-color var(--dur-fast); }
+.ws-switch:hover { background: var(--default-soft); }
+.ws-switch__name { font-weight: 600; font-size: var(--text-md); line-height: 18px; }
+.ws-switch__meta { font-size: var(--text-xs); line-height: var(--leading-xs); color: var(--muted); }
 .ws-switch > .i { color: var(--muted); }
-
-.nav-item { display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 10px; border-radius: var(--radius-lg); font-size: 14px; color: color-mix(in oklab, var(--foreground) 86%, var(--muted)); text-align: left; width: 100%; min-width: 0; transition: background-color var(--dur-fast), color var(--dur-fast), box-shadow var(--dur-fast); }
-.nav-item .i { color: var(--muted); transition: color var(--dur-fast); }
-.nav-item:hover { background: var(--default-soft-hover); color: var(--foreground); }
-.nav-item:hover .i { color: var(--foreground); }
-/* Current page: a raised neutral surface with an accent icon — calm, but unmistakable. */
-.nav-item[aria-current="page"] { background: var(--surface); font-weight: 500; color: var(--foreground); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); }
-.nav-item[aria-current="page"] .i { color: var(--accent-soft-foreground); }
-.nav-item__label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.nav-item .kbd { background: transparent; box-shadow: inset 0 0 0 1px var(--border); }
-.nav-item--primary { margin-bottom: 4px; }
-.nav-item--recent { height: 32px; font-size: 13px; color: var(--muted); }
-.nav-item--recent:hover { color: var(--foreground); }
-.nav-item--recent[aria-current="page"] { color: var(--foreground); }
-.nav-item__meta { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
-.space-dot { width: 10px; height: 10px; border-radius: 3px; flex: none; margin: 0 3px; }
-
-.user-button { display: flex; align-items: center; gap: 10px; width: 100%; height: 44px; padding: 6px 8px; border-radius: var(--radius-xl); text-align: left; min-width: 0; }
-.user-button:hover { background: var(--default-soft-hover); }
-.user-button__name { font-size: 14px; font-weight: 500; line-height: 18px; }
-.user-button__meta { font-size: 12px; line-height: 16px; color: var(--muted); }
-
-/* Main */
-.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; }
-.topbar { display: flex; align-items: center; gap: 8px; height: var(--header-h); padding: 0 12px 0 16px; border-bottom: 1px solid var(--separator); flex: none; min-width: 0; }
-.topbar__sep { height: 16px; align-self: center; }
-.topbar__end { margin-left: auto; display: flex; align-items: center; gap: 6px; min-width: 0; }
-.topbar .breadcrumbs { flex-wrap: nowrap; overflow: hidden; }
-.topbar .breadcrumbs > * { white-space: nowrap; }
-/* Global search lives in the topbar: a quiet field-like button that opens ⌘K. */
-.topbar-search { display: inline-flex; align-items: center; gap: 8px; height: 34px; width: 220px; padding: 0 6px 0 12px; border-radius: var(--radius-3xl); background: var(--field-background); color: var(--field-placeholder); box-shadow: var(--field-shadow), inset 0 0 0 1px var(--field-border); font-size: 13px; transition: box-shadow var(--dur-fast), color var(--dur-fast); }
-.topbar-search:hover { color: var(--foreground); box-shadow: var(--field-shadow), inset 0 0 0 1px color-mix(in oklab, var(--foreground) 20%, transparent); }
-.topbar-search:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--focus), 0 0 0 3px var(--focus-halo); }
-.topbar-search__label { flex: 1 1 auto; text-align: left; }
-.topbar-bell { position: relative; }
-.topbar-bell[aria-current="page"] { --button-fg: var(--foreground); background: var(--default); }
-.topbar-bell__badge { position: absolute; top: 3px; right: 2px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--radius-full); background: var(--accent); color: var(--accent-foreground); font-size: 10px; line-height: 16px; font-weight: 600; text-align: center; box-shadow: 0 0 0 2px var(--background); font-variant-numeric: tabular-nums; }
-@media (hover: none), (pointer: coarse) { .topbar-search .kbd { display: none; } }
 .ws-switch--static { cursor: default; }
 .ws-switch--static:hover { background: transparent; }
+.ws-mark--console { width: 24px; height: 24px; background: var(--foreground); color: var(--background); }
+
+/* Search row: looks like a field, opens the ⌘K palette. */
+.side-search { display: flex; align-items: center; gap: 8px; width: 100%; height: 32px; padding: 0 6px 0 10px; border-radius: var(--radius-lg); background: var(--field-background); color: var(--field-placeholder); box-shadow: var(--field-shadow), inset 0 0 0 1px var(--field-border); font-size: var(--text-sm); text-align: left; transition: box-shadow var(--dur-fast), color var(--dur-fast); }
+.side-search:hover { color: var(--foreground); box-shadow: var(--field-shadow), inset 0 0 0 1px color-mix(in oklab, var(--foreground) 20%, transparent); }
+.side-search__label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-search .kbd { height: 18px; padding: 0 5px; background: transparent; box-shadow: inset 0 0 0 1px var(--border); }
+@media (hover: none), (pointer: coarse) { .side-search .kbd { display: none; } }
+
+.nav-item { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px; border-radius: var(--radius-lg); font-size: var(--text-sm); line-height: var(--leading-sm); color: color-mix(in oklab, var(--foreground) 84%, var(--muted)); text-align: left; width: 100%; min-width: 0; transition: background-color var(--dur-fast), color var(--dur-fast); }
+.nav-item .i { color: var(--muted); transition: color var(--dur-fast); }
+.nav-item:hover { background: var(--default-soft); color: var(--foreground); }
+.nav-item:hover .i { color: var(--foreground); }
+.nav-item[aria-current="page"] { background: var(--default-soft-hover); font-weight: 500; color: var(--foreground); }
+.nav-item[aria-current="page"] .i { color: var(--accent-soft-foreground); }
+.nav-item__label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-item .badge--accent { background: var(--accent-soft); color: var(--accent-soft-foreground); }
+.sidebar :is(.nav-item, .sidebar__group-toggle, .ws-switch, .user-button, .side-search):focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--focus); }
+/* Work rows mark their space with its colour (features/work.js). */
+.space-dot { width: 10px; height: 10px; border-radius: 3px; flex: none; margin: 0 3px; }
+
+.user-button { display: flex; align-items: center; gap: 8px; width: 100%; height: 44px; padding: 0 8px; border-radius: var(--radius-lg); text-align: left; min-width: 0; transition: background-color var(--dur-fast); }
+.user-button:hover { background: var(--default-soft); }
+.user-button__name { font-size: var(--text-sm); font-weight: 500; line-height: 18px; }
+.user-button__meta { font-size: var(--text-xs); line-height: var(--leading-xs); color: var(--muted); }
+.user-button > .i { color: var(--muted); }
+
+/* Icon rail (desktop, collapsed): the same sidebar at 56 px — workspace mark, expand, search, one icon per page (its name a
+   tooltip and still the link's accessible name), groups split by hairlines, counts as small corner badges, the avatar. */
+@container app (min-width: 1024px) {
+  .sidebar.is-rail .sidebar__header { flex-direction: column; height: auto; padding: 8px 8px 4px; gap: 4px; }
+  .sidebar.is-rail :is(.ws-switch, .user-button) { flex: none; width: 40px; height: 40px; padding: 0; justify-content: center; }
+  .sidebar.is-rail :is(.ws-switch__text, .ws-switch > .i, .side-search__label, .side-search .kbd, .user-button__text, .user-button > .i, .sidebar__group-label) { display: none; }
+  .sidebar.is-rail .sidebar__toggle { width: 40px; height: 36px; }
+  .sidebar.is-rail .sidebar__search { display: flex; justify-content: center; padding: 0 8px 4px; }
+  .sidebar.is-rail .side-search { width: 40px; height: 36px; padding: 0; justify-content: center; background: transparent; box-shadow: none; color: var(--muted); }
+  .sidebar.is-rail .side-search:hover { background: var(--default-soft); color: var(--foreground); }
+  .sidebar.is-rail .sidebar__content { align-items: center; scrollbar-width: none; }
+  .sidebar.is-rail .sidebar__group { align-items: center; width: 100%; }
+  .sidebar.is-rail .sidebar__group + .sidebar__group { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--separator); }
+  .sidebar.is-rail .nav-item { position: relative; width: 40px; height: 36px; padding: 0; justify-content: center; }
+  .sidebar.is-rail .nav-item__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .sidebar.is-rail .nav-item .badge { position: absolute; top: 0; right: -2px; min-width: 16px; height: 16px; padding: 0 4px; font-size: 10px; box-shadow: 0 0 0 2px var(--background); }
+  .sidebar.is-rail .sidebar__footer { display: flex; justify-content: center; }
+}
+
+/* Main: the content column (--page-max, --page-px) is chosen by the page's width class and shared by the top row. One gutter
+   (32 px desktop, 24 px tablet, 16 px phone) for every width, so switching pages never moves the left edge. */
+.main { --page-max: var(--content-max); --page-px: var(--space-8); display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; }
+.main:has(.page--narrow) { --page-max: 800px; }
+.main:has(.page--wide) { --page-max: none; }
+.main:has(.page--studio) { --page-max: 1680px; }
+.main:not(:has(.page)) { --page-max: none; --page-px: var(--space-4); }
+
+/* CompactHeader: one 48 px row on the page background. Context (trail › title · chip · status) left, actions then global
+   controls right. A hairline appears once content scrolls under it, unless a ContextualToolbar is sticking right below. */
+.topbar { position: relative; z-index: calc(var(--z-sticky) + 1); flex: none; height: var(--header-h); background: var(--background); box-shadow: 0 1px 0 transparent; transition: box-shadow var(--dur); }
+.main.is-scrolled:not(:has(.ctx-bar, .rdr-head)) .topbar { box-shadow: 0 1px 0 var(--separator); }
+.topbar__inner { display: flex; align-items: center; gap: 8px; height: 100%; max-width: var(--page-max); margin: 0 auto; padding: 0 var(--page-px); min-width: 0; }
+.topbar__menu, .topbar__back, .topbar-search { display: none; }
+.topbar__context { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; }
+.topbar__trail { display: flex; align-items: center; gap: 2px; flex: 0 1 auto; min-width: 0; overflow: hidden; }
+.topbar__crumb { flex: 0 1 auto; min-width: 0; max-width: 220px; padding: 2px 4px; margin: 0 -4px 0 -4px; border-radius: var(--radius-md); font-size: var(--text-sm); line-height: 20px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topbar__crumb + .topbar__chev { margin-left: 4px; }
+a.topbar__crumb { transition: color var(--dur-fast), background-color var(--dur-fast); }
+a.topbar__crumb:hover { color: var(--foreground); background: var(--default-soft); }
+a.topbar__crumb:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
+.topbar__chev { flex: none; margin-right: 2px; color: var(--muted); opacity: .6; }
+/* The page's H1 at the section-title size (16 px): it leads by position and weight without a second header row. */
+.topbar__title { flex: 0 1 auto; min-width: 0; font-size: var(--text-lg); line-height: 22px; font-weight: var(--weight-semibold); letter-spacing: var(--tracking-snug); }
+/* Entity and reading pages carry their own H1: the top row shows the title only once that header has scrolled away. */
+.topbar__title--peek { opacity: 0; transform: translateY(4px); transition: opacity var(--dur), transform var(--dur) var(--ease-out); }
+.main.is-past-hero .topbar__title--peek { opacity: 1; transform: none; }
+.topbar__trail:has(+ .topbar__title--peek) > .topbar__chev:last-child { opacity: 0; transition: opacity var(--dur); }
+.main.is-past-hero .topbar__trail:has(+ .topbar__title--peek) > .topbar__chev:last-child { opacity: .6; }
+.topbar__extra { display: inline-flex; flex: none; }
+.topbar__meta { flex: 0 1 auto; min-width: 0; padding-left: 4px; font-size: var(--text-sm); line-height: 20px; color: var(--muted); }
+.topbar__end { display: flex; align-items: center; gap: 8px; flex: none; min-width: 0; }
+.topbar__actions { display: flex; align-items: center; gap: 6px; min-width: 0; }
+/* Page actions sit in the top row at the compact control size, whatever size the page asked for. */
+.topbar__actions .button:not(.button--sm) { height: var(--control-sm); padding: 0 12px; font-size: var(--text-sm); }
+.topbar__actions .button--icon-only:not(.button--sm) { width: var(--control-sm); padding: 0; }
+.topbar__global { display: flex; align-items: center; gap: 2px; }
+.topbar__actions + .topbar__global { padding-left: 8px; margin-left: 2px; box-shadow: inset 1px 0 0 var(--separator); }
+.topbar-bell { position: relative; }
+.topbar-bell[aria-current="page"] { --button-fg: var(--foreground); background: var(--default); }
+.topbar-bell__badge { position: absolute; top: 1px; right: 0; min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--radius-full); background: var(--accent); color: var(--accent-foreground); font-size: 10px; line-height: 16px; font-weight: 600; text-align: center; box-shadow: 0 0 0 2px var(--background); font-variant-numeric: tabular-nums; }
 .main__scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 .main__scroll--bare { overflow: hidden; display: flex; flex-direction: column; }
 
-/* Page */
-.page { width: 100%; max-width: var(--content-max); margin: 0 auto; padding: var(--space-8) var(--space-10) var(--space-14); }
-.page--narrow { max-width: 800px; }
-.page--wide { max-width: none; }
-.page-header { display: flex; align-items: flex-start; gap: var(--space-4); margin-bottom: var(--space-8); min-width: 0; }
-.page-header__body { flex: 1 1 auto; min-width: 0; }
-.page-header__title-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
-.page-header__title { font-size: var(--text-2xl); line-height: var(--leading-2xl); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tight); }
-.page-header__description { font-size: var(--text-md); line-height: var(--leading-md); color: var(--muted); margin-top: var(--space-1); max-width: 680px; }
-.page-header__actions { display: flex; align-items: center; gap: var(--space-2); flex: none; flex-wrap: wrap; justify-content: flex-end; }
-.page-header__lead { flex: none; }
-.page-tabs { margin: calc(var(--space-2) * -1) 0 var(--space-6); }
+/* PageLayout: content starts right under the top row, in the shared column. */
+.page { width: 100%; max-width: var(--page-max); margin: 0 auto; padding: var(--space-4) var(--page-px) var(--space-14); }
+.page:has(> :is(.ctx-bar, .page-hero):first-child) { padding-top: 0; }
+/* Entity identity block (pageHeader with a lead): mark, H1, meta lines. Not sticky — the top row takes over its title. */
+.page-hero { display: flex; align-items: flex-start; gap: var(--space-3); min-width: 0; padding: var(--space-3) 0 var(--space-5); }
+.page-hero__lead { flex: none; }
+.page-hero__body { flex: 1 1 auto; min-width: 0; }
+.page-hero__title-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.page-hero__title { min-width: 0; font-size: var(--text-xl); line-height: var(--leading-xl); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-snug); overflow-wrap: anywhere; }
+.page-hero__meta { margin-top: 2px; font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--muted); }
+/* ContextualToolbar: section tabs (and optional tools) sticking under the top row; its hairline is the tabs' baseline. */
+.ctx-bar { position: sticky; top: 0; z-index: var(--z-sticky); display: flex; align-items: center; gap: var(--space-3); min-width: 0; margin: 0 0 var(--space-5); background: var(--background); box-shadow: inset 0 -1px 0 var(--separator); }
+.ctx-bar > .tabs { flex: 1 1 auto; border-bottom: 0; }
+.ctx-bar__tools { display: flex; align-items: center; gap: 6px; flex: none; }
 .section { margin-top: var(--space-10); }
 .section:first-child { margin-top: 0; }
 .section__header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-3); min-width: 0; }
@@ -141,24 +199,32 @@ body.is-device { background: var(--surface-secondary); }
 
 /* Responsive shell */
 @container app (max-width: 1023px) {
-  .app, .app.is-collapsed { grid-template-columns: minmax(0, 1fr); }
-  .sidebar { position: absolute; z-index: var(--z-sidebar); top: 0; bottom: 0; left: 0; width: min(300px, 86vw); transform: translateX(-102%); transition: transform var(--dur-slow) var(--ease-out-fluid); box-shadow: var(--overlay-shadow); visibility: visible !important; }
+  .app, .app.is-collapsed { grid-template-columns: minmax(0, 1fr); transition: none; }
+  .sidebar { position: absolute; z-index: var(--z-sidebar); top: 0; bottom: 0; left: 0; width: min(288px, 86%); transform: translateX(-102%); transition: transform var(--dur-slow) var(--ease-out-fluid); box-shadow: var(--overlay-shadow); visibility: visible !important; }
   .app.is-nav-open .sidebar { transform: none; }
   .sidebar-backdrop { position: absolute; inset: 0; z-index: calc(var(--z-sidebar) - 1); background: var(--backdrop); animation: fade var(--dur); }
+  .main { --page-px: var(--space-6); }
+  .topbar__inner { padding-left: calc(var(--page-px) - 8px); }
+  .topbar__menu, .topbar-search { display: inline-flex; }
   .split__panel { position: absolute; z-index: var(--z-sidebar); top: 0; right: 0; bottom: 0; width: min(440px, 100%); box-shadow: var(--overlay-shadow); }
   .split__panel--wide { width: min(720px, 100%); }
   .form-section { grid-template-columns: minmax(0, 1fr); gap: 12px; }
 }
 @container app (max-width: 679px) {
-  .page { padding: 16px 16px 40px; }
-  .page-header { flex-wrap: wrap; margin-bottom: 16px; }
-  .page-header__actions { width: 100%; justify-content: flex-start; }
-  .topbar { padding: 0 8px; }
-  .topbar-search { width: 36px; height: 36px; padding: 0; justify-content: center; background: transparent; box-shadow: none; color: var(--muted); }
-  .topbar-search__label, .topbar-search .kbd { display: none; }
-  /* Phones: only the parent level and the current page. */
-  .topbar .breadcrumbs > :not(:nth-last-child(-n+3)) { display: none; }
-  .topbar .breadcrumbs > :last-child { min-width: 0; }
+  .main { --page-px: var(--space-4); }
+  /* A sub-page leads with Back to its parent (one leading control; the sidebar is one level up). */
+  .topbar__inner:has(.topbar__back) .topbar__menu { display: none; }
+  .page { padding-bottom: 40px; }
+  .topbar__inner { gap: 4px; padding: 0 8px; }
+  .side-search .kbd { display: none; }
+  /* Phones: Back to the nearest parent instead of the trail; no status line; actions with an icon become icon buttons (the
+     label stays as their accessible name). */
+  .topbar__trail, .topbar__meta { display: none; }
+  .topbar__back { display: inline-flex; }
+  .topbar__actions .button:has(> .i):not(.button--icon-only) { width: var(--control-sm); padding: 0; }
+  .topbar__actions .button:has(> .i):not(.button--icon-only) > span:not(.spinner) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .topbar__actions .button:has(> .i):not(.button--icon-only) > span ~ .i { display: none; }
+  .topbar__actions + .topbar__global { padding-left: 4px; margin-left: 0; }
   .auth { grid-template-columns: minmax(0, 1fr); }
   .auth__aside { display: none; }
   .auth__form { padding: 32px 20px; }

@@ -85,13 +85,30 @@ function appIcon(key, size = '') { const px = size === 'lg' ? 24 : size === 'sm'
 const kbd = k => `<kbd class="kbd">${esc(k)}</kbd>`;
 const itemIcon = (icon, tone = '', size = '') => `<span class="item-icon ${tone ? 'item-icon--' + tone : ''} ${size ? 'item-icon--' + size : ''}" aria-hidden="true">${ic(icon)}</span>`;
 
-/* ── Layout ── */
-/** Page header: title, one-line description, primary actions on the right. */
-function pageHeader({ title, desc = '', actions = '', extra = '', lead = '' }) {
-  return `<header class="page-header">${lead ? `<div class="page-header__lead">${lead}</div>` : ''}<div class="page-header__body"><div class="page-header__title-row"><h1 class="page-header__title">${esc(title)}</h1>${extra}</div>${desc ? `<p class="page-header__description">${desc}</p>` : ''}</div>${actions ? `<div class="page-header__actions">${actions}</div>` : ''}</header>`;
+/* ── Layout: AppShell (core/shell.js) = sidebar + main; main = CompactHeader (one top row, shell-owned) + the scrolling page.
+   A page never draws its own header row: it declares its title, chip, meta and actions with pageHeader(), its parents with
+   crumbs(), and its section tabs with contextBar(); the shell renders the one top row from them. ── */
+/** Declare the page's header. Two shapes:
+    - Index pages (no `lead`): nothing renders in the page. The title (H1), its chip (`extra`), a short status line (`meta`;
+      `desc` is accepted as the same) and the page's actions sit in the top row, so content starts right under it.
+    - Entity pages (`lead`: a space, knowledge base, collection, request…): a compact identity block opens the page (mark, H1,
+      `desc` as its meta lines); the top row keeps the parent trail and the actions, and shows the title once the block
+    scrolls away. `heading` replaces the hero's plain H1 when the title is interactive (e.g. rename). `inPage: true` is for
+    surfaces that draw their own identity block with the H1 (the reader): the top row treats it as a hero but nothing is
+    rendered. Returns the HTML to place first in the page ('' for index pages). */
+function pageHeader({ title, desc = '', meta = '', actions = '', extra = '', lead = '', heading = '', inPage = false }) {
+  S.head = { title, extra, actions, meta: lead || inPage ? '' : meta || desc, hero: !!lead || inPage };
+  if (!lead) return '';
+  return `<header class="page-hero" id="page-hero"><div class="page-hero__lead">${lead}</div><div class="page-hero__body"><div class="page-hero__title-row">${heading || `<h1 class="page-hero__title">${esc(title)}</h1>`}${extra}</div>${desc ? `<div class="page-hero__meta">${desc}</div>` : ''}</div></header>`;
 }
-/** Breadcrumbs shown in the topbar. Call from a page renderer: crumbs([{label, to}, …]). */
+/** Parents of the current page for the top row: crumbs([{label, to}, …, {label: current}]). The last item is the current page;
+    the top row shows the parents as a quiet trail (only the nearest one, as a Back button, on phones). */
 function crumbs(list) { S.crumbs = list; return ''; }
+/** ContextualToolbar: the page's section tabs (and, optionally, compact tools on the right) in one row that sticks under the top
+    row while the page scrolls. The only sticky row a page adds; filters and search stay in the content. */
+function contextBar(nav, tools = '') {
+  return `<div class="ctx-bar">${nav}${tools ? `<div class="ctx-bar__tools">${tools}</div>` : ''}</div>`;
+}
 function section(title, body, { desc = '', actions = '', id = '' } = {}) {
   return `<section class="section" ${id ? `id="${id}"` : ''}><div class="section__header"><div class="grow"><h2 class="section__title">${esc(title)}</h2>${desc ? `<p class="section__description">${desc}</p>` : ''}</div>${actions ? `<div class="row gap-8">${actions}</div>` : ''}</div>${body}</section>`;
 }
@@ -205,11 +222,13 @@ function swatchPicker({ value, options, act, label = '', labelled = false }) {
 }
 /** Page-section tabs as links (deep-linkable `base?tab=id`, aria-current). variant: primary (pill) | secondary (underline).
     With `act` they are an in-content filter instead: toggle buttons (aria-pressed), not ARIA tabs without panels.
+    `{ sep: true }` draws a quiet divider between groups of tabs (e.g. daily work | setup); `tone` colours an alert count.
     Narrow containers scroll the tabs with an edge fade (syncOverflow in app.js); the current tab is kept in view. */
 function tabs(items, active, base, { variant = 'secondary', act, label = 'Sections' } = {}) {
   return `<nav class="tabs ${variant === 'secondary' ? 'tabs--secondary' : ''}" aria-label="${esc(label)}" data-overflow><div class="tabs__list" ${act ? 'role="group"' : ''}>${items.map(t => {
+    if (t.sep) return '<span class="tabs__sep" aria-hidden="true"></span>';
     const sel = t.id === active;
-    const inner = `${t.icon ? ic(t.icon, 'i-sm') : ''}${esc(t.label)}${t.count != null && t.count !== '' ? (t.alert ? badge(+t.count || 0, { tone: 'accent' }) : `<span class="tabs__count">${fmtNum(t.count)}</span>`) : ''}`;
+    const inner = `${t.icon ? ic(t.icon, 'i-sm') : ''}${esc(t.label)}${t.count != null && t.count !== '' ? (t.alert ? badge(+t.count || 0, { tone: t.tone || 'accent' }) : `<span class="tabs__count">${fmtNum(t.count)}</span>`) : ''}`;
     return act ? `<button type="button" class="tabs__tab" aria-pressed="${sel}" data-act="${act}" data-value="${t.id}">${inner}</button>`
       : `<a class="tabs__tab" href="#${base}?tab=${t.id}" ${sel ? 'aria-current="page"' : ''}>${inner}</a>`;
   }).join('')}</div></nav>`;

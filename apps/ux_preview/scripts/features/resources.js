@@ -51,11 +51,23 @@
   }
   /** Fictional-data marker for demo workspaces. */
   const demoChip = () => (isDemoWs() ? chip('Demo data', { size: 'sm', icon: 'info', tip: curWs().demo }) : '');
-  /** Knowledge area header: title, demo marker, section tabs (Browse · My library) and the page's actions. Managing knowledge bases lives in Manage. */
-  const HUB_TABS = [['browse', 'Browse', '/knowledge'], ['library', 'My library', '/knowledge/library']];
-  function hubHeader(active, { actions = '', desc = '' } = {}) {
-    const nav = `<nav class="tabs hub-tabs" aria-label="Knowledge sections" data-overflow><div class="tabs__list">${HUB_TABS.map(([id, label, to]) => `<a class="tabs__tab" href="#${to}" ${id === active ? 'aria-current="page"' : ''}>${esc(label)}</a>`).join('')}</div></nav>`;
-    return pageHeader({ title: 'Knowledge', extra: demoChip(), desc, actions }) + `<div class="hub-nav">${nav}</div>`;
+  /** Knowledge area header: the title (top row) and one ContextualToolbar for the whole area — Browse │ Saved · My files ·
+      My collections — so My library never stacks a second tab bar under the first. `active` is 'browse' or a library tab id.
+      Managing knowledge bases lives in Manage. */
+  function hubTabs() {
+    const kb = visibleKbs().find(k => k.personal);
+    return [
+      { id: 'browse', label: 'Browse', to: '/knowledge' },
+      { sep: true },
+      { id: 'saved', label: 'Saved', to: '/knowledge/library?tab=saved', count: savedResources().length },
+      kb && { id: 'files', label: 'My files', to: '/knowledge/library?tab=files', count: docsIn(kb.id).length },
+      { id: 'collections', label: 'My collections', to: '/knowledge/library?tab=collections', count: myCollections().length },
+    ].filter(Boolean);
+  }
+  function hubHeader(active, { actions = '' } = {}) {
+    const items = hubTabs().map(t => (t.sep ? '<span class="tabs__sep" aria-hidden="true"></span>'
+      : `<a class="tabs__tab" href="#${t.to}" ${t.id === active ? 'aria-current="page"' : ''}>${esc(t.label)}${t.count ? `<span class="tabs__count">${fmtNum(t.count)}</span>` : ''}</a>`)).join('');
+    return pageHeader({ title: 'Knowledge', extra: demoChip(), actions }) + contextBar(`<nav class="tabs tabs--secondary" aria-label="Knowledge sections" data-overflow><div class="tabs__list">${items}</div></nav>`);
   }
   /** Knowledge header entry point: Contribute (review before publishing) for contributors; otherwise upload to My files. */
   const uploadBtn = (v = 'secondary') => (canContribute() ? btn('Contribute', { v, icon: 'upload', act: 'contribute' }) : visibleKbs().some(k => k.personal) ? btn('Upload', { v, icon: 'upload', act: 'contribute', data: { private: '1' } }) : '');
@@ -283,7 +295,7 @@
       // A new file only for uploads: synced documents are updated at their source (Publish update).
       canContribute() && !personal && (edit || isMine(d)) && res(d).source.key === 'upload' && { label: 'Submit a new version…', icon: 'upload', run: () => A['contribute']?.({ dataset: { versionOf: d.id } }) },
       isAdmin() && isPublishedStage(d) && !personal && { label: isFeatured(d.id) ? 'Remove from Home' : 'Feature on Home', icon: 'home', run: () => { const on = toggleFeatured(d.id); refresh(); toast(on ? 'Featured on Home for everyone who can read it' : 'Removed from Home', { action: { label: 'Undo', run: () => { toggleFeatured(d.id); refresh(); } } }); } },
-      canReviewKb(kb) && can('knowledge.manage') && { label: 'Manage in Documents', icon: 'files', run: () => go('/documents?tab=all&q=' + encodeURIComponent(docTitle(d))) },
+      canReviewKb(kb) && can('knowledge.manage') && { label: 'Manage in Knowledge Studio', icon: 'library', run: () => go(studioHref('library', { q: docTitle(d) })) },
     ].filter(Boolean);
     const archive = edit ? [{ sep: true }, { label: 'Archive', icon: 'archive', danger: true, run: () => X.archiveDocs?.([d]) }] : [];
     if (!manage.length) return [...head, ...archive];

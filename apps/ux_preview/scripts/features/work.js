@@ -239,7 +239,7 @@
     const tab = showTabs && query.tab === 'shared' ? 'shared' : 'mine';
     const src = tab === 'mine' ? mine : shared;
     const head = pageHeader({ title: 'Work', actions: flows.length ? newButton(flows) : '' });
-    const tabsHtml = showTabs ? `<div class="page-tabs">${tabs([{ id: 'mine', label: 'Mine', count: mine.length || '' }, { id: 'shared', label: 'Shared with me', count: shared.length || '' }], tab, '/work')}</div>` : '';
+    const tabsHtml = showTabs ? contextBar(tabs([{ id: 'mine', label: 'Mine', count: mine.length || '' }, { id: 'shared', label: 'Shared with me', count: shared.length || '' }], tab, '/work')) : '';
     const kindOpts = [...new Set(vis.map(w => w.kind))].map(k => [k, kindOf(k).label]);
     const spaceOpts = [...new Set(vis.map(w => w.space).filter(Boolean))].map(id => [id, spaceById(id)?.name || id]);
     const tools = needsTools(src.length, 'workList', ['kind', 'space']);
@@ -367,7 +367,7 @@
     const u = ui('workItem');
     const titleHtml = u.renaming === w.id
       ? `<div class="work-rename">${input({ id: 'work-rename', bind: 'workItem.name', value: u.name, onEnter: 'work-rename-save', attrs: 'aria-label="Title"' })}${btn('Save', { v: 'primary', size: 'sm', act: 'work-rename-save' })}${btn('Cancel', { v: 'ghost', size: 'sm', act: 'work-rename-cancel' })}</div>`
-      : ctx.canEdit ? `<h1 class="page-header__title work-title"><button type="button" class="work-title__btn" data-act="work-rename" data-id="${w.id}" data-tip="Rename">${esc(w.title)}${ic('pencil', 'work-title__pen')}</button></h1>` : `<h1 class="page-header__title work-title">${esc(w.title)}</h1>`;
+      : ctx.canEdit ? `<h1 class="page-hero__title work-title"><button type="button" class="work-title__btn" data-act="work-rename" data-id="${w.id}" data-tip="Rename">${esc(w.title)}${ic('pencil', 'work-title__pen')}</button></h1>` : `<h1 class="page-hero__title work-title">${esc(w.title)}</h1>`;
     const sp = ctx.sp, n = (w.sources || []).length;
     const meta = [
       sp && `<a class="work-meta__space" href="#/space/${sp.id}">${spaceTag(sp)}</a>`,
@@ -380,7 +380,8 @@
     let actions = '';
     if (w.status !== 'generating') { try { actions = k.actions?.(w, ctx) || ''; } catch (e) { console.error(e); } }
     const more = moreItems(w).length ? iconBtn('more', 'More', { menu: 'work-more', data: { id: w.id } }) : '';
-    return `<header class="page-header work-head"><div class="page-header__lead">${tile(w)}</div><div class="page-header__body"><div class="page-header__title-row">${titleHtml}${u.renaming === w.id ? '' : statusChip(w)}</div><div class="work-meta">${meta}</div></div>${actions || more ? `<div class="page-header__actions">${actions}${more}</div>` : ''}</header>`;
+    // The identity block opens the page; its actions live in the top row with the trail (the title joins them once scrolled).
+    return pageHeader({ title: w.title, lead: tile(w), heading: titleHtml, extra: u.renaming === w.id ? '' : statusChip(w), desc: `<div class="work-meta">${meta}</div>`, actions: actions + more });
   }
   P.workItem = ({ params, query }) => {
     const w = workById(params.id);

@@ -83,7 +83,7 @@ a.sp-mat__name:hover { text-decoration: underline; text-underline-offset: 3px; }
 }
 @container app (max-width: 679px) {
   /* Content first: the space's name and actions lead; the colored tile and faces step back. */
-  .page-header:has(.sp-head__meta) .page-header__lead { display: none; }
+  .page-hero:has(.sp-head__meta) .page-hero__lead { display: none; }
   .sp-head__people { margin-top: 4px; }
   .sp-head__people .avatar-group { display: none; }
   .sp-card { min-height: 0; }

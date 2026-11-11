@@ -1,10 +1,10 @@
 (() => {
 'use strict';
-/* Chat: the home composer (/chat) and threads (/chat/:id) — permission-aware
+/* Chat: AI Chat (/chat: the composer above the conversation list) and threads (/chat/:id) — permission-aware
    canned answers that stream with work steps, inline citations, a citation
    side panel, feedback, retry/edit, share and the product tour.
    File work (artifacts, attachments, file panel) lives in chat-files.js and
-   plugs in through X.chatFiles; the conversation list is conversations.js. */
+   plugs in through X.chatFiles; the conversation list and its ⋯ menu are conversations.js. */
 
 let run = null;    // active stream: { conv, msg, stop }
 let stick = true;  // keep the thread pinned to the bottom while streaming
@@ -547,25 +547,31 @@ A['chat-panel-close'] = () => { if (X.chatFiles?.leaveEdit && !X.chatFiles.leave
 /* ═══════════════ Pages ═══════════════ */
 const STARTER_IC = ['file-text', 'list', 'users'];
 /** One suggestion area under the composer. Searching a space (or one base of a space) with AI workflows swaps the starter
-    questions for that space's workflows — same cards, so the layout never grows a second row of ideas. */
-function suggestions(c) {
+    questions for that space's workflows — same cards, so the layout never grows a second row of ideas. Starter questions
+    only help before the first conversation (starters: false hides them once the list below has something to pick up). */
+function suggestions(c, starters = true) {
   const sp = hasModule('work') && (holderSpace(c) || (c.scope.length === 1 && hasModule('spaces') && spaceById(kbById(c.scope[0])?.space))) || null;
   const wfs = sp ? workflowsFor(sp).slice(0, 3) : [];
   const card = (attrs, icon, title, desc) => `<button type="button" class="chat-starter" ${attrs}><span class="chat-starter__title">${ic(icon, 'i-sm')}<span class="truncate">${esc(title)}</span></span>${desc ? `<span class="chat-starter__prompt clamp-2">${esc(desc)}</span>` : ''}</button>`;
   if (wfs.length) return `<div class="chat-starters" id="chat-starters" role="group" aria-label="${esc(`Start work in ${sp.name}`)}">${wfs.map(w => card(`data-act="chat-workflow" data-workflow="${esc(w.id)}" data-space="${esc(sp.id)}"`, w.icon, w.label, w.desc)).join('')}</div>`;
-  const starters = (X.assistantStarters?.() || D.assistant.starters || []).filter(s => s?.prompt).slice(0, 3);
-  return starters.length ? `<div class="chat-starters" id="chat-starters" role="group" aria-label="Suggested questions">${starters.map((s, i) => card(`data-act="chat-starter" data-prompt="${esc(s.prompt)}"`, STARTER_IC[i % 3], s.title || s.prompt, s.title ? s.prompt : '')).join('')}</div>` : '';
+  const picks = starters ? (X.assistantStarters?.() || D.assistant.starters || []).filter(s => s?.prompt).slice(0, 3) : [];
+  return picks.length ? `<div class="chat-starters" id="chat-starters" role="group" aria-label="Suggested questions">${picks.map((s, i) => card(`data-act="chat-starter" data-prompt="${esc(s.prompt)}"`, STARTER_IC[i % 3], s.title || s.prompt, s.title ? s.prompt : '')).join('')}</div>` : '';
 }
 A['chat-workflow'] = el => {
   const { workflow, space } = el.dataset; const data = { workflow, ...(space ? { space } : {}) };
   if (A['work-start']) A['work-start']({ dataset: data }); else go(NEXT_ROUTE['work-start'](data));
 };
+/** AI Chat (/chat): one destination to start a conversation (the composer, with its scope and attachments) and to pick up any
+    earlier one (the list below it, conversations.js). */
 P.chatHome = () => {
-  const a = D.assistant, c = composer('home');
+  const a = D.assistant, c = composer('home'), first = !myConvs().length;
   return `<div class="chat-home chat-drop" data-drop="home"><div class="chat-home__inner">
-    <h1 class="chat-home__title">${esc(a.welcome || 'What can I help you find?')}</h1>
-    ${composerHtml({ key: 'home', holder: c, lg: true })}
-    ${suggestions(c)}
+    <div class="chat-home__start">
+      <h1 class="chat-home__title">${esc(a.welcome || 'What can I help you find?')}</h1>
+      ${composerHtml({ key: 'home', holder: c, lg: true })}
+      ${suggestions(c, first)}
+    </div>
+    ${X.conversations?.list() || ''}
   </div></div>`;
 };
 AFTER.chatHome = ({ changed }) => { if (changed) { cui().panel = null; cui().edit = null; } afterComposer(changed); };
@@ -575,17 +581,18 @@ function threadSkel() {
 P.chatThread = ({ params }) => {
   const conv = convById(params.id);
   if (!isMine(conv)) {
-    crumbs([{ label: 'Conversations', to: '/chats' }, { label: 'Not found' }]);
-    return `<div class="page">${emptyState({ icon: 'message', title: 'This conversation isn’t available', desc: 'It may have been deleted, or it belongs to someone else.', actions: btn('New chat', { v: 'primary', icon: 'message-plus', href: '/chat' }) + btn('Conversations', { href: '/chats' }) })}</div>`;
+    crumbs([{ label: 'AI Chat', to: '/chat' }, { label: 'Not found' }]);
+    return `<div class="page">${emptyState({ icon: 'message', title: 'This conversation isn’t available', desc: 'It may have been deleted, or it belongs to someone else.', actions: btn('Go to AI Chat', { v: 'primary', icon: 'message', href: '/chat' }) })}</div>`;
   }
   ensureSeed(conv); conv.scope ??= []; settleStale(conv);
   const sp = holderSpace(conv);
   const proj = X.projects?.of(conv);
-  crumbs(sp ? [{ label: 'Spaces', to: '/spaces' }, { label: sp.name, to: '/space/' + sp.id }, { label: conv.title }] : proj ? [{ label: proj.name, to: '/project/' + proj.id }, { label: conv.title }] : [{ label: 'Conversations', to: '/chats' }, { label: conv.title }]);
-  topbarActions(`<span class="chat-top-actions">${btn(conv.share ? 'Shared' : 'Share', { v: 'ghost', size: 'sm', icon: conv.share ? 'users' : 'share', act: 'chat-share', data: { id: conv.id }, tip: conv.share ? shareSummary(conv) : '' })}${iconBtn('more', 'More', { size: 'sm', menu: 'chat-more', data: { id: conv.id } })}</span>`);
+  crumbs(sp ? [{ label: 'Spaces', to: '/spaces' }, { label: sp.name, to: '/space/' + sp.id }, { label: conv.title }] : proj ? [{ label: 'Projects', to: '/projects' }, { label: proj.name, to: '/project/' + proj.id }, { label: conv.title }] : [{ label: 'AI Chat', to: '/chat' }, { label: conv.title }]);
+  // The conversation's title is the top row's H1, its Share and ⋯ the row's actions: the thread starts right under it.
+  pageHeader({ title: conv.title, actions: `<span class="chat-top-actions">${btn(conv.share ? 'Shared' : 'Share', { v: 'ghost', size: 'sm', icon: conv.share ? 'users' : 'share', act: 'chat-share', data: { id: conv.id }, tip: conv.share ? shareSummary(conv) : '' })}${iconBtn('more', 'More', { size: 'sm', menu: 'chat-more', data: { id: conv.id } })}</span>` });
   const u = cui(); const panel = u.panel?.conv === conv.id ? u.panel : null;
   const streaming = run?.conv === conv.id;
-  const ok = () => `<h1 class="sr-only">${esc(conv.title)}</h1><div class="chat-thread">${conv.messages.map(m => m.role === 'user' ? userHtml(m) : `<div class="chat-msg chat-msg--ai" id="msg-${m.id}">${aiInner(conv, m)}</div>`).join('')}</div>`;
+  const ok = () => `<div class="chat-thread">${conv.messages.map(m => m.role === 'user' ? userHtml(m) : `<div class="chat-msg chat-msg--ai" id="msg-${m.id}">${aiInner(conv, m)}</div>`).join('')}</div>`;
   const side = panel?.kind === 'file' ? X.chatFiles?.panel(conv, panel) || '' : '';
   return `<div class="split chat-split">
     <div class="split__main chat-main chat-drop" data-drop="${conv.id}">
@@ -806,7 +813,7 @@ A['chat-request'] = el => {
   toast('Access requested'); refresh();
 };
 
-/* Thread ⋯: the same conversation menu as /chats and the sidebar (conversations.js) */
+/* Thread ⋯: the same conversation menu as AI Chat's list and project pages (conversations.js) */
 MENUS['chat-more'] = el => X.conversations?.menu(convById(el.dataset.id)) || [];
 
 /* ═══════════════ Share ═══════════════
@@ -885,8 +892,8 @@ const TOUR = [
   { sel: '.home-starts', title: 'Start from what you need', body: () => `Find a document, ask a question answered from ${curWs().name} documents with citations, or share what you know.` },
   { sel: '.home-sec--attention, .home-sec--continue', title: 'Pick up where you left off', body: () => ($('.home-sec--continue') ? 'What needs you and the documents you were reading. Ask about a document right from its row.' : 'What needs you shows up here, with the documents you were reading once you start.') },
   { sel: '.home-sec--explore', title: 'Explore what’s here', body: () => 'Each topic shows what it covers and how much there is. Open one to browse it in Knowledge.' },
-  { sel: '#side-new-chat', title: 'Start a conversation', body: () => 'Open a new chat to attach files or choose exactly what to search. Conversations and projects stay in the sidebar.' },
-  { sel: '#topbar-search', title: 'Find anything', body: () => touch() ? 'Search conversations, documents and pages.' : 'Search conversations, documents and pages, or press ⌘K.' },
+  { sel: '#nav-chat', title: 'AI Chat', body: () => 'AI Chat: start a conversation or pick up an earlier one. Attach files or choose exactly what to search.' },
+  { sel: '#side-search, #topbar-search', title: 'Find anything', body: () => touch() ? 'Search conversations, documents and pages.' : 'Search conversations, documents and pages, or press ⌘K.' },
 ];
 let tourAt = null;
 const tourKey = () => `${me().id}:${S.ws}`;

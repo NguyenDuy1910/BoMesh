@@ -279,6 +279,8 @@ a.item:focus-visible, .item--action:has(> .item__body .item__action:focus-visibl
 .tabs--secondary .tabs__list { background: transparent; padding: 0; border-radius: 0; gap: 4px; }
 .tabs--secondary .tabs__tab { border-radius: 0; height: 40px; padding: 0 10px; box-shadow: none; background: transparent; }
 .tabs--secondary .tabs__tab:is([aria-selected="true"], [aria-current="page"], [aria-pressed="true"]) { color: var(--foreground); background: transparent; box-shadow: inset 0 -2px 0 var(--accent); }
+/* A quiet divider between groups of tabs (daily work | setup). */
+.tabs__sep { flex: none; align-self: center; width: 1px; height: 18px; margin: 0 8px; background: var(--separator); }
 
 /* ───── Table (HeroUI primary variant) ───── */
 .table-root { position: relative; background: var(--surface-secondary); border-radius: calc(var(--radius) * 2.5); padding: 0 4px 4px; min-width: 0; }

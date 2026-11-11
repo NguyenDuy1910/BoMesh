@@ -1,9 +1,8 @@
 (() => {
 'use strict';
-/* Conversations (/chats): the caller's conversations, searchable and filterable
-   by project, with rename and delete (immediate, with Undo). The one conversation
-   ⋯ menu lives here and is shared by /chats rows, the sidebar, project pages and
-   the thread topbar (X.conversations.menu). */
+/* Conversations: the list under AI Chat's composer (/chat) — the caller's conversations, searchable and filterable
+   by project, with rename, move and delete (immediate, with Undo). The one conversation ⋯ menu lives here and is
+   shared by those rows, project pages and the thread topbar (X.conversations.menu). */
 
 const C = () => X.chat;
 const UIK = 'chats', PER = 20;
@@ -17,47 +16,46 @@ function context(c) {
   const kb = (c.scope || []).map(kbById).find(k => k && canReadKb(k));
   return kb ? { label: kb.name, icon: 'book' } : null;
 }
-/** One level up from an open conversation (its breadcrumb parent): the project, the space, else Conversations. */
+/** One level up from an open conversation (its breadcrumb parent): the project, the space, else AI Chat. */
 function parentPath(c) {
   const proj = X.projects?.of(c); if (proj) return '/project/' + proj.id;
   const sp = c.space && hasModule('spaces') && spaceById(c.space); if (sp) return '/space/' + sp.id;
-  return '/chats';
+  return '/chat';
 }
 
-P.chats = () => {
+/** AI Chat's list, below the composer: title, where it lives (project / space / base), last answer, when. The whole row opens
+    the conversation; ⋯ (on hover) renames, moves or deletes it. Search and the Project filter appear once the list needs them. */
+function listHtml() {
   const u = ui(UIK, { q: '', project: '' });
   const all = myConvs();
   all.forEach(c => C().ensureSeed(c));
   const projects = X.projects?.list() || [];
   if (u.project && u.project !== 'none' && !projects.some(p => p.id === u.project)) u.project = '';
   const inProject = c => !u.project || (u.project === 'none' ? !X.projects?.of(c) : c.project === u.project);
-  const found = all.filter(c => inProject(c) && matchesQ(UIK, c.title, C().lastLine(c)));
-  const rows = u.sort ? applySort(found, UIK, { title: c => c.title.toLowerCase(), at: c => c.at }) : [...found].sort((a, b) => b.at - a.at);
-  const none = () => emptyState({ icon: 'message', title: 'No conversations yet', desc: 'Ask a question and your conversations appear here.', actions: btn('New chat', { v: 'primary', icon: 'message-plus', href: '/chat' }), boxed: true });
+  const rows = all.filter(c => inProject(c) && matchesQ(UIK, c.title, C().lastLine(c))).sort((a, b) => b.at - a.at);
+  const none = () => emptyState({ icon: 'message', title: 'No conversations yet', desc: 'Ask a question above. Your conversations stay here, so you can pick one up later.', compact: true });
   const row = c => {
-    const cx_ = context(c), last = C().lastLine(c);
-    const ctx = cx_ ? chip(cx_.label, { icon: cx_.icon, size: 'sm' }) : '';
-    return `<tr class="table__row" data-act="conv-open" data-id="${c.id}" tabindex="0">
-      <td class="table__cell table__cell--primary conv-title-cell"><div class="row gap-8"><span class="cell-title truncate">${esc(c.title)}</span>${ctx}</div>${last ? `<div class="cell-sub truncate conv-sub">${esc(last)}</div>` : ''}</td>
-      <td class="table__cell table__cell--hide-sm conv-preview"><span class="muted truncate">${esc(last)}</span></td>
-      <td class="table__cell conv-updated"><span class="muted num">${rel(c.at)}</span></td>
-      <td class="table__cell table__cell--actions"><span class="reveal-on-hover">${iconBtn('more', `Options for ${c.title}`, { size: 'sm', menu: 'conv-menu', data: { id: c.id } })}</span></td></tr>`;
+    const where = context(c), last = C().lastLine(c);
+    return item({
+      title: esc(c.title), titleExtra: where ? chip(where.label, { icon: where.icon, size: 'sm' }) : '',
+      desc: last ? esc(last) : '', meta: `<span class="num" data-tip="${esc(fmtDateTime(c.at))}">${esc(rel(c.at))}</span>`,
+      href: '/chat/' + c.id, cls: 'conv-row',
+      trail: `<span class="reveal-on-hover">${iconBtn('more', `Options for ${c.title}`, { size: 'sm', menu: 'conv-menu', data: { id: c.id } })}</span>`,
+    });
   };
   const ok = () => {
     if (!all.length) return none();
     if (!rows.length) return noMatches(UIK, ['project'], 'conversations');
-    // Sorting earns its place on a long list (or once a sort is applied); a short one stays newest first.
-    const sortable = needsTools(all.length, UIK, ['sort']), head = (label, key) => (sortable ? sortHead(label, key, UIK) : th(label));
-    return table({ label: 'Conversations', head: head('Title', 'title') + th('Last answer', 'table__cell--hide-sm') + head('Updated', 'at') + th('<span class="sr-only">Actions</span>', 'table__column--actions'), rows: paginate(rows, UIK, PER).map(row), foot: rows.length > PER ? pager(rows.length, UIK, PER) : '' });
+    return list(paginate(rows, UIK, PER).map(row), 'conv-list') + pager(rows.length, UIK, PER);
   };
-  // Search and the Project filter earn their place once there's something to search.
+  const live = S.pageState === 'live' && !S.navLoading;
   const projFilter = projects.length ? filterButton('Project', UIK, 'project', [['none', 'No project'], ...projects.map(p => [p.id, p.name])]) : '';
-  const toolbar = needsTools(all.length, UIK, ['project']) ? `<div class="toolbar">${searchField({ uiKey: UIK, placeholder: 'Search conversations' })}${projFilter}${clearFilters(UIK, ['project'])}</div>` : '';
-  return `<div class="page">${pageHeader({ title: 'Conversations', actions: btn('New chat', { v: 'primary', icon: 'message-plus', href: '/chat' }) })}
-    ${S.pageState === 'empty' ? '' : toolbar}
-    ${gate({ ok, empty: none })}</div>`;
-};
-A['conv-open'] = el => go('/chat/' + el.dataset.id);
+  const tools = live && needsTools(all.length, UIK, ['project']) ? `<div class="conv-tools">${searchField({ uiKey: UIK, placeholder: 'Search conversations' })}${projFilter}${clearFilters(UIK, ['project'])}</div>` : '';
+  const count = live && all.length ? `<span class="conv-head__count num">${fmtNum(all.length)}</span>` : '';
+  return `<section class="conv-sec" aria-labelledby="conv-h">
+    <div class="conv-head"><h2 class="conv-head__title" id="conv-h">Conversations</h2>${count}<span class="grow"></span>${tools}</div>
+    ${gate({ ok, empty: none, loading: () => skelRows(4) })}</section>`;
+}
 
 /** The one ⋯ menu for a conversation, wherever it's shown. Rename · move to a project · Delete conversation. */
 function menu(c) {
@@ -107,5 +105,5 @@ A['conv-delete'] = el => {
   toast(`Deleted “${c.title}”`, { action: { label: 'Undo', run: () => { if (!D.convs.includes(c)) D.convs.splice(Math.min(i, D.convs.length), 0, c); persist(); if (wasOpen) go('/chat/' + c.id); else refresh(); } } });
 };
 
-X.conversations = { menu, context };
+X.conversations = { menu, context, list: listHtml };
 })();

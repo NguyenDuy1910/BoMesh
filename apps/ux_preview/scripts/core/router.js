@@ -26,10 +26,14 @@ route('/work/:id', { page: 'workItem', mode: 'workspace', nav: 'work', title: 'W
 route('/requests', { page: 'requests', mode: 'workspace', nav: 'requests', title: 'Requests', module: 'requests', simLoad: true });
 route('/requests/new', { page: 'requestNew', mode: 'workspace', nav: 'requests', title: 'New request', module: 'requests' });
 route('/requests/:id', { page: 'requestItem', mode: 'workspace', nav: 'requests', title: 'Request', module: 'requests' });
-route('/chat', { page: 'chatHome', mode: 'workspace', nav: 'chat', title: 'New chat', bare: true });
+// AI Chat: one destination — start a conversation (the composer) and pick up any earlier one (the list below it).
+route('/chat', { page: 'chatHome', mode: 'workspace', nav: 'chat', title: 'AI Chat', bare: true });
 route('/chat/:id', { page: 'chatThread', mode: 'workspace', nav: 'chat', title: 'Conversation', bare: true });
+// Your work: what you touched lately, your project folders, your submissions.
+route('/recent', { page: 'recent', mode: 'workspace', nav: 'recent', title: 'Recent', simLoad: true });
+route('/projects', { page: 'projects', mode: 'workspace', nav: 'projects', title: 'Projects', simLoad: true });
 route('/project/:id', { page: 'project', mode: 'workspace', nav: 'projects', title: 'Project' });
-route('/chats', { page: 'chats', mode: 'workspace', nav: 'chats', title: 'Conversations', simLoad: true });
+route('/contributions', { page: 'contributions', mode: 'workspace', nav: 'contributions', title: 'My contributions', simLoad: true });
 route('/inbox', { page: 'inbox', mode: 'workspace', nav: 'inbox', title: 'Inbox', simLoad: true });
 route('/search', { page: 'search', mode: 'workspace', nav: 'search', title: 'Search' });
 // Knowledge: Browse (the organization's knowledge: search, topics, collections shared with you) → Reader; My library is personal. Discovery also starts on Home.
@@ -39,13 +43,14 @@ route('/knowledge/collections/:id', { page: 'collection', mode: 'workspace', nav
 route('/doc/:id', { page: 'docViewer', mode: 'workspace', nav: 'knowledge', title: 'Document', bare: true });
 // Workspace admin
 route('/overview', { page: 'overview', mode: 'workspace', nav: 'overview', title: 'Overview', perm: 'tenant.manage', simLoad: true });
-// Curation and publication: review queue, every document's lifecycle, quality and topics (reviewers = owners of the bases).
-route('/documents', { page: 'documentsAdmin', mode: 'workspace', nav: 'documents', title: 'Documents', perm: 'knowledge.manage', simLoad: true });
-// Knowledge bases: the governed homes — who can see each one, the sources that feed it, its details (their owners and editors).
-route('/bases', { page: 'kbList', mode: 'workspace', nav: 'bases', title: 'Knowledge bases', simLoad: true });
-route('/bases/:id', { page: 'kbDetail', mode: 'workspace', nav: 'bases', title: 'Knowledge base', simLoad: true });
-route('/sources', { page: 'sources', mode: 'workspace', nav: 'sources', title: 'Sources', perm: 'source.manage', simLoad: true });
-route('/connections', { page: 'connections', mode: 'workspace', nav: 'connections', title: 'Connections', perm: 'source.manage', simLoad: true });
+// Knowledge Studio: the one place knowledge is run, in two groups of tabs —
+//   daily work: Review (one workbench: submissions, sync batches, publishing problems, quality queues) · Library
+//   setup, in the order it's done: Knowledge bases (where documents live, who reads them) · Taxonomy (how they're
+//   classified; workspace admins) · Sources (what comes in, with the accounts it signs in with; source admins).
+// Each tab shows only to the people who can use it; the page itself is open to anyone with one tab (P.studio decides).
+route('/studio', { page: 'studio', mode: 'workspace', nav: 'studio', title: 'Knowledge Studio', simLoad: true });
+// One knowledge base: access, the sources that feed it, settings (its owners and editors).
+route('/studio/bases/:id', { page: 'kbDetail', mode: 'workspace', nav: 'studio', title: 'Knowledge base', simLoad: true });
 route('/people', { page: 'people', mode: 'workspace', nav: 'people', title: 'People', perm: 'user.manage', simLoad: true });
 route('/assistant', { page: 'assistant', mode: 'workspace', nav: 'assistant', title: 'Assistant', perm: 'tenant.manage' });
 route('/activity', { page: 'activity', mode: 'workspace', nav: 'activity', title: 'Activity', perm: 'audit.read', simLoad: true });
@@ -61,13 +66,37 @@ route('/p/health', { page: 'pHealth', mode: 'platform', nav: 'p-health', title: 
 // Prototype-only
 route('/design', { page: 'design', mode: 'proto', title: 'Design system' });
 
-/** Old addresses keep working. */
-const REDIRECTS = { '/access': '/people', '/p/models': '/p/health', '/review': '/chat', '/knowledge-health': '/documents', '/knowledge/browse': '/knowledge' };
+/** Old addresses keep working. Each entry: [pattern, (match, query) → new address]. */
+const REDIRECTS = [
+  [/^\/access$/, () => '/people'], [/^\/p\/models$/, () => '/p/health'], [/^\/review$/, () => '/chat'], [/^\/knowledge\/browse$/, () => '/knowledge'],
+  // All conversations is AI Chat's list; My library's Recent and Contributions became Your work → Recent and My contributions.
+  [/^\/chats$/, () => '/chat'],
+  [/^\/knowledge\/library$/, (m, q) => (q.tab === 'contributions' ? `/contributions?${q.open ? 'open=' + encodeURIComponent(q.open) : ''}` : q.tab === 'recent' ? '/recent?' : null)],
+  [/^\/(documents|knowledge-health)$/, () => '/studio'],
+  // Knowledge Studio tabs renamed: Documents → Library, Master data → Taxonomy; Quality folded into Review.
+  [/^\/studio$/, (m, q) => {
+    const tab = { all: 'library', master: 'taxonomy', topics: 'taxonomy' }[q.tab];
+    if (tab) return `/studio?${new URLSearchParams({ ...q, tab })}`;
+    if (q.tab === 'quality') { const { seg, ...rest } = q; return `/studio?${new URLSearchParams({ ...rest, tab: 'review', queue: seg || 'quality' })}`; }
+    return null;
+  }],
+  // Sources and Connections were pages of their own; now they are Knowledge Studio → Sources (accounts are one of its views).
+  [/^\/sources$/, (m, q) => `/studio?${new URLSearchParams({ ...q, tab: 'sources', ...(q.tab === 'history' ? { view: 'history' } : {}) })}`],
+  [/^\/connections$/, () => '/studio?tab=sources&view=accounts'],
+  [/^\/bases$/, () => '/studio?tab=bases'],
+  [/^\/bases\/([^/]+)$/, (m, q) => `/studio/bases/${m[1]}${Object.keys(q).length ? '?' + new URLSearchParams(q) : ''}`],
+];
 
 function parseHash() {
   const h = decodeURI(location.hash.slice(1)) || (S.signedIn ? homeRoute() : '/signin');
   let [p, q = ''] = h.split('?');
-  if (REDIRECTS[p]) { p = REDIRECTS[p]; history.replaceState(null, '', '#' + p + (q ? '?' + q : '')); }
+  // Redirects apply in order and chain (e.g. /documents?tab=all → /studio?tab=all → /studio?tab=library).
+  for (const [re, to] of REDIRECTS) {
+    const m = p.match(re); if (!m) continue;
+    const next = to(m, Object.fromEntries(new URLSearchParams(q))); if (next == null) continue;
+    const keep = q; [p, q = ''] = next.split('?'); if (!next.includes('?')) q = keep;
+    history.replaceState(null, '', '#' + p + (q ? '?' + q : ''));
+  }
   const query = Object.fromEntries(new URLSearchParams(q));
   for (const r of ROUTES) {
     const m = p.match(r.re);

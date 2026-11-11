@@ -1,12 +1,10 @@
-/* My library (/knowledge/library?tab=saved|recent|contributions|files|collections)
-   and one collection (/knowledge/collections/:id): the personal side of
-   Knowledge — saved resources, recent reads, your contributions and where they
-   stand, My files and My collections (the reading lists you made). Collections
-   others share with you are in Browse ("Shared with you"); saved views are in
-   Browse's Views. Each tab carries its own one action (Contributions →
-   Contribute, My files → Upload, My collections → New collection). Uses X.res
-   (resources.js), X.ctb + DR['ctb'] (contribute.js), core/catalog.js and
-   core/lifecycle.js. Prefix: lib-, col-. */
+/* My library (/knowledge/library?tab=saved|files|collections), My contributions (/contributions) and one collection
+   (/knowledge/collections/:id): the personal side of Knowledge — saved resources, My files and My collections (the
+   reading lists you made); and, under Your work, what you contributed and where it stands. Recent reads are Your work
+   → Recent (recent.js). Collections others share with you are in Browse ("Shared with you"); saved views are in
+   Browse's Views. Each tab carries its own one action (My files → Upload, My collections → New collection); My
+   contributions' header carries Contribute. Uses X.res (resources.js), X.ctb + DR['ctb'] (contribute.js),
+   core/catalog.js and core/lifecycle.js. Prefix: lib-, col-. */
 (() => {
   'use strict';
 
@@ -22,54 +20,45 @@
   const longOr = (n, active) => n >= TOOLS_MIN || !!active;
 
   /* ═══════════════ My library ═══════════════ */
-  const TABS = [['saved', 'Saved'], ['recent', 'Recent'], ['contributions', 'Contributions'], ['files', 'My files'], ['collections', 'My collections']];
+  const TABS = [['saved', 'Saved'], ['files', 'My files'], ['collections', 'My collections']];
   const SAVED_SORTS = { saved: 'Recently saved', updated: 'Recently updated', title: 'Title A–Z' };
   /** A tab's one action, at the end of its toolbar. */
   const tabBar = (start, action) => `<div class="toolbar lib-bar">${start}${action ? `<div class="toolbar__end">${action}</div>` : ''}</div>`;
 
   P.library = ({ query }) => {
-    // The Knowledge tabs say where you are: no breadcrumb trail on top of them.
-    const kb = personalKb(), ctb = myContributions();
-    const counts = { saved: savedResources().length, recent: recentResources().length, contributions: ctb.length, files: kb ? docsIn(kb.id).length : 0, collections: myCollections().length };
-    const shown = { files: !!kb, contributions: canContribute() || ctb.length > 0 };
-    // Contributions: when something waits on you, the tab shows that number (highlighted), not the total.
-    const waiting = ctb.filter(d => stageOf(d) === 'changes').length;
-    const list = TABS.filter(([id]) => shown[id] ?? true).map(([id, label]) => ({ id, label, count: id === 'contributions' && waiting ? waiting : counts[id], alert: id === 'contributions' && waiting > 0 }));
-    const tab = list.some(t => t.id === query.tab) ? query.tab : 'saved';
-    // No header action: each tab has its own (Saved and Recent need none).
-    const head = X.res.hubHeader('library');
-    const body = { saved: savedTab, recent: recentTab, contributions: contributionsTab, files: filesTab, collections: collectionsTab }[tab](kb);
-    return `<div class="page lib">${head}<div class="page-tabs lib-tabs">${tabs(list, tab, '/knowledge/library', { label: 'My library' })}</div>${body}</div>`;
-  };
-  /** ?open=<id> (inbox, reader "Track") opens that contribution once, then leaves the address clean. */
-  AFTER.library = ({ query }) => {
-    if (query.tab !== 'contributions' || !query.open) return;
-    const id = query.open, q = { ...query }; delete q.open;
-    history.replaceState(null, '', '#' + S.cur.path + '?' + new URLSearchParams(q).toString());
-    S.cur.query = q;
-    if (docById(id)) openDrawer('ctb', { id });
+    const kb = personalKb();
+    const ids = TABS.filter(([id]) => id !== 'files' || kb).map(([id]) => id);
+    const tab = ids.includes(query.tab) ? query.tab : 'saved';
+    // Saved · My files · My collections are sections of the Knowledge bar (X.res.hubHeader); no header action: each tab has its own.
+    const head = X.res.hubHeader(tab);
+    const body = { saved: savedTab, files: filesTab, collections: collectionsTab }[tab](kb);
+    return `<div class="page lib">${head}${body}</div>`;
   };
 
-  /* ── Contributions: what you shared, where it stands, what to do next ── */
+  /* ═══════════════ My contributions: what you shared, where it stands, what to do next ═══════════════ */
   const CTB_GROUPS = [['all', 'All', null], ['changes', 'Needs your action', ['changes']], ['review', 'In review', ['analyzing', 'review']],
     ['published', 'Published', ['published', 'publishing', 'queued', 'merged', 'failed', 'update', 'stored']], ['rejected', LIFECYCLE.rejected.label, ['rejected']]];
   /** The one row action, only when the contribution waits on you. Everything else (Withdraw, Remove, Open) is in its panel. */
   const ctbAction = d => (lifecycleOf(d).key === 'changes' ? btn('Revise', { v: 'secondary', size: 'sm', icon: 'pencil', act: 'ctb-revise', data: { id: d.id } }) : '');
-  function contributionsTab() {
+  P.contributions = () => {
     const uk = 'libCtb', u = ui(uk, { seg: 'all' });
     const all = myContributions();
     const group = CTB_GROUPS.find(g => g[0] === u.seg) || CTB_GROUPS[0];
-    const rows = all.filter(d => (!group[2] || group[2].includes(lifecycleOf(d).key)) && matchesQ(uk, d.name, kbById(d.kb)?.name));
-    const contribute = canContribute() ? btn('Contribute', { v: 'primary', size: 'sm', icon: 'upload', act: 'contribute' }) : '';
-    const empty = () => emptyState({ icon: 'upload', title: 'No contributions yet', desc: 'Share a document with your team. A reviewer checks it before it’s published.', actions: btn('Contribute', { v: 'primary', icon: 'upload', act: 'contribute' }), boxed: true });
-    return gate({
+    const inGroup = (d, g) => !g[2] || g[2].includes(lifecycleOf(d).key);
+    const rows = all.filter(d => inGroup(d, group) && matchesQ(uk, d.name, kbById(d.kb)?.name));
+    const contribute = canContribute() ? btn('Contribute', { v: 'primary', icon: 'upload', act: 'contribute' }) : '';
+    const empty = () => emptyState({ icon: 'upload', title: 'No contributions yet', desc: canContribute() ? 'Share a document with your team. You check what the assistant suggests, then a reviewer publishes it.' : 'Documents you share with your team show up here, with where they stand.', boxed: true });
+    const head = pageHeader({ title: 'My contributions', actions: contribute });
+    const body = gate({
       loading: () => skelRows(4), empty,
       ok: () => {
-        if (!all.length) return canContribute() ? empty() : '';
-        const n = key => all.filter(d => CTB_GROUPS.find(g => g[0] === key)[2].includes(lifecycleOf(d).key)).length;
-        const opts = CTB_GROUPS.map(([id, label]) => [id, id === 'changes' && n('changes') ? `${label} (${n('changes')})` : label]);
-        const tools = longOr(all.length, u.seg !== 'all' || u.q) ? `<div class="lib-ctb-seg">${seg({ value: group[0], options: opts, act: 'lib-ctb-seg', label: 'Show' })}</div>${searchField({ uiKey: uk, placeholder: 'Search contributions' })}` : '';
-        const toolbar = tabBar(tools, contribute);
+        if (!all.length) return empty();
+        // One filter per state a contribution can be in (counts only where there is something); search earns its place on a long list.
+        const n = g => all.filter(d => inGroup(d, g)).length;
+        const opts = CTB_GROUPS.map(g => [g[0], g[2] && n(g) ? `${g[1]} · ${fmtNum(n(g))}` : g[1]]);
+        const seg_ = `<div class="lib-ctb-seg">${seg({ value: group[0], options: opts, act: 'lib-ctb-seg', label: 'Show' })}</div>`;
+        const search = longOr(all.length, u.q) ? searchField({ uiKey: uk, placeholder: 'Search contributions' }) : '';
+        const toolbar = seg_ || search ? `<div class="toolbar lib-bar">${seg_}${search}</div>` : '';
         if (!rows.length) return toolbar + noMatches(uk, ['seg'], 'contributions');
         return toolbar + list(rows.map(d => item({
           lead: fileIcon(d.type), title: esc(docTitle(d)), titleExtra: lifeChip(d, 'sm'),
@@ -78,7 +67,18 @@
         })), 'lib-list');
       },
     });
-  }
+    return `<div class="page lib">${head}${body}</div>`;
+  };
+  /** ?open=<id> (Home, Inbox, the Reader's Track, the submit toast) opens that contribution once, then leaves the address clean. */
+  AFTER.contributions = ({ query }) => {
+    if (!query.open) return;
+    const id = query.open, q = { ...query }; delete q.open;
+    const qs = new URLSearchParams(q).toString();
+    history.replaceState(null, '', '#' + S.cur.path + (qs ? '?' + qs : ''));
+    S.cur.query = q;
+    const d = docById(id);
+    if (d && canSeeDoc(d)) openDrawer('ctb', { id }); else toast('This contribution isn’t available', { tone: 'danger' });
+  };
   A['lib-ctb-seg'] = el => { ui('libCtb').seg = el.dataset.value; refresh(); };
 
   /* ── Saved ── */
@@ -110,32 +110,6 @@
     const n = ids.filter(id => l.includes(id)).length; if (!n) return;
     D.saved[me().id] = l.filter(id => !ids.includes(id)); u.sel = {}; persist(); refresh();
     toast(`Removed ${plural(n, 'resource')} from saved`, { action: { label: 'Undo', run: () => { D.saved[me().id] = before; persist(); refresh(); } } });
-  };
-
-  /* ── Recent ── */
-  function recentTab() {
-    const all = recentResources();
-    const empty = () => emptyState({ icon: 'history', title: 'No recent reads', desc: 'Resources you open show up here.', actions: btn('Browse knowledge', { v: 'primary', href: '/knowledge' }), boxed: true });
-    return gate({
-      loading: () => skelRows(6), empty,
-      ok: () => {
-        if (!all.length) return empty();
-        const start = new Date(); start.setHours(0, 0, 0, 0);
-        const today = start.getTime(), week = today - 6 * DAY;
-        const groups = [['Today', x => x.at >= today], ['This week', x => x.at < today && x.at >= week], ['Earlier', x => x.at < week]];
-        const html = groups.map(([label, fn]) => {
-          const items = all.filter(fn); if (!items.length) return '';
-          return `<section class="lib-group"><h2 class="lib-group__title">${esc(label)}</h2>${X.res.rows(items.map(x => x.doc), { compact: true })}</section>`;
-        }).join('');
-        // The tab already shows how many: the toolbar only offers clearing.
-        return `<div class="toolbar"><div class="toolbar__end">${btn('Clear history', { v: 'ghost', size: 'sm', icon: 'x', act: 'lib-clear-recent' })}</div></div><div class="stack gap-24">${html}</div>`;
-      },
-    });
-  }
-  A['lib-clear-recent'] = () => {
-    const before = [...mine('recent')];
-    D.recent[me().id] = []; persist(); refresh();
-    toast('History cleared', { action: { label: 'Undo', run: () => { D.recent[me().id] = before; persist(); refresh(); } } });
   };
 
   /* ── My files ── */

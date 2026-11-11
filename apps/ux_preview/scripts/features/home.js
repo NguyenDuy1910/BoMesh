@@ -1,6 +1,6 @@
 /* Home (/home): Discover & Start — the workspace's front page, not a second
    chat composer. A greeting with what this workspace holds for you; three
-   intent cards (find a document → Knowledge, ask a question → New chat,
+   intent cards (find a document → Knowledge, ask a question → AI Chat,
    contribute → review); then, only when there's something to show, what
    needs you, what you were reading (with Ask about it), what changed at the
    source, a map of the knowledge by topic and a few documents to read.
@@ -144,7 +144,7 @@
       { icon: 'sparkles', tone: 'accent', title: 'Ask a question', desc: `Answers from ${curWs().name} documents, with citations`, href: '/chat' },
       canContribute()
         ? { icon: 'upload', title: 'Contribute knowledge', desc: 'Share a document; a reviewer publishes it', act: 'contribute' }
-        : { icon: 'bookmark', title: 'Your library', desc: 'Saved documents, recent reads and collections', href: '/knowledge/library' },
+        : { icon: 'bookmark', title: 'Your library', desc: 'Saved documents, your files and collections', href: '/knowledge/library' },
     ];
     const card = c => {
       const inner = `${itemIcon(c.icon, c.tone || '')}<span class="home-start__body"><span class="home-start__title">${esc(c.title)}</span><span class="home-start__desc">${esc(c.desc)}</span></span>${ic('arrow-right', 'i-sm home-start__go')}`;
@@ -158,10 +158,10 @@
   function waitingItems() {
     const out = [];
     myContributions().filter(d => lifecycleOf(d).key === 'changes').slice(0, 1).forEach(d => out.push({
-      href: `/knowledge/library?tab=contributions&open=${d.id}`, lead: fileIcon(d.type, 'sm'), title: bare(d.name), sub: 'Changes requested', tone: 'warning',
+      href: X.ctb?.href(d.id) || `/contributions?open=${d.id}`, lead: fileIcon(d.type, 'sm'), title: bare(d.name), sub: 'Changes requested', tone: 'warning',
     }));
     const n = canReview() ? reviewQueue().length : 0;
-    if (n) out.push({ href: '/documents?tab=review', lead: itemIcon('inbox', 'accent', 'sm'), title: `${plural(n, 'document')} to review`, sub: 'Waiting for your decision' });
+    if (n) out.push({ href: '/studio?tab=review', lead: itemIcon('inbox', 'accent', 'sm'), title: `${plural(n, 'document')} to review`, sub: 'Waiting for your decision' });
     if (hasModule('spaces') || hasModule('requests')) X.upNext({ limit: 4 }).filter(it => it.kind === 'reply' || (it.at - NOW < 2 * DAY && it.at > NOW - DAY)).slice(0, 1).forEach(it => out.push({
       href: it.action?.href || '/inbox', act: it.action?.act, data: it.action?.data, lead: itemIcon(KIND_ICON[it.kind] || 'calendar', 'warning', 'sm'), title: it.title, sub: when(it).text, tone: 'warning',
     }));
@@ -177,7 +177,7 @@
   function continueSection() {
     const all = recentResources(40).filter(x => isReaderVisible(x.doc)), rows = all.slice(0, 4);
     if (!rows.length) return '';
-    const more = all.length > rows.length ? linkBtn('View all', { href: '/knowledge/library?tab=recent', size: 'sm' }) : '';
+    const more = all.length > rows.length ? linkBtn('View all', { href: '/recent', size: 'sm' }) : '';
     return sec('continue', 'Continue reading', list(rows.map(({ doc, at }) => item({
       lead: fileIcon(doc.type, 'sm'), title: esc(bare(doc.name)), titleExtra: okMark(doc),
       desc: `Opened ${esc(relLow(at))}<span class="res-dot" aria-hidden="true">·</span>${esc(kindMeta(res(doc).kind).label)}`,

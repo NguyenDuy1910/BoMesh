@@ -4,10 +4,11 @@
    Contribute  Anyone with knowledge.contribute uploads a file and picks (or lets the assistant
                suggest) the knowledge base. Nothing is published: the document is a submission
                (stage 'review') visible only to its contributor and that base's reviewers.
-   Curate      Reviewers (owners of the target knowledge base; workspace admins own all) see the
-               assistant's suggestions — type, topics (existing or proposed), knowledge base,
-               summary, flags — and approve, request changes or decline. Only workspace admins
-               change the taxonomy (accept or dismiss proposed topics).
+   Curate      Reviewers (owners of the target knowledge base; workspace admins own all) work in Knowledge Studio.
+               The assistant classifies every incoming document against the workspace's taxonomy (topics with
+               their keywords, synonyms, rules and examples) and suggests type, topics (existing or proposed),
+               knowledge base, summary and flags; reviewers approve, request changes or decline. Only workspace
+               admins change the taxonomy (import it, edit topics, accept or dismiss proposed topics).
    Publish     Approval publishes: the document joins its knowledge base and is processed
                (status pending → processing → ready). Only published + ready content reaches
                Browse, search, the reader and the assistant (core/catalog.js pools).
@@ -88,17 +89,37 @@ function lifecycleOf(d) {
 }
 /** Lifecycle chip (STATUS.life in ui.js uses the same vocabulary). */
 const lifeChip = (d, size) => { const l = lifecycleOf(d); return chip(l.label, { tone: l.tone, variant: l.quiet ? 'tertiary' : 'soft', dot: true, live: !!l.live, size, tip: l.desc }); };
-/** Groups for filters: [key, label, lifecycle keys]. */
+/** The Knowledge Studio flow, in order, then the two off-ramps: [key, label, lifecycle keys].
+    Every incoming document — contributed, synced or uploaded — moves In review → Publishing → Published;
+    Needs attention holds what stopped (and its fix), Not published what a reviewer turned away or took down. */
 const LIFE_GROUPS = [
-  ['review', 'In review', ['analyzing', 'review']], ['changes', 'Changes requested', ['changes']], ['attention', 'Needs attention', ['failed', 'queued', 'update']],
-  ['publishing', 'Publishing', ['publishing']], ['published', 'Published', ['published', 'stored']], ['rejected', 'Declined', ['rejected']], ['unpublished', 'Unpublished', ['unpublished']],
+  ['review', 'In review', ['analyzing', 'review', 'changes']], ['publishing', 'Publishing', ['publishing']], ['published', 'Published', ['published', 'stored']],
+  ['attention', 'Needs attention', ['failed', 'queued', 'update']], ['closed', 'Not published', ['rejected', 'unpublished']],
 ];
+/** Older addresses (?life=changes…) land on the group that now holds them. */
+const LIFE_GROUP_ALIAS = { changes: 'review', rejected: 'closed', unpublished: 'closed' };
 
 /* ═══════════════ Queries ═══════════════ */
 /** Everything a reviewer curates: documents in bases they own (any stage), not archived unless asked. */
 const curatedDocs = ({ archived = false } = {}) => D.docs.filter(d => (archived || !d.archived) && canReviewKb(kbById(d.kb)));
 /** Submissions waiting for a decision, oldest first. */
 const reviewQueue = () => curatedDocs().filter(d => stageOf(d) === 'review').sort((a, b) => (a.submission?.at || a.updated) - (b.submission?.at || b.updated));
+/** First syncs at scale hold risky files back in batches, one per reason (D.reviewBatches): the open ones in bases the caller reviews. */
+const openBatches = () => (D.reviewBatches || []).filter(b => b.status === 'open' && canReviewKb(kbById(b.kb)));
+/** Decisions waiting in Review: submissions plus open batches (what the Review tab and the Studio badge count). */
+const reviewDecisionCount = () => reviewQueue().length + openBatches().length;
+/** Published from a first sync but filed with low confidence or without a topic (D.classGroups): the open ones in bases the caller edits. */
+const openClassGroups = () => (D.classGroups || []).filter(g => g.status === 'open' && g.n > 0 && canEditKb(kbById(g.kb)));
+/** A run's at-scale counters (run.backfill), the one source of truth every surface reads. */
+const backfillOf = runId => (D.runs || []).find(r => r.id === runId)?.backfill || null;
+/** Move counters of a backfill by a delta ({ review: -n, published: n, 'topics.confident': n }); sign -1 undoes it. */
+function shiftBackfill(runId, delta, sign = 1) {
+  const bf = backfillOf(runId); if (!bf) return;
+  Object.entries(delta).forEach(([path, n]) => {
+    const [a, b] = path.split('.'), o = b ? (bf[a] ??= {}) : bf, k = b || a;
+    o[k] = (o[k] || 0) + sign * n;
+  });
+}
 /** The caller's contributions, newest activity first (withdrawn ones are archived and hidden). */
 const myContributions = () => D.docs.filter(d => !d.archived && isMine(d) && !kbById(d.kb)?.personal).sort((a, b) => lastEvent(b).at - lastEvent(a).at);
 const lastEvent = d => (d.submission?.events || []).at(-1) || { at: d.submission?.at || d.updated };
@@ -120,24 +141,91 @@ function genericTopicWords() {
   const n = new Map(); topicTree().flatMap(dm => dm.children).forEach(t => new Set(tokens(t.name)).forEach(w => n.set(w, (n.get(w) || 0) + 1)));
   return new Set([...n].filter(([, c]) => c > 1).map(([w]) => w));
 }
-/** Topic suggestions from three signals: distinctive title/note words, the topics of similar published documents,
-    and what the target knowledge base mostly holds. Returns [{id, score}] (best first, max 3). */
-function topicMatches(text, kb, similar = []) {
-  const words = new Set(tokens(text)), stems = new Set([...words].map(w => w.slice(0, 5))), generic = genericTopicWords();
+/** Taxonomy (Knowledge Studio → Taxonomy): on each topic a workspace admin keeps keywords and synonyms (the same signal),
+    optional rules on where a file comes from, and example documents. Guidance (t.guidance) is free text the assistant reads
+    with the rest; the mock matcher below doesn't use it. */
+const topicKeywords = t => (t?.keywords || []).map(k => String(k).trim()).filter(Boolean);
+const topicSynonyms = t => (t?.synonyms || []).map(k => String(k).trim()).filter(Boolean);
+/** Rule fields and operators: { field: 'source'|'path'|'type', op: 'is'|'contains', value }. A source value is a source id ('upload' = uploads). */
+const RULE_FIELDS = { source: 'Source', path: 'Folder path', type: 'File type' };
+const RULE_OPS = { is: 'is', contains: 'contains' };
+const topicRules = t => (t?.rules || []).filter(r => r && RULE_FIELDS[r.field] && RULE_OPS[r.op] && String(r.value ?? '').trim());
+/** Example documents that represent a topic (published ones only; the caller's access is checked where they're shown). */
+const topicExamples = t => (t?.examples || []).map(docById).filter(d => d && !d.archived && isPublishedStage(d));
+const ruleSourceName = v => (v === 'upload' ? 'Uploaded files' : srcById(v)?.name || v);
+/** What a rule tests on a document: its source (id and name), its path (own path, else the source's folders) or its file type. */
+function ruleValues(field, doc) {
+  const src = doc?.source && srcById(doc.source);
+  if (field === 'source') return [doc?.source, src?.name, doc?.source === 'upload' ? 'Uploaded files' : ''];
+  if (field === 'path') return [doc?.path, ...(src?.scope || [])];
+  return [doc?.type || String(doc?.name || '').split('.').slice(1).pop()];
+}
+function ruleMatches(r, doc) {
+  if (!doc) return false;
+  const norm = x => { const s = fold(x).trim(); return r.field === 'type' ? s.replace(/^\./, '') : s; };
+  const v = norm(r.value), vals = ruleValues(r.field, doc).filter(Boolean).map(norm);
+  return !!v && (r.op === 'is' ? vals.some(x => x === v) : vals.some(x => x.includes(v)));
+}
+/** "folder path contains “Chargebacks”" — a rule in words (Taxonomy, Review's evidence). */
+const ruleText = r => `${RULE_FIELDS[r.field].toLowerCase()} ${RULE_OPS[r.op]} “${r.field === 'source' ? ruleSourceName(r.value) : r.value}”`;
+/** Title similarity (shared words over all words) — duplicates and topic examples. */
+function titleSim(a, b) {
+  const x = titleWords(a), y = titleWords(b); if (!x.size || !y.size) return 0;
+  const i = [...x].filter(w => y.has(w)).length;
+  return i / (x.size + y.size - i);
+}
+const phrase = s => ' ' + fold(s).replace(/[^a-z0-9]+/g, ' ').trim() + ' ';
+/** Topic suggestions from these signals, strongest first: a rule on where the file comes from, keywords or synonyms found
+    in the title or note, distinctive words of the topic name, the topics of similar published documents, a title close to
+    one of the topic's examples, and what the target knowledge base mostly holds. `doc` ({ name, path, type, source }) is
+    needed for rules and examples; without it they don't count.
+    Returns [{id, score, why:{keywords[], synonyms[], name, similar, example, rule, base}}] (best first, max 3) — `why` is shown to the reviewer. */
+function topicMatches(text, kb, similar = [], doc = null) {
+  const words = new Set(tokens(text)), stems = new Set([...words].map(w => w.slice(0, 5))), generic = genericTopicWords(), hay = phrase(text);
   const kbDocs = kb ? docsIn(kb.id) : [];
   const share = id => (kbDocs.length ? kbDocs.filter(x => res(x).topics.includes(id)).length / kbDocs.length : 0);
-  const fromSimilar = new Map(); similar.forEach(s => res(s.doc).topics.forEach(id => fromSimilar.set(id, Math.max(fromSimilar.get(id) || 0, s.sim))));
+  const fromSimilar = new Map();
+  similar.forEach(s => res(s.doc).topics.forEach(id => { if ((fromSimilar.get(id)?.sim || 0) < s.sim) fromSimilar.set(id, { sim: s.sim, doc: s.doc.id }); }));
   const leaves = topicTree().flatMap(dm => dm.children);
+  const found = k => phrase(k).trim() && hay.includes(phrase(k));
   const scored = leaves.map(t => {
     const tw = tokens(t.name).filter(w => !generic.has(w)), key = tw.length ? tw : tokens(t.name);
     const hit = key.filter(w => words.has(w) || stems.has(w.slice(0, 5))).length / Math.max(1, key.length);
-    const score = (hit >= 0.75 ? hit : 0) + (fromSimilar.get(t.id) || 0) * 0.9 + (kb?.topics?.includes(t.id) ? 0.4 : 0) + share(t.id) * 0.3;
-    return { id: t.id, score };
+    const kw = topicKeywords(t).filter(found), syn = topicSynonyms(t).filter(found);
+    const rule = topicRules(t).find(r => ruleMatches(r, doc)) || null;
+    const ex = doc ? topicExamples(t).filter(e => e.id !== doc.id).map(e => ({ id: e.id, sim: titleSim(doc.name || text, e.name) })).sort((a, b) => b.sim - a.sim)[0] : null;
+    const exSim = ex && ex.sim >= 0.2 ? ex.sim : 0;
+    const sim = fromSimilar.get(t.id), base = !!kb?.topics?.includes(t.id) || share(t.id) >= 0.25;
+    const score = (rule ? 1.2 : 0) + Math.min(1.4, (kw.length + syn.length) * 0.8) + (hit >= 0.75 ? hit : 0) + (sim?.sim || 0) * 0.9 + exSim * 0.7 + (kb?.topics?.includes(t.id) ? 0.4 : 0) + share(t.id) * 0.3;
+    return { id: t.id, score, why: { keywords: kw.slice(0, 3), synonyms: syn.slice(0, 3), name: hit >= 0.75, similar: sim && sim.sim >= 0.3 ? sim.doc : '', example: exSim ? ex.id : '', rule, base } };
   }).filter(x => x.score >= 0.5).sort((a, b) => b.score - a.score).slice(0, 3);
   if (scored.length || !kbDocs.length) return scored;
   // Nothing distinctive: fall back to what the destination base mostly holds, with low confidence.
   const top = leaves.map(t => ({ id: t.id, score: share(t.id) })).sort((a, b) => b.score - a.score)[0];
-  return top && top.score >= 0.25 ? [{ id: top.id, score: 0.3 }] : [];
+  return top && top.score >= 0.25 ? [{ id: top.id, score: 0.3, why: { keywords: [], synonyms: [], name: false, similar: '', example: '', rule: null, base: true } }] : [];
+}
+/** A suggestion's evidence in words, strongest first (Review's Classification card, Taxonomy's test box). Documents the caller can't see aren't named. */
+function topicEvidence(w = {}) {
+  const o = w.similar && docById(w.similar), ex = w.example && docById(w.example);
+  const q = list => list.map(k => `“${k}”`).join(', ');
+  return [
+    w.contributor && 'confirmed by the contributor',
+    w.rule && `rule: ${ruleText(w.rule)}`,
+    w.keywords?.length && `matched ${q(w.keywords)}`,
+    w.synonyms?.length && `synonym ${q(w.synonyms)}`,
+    w.name && 'the title names it',
+    ex && canSeeDoc(ex) && `close to the example “${docTitle(ex)}”`,
+    o && canSeeDoc(o) && `like “${docTitle(o)}”`,
+    w.base && !w.keywords?.length && !w.synonyms?.length && !w.name && !w.rule && 'common in this knowledge base',
+  ].filter(Boolean);
+}
+/** Documents from sources that publish automatically skip review, so the assistant applies its confident taxonomy
+    matches itself (a rule, keywords, synonyms or the topic's own name; at most two). The rest stay untagged and show in Review → Missing details. */
+function autoClassify(d) {
+  if (d.topics?.length) return [];
+  const ids = topicMatches(d.name, kbById(d.kb), similarDocs(d), d).filter(x => x.why.rule || x.why.keywords.length || x.why.synonyms.length || x.why.name).slice(0, 2).map(x => x.id);
+  if (ids.length) { d.topics = ids; d.classifiedBy = 'assistant'; }
+  return ids;
 }
 const titleWords = name => new Set(tokens(String(name).replace(/\.[a-z0-9]+$/i, '')).filter(w => !/^(v\d+|draft|update|updated|copy|final|new|\d{4})$/.test(w)));
 /** Similar published documents by title words (possible duplicate or earlier version). */
@@ -149,14 +237,19 @@ function similarDocs(d, min = 0.3) {
   }).filter(x => x.sim >= min).sort((a, b) => b.sim - a.sim).slice(0, 3);
 }
 /** Compute (once) and return the assistant's suggestion for a document:
-    { status, kind:{value,conf}, topics:[{id,conf}], proposed:[proposalId], kb:{id,conf,by}, summary, flags:[{type, doc?, sim?, text}] }. */
+    { status, kind:{value,conf,by?}, topics:[{id,conf,why}], proposed:[proposalId], kb:{id,conf,by}, summary, flags:[{type, doc?, sim?, text}], confirmed? }.
+    Topics are matched against the workspace's taxonomy (topicMatches); `why` says which evidence matched. When the contributor
+    confirmed the details before submitting (d.submission.confirmed = { kind, topics, summary }), the suggestion starts from what
+    they confirmed: their topics carry `why.contributor` (plus the assistant's own evidence where it matched too). */
 function aiOf(d) {
   if (d.ai && d.ai.status !== 'analyzing') return d.ai;
   if (d.ai?.status === 'analyzing') return d.ai;
-  const kb = kbById(d.kb), text = [d.name, d.submission?.note, d.summary].filter(Boolean).join(' ');
-  const kind = d.kind || inferKind(d);
+  const c = d.submission?.confirmed || null;
+  const kb = kbById(d.kb), text = [d.name, d.submission?.note, c?.summary, d.summary].filter(Boolean).join(' ');
+  const kind = c?.kind || d.kind || inferKind(d);
   const similar = similarDocs(d);
-  const topics = topicMatches(text, kb, similar).map(x => ({ id: x.id, conf: x.score < 0.5 ? conf(d.id + x.id, 0.48, 0.6) : Math.round(Math.min(0.97, conf(d.id + x.id, 0.66, 0.88) + (x.score > 1.2 ? 0.07 : 0)) * 100) / 100 }));
+  const matched = topicMatches(text, kb, similar, d).map(x => ({ id: x.id, why: x.why, conf: x.score < 0.5 ? conf(d.id + x.id, 0.48, 0.6) : Math.round(Math.min(0.97, conf(d.id + x.id, 0.66, 0.88) + (x.score > 1.2 ? 0.07 : 0)) * 100) / 100 }));
+  const topics = c ? c.topics.filter(id => topicById(id)).map(id => { const m = matched.find(x => x.id === id); return { id, why: { ...(m?.why || {}), contributor: true }, conf: m?.conf ?? 1 }; }) : matched;
   const proposed = [];
   PROPOSAL_RULES.forEach(([re, name, parents]) => {
     if (!re.test(text) || (D.topics || []).some(t => fold(t.name) === fold(name))) return;
@@ -172,16 +265,22 @@ function aiOf(d) {
   const k = kindMeta(kind).label;
   d.ai = {
     status: 'done', at: Date.now(),
-    kind: { value: kind, conf: conf(d.id + kind) },
+    kind: { value: kind, conf: c ? 1 : conf(d.id + kind), ...(c ? { by: 'contributor' } : {}) },
     topics, proposed,
     kb: { id: d.kb, conf: d.submission?.kbBy === 'ai' ? conf(d.id + 'kb', 0.6, 0.85) : 1, by: d.submission?.kbBy || 'contributor' },
-    summary: d.summary || `${k} contributed by ${contributorName(d)}${topics.length ? ` about ${topics.map(t => topicName(t.id).toLowerCase()).join(' and ')}` : ''}.`,
-    flags,
+    summary: c?.summary || d.summary || `${k} contributed by ${contributorName(d)}${topics.length ? ` about ${topics.map(t => topicName(t.id).toLowerCase()).join(' and ')}` : ''}.`,
+    flags, ...(c ? { confirmed: true } : {}),
   };
   return d.ai;
 }
 /** Run analysis for every open submission (Topics and the queue read proposals from it). */
 const ensureAnalyzed = () => curatedDocs().filter(d => stageOf(d) === 'review').forEach(aiOf);
+/** The taxonomy changed: classify every open submission again (their reviewers' unsaved edits reset with it). Returns how many. */
+function reclassifyOpen() {
+  const open = D.docs.filter(d => !d.archived && stageOf(d) === 'review' && d.ai?.status === 'done');
+  open.forEach(d => { delete d.ai; aiOf(d); });
+  return open.length;
+}
 /** Suggest a knowledge base for a file the contributor didn't place: the one whose topics best match its title. */
 function suggestKb(name) {
   const cands = contributionTargets(); if (!cands.length) return null;
@@ -229,7 +328,7 @@ function dismissProposal(p) {
 function applyTopicToDocs(ids, topicId) {
   (ids || []).map(docById).filter(Boolean).forEach(d => {
     if (stageOf(d) === 'published') d.topics = [...new Set([...(res(d).topics), topicId])];
-    else if (d.ai) { d.ai.topics = [...d.ai.topics.filter(t => t.id !== topicId), { id: topicId, conf: 1, accepted: true }]; d.ai.proposed = []; }
+    else if (d.ai) { const was = d.ai.topics.find(t => t.id === topicId); d.ai.topics = [...d.ai.topics.filter(t => t.id !== topicId), { id: topicId, conf: 1, accepted: true, why: was?.why }]; d.ai.proposed = []; }
   });
 }
 
@@ -241,17 +340,19 @@ function analyzeSoon(d, ms = 1800) {
   d.ai = { status: 'analyzing' };
   setTimeout(() => { if (!D.docs.includes(d) || d.ai?.status !== 'analyzing') return; d.ai = null; aiOf(d); refresh(); }, ms);
 }
-/** Submit files for review. files: [{name, size, type}]. opts: { kb?, note?, versionOf? }. Returns the new documents. */
+/** Submit files for review. files: [{name, size, type, kb?, confirmed?}] — per file, the knowledge base and the details the contributor
+    confirmed ({ kind, topics, summary }; aiOf starts from them). opts: { kb?, note?, versionOf? }. Returns the new documents. */
 function submitFiles(files, { kb, note = '', versionOf } = {}) {
   const base = versionOf ? docById(versionOf) : null;
   return files.map(f => {
-    const target = kbById(base?.kb || kb) || suggestKb(f.name);
+    const target = kbById(base?.kb || f.kb || kb) || suggestKb(f.name);
     const d = {
       id: uid('d'), kb: target?.id, name: f.name, type: (f.type || f.name.split('.').pop() || 'file').toLowerCase(), size: Math.round(f.size || 120e3),
       status: 'pending', stage: 'review', source: 'upload', updated: Date.now(), addedBy: me().name, pages: Math.max(1, Math.round((f.size || 120e3) / 9e4) % 60 || 3), passages: 0, error: f.error || '',
-      submission: { by: me().id, at: Date.now(), note: note.trim(), kbBy: base || kb ? 'contributor' : 'ai', ...(versionOf ? { versionOf } : {}), events: [{ at: Date.now(), by: me().id, kind: 'submitted', text: note.trim() }] },
+      submission: { by: me().id, at: Date.now(), note: note.trim(), kbBy: base || f.kb || kb || f.confirmed ? 'contributor' : 'ai', ...(versionOf ? { versionOf } : {}), ...(f.confirmed ? { confirmed: f.confirmed } : {}), events: [{ at: Date.now(), by: me().id, kind: 'submitted', text: note.trim() }] },
     };
-    D.docs.push(d); analyzeSoon(d);
+    // The contributor already watched the analysis and confirmed it: the suggestion is ready at once. Otherwise it runs in the background.
+    D.docs.push(d); if (f.confirmed) aiOf(d); else analyzeSoon(d);
     lifeAudit(versionOf ? 'Submitted a new version' : 'Submitted a document for review', d.name);
     return d;
   });

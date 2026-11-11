@@ -144,7 +144,7 @@
         return rows.length ? grid(rows, tab) : noMatches('spList', [], 'spaces');
       },
     });
-    return `<div class="page">${head}${useTabs ? `<div class="page-tabs">${tabs(tabList, tab, '/spaces')}</div>` : ''}${S.pageState === 'empty' ? '' : toolbar}${body}</div>`;
+    return `<div class="page">${head}${useTabs ? contextBar(tabs(tabList, tab, '/spaces')) : ''}${S.pageState === 'empty' ? '' : toolbar}${body}</div>`;
   };
 
   /* ── Create ── */
@@ -298,7 +298,7 @@
     const tab = tabList.some(t => t.id === query.tab) ? query.tab : tabList[0].id;
     const head = pageHeader({ title: sp.name, lead: spaceMark(sp, 48), desc: `<span class="sp-head__meta">${metaLine(sp)}</span>${peopleLine(sp, !visitor)}`, actions: headerActions(sp, ctx) });
     const body = { overview: overviewTab, materials: materialsTab, work: workTab, queue: queueTab, people: peopleTab }[tab](sp, ctx);
-    return `<div class="page">${head}<div class="page-tabs">${tabs(tabList, tab, '/space/' + sp.id)}</div>${body}</div>`;
+    return `<div class="page">${head}${contextBar(tabs(tabList, tab, '/space/' + sp.id))}${body}</div>`;
   };
 
   /* ── Overview ── */

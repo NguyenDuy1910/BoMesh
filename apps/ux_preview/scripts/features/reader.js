@@ -335,24 +335,24 @@
   function submissionView(doc, kb, query) {
     const u = forDoc(rdrUi(), doc.id), l = lifecycleOf(doc), st = stageOf(doc), sub = doc.submission || {}, mine = isMine(doc);
     const reviewer = canReviewKb(kb) && can('knowledge.manage');
-    const track = X.ctb?.href(doc.id) || '/knowledge/library?tab=contributions';
+    const track = X.ctb?.href(doc.id) || '/contributions';
     crumbs(mine || !reviewer
-      ? [{ label: 'Knowledge', to: '/knowledge' }, { label: 'My library', to: '/knowledge/library?tab=contributions' }, { label: docTitle(doc) }]
-      : [{ label: 'Documents', to: '/documents?tab=review' }, { label: docTitle(doc) }]);
+      ? [{ label: 'Knowledge', to: '/knowledge' }, { label: 'My contributions', to: '/contributions' }, { label: docTitle(doc) }]
+      : [{ label: 'Knowledge Studio', to: '/studio?tab=review' }, { label: docTitle(doc) }]);
     const preview = !['zip', 'png', 'jpg', 'jpeg'].includes(doc.type);
     const m = preview ? docModel(doc) : null;
     const open = railOpen(u), k = kindMeta(res(doc).kind);
     const back = backBtn(null);
     const meta = [esc(k.label), esc(kb.name), esc(mine ? 'Contributed by you' : `Contributed by ${contributorName(doc)}`), sub.at && `<span>Submitted ${esc(rel(sub.at).replace(/^(Just now|Yesterday)$/, s => s.toLowerCase()))}</span>`].filter(Boolean).join(dot);
     // One primary: Review (reviewers) or Revise (the contributor, when changes were asked for — it opens the same place as Track).
-    const main = reviewer && st === 'review' ? btn('Review', { v: 'primary', icon: 'check-check', href: `/documents?tab=review&sel=${doc.id}` })
+    const main = reviewer && st === 'review' ? btn('Review', { v: 'primary', icon: 'check-check', href: `/studio?tab=review&sel=${doc.id}` })
       : mine && st === 'changes' ? btn('Revise', { v: 'primary', icon: 'pencil', href: track })
         : '';
     const trackBtn = mine && !(st === 'changes') ? btn('Track', { v: main ? 'secondary' : 'primary', icon: 'history', href: track }) : '';
-    const actions = main + trackBtn + iconBtn('more', 'More actions', { menu: 'rdr-sub-more', data: { id: doc.id } });
+    // The decision and Track sit in the top row with the trail; the head below is the document's identity only.
+    pageHeader({ title: docTitle(doc), inPage: true, actions: main + trackBtn + iconBtn('more', 'More actions', { menu: 'rdr-sub-more', data: { id: doc.id } }) });
     const head = `<header class="rdr-head">
-      <div class="rdr-head__row">${back}${fileIcon(doc.type, 'lg')}<div class="rdr-head__main"><div class="rdr-head__title-row"><h1 class="rdr-head__title">${esc(docTitle(doc))}</h1>${lifeChip(doc)}${X.res.demoChip()}</div><div class="rdr-head__meta">${meta}</div></div>
-        <div class="rdr-head__actions">${actions}</div></div></header>`;
+      <div class="rdr-head__row">${back}${fileIcon(doc.type, 'lg')}<div class="rdr-head__main"><div class="rdr-head__title-row"><h1 class="rdr-head__title">${esc(docTitle(doc))}</h1>${lifeChip(doc)}${X.res.demoChip()}</div><div class="rdr-head__meta">${meta}</div></div></div></header>`;
 
     /* Banner: why only some people can see it, and what happens next */
     const lastOf = kind => [...(sub.events || [])].reverse().find(e => e.kind === kind);
@@ -437,9 +437,11 @@
     const hits = ns.length && readable ? `<div class="rdr-hits" role="status">${ic(firstCite ? 'quote' : 'search', 'i-sm')}<span class="grow truncate">${total
       ? (firstCite ? `Cited passage${total > 1 ? ` <span class="num" id="rdr-hit-n">${u.hit + 1}</span> of <span class="num" id="rdr-hit-total">${total}</span>` : ''}` : `<span class="num" id="rdr-hit-n">${u.hit + 1}</span> of <span class="num" id="rdr-hit-total">${total}</span> for “${esc(qText)}”`)
       : `No matches for “${esc(qText || ns[0].text)}”`}</span>${total > 1 ? iconBtn('chevron-up', 'Previous', { size: 'sm', act: 'rdr-hit', data: { dir: -1 } }) + iconBtn('chevron-down', 'Next', { size: 'sm', act: 'rdr-hit', data: { dir: 1 } }) : ''}${iconBtn('x', 'Clear highlights', { size: 'sm', act: 'rdr-clear' })}</div>` : '';
+    // Ask, Save and ⋯ sit in the top row with the trail (Knowledge › base); the head below is the document's identity and
+    // the find-in-document bar. On phones the head slides away while reading down and the top row shows the title instead.
+    pageHeader({ title: docTitle(doc), inPage: true, actions });
     const head = `<header class="rdr-head" id="rdr-head">
-      <div class="rdr-head__row">${back}${fileIcon(doc.type, 'lg')}<div class="rdr-head__main"><div class="rdr-head__title-row"><h1 class="rdr-head__title">${esc(docTitle(doc))}</h1>${trust}${X.res.statusChip(doc)}${X.res.demoChip()}</div><div class="rdr-head__meta">${meta}</div></div>
-        <div class="rdr-head__actions">${actions}</div></div>${hits}</header>`;
+      <div class="rdr-head__row">${back}${fileIcon(doc.type, 'lg')}<div class="rdr-head__main"><div class="rdr-head__title-row"><h1 class="rdr-head__title">${esc(docTitle(doc))}</h1>${trust}${X.res.statusChip(doc)}${X.res.demoChip()}</div><div class="rdr-head__meta">${meta}</div></div></div>${hits}</header>`;
 
     /* Banners: only when they change what the reader should do */
     const t = trustOf(doc), canEdit = X.res.canEditRes(doc);
@@ -500,7 +502,7 @@
     const collapse = () => {
       const t = sc.scrollTop, dy = t - lastTop; lastTop = t;
       const want = t <= 48 ? false : dy > 4 ? true : dy < -4 ? false : headHidden;
-      if (want !== headHidden) { headHidden = want; rd?.classList.toggle('is-collapsed', want); }
+      if (want !== headHidden) { headHidden = want; rd?.classList.toggle('is-collapsed', want); $('#main')?.classList.toggle('is-past-hero', want); }
     };
     sc.onscroll = () => { collapse(); if (pages.length) trackPage(); };
     if (pages.length) trackPage();

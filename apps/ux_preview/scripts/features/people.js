@@ -59,7 +59,7 @@
   P.people = ({ query }) => {
     const tab = TABS.includes(query.tab) ? query.tab : 'members';
     const pend = pendingRequests().length;
-    const head = pageHeader({ title: 'People', desc: `Who can use ${esc(curWs().name)}, what they can do and what they can open.`, actions: TAB_ACTION[tab]() });
+    const head = pageHeader({ title: 'People', actions: TAB_ACTION[tab]() });
     const t = tabs([
       { id: 'members', label: 'Members' },
       { id: 'groups', label: 'Groups' },
@@ -67,7 +67,7 @@
       { id: 'requests', label: 'Requests', count: pend || null, alert: true },
     ], tab, '/people');
     const body = { members: membersTab, groups: groupsTab, roles: rolesTab, requests: requestsTab }[tab]();
-    return `<div class="page">${head}<div class="page-tabs">${t}</div>${body}</div>`;
+    return `<div class="page">${head}${contextBar(t)}${body}</div>`;
   };
 
   /* ══════════════ Members ══════════════ */

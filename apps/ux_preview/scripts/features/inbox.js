@@ -117,12 +117,12 @@
     if (isAdmin()) {
       attentionSources().forEach(s => {
         const reconnect = s.status === 'reconnect' || accById(s.account)?.status === 'expired';
-        out.push({ id: 'src-' + s.id, icon: 'alert-circle', tone: 'err', title: `${s.name} stopped syncing`, body: s.last?.error || 'Open the source to see what happened.', at: s.last?.at || NOW, to: '/sources', src: s.id, kind: reconnect ? 'reconnect' : 'source', acc: s.account });
+        out.push({ id: 'src-' + s.id, icon: 'alert-circle', tone: 'err', title: `${s.name} stopped syncing`, body: s.last?.error || 'Open the source to see what happened.', at: s.last?.at || NOW, to: studioHref('sources'), src: s.id, kind: reconnect ? 'reconnect' : 'source', acc: s.account });
       });
       pendingRequests().forEach(r => out.push(accessItem(r)));
       D.kbs.filter(k => !k.archived && !k.personal).forEach(kb => {
         const failed = docsIn(kb.id).filter(d => d.status === 'failed');
-        if (failed.length) out.push({ id: 'docs-' + kb.id, icon: 'file-text', tone: 'warn', title: `${plural(failed.length, 'document')} in ${kb.name} couldn’t be published`, body: failed.map(d => d.name).join(', '), at: Math.max(...failed.map(d => d.updated)), to: '/documents?tab=all&life=attention', needs: true });
+        if (failed.length) out.push({ id: 'docs-' + kb.id, icon: 'file-text', tone: 'warn', title: `${plural(failed.length, 'document')} in ${kb.name} couldn’t be published`, body: failed.map(d => d.name).join(', '), at: Math.max(...failed.map(d => d.updated)), to: '/studio?tab=library&life=attention', needs: true });
       });
       const gaps = D.gaps.filter(g => !g.dismissed);
       out.push({ id: 'a4', icon: 'sparkles', tone: 'info', title: `Weekly summary: ${fmtNum(D.usage.questions7)} questions, ${plural(gaps.length, 'knowledge gap')}`, body: gaps.length ? `Most asked without a good answer: “${[...gaps].sort((a, b) => b.n - a.n)[0].q}”` : 'Questions people asked and where knowledge fell short.', at: ago(2 * DAY), to: '/overview' });
@@ -218,6 +218,6 @@
   };
   A['inbox-approve'] = el => { markRead(el.dataset.id); if (A['req-approve']) A['req-approve']({ dataset: { id: el.dataset.req } }); else go('/people?tab=requests'); };
   A['inbox-deny'] = el => { markRead(el.dataset.id); if (A['req-deny']) A['req-deny']({ dataset: { id: el.dataset.req } }); else go('/people?tab=requests'); };
-  A['inbox-reconnect'] = el => { markRead(el.dataset.id); if (A['acc-reconnect']) A['acc-reconnect']({ dataset: { id: el.dataset.acc } }); else go('/connections'); };
+  A['inbox-reconnect'] = el => { markRead(el.dataset.id); if (A['acc-reconnect']) A['acc-reconnect']({ dataset: { id: el.dataset.acc } }); else go(studioHref('sources')); };
   A['inbox-prefs'] = () => openPrefs('notif');
 })();

@@ -4,35 +4,45 @@
    template; destinations appear only when the workspace has the module on
    (core/workspace.js) and the caller has the permission. */
 
-/** Member destinations, filtered by workspace modules. Conversations live under Projects and Recent (features/projects.js);
-    Inbox is the bell in the topbar; the full conversation list is in the sidebar's Recent and one ⌘K away (`/chats`). */
+/** WORKSPACE: where the organisation's knowledge and work live, filtered by workspace modules. Inbox is the topbar bell.
+    Conversations, projects and recent items each have their own page (AI Chat, Projects, Recent): the sidebar never lists them inline. */
 function memberNav() {
   return [
     { id: 'home', label: 'Home', icon: 'home', to: '/home' },
     { id: 'knowledge', label: 'Knowledge', icon: 'book', to: '/knowledge' },
+    { id: 'chat', label: 'AI Chat', icon: 'message', to: '/chat' },
     hasModule('work') && { id: 'work', label: 'Work', icon: 'sparkles', to: '/work' },
     hasModule('requests') && { id: 'requests', label: 'Requests', icon: 'clipboard', to: '/requests', count: () => X.requestsBadge?.() || 0 },
+  ].filter(Boolean);
+}
+/** YOUR WORK: what you touched lately, your project folders, your spaces, your submissions. My contributions counts only what
+    waits on you (changes requested); it shows to contributors and to anyone who still has submissions to follow. */
+function yourWorkNav() {
+  return [
+    { id: 'recent', label: 'Recent', icon: 'clock', to: '/recent' },
+    { id: 'projects', label: 'Projects', icon: 'folder', to: '/projects' },
+    hasModule('spaces') && { id: 'spaces', label: 'Spaces', icon: 'layers', to: '/spaces' },
+    (canContribute() || myContributions().length > 0) && { id: 'contributions', label: 'My contributions', icon: 'upload', to: '/contributions', count: () => myContributions().filter(d => stageOf(d) === 'changes').length, tone: 'accent' },
   ].filter(Boolean);
 }
 /** Pages that aren't sidebar rows (Inbox has the topbar bell): the palette lists them first. */
 const MORE_PAGES = [
   { label: 'Inbox', icon: 'inbox', to: '/inbox' },
-  { label: 'All conversations', icon: 'message', to: '/chats' },
 ];
+/** Manage = run the workspace. Everything about knowledge — where it comes from (sources and their accounts), where it
+    lives and who reads it (knowledge bases), how it's classified (taxonomy), and the review → publish work — is one
+    destination, Knowledge Studio; its tabs show to whoever can use them. The rest is people, the assistant, audit, settings. */
 const MANAGE_NAV = [
-  { id: 'overview', label: 'Overview', icon: 'home', to: '/overview', perm: 'tenant.manage' },
-  // Counts exactly what the landing tab shows: Documents opens on the Review queue while it has items.
-  { id: 'documents', label: 'Documents', icon: 'files', to: '/documents', perm: 'knowledge.manage', count: () => (canReview() ? reviewQueue().length : 0), tone: 'accent' },
-  // Owners and editors of a base manage it here even without workspace roles; owners who don't manage People see their bases' access requests.
-  { id: 'bases', label: 'Knowledge bases', icon: 'book', to: '/bases', show: () => canManageKbs(), count: () => (can('user.manage') ? 0 : pendingRequests().filter(r => kbRole(kbById(r.kb)) === 'owner').length), tone: 'accent' },
-  // Each root cause is counted once: a source that stopped because its account expired counts on Connections only.
-  { id: 'sources', label: 'Sources', icon: 'refresh', to: '/sources', perm: 'source.manage', count: () => X.srcBadge?.() || 0, tone: 'danger' },
-  { id: 'connections', label: 'Connections', icon: 'plug', to: '/connections', perm: 'source.manage', count: () => X.accBadge?.() || 0, tone: 'danger' },
+  { id: 'overview', label: 'Overview', icon: 'dashboard', to: '/overview', perm: 'tenant.manage' },
+  // One badge, the landing tab's: the review queue (accent), else broken sources or accounts (danger), else access requests the owner decides.
+  { id: 'studio', label: 'Knowledge Studio', icon: 'library', to: '/studio', show: () => X.studioTabs?.().length > 0, count: () => X.studioBadge?.().n || 0, tone: () => X.studioBadge?.().tone || 'accent' },
   { id: 'people', label: 'People', icon: 'users', to: '/people', perm: 'user.manage', count: () => pendingRequests().length, tone: 'accent' },
-  { id: 'assistant', label: 'Assistant', icon: 'sparkles', to: '/assistant', perm: 'tenant.manage' },
+  { id: 'assistant', label: 'Assistant', icon: 'bot', to: '/assistant', perm: 'tenant.manage' },
   { id: 'activity', label: 'Activity', icon: 'activity', to: '/activity', perm: 'audit.read' },
   { id: 'settings', label: 'Settings', icon: 'settings', to: '/settings', perm: 'tenant.manage' },
 ];
+/** MANAGE rows the caller may use (an editor who owns a base sees Knowledge Studio only). */
+const manageNav = () => MANAGE_NAV.filter(n => (n.show ? n.show() : can(n.perm)));
 const PLATFORM_NAV = [
   { id: 'p-workspaces', label: 'Workspaces', icon: 'building', to: '/p/workspaces', count: () => X.pWsAttention?.() || 0, tone: 'accent' },
   { id: 'p-users', label: 'Users', icon: 'users', to: '/p/users' },
@@ -43,59 +53,82 @@ const PLATFORM_NAV = [
   { id: 'p-health', label: 'System health', icon: 'server', to: '/p/health', count: () => D.pServices.filter(s => s.status !== 'operational').length, tone: 'danger' },
 ];
 
-function navItem(n, active) {
+/* Collapsible sidebar groups (Your work, Manage) remember their state per person; open until someone collapses them. */
+DATA_KEYS.push('navGroups');
+const navGroups = () => ((D.navGroups ??= {})[me().id] ??= {});
+/** Routes whose row lives under another id: a space page is under Spaces. */
+const NAV_OF = { space: 'spaces' };
+const toneOf = n => (typeof n.tone === 'function' ? n.tone() : n.tone) || 'accent';
+/** Below 1024 px the sidebar is off-canvas; above it, it is either expanded or a 56 px icon rail (S.collapsed). */
+const narrowFrame = () => ($('#frame')?.clientWidth || innerWidth) < 1024;
+const railMode = () => S.collapsed && !narrowFrame();
+function navItem(n, active, rail = false) {
   const c = n.count ? n.count() : 0;
-  return `<a class="nav-item" href="#${n.to}" ${active ? 'aria-current="page"' : ''}>${ic(n.icon)}<span class="nav-item__label">${esc(n.label)}</span>${badge(c, { tone: n.tone || 'accent' })}</a>`;
+  // In the rail the label stays in the DOM (it names the link) and shows as a tooltip.
+  return `<a class="nav-item" id="nav-${esc(n.id)}" href="#${n.to}" ${active ? 'aria-current="page"' : ''} ${rail ? `data-tip="${esc(n.label)}" data-tip-side="right"` : ''}>${ic(n.icon)}<span class="nav-item__label">${esc(n.label)}</span>${badge(c, { tone: toneOf(n) })}</a>`;
+}
+/** A labelled group of rows. With `key` it collapses: it stays open while you're on one of its pages, and collapsed it shows
+    a dot when something inside needs attention (red when something is broken) — the counts themselves live on the rows.
+    In the rail every group is open and the label becomes a hairline. */
+function navGroup({ key, label, items, active, rail }) {
+  if (!items.length) return '';
+  const rows = items.map(n => navItem(n, active === n.id, rail)).join('');
+  if (!key || rail) return `<div class="sidebar__group" role="group" aria-label="${esc(label)}"><div class="sidebar__group-label" aria-hidden="true">${esc(label)}</div>${rows}</div>`;
+  const here = items.some(n => n.id === active), open = here || navGroups()[key] !== false;
+  const need = items.filter(n => n.count?.()), tone = need.some(n => toneOf(n) === 'danger') ? 'danger' : 'accent';
+  const dot = open ? '' : badge(need.length, { tone, dot: true, label: tone === 'danger' ? 'Something needs fixing' : 'Something needs you' });
+  return `<div class="sidebar__group" role="group" aria-label="${esc(label)}"><button type="button" class="sidebar__group-label sidebar__group-toggle" data-act="nav-group" data-group="${key}" aria-expanded="${open}" ${here ? 'aria-disabled="true"' : ''}><span class="sidebar__group-text">${esc(label)}</span>${dot}${here ? '' : ic('chevron-down', 'i-xs sidebar__group-chev')}</button>${open ? rows : ''}</div>`;
+}
+/** The sidebar toggle: collapses to the rail / expands on desktop (⌘\), closes the off-canvas sidebar below 1024 px. */
+function sidebarToggle() {
+  const narrow = narrowFrame(), rail = railMode();
+  const label = narrow ? 'Close sidebar' : rail ? 'Expand sidebar' : 'Collapse sidebar';
+  return iconBtn(narrow ? 'x' : 'panel-left', label, { act: 'nav-toggle', size: 'sm', id: 'sidebar-toggle', cls: 'sidebar__toggle', aria: `aria-expanded="${!rail}" aria-controls="sidebar" ${narrow ? '' : 'aria-keyshortcuts="Meta+Backslash Control+Backslash"'}` });
 }
 function sidebar() {
-  const cur = S.cur, platform = cur.r.mode === 'platform', ws = curWs(), p = me();
+  const cur = S.cur, platform = cur.r.mode === 'platform', ws = curWs(), p = me(), active = NAV_OF[cur.r.nav] || cur.r.nav, rail = railMode();
+  const tip = label => (rail ? `data-tip="${esc(label)}" data-tip-side="right"` : '');
   // One workspace and no console: the header is a static identity row, not a switcher with a one-item menu.
   const switcher = platform || isOperator() || workspacesForMe().length > 1;
-  const head = platform
-    ? `<button type="button" class="ws-switch" data-menu="ws" aria-haspopup="menu" aria-expanded="false" aria-label="Switch workspace"><span class="ws-mark" style="background:var(--foreground);color:var(--background)">${ic('layers', 'i-sm')}</span><span class="grow stack"><span class="ws-switch__name truncate">Platform console</span><span class="ws-switch__meta">All workspaces</span></span>${ic('chevrons', 'i-sm')}</button>`
-    : switcher ? `<button type="button" class="ws-switch" data-menu="ws" aria-haspopup="menu" aria-expanded="false" aria-label="Switch workspace">${wsMark(ws, 28)}<span class="grow stack"><span class="ws-switch__name truncate">${esc(ws.name)}</span><span class="ws-switch__meta truncate">${esc(p.role)}</span></span>${ic('chevrons', 'i-sm')}</button>`
-      : `<div class="ws-switch ws-switch--static">${wsMark(ws, 28)}<span class="grow stack"><span class="ws-switch__name truncate">${esc(ws.name)}</span><span class="ws-switch__meta truncate">${esc(p.role)}</span></span></div>`;
-  let body = '';
-  if (!platform) {
-    body += `<div class="sidebar__group">${memberNav().map(n => navItem(n, cur.r.nav === n.id)).join('')}</div>`;
-    body += X.projects?.sidebar(cur) || '';
-    if (hasModule('spaces')) {
-      const mine = mySpaces();
-      body += `<div class="sidebar__group"><div class="sidebar__group-label"><span>Spaces</span><a href="#/spaces" ${cur.r.nav === 'spaces' ? 'aria-current="page"' : ''}>All</a></div>${mine.slice(0, 8).map(sp => `<a class="nav-item" href="#/space/${sp.id}" ${cur.path === '/space/' + sp.id ? 'aria-current="page"' : ''}><span class="space-dot" style="background:${esc(sp.color || 'var(--accent)')}" aria-hidden="true"></span><span class="nav-item__label">${esc(sp.name)}</span>${sp.code ? `<span class="nav-item__meta">${esc(sp.code)}</span>` : ''}</a>`).join('') || `<a class="nav-item nav-item--recent" href="#/spaces"><span class="nav-item__label">Find or create a space</span></a>`}</div>`;
-    }
-    const manage = MANAGE_NAV.filter(n => (n.show ? n.show() : can(n.perm)));
-    if (manage.length) {
-      // Progressive disclosure: administration stays one row until it's needed (open on a Manage page or by choice);
-      // collapsed, a dot says something inside needs attention (red when something is broken) — the counts live on the rows.
-      const here = manage.some(n => cur.r.nav === n.id), open = here || S.manageOpen;
-      const need = manage.filter(n => n.count?.()), tone = need.some(n => n.tone === 'danger') ? 'danger' : 'accent';
-      body += `<div class="sidebar__group"><button type="button" class="sidebar__group-label sidebar__group-toggle" data-act="nav-manage" aria-expanded="${open}" ${here ? 'aria-disabled="true"' : ''}><span>Manage</span>${!open ? badge(need.length, { tone, dot: true, label: tone === 'danger' ? 'Something needs fixing' : 'Something needs you' }) : ''}${here ? '' : ic(open ? 'chevron-up' : 'chevron-down', 'i-xs')}</button>${open ? manage.map(n => navItem(n, cur.r.nav === n.id)).join('') : ''}</div>`;
-    }
-  } else {
-    body += `<div class="sidebar__group">${PLATFORM_NAV.map(n => navItem(n, cur.r.nav === n.id)).join('')}</div>`;
-    body += `<div class="sidebar__group"><div class="sidebar__group-label">Workspace</div><a class="nav-item" href="#${homeRoute()}">${ic('arrow-left')}<span class="nav-item__label">Back to ${esc(ws.name)}</span></a></div>`;
-  }
-  const foot = `<div class="sidebar__footer"><button type="button" class="user-button" data-menu="me" aria-haspopup="menu" aria-expanded="false" aria-label="Account and preferences">${avatar(p.name)}<span class="grow stack"><span class="user-button__name truncate">${esc(p.name)}</span><span class="user-button__meta truncate">${esc(p.email)}</span></span>${ic('chevrons', 'i-sm muted')}</button></div>`;
-  return `<aside class="sidebar" aria-label="Main navigation"><div class="sidebar__header">${head}</div><nav class="sidebar__content">${body}</nav>${foot}</aside>`;
+  const wsName = platform ? 'Platform console' : ws.name;
+  const mark = platform ? `<span class="ws-mark ws-mark--console" aria-hidden="true">${ic('layers', 'i-sm')}</span>` : wsMark(ws, 24);
+  const ident = `${mark}<span class="grow stack ws-switch__text"><span class="ws-switch__name truncate">${esc(wsName)}</span><span class="ws-switch__meta truncate">${platform ? 'All workspaces' : 'Workspace'}</span></span>`;
+  const head = switcher
+    ? `<button type="button" class="ws-switch" data-menu="ws" aria-haspopup="menu" aria-expanded="false" aria-label="Switch workspace: ${esc(wsName)}" ${tip(wsName)}>${ident}${ic('chevrons', 'i-sm')}</button>`
+    : `<div class="ws-switch ws-switch--static" ${tip(wsName)}>${ident}</div>`;
+  // Search is the sidebar's first row (an icon in the rail); the top row offers it only while the sidebar is off-canvas.
+  const search = `<div class="sidebar__search"><button type="button" class="side-search" id="side-search" data-act="palette" aria-label="Search anything (⌘K)" aria-keyshortcuts="Meta+K" ${tip('Search (⌘K)')}>${ic('search')}<span class="side-search__label">Search anything…</span>${kbd('⌘K')}</button></div>`;
+  const body = platform
+    ? navGroup({ label: 'Console', items: PLATFORM_NAV, active, rail }) + navGroup({ label: 'Workspace', items: [{ id: 'back', label: `Back to ${ws.name}`, icon: 'arrow-left', to: homeRoute() }], rail })
+    : navGroup({ label: 'Workspace', items: memberNav(), active, rail }) + navGroup({ key: 'work', label: 'Your work', items: yourWorkNav(), active, rail }) + navGroup({ key: 'manage', label: 'Manage', items: manageNav(), active, rail });
+  const foot = `<div class="sidebar__footer"><button type="button" class="user-button" data-menu="me" aria-haspopup="menu" aria-expanded="false" aria-label="Account and preferences" ${tip(p.name)}>${avatar(p.name)}<span class="grow stack user-button__text"><span class="user-button__name truncate">${esc(p.name)}</span><span class="user-button__meta truncate">${esc(p.role)}</span></span>${ic('chevrons', 'i-sm')}</button></div>`;
+  return `<aside class="${cx('sidebar', rail && 'is-rail')}" id="sidebar" aria-label="Main navigation"><div class="sidebar__header">${head}${sidebarToggle()}</div>${search}<nav class="sidebar__content" aria-label="Pages">${body}</nav>${foot}</aside>`;
 }
-/** Breadcrumbs only when they add a level the H1 doesn't (depth ≥ 2); Manage pages say where they live ("Manage › Sources"). */
-function crumbTrail() {
-  const cur = S.cur, manage = cur.r.mode === 'workspace' && MANAGE_NAV.some(n => n.id === cur.r.nav);
-  let list = S.crumbs || [{ label: cur.r.title }];
-  if (manage && list[0]?.label !== 'Manage') list = [{ label: 'Manage' }, ...list];
-  return list.length >= 2 ? list : [];
-}
+/** CompactHeader: the app's one top row. Left: the menu button (off-canvas only), then the page's context — its parents as a
+    quiet trail, its title (the page's H1 for index pages; for entity and reading pages, which carry their own H1, the title
+    appears once that header scrolls away), its chip and a short status line. Right: the page's actions, then global controls
+    (search while the sidebar is off-canvas, Inbox). Its inner row is aligned with the page's content column (--page-max). */
 function topbar() {
-  const list = crumbTrail(), inApp = S.cur.r.mode === 'workspace';
-  const bc = list.length ? `<nav class="breadcrumbs" aria-label="Breadcrumb">${list.map((c, i) => (i ? ic('chevron-right') : '') + (c.to && i < list.length - 1 ? `<a href="#${c.to}">${esc(c.label)}</a>` : `<span ${i === list.length - 1 ? 'aria-current="page"' : ''} class="truncate">${esc(c.label)}</span>`)).join('')}</nav>` : '';
+  const cur = S.cur, inApp = cur.r.mode === 'workspace', h = S.head || {}, list = S.crumbs || [];
+  const parents = list.slice(0, -1), title = h.title || list.at(-1)?.label || '';
+  const own = !!h.title && !h.hero;   // the top row holds the page's H1
+  const near = [...parents].reverse().find(c => c.to);
+  const back = near ? `<a class="button button--ghost button--icon-only button--sm button--muted topbar__back" href="#${near.to}" aria-label="Back to ${esc(near.label)}" data-tip="${esc(near.label)}">${ic('arrow-left')}</a>` : '';
+  const trail = parents.length ? `<nav class="topbar__trail" aria-label="Breadcrumb">${parents.map(c => (c.to ? `<a class="topbar__crumb" href="#${c.to}">${esc(c.label)}</a>` : `<span class="topbar__crumb">${esc(c.label)}</span>`) + ic('chevron-right', 'i-xs topbar__chev')).join('')}</nav>` : '';
+  const titleEl = !title ? '' : own ? `<h1 class="topbar__title truncate">${esc(title)}</h1>` : `<span class="topbar__title topbar__title--peek truncate" aria-hidden="true">${esc(title)}</span>`;
+  const context = `<div class="topbar__context">${back}${trail}${titleEl}${own && h.extra ? `<span class="topbar__extra">${h.extra}</span>` : ''}${own && h.meta ? `<span class="topbar__meta truncate">${h.meta}</span>` : ''}</div>`;
+  const actions = (h.actions || '') + (S.topbarEnd || '');
   const unread = inApp ? X.inboxUnread?.() || 0 : 0;
-  const search = `<button type="button" class="topbar-search" id="topbar-search" data-act="palette" aria-label="Search, ask or go to (⌘K)" aria-keyshortcuts="Meta+K">${ic('search')}<span class="topbar-search__label">Search</span>${kbd('⌘K')}</button>`;
-  const bell = inApp ? `<a class="button button--ghost button--icon-only button--muted topbar-bell" id="topbar-inbox" href="#/inbox" data-tip="Inbox" aria-label="${unread ? `Inbox, ${unread} unread` : 'Inbox'}" ${S.cur.r.nav === 'inbox' ? 'aria-current="page"' : ''}>${ic('bell')}${unread ? `<span class="topbar-bell__badge" aria-hidden="true">${unread > 9 ? '9+' : unread}</span>` : ''}</a>` : '';
-  return `<header class="topbar">${iconBtn('panel-left', 'Toggle sidebar', { act: 'nav-toggle', size: 'sm' })}${bc ? `<span class="separator separator--v topbar__sep"></span>${bc}` : ''}<div class="topbar__end" id="topbar-end">${S.topbarEnd || ''}${search}${bell}</div></header>`;
+  const menu = iconBtn('menu', 'Open sidebar', { act: 'nav-toggle', size: 'sm', id: 'topbar-menu', cls: 'topbar__menu', aria: 'aria-controls="sidebar" aria-expanded="false"' });
+  const search = iconBtn('search', 'Search anything', { act: 'palette', id: 'topbar-search', size: 'sm', cls: 'topbar-search', aria: 'aria-keyshortcuts="Meta+K"' });
+  const bell = inApp ? `<a class="button button--ghost button--icon-only button--sm button--muted topbar-bell" id="topbar-inbox" href="#/inbox" data-tip="Inbox" aria-label="${unread ? `Inbox, ${unread} unread` : 'Inbox'}" ${cur.r.nav === 'inbox' ? 'aria-current="page"' : ''}>${ic('bell')}${unread ? `<span class="topbar-bell__badge" aria-hidden="true">${unread > 9 ? '9+' : unread}</span>` : ''}</a>` : '';
+  return `<header class="topbar"><div class="topbar__inner">${menu}${context}<div class="topbar__end" id="topbar-end">${actions ? `<div class="topbar__actions">${actions}</div>` : ''}<div class="topbar__global">${search}${bell}</div></div></div></header>`;
 }
-/** Pages may place compact contextual actions in the topbar (e.g. chat Share). */
-function topbarActions(html) { S.topbarEnd = html; return ''; }
-A['nav-manage'] = el => { if (el.getAttribute('aria-disabled') === 'true') return; S.manageOpen = !S.manageOpen; persist(); refresh(); $('[data-act="nav-manage"]')?.focus(); };
+A['nav-group'] = el => {
+  if (el.getAttribute('aria-disabled') === 'true') return;
+  const g = navGroups(), k = el.dataset.group; g[k] = g[k] === false;
+  persist(); refresh(); $(`[data-act="nav-group"][data-group="${k}"]`)?.focus();
+};
 
 MENUS.ws = () => {
   const items = [{ section: 'Workspaces' }];
@@ -176,7 +209,7 @@ A['pref-notif'] = el => {
 const prefShowSteps = () => S.ui.prefs?.steps !== false;
 M.shortcuts = () => ({
   size: 'sm', title: 'Keyboard shortcuts',
-  body: `<dl class="kv" style="grid-template-columns:1fr auto;gap:12px 16px">${[['Search or ask', '⌘ K'], ['New chat', '⌘ ⇧ O'], ['Send message', '↵'], ['New line', '⇧ ↵'], ['Close dialog or panel', 'Esc']].map(([a, k]) => `<dt class="fg">${a}</dt><dd class="row gap-4">${k.split(' ').map(kbd).join('')}</dd>`).join('')}</dl>`,
+  body: `<dl class="kv" style="grid-template-columns:1fr auto;gap:12px 16px">${[['Search or ask', '⌘ K'], ['New chat', '⌘ ⇧ O'], ['Collapse or expand the sidebar', '⌘ \\'], ['Send message', '↵'], ['New line', '⇧ ↵'], ['Close dialog or panel', 'Esc']].map(([a, k]) => `<dt class="fg">${a}</dt><dd class="row gap-4">${k.split(' ').map(kbd).join('')}</dd>`).join('')}</dl>`,
   foot: btn('Done', { v: 'primary', act: 'close-modal' }),
 });
 
