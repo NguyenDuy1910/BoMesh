@@ -104,12 +104,14 @@
   /** The shared list-tools rule (core needsTools), plus a non-default time window counts as "in use". */
   const needsTools = (n, uiKey, fields) => window.needsTools(n, uiKey, fields) || (ui(uiKey).win || '30') !== '30';
 
+  /** Activity's sections are sidebar sub-rows of Activity (pageSections). */
+  const sections = () => pageSections('/activity', [{ id: 'changes', label: 'Changes' }, { id: 'signins', label: 'Sign-ins' }]);
+  (X.sections ||= {}).activity = () => sections().nav();
   P.activity = ({ query }) => {
-    const tab = query.tab === 'signins' ? 'signins' : 'changes';
+    const s = sections(), tab = s.section(query);
     const live = S.pageState === 'live' && !S.navLoading;
-    const head = pageHeader({ title: 'Activity', actions: exportActions('act-export', live) });
-    const t = tabs([{ id: 'changes', label: 'Changes' }, { id: 'signins', label: 'Sign-ins' }], tab, '/activity');
-    return `<div class="page">${head}${contextBar(t)}${tab === 'signins' ? signinsTab() : changesTab()}</div>`;
+    const head = pageHeader({ title: s.title(query), actions: exportActions('act-export', live) });
+    return `<div class="page">${head}${tab === 'signins' ? signinsTab() : changesTab()}</div>`;
   };
 
   function changesTab() {

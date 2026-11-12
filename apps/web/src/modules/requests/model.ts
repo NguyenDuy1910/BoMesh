@@ -159,8 +159,6 @@ export function clip(value: string | null | undefined, n: number): string {
   return cut.slice(0, Math.max(cut.lastIndexOf(" "), n - 12)).replace(/[\s,;:.–—-]+$/, "") + "…";
 }
 
-export const firstName = (name: string) => name.trim().split(/\s+/)[0] || name;
-
 /** Staff roles of a space member (`roles/spaceLead`, `roles/spaceStaff`). */
 export const STAFF_ROLES = ["roles/spaceLead", "roles/spaceStaff"];
 export function roleLabel(roles: readonly string[] | undefined): string {
@@ -181,6 +179,8 @@ export interface CheckLine {
   consequence?: string;
   /** Item name of the policy document (only when the reader can open it). */
   cite?: string;
+  /** A failing rule the requester can fix in the form (its condition reads `fields`); others hide the form. */
+  fixable?: boolean;
 }
 
 /**
@@ -196,8 +196,13 @@ export function checkLines(rules: readonly RequestTypeRule[], eligibility: Reque
     if (!eligibility) return { key, state: "wait", label, detail: "Fill in the details to check this rule.", cite: rule.policyCitation };
     const hit = triggered.get(rule.condition);
     if (!hit) return { key, state: "pass", label, cite: rule.policyCitation };
-    if (hit.severity === "BLOCK")
-      return { key, state: "fail", label, detail: "Your request doesn’t meet this rule.", consequence: `${capital(team)} can’t accept it as it is. Change the details, or ask them whether an exception applies to you.`, cite: hit.policyCitation };
+    if (hit.severity === "BLOCK") {
+      const fixable = /\bfields\./.test(rule.condition);
+      const consequence = fixable
+        ? `${capital(team)} can’t accept it as it is. Change the details, or ask them whether an exception applies to you.`
+        : `${capital(team)} can’t accept this request. Ask them whether an exception applies to you.`;
+      return { key, state: "fail", label, detail: "Your request doesn’t meet this rule.", consequence, cite: hit.policyCitation, fixable };
+    }
     return { key, state: "warn", label, detail: "You can still send it; the office will take this into account.", cite: hit.policyCitation };
   });
 }

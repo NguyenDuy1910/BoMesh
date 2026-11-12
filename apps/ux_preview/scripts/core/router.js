@@ -34,23 +34,22 @@ route('/recent', { page: 'recent', mode: 'workspace', nav: 'recent', title: 'Rec
 route('/projects', { page: 'projects', mode: 'workspace', nav: 'projects', title: 'Projects', simLoad: true });
 route('/project/:id', { page: 'project', mode: 'workspace', nav: 'projects', title: 'Project' });
 route('/contributions', { page: 'contributions', mode: 'workspace', nav: 'contributions', title: 'My contributions', simLoad: true });
-route('/inbox', { page: 'inbox', mode: 'workspace', nav: 'inbox', title: 'Inbox', simLoad: true });
 route('/search', { page: 'search', mode: 'workspace', nav: 'search', title: 'Search' });
-// Knowledge: Browse (the organization's knowledge: search, topics, collections shared with you) → Reader; My library is personal. Discovery also starts on Home.
+// Knowledge: Browse (the organization's knowledge: search, topics, reading lists shared with you) → Reader; My library is personal. Discovery also starts on Home.
 route('/knowledge', { page: 'catalog', mode: 'workspace', nav: 'knowledge', title: 'Knowledge', simLoad: true });
 route('/knowledge/library', { page: 'library', mode: 'workspace', nav: 'knowledge', title: 'My library', simLoad: true });
-route('/knowledge/collections/:id', { page: 'collection', mode: 'workspace', nav: 'knowledge', title: 'Collection', simLoad: true });
+route('/knowledge/lists/:id', { page: 'collection', mode: 'workspace', nav: 'knowledge', title: 'Collection', simLoad: true });
 route('/doc/:id', { page: 'docViewer', mode: 'workspace', nav: 'knowledge', title: 'Document', bare: true });
 // Workspace admin
 route('/overview', { page: 'overview', mode: 'workspace', nav: 'overview', title: 'Overview', perm: 'tenant.manage', simLoad: true });
-// Knowledge Studio: the one place knowledge is run, in two groups of tabs —
-//   daily work: Review (one workbench: submissions, sync batches, publishing problems, quality queues) · Library
-//   setup, in the order it's done: Knowledge bases (where documents live, who reads them) · Taxonomy (how they're
+// Knowledge Studio: the one place knowledge is run, its sections listed under it in the sidebar —
+//   daily work: Review (one workbench: submissions, sync batches, publishing problems, quality queues) · Documents
+//   setup, in the order it's done: Collections (where documents live, who reads them) · Taxonomy (how they're
 //   classified; workspace admins) · Sources (what comes in, with the accounts it signs in with; source admins).
-// Each tab shows only to the people who can use it; the page itself is open to anyone with one tab (P.studio decides).
+// Each section shows only to the people who can use it; the page itself is open to anyone with one (P.studio decides).
 route('/studio', { page: 'studio', mode: 'workspace', nav: 'studio', title: 'Knowledge Studio', simLoad: true });
-// One knowledge base: access, the sources that feed it, settings (its owners and editors).
-route('/studio/bases/:id', { page: 'kbDetail', mode: 'workspace', nav: 'studio', title: 'Knowledge base', simLoad: true });
+// One collection: access, the sources that feed it, settings (its owners and editors).
+route('/studio/collections/:id', { page: 'kbDetail', mode: 'workspace', nav: 'studio', title: 'Collection', simLoad: true });
 route('/people', { page: 'people', mode: 'workspace', nav: 'people', title: 'People', perm: 'user.manage', simLoad: true });
 route('/assistant', { page: 'assistant', mode: 'workspace', nav: 'assistant', title: 'Assistant', perm: 'tenant.manage' });
 route('/activity', { page: 'activity', mode: 'workspace', nav: 'activity', title: 'Activity', perm: 'audit.read', simLoad: true });
@@ -73,9 +72,9 @@ const REDIRECTS = [
   [/^\/chats$/, () => '/chat'],
   [/^\/knowledge\/library$/, (m, q) => (q.tab === 'contributions' ? `/contributions?${q.open ? 'open=' + encodeURIComponent(q.open) : ''}` : q.tab === 'recent' ? '/recent?' : null)],
   [/^\/(documents|knowledge-health)$/, () => '/studio'],
-  // Knowledge Studio tabs renamed: Documents → Library, Master data → Taxonomy; Quality folded into Review.
+  // Knowledge Studio sections renamed: Library → Documents, Master data → Taxonomy; Quality folded into Review.
   [/^\/studio$/, (m, q) => {
-    const tab = { all: 'library', master: 'taxonomy', topics: 'taxonomy' }[q.tab];
+    const tab = { all: 'documents', library: 'documents', master: 'taxonomy', topics: 'taxonomy' }[q.tab];
     if (tab) return `/studio?${new URLSearchParams({ ...q, tab })}`;
     if (q.tab === 'quality') { const { seg, ...rest } = q; return `/studio?${new URLSearchParams({ ...rest, tab: 'review', queue: seg || 'quality' })}`; }
     return null;
@@ -83,14 +82,14 @@ const REDIRECTS = [
   // Sources and Connections were pages of their own; now they are Knowledge Studio → Sources (accounts are one of its views).
   [/^\/sources$/, (m, q) => `/studio?${new URLSearchParams({ ...q, tab: 'sources', ...(q.tab === 'history' ? { view: 'history' } : {}) })}`],
   [/^\/connections$/, () => '/studio?tab=sources&view=accounts'],
-  [/^\/bases$/, () => '/studio?tab=bases'],
-  [/^\/bases\/([^/]+)$/, (m, q) => `/studio/bases/${m[1]}${Object.keys(q).length ? '?' + new URLSearchParams(q) : ''}`],
+  [/^\/bases$/, () => '/studio?tab=collections'],
+  [/^\/bases\/([^/]+)$/, (m, q) => `/studio/collections/${m[1]}${Object.keys(q).length ? '?' + new URLSearchParams(q) : ''}`],
 ];
 
 function parseHash() {
   const h = decodeURI(location.hash.slice(1)) || (S.signedIn ? homeRoute() : '/signin');
   let [p, q = ''] = h.split('?');
-  // Redirects apply in order and chain (e.g. /documents?tab=all → /studio?tab=all → /studio?tab=library).
+  // Redirects apply in order and chain (e.g. /documents?tab=all → /studio?tab=all → /studio?tab=documents).
   for (const [re, to] of REDIRECTS) {
     const m = p.match(re); if (!m) continue;
     const next = to(m, Object.fromEntries(new URLSearchParams(q))); if (next == null) continue;

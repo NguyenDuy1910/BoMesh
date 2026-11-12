@@ -20,7 +20,7 @@ export interface ChipFile {
   item?: string;
   /** `ref`: a knowledge document read in place; `upload`: a file saved to My files. */
   kind?: "upload" | "ref";
-  /** Knowledge base name of a reference. */
+  /** Collection name of a reference. */
   base?: string;
   /** A reference the reader can no longer open. */
   locked?: boolean;

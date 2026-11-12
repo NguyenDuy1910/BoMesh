@@ -11,7 +11,7 @@ import { resourceId, type Schema } from "@/lib/api/client";
 import { PLATFORM_CONSOLE, type ShellMode } from "@/lib/navigation";
 import { isPlatformOperator, useSession } from "@/lib/session";
 import { listMyWorkspaces, rememberedWorkspace, rememberWorkspace, useOptionalWorkspace } from "@/lib/workspace";
-import { markWorkspaceOpened, useRoleDisplayName } from "@/modules/auth/api";
+import { markWorkspaceOpened } from "@/modules/auth/api";
 
 export interface ShellWorkspaces {
   workspaces: Schema<"Workspace">[];
@@ -43,7 +43,7 @@ export function WorkspaceMenu({ mode }: { mode: ShellMode }) {
   const fallback = useShellWorkspaces(!ctx);
   const workspaces = ctx?.workspaces ?? fallback.workspaces;
   const activeId = ctx?.id ?? null;
-  const role = useRoleDisplayName(ctx?.id, ctx?.member.roles);
+  const operator = isPlatformOperator(session);
 
   const switchTo = (workspace: Schema<"Workspace">) => {
     const id = resourceId(workspace.name);
@@ -58,33 +58,34 @@ export function WorkspaceMenu({ mode }: { mode: ShellMode }) {
     if (id !== activeId) toast(`Switched to ${workspace.displayName}`, { tone: "accent" });
   };
 
+  const name = platform ? "Platform console" : (ctx?.workspace.displayName ?? "");
+  const ident = (
+    <>
+      {platform ? (
+        <span className="ws-mark ws-mark--console" aria-hidden>
+          <Layers className="i i-sm" />
+        </span>
+      ) : (
+        <WorkspaceMark name={name} size={24} />
+      )}
+      <span className="grow stack ws-switch__text">
+        <span className="ws-switch__name truncate" translate={platform ? undefined : "no"}>
+          {name}
+        </span>
+        <span className="ws-switch__meta truncate">{platform ? "All workspaces" : "Workspace"}</span>
+      </span>
+    </>
+  );
+  // One workspace and no console: a static identity row, not a switcher with a one-item menu.
+  if (!platform && !operator && workspaces.length <= 1) return <div className="ws-switch ws-switch--static">{ident}</div>;
+
   return (
     <Dropdown>
-      <Dropdown.Trigger className="ws-switch" aria-label="Switch workspace">
-        {platform ? (
-          <>
-            <span className="ws-mark" style={{ background: "var(--foreground)", color: "var(--background)" }} aria-hidden>
-              <Layers className="i i-sm" />
-            </span>
-            <span className="grow stack">
-              <span className="ws-switch__name truncate">Platform console</span>
-              <span className="ws-switch__meta">All workspaces</span>
-            </span>
-          </>
-        ) : (
-          <>
-            <WorkspaceMark name={ctx?.workspace.displayName ?? ""} size={28} />
-            <span className="grow stack">
-              <span className="ws-switch__name truncate" translate="no">
-                {ctx?.workspace.displayName}
-              </span>
-              <span className="ws-switch__meta truncate">{role}</span>
-            </span>
-          </>
-        )}
+      <Dropdown.Trigger className="ws-switch" aria-label={`Switch workspace: ${name}`}>
+        {ident}
         <ChevronsUpDown className="i i-sm" aria-hidden />
       </Dropdown.Trigger>
-      <Dropdown.Popover placement="bottom start" offset={4} className="shell-menu">
+      <Dropdown.Popover placement="bottom start" offset={4}>
         <Dropdown.Menu aria-label="Workspaces">
           <Dropdown.Section selectionMode="single" selectedKeys={!platform && activeId ? [activeId] : []}>
             <Header>Workspaces</Header>
@@ -100,7 +101,7 @@ export function WorkspaceMenu({ mode }: { mode: ShellMode }) {
           </Dropdown.Section>
           <Separator />
           <Dropdown.Section>
-            {isPlatformOperator(session) ? (
+            {operator ? (
               platform ? (
                 <Dropdown.Item id="back" textValue="Back to workspace" onAction={() => router.push("/home")}>
                   <ArrowLeft className="i" aria-hidden />

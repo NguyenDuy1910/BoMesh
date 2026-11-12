@@ -1,19 +1,19 @@
 'use strict';
 /* Knowledge catalog — the resource model behind Knowledge (Discover, Browse,
-   Library, Reader) and Knowledge health.
+   the personal sections, Reader), Knowledge Studio → Documents and Knowledge health.
 
    Concepts (one meaning each):
    - Source          where content comes from (a connector source or an upload). Provenance only.
-   - Resource        one canonical document (D.docs). Lives in exactly one knowledge base.
-   - Knowledge base  the governed home of resources: ownership + access boundary (backend Collection).
+   - Resource        one canonical document (D.docs). Lives in exactly one collection.
+   - Collection  the governed home of resources: ownership + access boundary (backend Reading list).
    - Space/context   a course, group, office, team or project. Resources link to many spaces
-                     (doc.contexts, plus the knowledge base's own space) without being copied.
+                     (doc.contexts, plus the collection's own space) without being copied.
    - Topic           the workspace taxonomy (domain → topic), D.topics.
-   - Collection      a curated, ordered list of references (D.collections). Never grants access.
+   - Reading list      a curated, ordered list of references (D.collections). Never grants access.
    - Saved view      a stored Browse query (D.views), kept and managed in Browse's Filters.
-   Browse = the organization's knowledge (topics, collections shared with you, filters).
-   My library = saved + recent + my files + my collections + contributions. Managing
-   knowledge bases (access, sources, settings) is Manage → Knowledge bases.
+   Browse = the organization's knowledge (topics, reading lists shared with you, filters).
+   My library = saved + recent + my files + my reading lists + contributions. Managing
+   collections (access, sources, settings) is Manage → Collections.
 
    Feature code reads metadata through res(doc), so derived defaults apply everywhere and
    resources without hand-written metadata (uploads, synced files) still work. Workspace-
@@ -80,7 +80,7 @@ const topicLineage = id => { const t = topicById(id); return t ? (t.parent ? [t.
 
 /* ═══════════════ Resource metadata ═══════════════ */
 const READABLE_STATUS = ['ready', 'outdated'];
-/** Library records that are reader-facing: index status is an editor concern. */
+/** Catalog records that are reader-facing: index status is an editor concern. */
 const isReaderVisible = doc => [...READABLE_STATUS, 'unsupported'].includes(doc.status);
 const isSearchable = doc => READABLE_STATUS.includes(doc.status);
 function ownerOfKb(kb) {
@@ -89,7 +89,7 @@ function ownerOfKb(kb) {
   const o = (kb.shares || []).find(s => s.role === 'owner');
   return o ? (o.kind === 'group' ? groupById(o.id)?.name : memberById(o.id)?.name) || '' : '';
 }
-/** Spaces a resource belongs to: its own links plus its knowledge base's space. Spaces module only. */
+/** Spaces a resource belongs to: its own links plus its collection's space. Spaces module only. */
 function resContexts(doc) {
   if (!hasModule('spaces')) return [];
   const kb = kbById(doc.kb);
@@ -104,7 +104,7 @@ function provenance(doc) {
 }
 function defaultSummary(doc) {
   const k = kindMeta(doc.kind || inferKind(doc)).label.toLowerCase(), kb = kbById(doc.kb);
-  return `${k[0].toUpperCase() + k.slice(1)} in ${kb?.name || 'this knowledge base'}.`;
+  return `${k[0].toUpperCase() + k.slice(1)} in ${kb?.name || 'this collection'}.`;
 }
 /** Everything the catalog knows about a resource. Cheap; call freely. */
 function res(doc) {
@@ -157,13 +157,13 @@ const catalogPool = () => readableResources().filter(isReaderVisible);
 /** What Browse lists: the organization's knowledge. Personal files live in My library. */
 const sharedPool = () => catalogPool().filter(d => !kbById(d.kb)?.personal);
 const canOpenRes = doc => !!doc && !doc.archived && isPublishedStage(doc) && canReadKb(kbById(doc.kb)) && !kbById(doc.kb)?.archived;
-/** Where a knowledge base opens for reading: its documents in Browse (a locked base offers Request access there); My files in My library. */
+/** Where a collection opens for reading: its documents in Browse (a locked base offers Request access there); My files in My library. */
 const kbHref = kb => (!kb ? '/knowledge' : kb.personal ? '/knowledge/library?tab=files' : catalogHref({ filters: { kb: [kb.id] } }));
-/** Bases the caller manages (owner or editor) — Manage → Knowledge bases. */
+/** Bases the caller manages (owner or editor) — Manage → Collections. */
 const managedKbs = () => visibleKbs().filter(k => !k.personal && canEditKb(k));
 const canManageKbs = () => can('knowledge.manage') || managedKbs().length > 0;
-/** A managed base's page (access, sources, settings), under Knowledge Studio → Knowledge bases. */
-const kbManageHref = (kb, tab = '') => '/studio/bases/' + kb.id + (tab ? '?tab=' + tab : '');
+/** A managed base's page (access, sources, settings), under Knowledge Studio → Collections. */
+const kbManageHref = (kb, tab = '') => '/studio/collections/' + kb.id + (tab ? '?tab=' + tab : '');
 /** Knowledge Studio addresses: a tab, optionally with a view (Sources: sources | history | accounts) and more query. */
 const studioHref = (tab, q = {}) => '/studio?' + new URLSearchParams({ tab, ...q });
 const onStudioTab = (tab, view) => S.cur?.r.page === 'studio' && S.cur.query.tab === tab && (!view || (S.cur.query.view || '') === view);
@@ -234,7 +234,7 @@ const FACETS = [
   { id: 'kind', label: 'Type', values: (d, r) => [r.kind], name: id => kindMeta(id).label },
   { id: 'owner', label: 'Owner', values: (d, r) => (r.owner ? [r.owner] : ['—']), name: v => (v === '—' ? 'No owner' : v) },
   { id: 'src', label: 'Source', values: (d, r) => [r.source.key], name: id => (id === 'upload' ? 'Uploaded files' : srcById(id)?.name || 'Source') },
-  { id: 'kb', label: 'Knowledge base', values: d => [d.kb], name: id => kbById(id)?.name || 'Knowledge base' },
+  { id: 'kb', label: 'Collection', values: d => [d.kb], name: id => kbById(id)?.name || 'Collection' },
   { id: 'trust', label: 'Trust', values: d => [trustOf(d).state], name: id => TRUST[id]?.label || id },
   { id: 'upd', label: 'Updated', single: true, values: d => UPDATED_WINDOWS.filter(w => Date.now() - d.updated <= w[2] * DAY).map(w => w[0]), name: id => UPDATED_WINDOWS.find(w => w[0] === id)?.[1] || id },
   { id: 'fmt', label: 'Format', values: d => [formatOf(d)[0]], name: id => Object.values(FORMATS).find(f => f[0] === id)?.[1] || 'Other' },
@@ -317,7 +317,7 @@ const publishedAt = d => { const e = (d.submission?.events || []).filter(x => x.
 /** Trusted, readable, ready documents, newest first (Home "Recently published"). */
 const recentlyPublished = (n = 6) => catalogPool().filter(d => d.status === 'ready' && !kbById(d.kb)?.personal).sort((a, b) => publishedAt(b) - publishedAt(a)).slice(0, n);
 
-/* ═══════════════ Collections ═══════════════ */
+/* ═══════════════ Reading lists ═══════════════ */
 const collectionById = id => (D.collections || []).find(c => c.id === id && !c.archived);
 /** Share scopes: 'private' | 'workspace' | 'space:<id>'. */
 const collectionSpace = c => (c.share?.startsWith('space:') ? spaceById(c.share.slice(6)) : null);

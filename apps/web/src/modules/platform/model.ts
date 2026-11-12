@@ -243,7 +243,7 @@ function mergeErrors(classes: IngestionWorkspaceSummary["errorClasses"]): { erro
 }
 
 /**
- * Indexing rows for every workspace. `now` = summary over every run (live queue);
+ * Indexing rows for every workspace that can index (archived ones are read-only and left out). `now` = summary over every run (live queue);
  * `day` = summary over runs created in the last 24 hours (throughput, failure rate, error classes);
  * `tasks` = recent tasks (median processing time).
  */
@@ -267,7 +267,7 @@ export function buildIndexing(
     const ws = workspaceIdOf(task.name);
     durations.set(ws, [...(durations.get(ws) ?? []), ms]);
   }
-  return workspaces.map((w) => {
+  return workspaces.filter((w) => w.state !== "ARCHIVED").map((w) => {
     const id = lastSegment(w.name);
     const q = live.get(id);
     const d = recent.get(id);
@@ -414,6 +414,20 @@ export const CATEGORY_LABEL: Record<NonNullable<Schema<"AuditEvent">["category"]
   SIGN_IN: "Sign-in",
 };
 
+/**
+ * Workspace-scoped events the platform Audit log shows: the workspace's lifecycle and indexing state, which the
+ * platform decides. Everything else inside a workspace stays in that workspace's Activity (SCREEN_INVENTORY).
+ */
+export const PLATFORM_WORKSPACE_ACTIONS: readonly string[] = [
+  "CreateWorkspace",
+  "UpdateWorkspace",
+  "SuspendWorkspace",
+  "ActivateWorkspace",
+  "ArchiveWorkspace",
+  "PauseWorkspaceIngestion",
+  "ResumeWorkspaceIngestion",
+];
+
 const PAST: Record<string, string> = {
   Create: "Created", Update: "Updated", Delete: "Deleted", Undelete: "Restored", Verify: "Verified", Withdraw: "Withdrew",
   Analyze: "Analyzed", Export: "Exported", Suspend: "Suspended", Activate: "Reactivated", Archive: "Archived",
@@ -430,6 +444,8 @@ const SPECIAL: Record<string, string> = {
   CreateUser: "Created account",
   ResetPassword: "Reset password",
   SendPasswordReset: "Sent password reset",
+  PauseWorkspaceIngestion: "Paused indexing",
+  ResumeWorkspaceIngestion: "Resumed indexing",
 };
 
 /** API method name (`UpdateWorkspaceSettings`) → plain words ("Updated workspace settings"). */
@@ -466,8 +482,10 @@ export function toCsv(rows: readonly (readonly (string | number | null | undefin
 
 /* ── Health ─────────────────────────────────────────────────────────────── */
 
+export type ServiceStatus = "operational" | "degraded" | "down" | "not_configured";
+
 /** Preview `status('service', …)` keys from `Component.state`. */
-export function serviceStatus(state: Schema<"Component">["state"]): "operational" | "degraded" | "down" | "not_configured" {
+export function serviceStatus(state: Schema<"Component">["state"]): ServiceStatus {
   if (state === "HEALTHY") return "operational";
   if (state === "DEGRADED") return "degraded";
   if (state === "DOWN") return "down";

@@ -14,7 +14,7 @@ export interface ToastOptions {
   undo?: () => void;
   /** Muted second line. */
   description?: string;
-  /** Auto-dismiss after ms (default 6500 with an action, otherwise 3800; 0 keeps it open). */
+  /** Auto-dismiss after ms (default 8000 with an action, otherwise 4000; 0 keeps it open). Hover or focus pauses it. */
   duration?: number;
 }
 
@@ -33,7 +33,7 @@ export function toast(message: string, options: ToastOptions = {}): string {
     variant: tone,
     description: options.description,
     indicator: <Icon className={`i toast__icon--${tone}`} aria-hidden />,
-    timeout: options.duration ?? (action ? 6500 : 3800),
+    timeout: options.duration ?? (action ? 8000 : 4000),
     actionProps: action
       ? {
           children: action.label,
@@ -52,7 +52,10 @@ export function toast(message: string, options: ToastOptions = {}): string {
 /** Dismisses a toast returned by {@link toast}. */
 export const closeToast = (id: string) => heroToast.close(id);
 
-/** Toast region; mount once in the root providers. Bottom-centre, three visible, 420 px wide (preview `.toast-region`). */
+/**
+ * Toast region; mount once in the root providers. A small note in the bottom-right corner, three visible, 360 px wide;
+ * full width at the bottom on phones and above the chat composer on threads (components.css `.toast-region`).
+ */
 export function ToastHost() {
-  return <Toast.Provider placement="bottom" maxVisibleToasts={3} width={420} />;
+  return <Toast.Provider placement="bottom end" maxVisibleToasts={3} width={360} />;
 }

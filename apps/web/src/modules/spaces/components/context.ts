@@ -15,5 +15,10 @@ export interface SpaceView {
   manage: boolean;
   /** Not a member and not a manager (open spaces only reach the page). */
   visitor: boolean;
+  /** The header carries New (staff and non-member managers outside a desk); the tabs then don't repeat it. */
+  newInHeader: boolean;
   can: (permission: SpacePermission) => boolean;
 }
+
+/** List tools (search, filters) appear once a list is long enough to need them (preview `TOOLS_MIN`). */
+export const TOOLS_MIN = 7;

@@ -7,7 +7,7 @@ import { useWorkspace } from "@/lib/workspace";
 import type { Contribution, Item } from "../api";
 import type { LifecycleKey } from "../model";
 import { useItemsByName, useKnowledgeModel, useMemberNames } from "../queries";
-import { contributionLife, type ContributionContext } from "./contributions";
+import { contributionLife, type TimelineContext } from "./contributions";
 
 /** What the contributions list and panel show about one contribution. */
 export interface ContributionView {
@@ -24,13 +24,13 @@ export interface ContributionView {
   revised?: Item;
   /** The document people read once approved (candidate, or the revised one for a new version). */
   published?: Item | null;
-  /** Knowledge base display name ("" when not chosen yet). */
+  /** Collection display name ("" when not chosen yet). */
   base: string;
-  /** Knowledge base item name (target, or the assistant's suggestion). */
+  /** Collection item name (target, or the assistant's suggestion). */
   baseName: string;
   life: LifecycleKey;
   mine: boolean;
-  ctx: ContributionContext & { mine: boolean; revisedName?: string };
+  ctx: TimelineContext;
 }
 
 /**
@@ -58,7 +58,9 @@ export function useContributionViews(contributions: readonly Contribution[]) {
       const base = (baseName && model.collectionNames?.get(baseName)) || published?.ancestors?.[0]?.displayName || "";
       const doc = (candidate ?? revised)?.document;
       const mine = !!c.contributor && c.contributor === me;
-      const ctx = { me, names, base, published, mine, revisedName: revised?.displayName };
+      // Contribute writes what the contributor confirmed (type, topics) onto the candidate before submitting.
+      const confirmed = c.kind !== "NEW_REVISION" && !!(candidate?.document?.documentType || candidate?.document?.topics?.length);
+      const ctx: TimelineContext = { me, names, base, audience: c.audienceSummary, published, mine, revisedName: revised?.displayName, confirmed };
       return {
         contribution: c,
         id: (c.name ?? "").slice((c.name ?? "").lastIndexOf("/") + 1),

@@ -73,14 +73,14 @@
   /** The list only: problems (an expired account) are announced once, above the Sources views, with Reconnect. */
   function accountsView() {
     X.src?.boot();
-    const none = () => emptyState({ icon: 'key', title: 'No accounts yet', desc: 'Accounts are added when you connect a source: sign in once, then pick what to sync.', actions: btn('Connect source', { v: 'primary', icon: 'plus', act: 'src-connect' }), boxed: true });
+    const none = () => emptyState({ icon: 'key', title: 'No accounts yet', desc: 'An account is added the first time you add a source: sign in once, then pick what to sync.', actions: btn('Add source', { v: 'primary', icon: 'plus', act: 'src-connect' }), boxed: true });
     return gate({
       loading: () => skelRows(3),
       empty: none,
       ok: () => {
         if (!D.accounts.length) return none();
         const head = th('Account') + th('Status') + th('Used by') + th('Last checked') + th('<span class="sr-only">Actions</span>', 'table__column--actions');
-        const bar = `<div class="toolbar"><p class="t-sm muted grow">The sign-ins sources read with. BoMesh never shows or stores the password.</p><div class="toolbar__end">${btn('Connect account', { v: 'ghost', size: 'sm', icon: 'plus', act: 'acc-connect' })}</div></div>`;
+        const bar = `<div class="toolbar"><div class="toolbar__end">${btn('Connect account', { v: 'ghost', size: 'sm', icon: 'plus', act: 'acc-connect' })}</div></div>`;
         return bar + table({ label: 'Connected accounts', head, rows: D.accounts.map(accRow) });
       },
     });
@@ -105,7 +105,7 @@
     const test = { label: 'Test connection', icon: 'refresh', disabled: a.checking, run: () => A['acc-test']({ dataset: { id: a.id } }) };
     return [
       ...(expired ? [reconnect, test] : [test, reconnect]),
-      { label: 'Connect a source', icon: 'plug', disabled: a.status !== 'connected', run: () => X.src.openWizard({ app: a.app, acc: a.id }) },
+      { label: 'Add source with this account', icon: 'plug', disabled: a.status !== 'connected', run: () => X.src.openWizard({ app: a.app, acc: a.id }) },
       { sep: true },
       { label: 'Disconnect', icon: 'trash', danger: true, run: () => A['acc-disconnect']({ dataset: { id: a.id } }) },
     ];
@@ -165,7 +165,7 @@
     if (signInFailed()) { p.phase = 'error'; p.guard = false; refreshLayer(); return; }
     const acc = accById(p.id); closeModal(); if (!acc) return;
     const fixed = reconnect(acc);
-    toast(reconnectMsg(acc, fixed), fixed.length ? { action: { label: 'View', run: () => X.src.open(fixed[0].id) } } : {});
+    toast(reconnectMsg(acc, fixed), fixed.length ? { action: { label: 'Open', run: () => X.src.open(fixed[0].id) } } : {});
     refresh();
   };
   A['acc-rc-cancel'] = () => { const p = S.modal?.props; if (!p) return; p.t = null; p.phase = 'idle'; p.guard = false; refreshLayer(); };
@@ -220,7 +220,7 @@
     closeModal(); S.ui.accNew = null;
     const s = srcById(f.src);
     if (s) X.src.attach(s, acc);
-    else toast(`Connected ${acc.label}`, { action: { label: 'Connect source', run: () => X.src.openWizard({ app: acc.app, acc: acc.id }) } });
+    else toast(`Connected ${acc.label}`, { action: { label: 'Add source', run: () => X.src.openWizard({ app: acc.app, acc: acc.id }) } });
     refresh();
   };
 })();

@@ -1,12 +1,13 @@
 "use client";
 
-import { Button, Chip, Description, Label, ListBox, Select } from "@heroui/react";
-import { Users, X } from "lucide-react";
+import { Button, Chip } from "@heroui/react";
+import { CircleAlert, Eye, Pencil, Plus, Shield, UserPlus, Users, X, type LucideIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { ItemIcon } from "@/components/ui/ItemIcon";
 import { List, ListItem } from "@/components/ui/List";
 import { SearchInput } from "@/components/ui/SearchInput";
+import { Segmented } from "@/components/ui/Segmented";
 import { UserAvatar } from "@/components/ui/UserAvatar";
 import { resourceId } from "@/lib/api/client";
 import { plural } from "@/lib/format";
@@ -14,6 +15,10 @@ import { plural } from "@/lib/format";
 import { KnowledgeModal } from "../../components/KnowledgeModal";
 import { ROLE_DESC, ROLE_LABEL, ROLES, type Share, type ShareRole } from "../model";
 import { useSharePrincipals } from "../queries";
+
+/** Preview `KB_ROLES[role].icon`. */
+const ROLE_ICON: Record<ShareRole, LucideIcon> = { viewer: Eye, editor: Pencil, owner: Shield };
+const focusSearch = () => requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".kb-share-q input")?.focus());
 
 export interface SharePrincipal {
   principal: string;
@@ -60,6 +65,7 @@ export function ShareDialog({ baseName, shares, isOpen, onClose, onShare }: Shar
   const [picked, setPicked] = useState<string[]>([]);
   const [role, setRole] = useState<ShareRole>("viewer");
   const [busy, setBusy] = useState(false);
+  const [touched, setTouched] = useState(false);
 
   const options = useMemo(() => {
     const taken = new Set([...shares.map((s) => s.principal), ...picked]);
@@ -75,98 +81,114 @@ export function ShareDialog({ baseName, shares, isOpen, onClose, onShare }: Shar
     setQ("");
     setPicked([]);
     setRole("viewer");
+    setTouched(false);
   }
   function pick(principal: string) {
     setPicked((p) => [...p, principal]);
     setQ("");
+    setTouched(false);
+    focusSearch();
   }
   async function share() {
-    if (busy || !picked.length) return;
+    if (busy) return;
+    if (!picked.length) {
+      setTouched(true);
+      focusSearch();
+      return;
+    }
     setBusy(true);
     const ok = await onShare(picked, role, picked.map((p) => people.get(p)?.name ?? "Someone"));
     setBusy(false);
     if (ok) close();
   }
 
+  const err = touched && !picked.length ? "Add at least one person or group." : "";
   return (
     <KnowledgeModal
       isOpen={isOpen}
       onClose={close}
       guard={busy}
+      icon={UserPlus}
       title={
         <>
           Share <span translate="no">{baseName}</span>
         </>
       }
+      description="Give people or groups access. They can open it right away."
+      footerStart={<span className="t-xs muted">Admins can always manage it.</span>}
       footer={
         <>
-          <Button variant="tertiary" onPress={close} isDisabled={busy}>
+          <Button variant="ghost" onPress={close} isDisabled={busy}>
             Cancel
           </Button>
-          <Button variant="primary" onPress={() => void share()} isDisabled={!picked.length} isPending={busy}>
-            {picked.length ? `Share with ${picked.length}` : "Share"}
+          <Button variant="primary" onPress={() => void share()} isPending={busy}>
+            {busy ? null : <UserPlus className="i" aria-hidden />}
+            {picked.length > 1 ? `Share with ${picked.length}` : "Share"}
           </Button>
         </>
       }
     >
-      <div className="field">
-        <span className="label">People or groups</span>
-        {picked.length ? (
-          <div className="row wrap gap-6">
-            {picked.map((p) => {
-              const name = people.get(p)?.name ?? "Someone";
-              return (
-                <Chip key={p} size="sm" variant="soft" className="kb-pick">
-                  {name}
-                  <button type="button" aria-label={`Remove ${name}`} onClick={() => setPicked((all) => all.filter((x) => x !== p))}>
-                    <X className="i i-xs" aria-hidden />
-                  </button>
-                </Chip>
-              );
-            })}
-          </div>
-        ) : null}
-        <SearchInput
-          className="kb-share-q"
-          value={q}
-          onChange={setQ}
-          label="People or groups"
-          placeholder="Search by name or email"
-          fullWidth
-          autoFocus
-          onSubmit={() => {
-            if (q.trim() && options[0]) pick(options[0].principal);
-            else void share();
-          }}
-        />
-        {options.length ? (
-          <List className="kb-share-list">
-            {options.map((o) => (
-              <ListItem key={o.principal} lead={<ShareLead who={o} size="sm" />} title={o.name} description={o.sub} onPress={() => pick(o.principal)} label={`Add ${o.name}`} />
-            ))}
-          </List>
-        ) : (
-          <p className="t-sm muted">{q.trim() ? `No one called “${q.trim()}” in this workspace.` : "Everyone already has access."}</p>
-        )}
+      <div className="kn-form">
+        <div className="field">
+          <span className="label">People or groups</span>
+          {picked.length ? (
+            <div className="kb-picks">
+              {picked.map((p) => {
+                const name = people.get(p)?.name ?? "Someone";
+                return (
+                  <Chip key={p} variant="soft" color="accent" className="kb-pick">
+                    {name}
+                    <button type="button" aria-label={`Remove ${name}`} disabled={busy} onClick={() => setPicked((all) => all.filter((x) => x !== p))}>
+                      <X className="i i-xs" aria-hidden />
+                    </button>
+                  </Chip>
+                );
+              })}
+            </div>
+          ) : null}
+          <SearchInput
+            className="kb-share-q"
+            value={q}
+            onChange={setQ}
+            label="People or groups"
+            placeholder="Search by name or email"
+            fullWidth
+            autoFocus
+            onSubmit={() => {
+              if (q.trim() && options[0]) pick(options[0].principal);
+              else void share();
+            }}
+          />
+          {err ? (
+            <div className="field-error" role="alert">
+              <CircleAlert className="i" aria-hidden />
+              <span>{err}</span>
+            </div>
+          ) : null}
+          {options.length ? (
+            <List className="kb-share-list">
+              {options.map((o) => (
+                <ListItem
+                  key={o.principal}
+                  lead={<ShareLead who={o} size="sm" />}
+                  title={o.name}
+                  description={o.sub}
+                  actions={<Plus className="i i-sm muted" aria-hidden />}
+                  onPress={() => pick(o.principal)}
+                  label={`Add ${o.name}`}
+                />
+              ))}
+            </List>
+          ) : (
+            <p className="kb-share-none">{q.trim() ? `No one called “${q.trim()}” in this workspace.` : "Everyone already has access."}</p>
+          )}
+        </div>
+        <div className="field">
+          <span className="label">Role</span>
+          <Segmented label="Role" full value={role} onChange={setRole} options={ROLES.map((r) => ({ value: r, label: ROLE_LABEL[r], icon: ROLE_ICON[r] }))} />
+          <div className="description">{ROLE_DESC[role]}</div>
+        </div>
       </div>
-      <Select className="field" value={role} onChange={(v) => v != null && setRole(String(v) as ShareRole)}>
-        <Label>Role</Label>
-        <Select.Trigger>
-          <Select.Value />
-          <Select.Indicator />
-        </Select.Trigger>
-        <Description>{ROLE_DESC[role]}</Description>
-        <Select.Popover>
-          <ListBox>
-            {ROLES.map((r) => (
-              <ListBox.Item key={r} id={r} textValue={ROLE_LABEL[r]}>
-                {ROLE_LABEL[r]}
-                <ListBox.ItemIndicator />
-              </ListBox.Item>
-            ))}
-          </ListBox>
-        </Select.Popover>
-      </Select>
     </KnowledgeModal>
   );
 }

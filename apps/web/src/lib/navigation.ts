@@ -1,37 +1,159 @@
 import {
   Activity,
   BookOpen,
+  Bot,
   Building,
   ChartColumn,
   ClipboardList,
+  Clock,
   Database,
-  Files,
+  Folder,
   House,
-  Inbox,
+  LayoutDashboard,
   Layers,
+  Library,
   MessageSquare,
   Plug,
-  RefreshCw,
   Server,
   Settings,
   Sparkles,
+  Upload,
   Users,
   type LucideIcon,
 } from "lucide-react";
+import { useSearchParams } from "next/navigation";
 
 import type { WorkspaceModule, WorkspacePermission } from "@/lib/workspace";
 
 /**
  * The information architecture (UX preview `scripts/core/router.js` and
- * `shell.js`): every screen's mode, title, nav item and gate, and the
- * sidebar's destinations. The sidebar, topbar, command palette and the
- * shell's route gate all read these; the API still authorizes every request.
+ * `shell.js`): every screen's mode, title, nav item and gate, the sidebar's
+ * destinations and each area's sections. The sidebar, the top row, the command
+ * palette and the shell's route gate all read these; the API still authorizes
+ * every request.
  */
 
 export type ShellMode = "auth" | "workspace" | "platform";
 
-/** Which attention count a nav item shows. */
-export type NavBadge = "requests" | "documents" | "sources" | "connections" | "people" | "indexing" | "health";
+/* ── Sections: an area's pages, listed as sidebar sub-rows (preview `pageSections`) ── */
+
+/** One section of an area, addressed by `?tab=`. `title` is the top-row title when it differs from the label. */
+export interface Section {
+  id: string;
+  label: string;
+  href: string;
+  title?: string;
+  /** Starts a new cluster (a small gap above it in the sidebar). */
+  gap?: boolean;
+}
+
+/** Knowledge's personal sections. Browse is `/knowledge` itself; "My files" exists only with a personal collection. */
+export const librarySections: readonly Section[] = [
+  { id: "saved", label: "Saved", href: "/knowledge/library?tab=saved" },
+  { id: "files", label: "My files", href: "/knowledge/library?tab=files" },
+  { id: "lists", label: "My reading lists", href: "/knowledge/library?tab=lists" },
+];
+
+export const peopleSections: readonly Section[] = [
+  { id: "members", label: "Members", href: "/people?tab=members" },
+  { id: "groups", label: "Groups", href: "/people?tab=groups" },
+  { id: "roles", label: "Roles", href: "/people?tab=roles" },
+  { id: "requests", label: "Access requests", href: "/people?tab=requests" },
+];
+
+export const activitySections: readonly Section[] = [
+  { id: "changes", label: "Changes", href: "/activity?tab=changes" },
+  { id: "signins", label: "Sign-ins", href: "/activity?tab=signins" },
+];
+
+export const settingsSections: readonly Section[] = [
+  { id: "general", label: "General", href: "/settings?tab=general" },
+  { id: "setup", label: "Workspace setup", href: "/settings?tab=setup" },
+];
+
+/** "By workspace", so it never reads as the Workspaces page. */
+export const indexingSections: readonly Section[] = [
+  { id: "workspaces", label: "By workspace", href: "/p/indexing?tab=workspaces", title: "Indexing" },
+  { id: "jobs", label: "Jobs", href: "/p/indexing?tab=jobs", title: "Indexing jobs" },
+  { id: "policies", label: "Policies", href: "/p/indexing?tab=policies", title: "Indexing policies" },
+];
+
+/** What decides the Knowledge Studio sections the caller gets. */
+export interface StudioAccess {
+  can: (permission: WorkspacePermission) => boolean;
+  /** Holds `items.create`, or owns/edits at least one shared collection. */
+  managesCollections: boolean;
+}
+
+export type StudioSectionId = "review" | "documents" | "collections" | "taxonomy" | "sources";
+
+/** [id, label, cluster, who may use it]; setup is listed in the order it's done: where → how classified → what comes in. */
+const STUDIO_DEFS: readonly [StudioSectionId, string, "work" | "setup", (a: StudioAccess) => boolean][] = [
+  ["review", "Review", "work", (a) => a.can("contributions.review")],
+  ["documents", "Documents", "work", (a) => a.can("contributions.review")],
+  ["collections", "Collections", "setup", (a) => a.managesCollections],
+  ["taxonomy", "Taxonomy", "setup", (a) => a.can("topics.update")],
+  ["sources", "Sources", "setup", (a) => a.can("sources.list")],
+];
+
+/** Knowledge Studio's sections the caller may use: Review · Documents │ Collections · Taxonomy · Sources. */
+export function studioSections(access: StudioAccess): Section[] {
+  const defs = STUDIO_DEFS.filter((d) => d[3](access));
+  return defs.map(([id, label, cluster], i) => ({
+    id,
+    label,
+    href: `/studio?tab=${id}`,
+    gap: i > 0 && defs[i - 1][2] !== cluster,
+  }));
+}
+
+/** Old Studio and Documents addresses: Library → Documents, Master data/Topics → Taxonomy, Quality → Review. */
+export const STUDIO_ALIASES: Readonly<Record<string, StudioSectionId>> = {
+  all: "documents",
+  library: "documents",
+  bases: "collections",
+  master: "taxonomy",
+  topics: "taxonomy",
+  quality: "review",
+};
+
+/**
+ * The section Knowledge Studio opens on: what needs the caller first — decisions to publish (Review), then broken
+ * sources (Sources), then the first allowed section.
+ */
+export function studioLanding(sections: readonly Section[], counts: { review?: number; sources?: number }): string {
+  const has = (id: string) => sections.some((s) => s.id === id);
+  if (has("review") && counts.review) return "review";
+  if (has("sources") && counts.sources) return "sources";
+  return sections[0]?.id ?? "";
+}
+
+/** The `?tab=` of `query` when it names one of `sections`, else `fallback` (default: the first section). */
+export function sectionOf(sections: readonly Section[], tab: string | null | undefined, fallback?: string): string {
+  return tab && sections.some((s) => s.id === tab) ? tab : (fallback ?? sections[0]?.id ?? "");
+}
+
+/** The active section id from the address's `?tab=` (an unknown one falls back). */
+export function useSection(sections: readonly Section[], fallback?: string): string {
+  return sectionOf(sections, useSearchParams().get("tab"), fallback);
+}
+
+/** What the top row shows for a section: its `title`, else its label. */
+export function sectionTitle(sections: readonly Section[], id: string): string {
+  const s = sections.find((x) => x.id === id);
+  return s?.title ?? s?.label ?? "";
+}
+
+/** The path part of a section address (`/people?tab=roles` → `/people`). */
+export const sectionPath = (s: Section): string => s.href.split("?")[0];
+
+/* ── Sidebar destinations ── */
+
+/** Which attention count a nav item (or section) shows. */
+export type NavBadge = "requests" | "contributions" | "studio" | "people" | "indexing" | "health" | "platformWorkspaces";
+
+/** Which section list a row opens as sub-rows while you're in its area. */
+export type NavSections = "library" | "studio" | "people" | "activity" | "settings" | "indexing";
 
 export interface NavItem {
   id: string;
@@ -45,6 +167,10 @@ export interface NavItem {
   badge?: NavBadge;
   /** The badge means something is broken (danger tone). */
   alert?: boolean;
+  /** The area's sections, shown as sub-rows. */
+  sections?: NavSections;
+  /** The row's own page in the rail's section menu, when it is not one of the sections (Knowledge → Browse). */
+  home?: string;
 }
 
 /** What the caller may see in the active workspace (`useWorkspace()`). */
@@ -53,48 +179,44 @@ export interface NavAccess {
   hasModule: (module: WorkspaceModule) => boolean;
 }
 
-/** Member destinations, filtered by workspace modules. Conversations live in the sidebar's Recent group. */
+/** WORKSPACE: where the organisation's knowledge and work live, filtered by workspace modules. Inbox is the top-row bell. */
 export const MEMBER_NAV: readonly NavItem[] = [
   { id: "home", label: "Home", icon: House, href: "/home" },
-  { id: "knowledge", label: "Knowledge", icon: BookOpen, href: "/knowledge" },
+  { id: "knowledge", label: "Knowledge", icon: BookOpen, href: "/knowledge", sections: "library", home: "Browse" },
+  { id: "chat", label: "AI Chat", icon: MessageSquare, href: "/chat" },
   { id: "work", label: "Work", icon: Sparkles, href: "/work", module: "work" },
   { id: "requests", label: "Requests", icon: ClipboardList, href: "/requests", module: "requests", badge: "requests" },
 ];
 
-/** Pages that are not in the sidebar but stay one ⌘K away. */
-export const MORE_PAGES: readonly NavItem[] = [
-  { id: "inbox", label: "Inbox", icon: Inbox, href: "/inbox" },
-  { id: "chats", label: "All conversations", icon: MessageSquare, href: "/chats" },
+/**
+ * YOUR WORK: what you touched lately, your project folders, your spaces, your submissions. My contributions shows to
+ * contributors and to anyone who still has submissions to follow (the sidebar decides the latter).
+ */
+export const YOUR_WORK_NAV: readonly NavItem[] = [
+  { id: "recent", label: "Recent", icon: Clock, href: "/recent" },
+  { id: "projects", label: "Projects", icon: Folder, href: "/projects" },
+  { id: "spaces", label: "Spaces", icon: Layers, href: "/spaces", module: "spaces" },
+  { id: "contributions", label: "My contributions", icon: Upload, href: "/contributions", badge: "contributions" },
 ];
 
-/** Spaces index (sidebar group label link and ⌘K page). */
-export const SPACES_NAV: NavItem = { id: "spaces", label: "Spaces", icon: Layers, href: "/spaces", module: "spaces" };
+/** Knowledge Studio: shown when the caller has at least one Studio section (`studioSections`). */
+export const STUDIO_NAV: NavItem = { id: "studio", label: "Knowledge Studio", icon: Library, href: "/studio", badge: "studio", sections: "studio" };
 
-/** Manage → Knowledge bases (preview `/bases`): shown to whoever owns or edits at least one base, or holds
- *  `items.create` — a per-base grant, not a single workspace permission, so it's rendered by `Sidebar.tsx`
- *  (which checks base ownership) rather than filtered by `manageNav()`. KNOWLEDGE_HUB.md: a knowledge base is
- *  managed here by its owners/editors; readers meet it only as a Browse filter, never as a Knowledge hub tab. */
-export const BASES_NAV: NavItem = { id: "bases", label: "Knowledge bases", icon: BookOpen, href: "/bases" };
-
-/** The Manage group: only what the caller may open is listed. */
+/** MANAGE: run the workspace. Everything about knowledge is one destination, Knowledge Studio (inserted by `manageNav`). */
 export const MANAGE_NAV: readonly NavItem[] = [
-  { id: "overview", label: "Overview", icon: House, href: "/overview", permission: "workspaces.getOverview" },
-  { id: "documents", label: "Documents", icon: Files, href: "/documents", permission: "contributions.review", badge: "documents" },
-  { id: "sources", label: "Sources", icon: RefreshCw, href: "/sources", permission: "sources.list", badge: "sources", alert: true },
-  // Preview gates Sources and Connections on one ability (source.manage); members can list their own connections.
-  { id: "connections", label: "Connections", icon: Plug, href: "/connections", permission: "sources.list", badge: "connections", alert: true },
-  { id: "people", label: "People", icon: Users, href: "/people", permission: "members.create", badge: "people" },
-  { id: "assistant", label: "Assistant", icon: Sparkles, href: "/assistant", permission: "workspaces.updateAssistant" },
-  { id: "activity", label: "Activity", icon: Activity, href: "/activity", permission: "auditEvents.list" },
-  { id: "settings", label: "Settings", icon: Settings, href: "/settings", permission: "workspaces.updateSettings" },
+  { id: "overview", label: "Overview", icon: LayoutDashboard, href: "/overview", permission: "workspaces.getOverview" },
+  { id: "people", label: "People", icon: Users, href: "/people", permission: "members.create", badge: "people", sections: "people" },
+  { id: "assistant", label: "Assistant", icon: Bot, href: "/assistant", permission: "workspaces.updateAssistant" },
+  { id: "activity", label: "Activity", icon: Activity, href: "/activity", permission: "auditEvents.list", sections: "activity" },
+  { id: "settings", label: "Settings", icon: Settings, href: "/settings", permission: "workspaces.updateSettings", sections: "settings" },
 ];
 
 /** The platform console (operators): the same shell, a different sidebar. */
 export const PLATFORM_NAV: readonly NavItem[] = [
-  { id: "p-workspaces", label: "Workspaces", icon: Building, href: "/p/workspaces" },
+  { id: "p-workspaces", label: "Workspaces", icon: Building, href: "/p/workspaces", badge: "platformWorkspaces" },
   { id: "p-users", label: "Users", icon: Users, href: "/p/users" },
   { id: "p-connectors", label: "Connectors", icon: Plug, href: "/p/connectors" },
-  { id: "p-indexing", label: "Indexing", icon: Database, href: "/p/indexing", badge: "indexing", alert: true },
+  { id: "p-indexing", label: "Indexing", icon: Database, href: "/p/indexing", badge: "indexing", alert: true, sections: "indexing" },
   { id: "p-usage", label: "Usage", icon: ChartColumn, href: "/p/usage" },
   { id: "p-audit", label: "Audit log", icon: Activity, href: "/p/audit" },
   { id: "p-health", label: "System health", icon: Server, href: "/p/health", badge: "health", alert: true },
@@ -111,8 +233,19 @@ export function memberNav(access: NavAccess): NavItem[] {
   return MEMBER_NAV.filter((item) => canSeeNavItem(item, access));
 }
 
-export function manageNav(access: NavAccess): NavItem[] {
-  return MANAGE_NAV.filter((item) => canSeeNavItem(item, access));
+/** Your work rows; `contributions` decides whether My contributions shows, `projects` whether Projects does (the API has
+ *  no projects: only the development adapter supplies them, `projectsAvailable` in `modules/projects/adapter`). */
+export function yourWorkNav(access: NavAccess, contributions: boolean, projects: boolean): NavItem[] {
+  return YOUR_WORK_NAV.filter(
+    (item) => canSeeNavItem(item, access) && (item.id !== "contributions" || contributions) && (item.id !== "projects" || projects),
+  );
+}
+
+/** Manage rows the caller may use; Knowledge Studio second when `studio` (an editor who owns a collection sees only it). */
+export function manageNav(access: NavAccess, studio: boolean): NavItem[] {
+  const rows = MANAGE_NAV.filter((item) => canSeeNavItem(item, access));
+  if (studio) rows.splice(rows[0]?.id === "overview" ? 1 : 0, 0, STUDIO_NAV);
+  return rows;
 }
 
 /* ── Routes ── */
@@ -140,8 +273,12 @@ export const ROUTES: readonly RouteDef[] = [
   { pattern: "/password-reset/:token", title: "Reset password", mode: "auth" },
   { pattern: "/workspaces", title: "Choose a workspace", mode: "auth" },
   { pattern: "/home", title: "Home", mode: "workspace", nav: "home" },
+  { pattern: "/recent", title: "Recent", mode: "workspace", nav: "recent" },
+  { pattern: "/projects", title: "Projects", mode: "workspace", nav: "projects" },
+  { pattern: "/project/:id", title: "Project", mode: "workspace", nav: "projects" },
+  { pattern: "/contributions", title: "My contributions", mode: "workspace", nav: "contributions" },
   { pattern: "/spaces", title: "Spaces", mode: "workspace", nav: "spaces", module: "spaces" },
-  { pattern: "/space/:id", title: "Space", mode: "workspace", nav: "space", module: "spaces" },
+  { pattern: "/space/:id", title: "Space", mode: "workspace", nav: "spaces", module: "spaces" },
   { pattern: "/work", title: "Work", mode: "workspace", nav: "work", module: "work" },
   { pattern: "/work/new", title: "New work", mode: "workspace", nav: "work", module: "work" },
   { pattern: "/work/:id", title: "Work", mode: "workspace", nav: "work", module: "work", bare: true },
@@ -150,21 +287,15 @@ export const ROUTES: readonly RouteDef[] = [
   { pattern: "/requests/:id", title: "Request", mode: "workspace", nav: "requests", module: "requests" },
   { pattern: "/chat", title: "New chat", mode: "workspace", nav: "chat", bare: true },
   { pattern: "/chat/:id", title: "Chat", mode: "workspace", nav: "chat", bare: true },
-  { pattern: "/chat/:id/shares/:share", title: "Shared conversation", mode: "workspace", nav: "chats", bare: true },
-  { pattern: "/project/:id", title: "Project", mode: "workspace", nav: "projects" },
-  { pattern: "/chats", title: "Conversations", mode: "workspace", nav: "chats" },
-  { pattern: "/inbox", title: "Inbox", mode: "workspace", nav: "inbox" },
-  { pattern: "/search", title: "Search", mode: "workspace", nav: "search" },
+  { pattern: "/chat/:id/shares/:share", title: "Shared conversation", mode: "workspace", nav: "chat", bare: true },
+  { pattern: "/search", title: "Search", mode: "workspace" },
   { pattern: "/knowledge", title: "Knowledge", mode: "workspace", nav: "knowledge" },
-  { pattern: "/knowledge/library", title: "My library", mode: "workspace", nav: "knowledge" },
-  { pattern: "/bases", title: "Knowledge bases", mode: "workspace", nav: "bases" },
-  { pattern: "/knowledge/collections/:id", title: "Collection", mode: "workspace", nav: "knowledge" },
-  { pattern: "/bases/:id", title: "Knowledge base", mode: "workspace", nav: "bases" },
+  { pattern: "/knowledge/library", title: "Knowledge", mode: "workspace", nav: "knowledge" },
+  { pattern: "/knowledge/lists/:id", title: "Reading list", mode: "workspace", nav: "knowledge" },
   { pattern: "/doc/:id", title: "Document", mode: "workspace", nav: "knowledge", bare: true },
   { pattern: "/overview", title: "Overview", mode: "workspace", nav: "overview", permission: "workspaces.getOverview" },
-  { pattern: "/documents", title: "Documents", mode: "workspace", nav: "documents", permission: "contributions.review" },
-  { pattern: "/sources", title: "Sources", mode: "workspace", nav: "sources", permission: "sources.list" },
-  { pattern: "/connections", title: "Connections", mode: "workspace", nav: "connections", permission: "sources.list" },
+  { pattern: "/studio", title: "Knowledge Studio", mode: "workspace", nav: "studio" },
+  { pattern: "/studio/collections/:id", title: "Collection", mode: "workspace", nav: "studio" },
   { pattern: "/people", title: "People", mode: "workspace", nav: "people", permission: "members.create" },
   { pattern: "/assistant", title: "Assistant", mode: "workspace", nav: "assistant", permission: "workspaces.updateAssistant" },
   { pattern: "/activity", title: "Activity", mode: "workspace", nav: "activity", permission: "auditEvents.list" },
@@ -183,7 +314,7 @@ const NOT_FOUND: RouteInfo = { title: "Not found", mode: "workspace" };
 function matches(pattern: string, pathname: string): boolean {
   const want = pattern.split("/");
   const got = pathname.replace(/\/+$/, "").split("/");
-  return want.length === got.length && want.every((seg, i) => seg.startsWith(":") ? got[i] !== "" : seg === got[i]);
+  return want.length === got.length && want.every((seg, i) => (seg.startsWith(":") ? got[i] !== "" : seg === got[i]));
 }
 
 /** The route an address belongs to; unknown addresses are "Not found" (platform ones in the console). */

@@ -103,7 +103,7 @@ export function useTopics() {
 const readableBases = (bases: Item[]) => bases.filter((b) => b.access !== "LOCKED");
 
 /**
- * Root collections ("knowledge bases"); `showLocked` adds discoverable ones the caller can't read (LOCKED).
+ * Root collections (access boundaries); `showLocked` adds discoverable ones the caller can't read (LOCKED).
  * Both variants share one request (`showLocked=true`), so a page never lists the roots twice.
  */
 export function useKnowledgeBases({ showLocked = false, enabled = true }: { showLocked?: boolean; enabled?: boolean } = {}) {
@@ -128,25 +128,48 @@ export function useContributionTargets() {
 }
 
 /**
+ * Display names of personal collections: the caller's is "My files"; other members' (readable by
+ * admins) are named after their owner, so two "My files" never look like one collection.
+ */
+export function usePersonalCollectionNames(): ReadonlyMap<string, string> {
+  const { member } = useWorkspace();
+  const bases = useKnowledgeBases();
+  const others = (bases.data ?? []).filter((b) => b.collection?.kind === "PERSONAL" && b.name !== member.personalCollection);
+  const owners = useMemberNames(others.map((b) => b.collection?.owner ?? b.creator));
+  return useMemo(() => {
+    const out = new Map<string, string>();
+    for (const b of others) {
+      const owner = owners.get(b.collection?.owner ?? b.creator ?? "");
+      if (b.name) out.set(b.name, owner ? `${owner}’s files` : "Personal files");
+    }
+    if (member.personalCollection) out.set(member.personalCollection, "My files");
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `bases.data` and `owners` capture `others`
+  }, [bases.data, owners, member.personalCollection]);
+}
+
+/**
  * The resource model for this workspace: `toResource(item)` with document-type labels,
- * topic and base names and the caller's "My files" resolved.
+ * topic and base names and personal collections ("My files", others' files) resolved.
  */
 export function useKnowledgeModel(extraCollections?: ReadonlyMap<string, string>) {
   const { id, member, settings } = useWorkspace();
   const topics = useTopics();
   const bases = useKnowledgeBases();
+  const personal = usePersonalCollectionNames();
   const ctx = useMemo<ModelContext>(() => {
     const collectionNames = new Map<string, string>(extraCollections ?? []);
     for (const b of bases.data ?? []) if (b.name) collectionNames.set(b.name, b.displayName ?? "");
-    if (member.personalCollection) collectionNames.set(member.personalCollection, "My files");
+    for (const [name, label] of personal) collectionNames.set(name, label);
     return {
       workspaceId: id,
       personalCollection: member.personalCollection,
+      personalCollections: new Set(personal.keys()),
       documentTypes: new Map((settings?.documentTypes ?? []).map((t) => [t.key ?? "", t.displayName ?? t.key ?? ""])),
       topicNames: topicNames(topics.data ?? []),
       collectionNames,
     };
-  }, [id, member.personalCollection, settings?.documentTypes, topics.data, bases.data, extraCollections]);
+  }, [id, member.personalCollection, settings?.documentTypes, topics.data, bases.data, extraCollections, personal]);
   const map = useCallback((item: Item, extra?: { contribution?: Contribution | null; verifierName?: string }): Resource => toResource(item, ctx, extra), [ctx]);
   return { ctx, toResource: map, topics: topics.data ?? [], bases: bases.data ?? [] };
 }
@@ -368,7 +391,7 @@ export function useSavedSearchMutations() {
   };
 }
 
-/* ═══════════════ Reading lists ("Collections") ═══════════════ */
+/* ═══════════════ Reading lists ═══════════════ */
 
 /** Visible reading lists (AIP-160 `filter`: `audience`, `space`, `owner`, `type`), newest first. */
 export function useReadingLists(filter = "") {
@@ -468,12 +491,12 @@ export interface ItemSpace {
   material?: string;
   /** The caller may pin/unpin materials here (`materials.create` + `.delete`). */
   manageable: boolean;
-  /** The item's knowledge base belongs to this space (`collection.space`); not removable here. */
+  /** The item's collection belongs to this space (`collection.space`); not removable here. */
   viaBase: boolean;
 }
 
 /**
- * Spaces related to an item: where it's pinned as a material, the space of its knowledge base, and
+ * Spaces related to an item: where it's pinned as a material, the space of its collection, and
  * every space whose materials the caller manages. Spaces module only (empty otherwise).
  */
 export function useItemSpaces(item: string | undefined | null, { baseSpace, enabled = true }: { baseSpace?: string; enabled?: boolean } = {}) {

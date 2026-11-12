@@ -28,8 +28,8 @@ export interface KindMeta {
 }
 
 export const WORK_KINDS: Readonly<Record<WorkKind, KindMeta>> = {
-  EVIDENCE_REVIEW: { label: "Literature review", icon: Table, tone: "warning", noun: "review", layout: "wide" },
-  DRAFT: { label: "Draft", icon: Pencil, tone: "default", noun: "draft", layout: "doc" },
+  EVIDENCE_REVIEW: { label: "Evidence review", icon: Table, tone: "warning", noun: "review", layout: "wide" },
+  DRAFT: { label: "Draft", icon: Pencil, tone: "accent", noun: "draft", layout: "doc" },
   STUDY_GUIDE: { label: "Study guide", icon: BookOpen, tone: "success", noun: "study guide", layout: "narrow" },
   QUIZ: { label: "Quiz", icon: CircleCheck, tone: "accent", noun: "questions", layout: "narrow" },
 };

@@ -15,9 +15,13 @@ interface OverlayState {
   query: string;
   /** Product tour step, or null when it is not running. */
   tour: number | null;
+  /** Preferences section to scroll to when the dialog opens. */
+  prefsFocus: PreferencesSection | null;
 }
 
-let state: OverlayState = { open: null, query: "", tour: null };
+export type PreferencesSection = "notifications";
+
+let state: OverlayState = { open: null, query: "", tour: null, prefsFocus: null };
 const listeners = new Set<() => void>();
 
 function set(patch: Partial<OverlayState>) {
@@ -30,7 +34,7 @@ function subscribe(fn: () => void) {
   return () => listeners.delete(fn);
 }
 
-const SERVER: OverlayState = { open: null, query: "", tour: null };
+const SERVER: OverlayState = { open: null, query: "", tour: null, prefsFocus: null };
 
 export function useShellOverlays(): OverlayState {
   return useSyncExternalStore(subscribe, () => state, () => SERVER);
@@ -41,8 +45,9 @@ export function openCommandPalette(query = ""): void {
   set({ open: "palette", query });
 }
 
-export function openPreferences(): void {
-  set({ open: "preferences" });
+/** Preferences; `focus` scrolls to a section (the Inbox's Notification settings opens Email notifications). */
+export function openPreferences(focus: PreferencesSection | null = null): void {
+  set({ open: "preferences", prefsFocus: focus });
 }
 
 /** The Appearance drawer replaces an open Preferences dialog (preview `X.appearance.open`). */
@@ -55,7 +60,7 @@ export function openShortcuts(): void {
 }
 
 export function closeOverlay(): void {
-  set({ open: null, query: "" });
+  set({ open: null, query: "", prefsFocus: null });
 }
 
 export function setTourStep(step: number | null): void {

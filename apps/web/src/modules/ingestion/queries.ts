@@ -137,4 +137,14 @@ export function sourcesByConnection(sources: readonly Source[] | undefined): Map
   return out;
 }
 
+/** Something on Studio → Sources needs fixing: a failed or expired source, or an expired account (Studio landing). */
+export function useSourcesNeedAttention(): boolean {
+  const sources = useSources();
+  const connections = useConnections();
+  return (
+    (sources.data ?? []).some((s) => s.state === "FAILED" || s.state === "REAUTHORIZATION_REQUIRED") ||
+    (connections.data ?? []).some((c) => c.state === "REAUTHORIZATION_REQUIRED" || c.state === "FAILED")
+  );
+}
+
 export type { Connection, Source, Sync };

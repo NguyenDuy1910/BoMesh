@@ -12,19 +12,19 @@ import { resourceId } from "@/lib/api/client";
 import type { Resource } from "../../model";
 import { useKnowledgeModel } from "../../queries";
 import { useShareLabel } from "../../components/share-label";
-import { openAddToCollection } from "../../components/dialogs";
+import { openAddToReadingList } from "../../components/dialogs";
 import { ResourceList, ResourceRow } from "../../components/ResourceRow";
-import { useCollectionsIncluding, useRelated } from "../queries";
+import { useReadingListsIncluding, useRelated } from "../queries";
 import { RailSection } from "./AboutPane";
 
 /**
- * Related tab (preview `relatedPane`): similar resources and the collections that include it.
+ * Related tab (preview `relatedPane`): similar resources and the reading lists that include it.
  * "Cited in your conversations" is omitted: the API has no query for conversations citing an item.
  */
 export function RelatedPane({ resource: r }: { resource: Resource }) {
   const { toResource } = useKnowledgeModel();
   const related = useRelated(r.id, { enabled: r.readable });
-  const cols = useCollectionsIncluding(r.id);
+  const lists = useReadingListsIncluding(r.id);
   const share = useShareLabel();
   const rows = (related.data?.results ?? []).flatMap((x) => (x.item && resourceId(x.item.name) !== r.id ? [toResource(x.item)] : []));
 
@@ -48,16 +48,16 @@ export function RelatedPane({ resource: r }: { resource: Resource }) {
         )}
       </RailSection>
       <RailSection
-        title="Collections that include it"
-        extra={<IconButton icon={ListPlus} tip="Add to collection" size="sm" onPress={() => openAddToCollection(r.name)} />}
+        title="Reading lists that include it"
+        extra={<IconButton icon={ListPlus} tip="Add to reading list" size="sm" onPress={() => openAddToReadingList(r.name)} />}
       >
-        {cols.isPending ? (
+        {lists.isPending ? (
           <SkeletonRows rows={2} />
-        ) : cols.isError ? (
-          <ErrorState error={cols.error} onRetry={cols.refetch} boxed={false} compact />
-        ) : cols.data.length ? (
+        ) : lists.isError ? (
+          <ErrorState error={lists.error} onRetry={lists.refetch} boxed={false} compact />
+        ) : lists.data.length ? (
           <List plain className="rdr-list">
-            {cols.data.map((c) => {
+            {lists.data.map((c) => {
               const s = share(c);
               return (
                 <ListItem
@@ -70,13 +70,13 @@ export function RelatedPane({ resource: r }: { resource: Resource }) {
                       {s.label}
                     </span>
                   }
-                  href={`/knowledge/collections/${resourceId(c.name)}`}
+                  href={`/knowledge/lists/${resourceId(c.name)}`}
                 />
               );
             })}
           </List>
         ) : (
-          <p className="rdr-none">Not in any collection you can see.</p>
+          <p className="rdr-none">Not in any reading list you can see.</p>
         )}
       </RailSection>
     </>

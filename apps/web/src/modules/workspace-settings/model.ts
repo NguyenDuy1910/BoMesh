@@ -107,17 +107,18 @@ export function setupOf(settings: Settings | null | undefined): Setup {
   };
 }
 
-const sameSet = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((x) => b.includes(x));
+/** Items in one list but not the other. */
+const diff = (a: readonly string[], b: readonly string[]) => a.filter((x) => !b.includes(x)).length + b.filter((x) => !a.includes(x)).length;
 
-/** Whether a module differs from the template default (preview "Changed from <template>"). */
+/** Whether a module differs from the template default. */
 export const moduleChanged = (setup: Setup, template: Template, key: ModuleKey) => setup.modules[key] !== template.modules[key];
 
-/** Whether anything differs from the template defaults (shows "Reset to … defaults"). */
-export function isOverridden(setup: Setup, template: Template): boolean {
+/** How many settings differ from the template defaults (preview `setupChanges`; 0 hides "Reset to … defaults"). */
+export function setupChanges(setup: Setup, template: Template): number {
   return (
-    MODULES.some((m) => moduleChanged(setup, template, m.key)) ||
-    (setup.modules.spaces && !sameSet(setup.spaceTypes, template.spaceTypes)) ||
-    (setup.modules.work && !sameSet(setup.workflows, template.workflows))
+    MODULES.filter((m) => moduleChanged(setup, template, m.key)).length +
+    (setup.modules.spaces ? diff(setup.spaceTypes, template.spaceTypes) : 0) +
+    (setup.modules.work ? diff(setup.workflows, template.workflows) : 0)
   );
 }
 

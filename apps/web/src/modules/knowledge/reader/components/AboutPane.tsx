@@ -2,7 +2,7 @@
 
 import { Button, buttonVariants } from "@heroui/react";
 import clsx from "clsx";
-import { Link as LinkIcon, Link2, Lock, Pencil } from "lucide-react";
+import { Link as LinkIcon, Lock, Pencil } from "lucide-react";
 import NextLink from "next/link";
 import type { ReactNode } from "react";
 
@@ -10,11 +10,10 @@ import { StatusChip } from "@/components/ui/StatusChip";
 import { toast } from "@/components/ui/Toast";
 import { resourceId } from "@/lib/api/client";
 import { fmtDate } from "@/lib/format";
-import { useWorkspace } from "@/lib/workspace";
 
 import type { Resource } from "../../model";
 import { useItem, useMemberNames } from "../../queries";
-import { openEditDetails, openLinkToSpaces } from "../../components/dialogs";
+import { openEditDetails } from "../../components/dialogs";
 import { ResourceDetails } from "../../components/ResourceDetails";
 import type { ItemRevision } from "../api";
 import { revisionNumber } from "../links";
@@ -43,9 +42,12 @@ export interface AboutPaneProps {
   onView: (v: number | undefined) => void;
 }
 
-/** About tab (preview `aboutPane`): details, a few actions, version history. */
+/**
+ * About tab (preview `aboutPane`): details (type, topics, owner, collection, source/provenance, trust,
+ * version, who can see it; Edit for editors), the source link and the collection's access for its
+ * owners, then the version history (View an older version → `?v=`).
+ */
 export function AboutPane({ resource: r, canEdit, revisions, viewing, current, onView }: AboutPaneProps) {
-  const { hasModule } = useWorkspace();
   const base = useItem(r.isPersonal ? null : r.base?.id);
   const owner = base.data?.access === "OWNER" && !r.isPersonal;
   const names = useMemberNames((revisions ?? []).map((v) => v.creator));
@@ -59,25 +61,13 @@ export function AboutPane({ resource: r, canEdit, revisions, viewing, current, o
   };
   const acts = [
     r.source.url && (
-      <Button key="src" size="sm" variant="secondary" onPress={() => void copySource()}>
+      <Button key="src" size="sm" variant="ghost" onPress={() => void copySource()}>
         <LinkIcon className="i" aria-hidden />
         Copy source link
       </Button>
     ),
-    canEdit && (
-      <Button key="edit" size="sm" variant="secondary" onPress={() => openEditDetails(r.name)}>
-        <Pencil className="i" aria-hidden />
-        Edit details
-      </Button>
-    ),
-    canEdit && hasModule("spaces") && (
-      <Button key="link" size="sm" variant="secondary" onPress={() => openLinkToSpaces(r.name)}>
-        <Link2 className="i" aria-hidden />
-        Link to spaces
-      </Button>
-    ),
     owner && r.base && (
-      <NextLink key="access" href={`/bases/${r.base.id}?tab=access`} className={buttonVariants({ variant: "secondary", size: "sm" })}>
+      <NextLink key="access" href={`/studio/collections/${resourceId(r.base.id)}?tab=access`} className={buttonVariants({ variant: "ghost", size: "sm" })}>
         <Lock className="i" aria-hidden />
         Manage access
       </NextLink>
@@ -86,7 +76,17 @@ export function AboutPane({ resource: r, canEdit, revisions, viewing, current, o
 
   return (
     <>
-      <RailSection title="Details">
+      <RailSection
+        title="Details"
+        extra={
+          canEdit ? (
+            <Button size="sm" variant="ghost" aria-label="Edit details" onPress={() => openEditDetails(r.name)}>
+              <Pencil className="i" aria-hidden />
+              Edit
+            </Button>
+          ) : null
+        }
+      >
         <ResourceDetails resource={r} />
       </RailSection>
       {acts.length ? <div className="rdr-acts">{acts}</div> : null}
@@ -102,7 +102,7 @@ export function AboutPane({ resource: r, canEdit, revisions, viewing, current, o
                 <li key={v.name} className={clsx("rdr-ver", on && "is-on")}>
                   <span className="rdr-ver__v num">v{n}</span>
                   <span className="rdr-ver__body">
-                    <span className="rdr-ver__note" translate="no">
+                    <span className="rdr-ver__note" translate={v.changeSummary ? "no" : undefined}>
                       {v.changeSummary || "Updated"}
                     </span>
                     <span className="rdr-ver__meta">

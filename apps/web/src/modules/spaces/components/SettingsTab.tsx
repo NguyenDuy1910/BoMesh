@@ -2,20 +2,24 @@
 
 import { Button, FieldError, Input, Label, TextArea, TextField } from "@heroui/react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Archive } from "lucide-react";
+import { Archive, Check, ClipboardList, Link as LinkIcon, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { ChoiceGroup, FormSection, SaveBar, SkeletonRows, SwitchRow, confirm, toast } from "@/components/ui";
+import { ChoiceGroup, Disclosure, FormSection, ItemIcon, List, ListItem, SaveBar, Segmented, SkeletonRows, SwitchRow, confirm, toast } from "@/components/ui";
 import { errorMessage } from "@/lib/api/client";
-import { plural } from "@/lib/format";
+import { fmtNum, plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { updateItem } from "@/modules/knowledge/api";
+import { createBase } from "@/modules/knowledge/bases/api";
+import { KnowledgeModal } from "@/modules/knowledge/components/KnowledgeModal";
+import { slaDays } from "@/modules/requests/model";
 
-import { deleteSpace, undeleteSpace, updateSpace } from "../api";
-import { invalidateSpaces, useLinkableBases, useSpaces } from "../queries";
+import { createRequestType, deleteRequestType, deleteSpace, undeleteRequestType, undeleteSpace, updateRequestType, updateSpace, type RequestType } from "../api";
+import { invalidateSpaces, useLinkableBases, useRequestTypes, useSpaces, type LinkableBase } from "../queries";
 import { MAX_NAME, POLICY_OF, visibilityOf, type Space, type Visibility } from "../types";
 import type { SpaceView } from "./context";
+import { Menu } from "./Menu";
 import { spaceNameError } from "./CreateSpaceDialog";
 
 interface Form {
@@ -23,6 +27,7 @@ interface Form {
   desc: string;
   visibility: Visibility;
   bases: string[];
+  newKb: boolean;
 }
 
 const formOf = (space: Space, linked: readonly string[]): Form => ({
@@ -30,9 +35,10 @@ const formOf = (space: Space, linked: readonly string[]): Form => ({
   desc: space.description ?? "",
   visibility: visibilityOf(space.joinPolicy),
   bases: [...linked],
+  newKb: false,
 });
 
-/** Settings (preview `settingsTab`, leads and admins): details, linked knowledge, who can find it, archive. */
+/** Settings (preview `settingsTab`, leads and admins): details, linked collections, request types, who can find it, archive. */
 export function SettingsTab({ view }: { view: SpaceView }) {
   const bases = useLinkableBases();
   if (!bases.data) return <SkeletonRows rows={4} />;
@@ -40,13 +46,31 @@ export function SettingsTab({ view }: { view: SpaceView }) {
   return <SettingsForm key={`${view.space.etag}-${linked.join(",")}`} view={view} linked={linked} />;
 }
 
+/** One collection to link (preview `kbRow`). */
+function CollectionSwitch({ entry, space, on, disabled, onChange }: { entry: LinkableBase; space: Space; on: boolean; disabled: boolean; onChange: (on: boolean) => void }) {
+  const { base, readable, editable } = entry;
+  const docs = plural(base.collection?.documentCount ?? 0, "document");
+  const elsewhere = base.collection?.space && base.collection.space !== space.name;
+  return (
+    <SwitchRow
+      title={<span translate="no">{base.displayName}</span>}
+      label={base.displayName}
+      description={!readable ? "You can’t read this one" : !editable ? "Only its editors can link it" : elsewhere ? `${docs} · linked to another space` : docs}
+      isDisabled={!editable || disabled}
+      isSelected={on}
+      onChange={onChange}
+    />
+  );
+}
+
 function SettingsForm({ view, linked }: { view: SpaceView; linked: string[] }) {
-  const { id: ws, workspace } = useWorkspace();
+  const { id: ws, workspace, hasModule, can: wsCan } = useWorkspace();
   const router = useRouter();
   const qc = useQueryClient();
   const { space, type, sid } = view;
   const spaces = useSpaces();
   const bases = useLinkableBases();
+  const catalog = useRequestTypes(sid);
   const [f, setF] = useState<Form>(() => formOf(space, linked));
   const [tried, setTried] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -56,11 +80,23 @@ function SettingsForm({ view, linked }: { view: SpaceView; linked: string[] }) {
     f.name.trim() !== initial.name ||
     f.desc.trim() !== initial.desc ||
     f.visibility !== initial.visibility ||
+    f.newKb ||
     [...f.bases].sort().join() !== [...initial.bases].sort().join();
 
   const cands = (bases.data ?? []).filter((b) => b.readable || initial.bases.includes(b.base.name ?? ""));
+  const saved = cands.filter((b) => initial.bases.includes(b.base.name ?? ""));
+  const rest = cands.filter((b) => !initial.bases.includes(b.base.name ?? ""));
+  const picked = rest.filter((b) => f.bases.includes(b.base.name ?? "")).length;
+  // Same pattern as Create: a Switch for the space's own collection (until it has one), then a Switch per collection.
+  const offerNew = !initial.bases.length && wsCan("items.create");
+  const toggleBase = (name: string, on: boolean) => setF({ ...f, bases: on ? [...f.bases, name] : f.bases.filter((b) => b !== name) });
+  const takesRequests = hasModule("requests") && type.key !== "course";
   const visibility: { value: Visibility; title: string; description: string }[] = [
-    { value: "open", title: "Open", description: `Anyone in ${workspace.displayName ?? "the workspace"} can open it and send requests.` },
+    {
+      value: "open",
+      title: "Open",
+      description: `Anyone in ${workspace.displayName ?? "the workspace"} can open it${catalog.data?.length ? " and send requests" : ""}.`,
+    },
     { value: "discoverable", title: "Discoverable", description: "Anyone can find it and ask to join." },
     {
       value: "members",
@@ -87,9 +123,11 @@ function SettingsForm({ view, linked }: { view: SpaceView; linked: string[] }) {
         );
       const add = f.bases.filter((b) => !initial.bases.includes(b));
       const drop = initial.bases.filter((b) => !f.bases.includes(b));
+      const name = f.name.trim();
       await Promise.all([
         ...add.map((b) => updateItem(ws, b, { collection: { space: space.name } }, ["collection.space"])),
         ...drop.map((b) => updateItem(ws, b, { collection: { space: "" } }, ["collection.space"])),
+        ...(f.newKb ? [createBase(ws, { displayName: name, description: f.desc.trim() || `Materials for ${name}.`, discoverable: true, space: space.name })] : []),
       ]);
       await invalidateSpaces(qc, ws);
       void qc.invalidateQueries({ queryKey: [ws, "items"] });
@@ -101,13 +139,13 @@ function SettingsForm({ view, linked }: { view: SpaceView; linked: string[] }) {
     }
   }
 
+  // Archiving hides the space from everyone who depends on it, so it asks first (no typed name: that's for workspaces).
   async function archive() {
     const ok = await confirm({
       title: `Archive ${space.displayName}?`,
-      description: "Members lose the space page, its announcements and queue. Linked knowledge bases and saved work stay where they are.",
+      description: "Members lose the space page, its announcements and queue. Linked collections and saved work stay where they are.",
       confirmLabel: "Archive space",
       tone: "danger",
-      typed: space.displayName,
     });
     if (!ok) return;
     try {
@@ -141,36 +179,53 @@ function SettingsForm({ view, linked }: { view: SpaceView; linked: string[] }) {
             <TextArea rows={2} />
           </TextField>
         </FormSection>
-        <FormSection title="Knowledge" description="Members can read and ask about linked knowledge bases. Access to each base still applies.">
+        <FormSection title="Knowledge" description="Members can read and ask about linked collections. Access to each collection still applies.">
           <div className="stack gap-4">
-            {cands.length ? (
-              cands.map(({ base, readable, editable }) => {
-                const elsewhere = base.collection?.space && base.collection.space !== space.name;
-                return (
-                  <SwitchRow
-                    key={base.name}
-                    title={<span translate="no">{base.displayName}</span>}
-                    label={base.displayName}
-                    description={
-                      !readable
-                        ? "You can’t read this one"
-                        : !editable
-                          ? "Only its editors can link it"
-                          : elsewhere
-                            ? `${plural(base.collection?.documentCount ?? 0, "document")} · linked to another space`
-                            : plural(base.collection?.documentCount ?? 0, "document")
-                    }
-                    isDisabled={!editable || busy}
-                    isSelected={f.bases.includes(base.name ?? "")}
-                    onChange={(on) => setF({ ...f, bases: on ? [...f.bases, base.name ?? ""] : f.bases.filter((b) => b !== base.name) })}
-                  />
-                );
-              })
-            ) : (
-              <p className="t-sm muted">No knowledge bases to link yet.</p>
-            )}
+            {offerNew ? (
+              <SwitchRow
+                title="Start a new collection for this space"
+                description="Named after the space, owned by you. Members contribute to it."
+                isSelected={f.newKb}
+                onChange={(newKb) => setF({ ...f, newKb })}
+                isDisabled={busy}
+              />
+            ) : null}
+            {saved.map((b) => (
+              <CollectionSwitch
+                key={b.base.name}
+                entry={b}
+                space={space}
+                on={f.bases.includes(b.base.name ?? "")}
+                disabled={busy}
+                onChange={(on) => toggleBase(b.base.name ?? "", on)}
+              />
+            ))}
+            {rest.length ? (
+              <div className="mt-8">
+                <Disclosure title="Link existing collections" icon={LinkIcon} summary={picked ? `${fmtNum(picked)} selected` : `${fmtNum(rest.length)} available`}>
+                  <div className="stack gap-4">
+                    {rest.map((b) => (
+                      <CollectionSwitch
+                        key={b.base.name}
+                        entry={b}
+                        space={space}
+                        on={f.bases.includes(b.base.name ?? "")}
+                        disabled={busy}
+                        onChange={(on) => toggleBase(b.base.name ?? "", on)}
+                      />
+                    ))}
+                  </div>
+                </Disclosure>
+              </div>
+            ) : null}
+            {!offerNew && !cands.length ? <p className="t-sm muted">No collections to link yet.</p> : null}
           </div>
         </FormSection>
+        {takesRequests ? (
+          <FormSection title="Requests" description="What people can ask for, and how soon you usually answer. Changes apply right away.">
+            <RequestTypes view={view} types={catalog.data} />
+          </FormSection>
+        ) : null}
         <FormSection title="Who can find it">
           <ChoiceGroup label="Who can find it" value={f.visibility} onChange={(visibility) => setF({ ...f, visibility })} options={visibility} isDisabled={busy} />
         </FormSection>
@@ -183,7 +238,7 @@ function SettingsForm({ view, linked }: { view: SpaceView; linked: string[] }) {
                 </span>
                 <div className="grow">
                   <h3 className="card__title">Archive space</h3>
-                  <p className="card__description">Hides it for everyone. Linked knowledge bases and saved work stay where they are.</p>
+                  <p className="card__description">Hides it for everyone. Linked collections and saved work stay where they are.</p>
                 </div>
                 <Button variant="danger-soft" onPress={() => void archive()}>
                   <Archive aria-hidden />
@@ -196,7 +251,183 @@ function SettingsForm({ view, linked }: { view: SpaceView; linked: string[] }) {
           )}
         </FormSection>
       </div>
-      <SaveBar isDirty={dirty} isSaving={busy} onSave={() => void save()} onDiscard={() => setF(initial)} />
+      <SaveBar isDirty={dirty} isSaving={busy} saveLabel="Save changes" onSave={() => void save()} onDiscard={() => setF(initial)} />
     </>
+  );
+}
+
+const slaWords = (d: number | null) => (d === null ? "" : d <= 1 ? "Next working day" : `${d} working days`);
+
+/** Request types (preview `requestTypesSection`): what people can ask this office or team for. Delete is immediate with Undo. */
+function RequestTypes({ view, types }: { view: SpaceView; types: RequestType[] | undefined }) {
+  const { id: ws } = useWorkspace();
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState<{ type?: RequestType } | null>(null);
+  const canCreate = view.can("requestTypes.create");
+  const canEdit = view.can("requestTypes.update");
+  const canDelete = view.can("requestTypes.delete");
+  if (!types) return <SkeletonRows rows={2} />;
+
+  async function remove(t: RequestType) {
+    try {
+      await deleteRequestType(t.name ?? "", t.etag);
+      void invalidateSpaces(qc, ws);
+      toast(`Deleted “${t.displayName}”`, {
+        undo: () =>
+          void undeleteRequestType(t.name ?? "")
+            .then(() => invalidateSpaces(qc, ws))
+            .catch((e) => toast(errorMessage(e), { tone: "danger" })),
+      });
+    } catch (e) {
+      toast(errorMessage(e), { tone: "danger" });
+    }
+  }
+
+  const add = canCreate ? (
+    <Button variant="tertiary" onPress={() => setEditing({})}>
+      <Plus aria-hidden />
+      New request type
+    </Button>
+  ) : null;
+
+  return (
+    <>
+      {types.length ? (
+        <>
+          <List>
+            {types.map((t) => (
+              <ListItem
+                key={t.name}
+                lead={<ItemIcon icon={ClipboardList} size="sm" />}
+                title={t.displayName}
+                contentTitle
+                description={[slaWords(slaDays(t)), plural(t.fields?.length ?? 0, "field"), t.rules?.length ? plural(t.rules.length, "rule check") : ""].filter(Boolean).join(" · ")}
+                actions={
+                  canEdit || canDelete ? (
+                    <span className="reveal-on-hover">
+                      <Menu
+                        label={`Options for ${t.displayName}`}
+                        nodes={[
+                          ...(canEdit ? [{ id: "edit", label: "Edit", icon: Pencil, run: () => setEditing({ type: t }) }] : []),
+                          ...(canEdit && canDelete ? [{ sep: "1" }] : []),
+                          ...(canDelete ? [{ id: "delete", label: "Delete", icon: Trash2, danger: true, run: () => void remove(t) }] : []),
+                        ]}
+                      >
+                        <Button isIconOnly size="sm" variant="ghost" aria-label={`Options for ${t.displayName}`} className="button--muted">
+                          <MoreHorizontal aria-hidden />
+                        </Button>
+                      </Menu>
+                    </span>
+                  ) : undefined
+                }
+              />
+            ))}
+          </List>
+          {add ? <div className="mt-12">{add}</div> : null}
+        </>
+      ) : (
+        <div className="stack gap-12">
+          <p className="t-sm muted">
+            <span translate="no">{view.space.displayName}</span> doesn’t take requests yet. Add a type and it shows up in Requests → New request.
+          </p>
+          {add ? <div>{add}</div> : null}
+        </div>
+      )}
+      {editing ? <RequestTypeDialog view={view} type={editing.type} onClose={() => setEditing(null)} /> : null}
+    </>
+  );
+}
+
+const SLA_OPTS = [
+  { value: "1", label: "Next day" },
+  { value: "2", label: "2 days" },
+  { value: "3", label: "3 days" },
+  { value: "5", label: "5 days" },
+];
+
+/** New or edit request type (preview `M['sp-rt']`). */
+function RequestTypeDialog({ view, type, onClose }: { view: SpaceView; type?: RequestType; onClose: () => void }) {
+  const { id: ws } = useWorkspace();
+  const qc = useQueryClient();
+  const [name, setName] = useState(type?.displayName ?? "");
+  const [desc, setDesc] = useState(type?.description ?? "");
+  const [sla, setSla] = useState(String(slaDays(type) ?? 2));
+  const [tried, setTried] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const err = tried && !name.trim() ? "Name what people can ask for." : "";
+  const kept = type ? [plural(type.fields?.length ?? 0, "field"), type.rules?.length ? plural(type.rules.length, "rule check") : ""].filter(Boolean).join(" · ") : "";
+
+  async function save() {
+    setTried(true);
+    const n = name.trim();
+    if (!n) return;
+    setBusy(true);
+    const data = { displayName: n, description: desc.trim(), slaDuration: `${Number(sla) * 86_400}s` };
+    try {
+      if (type?.name) {
+        await updateRequestType(type.name, { ...data, etag: type.etag }, ["displayName", "description", "slaDuration"]);
+        toast("Request type updated");
+      } else {
+        const made = await createRequestType(ws, view.sid, { ...data, fields: [{ key: "details", displayName: "Details", type: "TEXT", required: true }] });
+        toast(`People can now request “${n}”`, {
+          undo: () =>
+            void deleteRequestType(made.name ?? "", made.etag)
+              .then(() => invalidateSpaces(qc, ws))
+              .catch((e) => toast(errorMessage(e), { tone: "danger" })),
+        });
+      }
+      void invalidateSpaces(qc, ws);
+      onClose();
+    } catch (e) {
+      toast(errorMessage(e), { tone: "danger" });
+      setBusy(false);
+    }
+  }
+
+  return (
+    <KnowledgeModal
+      isOpen
+      onClose={onClose}
+      guard={busy}
+      size="md"
+      icon={ClipboardList}
+      title={type ? "Edit request type" : "New request type"}
+      description="It shows up in Requests → New request, and requests land in this space’s queue."
+      footer={
+        <>
+          <Button variant="ghost" onPress={onClose} isDisabled={busy}>
+            Cancel
+          </Button>
+          <Button variant="primary" onPress={() => void save()} isPending={busy}>
+            {type ? <Check aria-hidden /> : <Plus aria-hidden />}
+            {type ? "Save changes" : "Add request type"}
+          </Button>
+        </>
+      }
+    >
+      <div className="stack gap-16">
+        <TextField value={name} onChange={setName} isRequired isInvalid={!!err} maxLength={60} autoFocus>
+          <Label>Name</Label>
+          <Input placeholder="e.g. New laptop" />
+          <FieldError>{err}</FieldError>
+        </TextField>
+        <TextField value={desc} onChange={setDesc} maxLength={160}>
+          <Label>
+            What it’s for <span className="label__opt">(optional)</span>
+          </Label>
+          <TextArea rows={2} placeholder="One line people read before they choose it." />
+        </TextField>
+        <div className="field">
+          <span className="label">Usual turnaround</span>
+          <Segmented label="Usual turnaround" value={sla} onChange={setSla} options={SLA_OPTS} />
+          <div className="description">Working days. Staff see it as the SLA in their queue.</div>
+        </div>
+        <p className="t-sm muted">
+          {type
+            ? `${kept} stay as they are.`
+            : "People describe what they need in one Details field. The assistant checks your space’s policies before they send."}
+        </p>
+      </div>
+    </KnowledgeModal>
   );
 }

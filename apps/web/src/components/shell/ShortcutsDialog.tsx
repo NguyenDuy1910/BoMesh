@@ -7,6 +7,7 @@ import { closeOverlay, useShellOverlays } from "./overlays";
 const SHORTCUTS: [string, string[]][] = [
   ["Search or ask", ["⌘", "K"]],
   ["New chat", ["⌘", "⇧", "O"]],
+  ["Collapse or expand the sidebar", ["⌘", "\\"]],
   ["Send message", ["↵"]],
   ["New line", ["⇧", "↵"]],
   ["Close dialog or panel", ["Esc"]],

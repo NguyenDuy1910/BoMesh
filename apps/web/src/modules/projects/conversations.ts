@@ -2,7 +2,7 @@
 
 import { api, call, listAll, resourceId, type Schema } from "@/lib/api/client";
 
-/** Conversation API used by the conversation lists (`/chats`, sidebar, projects). */
+/** Conversation API used by the conversation lists (AI Chat's list, project pages, the thread's ⋯ menu). */
 
 export type Conversation = Schema<"Conversation">;
 
@@ -24,22 +24,6 @@ export function listConversations(workspace: string): Promise<Conversation[]> {
       ),
     (page) => page.conversations,
   );
-}
-
-/** The caller's `pageSize` most recently active conversations (one ListConversations page). */
-export async function listRecentConversations(
-  workspace: string,
-  pageSize: number,
-): Promise<Conversation[]> {
-  const page = await call(
-    api.GET("/api/v1/workspaces/{workspace}/conversations", {
-      params: {
-        path: { workspace },
-        query: { pageSize, orderBy: "lastMessageTime desc" },
-      },
-    }),
-  );
-  return page.conversations ?? [];
 }
 
 /** UpdateConversation with an explicit field mask. */

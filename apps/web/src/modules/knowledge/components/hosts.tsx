@@ -8,7 +8,7 @@ import { knowledgeDialogs } from "./dialogs";
 
 /* The dialogs load on first open: none of them is on screen at first paint, so the shell stays light. */
 const ContributeDialog = dynamic(() => import("./Contribute").then((m) => m.ContributeDialog), { ssr: false });
-const AddToCollectionDialog = dynamic(() => import("./AddToCollectionDialog").then((m) => m.AddToCollectionDialog), { ssr: false });
+const AddToReadingListDialog = dynamic(() => import("./AddToReadingListDialog").then((m) => m.AddToReadingListDialog), { ssr: false });
 const EditDetailsDialog = dynamic(() => import("./EditDetailsDialog").then((m) => m.EditDetailsDialog), { ssr: false });
 const LinkToSpacesDialog = dynamic(() => import("./LinkToSpacesDialog").then((m) => m.LinkToSpacesDialog), { ssr: false });
 const MoveDialog = dynamic(() => import("./MoveDialog").then((m) => m.MoveDialog), { ssr: false });
@@ -23,14 +23,14 @@ export function ContributeHost() {
   return <ContributeDialog key={key} {...options} isOpen onClose={closeContribute} />;
 }
 
-/** Renders the knowledge dialogs opened with `openAddToCollection`, `openEditDetails`, `openLinkToSpaces`, `openMoveItems`, `openReadingListEditor`. */
+/** Renders the knowledge dialogs opened with `openAddToReadingList`, `openEditDetails`, `openLinkToSpaces`, `openMoveItems`, `openReadingListEditor`. */
 export function KnowledgeDialogsHost() {
   const dialog = knowledgeDialogs.useCurrent();
   if (!dialog) return null;
   const close = knowledgeDialogs.close;
   switch (dialog.kind) {
-    case "collect":
-      return <AddToCollectionDialog key={dialog.key} items={dialog.items} isOpen onClose={close} />;
+    case "addToList":
+      return <AddToReadingListDialog key={dialog.key} items={dialog.items} isOpen onClose={close} />;
     case "edit":
       return <EditDetailsDialog key={dialog.key} item={dialog.item} isOpen onClose={close} />;
     case "link":

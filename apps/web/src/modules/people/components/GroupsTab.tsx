@@ -1,17 +1,17 @@
 "use client";
 
-import { Button, Input, Label, Modal, TextField, FieldError } from "@heroui/react";
-import { Plus, Users } from "lucide-react";
-import { useState } from "react";
+import { Button, FieldError, Input, Label, TextField } from "@heroui/react";
+import { Check, Pencil, Plus, Users } from "lucide-react";
+import { useState, type KeyboardEvent } from "react";
 
-import { EmptyState, Gate, ItemIcon, NoMatches, SearchInput, SkeletonCards, UserAvatar, toast } from "@/components/ui";
+import { EmptyState, Gate, NoMatches, SearchInput, SkeletonCards, UserAvatar, toast } from "@/components/ui";
 import { errorMessage } from "@/lib/api/client";
 import { plural } from "@/lib/format";
-import { useWorkspace } from "@/lib/workspace";
 
-import { createGroup, type Group } from "../api";
-import { groupNameError } from "../model";
+import { createGroup, updateGroup, type Group } from "../api";
+import { groupNameError, needsTools } from "../model";
 import { usePeopleClient, type Directory } from "../queries";
+import { Dialog } from "./Dialog";
 import { useKnowledgeAccess } from "./KnowledgeAccess";
 
 type DirQuery = { data?: Directory; isPending: boolean; isError: boolean; error: unknown; refetch: () => unknown };
@@ -19,17 +19,22 @@ type DirQuery = { data?: Directory; isPending: boolean; isError: boolean; error:
 function GroupCard({ group, dir, fresh, onOpen }: { group: Group; dir: Directory; fresh: boolean; onOpen: () => void }) {
   const members = dir.people.filter((p) => p.groups.includes(group.name ?? ""));
   const access = useKnowledgeAccess({ groups: [group.name ?? ""], groupLabel: () => group.displayName });
-  const bases = access.data?.filter((a) => a.via !== "Everyone").length ?? 0;
+  const shared = access.data?.filter((a) => a.via !== "Everyone").length ?? 0;
   return (
-    <div className={fresh ? "card card--action ppl-group ppl-fresh" : "card card--action ppl-group"} role="button" tabIndex={0} onClick={onOpen} onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), onOpen())}>
-      <div className="row gap-12">
-        <ItemIcon icon={Users} tone="accent" size="sm" />
-        <span className="grow stack" style={{ minWidth: 0 }}>
-          <span className="card__title truncate" translate="no">
-            {group.displayName}
-          </span>
-        </span>
-      </div>
+    <div
+      className={fresh ? "card card--action ppl-group ppl-fresh" : "card card--action ppl-group"}
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        onOpen();
+      }}
+    >
+      <span className="card__title truncate" translate="no">
+        {group.displayName}
+      </span>
       <p className="t-sm muted clamp-2 ppl-group__desc" translate={group.description ? "no" : undefined}>
         {group.description || "No description"}
       </p>
@@ -46,116 +51,138 @@ function GroupCard({ group, dir, fresh, onOpen }: { group: Group; dir: Directory
         ) : (
           <span className="t-xs muted">No members</span>
         )}
-        <span className="t-xs muted">{bases ? plural(bases, "knowledge base") : ""}</span>
+        <span className="t-xs muted">{shared ? plural(shared, "collection") : ""}</span>
       </div>
     </div>
   );
 }
 
-export function GroupsTab({ query, fresh, onOpen, onCreate }: { query: DirQuery; fresh: ReadonlySet<string>; onOpen: (group: Group) => void; onCreate: () => void }) {
-  const { can } = useWorkspace();
+/** Groups (preview `groupsTab`): reusable teams as cards; New group lives in the page header. */
+export function GroupsTab({ query, fresh, onOpen }: { query: DirQuery; fresh: ReadonlySet<string>; onOpen: (group: Group) => void }) {
   const [q, setQ] = useState("");
-  const manage = can("groups.create");
-  const createButton = (primary: boolean) => (
-    <Button variant={primary ? "primary" : "secondary"} size={primary ? "md" : "sm"} onPress={onCreate}>
-      <Plus className="i" aria-hidden />
-      Create group
-    </Button>
-  );
   return (
-    <>
-      <div className="toolbar">
-        <SearchInput value={q} onChange={setQ} placeholder="Search groups" label="Search groups" />
-        {manage ? <span className="toolbar__end">{createButton(false)}</span> : null}
-      </div>
-      <Gate
-        query={query}
-        skeleton={<SkeletonCards cards={6} />}
-        isEmpty={(d) => d.groups.length === 0}
-        empty={
-          <EmptyState icon={Users} boxed title="No groups yet" description="Groups let you share knowledge with a whole team in one step." actions={manage ? createButton(true) : null} />
-        }
-      >
-        {(dir) => {
-          const needle = q.trim().toLowerCase();
-          const rows = dir.groups.filter((g) => !needle || g.displayName.toLowerCase().includes(needle) || (g.description ?? "").toLowerCase().includes(needle));
-          if (!rows.length) return <NoMatches what="groups" onClear={() => setQ("")} />;
-          return (
-            <div className="grid cols-3">
-              {rows.map((g) => (
-                <GroupCard key={g.name} group={g} dir={dir} fresh={fresh.has(g.name ?? "")} onOpen={() => onOpen(g)} />
-              ))}
-            </div>
-          );
-        }}
-      </Gate>
-    </>
+    <Gate
+      query={query}
+      skeleton={<SkeletonCards cards={6} />}
+      isEmpty={(d) => d.groups.length === 0}
+      empty={<EmptyState icon={Users} boxed title="No groups yet" description="Groups let you share knowledge with a whole team in one step." />}
+    >
+      {(dir) => {
+        const needle = q.trim().toLowerCase();
+        const rows = dir.groups.filter((g) => !needle || g.displayName.toLowerCase().includes(needle) || (g.description ?? "").toLowerCase().includes(needle));
+        return (
+          <>
+            {needsTools(dir.groups.length, Boolean(needle)) ? (
+              <div className="toolbar">
+                <SearchInput value={q} onChange={setQ} placeholder="Search groups" label="Search groups" />
+              </div>
+            ) : null}
+            {rows.length ? (
+              <div className="grid cols-3">
+                {rows.map((g) => (
+                  <GroupCard key={g.name} group={g} dir={dir} fresh={fresh.has(g.name ?? "")} onOpen={() => onOpen(g)} />
+                ))}
+              </div>
+            ) : (
+              <NoMatches what="groups" onClear={() => setQ("")} />
+            )}
+          </>
+        );
+      }}
+    </Gate>
   );
 }
 
-/** Create group (preview `M['ppl-group-new']`). */
-export function CreateGroupDialog({ isOpen, onClose, dir, onCreated }: { isOpen: boolean; onClose: () => void; dir: Directory | undefined; onCreated: (group: Group) => void }) {
-  return (
-    <Modal.Backdrop isOpen={isOpen} onOpenChange={(open) => (open ? undefined : onClose())}>
-      <Modal.Container size="sm">
-        <Modal.Dialog>{isOpen ? <CreateGroupForm dir={dir} onClose={onClose} onCreated={onCreated} /> : null}</Modal.Dialog>
-      </Modal.Container>
-    </Modal.Backdrop>
-  );
+/**
+ * Create a group, or edit its name and description (preview `M['ppl-group-form']`): a two-field form in a dialog.
+ * `group` null = create.
+ */
+export function GroupFormDialog({
+  state,
+  dir,
+  onClose,
+  onCreated,
+}: {
+  state: { group: Group | null } | null;
+  dir: Directory | undefined;
+  onClose: () => void;
+  onCreated: (group: Group) => void;
+}) {
+  return state ? <GroupForm key={state.group?.name ?? "new"} group={state.group} dir={dir} onClose={onClose} onCreated={onCreated} /> : null;
 }
 
-function CreateGroupForm({ dir, onClose, onCreated }: { dir: Directory | undefined; onClose: () => void; onCreated: (group: Group) => void }) {
+function GroupForm({ group, dir, onClose, onCreated }: { group: Group | null; dir: Directory | undefined; onClose: () => void; onCreated: (group: Group) => void }) {
   const { ws, refresh } = usePeopleClient();
-  const [name, setName] = useState("");
-  const [desc, setDesc] = useState("");
+  const [name, setName] = useState(group?.displayName ?? "");
+  const [desc, setDesc] = useState(group?.description ?? "");
   const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
-  const err = touched ? groupNameError(name, dir?.groups.map((g) => g.displayName) ?? []) : "";
+  const others = (dir?.groups ?? []).filter((g) => g.name !== group?.name).map((g) => g.displayName);
+  const changed = name.trim() !== (group?.displayName ?? "");
+  const err = touched || (name.trim() && changed) ? groupNameError(name, others) : "";
 
   async function save() {
     setTouched(true);
-    if (busy || groupNameError(name, dir?.groups.map((g) => g.displayName) ?? [])) return;
+    if (busy || groupNameError(name, others)) {
+      document.getElementById("ppl-gn-name")?.focus();
+      return;
+    }
     setBusy(true);
     try {
-      const group = await createGroup(ws, { displayName: name.trim(), description: desc.trim() });
-      await refresh();
-      onClose();
-      toast(`Created ${group.displayName}`);
-      onCreated(group);
+      if (group) {
+        const saved = await updateGroup(ws, group.name ?? "", { displayName: name.trim(), description: desc.trim() });
+        await refresh();
+        onClose();
+        toast(`Saved ${saved.displayName}`);
+      } else {
+        const created = await createGroup(ws, { displayName: name.trim(), description: desc.trim() });
+        await refresh();
+        onClose();
+        toast(`Created ${created.displayName}`);
+        onCreated(created);
+      }
     } catch (error) {
       toast(errorMessage(error), { tone: "danger" });
-    } finally {
       setBusy(false);
     }
   }
 
+  const onEnter = (e: KeyboardEvent) => {
+    if (e.key === "Enter") void save();
+  };
+
   return (
-    <>
-      <Modal.CloseTrigger aria-label="Close" />
-      <Modal.Header>
-        <Modal.Heading>Create group</Modal.Heading>
-      </Modal.Header>
-      <Modal.Body className="stack gap-16">
-        <TextField value={name} onChange={setName} isRequired isInvalid={Boolean(err)} maxLength={40} autoFocus>
-          <Label>Name</Label>
-          <Input placeholder="e.g. Marketing" onKeyDown={(e) => e.key === "Enter" && void save()} />
-          <FieldError>{err}</FieldError>
-        </TextField>
-        <TextField value={desc} onChange={setDesc} maxLength={80}>
-          <Label>
-            Description <span className="label__opt">(optional)</span>
-          </Label>
-          <Input placeholder="Who belongs in this group" onKeyDown={(e) => e.key === "Enter" && void save()} />
-        </TextField>
-      </Modal.Body>
-      <Modal.Footer>
-        <Button variant="tertiary" slot="close">
-          Cancel
-        </Button>
-        <Button variant="primary" isPending={busy} onPress={() => void save()}>
-          Create group
-        </Button>
-      </Modal.Footer>
-    </>
+    <Dialog
+      isOpen
+      onClose={onClose}
+      guard={busy}
+      icon={group ? Pencil : Users}
+      title={group ? "Edit group details" : "Create group"}
+      description={group ? "Rename it or say who belongs in it. Members and access stay as they are." : "Share knowledge with a whole team in one step."}
+      footerStart={group ? undefined : "Next, you’ll add people to it."}
+      footer={
+        <>
+          <Button variant="ghost" isDisabled={busy} onPress={onClose}>
+            Cancel
+          </Button>
+          <Button variant="primary" isPending={busy} onPress={() => void save()}>
+            {group ? <Check className="i" aria-hidden /> : <Plus className="i" aria-hidden />}
+            {group ? "Save changes" : "Create group"}
+          </Button>
+        </>
+      }
+    >
+      <TextField value={name} onChange={setName} isRequired isInvalid={Boolean(err)} isDisabled={busy} maxLength={40} autoFocus>
+        <Label>Name</Label>
+        <Input id="ppl-gn-name" placeholder="e.g. Customer support" onKeyDown={onEnter} />
+        <FieldError>{err}</FieldError>
+      </TextField>
+      <TextField value={desc} onChange={setDesc} isDisabled={busy} maxLength={80}>
+        <Label>
+          Description <span className="label__opt">(optional)</span>
+        </Label>
+        <Input placeholder="Who belongs in this group" onKeyDown={onEnter} />
+      </TextField>
+    </Dialog>
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { Button, Description, FieldError, Label, TextArea, TextField } from "@heroui/react";
-import { Send, Sparkles } from "lucide-react";
+import { MessageSquare, Send, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -57,24 +57,40 @@ function AskSpaceForm({ space, onClose, initialQuestion, about, sourceMessage, a
       {
         onSuccess: (r) => {
           onClose();
-          toast(`Question sent to ${teamWord(space)}`, { action: { label: "View", onPress: () => router.push(`/requests/${resourceId(r.name)}`) } });
+          toast(`Question sent to ${teamWord(space)}`, { action: { label: "Open", onPress: () => router.push(`/requests/${resourceId(r.name)}`) } });
         },
         onError: (e) => toast(errorMessage(e), { tone: "danger" }),
       },
     );
   };
 
+  const names = team.map((m) => m.displayName ?? "");
   return (
     <KnowledgeModal
       isOpen
       onClose={onClose}
       guard={create.isPending}
       size="md"
-      title={course ? "Ask the teaching team" : `Ask ${space.displayName}`}
-      description={[space.displayName, about].filter(Boolean).join(" · ")}
+      icon={MessageSquare}
+      title={course ? `Ask the ${space.displayName} teaching team` : `Ask ${space.displayName}`}
+      description={note}
+      footerStart={
+        team.length ? (
+          <span className="row gap-8" style={{ minWidth: 0 }}>
+            <span className="rq-avatars">
+              {team.slice(0, 3).map((m) => (
+                <UserAvatar key={m.name} name={m.displayName ?? ""} size="xs" />
+              ))}
+            </span>
+            <span className="truncate" translate="no">
+              {names.length > 2 ? `${names.slice(0, 2).join(", ")} +${names.length - 2}` : names.join(" and ")}
+            </span>
+          </span>
+        ) : undefined
+      }
       footer={
         <>
-          <Button variant="tertiary" onPress={onClose} isDisabled={create.isPending}>
+          <Button variant="ghost" onPress={onClose} isDisabled={create.isPending}>
             Cancel
           </Button>
           <Button variant="primary" onPress={send} isPending={create.isPending}>
@@ -87,7 +103,7 @@ function AskSpaceForm({ space, onClose, initialQuestion, about, sourceMessage, a
       <TextField className="field" value={text} onChange={(v) => (setText(v), error && setError(""))} isRequired isInvalid={!!error}>
         <Label>Your question</Label>
         <TextArea rows={5} placeholder="What do you want to know?" autoFocus translate="no" />
-        {error ? <FieldError>{error}</FieldError> : <Description>{note}</Description>}
+        {error ? <FieldError>{error}</FieldError> : <Description>{about ?? "Say what you already tried, so they can answer in one go."}</Description>}
       </TextField>
       {assistantAnswer ? (
         <div className="rq-ai mt-16">
@@ -96,18 +112,6 @@ function AskSpaceForm({ space, onClose, initialQuestion, about, sourceMessage, a
             <div className="rq-ai__label">Sent along: what the assistant found</div>
             <p translate="no">{clip(assistantAnswer, 280)}</p>
           </div>
-        </div>
-      ) : null}
-      {team.length ? (
-        <div className="row gap-8 mt-16 t-sm muted">
-          <span className="rq-avatars">
-            {team.slice(0, 3).map((m) => (
-              <UserAvatar key={m.name} name={m.displayName ?? ""} size="xs" />
-            ))}
-          </span>
-          <span className="truncate" translate="no">
-            {team.map((m) => m.displayName).join(", ")}
-          </span>
         </div>
       ) : null}
     </KnowledgeModal>

@@ -95,7 +95,7 @@
   function forms() {
     const d = ds();
     const left = `
-      ${field({ id: 'ds-name', label: 'Knowledge base name', required: true, desc: 'Visible to everyone with access.', control: input({ id: 'ds-name', bind: 'ds.name', value: d.name }) })}
+      ${field({ id: 'ds-name', label: 'Collection name', required: true, desc: 'Visible to everyone with access.', control: input({ id: 'ds-name', bind: 'ds.name', value: d.name }) })}
       ${field({ id: 'ds-focus', label: 'Focused', desc: 'An accent edge and a soft halo. Click any field to see it live.', control: input({ id: 'ds-focus', value: 'Travel policies', cls: 'ds-focused', attrs: 'readonly tabindex="-1" aria-readonly="true"' }) })}
       ${field({ id: 'ds-email', label: 'Work email', error: 'Enter an email like name@company.com.', control: input({ id: 'ds-email', value: 'linh.tran@', invalid: true }) })}
       ${field({ id: 'ds-desc', label: 'Description', optional: true, control: textarea({ id: 'ds-desc', bind: 'ds.desc', value: d.desc, rows: 3, attrs: 'data-live maxlength="160"' }), counter: `<span class="counter">${d.desc.length}/160</span>` })}
@@ -154,9 +154,9 @@
     const d = ds(), picked = KBS.filter((_, i) => d.kbs?.[i]);
     // A still picture of the dialog anatomy; “Open dialog” runs the same pattern for real (validation, loading, toast with Undo).
     const anatomy = `<div class="modal__dialog ds-dialog-preview" inert aria-hidden="true">
-      <header class="modal__header modal__header--icon"><span class="modal__icon modal__icon--accent">${ic('folder-plus')}</span><div class="grow"><div class="modal__heading">Create knowledge base</div><p class="modal__description">A home for related documents. Answers cite what’s inside.</p></div></header>
+      <header class="modal__header modal__header--icon"><span class="modal__icon modal__icon--accent">${ic('folder-plus')}</span><div class="grow"><div class="modal__heading">Create collection</div><p class="modal__description">A home for related documents. Answers cite what’s inside.</p></div></header>
       <div class="modal__body">${field({ id: 'ds-pv-name', label: 'Name', required: true, control: input({ id: 'ds-pv-name', placeholder: 'e.g. Travel policies' }) })}</div>
-      <footer class="modal__footer"><div class="modal__footer-start">You can change access later.</div>${btn('Cancel', { v: 'ghost' })}${btn('Create knowledge base', { v: 'primary', icon: 'plus' })}</footer>
+      <footer class="modal__footer"><div class="modal__footer-start">You can change access later.</div>${btn('Cancel', { v: 'ghost' })}${btn('Create collection', { v: 'primary', icon: 'plus' })}</footer>
     </div>`;
     const rules = `<ul class="ds-rules">
       <li>${ic('check', 'i-sm')}<span><strong>Icon tile</strong> names the action at a glance; tone follows the outcome.</span></li>
@@ -167,9 +167,9 @@
     const tones = `<div class="ds-tones">${TONES.map(([t, l, i]) => `<span class="ds-tone"><span class="modal__icon modal__icon--${t}" aria-hidden="true">${ic(i)}</span><span class="t-xs muted">${esc(l)}</span></span>`).join('')}</div>`;
     const choices = `<div class="stack gap-16">
       <div class="field"><span class="label">Tiles (3 or more options)</span>${choiceGroup({ name: 'ds-tile', value: d.tile, act: 'ds-tile', cols: 3, options: [['team', 'Team', 'People who work together.', 'users'], ['course', 'Course', 'A class with a term.', 'graduation'], ['project', 'Project', 'Work toward one goal.', 'target']] })}</div>
-      <div class="field"><span class="label">Rows (2 options)</span>${choiceGroup({ name: 'ds-kbmode', value: d.kbMode, act: 'ds-kbmode', cols: 2, options: [['new', 'Start a new knowledge base', 'Named after the space.', 'folder-plus'], ['link', 'Only link existing ones', 'Pick them below.', 'link']] })}</div>
+      <div class="field"><span class="label">Rows (2 options)</span>${choiceGroup({ name: 'ds-kbmode', value: d.kbMode, act: 'ds-kbmode', cols: 2, options: [['new', 'Start a new collection', 'Named after the space.', 'folder-plus'], ['link', 'Only link existing ones', 'Pick them below.', 'link']] })}</div>
     </div>`;
-    const picker = disclosure({ path: 'ds.showKbs', icon: 'library', title: 'Link knowledge bases', summary: picked.length ? esc(picked.length === 1 ? picked[0] : `${picked.length} linked`) : 'None yet',
+    const picker = disclosure({ path: 'ds.showKbs', icon: 'library', title: 'Link collections', summary: picked.length ? esc(picked.length === 1 ? picked[0] : `${picked.length} linked`) : 'None yet',
       body: `<div class="option-list">${KBS.map((k, i) => checkbox({ label: esc(k), checked: !!d.kbs?.[i], act: 'ds-kb', data: { i } })).join('')}</div>` });
     const lift = `<div class="grid cols-3">${[['book', 'accent', 'HR Policies', '128 documents'], ['users', 'success', 'People Ops', '12 members'], ['plug', '', 'Google Drive', '412 files synced']].map(([i, t, title, desc]) =>
       `<button type="button" class="card card--action ds-lift" data-act="ds-press" data-label="${esc(title)}"><span class="row gap-12">${itemIcon(i, t)}<span class="stack grow"><span class="card__title truncate">${esc(title)}</span><span class="t-sm muted">${esc(desc)}</span></span>${ic('chevron-right', 'muted')}</span></button>`).join('')}</div>`;
@@ -200,7 +200,7 @@
   function dataDisplay() {
     const u = 'dsTable';
     const rows = applySort(ROWS, u, { name: r => r.name.toLowerCase() });
-    const head = selAllCheck(u, ROWS.map(r => r.id)) + sortHead('Name', 'name', u) + th('Knowledge base') + sortHead('Size', 'size', u, 'table__column--num') + sortHead('Updated', 'updated', u) + th('Status') + th('<span class="sr-only">Actions</span>', 'table__column--actions');
+    const head = selAllCheck(u, ROWS.map(r => r.id)) + sortHead('Name', 'name', u) + th('Collection') + sortHead('Size', 'size', u, 'table__column--num') + sortHead('Updated', 'updated', u) + th('Status') + th('<span class="sr-only">Actions</span>', 'table__column--actions');
     const trs = rows.map(r => `<tr class="table__row" data-act="ds-row" data-id="${r.id}" tabindex="0">${selCheck(u, r.id, 'Select ' + r.name)}<td class="table__cell table__cell--primary"><span class="row gap-8">${fileIcon(r.type, 'sm')}<span class="truncate medium">${esc(r.name)}</span></span></td><td class="table__cell table__cell--hide-sm ds-nowrap">${esc(r.kb)}</td><td class="table__cell table__cell--num num ds-nowrap">${fmtSize(r.size)}</td><td class="table__cell ds-nowrap">${rel(r.updated)}</td><td class="table__cell">${status('doc', r.status)}</td><td class="table__cell table__cell--actions">${iconBtn('more', 'Actions for ' + r.name, { size: 'sm', menu: 'ds-menu' })}</td></tr>`);
     const tbl = table({ head, rows: trs, label: 'Documents example' }) + bulkBar(u, btn('Archive', { size: 'sm', icon: 'archive', act: 'ds-bulk' }));
     const items = list([
@@ -232,7 +232,7 @@
       ${stats}
       <div class="grid cols-2">${demo('Avatars and icons', ids)}${demo('Progress and meter', prog)}</div>
       ${demo('Charts', charts)}
-    </div>`, { id: 'ds-data', desc: 'Tables for records, lists for short collections, cards for metrics.' });
+    </div>`, { id: 'ds-data', desc: 'Tables for records, lists for short sets, cards for metrics.' });
   }
 
   /* ── Feedback ── */
@@ -333,7 +333,7 @@
   };
   /* Gallery dialog: the full create pattern (icon tile, description, icon choices, inline validation, footer hint, loading, toast with Undo). */
   const dsm = () => ui('dsModal', { name: '', access: 'workspace', touched: false, busy: false });
-  const dsmError = f => (f.touched && !f.name.trim() ? 'Enter a name for the knowledge base.' : '');
+  const dsmError = f => (f.touched && !f.name.trim() ? 'Enter a name for the collection.' : '');
   A['ds-modal'] = () => { S.ui.dsModal = null; dsm(); openModal('ds-modal'); };
   A['ds-modal-access'] = el => { dsm().access = el.dataset.value; refreshLayer(); };
   A['ds-modal-ok'] = async () => {
@@ -355,12 +355,12 @@
   M['ds-modal'] = () => {
     const f = dsm(), err = dsmError(f), dis = f.busy ? 'disabled' : '';
     return {
-      title: 'Create knowledge base', icon: 'folder-plus', guard: f.busy,
+      title: 'Create collection', icon: 'folder-plus', guard: f.busy,
       desc: 'A home for related documents. Answers cite what’s inside.',
       body: `${field({ id: 'ds-kb-name', label: 'Name', required: true, error: err, control: input({ id: 'ds-kb-name', bind: 'dsModal.name', value: f.name, placeholder: 'e.g. Travel policies', autofocus: true, onEnter: 'ds-modal-ok', invalid: !!err, attrs: `maxlength="60" ${dis}` }) })}
         <div class="field"><span class="label">Who can see it</span>${choiceGroup({ name: 'ds-kb-access', value: f.access, act: 'ds-modal-access', cols: 2, options: [['workspace', 'Everyone in the workspace', 'Members can read and ask.', 'users'], ['private', 'Only people you add', 'Invite them after creating.', 'lock']] })}</div>`,
       footStart: 'You can change access later.',
-      foot: btn('Cancel', { v: 'ghost', act: 'close-modal', disabled: f.busy }) + btn('Create knowledge base', { v: 'primary', icon: 'plus', act: 'ds-modal-ok', loading: f.busy }),
+      foot: btn('Cancel', { v: 'ghost', act: 'close-modal', disabled: f.busy }) + btn('Create collection', { v: 'primary', icon: 'plus', act: 'ds-modal-ok', loading: f.busy }),
     };
   };
   DR['ds-drawer'] = ({ id }) => {

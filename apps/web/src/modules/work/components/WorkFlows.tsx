@@ -60,10 +60,18 @@ export function FirstRun({ flows }: { flows: readonly Workflow[] }) {
   );
 }
 
-/** "New ▾" — the workflow menu (preview `MENUS['work-new']`). */
+/** New: one workflow is a direct button; several open the "New ▾" workflow menu (preview `newButton`). */
 export function NewWorkMenu({ flows, space }: { flows: readonly Workflow[]; space?: string }) {
   const router = useRouter();
-  const onAction = (key: Key) => router.push(newWorkHref({ workflow: String(key) as WorkflowId, space }));
+  const start = (workflow: WorkflowId) => router.push(newWorkHref({ workflow, space }));
+  const only = flows.length === 1 ? flows[0] : null;
+  if (only)
+    return (
+      <Button variant="primary" onPress={() => start(only.id)}>
+        <only.icon className="i" aria-hidden />
+        {only.label}
+      </Button>
+    );
   return (
     <Dropdown>
       <Button variant="primary">
@@ -72,7 +80,7 @@ export function NewWorkMenu({ flows, space }: { flows: readonly Workflow[]; spac
         <ChevronDown className="i" aria-hidden />
       </Button>
       <Dropdown.Popover placement="bottom end">
-        <Dropdown.Menu aria-label="New work" onAction={onAction}>
+        <Dropdown.Menu aria-label="New work" onAction={(key: Key) => start(String(key) as WorkflowId)}>
           {flows.map((f) => (
             <Dropdown.Item key={f.id} id={f.id} textValue={f.label}>
               <f.icon className="i" aria-hidden />

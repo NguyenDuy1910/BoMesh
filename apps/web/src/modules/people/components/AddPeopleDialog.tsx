@@ -2,11 +2,12 @@
 
 import { Button, Modal } from "@heroui/react";
 import { useQueries, useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, X } from "lucide-react";
+import { AlertCircle, UserPlus, Users, X } from "lucide-react";
 import { useRef, useState, type KeyboardEvent } from "react";
 
-import { Tip, UserAvatar, toast } from "@/components/ui";
+import { Disclosure, Tip, UserAvatar, toast } from "@/components/ui";
 import { errorMessage } from "@/lib/api/client";
+import { plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 
 import { addToGroup, createMember, deleteMember, lookupUser, type Member, type User } from "../api";
@@ -38,6 +39,7 @@ function AddPeopleForm({ dir, onClose, onAdded }: { dir: Directory; onClose: () 
   const [role, setRole] = useState(MEMBER_ROLE);
   const [groups, setGroups] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const [tried, setTried] = useState(false);
 
   const memberEmails = new Set(dir.people.map((p) => p.email.toLowerCase()));
   const checkable = (e: string) => EMAIL_RE.test(e) && !memberEmails.has(e);
@@ -60,7 +62,7 @@ function AddPeopleForm({ dir, onClose, onAdded }: { dir: Directory; onClose: () 
   const draftEmail = draft.trim().toLowerCase();
   const draftOk = Boolean(draftEmail) && EMAIL_RE.test(draftEmail) && !memberEmails.has(draftEmail) && !emails.includes(draftEmail);
   const n = checks.length - bad.length + (draftOk ? 1 : 0);
-  const ready = n > 0 && !bad.length && (!draftEmail || draftOk || emails.includes(draftEmail));
+  const none = tried && !emails.length && !draftEmail;
   const roleDef = dir.roleByName.get(role);
 
   const commit = (text: string) => setEmails((cur) => [...cur, ...splitEmails(text).filter((e) => !cur.includes(e))]);
@@ -82,12 +84,15 @@ function AddPeopleForm({ dir, onClose, onAdded }: { dir: Directory; onClose: () 
         setDraft("");
       } else void submit();
     } else if (event.key === "Backspace" && !draft && emails.length) {
+      event.preventDefault();
+      setDraft(emails[emails.length - 1]);
       setEmails((cur) => cur.slice(0, -1));
     }
   };
 
   async function submit() {
     if (busy) return;
+    setTried(true);
     const all = draft.trim() ? [...emails, ...splitEmails(draft).filter((e) => !emails.includes(e))] : emails;
     if (draft.trim()) {
       setEmails(all);
@@ -140,17 +145,22 @@ function AddPeopleForm({ dir, onClose, onAdded }: { dir: Directory; onClose: () 
     <>
       <Modal.CloseTrigger aria-label="Close" />
       <Modal.Header>
-        <Modal.Heading>Add people</Modal.Heading>
-        <p className="modal__description">
-          They join <span translate="no">{workspace.displayName}</span> right away.
-        </p>
+        <span className="modal__icon" aria-hidden>
+          <UserPlus />
+        </span>
+        <div className="grow" style={{ minWidth: 0 }}>
+          <Modal.Heading>Add people</Modal.Heading>
+          <p className="modal__description">
+            They join <span translate="no">{workspace.displayName}</span> right away.
+          </p>
+        </div>
       </Modal.Header>
       <Modal.Body className="stack gap-16">
         <div className="field">
           <label className="label" htmlFor="ppl-add-email">
             Emails
           </label>
-          <div className={bad.length ? "ppl-chipin is-invalid" : "ppl-chipin"} onClick={() => input.current?.focus()}>
+          <div className={bad.length || none ? "ppl-chipin is-invalid" : "ppl-chipin"} onClick={() => input.current?.focus()}>
             {checks.map(([e, why]) => {
               const chip = (
                 <span key={e} className={why ? "ppl-chip is-invalid" : "ppl-chip"}>
@@ -207,10 +217,15 @@ function AddPeopleForm({ dir, onClose, onAdded }: { dir: Directory; onClose: () 
               spellCheck={false}
               autoFocus
               aria-label="Email addresses"
-              aria-invalid={bad.length > 0}
+              aria-invalid={bad.length > 0 || none}
             />
           </div>
-          {bad.length ? (
+          {none ? (
+            <div className="field-error" role="alert">
+              <AlertCircle className="i" aria-hidden />
+              <span>Add at least one email address.</span>
+            </div>
+          ) : bad.length ? (
             <div className="stack gap-4" role="alert">
               {bad.map(([e, why]) => (
                 <div key={e} className="field-error">
@@ -230,20 +245,29 @@ function AddPeopleForm({ dir, onClose, onAdded }: { dir: Directory; onClose: () 
         </div>
         <RoleSelect label="Role" value={role} roles={dir.roles} onChange={setRole} description={roleDef?.description} fullWidth />
         {dir.groups.length ? (
-          <div className="field">
-            <span className="label">
-              Groups<span className="label__opt">(optional)</span>
-            </span>
+          <Disclosure
+            icon={Users}
+            title="Add to groups"
+            summary={
+              groups.length
+                ? groups.length <= 2
+                  ? groups.map((g) => dir.groupByName.get(g)?.displayName ?? "").join(", ")
+                  : plural(groups.length, "group")
+                : "None"
+            }
+          >
             <GroupChecks groups={dir.groups} value={groups} onChange={setGroups} />
-          </div>
+          </Disclosure>
         ) : null}
       </Modal.Body>
       <Modal.Footer>
-        <Button variant="tertiary" slot="close">
+        <span className="grow t-sm muted">You can change roles and groups later.</span>
+        <Button variant="ghost" slot="close">
           Cancel
         </Button>
-        <Button variant="primary" isDisabled={!ready} isPending={busy} onPress={() => void submit()}>
-          {n > 1 ? `Add ${n} people` : "Add person"}
+        <Button variant="primary" isPending={busy} onPress={() => void submit()}>
+          <UserPlus className="i" aria-hidden />
+          {n > 1 ? `Add ${n} people` : n === 1 ? "Add person" : "Add people"}
         </Button>
       </Modal.Footer>
     </>

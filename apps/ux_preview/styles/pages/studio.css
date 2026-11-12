@@ -1,14 +1,13 @@
 /* Knowledge Studio (features/curation.js, features/masterdata.js): the Review queue chooser, the flow strip on the
-   Library, the document drawer's progress steps, the classification evidence in Review, the Taxonomy tab
+   Library, the document drawer's progress steps, the classification evidence in Review, the Taxonomy section
    (summary, domains → topics, the topic editor, the import check), review batches and topics to confirm (first syncs
-   at scale), the Sources intake line, base cards' topics, and Overview → Knowledge health.
-   Prefixes: rq-, flow-, flow-steps-, cur-why, md-, rb-, cg-, src-intake, kb-card__topics, health-.
+   at scale), base cards' topics, and Overview → Knowledge health. Its sections are sidebar sub-rows (no tab bar).
+   Prefixes: rq-, flow-, flow-steps-, cur-why, md-, rb-, cg-, kb-card__topics, health-.
    Tokens only. */
 
 /* ───── The Studio page: wider than reading pages (it's a workbench; .main sets --page-max 1680 px). It is
    the `studio` container, so the Review panes respond to the room the page really has (rail or expanded sidebar). ───── */
 .page--studio { container: studio / inline-size; padding-bottom: var(--space-6); }
-.page--studio > .ctx-bar { margin-bottom: var(--space-4); }
 
 /* ───── Flow strip: In review › Publishing › Published · Needs attention · Not published ───── */
 .flow { display: flex; align-items: stretch; gap: 4px; margin-bottom: 16px; padding: 6px; border-radius: var(--radius-2xl); background: var(--surface); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); overflow-x: auto; scrollbar-width: none; }
@@ -24,7 +23,6 @@
 .flow__step:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .flow__label { font-size: 12px; line-height: 16px; font-weight: 500; color: var(--muted); white-space: nowrap; }
 .flow__step[aria-pressed="true"] .flow__label { color: inherit; }
-.flow__sub { margin-top: -2px; font-size: 11.5px; line-height: 16px; color: var(--muted); white-space: nowrap; }
 .flow__count { font-size: 20px; line-height: 28px; font-weight: 600; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
 .flow__step--accent .flow__count { color: var(--accent); }
 .flow__step--danger .flow__count { color: var(--danger); }
@@ -47,30 +45,23 @@
 .flow-steps__item.is-todo .flow-steps__text, .flow-steps__item.is-skipped .flow-steps__text { color: var(--muted); }
 @media (prefers-reduced-motion: reduce) { .flow-steps__item.is-busy .flow-steps__dot .i { animation: none; } }
 
-/* ───── Setup guide (Overview, Studio setup tabs): bases → master data → sources → first sync ───── */
+/* ───── Setup guide (Overview of a brand-new workspace only): bases → taxonomy → sources → first sync ───── */
 .setup { margin-bottom: 20px; padding: 16px 16px 8px; }
 .setup__head { display: flex; align-items: center; gap: 16px; padding: 0 4px 12px; border-bottom: 1px solid var(--separator); }
 .setup__heading { font-size: 15px; line-height: 22px; font-weight: 600; }
-.setup__sub { margin: 2px 0 0; font-size: 13px; line-height: 19px; color: var(--muted); }
-.setup__bar { flex: 0 0 160px; }
 .setup__steps { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
 .setup__step { display: flex; align-items: center; gap: 12px; padding: 12px 4px; min-width: 0; }
 .setup__step + .setup__step { border-top: 1px solid var(--separator); }
 .setup__num { display: grid; place-items: center; flex: none; width: 26px; height: 26px; border-radius: var(--radius-full); background: var(--default); color: var(--muted); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.setup__step.is-done .setup__num { background: var(--success-soft); color: var(--success-soft-foreground); }
 .setup__step.is-next .setup__num { background: var(--accent); color: var(--accent-foreground); }
 .setup__title { font-size: 14px; line-height: 20px; font-weight: 500; }
-.setup__step.is-done .setup__title { color: var(--muted); }
 .setup__desc { margin: 2px 0 0; font-size: 13px; line-height: 19px; color: var(--muted); max-width: 68ch; }
-.setup__step:not(.is-next):not(.is-done) .setup__desc { display: none; }
+.setup__step:not(.is-next) .setup__desc { display: none; }
 
-/* ───── Setup tabs: one line on what the tab decides; Sources views and the contributions intake line ───── */
-.kb-intro { margin: 0 0 16px; font-size: 13px; line-height: 19px; color: var(--muted); max-width: 80ch; }
+/* ───── Setup sections: base cards' topics; Sources views ───── */
 .kb-card__topics { display: flex; align-items: center; gap: 6px; min-width: 0; margin-top: 4px; font-size: 12px; line-height: 16px; color: var(--muted); }
 .kb-card__topics > .i { flex: none; }
 .src-views { margin-bottom: 16px; max-width: 100%; overflow-x: auto; }
-.src-intake { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; margin: 0 0 12px; font-size: 13px; line-height: 19px; color: var(--muted); }
-.src-intake > .i { flex: none; }
 
 /* ───── Review: the queue chooser — one row of pills, groups split by a hairline; one select on phones ───── */
 .rq { margin-bottom: 12px; min-width: 0; }
@@ -146,7 +137,7 @@
   .flow__main, .flow__off { display: contents; }
   .flow__sep, .flow__div { display: none; }
   .flow__step { min-width: 0; padding: 6px 10px; }
-  .flow__label, .flow__sub { overflow: hidden; max-width: 100%; text-overflow: ellipsis; }
+  .flow__label { overflow: hidden; max-width: 100%; text-overflow: ellipsis; }
   .flow__count { font-size: 18px; line-height: 24px; }
   .md-prop { flex-wrap: wrap; padding: 12px; }
   .md-prop__main { flex-basis: calc(100% - 44px); }

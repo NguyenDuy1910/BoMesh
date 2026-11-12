@@ -1,13 +1,11 @@
 "use client";
 
-import { Button, Chip, Input } from "@heroui/react";
-import { ArrowRight, Layers, Lock, MessageSquare, Search, Sparkles, X } from "lucide-react";
-import NextLink from "next/link";
+import { Button } from "@heroui/react";
+import { ArrowLeft, ArrowRight, Layers, Lock, MessageSquare, Search, Sparkles } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
-import { PageChrome } from "@/components/shell/page-chrome";
-import { EmptyState, ErrorState, IconButton, ItemIcon, List, ListItem, Page, Pager, paginate, Section, SectionTabs, SkeletonRows, UserAvatar } from "@/components/ui";
+import { EmptyState, ErrorState, ItemIcon, LinkButton, List, ListItem, Page, PageHeader, Pager, SearchInput, Section, SkeletonRows, StatusChip, UserAvatar } from "@/components/ui";
 import { resourceId } from "@/lib/api/client";
 import { fmtNum, plural, rel } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
@@ -15,8 +13,10 @@ import { BaseMark } from "@/modules/knowledge/bases/components/BaseMark";
 import { HighlightText } from "@/modules/knowledge/components/HighlightText";
 import { ResourceList, ResourceRow } from "@/modules/knowledge/components/ResourceRow";
 import { useShareLabel } from "@/modules/knowledge/components/share-label";
-import { catalogHref, catalogSearchRequest, fold, parseCatalogQuery, snippetOf, type Resource } from "@/modules/knowledge/model";
+import { catalogHref, catalogSearchRequest, fold, parseCatalogQuery, snippetOf, tokens } from "@/modules/knowledge/model";
+import { openDocumentPreview } from "@/modules/knowledge/preview/store";
 import { useKnowledgeBases, useKnowledgeModel, useReadingLists, useSearchItems } from "@/modules/knowledge/queries";
+import { originParam } from "@/modules/knowledge/reader/links";
 
 import type { Conversation, Member } from "../api";
 import { useMyConversations, usePeople } from "../queries";
@@ -24,29 +24,44 @@ import { useMyConversations, usePeople } from "../queries";
 const PER_GROUP = 5;
 const PER_PAGE = 20;
 
-type GroupId = "docs" | "cols" | "kbs" | "convs" | "people";
+type GroupId = "docs" | "lists" | "kbs" | "convs" | "people";
 
 interface Group {
   id: GroupId;
   label: string;
   /** Matching rows; `null` while unknown (loading or failed). */
   count: number | null;
-  isPending: boolean;
   error: unknown;
   retry: () => unknown;
-  render: (page: number, all: boolean) => ReactNode;
+  /** Rows `start`–`end` of the group. */
+  render: (start: number, end: number) => ReactNode;
 }
 
-/** Search (`/search?q=&tab=`, preview `P.search`): one query across documents, collections, bases, conversations and (people managers) people. */
+/** A group of matched rows rendered as a `.srch-list` list. */
+function listGroup<T>({ rows, item, ...g }: Omit<Group, "render"> & { rows: readonly T[]; item: (row: T) => ReactNode }): Group {
+  return { ...g, render: (start, end) => <List className="srch-list">{rows.slice(start, end).map(item)}</List> };
+}
+
+/** Every query word (folded) starts a word somewhere in the texts (preview search.js `matches`). */
+function matches(toks: readonly string[], ...texts: (string | undefined)[]) {
+  if (!toks.length) return false;
+  const words = " " + texts.map((t) => fold(t ?? "").replace(/[^\p{L}\p{N}]+/gu, " ")).join(" ");
+  return toks.every((t) => words.includes(" " + t));
+}
+
+/**
+ * Search (`/search?q=&tab=`, preview `P.search`): a grouped overview of one query — documents (the top five; the
+ * full set with filters is Browse), reading lists, collections, conversations and, for people managers, people.
+ * Other groups open their full list here (`?tab=`).
+ */
 export function SearchPage() {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
   const q = (params.get("q") ?? "").trim();
-  const tabParam = params.get("tab") ?? "";
+  const tab = params.get("tab") ?? "";
   const [text, setText] = useState(params.get("q") ?? "");
   const [page, setPage] = useState(1);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   const setQuery = (patch: Record<string, string>) => {
     const next = new URLSearchParams(params.toString());
@@ -70,326 +85,263 @@ export function SearchPage() {
     setText("");
     setPage(1);
     setQuery({ q: "", tab: "" });
-    inputRef.current?.focus();
   };
   const ask = () => q && router.push(`/chat?q=${encodeURIComponent(q)}&send=1`);
 
-  const box = (
-    <>
-      <h1 className="sr-only">Search</h1>
-      <div className="srch-box">
-        <Search className="i i-lg" aria-hidden />
-        <Input
-          ref={inputRef}
-          className="input--lg"
-          type="search"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="Search documents, knowledge and conversations"
-          aria-label="Search"
-          autoComplete="off"
-          autoFocus
-          fullWidth
-        />
-        {text ? (
-          <span className="srch-box__clear">
-            <IconButton icon={X} tip="Clear search" size="sm" onPress={clear} />
-          </span>
-        ) : null}
-      </div>
-    </>
-  );
-
   return (
     <Page narrow>
-      <PageChrome crumbs={[{ label: "Search" }]} />
-      {box}
+      <PageHeader title="Search" />
+      <div className="srch-top">
+        <SearchInput value={text} onChange={setText} label="Search" placeholder="Search documents, collections and conversations" size="md" fullWidth autoFocus />
+      </div>
       {q ? (
         <>
+          {/* Same wording as Home and ⌘K: "Ask AI", answered with sources. */}
           <button type="button" className="card card--action srch-ask" onClick={ask}>
             <ItemIcon icon={Sparkles} tone="accent" />
             <span className="grow stack">
-              <span className="medium">Ask the assistant</span>
-              <span className="t-sm muted truncate" translate="no">
-                “{q}”
+              <span className="medium">Ask AI</span>
+              <span className="t-sm muted truncate">
+                <span translate="no">“{q}”</span>
+                {" · "}
+                {"Answer with sources"}
               </span>
             </span>
             <ArrowRight className="i muted" aria-hidden />
           </button>
-          <Results key={q} q={q} tab={tabParam} page={page} setPage={setPage} setTab={(id) => (setPage(1), setQuery({ tab: id === "all" ? "" : id }))} onClear={clear} />
+          <Results
+            key={q}
+            q={q}
+            tab={tab}
+            page={page}
+            setPage={setPage}
+            setTab={(id) => {
+              setPage(1);
+              setQuery({ tab: id === "all" ? "" : id });
+              window.scrollTo({ top: 0 });
+            }}
+            onClear={clear}
+          />
         </>
       ) : (
-        <EmptyState icon={Search} title="Search your workspace" description="Find documents by name or content, knowledge bases and past conversations." />
+        <EmptyState icon={Search} title="Search your workspace" description="Find documents by name or content, collections and past conversations." />
       )}
     </Page>
   );
 }
 
-const matches = (q: string, ...texts: (string | undefined)[]) => {
-  const fq = fold(q);
-  return texts.some((t) => !!t && fold(t).includes(fq));
-};
-
 function Results({ q, tab, page, setPage, setTab, onClear }: { q: string; tab: string; page: number; setPage: (n: number) => void; setTab: (id: string) => void; onClear: () => void }) {
   const ws = useWorkspace();
   const model = useKnowledgeModel();
   const canPeople = ws.can("members.create");
+  const toks = useMemo(() => tokens(q), [q]);
+  const shareLabel = useShareLabel();
 
-  /* ── Documents: the catalog search (same ranking and access as Browse) ── */
-  const [docTokens, setDocTokens] = useState<string[]>([""]);
-  const docPage = tab === "docs" ? Math.min(page, docTokens.length) : 1;
-  const request = useMemo(
-    () => catalogSearchRequest(parseCatalogQuery({ q }), ws.id, { facets: false, pageSize: PER_PAGE, pageToken: docTokens[docPage - 1] || undefined }),
-    [q, ws.id, docTokens, docPage],
-  );
+  /* Documents: the catalog search (same ranking and access as Browse); the full set is Browse. */
+  const request = useMemo(() => catalogSearchRequest(parseCatalogQuery({ q }), ws.id, { facets: false, pageSize: PER_GROUP }), [q, ws.id]);
   const docs = useSearchItems(request);
-  const next = docs.data?.nextPageToken;
-  useEffect(() => {
-    if (next && docTokens.length === docPage) setDocTokens((t) => [...t, next]);
-  }, [next, docTokens.length, docPage]);
-  const docRows = useMemo(
-    () => (docs.data?.results ?? []).filter((r) => r.item).map((r) => ({ resource: model.toResource(r.item!), snippet: snippetOf(r) })),
-    [docs.data, model],
-  );
+  const docRows = useMemo(() => (docs.data?.results ?? []).filter((r) => r.item).map((r) => ({ resource: model.toResource(r.item!), snippet: snippetOf(r) })), [docs.data, model]);
   const docTotal = docs.data ? (docs.data.totalSize ?? docRows.length) : null;
 
-  /* ── The rest: filtered locally ── */
+  /* The rest: matched locally. */
   const lists = useReadingLists();
   const bases = useKnowledgeBases({ showLocked: true });
   const convs = useMyConversations();
   const people = usePeople({ enabled: canPeople });
-  const shareLabel = useShareLabel();
-
-  const cols = (lists.data ?? []).filter((l) => l.type !== "FEATURED" && matches(q, l.displayName, l.description));
-  const kbs = (bases.data ?? []).filter((b) => matches(q, b.displayName, b.collection?.description));
-  const conversations = (convs.data ?? []).filter((c) => matches(q, c.displayName));
-  const members = (people.members.data ?? []).filter((m) => matches(q, m.displayName, m.email));
   const roleNames = new Map((people.roles.data ?? []).map((r) => [r.name ?? "", r.displayName]));
 
-  const browse = (
-    <NextLink className="link-button" href={catalogHref({ q })}>
-      {docTotal && docTotal > PER_GROUP ? `See all ${fmtNum(docTotal)} in Browse` : "See all in Browse"}
-      <ArrowRight className="i i-sm" aria-hidden />
-    </NextLink>
-  );
+  const listRows = (lists.data ?? []).filter((l) => matches(toks, l.displayName, l.description));
+  const kbRows = (bases.data ?? []).filter((b) => matches(toks, b.displayName, b.collection?.description));
+  const convRows = (convs.data ?? []).filter((c) => matches(toks, c.displayName));
+  const memberRows = (people.members.data ?? []).filter((m) => matches(toks, m.displayName, m.email));
 
   const groups: Group[] = [
     {
       id: "docs",
       label: "Documents",
       count: docTotal,
-      isPending: docs.isPending,
       error: docs.data ? null : docs.error,
       retry: docs.refetch,
-      render: (_page, all) => (
-        <>
-          <ResourceList>
-            {(all ? docRows.slice(0, PER_GROUP) : docRows).map(({ resource, snippet }: { resource: Resource; snippet: string | null }) => (
-              <ResourceRow key={resource.name} resource={resource} q={q} snippet={snippet} />
-            ))}
-          </ResourceList>
-          {all ? null : (
-            <>
-              <Pager page={docPage} pageSize={PER_PAGE} total={docs.data?.totalSize} pageCount={docRows.length} hasNext={!!next} onPageChange={setPage} />
-              <div className="srch-more">{browse}</div>
-            </>
-          )}
-        </>
+      render: () => (
+        <ResourceList>
+          {docRows.map(({ resource, snippet }) => (
+            <ResourceRow
+              key={resource.name}
+              resource={resource}
+              q={q}
+              snippet={snippet}
+              onOpen={() => openDocumentPreview({ item: resource.name, q, from: originParam({ kind: "search" }) })}
+            />
+          ))}
+        </ResourceList>
       ),
     },
-    {
-      id: "cols",
-      label: "Collections",
-      count: lists.data ? cols.length : null,
-      isPending: lists.isPending,
+    listGroup({
+      id: "lists",
+      label: "Reading lists",
+      count: lists.data ? listRows.length : null,
       error: lists.data ? null : lists.error,
       retry: lists.refetch,
-      render: (p, all) => (
-        <List className="srch-list">
-          {(all ? cols.slice(0, PER_GROUP) : paginate(cols, p, PER_PAGE)).map((c) => {
-            const s = shareLabel(c);
-            return (
-              <ListItem
-                key={c.name}
-                lead={<ItemIcon icon={Layers} size="sm" />}
-                title={<HighlightText text={c.displayName ?? ""} q={q} />}
-                label={c.displayName}
-                contentTitle
-                description={c.description ? <span translate="no"><HighlightText text={c.description} q={q} /></span> : undefined}
-                meta={
-                  <>
-                    <span className="row gap-4">
-                      <s.icon className="i i-xs" aria-hidden />
-                      {s.label}
-                    </span>{" "}
-                    · {plural(c.itemCount ?? 0, "item")}
-                  </>
-                }
-                href={`/knowledge/collections/${resourceId(c.name)}`}
-              />
-            );
-          })}
-        </List>
-      ),
-    },
-    {
+      rows: listRows,
+      item: (l) => {
+        const s = shareLabel(l);
+        return (
+          <ListItem
+            key={l.name}
+            lead={<ItemIcon icon={Layers} size="sm" />}
+            title={<HighlightText text={l.displayName ?? ""} q={q} />}
+            label={l.displayName}
+            contentTitle
+            description={l.description ? <span translate="no"><HighlightText text={l.description} q={q} /></span> : undefined}
+            meta={
+              <>
+                <span className="row gap-4">
+                  <s.icon className="i i-xs" aria-hidden />
+                  {s.label}
+                </span>{" "}
+                · {plural(l.itemCount ?? 0, "item")}
+              </>
+            }
+            href={`/knowledge/lists/${resourceId(l.name)}`}
+          />
+        );
+      },
+    }),
+    listGroup({
       id: "kbs",
-      label: "Knowledge bases",
-      count: bases.data ? kbs.length : null,
-      isPending: bases.isPending,
+      label: "Collections",
+      count: bases.data ? kbRows.length : null,
       error: bases.data ? null : bases.error,
       retry: bases.refetch,
-      render: (p, all) => (
-        <List className="srch-list">
-          {(all ? kbs.slice(0, PER_GROUP) : paginate(kbs, p, PER_PAGE)).map((k) => {
-            const locked = k.access === "LOCKED";
-            return (
-              <ListItem
-                key={k.name}
-                lead={<BaseMark base={k} size={32} />}
-                title={<HighlightText text={k.displayName ?? ""} q={q} />}
-                label={k.displayName}
-                contentTitle
-                description={k.collection?.description ? <span translate="no"><HighlightText text={k.collection.description} q={q} /></span> : undefined}
-                meta={
-                  locked ? (
-                    <Chip size="sm">
-                      <Lock className="i i-xs" aria-hidden />
-                      Locked
-                    </Chip>
-                  ) : (
-                    plural(k.collection?.documentCount ?? 0, "document")
-                  )
-                }
-                href={`/bases/${resourceId(k.name)}`}
-              />
-            );
-          })}
-        </List>
-      ),
-    },
-    {
+      rows: kbRows,
+      // A collection's documents are a Browse filter; a locked one there offers Request access.
+      item: (k) => {
+        const locked = k.access === "LOCKED";
+        return (
+          <ListItem
+            key={k.name}
+            lead={<BaseMark base={k} size={32} />}
+            title={<HighlightText text={k.displayName ?? ""} q={q} />}
+            label={k.displayName}
+            contentTitle
+            description={k.collection?.description ? <span translate="no"><HighlightText text={k.collection.description} q={q} /></span> : undefined}
+            meta={locked ? <StatusChip label="Locked" icon={Lock} size="sm" /> : plural(k.collection?.documentCount ?? 0, "document")}
+            href={k.collection?.kind === "PERSONAL" ? "/knowledge/library?tab=files" : catalogHref({ filters: { kb: [resourceId(k.name)] } })}
+          />
+        );
+      },
+    }),
+    listGroup({
       id: "convs",
       label: "Conversations",
-      count: convs.data ? conversations.length : null,
-      isPending: convs.isPending,
+      count: convs.data ? convRows.length : null,
       error: convs.data ? null : convs.error,
       retry: convs.refetch,
-      render: (p, all) => (
-        <List className="srch-list">
-          {(all ? conversations.slice(0, PER_GROUP) : paginate(conversations, p, PER_PAGE)).map((c: Conversation) => (
-            <ListItem
-              key={c.name}
-              lead={<ItemIcon icon={MessageSquare} size="sm" />}
-              title={<HighlightText text={c.displayName || "New conversation"} q={q} />}
-              label={c.displayName}
-              contentTitle
-              meta={rel(c.lastMessageTime ?? c.updateTime)}
-              href={`/chat/${resourceId(c.name)}`}
-            />
-          ))}
-        </List>
+      rows: convRows,
+      item: (c: Conversation) => (
+        <ListItem
+          key={c.name}
+          lead={<ItemIcon icon={MessageSquare} size="sm" />}
+          title={<HighlightText text={c.displayName || "New conversation"} q={q} />}
+          label={c.displayName}
+          contentTitle
+          meta={rel(c.lastMessageTime ?? c.updateTime)}
+          href={`/chat/${resourceId(c.name)}`}
+        />
       ),
-    },
+    }),
+    ...(canPeople
+      ? [
+          listGroup({
+            id: "people",
+            label: "People",
+            count: people.members.data ? memberRows.length : null,
+            error: people.members.data ? null : people.members.error,
+            retry: people.members.refetch,
+            rows: memberRows,
+            item: (m: Member) => (
+              <ListItem
+                key={m.name}
+                lead={<UserAvatar name={m.displayName ?? m.email ?? ""} size="sm" />}
+                title={<HighlightText text={m.displayName ?? ""} q={q} />}
+                label={m.displayName}
+                description={<HighlightText text={m.email ?? ""} q={q} />}
+                meta={(m.roles ?? []).map((r) => roleNames.get(r) ?? "").filter(Boolean)[0]}
+                href={`/people?tab=members&open=${resourceId(m.name)}`}
+              />
+            ),
+          }),
+        ]
+      : []),
   ];
-  if (canPeople)
-    groups.push({
-      id: "people",
-      label: "People",
-      count: people.members.data ? members.length : null,
-      isPending: people.members.isPending,
-      error: people.members.data ? null : people.members.error,
-      retry: people.members.refetch,
-      render: (p, all) => (
-        <List className="srch-list">
-          {(all ? members.slice(0, PER_GROUP) : paginate(members, p, PER_PAGE)).map((m: Member) => (
-            <ListItem
-              key={m.name}
-              lead={<UserAvatar name={m.displayName ?? m.email ?? ""} size="sm" />}
-              title={<HighlightText text={m.displayName ?? ""} q={q} />}
-              label={m.displayName}
-              description={<HighlightText text={m.email ?? ""} q={q} />}
-              meta={(m.roles ?? []).map((r) => roleNames.get(r) ?? "").filter(Boolean)[0]}
-              href={`/people?tab=members&open=${resourceId(m.name)}`}
-            />
-          ))}
-        </List>
-      ),
-    });
 
   const loading = (g: Group) => g.count === null && !g.error;
   if (groups.every(loading)) return <SkeletonRows rows={6} />;
 
   const total = groups.reduce((n, g) => n + (g.count ?? 0), 0);
-  const unsettled = groups.filter((g) => g.error || loading(g));
-  if (!total && !unsettled.length) {
+  if (!total && !groups.some((g) => g.error || loading(g))) {
     return (
       <EmptyState
         icon={Search}
         title={`No results for “${q}”`}
-        description="Try different words, or ask the assistant — it can find answers across everything you can access."
-        actions={<Button onPress={onClear}>Clear search</Button>}
+        description="Try different words, or ask AI above — it answers from everything you can access."
+        actions={
+          <Button variant="tertiary" onPress={onClear}>
+            Clear search
+          </Button>
+        }
         boxed
       />
     );
   }
 
-  const active: "all" | GroupId = groups.some((g) => g.id === tab) ? (tab as GroupId) : "all";
-  const tabs = (
-    <div className="page-tabs">
-      <SectionTabs
-        label="Result types"
-        active={active}
-        onChange={setTab}
-        items={[{ id: "all", label: "All", count: total }, ...groups.map((g) => ({ id: g.id, label: g.label, count: g.count }))]}
-      />
-    </div>
-  );
-  const errorOf = (g: Group) => <ErrorState error={g.error} onRetry={g.retry} compact />;
-
-  if (active === "all") {
+  // Documents never paginate here: their full set (with filters and sort) is Browse.
+  const open = groups.find((g) => g.id === tab && g.id !== "docs");
+  if (open) {
     return (
       <>
-        {tabs}
-        {groups
-          .filter((g) => g.error || g.count || loading(g))
-          .map((g) => (
-            <Section
-              key={g.id}
-              title={g.label}
-              actions={
-                g.error ? null : g.id === "docs" ? (
-                  browse
-                ) : (g.count ?? 0) > PER_GROUP ? (
-                  <button type="button" className="link-button" onClick={() => setTab(g.id)}>
-                    See all {fmtNum(g.count ?? 0)}
-                  </button>
-                ) : null
-              }
-            >
-              {g.error ? errorOf(g) : loading(g) ? <SkeletonRows rows={3} /> : g.render(1, true)}
-            </Section>
-          ))}
+        <div className="srch-back">
+          <Button variant="ghost" size="sm" onPress={() => setTab("all")}>
+            <ArrowLeft aria-hidden />
+            All results
+          </Button>
+        </div>
+        <Section title={`${open.label} · ${fmtNum(open.count ?? 0)}`}>
+          {open.error ? (
+            <ErrorState error={open.error} onRetry={open.retry} compact />
+          ) : loading(open) ? (
+            <SkeletonRows rows={6} />
+          ) : (
+            <>
+              {open.render((page - 1) * PER_PAGE, page * PER_PAGE)}
+              <Pager page={page} pageSize={PER_PAGE} total={open.count ?? 0} onPageChange={setPage} />
+            </>
+          )}
+        </Section>
       </>
     );
   }
 
-  const g = groups.find((x) => x.id === active)!;
+  const more = (g: Group) =>
+    g.id === "docs" ? (
+      <LinkButton href={catalogHref({ q })} icon={ArrowRight}>
+        {(g.count ?? 0) > PER_GROUP ? `See all ${fmtNum(g.count ?? 0)} in Knowledge` : "Open in Knowledge"}
+      </LinkButton>
+    ) : (g.count ?? 0) > PER_GROUP ? (
+      <LinkButton onPress={() => setTab(g.id)} icon={ArrowRight}>
+        {`See all ${fmtNum(g.count ?? 0)}`}
+      </LinkButton>
+    ) : null;
+
   return (
     <>
-      {tabs}
-      {g.error ? (
-        errorOf(g)
-      ) : loading(g) ? (
-        <SkeletonRows rows={6} />
-      ) : !g.count ? (
-        <EmptyState icon={Search} title={`No ${g.label.toLowerCase()} match`} description="Try another word." boxed compact />
-      ) : (
-        <>
-          {g.render(page, false)}
-          {g.id === "docs" ? null : <Pager page={page} pageSize={PER_PAGE} total={g.count} onPageChange={setPage} />}
-        </>
-      )}
+      {groups
+        .filter((g) => g.error || g.count || loading(g))
+        .map((g) => (
+          <Section key={g.id} title={g.label} actions={g.error ? null : more(g)}>
+            {g.error ? <ErrorState error={g.error} onRetry={g.retry} compact /> : loading(g) ? <SkeletonRows rows={3} /> : g.render(0, PER_GROUP)}
+          </Section>
+        ))}
     </>
   );
 }

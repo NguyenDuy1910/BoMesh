@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { explainPassagePrompt, parseReaderQuery, readerHref, revisionNumber } from "../src/modules/knowledge/reader/links.ts";
+import { explainPassagePrompt, originParam, parseOrigin, parseReaderQuery, readerHref, revisionNumber } from "../src/modules/knowledge/reader/links.ts";
 
 function query(href: string): URLSearchParams {
   return new URL(href, "http://bomesh.test").searchParams;
@@ -19,7 +19,8 @@ test("the reader address carries every cited passage, in citation order", () => 
 
 test("deep-link parameters parse back, ignoring junk", () => {
   const parsed = parseReaderQuery(query("/doc/x?q=%20leave%20&page=3&passage=a&passage=b&passage=a&from=k&v=0"));
-  assert.deepEqual(parsed, { q: "leave", page: 3, passages: ["a", "b"], from: "k", v: undefined });
+  assert.deepEqual(parsed, { q: "leave", page: 3, passages: ["a", "b"], from: "k", v: undefined, ask: false });
+  assert.equal(parseReaderQuery(query("/doc/x?ask=1")).ask, true);
   assert.equal(parseReaderQuery(query("/doc/x?page=two&v=2")).v, 2);
   assert.equal(parseReaderQuery(query("/doc/x?page=two")).page, undefined);
 });
@@ -35,4 +36,13 @@ test("asking about a selection quotes it, collapsed and cut to a readable length
   const quote = long.split("“")[1]!.split("”")[0]!;
   assert.ok(quote.endsWith("…"));
   assert.ok(quote.length <= 241);
+});
+
+test("the reader's origin round-trips through from=", () => {
+  assert.deepEqual(parseOrigin("k9"), { kind: "conversation", id: "k9" });
+  assert.deepEqual(parseOrigin("home"), { kind: "home" });
+  assert.deepEqual(parseOrigin(originParam({ kind: "list", id: "workspaces/w/readingLists/r1" })), { kind: "list", id: "r1" });
+  assert.deepEqual(parseOrigin(originParam({ kind: "library", tab: "saved" })), { kind: "library", tab: "saved" });
+  assert.equal(parseOrigin(""), null);
+  assert.equal(new URL(readerHref({ item: "d", from: "space:s1", ask: true }), "http://x").search, "?from=space%3As1&ask=1");
 });

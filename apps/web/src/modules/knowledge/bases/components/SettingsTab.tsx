@@ -15,14 +15,14 @@ import { useWorkspace } from "@/lib/workspace";
 import { updateItem } from "../../api";
 import { invalidateKnowledge, useKnowledgeBases } from "../../queries";
 import { DESC_MAX, NAME_MAX, nameError, type Item } from "../model";
-import { useBaseOperations } from "../operations";
+import { useCollectionOperations } from "../operations";
 
 /** Settings tab (preview `settingsTab(kb)`): name and description, archive. Owners only. */
 export function SettingsTab({ base }: { base: Item }) {
   const { id: ws } = useWorkspace();
   const qc = useQueryClient();
   const bases = useKnowledgeBases({ showLocked: true });
-  const ops = useBaseOperations();
+  const ops = useCollectionOperations();
   const savedName = base.displayName ?? "";
   const savedDesc = base.collection?.description ?? "";
   const [name, setName] = useState(savedName);
@@ -68,7 +68,7 @@ export function SettingsTab({ base }: { base: Item }) {
   return (
     <div className="kb-narrow stack gap-16">
       <Card className="card--lg">
-        <FormSection title="Details" description="Shown on the Knowledge page and when people choose what to ask about.">
+        <FormSection title="Details" description="Shown in Browse filters and when people choose what to ask about.">
           <TextField value={name} onChange={setName} isRequired isInvalid={!!shown} isDisabled={busy} maxLength={NAME_MAX}>
             <Label>Name</Label>
             <Input
@@ -104,13 +104,13 @@ export function SettingsTab({ base }: { base: Item }) {
       </Card>
       <Card className="card--lg">
         <FormSection
-          title="Archive knowledge base"
+          title="Archive collection"
           description={`${n ? `Removes it and its ${plural(n, "document")} from answers and search for everyone.` : "Removes it for everyone."} You can undo right after.`}
         >
           <div>
             <Button variant="danger-soft" onPress={() => void ops.archive(base)}>
               <Archive className="i" aria-hidden />
-              Archive knowledge base
+              Archive collection
             </Button>
           </div>
         </FormSection>

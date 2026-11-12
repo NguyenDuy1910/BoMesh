@@ -73,7 +73,7 @@ seedWorkspace('ws-finx', () => {
   D.roles = [
     { id: 'r-admin', name: 'Workspace admin', system: true, desc: 'Full control of this workspace.', perms: ALL_TENANT },
     { id: 'r-member', name: 'Member', system: true, desc: 'Ask questions, browse the knowledge they can access, contribute documents for review and send requests.', perms: ['tenant.read', 'knowledge.read', 'knowledge.contribute'] },
-    { id: 'r-km', name: 'Knowledge owner', system: false, desc: 'Owns knowledge bases, reviews what is submitted to them and keeps their sources healthy.', perms: KM_PERMS },
+    { id: 'r-km', name: 'Knowledge owner', system: false, desc: 'Owns collections, reviews what is submitted to them and keeps their sources healthy.', perms: KM_PERMS },
     { id: 'r-auditor', name: 'Auditor', system: false, desc: 'Reviews activity and sign-ins for audits. Cannot change anything.', perms: ['tenant.read', 'knowledge.read', 'audit.read'] },
   ];
   D.groups = [
@@ -224,7 +224,7 @@ seedWorkspace('ws-finx', () => {
       sample: ['Merchant onboarding checklist 2020.pdf', 'Teller shift handover.docx', 'Branch opening hours — Tet.pdf', 'MID request form.xlsx', 'Cash count procedure — branches.pdf'] },
   ];
 
-  /* Access requests (to knowledge bases) */
+  /* Access requests (to collections) */
   D.requests = [
     { id: 'req-fx-1', user: 'u-fx-tuan', kb: 'kb-fx-pay', role: 'viewer', note: 'Building the settlement fact table and need the NAPAS settlement file format.', at: P(0, 4), status: 'pending' },
     { id: 'req-fx-2', user: 'u-fx-huy', kb: 'kb-fx-eng', role: 'editor', note: 'I own the MSK evaluation and want to keep the ADR drafts for CBM up to date.', at: P(1, 3), status: 'pending' },

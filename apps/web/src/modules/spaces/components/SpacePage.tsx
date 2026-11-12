@@ -2,19 +2,18 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { Button, buttonVariants } from "@heroui/react";
-import { Calendar, ChevronDown, Clock, Layers, Lock, Megaphone, MessageSquare, Plus, Sparkles, Upload } from "lucide-react";
+import { Clock, Layers, Lock, Plus, Settings, Sparkles, Users } from "lucide-react";
 import NextLink from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState, type ReactNode } from "react";
 
 import { PageChrome } from "@/components/shell/page-chrome";
-import { EmptyState, ErrorState, Page, PageHeader, SectionTabs, SkeletonRows, UserAvatar, toast, type SectionTab } from "@/components/ui";
+import { EmptyState, ErrorState, IconButton, Page, PageHeader, SectionTabs, SkeletonRows, UserAvatar, toast, type SectionTab } from "@/components/ui";
 import { ApiError, errorMessage, resourceId } from "@/lib/api/client";
 import { plural, rel } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
-import { openContribute } from "@/modules/knowledge/components/contribute-store";
-import { AskSpaceDialog } from "@/modules/requests/components/AskSpaceDialog";
-import { newWorkHref, workflowsFor } from "@/modules/work/kinds";
+import { AskSpaceDialog, isActionable } from "@/modules/requests";
+import { NewWorkMenu, workflowsFor } from "@/modules/work";
 
 import { decideRequest, type Announcement } from "../api";
 import {
@@ -33,7 +32,6 @@ import { isStaffRole, joinMode, spaceType } from "../types";
 import type { SpaceView } from "./context";
 import { JoinSpaceDialog } from "./JoinSpaceDialog";
 import { MaterialsTab } from "./MaterialsTab";
-import { Menu, type MenuNode } from "./Menu";
 import { OverviewTab } from "./OverviewTab";
 import { PeopleTab } from "./PeopleTab";
 import { AnnouncementDialog, EventDialog } from "./PostDialogs";
@@ -42,6 +40,7 @@ import { SettingsTab } from "./SettingsTab";
 import { SpaceMark } from "./SpaceMark";
 import { WorkTab } from "./WorkTab";
 
+type BaseView = Omit<SpaceView, "newInHeader">;
 type Dialog = { kind: "announcement"; announcement?: Announcement } | { kind: "event"; item?: UpNextItem } | { kind: "ask" } | null;
 
 /** `/space/[id]` (preview `P.space`). */
@@ -61,7 +60,7 @@ export function SpacePage({ spaceId }: { spaceId: string }) {
   const type = spaceType(space.spaceType, settings);
   const role = space.callerRole || null;
   const manage = perms.can("spaces.update");
-  const view: SpaceView = {
+  const view: BaseView = {
     space,
     sid: resourceId(space.name),
     type,
@@ -72,13 +71,15 @@ export function SpacePage({ spaceId }: { spaceId: string }) {
     can: perms.can,
   };
   if (view.visitor && joinMode(space, type) !== "open") return <LockedPage view={view} />;
-  return <SpaceBody view={view} />;
+  return <SpaceBody base={view} />;
 }
+
+const spacesCrumb = { label: "Spaces", href: "/spaces" };
 
 function Unavailable() {
   return (
     <Page>
-      <PageChrome crumbs={[{ label: "Spaces", href: "/spaces" }, { label: "Not available" }]} />
+      <PageChrome crumbs={[spacesCrumb, { label: "Not available" }]} />
       <EmptyState
         icon={Layers}
         boxed
@@ -95,7 +96,7 @@ function Unavailable() {
 }
 
 /** Header people line (preview `peopleLine`): first faces and the member count; links to People for members. */
-function PeopleLine({ view, link }: { view: SpaceView; link: boolean }) {
+function PeopleLine({ view, link }: { view: BaseView; link: boolean }) {
   const members = useSpaceMembers(view.sid, link);
   const faces = (
     <>
@@ -106,7 +107,7 @@ function PeopleLine({ view, link }: { view: SpaceView; link: boolean }) {
           ))}
         </span>
       ) : null}
-      {plural(view.space.memberCount ?? members.data?.length ?? 0, "member")}
+      {plural(Math.max(view.space.memberCount ?? 0, members.data?.length ?? 0), "member")}
     </>
   );
   return link ? (
@@ -118,7 +119,8 @@ function PeopleLine({ view, link }: { view: SpaceView; link: boolean }) {
   );
 }
 
-function Description({ view, link }: { view: SpaceView; link: boolean }) {
+/** Hero meta (preview `sp-head__meta` + `peopleLine`). */
+function HeadMeta({ view, link }: { view: BaseView; link: boolean }) {
   return (
     <>
       <span className="sp-head__meta">{view.type.label}</span>
@@ -128,7 +130,7 @@ function Description({ view, link }: { view: SpaceView; link: boolean }) {
 }
 
 /** Outsiders of a non-open space (preview `lockedPage`): enrolled-only courses, a pending request, or Request to join. */
-function LockedPage({ view }: { view: SpaceView }) {
+function LockedPage({ view }: { view: BaseView }) {
   const { id: ws } = useWorkspace();
   const qc = useQueryClient();
   const mine = useMyJoinRequests();
@@ -194,19 +196,38 @@ function LockedPage({ view }: { view: SpaceView }) {
 
   return (
     <Page>
-      <PageChrome crumbs={[{ label: "Spaces", href: "/spaces" }, { label: space.displayName ?? "Space" }]} />
-      <PageHeader title={<span translate="no">{space.displayName}</span>} lead={<SpaceMark space={space} size={48} />} description={<Description view={view} link={false} />} />
+      <PageHeader
+        title={space.displayName}
+        heading={<span translate="no">{space.displayName}</span>}
+        lead={<SpaceMark space={space} size={48} />}
+        meta={<HeadMeta view={view} link={false} />}
+        crumbs={[spacesCrumb, { label: space.displayName }]}
+      />
       {body}
       <JoinSpaceDialog space={joining ? space : null} onClose={() => setJoining(false)} />
     </Page>
   );
 }
 
-function SpaceBody({ view }: { view: SpaceView }) {
-  const { settings, hasModule } = useWorkspace();
+/** Settings is a rare admin task: its own page behind the header gear, not a tab (preview `query.tab === 'settings'`). */
+function SettingsPage({ view }: { view: SpaceView }) {
+  return (
+    <Page>
+      <PageHeader
+        title="Space settings"
+        lead={<SpaceMark space={view.space} size={40} />}
+        crumbs={[spacesCrumb, { label: view.space.displayName, href: `/space/${view.sid}` }, { label: "Settings" }]}
+      />
+      <SettingsTab view={view} />
+    </Page>
+  );
+}
+
+function SpaceBody({ base }: { base: BaseView }) {
+  const { settings, hasModule, memberId } = useWorkspace();
   const router = useRouter();
   const params = useSearchParams();
-  const { space, sid, type, staff, manage, visitor, can } = view;
+  const { space, sid, type, role, staff, manage, visitor, can } = base;
   const [dialog, setDialog] = useState<Dialog>(null);
   const bases = useSpaceBases(space);
   const materials = useSpaceMaterials(sid, can("materials.list"));
@@ -216,45 +237,36 @@ function SpaceBody({ view }: { view: SpaceView }) {
 
   const catalogCount = catalog.data?.length ?? 0;
   const queueLabel = catalogCount ? "Requests" : "Questions";
-  const waiting = (queue.data ?? []).filter((r) => r.state === "OPEN").length;
+  const waiting = (queue.data ?? []).filter((r) => resourceId(r.requester) !== memberId && isActionable(r)).length;
   const readable = (bases.data ?? []).filter((b) => b.access !== "LOCKED");
-  const editable = readable.find((b) => b.access === "EDITOR" || b.access === "OWNER");
-  const workflows = hasModule("work") && view.role ? workflowsFor(settings, space) : [];
+  const workflows = hasModule("work") ? workflowsFor(settings, space) : [];
+  /** Offices whose staff work a request queue: the queue is their space's main view (preview `isDesk`). */
+  const desk = staff && type.key === "office" && catalogCount > 0;
+  const newInHeader = (staff || (manage && !role)) && !desk && workflows.length > 0;
+  const view: SpaceView = { ...base, newInHeader };
 
-  const tabs: SectionTab[] = [{ id: "overview", label: "Overview" }];
+  if (params.get("tab") === "settings" && manage) return <SettingsPage view={view} />;
+
+  // Preview `tabsFor`: desks open on their queue; visitors see Overview and Materials only.
+  const tabs: SectionTab[] = [];
+  const queueTab = () => tabs.push({ id: "queue", label: queueLabel, count: waiting || null, alert: waiting > 0 });
+  if (desk) queueTab();
+  tabs.push({ id: "overview", label: "Overview" });
   if (readable.length || manage || materials.data?.length) tabs.push({ id: "materials", label: "Materials" });
   if (!visitor) {
     if (hasModule("work")) tabs.push({ id: "work", label: "Work" });
-    if (queueOn) tabs.push({ id: "queue", label: queueLabel, count: waiting || null, alert: waiting > 0 });
+    if (queueOn && !desk) queueTab();
     tabs.push({ id: "people", label: "People" });
-    if (manage) tabs.push({ id: "settings", label: "Settings" });
   }
-  const tab = tabs.some((t) => t.id === params.get("tab")) ? params.get("tab")! : "overview";
+  const tab = tabs.some((t) => t.id === params.get("tab")) ? params.get("tab")! : tabs[0].id;
 
-  const newNodes: MenuNode[] = workflows.map((w) => ({ id: w.id, label: w.label, icon: w.icon, run: () => router.push(newWorkHref({ workflow: w.id, space: sid })) }));
-  const extra: MenuNode[] = [];
-  if (can("announcements.create")) extra.push({ id: "announcement", label: "Announcement", icon: Megaphone, run: () => setDialog({ kind: "announcement" }) });
-  if (can("events.create")) extra.push({ id: "event", label: "Event", icon: Calendar, run: () => setDialog({ kind: "event" }) });
-  if (editable && (staff || manage)) extra.push({ id: "materials", label: "Add materials", icon: Upload, run: () => openContribute({ collection: editable.name }) });
-  const newMenu = newNodes.length && extra.length ? [...newNodes, { sep: "1" }, ...extra] : [...newNodes, ...extra];
-
-  const askLabel = type.key === "course" && !staff ? "Ask about this course" : "Ask";
   const ask = (variant: "primary" | "tertiary") => (
     <NextLink href={`/chat?space=${sid}`} className={buttonVariants({ variant })}>
       <Sparkles aria-hidden />
-      {askLabel}
+      Ask AI
     </NextLink>
   );
-  const newButton = (variant: "primary" | "tertiary") =>
-    newMenu.length ? (
-      <Menu label="New" nodes={newMenu}>
-        <Button variant={variant}>
-          <Plus aria-hidden />
-          New
-          <ChevronDown aria-hidden />
-        </Button>
-      </Menu>
-    ) : null;
+  const gear = manage ? <IconButton icon={Settings} tip="Space settings" onPress={() => router.push(`/space/${sid}?tab=settings`)} /> : null;
 
   let actions: ReactNode;
   if (visitor)
@@ -269,40 +281,35 @@ function SpaceBody({ view }: { view: SpaceView }) {
         ) : null}
       </>
     );
-  else if (staff || (manage && !view.role))
+  else if (staff || (manage && !role))
     actions = (
       <>
         {ask("tertiary")}
-        {newButton("primary")}
+        {newInHeader ? <NewWorkMenu flows={workflows} space={sid} /> : null}
+        {gear}
       </>
     );
-  else
+  else {
+    const team = type.key === "course" ? "Ask the teaching team" : type.key === "office" ? "Ask the office" : "Ask the team";
     actions = (
       <>
         {hasModule("requests") ? (
           <Button variant="tertiary" onPress={() => setDialog({ kind: "ask" })}>
-            <MessageSquare aria-hidden />
-            {type.key === "course" ? (
-              "Ask the teaching team"
-            ) : (
-              <span>
-                Ask <span translate="no">{space.displayName}</span>
-              </span>
-            )}
+            <Users aria-hidden />
+            {team}
           </Button>
-        ) : type.key === "course" ? null : (
-          newButton("tertiary")
-        )}
+        ) : null}
         {ask("primary")}
+        {gear}
       </>
     );
+  }
 
   let body: ReactNode;
   if (tab === "materials") body = <MaterialsTab view={view} />;
   else if (tab === "work") body = <WorkTab view={view} />;
-  else if (tab === "queue") body = <QueueTab view={view} noun={queueLabel.toLowerCase()} />;
+  else if (tab === "queue") body = <QueueTab view={view} />;
   else if (tab === "people") body = <PeopleTab view={view} />;
-  else if (tab === "settings") body = <SettingsTab view={view} />;
   else
     body = (
       <OverviewTab
@@ -316,12 +323,13 @@ function SpaceBody({ view }: { view: SpaceView }) {
 
   return (
     <Page>
-      <PageChrome crumbs={[{ label: "Spaces", href: "/spaces" }, { label: space.displayName ?? "Space" }]} />
       <PageHeader
-        title={<span translate="no">{space.displayName}</span>}
+        title={space.displayName}
+        heading={<span translate="no">{space.displayName}</span>}
         lead={<SpaceMark space={space} size={48} />}
-        description={<Description view={view} link={!visitor} />}
+        meta={<HeadMeta view={view} link={!visitor} />}
         actions={actions}
+        crumbs={[spacesCrumb, { label: space.displayName }]}
       >
         <SectionTabs items={tabs} active={tab} base={`/space/${sid}`} />
       </PageHeader>

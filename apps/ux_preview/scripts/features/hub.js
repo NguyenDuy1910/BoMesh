@@ -1,5 +1,5 @@
 /* Knowledge: Browse (/knowledge) — the organization's knowledge, content first.
-   One search field, topic shortcuts (the only topic control), collections shared
+   One search field, topic shortcuts (the only topic control), reading lists shared
    with you (landing), and a grid of documents you can recognise and judge
    without opening them. Filters sit right above the results as inline buttons
    (Type · Updated · Trust · Owner, the rest under More filters), each opening a
@@ -9,7 +9,7 @@
    Views dropdown next to the filters (open, save, rename, delete). A document
    opens in the shared document preview overlay (preview.js), then the Reader.
    The URL holds the result set (q, filters, sort, view), so every set is
-   linkable and can be saved as a view. A knowledge base is a filter here (kb=);
+   linkable and can be saved as a view. A collection is a filter here (kb=);
    a locked one offers Request access. Personal files, saved and recent reads
    live in My library. Model: core/catalog.js. Pieces: X.res (resources.js).
    Actions: cat-*. Popovers: cat-f (data-f = facet id | more | all).
@@ -31,7 +31,7 @@
     return emptyState({
       icon: 'book', title: 'No knowledge yet', boxed: true,
       desc: up ? 'Contribute files or connect a source to start the catalog.' : 'Nothing has been shared with you yet.',
-      actions: up + (can('knowledge.manage') ? btn('Create knowledge base', { icon: 'plus', act: 'kb-create' }) : ''),
+      actions: up + (can('knowledge.manage') ? btn('Create collection', { icon: 'plus', act: 'kb-create' }) : ''),
     });
   }
 
@@ -173,7 +173,7 @@
     const cards = page.map((d, i) => X.res.card(d, { act: 'cat-select', data, q: p.q, hide, plain: seen.get(keys[i]) > 1 })).join('');
     return `<div class="cat-results"><div class="cat-cards">${cards}</div></div>${r.total > PER ? pager(r.total, 'cat', PER) : ''}`;
   }
-  /** Landing only: reading lists curated for you (shared with the workspace or your spaces). Yours are in My library → My collections.
+  /** Landing only: reading lists curated for you (shared with the workspace or your spaces). Yours are in My library → My reading lists.
       Phones show them as one swipeable row, so the documents start near the top. */
   const COLS_SHOWN = 3;
   const sharedCollections = () => visibleCollections().filter(c => c.owner !== me().id && collectionItems(c).ok.length).sort((a, b) => (b.featured ? 1 : 0) - (a.featured ? 1 : 0) || b.updated - a.updated);
@@ -182,7 +182,7 @@
     const all = sharedCollections(); if (!all.length) return '';
     const open = cui().colsAll, shown = open ? all : all.slice(0, COLS_SHOWN);
     const more = all.length > COLS_SHOWN ? linkBtn(open ? 'Show less' : `Show all ${fmtNum(all.length)}`, { act: 'cat-cols-all' }) : '';
-    const itemHtml = c => `<a class="cat-col" href="#/knowledge/collections/${esc(c.id)}">${itemIcon('list', c.featured ? 'accent' : '', 'sm')}<span class="cat-col__body"><span class="cat-col__title truncate">${esc(c.name)}</span><span class="cat-col__sub truncate">${plural(collectionItems(c).ok.length, 'item')} · ${esc(c.desc || shareLabel(c).label)}</span></span></a>`;
+    const itemHtml = c => `<a class="cat-col" href="#/knowledge/lists/${esc(c.id)}">${itemIcon('list', c.featured ? 'accent' : '', 'sm')}<span class="cat-col__body"><span class="cat-col__title truncate">${esc(c.name)}</span><span class="cat-col__sub truncate">${plural(collectionItems(c).ok.length, 'item')} · ${esc(c.desc || shareLabel(c).label)}</span></span></a>`;
     return `<section class="cat-cols" aria-labelledby="cat-cols-h"><div class="cat-cols__head"><h2 class="cat-cols__title" id="cat-cols-h">Shared with you</h2><span class="grow"></span>${more}</div><div class="cat-cols__list">${shown.map(itemHtml).join('')}</div></section>`;
   }
   function noMatches(p) {
@@ -198,7 +198,7 @@
     });
   }
   /** One quiet way in to the bases people can see but not open — unless the page already shows one of them. */
-  const lockedNote = p => (visibleKbs().some(k => kbRole(k) === 'none') && !(p.filters.kb || []).some(id => kbRole(kbById(id)) === 'none') ? `<button type="button" class="cat-locked" data-act="kb-locked">${ic('lock', 'i-sm')}<span>Some knowledge bases aren’t shared with you</span>${ic('arrow-right', 'i-sm')}</button>` : '');
+  const lockedNote = p => (visibleKbs().some(k => kbRole(k) === 'none') && !(p.filters.kb || []).some(id => kbRole(kbById(id)) === 'none') ? `<button type="button" class="cat-locked" data-act="kb-locked">${ic('lock', 'i-sm')}<span>Some collections aren’t shared with you</span>${ic('arrow-right', 'i-sm')}</button>` : '');
 
   function loadingBody() {
     const pills = `<div class="cat-pills" aria-hidden="true">${[44, 64, 72, 58, 66].map(w => `<span class="skeleton cat-skel-pill" style="width:${w}px"></span>`).join('')}</div>`;

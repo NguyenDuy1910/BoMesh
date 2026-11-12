@@ -19,7 +19,7 @@ export function AttachMenu({ composer }: { composer: ComposerAttachments }) {
         <Button isIconOnly size="sm" variant="ghost" className="button--muted" aria-label="Attach files">
           <Paperclip aria-hidden />
         </Button>
-        <Dropdown.Popover placement="top start">
+        <Dropdown.Popover placement="bottom start">
           <Dropdown.Menu
             aria-label="Attach files"
             onAction={(key) => {
@@ -59,10 +59,10 @@ export function AttachMenu({ composer }: { composer: ComposerAttachments }) {
         isOpen={picking}
         onOpenChange={setPicking}
         title="Add from knowledge"
-        description="The assistant reads these where they are. Nothing is copied, and access rules still apply."
+        description="The assistant reads these where they are. Nothing is copied; access rules still apply."
         exclude={composer.files.map((f) => resourceId(f.item)).filter(Boolean)}
         room={MAX_ATTACHMENTS - composer.count}
-        roomFullText={`This message already has ${MAX_ATTACHMENTS} files`}
+        roomFullText={`This message already has ${MAX_ATTACHMENTS} files.`}
         onAdd={composer.addRefs}
       />
     </>

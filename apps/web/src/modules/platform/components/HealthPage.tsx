@@ -2,25 +2,30 @@
 
 import { Button } from "@heroui/react";
 import { AlertCircle, ArrowUpRight, CheckCircle2, ChevronDown, ChevronUp, Cpu, FileText, Layers, RefreshCw, Search, Server, Sparkles } from "lucide-react";
-import NextLink from "next/link";
 import { useState, type ReactNode } from "react";
 
-import { PageChrome } from "@/components/shell/page-chrome";
-import { Callout, DataTable, EmptyState, ErrorState, ItemIcon, List, ListItem, Page, PageHeader, PreviewChip, Section, SkeletonRows, StatusChip, toast } from "@/components/ui";
+import { Callout, DataTable, Disclosure, EmptyState, ErrorState, ItemIcon, LinkButton, List, ListItem, Page, PageHeader, PreviewChip, Section, SkeletonRows, StatusChip, toast } from "@/components/ui";
 import { fmtDate, plural, rel } from "@/lib/format";
 
 import type { Component, Incident } from "../api";
-import { errorCategoryLabel, fmtIncidentDuration, serviceStatus, unhealthyComponents } from "../model";
+import { errorCategoryLabel, fmtIncidentDuration, serviceStatus, unhealthyComponents, type ServiceStatus } from "../model";
 import { useComponents, useIncidents } from "../queries";
 import { PREVIEW_TIP } from "./shared";
 
 /** Preview `D.pModels` names and descriptions, keyed by the deployment setting that configures each model. */
 const MODEL_COPY: Record<string, { name: string; description: string; icon: typeof Sparkles }> = {
   OPENROUTER_MODEL: { name: "Answers & reasoning", description: "Writes answers and decides when to search.", icon: Sparkles },
+  OPENAI_MODEL: { name: "Answers & reasoning", description: "Writes answers and decides when to search.", icon: Sparkles },
   EMBEDDING_MODEL: { name: "Search understanding", description: "Turns passages into searchable meaning.", icon: Search },
   BOMESH_DOCLING_MODEL: { name: "Document reading", description: "Reads layouts, tables and scanned pages.", icon: FileText },
   BOMESH_CONTEXTUALIZATION_MODEL: { name: "Passage context", description: "Adds surrounding context to each passage before indexing.", icon: Layers },
 };
+
+/** Components whose trouble slows document processing: the banner then points to Indexing by workspace. */
+const PROCESSING = ["components/vector-index", "components/embedding-model"];
+
+/** Preview services order: outages first, then anything not operational, healthy last. */
+const SERVICE_RANK: Record<ServiceStatus, number> = { down: 0, degraded: 1, not_configured: 1, operational: 2 };
 
 function ServiceChip({ state }: { state: Component["state"] }) {
   const s = serviceStatus(state);
@@ -40,7 +45,6 @@ function noteFor(component: Component, incidents: readonly Incident[]): string |
 export function HealthPage() {
   const components = useComponents();
   const incidents = useIncidents();
-  const [showIncidents, setShowIncidents] = useState(false);
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [refreshing, setRefreshing] = useState(false);
 
@@ -65,9 +69,14 @@ export function HealthPage() {
   const banner = (): ReactNode => {
     if (!bad.length) return <Callout tone="success" title="All systems operational" />;
     const tone = bad.some((c) => c.state === "DOWN") ? "danger" : "warning";
-    if (bad.length > 1) return <Callout tone={tone} title={`${plural(bad.length, "service")} need attention`} description={bad.map((c) => c.displayName).join(", ")} />;
+    const action = bad.some((c) => PROCESSING.includes(c.name ?? "")) ? (
+      <LinkButton href="/p/indexing" icon={ArrowUpRight}>
+        Indexing by workspace
+      </LinkButton>
+    ) : undefined;
+    if (bad.length > 1) return <Callout tone={tone} title={`${plural(bad.length, "service")} need attention`} description={bad.map((c) => c.displayName).join(", ")} actions={action} />;
     const c = bad[0];
-    return <Callout tone={tone} title={`${c.displayName} is ${c.state === "DOWN" ? "down" : "degraded"}`} description={noteFor(c, incidentList) ?? undefined} />;
+    return <Callout tone={tone} title={`${c.displayName} is ${c.state === "DOWN" ? "down" : "degraded"}`} description={noteFor(c, incidentList) ?? undefined} actions={action} />;
   };
 
   const resolved = incidentList.filter((i) => i.state === "RESOLVED");
@@ -75,10 +84,9 @@ export function HealthPage() {
 
   return (
     <Page>
-      <PageChrome crumbs={[{ label: "System health" }]} />
       <PageHeader
         title="System health"
-        description={updated}
+        meta={updated}
         chips={<PreviewChip tooltip={PREVIEW_TIP} />}
         actions={
           <Button variant="tertiary" isPending={refreshing} onPress={() => void refresh()}>
@@ -96,18 +104,10 @@ export function HealthPage() {
       ) : (
         <>
           <div className="pf-banner">{banner()}</div>
-          <Section
-            title="Services"
-            actions={
-              <NextLink className="link-button" href="/p/indexing">
-                Indexing by workspace
-                <ArrowUpRight className="i i-sm" aria-hidden />
-              </NextLink>
-            }
-          >
+          <Section title="Services">
             <DataTable
               label="Services"
-              rows={services}
+              rows={[...services].sort((a, b) => SERVICE_RANK[serviceStatus(a.state)] - SERVICE_RANK[serviceStatus(b.state)])}
               getRowId={(c) => c.name ?? ""}
               onRowAction={(c) => {
                 if (!noteFor(c, incidentList)) return;
@@ -179,26 +179,22 @@ export function HealthPage() {
               })}
             </List>
           </Section>
-          <Section
-            title="Recent incidents"
-            description={
-              ongoing.length
-                ? `${plural(ongoing.length, "incident")} ongoing · ${plural(resolved.length, "incident")} resolved in the last 30 days`
-                : `${plural(resolved.length, "incident")} resolved in the last 30 days`
-            }
-            actions={
-              <Button variant="ghost" size="sm" aria-expanded={showIncidents} onPress={() => setShowIncidents((v) => !v)}>
-                {showIncidents ? "Hide" : "Show"}
-                {showIncidents ? <ChevronUp className="i" aria-hidden /> : <ChevronDown className="i" aria-hidden />}
-              </Button>
-            }
-          >
-            {showIncidents ? (
-              incidents.isError && !incidents.data ? (
+          <section className="section" aria-label="Recent incidents">
+            <Disclosure
+              icon={ongoing.length ? AlertCircle : CheckCircle2}
+              title="Recent incidents"
+              summary={
+                ongoing.length
+                  ? `${plural(ongoing.length, "incident")} ongoing · ${plural(resolved.length, "incident")} resolved in the last 30 days`
+                  : `${plural(resolved.length, "incident")} resolved in the last 30 days`
+              }
+            >
+              {incidents.isError && !incidents.data ? (
                 <ErrorState error={incidents.error} onRetry={incidents.refetch} compact />
               ) : incidentList.length ? (
                 <List>
-                  {incidentList.map((i) => {
+                  {/* What's still going on comes first; then the resolved ones, newest first (API order). */}
+                  {[...ongoing, ...resolved].map((i) => {
                     const end = i.endTime ? Date.parse(i.endTime) : Date.now();
                     const dur = end - Date.parse(i.startTime ?? "");
                     return (
@@ -214,9 +210,9 @@ export function HealthPage() {
                 </List>
               ) : (
                 <p className="t-sm muted">No incidents in the last 30 days.</p>
-              )
-            ) : null}
-          </Section>
+              )}
+            </Disclosure>
+          </section>
         </>
       )}
     </Page>

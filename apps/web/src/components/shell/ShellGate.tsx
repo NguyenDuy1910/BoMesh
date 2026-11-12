@@ -39,7 +39,10 @@ export function ShellSkeleton() {
     <div className="app" aria-busy="true" aria-label="Loading">
       <aside className="sidebar" aria-hidden>
         <div className="sidebar__header">
-          <Skeleton style={{ height: 44, flex: 1, borderRadius: "var(--radius-xl)" }} />
+          <Skeleton style={{ height: 32, flex: 1, borderRadius: "var(--radius-lg)" }} />
+        </div>
+        <div className="sidebar__search">
+          <Skeleton style={{ height: 32, borderRadius: "var(--radius-lg)" }} />
         </div>
         <div className="sidebar__content">
           {Array.from({ length: 6 }, (_, i) => (
@@ -48,7 +51,9 @@ export function ShellSkeleton() {
         </div>
       </aside>
       <main className="main">
-        <header className="topbar" />
+        <header className="topbar">
+          <div className="topbar__inner" />
+        </header>
         <div className="main__scroll">
           <Page>
             <SkeletonRows rows={5} />

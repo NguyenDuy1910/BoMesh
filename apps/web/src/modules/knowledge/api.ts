@@ -125,7 +125,7 @@ export function listChildren(workspace: string, parentItem: string, options: Omi
   return listItems(workspace, { orderBy: "itemType,displayName", ...options, filter: options.filter ? `${parent} AND (${options.filter})` : parent });
 }
 
-/** Root collections ("knowledge bases"); `showLocked` adds discoverable bases the caller can't read. */
+/** Root collections (the access boundaries); `showLocked` adds discoverable collections the caller can't read. */
 export function listRootCollections(workspace: string, options: { showLocked?: boolean } = {}): Promise<Item[]> {
   return listAllItems(workspace, { filter: 'parentItem = "" AND itemType = COLLECTION', orderBy: "displayName", showLocked: options.showLocked });
 }
@@ -380,7 +380,7 @@ export async function deleteSavedSearch(workspace: string, name: string): Promis
   );
 }
 
-/* ═══════════════ Reading lists ("Collections" in the UI) ═══════════════ */
+/* ═══════════════ Reading lists ═══════════════ */
 
 /** The workspace's FEATURED list (Home "Featured"). */
 export const FEATURED_LIST = "featured";

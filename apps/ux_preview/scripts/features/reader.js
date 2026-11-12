@@ -7,7 +7,7 @@
    place from the document's own passages and cites them (the header's Ask, the
    selection toolbar, and ?ask=1 — "Ask about this document" from anywhere);
    About holds details and versions (⋯ → About this document); Related lists
-   resources, collections, conversations. ?v= shows an older version: the header
+   resources, reading lists, conversations. ?v= shows an older version: the header
    and trust follow it, Ask and Save stay with the current one. Back appears only
    when the breadcrumb doesn't lead where the reader came from.
    Documents that aren't published (submissions, changes requested, declined,
@@ -38,7 +38,7 @@
     if (to.startsWith('/doc/') && from && !from.startsWith('/doc/')) origin = from;
   }, true);
   /** Back only where the breadcrumb doesn't already lead: from a conversation ("Back to conversation"), Home, search, My library, a
-      collection or a space. From Browse the breadcrumb's Knowledge is the way back, so Back would only repeat it. */
+      reading list or a space. From Browse the breadcrumb's Knowledge is the way back, so Back would only repeat it. */
   function backBtn(conv) {
     if (conv) return iconBtn('arrow-left', 'Back to conversation', { href: '/chat/' + conv.id, cls: 'rdr-back' });
     if (!origin || /^\/knowledge(\?|$)/.test(origin)) return '';
@@ -271,7 +271,7 @@
     const convs = citingConvs(doc);
     const none = t => `<p class="rdr-none">${esc(t)}</p>`;
     return railSec('Related resources', related.length ? X.res.rows(related, { compact: true }) : none('Nothing related yet.'))
-      + railSec('Collections that include it', cols.length ? list(cols.map(c => { const s = shareLabel(c); return item({ lead: itemIcon('list', '', 'sm'), title: esc(c.name), desc: `<span class="row gap-4">${ic(s.icon, 'i-xs')}${esc(s.label)}</span>`, href: '/knowledge/collections/' + c.id }); }), 'list--plain rdr-list') : none('Not in any collection you can see.'), btn('', { v: 'ghost', size: 'sm', icon: 'list-plus', tip: 'Add to collection', act: 'res-collect', data: { id: doc.id } }))
+      + railSec('Collections that include it', cols.length ? list(cols.map(c => { const s = shareLabel(c); return item({ lead: itemIcon('list', '', 'sm'), title: esc(c.name), desc: `<span class="row gap-4">${ic(s.icon, 'i-xs')}${esc(s.label)}</span>`, href: '/knowledge/lists/' + c.id }); }), 'list--plain rdr-list') : none('Not in any reading list you can see.'), btn('', { v: 'ghost', size: 'sm', icon: 'list-plus', tip: 'Add to reading list', act: 'res-collect', data: { id: doc.id } }))
       + railSec('Cited in your conversations', convs.length ? list(convs.slice(0, 6).map(c => item({ lead: itemIcon('message', '', 'sm'), title: esc(c.title || 'Conversation'), desc: esc(rel(c.at)), href: '/chat/' + c.id })), 'list--plain rdr-list') : none('Not cited in your conversations yet.'));
   }
 
@@ -338,7 +338,7 @@
     const track = X.ctb?.href(doc.id) || '/contributions';
     crumbs(mine || !reviewer
       ? [{ label: 'Knowledge', to: '/knowledge' }, { label: 'My contributions', to: '/contributions' }, { label: docTitle(doc) }]
-      : [{ label: 'Knowledge Studio', to: '/studio?tab=review' }, { label: docTitle(doc) }]);
+      : [{ label: 'Review', to: '/studio?tab=review' }, { label: docTitle(doc) }]);
     const preview = !['zip', 'png', 'jpg', 'jpeg'].includes(doc.type);
     const m = preview ? docModel(doc) : null;
     const open = railOpen(u), k = kindMeta(res(doc).kind);
@@ -376,7 +376,7 @@
     const orig = sub.versionOf ? docById(sub.versionOf) : null;
     const about = () => `<section class="rdr-sec">${kv([
       ['Status', lifeChip(doc, 'sm')],
-      ['Knowledge base', esc(kb.name)],
+      ['Collection', esc(kb.name)],
       ['Contributed by', esc(mine ? 'You' : contributorName(doc))],
       sub.at && ['Submitted', esc(fmtDateTime(sub.at))],
       orig && ['New version of', canOpenRes(orig) ? `<a class="link" href="#/doc/${orig.id}">${esc(orig.name)}</a>` : esc(orig.name)],

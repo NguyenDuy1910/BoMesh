@@ -1,15 +1,15 @@
 /* Knowledge Studio (/studio) — Manage → Knowledge Studio: the one place knowledge is run.
-   Two groups of tabs, one row:
+   Its sections are sub-rows of Knowledge Studio in the sidebar, in two clusters:
      daily work   Review (one workbench for everything that needs a person, picked with a queue chooser:
                   To publish — Submissions · Sync batches · Publishing problems; To keep right — Topics to confirm ·
-                  Re-verification due · Missing details · Possible duplicates) · Library (every document whatever its
+                  Re-verification due · Missing details · Possible duplicates) · Documents (every document whatever its
                   origin, along the flow: In review → Publishing → Published, plus Needs attention and Not published)
-     setup        Knowledge bases (where documents live, who reads them) · Taxonomy (how they're classified) ·
+     setup        Collections (where documents live, who reads them) · Taxonomy (how they're classified) ·
                   Sources (what comes in, how often, how it's published; with the accounts it signs in with)
    The setup group is in the order it's done the first time; the setup guide (X.setupGuide) walks it.
    Tabs show only to people who can use them (X.studioTabs); bodies come from governance.js (X.gov.queue — the
    "To keep right" queues), knowledge.js (X.kb.tab), masterdata.js (X.md.tab) and sources.js (X.src.tab).
-   Scope of review: documents in the knowledge bases the caller owns (workspace admins own all) — curatedDocs().
+   Scope of review: documents in the collections the caller owns (workspace admins own all) — curatedDocs().
    Readers never see any of this. Every document row opens the same drawer (cur-doc), which shows where the
    document is in the flow; a row shows its state's fix.
    Exports: X.reviewNotices(), X.studioTabs(), X.studioBadge(), X.setupGuide(), X.reviewQueues() (counts per queue,
@@ -22,13 +22,13 @@
   /** [id, label, group, who may use it]. Setup is listed in the order it's done: where → how classified → what comes in. */
   const TAB_DEFS = [
     ['review', 'Review', 'work', () => can('knowledge.manage') && canReview()],
-    ['library', 'Library', 'work', () => can('knowledge.manage') && canReview()],
-    ['bases', 'Knowledge bases', 'setup', () => canManageKbs()],
+    ['documents', 'Documents', 'work', () => can('knowledge.manage') && canReview()],
+    ['collections', 'Collections', 'setup', () => canManageKbs()],
     ['taxonomy', 'Taxonomy', 'setup', () => canManageTaxonomy()],
     ['sources', 'Sources', 'setup', () => can('source.manage')],
   ];
-  /** Old tab ids: Documents → Library, Master data/Topics → Taxonomy, Quality (and Knowledge health's tabs) → Review queues. */
-  const TAB_ALIAS = { all: 'library', documents: 'library', master: 'taxonomy', topics: 'taxonomy', quality: 'review', details: 'review', duplicates: 'review' };
+  /** Old section ids: Library → Documents, Master data/Topics → Taxonomy, Quality (and Knowledge health's tabs) → Review queues. */
+  const TAB_ALIAS = { all: 'documents', library: 'documents', master: 'taxonomy', topics: 'taxonomy', quality: 'review', details: 'review', duplicates: 'review' };
   /** Review queues: [id, label, group]. To publish = decisions before documents reach people; to keep right = published ones. */
   const QUEUES = [
     ['submissions', 'Submissions', 'publish'], ['batches', 'Sync batches', 'publish'], ['problems', 'Publishing problems', 'publish'],
@@ -45,7 +45,7 @@
   const flagsOf = d => aiOf(d).flags || [];
   const hasFlag = (d, type) => flagsOf(d).some(f => f.type === type);
   const srcKey = d => (d.source && d.source !== 'upload' ? d.source : 'upload');
-  /** Where a document came from: its source, a person's contribution, or an editor's upload (the Library's Origin). */
+  /** Where a document came from: its source, a person's contribution, or an editor's upload (Documents' Origin column). */
   const originKey = d => (srcKey(d) !== 'upload' ? d.source : d.submission?.by ? 'contrib' : 'upload');
   const drafts = () => ui('curDraft');
   const tabsAllowed = () => TAB_DEFS.filter(t => t[3]()).map(t => t[0]);
@@ -96,6 +96,21 @@
   };
   const onReview = () => S.cur?.r.page === 'studio' && tabOf(S.cur.query) === 'review';
   const onSplit = kind => onReview() && queueOf(S.cur.query) === kind;
+  /** What each section counts — only what waits on the caller: decisions to publish, access requests, proposed topics, broken sources. */
+  const tabCounts = () => ({
+    review: { count: decisionCount() },
+    collections: { count: ownerRequests() },
+    // Only workspace admins change the taxonomy, so only they get the section (and the proposed topics to decide).
+    taxonomy: { count: X.md?.proposalCount?.() || 0 },
+    sources: { count: sourceProblems(), tone: 'danger' },
+  });
+  /** The Studio's sections as sidebar sub-rows of Knowledge Studio (core/shell.js navItem), in the order of TAB_DEFS; the first
+      setup section starts a new cluster. A base's page (/studio/collections/:id) belongs to Collections. */
+  X.studioNav = () => {
+    const cur = S.cur, here = cur?.r.page === 'studio' ? tabOf(cur.query) : cur?.r.page === 'kbDetail' ? 'collections' : '';
+    const counts = tabCounts(), defs = TAB_DEFS.filter(t => t[3]());
+    return defs.map(([id, label, group], i) => ({ id, label, to: studioHref(id), current: id === here, gap: i > 0 && defs[i - 1][2] !== group, ...counts[id] }));
+  };
 
   /* ═══════════════ Badges and inbox ═══════════════ */
   X.reviewNotices = () => {
@@ -117,64 +132,61 @@
     const keyed = leaves.filter(t => topicKeywords(t).length).length;
     const synced = D.sources.some(s => s.last?.at) || D.docs.some(d => d.source && d.source !== 'upload' && d.status === 'ready');
     return [
-      { id: 'bases', done: kbs.length > 0, title: 'Create knowledge bases', desc: 'Where documents live and who can read them. Make one per access boundary — a team, a function, the whole company.', cta: 'Create knowledge base', act: 'kb-create' },
+      { id: 'collections', done: kbs.length > 0, title: 'Create collections', desc: 'Where documents live and who can read them. Make one per access boundary — a team, a function, the whole company.', cta: 'New collection', act: 'kb-create' },
       { id: 'taxonomy', done: !!(D.masterImports || []).length || (leaves.length && keyed / leaves.length >= 0.8), title: 'Load the taxonomy', desc: 'The domains and topics documents are filed under, with the words that recognise them. Import them before the first sync, so every document is classified as it arrives.', cta: 'Import taxonomy', act: 'md-import' },
-      { id: 'sources', done: D.sources.length > 0, title: 'Connect sources', desc: 'Pick the folders, the knowledge base they land in, how often they sync and how documents are published.', cta: 'Connect source', act: 'src-connect' },
+      { id: 'sources', done: D.sources.length > 0, title: 'Add sources', desc: 'Pick the folders, the collection they land in, how often they sync and how documents are published.', cta: 'Add source', act: 'src-connect' },
       { id: 'sync', done: synced, title: 'Check the first sync', desc: 'Watch it read, classify and publish. Review what the assistant wasn’t sure about, then let the schedule take over.', cta: 'Open Sources', href: studioHref('sources') },
     ];
   }
-  /** The guide while setup is unfinished (admins). force: a brand-new workspace (the prototype's Empty state) — every step to do. */
+  /** The full checklist, only for a workspace with nothing set up yet (Overview's empty state; force: the prototype's Empty
+      state). Once anything is done, what's left is one row in Overview → Needs attention (X.setupNext) — never a block on the
+      Studio's own pages, where each section's empty state and header action already lead. */
   X.setupGuide = ({ force = false } = {}) => {
     if (!isAdmin()) return '';
     const steps = setupSteps().map(s => (force ? { ...s, done: false } : s)), left = steps.filter(s => !s.done);
-    if (!left.length) return '';
-    const next = left[0], done = steps.length - left.length;
+    if (!left.length || left.length < steps.length) return '';
+    const next = left[0];
     const rows = steps.map((s, i) => {
-      // Secondary: the page header keeps the one primary; the guide only names the next step.
       const now = s === next, action = now ? btn(s.cta, { v: 'secondary', size: 'sm', act: s.act, href: s.href }) : '';
-      return `<li class="${cx('setup__step', s.done && 'is-done', now && 'is-next')}"><span class="setup__num" aria-hidden="true">${s.done ? ic('check', 'i-xs') : i + 1}</span>
-        <div class="grow"><div class="setup__title">${esc(s.title)}${s.done ? '<span class="sr-only">Done</span>' : ''}</div>${s.done ? '' : `<p class="setup__desc">${esc(s.desc)}</p>`}</div>${action}</li>`;
+      return `<li class="${cx('setup__step', now && 'is-next')}"><span class="setup__num" aria-hidden="true">${i + 1}</span>
+        <div class="grow"><div class="setup__title">${esc(s.title)}</div><p class="setup__desc">${esc(s.desc)}</p></div>${action}</li>`;
     }).join('');
-    return `<section class="setup card" aria-label="Set up knowledge"><div class="setup__head"><div class="grow"><h2 class="setup__heading">Set up knowledge</h2><p class="setup__sub"><span>${esc(`${done} of ${steps.length} done`)}</span><span aria-hidden="true"> · </span><span>Where documents live, how they’re classified, then what comes in.</span></p></div><div class="setup__bar">${progress(done / steps.length * 100, 'success', 'Setup progress')}</div></div><ol class="setup__steps">${rows}</ol></section>`;
+    return `<section class="setup card" aria-label="Set up knowledge"><div class="setup__head"><h2 class="setup__heading grow">Set up knowledge</h2></div><ol class="setup__steps">${rows}</ol></section>`;
+  };
+  /** The next unfinished setup step as an Overview attention item ({ title, desc, actions }), or null. Named by what's
+      actually missing: topics without keywords can't classify anything, so that's the problem, not "load the taxonomy". */
+  X.setupNext = () => {
+    if (!isAdmin()) return null;
+    const steps = setupSteps(), left = steps.filter(s => !s.done);
+    if (!left.length || left.length === steps.length) return null;
+    const s = left[0], leaves = (D.topics || []).filter(t => t.parent && !t.archived), bare = leaves.filter(t => !topicKeywords(t).length && !topicSynonyms(t).length).length;
+    if (s.id === 'taxonomy' && bare) return { icon: 'tag', title: `${plural(bare, 'topic')} without keywords`, desc: 'Documents aren’t filed under a topic until it has words to recognise it by.', actions: btn('Add keywords', { v: 'secondary', size: 'sm', href: studioHref('taxonomy', { show: 'bare' }) }) };
+    return { icon: 'list', title: s.title, desc: s.desc, actions: btn(s.cta, { v: 'secondary', size: 'sm', act: s.act, href: s.href }) };
   };
 
   /* ═══════════════ Page ═══════════════ */
-  /** The page's one primary action follows the tab: add documents while working, create, import or connect while setting up. */
+  /** The page's one primary action follows the section: Add documents, New collection, Import or Add source. Header buttons that
+      create say "New X" (the dialog's confirm says "Create"). Review has none: its decision bar is the primary. */
   function headerAction(tab) {
     const upKb = S.ui[AK]?.kb;
-    // On Review the decision bar is the primary; adding documents stays secondary there.
-    if ((tab === 'review' || tab === 'library') && canContribute()) return btn('Add documents', { v: tab === 'library' ? 'primary' : 'secondary', icon: 'upload', act: 'contribute', data: upKb ? { kb: upKb } : undefined });
-    if (tab === 'bases' && can('knowledge.manage')) return btn('Create knowledge base', { v: 'primary', icon: 'plus', act: 'kb-create' });
+    if (tab === 'documents' && canContribute()) return btn('Add documents', { v: 'primary', icon: 'upload', act: 'contribute', data: upKb ? { kb: upKb } : undefined });
+    if (tab === 'collections' && can('knowledge.manage')) return btn('New collection', { v: 'primary', icon: 'plus', act: 'kb-create' });
     if (tab === 'taxonomy') return btn('Import', { v: 'primary', icon: 'upload', act: 'md-import' });
-    if (tab === 'sources') return btn('Connect source', { v: 'primary', icon: 'plus', act: 'src-connect' });
+    if (tab === 'sources') return X.src?.addBtn?.() || '';
     return '';
   }
   P.studio = ({ query }) => {
-    crumbs([{ label: 'Knowledge Studio' }]);
     const allowed = tabsAllowed();
     if (!allowed.length) return noAccessPage();
     const tab = tabOf(query);
-    // The tabs say where you are; a description under the title would repeat it on every visit.
-    const head = pageHeader({ title: 'Knowledge Studio', extra: X.res.demoChip(), actions: headerAction(tab) });
-    const COUNTS = {
-      review: { count: decisionCount() || '', alert: true },
-      bases: { count: ownerRequests() || '', alert: true },
-      // Only workspace admins change the taxonomy, so only they get the tab (and the proposed topics to decide).
-      taxonomy: { count: X.md?.proposalCount?.() || '' },
-      sources: { count: sourceProblems() || '', alert: true, tone: 'danger' },
-    };
-    const defs = TAB_DEFS.filter(t => allowed.includes(t[0]));
-    const work = defs.filter(t => t[2] === 'work'), setup = defs.filter(t => t[2] === 'setup');
-    const item = ([id, label]) => ({ id, label, ...COUNTS[id] });
-    const tabList = [...work.map(item), ...(work.length && setup.length ? [{ sep: true }] : []), ...setup.map(item)];
+    // The section's name is the title; the sidebar lists the sections under Knowledge Studio (X.studioNav), so the page has no tab bar.
+    const head = pageHeader({ title: TAB_DEFS.find(t => t[0] === tab)[1], extra: X.res.demoChip(), actions: headerAction(tab) });
     const body = tab === 'review' ? reviewTab(query)
-      : tab === 'library' ? libraryTab(query)
-        : tab === 'bases' ? X.kb?.tab?.({ query })
+      : tab === 'documents' ? documentsTab(query)
+        : tab === 'collections' ? X.kb?.tab?.({ query })
           : tab === 'taxonomy' ? X.md?.tab?.({ query })
             : X.src?.tab?.({ query });
-    // While setup is unfinished, the guide leads every tab of the setup group (it names the next step and its action).
-    const guide = TAB_DEFS.find(t => t[0] === tab)?.[2] === 'setup' ? X.setupGuide() : '';
-    return `<div class="page page--studio cur">${head}${defs.length > 1 ? contextBar(tabs(tabList, tab, BASE)) : ''}${guide}${body ?? skelRows(6)}</div>`;
+    return `<div class="page page--studio cur">${head}${body ?? skelRows(6)}</div>`;
   };
   const prevAfter = AFTER.studio;
   AFTER.studio = args => {
@@ -221,12 +233,12 @@
   function queueDone(id, counts) {
     const next = QUEUES.find(([q]) => q !== id && counts[q]);
     const COPY = {
-      submissions: ['You’re all caught up', 'New submissions to your knowledge bases show up here.'],
+      submissions: ['You’re all caught up', 'New submissions to your collections show up here.'],
       batches: ['No batches waiting', 'When a first sync holds files back, they show up here, one decision per reason.'],
       problems: ['Everything approved is published', 'Documents that couldn’t publish or changed at their source show up here with their fix.'],
     };
     const [title, desc] = COPY[id] || COPY.submissions;
-    const action = next ? btn(`Next: ${next[1]}`, { icon: 'arrow-right', act: 'cur-queue', data: { value: next[0] } }) : btn('Open the library', { href: studioHref('library') });
+    const action = next ? btn(`Next: ${next[1]}`, { icon: 'arrow-right', act: 'cur-queue', data: { value: next[0] } }) : btn('See all documents', { href: studioHref('documents') });
     return emptyState({ icon: 'check-circle', tone: 'success', title, desc, actions: action, boxed: true });
   }
 
@@ -325,14 +337,14 @@
   function batchList({ rows }, cur) {
     return `<div class="cur-queue"><div class="cur-queue__list" id="cur-queue" data-keep-scroll role="list">${rows.map(b => batchItem(b, b.id === cur)).join('')}</div></div>`;
   }
-  /** The queue's bulk decisions, in the same floating bar the Library and the other queues use. */
+  /** The queue's bulk decisions, in the same floating bar Documents and the other queues use. */
   const queueBulk = () => bulkBar(QK, btn('Decline…', { v: 'ghost', size: 'sm', icon: 'x-circle', act: 'cur-bulk-decline' }) + btn('Approve & publish', { v: 'secondary', size: 'sm', icon: 'check', act: 'cur-bulk-approve' }));
   MENUS['cur-qfilter'] = () => {
     const u = ui(QK), all = reviewQueue(), f = u.f || 'all', kbs = queueKbs(all);
     const set = (k, v) => { u[k] = v; refresh(); };
     const show = FILTERS.filter(([k]) => k === 'all' || k === f || all.some(FILTER_FN[k]))
       .map(([k, l]) => ({ label: l, meta: fmtNum(all.filter(FILTER_FN[k]).length), checked: f === k, run: () => set('f', k) }));
-    const bases = kbs.length > 1 || u.kb ? [{ section: 'Knowledge base' }, { label: 'All knowledge bases', checked: !u.kb, run: () => set('kb', '') }, ...kbs.map(k => ({ label: k.name, checked: u.kb === k.id, run: () => set('kb', k.id) }))] : [];
+    const bases = kbs.length > 1 || u.kb ? [{ section: 'Collection' }, { label: 'All collections', checked: !u.kb, run: () => set('kb', '') }, ...kbs.map(k => ({ label: k.name, checked: u.kb === k.id, run: () => set('kb', k.id) }))] : [];
     const clear = (u.f && u.f !== 'all') || u.kb ? [{ sep: true }, { label: 'Clear filters', icon: 'x', run: () => { u.f = ''; u.kb = ''; refresh(); } }] : [];
     return [{ section: 'Show' }, ...show, ...bases, ...clear];
   };
@@ -376,8 +388,9 @@
   const whyText = t => topicEvidence(t.why || {}).join(' · ');
   const byContributor = '<span class="t-xs muted">Chosen by the contributor</span>';
   function suggestionsCard(d, f) {
-    const ai = aiOf(d), from = ai.confirmed ? 'Confirmed by the contributor. Check before you publish.' : `Matched against ${esc(curWs().name)}’s taxonomy. Check and edit before you publish.`;
-    const sec = body => `<section class="cur-insp__sec cur-sugs" aria-labelledby="cur-cls-h"><h3 class="cur-insp__h" id="cur-cls-h">Classification</h3><p class="cur-insp__sub">${from}</p>${body}</section>`;
+    // The fields themselves show they're editable; the line only says when a person (not the assistant) chose them.
+    const ai = aiOf(d), from = ai.confirmed ? '<p class="cur-insp__sub">Confirmed by the contributor.</p>' : '';
+    const sec = body => `<section class="cur-insp__sec cur-sugs" aria-labelledby="cur-cls-h"><h3 class="cur-insp__h" id="cur-cls-h">Classification</h3>${from}${body}</section>`;
     if (!f) return sec(`<div class="cur-analyzing">${spinner()}<span>Reading the file and matching it against your taxonomy…</span></div>`);
     const kinds = Object.entries(RESOURCE_KINDS).map(([id, k]) => [id, k.label]);
     // What the contributor confirmed carries no assistant confidence: it says who chose it instead.
@@ -394,13 +407,13 @@
     const props = (ai.proposed || []).map(proposalById).filter(p => p && p.status === 'open');
     const decideIn = canManageTaxonomy() ? `<a class="link" href="#${studioHref('taxonomy')}">Decide in Taxonomy</a>` : '<span>A workspace admin decides.</span>';
     const proposed = props.length ? `<div class="cur-prop-note">${ic('sparkles', 'i-xs')}<div><span>${props.length === 1 ? 'Suggests a new topic:' : 'Suggests new topics:'}</span> ${props.map(p => `<span class="medium">${esc(p.name)}</span>`).join(', ')}<br><span>You can publish without it.</span> ${decideIn}</div></div>` : '';
-    // Knowledge base: where it lives decides who can see it.
+    // Collection: where it lives decides who can see it.
     const version = !!(f.asVersionOf || d.submission?.versionOf);
     const kbs = reviewableKbs().filter(k => k.contribute !== false || k.id === d.kb);
     const target = kbById(version ? docById(f.asVersionOf || d.submission.versionOf)?.kb : f.kb) || kbById(d.kb), who = X.whoCanSee(target);
     const kbBadge = version ? '' : ai.kb.by === 'ai' ? confBadge(ai.kb.conf, f.kb !== ai.kb.id) : f.kb !== d.kb ? confBadge(null, true) : byContributor;
-    const kbCtl = version ? `<div class="cur-fixed">${X.kbMark(target, 20)}<span class="truncate">${esc(target.name)}</span></div>` : select({ id: 'cur-kb', bind: `curDraft.${d.id}.kb`, value: f.kb, options: kbs.map(k => [k.id, k.name]), change: 'cur-redraw', size: 'sm', label: 'Knowledge base' });
-    const kb = sugRow('Knowledge base', kbBadge, kbCtl, `<div class="cur-who">${ic(who.icon, 'i-xs')}<span>${version ? 'Same as the current version · ' : ''}${esc(who.label)} will see it</span></div>`);
+    const kbCtl = version ? `<div class="cur-fixed">${X.kbMark(target, 20)}<span class="truncate">${esc(target.name)}</span></div>` : select({ id: 'cur-kb', bind: `curDraft.${d.id}.kb`, value: f.kb, options: kbs.map(k => [k.id, k.name]), change: 'cur-redraw', size: 'sm', label: 'Collection' });
+    const kb = sugRow('Collection', kbBadge, kbCtl, `<div class="cur-who">${ic(who.icon, 'i-xs')}<span>${version ? 'Same as the current version · ' : ''}${esc(who.label)} will see it</span></div>`);
     const summary = sugRow('Summary', confBadge(null, f.summary.trim() !== (ai.summary || '').trim()), textarea({ id: 'cur-sum-' + d.id, bind: `curDraft.${d.id}.summary`, value: f.summary, rows: 3, attrs: 'maxlength="280" aria-label="Summary"' }));
     return sec(`<div class="cur-sug-list">${type}${topics}${proposed}${kb}${summary}</div>`);
   }
@@ -484,12 +497,12 @@
 
   /* ── The workbench: chooser, then the open queue ── */
   function reviewTab(query) {
-    const caughtUp = () => emptyState({ icon: 'check-circle', tone: 'success', title: 'You’re all caught up', desc: 'Submissions, sync batches, publishing problems and quality checks show up here.', actions: btn('Open the library', { href: studioHref('library') }), boxed: true });
+    const caughtUp = () => emptyState({ icon: 'check-circle', tone: 'success', title: 'You’re all caught up', desc: 'Submissions, sync batches, publishing problems and quality checks show up here.', actions: btn('See all documents', { href: studioHref('documents') }), boxed: true });
     return gate({
       loading: () => `<div class="cur-split cur-wb"><div class="cur-queue">${skelRows(6)}</div><div class="cur-pane">${skelRows(3)}</div><div class="cur-detail cur-insp">${skelRows(3)}</div></div>`,
       empty: caughtUp,
       ok: () => {
-        // ?kb= (from a knowledge base page or a notice) preselects the base filter of Submissions and Publishing problems.
+        // ?kb= (from a collection page or a notice) preselects the base filter of Submissions and Publishing problems.
         const qkb = query.kb || '';
         [[QK, { q: '', f: 'all', kb: '', sel: {} }], [PK, { q: '', kb: '', life: '', sort: { key: 'updated', dir: 'desc' }, page: 1, sel: {} }]].forEach(([k, init]) => {
           const u = ui(k, init); if (u._kb !== qkb) { u._kb = qkb; u.kb = qkb; }
@@ -529,7 +542,7 @@
     u.sel = Object.fromEntries(Object.entries(u.sel || {}).filter(([id, on]) => on && live.has(id)));
     const kbOpts = queueKbs(docs).map(k => [k.id, k.name]), lifeOpts = PROBLEM_OPTS.filter(([k]) => docs.some(d => lifeKey(d) === k));
     const tools = needsTools(docs.length, PK, ['kb', 'life'])
-      ? `<div class="toolbar">${searchField({ uiKey: PK, placeholder: 'Search documents' })}${lifeOpts.length > 1 || u.life ? filterButton('Problem', PK, 'life', lifeOpts) : ''}${kbOpts.length > 1 || u.kb ? filterButton('Knowledge base', PK, 'kb', kbOpts) : ''}${clearFilters(PK, ['kb', 'life'])}</div>` : '';
+      ? `<div class="toolbar">${searchField({ uiKey: PK, placeholder: 'Search documents' })}${lifeOpts.length > 1 || u.life ? filterButton('Problem', PK, 'life', lifeOpts) : ''}${kbOpts.length > 1 || u.kb ? filterButton('Collection', PK, 'kb', kbOpts) : ''}${clearFilters(PK, ['kb', 'life'])}</div>` : '';
     const hint = '<p class="gov-summary">Approved, but not in front of people yet. Each row shows its fix; select several to publish them together.</p>';
     let rows = docs.filter(d => (!u.kb || d.kb === u.kb) && (!u.life || lifeKey(d) === u.life) && matchesQ(PK, d.name, kbById(d.kb)?.name, originName(d)));
     rows = applySort(rows, PK, SORTERS);
@@ -599,7 +612,7 @@
     if (onReview()) setQuery({ queue: 'submissions', sel: docs[0].id }); else refresh();
     toast(docs.length === 1 ? `“${docs[0].name}” is back in review` : `${plural(docs.length, 'document')} are back in review`, { tone: 'accent' });
   }
-  /** Decide a batch: its status, the run's counters (so Sources, the run, Review and the Library agree), audit, Undo, then the next entry. */
+  /** Decide a batch: its status, the run's counters (so Sources, the run, Review and Documents agree), audit, Undo, then the next entry. */
   const BATCH_AUDIT = { declined: 'Kept a batch unpublished', approved: 'Published a batch', replaced: 'Published a batch as new versions' };
   function batchToast(b, to) {
     const n = plural(b.n, 'document'), kb = kbById(b.kb)?.name || '';
@@ -641,7 +654,7 @@
   A['cur-approve'] = el => {
     const d = inQueue(el.dataset.id); if (!d || !draftOf(d)) return;
     const dec = decisionOf(d), o = docById(dec.asVersionOf || d.submission?.versionOf);
-    const msg = o ? `Approved. “${o.name}” is publishing as v${res(o).version + 1}.` : `Approved “${d.name}”. Publishing to ${kbById(dec.kb || d.kb)?.name || 'its knowledge base'}.`;
+    const msg = o ? `Approved. “${o.name}” is publishing as v${res(o).version + 1}.` : `Approved “${d.name}”. Publishing to ${kbById(dec.kb || d.kb)?.name || 'its collection'}.`;
     decide([d], () => approveAndPublish(d, dec), msg);
   };
   A['cur-bulk-approve'] = () => {
@@ -660,7 +673,7 @@
   /* Request changes / decline: a required message the contributor sees. */
   const QUICK = {
     changes: ['Please remove personal data (names, grades, ID numbers) and resubmit.', 'Please add a short note on what this covers and who it’s for.', 'Please upload the final version as a PDF.'],
-    decline: ['This is already published. Use the existing document instead.', 'We can’t publish copyrighted material.', 'It contains personal data that can’t be shared.', 'It doesn’t belong in this knowledge base.'],
+    decline: ['This is already published. Use the existing document instead.', 'We can’t publish copyrighted material.', 'It contains personal data that can’t be shared.', 'It doesn’t belong in this collection.'],
   };
   function openDecide(mode, ids) {
     const docs = ids.map(inQueue).filter(Boolean); if (!docs.length) return;
@@ -721,7 +734,7 @@
   function cmpCol(d, label) {
     const r = res(d), info = isPublishedStage(d) && stageOf(d) === 'published' ? X.res.details(d) : kv([
       ['Type', esc(kindMeta(aiOf(d).kind?.value || r.kind).label)],
-      ['Knowledge base', esc(kbById(d.kb)?.name || '—')],
+      ['Collection', esc(kbById(d.kb)?.name || '—')],
       ['Contributor', esc(contributorName(d))],
       ['Submitted', esc(fmtDateTime(d.submission?.at || d.updated))],
       ['Size', `${esc(fmtSize(d.size))} · ${plural(d.pages || 1, 'page')}`],
@@ -741,7 +754,7 @@
   };
   A['cur-cmp-pick'] = el => { const f = draftOf(docById(el.dataset.id)); if (f) f.asVersionOf = el.dataset.other; closeDrawer(); refresh(); };
 
-  /* ═══════════════ Library ═══════════════ */
+  /* ═══════════════ Documents ═══════════════ */
   const SORTERS = { name: d => d.name.toLowerCase(), updated: d => d.updated };
   const LIFE_OF_GROUP = Object.fromEntries(LIFE_GROUPS.map(([k, , keys]) => [k, keys]));
   const FACETS = ['kb', 'src', 'kind', 'topic'];
@@ -765,26 +778,23 @@
   const FLOW_TIPS = {
     review: 'Being classified, waiting for a reviewer, or back with the contributor.',
     publishing: 'Approved and being made searchable.',
-    published: 'Searchable, and used in answers for everyone who can read its knowledge base.',
+    published: 'Searchable, and used in answers for everyone who can read its collection.',
     attention: 'Couldn’t publish, waiting to publish, or changed at the source. Each row shows its fix; Review → Publishing problems fixes them together.',
     closed: 'Declined by a reviewer or unpublished. Kept with their history.',
   };
   /** With a first sync at scale: what its batches and its published documents mean here (they're never rows of this table). */
   const FLOW_TIPS_SCALE = {
     review: 'Being classified, waiting for a reviewer, or back with the contributor. Batches a first sync held back are decided in Review and aren’t listed here.',
-    published: 'Searchable, and used in answers for everyone who can read its knowledge base. Documents published by a first sync are counted in Sources.',
+    published: 'Searchable, and used in answers for everyone who can read its collection. Documents published by a first sync are counted in Sources.',
   };
   function flowStrip(docs, u) {
     const pool = docs.filter(d => facetMatch(d, u)), count = k => pool.filter(d => LIFE_OF_GROUP[k].includes(lifeKey(d))).length;
-    // In review also holds what went back to its contributor: said once, under the count, so it squares with the Review tab.
-    const back = pool.filter(d => lifeKey(d) === 'changes').length;
-    // Open batches (thousands of documents each) show under In review as a sub-line, never added to its count or the table.
+    // Open batches (thousands of documents each) are never added to In review's count or the table: decided in Review, its tooltip says so.
     const held = u.kind || u.topic || (u.q || '').trim() ? 0 : openBatches().filter(b => (!u.kb || b.kb === u.kb) && (!u.src || b.source === u.src)).reduce((s, b) => s + b.n, 0);
     const firstSync = (D.runs || []).some(r => r.backfill && canReviewKb(kbById(r.kb)));
     const tips = { ...FLOW_TIPS, ...(held ? { review: FLOW_TIPS_SCALE.review } : {}), ...(firstSync ? { published: FLOW_TIPS_SCALE.published } : {}) };
-    const subs = { review: [back && `${fmtNum(back)} with the contributor`, held && `+${fmtNum(held)} in batches`] };
-    const sub = k => (subs[k] || []).filter(Boolean).map(t => `<span class="flow__sub">${esc(t)}</span>`).join('');
-    const step = (k, label, n, tone = '') => `<button type="button" class="${cx('flow__step', tone && n && 'flow__step--' + tone)}" aria-pressed="${(u.life || '') === k}" data-act="cur-flow" data-value="${k}" ${tips[k] ? `data-tip="${esc(tips[k])}"` : ''}><span class="flow__label">${esc(label)}</span><span class="flow__count num">${fmtNum(n)}</span>${sub(k)}</button>`;
+    // Each step is a label and a count; how it squares with Review is in its tooltip, not under the number.
+    const step = (k, label, n, tone = '') => `<button type="button" class="${cx('flow__step', tone && n && 'flow__step--' + tone)}" aria-pressed="${(u.life || '') === k}" data-act="cur-flow" data-value="${k}" ${tips[k] ? `data-tip="${esc(tips[k])}"` : ''}><span class="flow__label">${esc(label)}</span><span class="flow__count num">${fmtNum(n)}</span></button>`;
     const [rv, pub, done, att, closed] = LIFE_GROUPS;
     const sep = `<span class="flow__sep" aria-hidden="true">${ic('chevron-right', 'i-sm')}</span>`;
     return `<div class="flow" role="group" aria-label="Where documents are">
@@ -794,12 +804,6 @@
     </div>`;
   }
   A['cur-flow'] = el => { const u = ui(AK), v = el.dataset.value || ''; u.life = u.life === v ? '' : v; u.page = 1; u.sel = {}; refresh(); };
-  /** Who can find it: the base's audience once it's searchable; before (or after it's taken down) nobody but reviewers. */
-  function visibilityCell(d) {
-    const kb = kbById(d.kb), who = X.whoCanSee(kb), seen = ['published', 'update', 'stored'].includes(lifeKey(d));
-    if (seen) return `<span class="row gap-6 cur-vis" data-tip="${esc(who.detail || who.label)}">${ic(who.icon, 'i-sm muted')}<span class="truncate">${esc(who.label)}</span></span>`;
-    return `<span class="row gap-6 cur-vis muted" data-tip="${esc(`${who.label} once it’s published`)}">${ic('eye-off', 'i-sm')}<span class="truncate">Not visible yet</span></span>`;
-  }
   function allRow(d) {
     const on = !!ui(AK).sel?.[d.id], r = res(d);
     return `<tr class="table__row" data-act="cur-doc" data-id="${d.id}" tabindex="0" ${on ? 'aria-selected="true"' : ''}>
@@ -808,14 +812,13 @@
       <td class="table__cell table__cell--hide-sm">${originCell(d)}</td>
       <td class="table__cell table__cell--hide-sm cur-owner"><span class="truncate">${esc(r.owner || '—')}</span></td>
       <td class="table__cell">${lifeChip(d, 'sm')}</td>
-      <td class="table__cell table__cell--hide-sm">${visibilityCell(d)}</td>
       <td class="table__cell muted cur-nowrap" data-tip="${esc(fmtDateTime(d.updated))}">${rel(d.updated)}</td>
       <td class="table__cell table__cell--actions"><div class="row gap-4 none">${rowFix(d)}<span class="reveal-on-hover">${iconBtn('more', 'More actions', { size: 'sm', menu: 'cur-row', data: { id: d.id, ctx: 'row' } })}</span></div></td></tr>`;
   }
-  function libraryTab(query) {
+  function documentsTab(query) {
     const u = ui(AK, { q: '', life: '', kb: '', src: '', kind: '', topic: '', sort: { key: 'updated', dir: 'desc' }, page: 1, sel: {} });
     syncFromQuery(u, query);
-    const empty = () => emptyState({ icon: 'files', title: 'No documents yet', desc: 'Documents added to the knowledge bases you look after show up here, whatever their origin.', actions: canContribute() ? btn('Add documents', { v: 'primary', icon: 'upload', act: 'contribute' }) : '', boxed: true });
+    const empty = () => emptyState({ icon: 'files', title: 'No documents yet', desc: 'Documents added to the collections you look after show up here, whatever their origin.', actions: canContribute() ? btn('Add documents', { v: 'primary', icon: 'upload', act: 'contribute' }) : '', boxed: true });
     return gate({
       loading: () => skelRows(8),
       empty,
@@ -840,12 +843,13 @@
         if (!rows.length) return flow + toolbar + noMatches(AK, ['life', ...FACETS], 'documents');
         const page = paginate(rows, AK, PER);
         const bulk = bulkBar(AK, btn('Publish', { v: 'ghost', size: 'sm', icon: 'upload', act: 'cur-bulk-publish' }) + btn('Unpublish', { v: 'ghost', size: 'sm', icon: 'eye-off', act: 'cur-bulk-unpublish' }) + btn('Archive', { v: 'ghost', size: 'sm', icon: 'archive', act: 'cur-bulk-archive' }));
-        const head = `${selAllCheck(AK, page.map(d => d.id))}${sortHead('Name', 'name', AK)}${th('Origin', 'table__column--hide-sm')}${th('Owner', 'table__column--hide-sm')}${th('Lifecycle')}${th('Visibility', 'table__column--hide-sm')}${sortHead('Updated', 'updated', AK)}${th('<span class="sr-only">Actions</span>', 'table__column--actions')}`;
-        return flow + toolbar + `<div class="cur-all">${table({ label: 'Library', head, rows: page.map(allRow), foot: pager(rows.length, AK, PER) })}</div>` + bulk;
+        // No Visibility column: who can read a document is its collection's audience (shown on the collection), the same for every row of it.
+        const head = `${selAllCheck(AK, page.map(d => d.id))}${sortHead('Name', 'name', AK)}${th('Origin', 'table__column--hide-sm')}${th('Owner', 'table__column--hide-sm')}${th('Lifecycle')}${sortHead('Updated', 'updated', AK)}${th('<span class="sr-only">Actions</span>', 'table__column--actions')}`;
+        return flow + toolbar + `<div class="cur-all">${table({ label: 'Documents', head, rows: page.map(allRow), foot: pager(rows.length, AK, PER) })}</div>` + bulk;
       },
     });
   }
-  /** Facets the Library offers, only when they'd split it (or one is in use): [{ key, label, opts }]. */
+  /** Facets Documents offers, only when they'd split it (or one is in use): [{ key, label, opts }]. */
   function allFacets(docs, u) {
     const kbs = queueKbs(docs);
     const srcs = [...new Set(docs.map(srcKey))].filter(k => k !== 'upload').map(srcById).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
@@ -853,7 +857,7 @@
     const kinds = [...new Set(docs.map(d => res(d).kind))].map(k => [k, kindMeta(k).label]).sort((a, b) => a[1].localeCompare(b[1]));
     const topics = [...new Set(docs.flatMap(d => res(d).topics))].filter(id => topicById(id)).map(id => [id, topicName(id)]).sort((a, b) => a[1].localeCompare(b[1]));
     return [
-      (kbs.length > 1 || u.kb) && { key: 'kb', label: 'Knowledge base', opts: kbs.map(k => [k.id, k.name]) },
+      (kbs.length > 1 || u.kb) && { key: 'kb', label: 'Collection', opts: kbs.map(k => [k.id, k.name]) },
       (origins.length > 1 || u.src) && { key: 'src', label: 'Origin', opts: origins },
       (kinds.length > 1 || u.kind) && { key: 'kind', label: 'Type', opts: kinds },
       (topics.length > 1 || u.topic) && { key: 'topic', label: 'Topic', opts: topics },
@@ -872,7 +876,7 @@
     const u = ui(AK), set = (key, dir) => { u.sort = { key, dir }; u.page = 1; refresh(); };
     return [{ section: 'Sort by' }, { label: 'Recently updated', checked: u.sort?.key !== 'name', run: () => set('updated', 'desc') }, { label: 'Name', checked: u.sort?.key === 'name', run: () => set('name', 'asc') }];
   };
-  /** Selected documents in a list (Library or Publishing problems) the caller reviews. */
+  /** Selected documents in a list (Documents or Publishing problems) the caller reviews. */
   const selectedIn = key => selIds(key).map(docById).filter(d => d && canReviewKb(kbById(d.kb)));
   const canPublish = d => { const k = lifeKey(d); return k === 'unpublished' || k === 'queued' || k === 'update' || (k === 'failed' && !isLocked(d)); };
   const canUnpublish = d => stageOf(d) === 'published' && !d.archived;
@@ -932,7 +936,7 @@
     const more = [main !== 'open' && 'open', live && 'edit', live && !kbById(d.kb)?.personal && 'move', canUnpublish(d) && 'unpublish'].filter(Boolean);
     return { main, more, tail: ['download', !d.archived && k !== 'merged' && 'archive'].filter(Boolean) };
   }
-  /** The state's fix as a small row button (Library, Publishing problems), or ''. */
+  /** The state's fix as a small row button (Documents, Publishing problems), or ''. */
   function rowFix(d) {
     const { main } = opsFor(d); if (!ROW_FIX.has(main)) return '';
     return btn(OPS[main].label, { v: 'secondary', size: 'sm', icon: OPS[main].icon, act: 'cur-op', data: { id: d.id, op: main } });
@@ -984,7 +988,7 @@
       : k === 'changes' ? { state: 'issue', text: `Changes requested${by(ev('changes'))}`, at: ev('changes')?.at }
         : k === 'rejected' ? { state: 'issue', text: `Declined${by(ev('rejected'))}`, at: ev('rejected')?.at }
           : ev('approved') ? { state: 'done', text: `Approved${by(ev('approved'))}`, at: ev('approved').at }
-            : { state: 'skipped', text: src ? `Not needed: ${src.name} publishes automatically` : 'Not needed: added by an editor of the knowledge base' };
+            : { state: 'skipped', text: src ? `Not needed: ${src.name} publishes automatically` : 'Not needed: added by an editor of the collection' };
     const who = kb ? X.whoCanSee(kb).label : '';
     const PUB = {
       queued: { state: 'issue', text: 'Waiting to publish' }, publishing: { state: 'current', busy: true, text: 'Making it searchable…' },
@@ -1008,7 +1012,7 @@
   }
   DR['cur-doc'] = ({ id }) => {
     const d = docById(id), kb = d && kbById(d.kb);
-    if (!d || !kb || !canOpenDoc(d)) return { title: 'Document not available', body: emptyState({ icon: 'file', title: 'This document isn’t available', desc: 'It may have been moved to a knowledge base you don’t look after.' }) };
+    if (!d || !kb || !canOpenDoc(d)) return { title: 'Document not available', body: emptyState({ icon: 'file', title: 'This document isn’t available', desc: 'It may have been moved to a collection you don’t look after.' }) };
     const l = lifecycleOf(d), { main } = opsFor(d), k = l.key;
     const opBtn = (op, v = 'secondary') => btn(OPS[op].label, { v, icon: OPS[op].icon, act: 'cur-op', data: { id: d.id, op } });
     const last = [...(d.submission?.events || [])].reverse().find(e => ['changes', 'rejected', 'unpublished'].includes(e.kind));
@@ -1024,7 +1028,7 @@
       <div class="drawer__section"><h3 class="drawer__section-title">Progress</h3>${stepper(d)}</div>
       <div class="drawer__section">${disclosure({ path: 'curDocHistory', title: 'History', icon: 'history', summary: events ? plural(events, 'event') : '', body: timeline(d) })}</div>
       <div class="drawer__section"><h3 class="drawer__section-title">Details</h3>${published ? X.res.details(d) : kv([
-        ['Knowledge base', `<a class="link" href="#${canEditKb(kb) ? kbManageHref(kb) : kbHref(kb)}">${esc(kb.name)}</a>`],
+        ['Collection', `<a class="link" href="#${canEditKb(kb) ? kbManageHref(kb) : kbHref(kb)}">${esc(kb.name)}</a>`],
         ['Contributor', esc(contributorName(d))],
         ['Type', esc(kindMeta(res(d).kind).label)],
         ['Size', `${esc(fmtSize(d.size))} · ${plural(d.pages || 1, 'page')}`],

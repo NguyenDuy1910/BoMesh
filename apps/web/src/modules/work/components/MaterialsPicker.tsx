@@ -21,7 +21,12 @@ interface Props {
   q: string;
   onQ: (q: string) => void;
   spaceName?: string;
+  /** How many sources the workflow can use at once; the counter says so ("3 selected · up to 8"). */
+  max?: number;
 }
+
+/** Search appears from this many documents, or while a search is in use (preview `needsTools`). */
+const TOOLS_MIN = 7;
 
 function DocCheckbox({ doc, isSelected, onToggle }: { doc: Item; isSelected: boolean; onToggle: () => void }) {
   const ok = isUsableDoc(doc);
@@ -49,7 +54,7 @@ function DocCheckbox({ doc, isSelected, onToggle }: { doc: Item; isSelected: boo
 }
 
 /** Checklist of documents grouped by collection, with search and Select all (preview `sourcePicker`). */
-export function MaterialsPicker({ groups, isPending, error, onRetry, selected, onChange, q, onQ, spaceName }: Props) {
+export function MaterialsPicker({ groups, isPending, error, onRetry, selected, onChange, q, onQ, spaceName, max }: Props) {
   if (isPending) return <SkeletonRows rows={4} />;
   if (error) return <ErrorState error={error} onRetry={onRetry} />;
   if (!groups?.length)
@@ -57,7 +62,7 @@ export function MaterialsPicker({ groups, isPending, error, onRetry, selected, o
       <EmptyState
         icon={Files}
         title="No materials here yet"
-        description={spaceName ? `${spaceName} has no documents you can read.` : "Add documents to a knowledge base first."}
+        description={spaceName ? `${spaceName} has no documents you can read.` : "Add documents to a collection first."}
         boxed
         compact
       />
@@ -66,7 +71,10 @@ export function MaterialsPicker({ groups, isPending, error, onRetry, selected, o
   const needle = q.trim().toLowerCase();
   const shown = groups.map((g) => ({ ...g, docs: g.docs.filter((d) => !needle || (d.displayName ?? "").toLowerCase().includes(needle)) })).filter((g) => g.docs.length);
   const pickable = shown.flatMap((g) => g.docs).filter(isUsableDoc);
-  const n = groups.flatMap((g) => g.docs).filter((d) => selected.has(d.name ?? "")).length;
+  const all = groups.flatMap((g) => g.docs);
+  const n = all.filter((d) => selected.has(d.name ?? "")).length;
+  const over = !!max && n > max;
+  const count = max ? `${n ? `${fmtNum(n)} selected` : "None selected"} · up to ${fmtNum(max)}` : n ? `${fmtNum(n)} selected` : "None selected";
   const on = pickable.filter((d) => selected.has(d.name ?? "")).length;
   const toggle = (name: string) => {
     const next = new Set(selected);
@@ -103,9 +111,11 @@ export function MaterialsPicker({ groups, isPending, error, onRetry, selected, o
   return (
     <div className="work-pick">
       <div className="work-pick__bar">
-        <SearchInput value={q} onChange={onQ} placeholder="Search documents" label="Search documents" />
+        {all.length >= TOOLS_MIN || q ? <SearchInput value={q} onChange={onQ} placeholder="Search documents" label="Search documents" /> : null}
         <span className="grow" />
-        <span className="t-sm muted num">{n ? `${fmtNum(n)} selected` : "None selected"}</span>
+        <span className={`t-sm num ${over ? "work-pick__over" : "muted"}`} aria-live="polite">
+          {count}
+        </span>
       </div>
       {pickable.length ? (
         <div className="work-pick__all">

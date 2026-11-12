@@ -19,7 +19,7 @@ import { draftText, scheduleFor, type ScheduleDraft } from "./schedule";
 export interface SourceActions {
   syncNow: (source: Source) => Promise<Sync | null>;
   togglePause: (source: Source) => Promise<void>;
-  disconnect: (source: Source, kbName: string | undefined) => Promise<boolean>;
+  disconnect: (source: Source, collectionName: string | undefined) => Promise<boolean>;
   publish: (sources: readonly Source[]) => Promise<void>;
   setPolicy: (source: Source, policy: PublishingPolicy) => Promise<void>;
   saveSchedule: (source: Source, draft: ScheduleDraft) => Promise<boolean>;
@@ -84,10 +84,10 @@ export function useSourceActions(connections: ReadonlyMap<string, Connection>): 
 
   const togglePause = (source: Source) => (source.state === "PAUSED" ? resume(source) : pause(source));
 
-  async function disconnect(source: Source, kbName: string | undefined): Promise<boolean> {
+  async function disconnect(source: Source, collectionName: string | undefined): Promise<boolean> {
     const ok = await confirm({
       title: `Disconnect ${sourceName(source)}?`,
-      description: `Documents already in ${kbName || "the knowledge base"} stay. New changes stop syncing.`,
+      description: `Documents already in ${collectionName || "the collection"} stay. New changes stop syncing.`,
       confirmLabel: "Disconnect",
       tone: "danger",
     });
@@ -127,7 +127,7 @@ export function useSourceActions(connections: ReadonlyMap<string, Connection>): 
     if (before === policy) return;
     try {
       const updated = await updateSource(id, source, { publishingPolicy: policy }, ["publishingPolicy"]);
-      toast(policy === "REVIEW_FIRST" ? `${sourceName(source)}: new and changed files go to review first` : `${sourceName(source)}: new and changed files publish automatically`, {
+      toast(policy === "REVIEW_FIRST" ? `${sourceName(source)}: every new and changed file goes to review first` : `${sourceName(source)}: new and changed files publish automatically`, {
         undo: () => {
           updateSource(id, updated, { publishingPolicy: before }, ["publishingPolicy"]).then(refresh, fail);
         },

@@ -4,12 +4,13 @@
    template; destinations appear only when the workspace has the module on
    (core/workspace.js) and the caller has the permission. */
 
-/** WORKSPACE: where the organisation's knowledge and work live, filtered by workspace modules. Inbox is the topbar bell.
-    Conversations, projects and recent items each have their own page (AI Chat, Projects, Recent): the sidebar never lists them inline. */
+/** WORKSPACE: where the organisation's knowledge and work live, filtered by workspace modules. Inbox is the topbar bell (a popover).
+    Conversations, projects and recent items each have their own page (AI Chat, Projects, Recent): the sidebar never lists them inline.
+    Knowledge opens its personal sections (Saved · My files · My reading lists) as sub-rows while you're in it. */
 function memberNav() {
   return [
     { id: 'home', label: 'Home', icon: 'home', to: '/home' },
-    { id: 'knowledge', label: 'Knowledge', icon: 'book', to: '/knowledge' },
+    { id: 'knowledge', label: 'Knowledge', icon: 'book', to: '/knowledge', home: 'Browse', children: () => X.res?.libraryNav?.() || [] },
     { id: 'chat', label: 'AI Chat', icon: 'message', to: '/chat' },
     hasModule('work') && { id: 'work', label: 'Work', icon: 'sparkles', to: '/work' },
     hasModule('requests') && { id: 'requests', label: 'Requests', icon: 'clipboard', to: '/requests', count: () => X.requestsBadge?.() || 0 },
@@ -25,21 +26,19 @@ function yourWorkNav() {
     (canContribute() || myContributions().length > 0) && { id: 'contributions', label: 'My contributions', icon: 'upload', to: '/contributions', count: () => myContributions().filter(d => stageOf(d) === 'changes').length, tone: 'accent' },
   ].filter(Boolean);
 }
-/** Pages that aren't sidebar rows (Inbox has the topbar bell): the palette lists them first. */
-const MORE_PAGES = [
-  { label: 'Inbox', icon: 'inbox', to: '/inbox' },
-];
 /** Manage = run the workspace. Everything about knowledge — where it comes from (sources and their accounts), where it
-    lives and who reads it (knowledge bases), how it's classified (taxonomy), and the review → publish work — is one
-    destination, Knowledge Studio; its tabs show to whoever can use them. The rest is people, the assistant, audit, settings. */
+    lives and who reads it (collections), how it's classified (taxonomy), and the review → publish work — is one
+    destination, Knowledge Studio. The rest is people, the assistant, audit, settings. An area with sections (Knowledge
+    Studio, People, Activity, Settings) lists them as sidebar sub-rows, so a new section is one more row, never a tab. */
 const MANAGE_NAV = [
   { id: 'overview', label: 'Overview', icon: 'dashboard', to: '/overview', perm: 'tenant.manage' },
-  // One badge, the landing tab's: the review queue (accent), else broken sources or accounts (danger), else access requests the owner decides.
-  { id: 'studio', label: 'Knowledge Studio', icon: 'library', to: '/studio', show: () => X.studioTabs?.().length > 0, count: () => X.studioBadge?.().n || 0, tone: () => X.studioBadge?.().tone || 'accent' },
-  { id: 'people', label: 'People', icon: 'users', to: '/people', perm: 'user.manage', count: () => pendingRequests().length, tone: 'accent' },
+  // One badge, the landing section's: the review queue (accent), else broken sources or accounts (danger), else access requests
+  // the owner decides. While the sub-rows show, each carries its own count instead.
+  { id: 'studio', label: 'Knowledge Studio', icon: 'library', to: '/studio', show: () => X.studioTabs?.().length > 0, count: () => X.studioBadge?.().n || 0, tone: () => X.studioBadge?.().tone || 'accent', children: () => X.studioNav?.() || [] },
+  { id: 'people', label: 'People', icon: 'users', to: '/people', perm: 'user.manage', count: () => pendingRequests().length, tone: 'accent', children: () => X.sections?.people?.() || [] },
   { id: 'assistant', label: 'Assistant', icon: 'bot', to: '/assistant', perm: 'tenant.manage' },
-  { id: 'activity', label: 'Activity', icon: 'activity', to: '/activity', perm: 'audit.read' },
-  { id: 'settings', label: 'Settings', icon: 'settings', to: '/settings', perm: 'tenant.manage' },
+  { id: 'activity', label: 'Activity', icon: 'activity', to: '/activity', perm: 'audit.read', children: () => X.sections?.activity?.() || [] },
+  { id: 'settings', label: 'Settings', icon: 'settings', to: '/settings', perm: 'tenant.manage', children: () => X.sections?.settings?.() || [] },
 ];
 /** MANAGE rows the caller may use (an editor who owns a base sees Knowledge Studio only). */
 const manageNav = () => MANAGE_NAV.filter(n => (n.show ? n.show() : can(n.perm)));
@@ -47,7 +46,7 @@ const PLATFORM_NAV = [
   { id: 'p-workspaces', label: 'Workspaces', icon: 'building', to: '/p/workspaces', count: () => X.pWsAttention?.() || 0, tone: 'accent' },
   { id: 'p-users', label: 'Users', icon: 'users', to: '/p/users' },
   { id: 'p-connectors', label: 'Connectors', icon: 'plug', to: '/p/connectors' },
-  { id: 'p-indexing', label: 'Indexing', icon: 'database', to: '/p/indexing', count: () => X.pIndexAlerts?.() || 0, tone: 'danger' },
+  { id: 'p-indexing', label: 'Indexing', icon: 'database', to: '/p/indexing', count: () => X.pIndexAlerts?.() || 0, tone: 'danger', children: () => X.sections?.indexing?.() || [] },
   { id: 'p-usage', label: 'Usage', icon: 'chart', to: '/p/usage' },
   { id: 'p-audit', label: 'Audit log', icon: 'activity', to: '/p/audit' },
   { id: 'p-health', label: 'System health', icon: 'server', to: '/p/health', count: () => D.pServices.filter(s => s.status !== 'operational').length, tone: 'danger' },
@@ -62,11 +61,27 @@ const toneOf = n => (typeof n.tone === 'function' ? n.tone() : n.tone) || 'accen
 /** Below 1024 px the sidebar is off-canvas; above it, it is either expanded or a 56 px icon rail (S.collapsed). */
 const narrowFrame = () => ($('#frame')?.clientWidth || innerWidth) < 1024;
 const railMode = () => S.collapsed && !narrowFrame();
+/** A row's sections ({ id, label, to, current, count, tone, gap }) — only when there are at least two to choose between. */
+const navKids = n => { const k = n.children?.() || []; return k.length > 1 ? k : []; };
 function navItem(n, active, rail = false) {
   const c = n.count ? n.count() : 0;
+  // In the rail a row with sections opens them as a menu (the parent's own page first, when it has one of its own).
+  if (rail && navKids(n).length) return `<button type="button" class="nav-item" id="nav-${esc(n.id)}" data-menu="nav-sub" data-menu-side="right" data-id="${esc(n.id)}" aria-haspopup="menu" aria-expanded="false" ${active ? 'aria-current="page"' : ''} data-tip="${esc(n.label)}" data-tip-side="right">${ic(n.icon)}<span class="nav-item__label">${esc(n.label)}</span>${badge(c, { tone: toneOf(n) })}</button>`;
+  // Sections show as sub-rows while you're in the row's area and the sidebar is expanded; they carry the counts then, and on a
+  // sub-row the parent stays marked as its area. A new section is one more row, so the page itself never needs a tab bar.
+  const kids = active && !rail ? navKids(n) : [], inKid = kids.some(k => k.current);
   // In the rail the label stays in the DOM (it names the link) and shows as a tooltip.
-  return `<a class="nav-item" id="nav-${esc(n.id)}" href="#${n.to}" ${active ? 'aria-current="page"' : ''} ${rail ? `data-tip="${esc(n.label)}" data-tip-side="right"` : ''}>${ic(n.icon)}<span class="nav-item__label">${esc(n.label)}</span>${badge(c, { tone: toneOf(n) })}</a>`;
+  const row = `<a class="${cx('nav-item', inKid && 'is-ancestor')}" id="nav-${esc(n.id)}" href="#${n.to}" ${active && !inKid ? 'aria-current="page"' : ''} ${rail ? `data-tip="${esc(n.label)}" data-tip-side="right"` : ''}>${ic(n.icon)}<span class="nav-item__label">${esc(n.label)}</span>${kids.length ? '' : badge(c, { tone: toneOf(n) })}</a>`;
+  const sub = kids.length ? `<div class="nav-sub" role="group" aria-label="${esc(n.label)}">${kids.map(k => `<a class="${cx('nav-item', 'nav-item--sub', k.gap && 'nav-item--gap')}" id="nav-${esc(n.id)}-${esc(k.id)}" href="#${k.to}" ${k.current ? 'aria-current="page"' : ''}><span class="nav-item__label">${esc(k.label)}</span>${badge(k.count || 0, { tone: k.tone || 'accent' })}</a>`).join('')}</div>` : '';
+  return row + sub;
 }
+/** The rail's section menu for a row with sections (see navItem). */
+MENUS['nav-sub'] = el => {
+  const n = [...memberNav(), ...yourWorkNav(), ...manageNav(), ...PLATFORM_NAV].find(x => x.id === el.dataset.id); if (!n) return [];
+  const kids = navKids(n), inKid = kids.some(k => k.current), here = (NAV_OF[S.cur.r.nav] || S.cur.r.nav) === n.id;
+  const own = n.home ? [{ label: n.home, checked: here && !inKid, run: () => go(n.to) }, { sep: true }] : [];
+  return [{ section: n.label }, ...own, ...kids.map(k => ({ label: k.label, meta: k.count ? fmtNum(k.count) : '', checked: !!k.current, run: () => go(k.to) }))];
+};
 /** A labelled group of rows. With `key` it collapses: it stays open while you're on one of its pages, and collapsed it shows
     a dot when something inside needs attention (red when something is broken) — the counts themselves live on the rows.
     In the rail every group is open and the label becomes a hairline. */
@@ -121,7 +136,8 @@ function topbar() {
   const unread = inApp ? X.inboxUnread?.() || 0 : 0;
   const menu = iconBtn('menu', 'Open sidebar', { act: 'nav-toggle', size: 'sm', id: 'topbar-menu', cls: 'topbar__menu', aria: 'aria-controls="sidebar" aria-expanded="false"' });
   const search = iconBtn('search', 'Search anything', { act: 'palette', id: 'topbar-search', size: 'sm', cls: 'topbar-search', aria: 'aria-keyshortcuts="Meta+K"' });
-  const bell = inApp ? `<a class="button button--ghost button--icon-only button--sm button--muted topbar-bell" id="topbar-inbox" href="#/inbox" data-tip="Inbox" aria-label="${unread ? `Inbox, ${unread} unread` : 'Inbox'}" ${cur.r.nav === 'inbox' ? 'aria-current="page"' : ''}>${ic('bell')}${unread ? `<span class="topbar-bell__badge" aria-hidden="true">${unread > 9 ? '9+' : unread}</span>` : ''}</a>` : '';
+  // Inbox is a popover on the bell (features/inbox.js PO.inbox): reading notifications never leaves the page you're on.
+  const bell = inApp ? `<button type="button" class="button button--ghost button--icon-only button--sm button--muted topbar-bell" id="topbar-inbox" data-popover="inbox" aria-haspopup="dialog" aria-expanded="false" data-tip="Inbox" aria-label="${unread ? `Inbox, ${unread} unread` : 'Inbox'}">${ic('bell')}${unread ? `<span class="topbar-bell__badge" aria-hidden="true">${unread > 9 ? '9+' : unread}</span>` : ''}</button>` : '';
   return `<header class="topbar"><div class="topbar__inner">${menu}${context}<div class="topbar__end" id="topbar-end">${actions ? `<div class="topbar__actions">${actions}</div>` : ''}<div class="topbar__global">${search}${bell}</div></div></div></header>`;
 }
 A['nav-group'] = el => {
@@ -184,7 +200,7 @@ M.prefs = () => {
       ${X.lang.field()}
       <div class="mt-16">${switchRow({ title: 'Show how answers were found', desc: 'Show the searches and analysis steps above each answer.', on: f.steps, act: 'pref-steps' })}</div>
       <h3 class="t-subheading mt-16" id="pref-notif">Email notifications</h3>
-      ${isAdmin() ? notif('syncs', 'A source stops syncing', 'So knowledge doesn’t go stale unnoticed.') + notif('requests', 'Someone requests access', 'For knowledge bases you own.') : ''}
+      ${isAdmin() ? notif('syncs', 'A source stops syncing', 'So knowledge doesn’t go stale unnoticed.') + notif('requests', 'Someone requests access', 'For collections you own.') : ''}
       ${notif('docs', 'Documents I rely on change', 'When a source cited in your chats is updated.')}
       ${notif('digest', 'Weekly summary', isAdmin() ? 'Questions, knowledge gaps and sync health.' : 'New knowledge shared with you.')}`,
     foot: btn('Done', { v: 'primary', act: 'close-modal' }),

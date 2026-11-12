@@ -1,10 +1,10 @@
 "use client";
 
-import { Checkbox, Dropdown, Label, Table } from "@heroui/react";
+import { Checkbox, Dropdown, Label, Separator, Table } from "@heroui/react";
 import type { Selection, SortDescriptor } from "@heroui/react";
 import { ArrowUp, ChevronsUpDown, MoreHorizontal, X, type LucideIcon } from "lucide-react";
 import clsx from "clsx";
-import { useMemo, useState, type ReactNode } from "react";
+import { Fragment, useMemo, useState, type ReactNode } from "react";
 import { IconButton } from "./IconButton";
 
 export interface DataTableColumn<T> {
@@ -286,13 +286,18 @@ function RowMenu({ actions }: { actions: readonly RowAction[] }) {
       <IconButton icon={MoreHorizontal} tip="More actions" size="sm" showTip={false} />
       <Dropdown.Popover placement="bottom end">
         <Dropdown.Menu aria-label="Row actions" onAction={(key) => actions.find((a) => a.id === key)?.onAction()} disabledKeys={actions.filter((a) => a.isDisabled).map((a) => a.id)}>
-          {actions.map((action) => {
+          {actions.map((action, i) => {
             const Icon = action.icon;
+            // Preview menus set the destructive entry apart: a separator before the first danger action that isn't first.
+            const split = action.danger && i > 0 && !actions[i - 1].danger;
             return (
-              <Dropdown.Item key={action.id} id={action.id} textValue={action.label} variant={action.danger ? "danger" : "default"}>
-                {Icon ? <Icon className="i" aria-hidden /> : null}
-                <Label>{action.label}</Label>
-              </Dropdown.Item>
+              <Fragment key={action.id}>
+                {split ? <Separator /> : null}
+                <Dropdown.Item id={action.id} textValue={action.label} variant={action.danger ? "danger" : "default"}>
+                  {Icon ? <Icon className="i" aria-hidden /> : null}
+                  <Label>{action.label}</Label>
+                </Dropdown.Item>
+              </Fragment>
             );
           })}
         </Dropdown.Menu>

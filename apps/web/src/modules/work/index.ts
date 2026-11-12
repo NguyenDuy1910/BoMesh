@@ -1,5 +1,6 @@
 /** Work module: pieces other slices import (Spaces, Home, Library, Reader, palette). */
 export { WorkItemRow, type WorkItemRowProps } from "./components/WorkItemRow";
+export { NewWorkMenu } from "./components/WorkFlows";
 export {
   WORK_KINDS,
   enabledWorkflowIds,

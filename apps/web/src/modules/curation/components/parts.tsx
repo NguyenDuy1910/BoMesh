@@ -1,34 +1,26 @@
 "use client";
 
-import { buttonVariants, Card, Label, ListBox, Select } from "@heroui/react";
+import { buttonVariants, Label, ListBox, Select } from "@heroui/react";
 import type { LucideIcon } from "lucide-react";
 import NextLink from "next/link";
 import type { ReactNode } from "react";
 
+import { PreviewChip } from "@/components/ui";
+import { useWorkspace } from "@/lib/workspace";
 import { useSource } from "@/modules/knowledge/queries";
 
 import { confLevel } from "../model";
+
+/** The section header's *Demo data* chip in demo workspaces. */
+export function DemoChip() {
+  const { workspace } = useWorkspace();
+  return workspace.demo ? <PreviewChip label="Demo data" tooltip="This workspace holds fictional demo content." /> : null;
+}
 
 /** A source's display name ("Source sync" while unknown). */
 export function SourceName({ source }: { source: string | undefined }) {
   const src = useSource(source);
   return <>{src.data?.displayName || "Source sync"}</>;
-}
-
-/** Card with a header (preview `card(body, { title, desc, actions, cls })`). */
-export function PanelCard({ title, description, actions, className, children }: { title: ReactNode; description?: ReactNode; actions?: ReactNode; className?: string; children: ReactNode }) {
-  return (
-    <Card className={className}>
-      <Card.Header>
-        <div className="grow">
-          <Card.Title>{title}</Card.Title>
-          {description ? <Card.Description>{description}</Card.Description> : null}
-        </div>
-        {actions ? <div className="row gap-4 none">{actions}</div> : null}
-      </Card.Header>
-      {children}
-    </Card>
-  );
 }
 
 /** Assistant confidence badge (`cur-conf`): Edited wins over a percentage. */

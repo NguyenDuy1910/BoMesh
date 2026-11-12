@@ -1,48 +1,36 @@
 "use client";
 
-import { Button, Dropdown, Header, Label, SearchField, ToggleButton, Tooltip } from "@heroui/react";
+import { Button, Dropdown, Header, Label, SearchField, Tooltip } from "@heroui/react";
 import clsx from "clsx";
-import { AlertCircle, ArrowRight, ArrowUpDown, Bookmark, BookOpen, Check, ChevronDown, LayoutGrid, List, Lock, RotateCw, Search, SlidersVertical, Sparkles, X } from "lucide-react";
-import NextLink from "next/link";
+import { AlertCircle, ArrowUpDown, BookOpen, ChevronDown, LayoutGrid, List, Plus, RotateCw, Search, Sparkles, X } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { PageChrome } from "@/components/shell/page-chrome";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
+import { LinkButton } from "@/components/ui/LinkButton";
 import { Page } from "@/components/ui/Page";
 import { Pager } from "@/components/ui/Pager";
 import { Segmented } from "@/components/ui/Segmented";
-import { fmtNum, plural } from "@/lib/format";
 import { resourceId, type Schema } from "@/lib/api/client";
+import { fmtNum, plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 
 import type { SearchItemsResult } from "../api";
+import { CreateCollectionDialog } from "../bases/components/CreateCollectionDialog";
 import { ContributeButton, KnowledgeHeader } from "../components/KnowledgeHeader";
 import { ResourceCard } from "../components/ResourceCard";
 import { ResourceList, ResourceRow } from "../components/ResourceRow";
 import { passageOf, snippetOf, SORTS_CATALOG, topicTree, type CatalogSort, type Resource } from "../model";
-import { useKnowledgeBases, useKnowledgeModel, useSavedSearches, useTopics } from "../queries";
-import {
-  activeCount,
-  browseFacets,
-  browseHref,
-  defaultSort,
-  describeParams,
-  filterLabels,
-  parseBrowseQuery,
-  PER_PAGE,
-  pillTopic,
-  savedSearchParams,
-  setKey,
-  type BrowseParams,
-} from "./catalog";
-import { ContinueReading } from "./ContinueReading";
-import { FiltersDrawer } from "./FiltersDrawer";
-import { useFacetLabel } from "./labels";
 import { openDocumentPreview } from "../preview/store";
-import { SaveViewDialog } from "./SaveViewDialog";
+import { useKnowledgeBases, useKnowledgeModel, useSavedSearches, useTopics } from "../queries";
+import { activeCount, browseFacets, browseHref, defaultSort, describeParams, filterLabels, parseBrowseQuery, PER_PAGE, pillTopic, type BrowseFacetId, type BrowseParams } from "./catalog";
+import { FilterBar } from "./FilterBar";
+import { useFacetLabel } from "./labels";
+import { LockedCollection, LockedNote } from "./LockedCollections";
+import { SharedLists } from "./SharedLists";
 import { useCatalog, type BrowseOption } from "./useCatalog";
+import { ViewsMenu } from "./ViewsMenu";
 
 const TOPIC_PILLS = 6;
 
@@ -53,14 +41,14 @@ const plainSnippet = (s: string | null) => (s ? s.replace(/<\/?(?:b|mark|em|stro
 
 function Pill({ label, on, count, onPress }: { label: string; on: boolean; count?: number; onPress: () => void }) {
   return (
-    <ToggleButton className={clsx("cat-pill", on && "is-on")} isSelected={on} onChange={onPress}>
+    <button type="button" className={clsx("cat-pill", on && "is-on")} aria-pressed={on} onClick={onPress}>
       <span translate="no">{label}</span>
       {count !== undefined ? <span className="cat-pill__n">{fmtNum(count)}</span> : null}
-    </ToggleButton>
+    </button>
   );
 }
 
-/** Topic shortcuts: domains as one row of pills (the first few, the rest under More); a chosen domain reveals its topics. */
+/** Topic shortcuts (the only topic control): domains as one row of pills (the first few, the rest under More); a chosen domain reveals its topics. */
 function TopicBar({ p, options, topics, onTopic }: { p: BrowseParams; options: BrowseOption[]; topics: Schema<"Topic">[]; onTopic: (id: string) => void }) {
   const counts = new Map(options.map((o) => [o.value, o.count ?? 0]));
   const tree = topicTree(topics).map((d) => ({ ...d, id: resourceId(d.name) }));
@@ -83,10 +71,10 @@ function TopicBar({ p, options, topics, onTopic }: { p: BrowseParams; options: B
         ))}
         {rest.length ? (
           <Dropdown>
-            <Button variant="ghost" className="cat-pill cat-pill--more">
+            <Dropdown.Trigger className="cat-pill cat-pill--more">
               More
               <ChevronDown className="i i-xs" aria-hidden />
-            </Button>
+            </Dropdown.Trigger>
             <Dropdown.Popover placement="bottom start">
               <Dropdown.Menu aria-label="More topics" onAction={(key) => onTopic(String(key))}>
                 <Dropdown.Section>
@@ -117,6 +105,17 @@ function TopicBar({ p, options, topics, onTopic }: { p: BrowseParams; options: B
   );
 }
 
+const CardSkeleton = () => (
+  <div className="doc-card" aria-hidden>
+    <span className="skeleton cat-skel-media" />
+    <div className="doc-card__body">
+      <span className="skeleton skeleton--line" style={{ width: "70%" }} />
+      <span className="skeleton skeleton--line" style={{ width: "95%", height: 10 }} />
+      <span className="skeleton skeleton--line" style={{ width: "40%", height: 10 }} />
+    </div>
+  </div>
+);
+
 function LoadingBody() {
   return (
     <>
@@ -130,61 +129,64 @@ function LoadingBody() {
       </div>
       <div className="cat-cards">
         {Array.from({ length: 6 }, (_, i) => (
-          <div key={i} className="doc-card" aria-hidden>
-            <span className="skeleton cat-skel-media" />
-            <div className="doc-card__body">
-              <span className="skeleton skeleton--line" style={{ width: "70%" }} />
-              <span className="skeleton skeleton--line" style={{ width: "95%", height: 10 }} />
-              <span className="skeleton skeleton--line" style={{ width: "40%", height: 10 }} />
-            </div>
-          </div>
+          <CardSkeleton key={i} />
         ))}
       </div>
     </>
   );
 }
 
-/** Empty Browse: nothing readable yet. */
+/** Empty Browse: nothing readable yet (preview `emptyKnowledge`). */
 function EmptyKnowledge() {
   const { can, member } = useWorkspace();
+  const [creating, setCreating] = useState(false);
   const canUpload = can("contributions.create") || !!member.personalCollection;
+  const canCreate = can("items.create");
   return (
-    <EmptyState
-      icon={BookOpen}
-      boxed
-      title="No knowledge yet"
-      description={canUpload ? "Contribute files or connect a source to start the catalog." : "Nothing has been shared with you yet."}
-      actions={
-        <>
-          <ContributeButton variant="primary" />
-          <NextLink className="button button--secondary" href="/bases">
-            Knowledge bases
-          </NextLink>
-        </>
-      }
-    />
+    <>
+      <EmptyState
+        icon={BookOpen}
+        boxed
+        title="No knowledge yet"
+        description={canUpload ? "Contribute files or connect a source to start the catalog." : "Nothing has been shared with you yet."}
+        actions={
+          <>
+            <ContributeButton variant="primary" />
+            {canCreate ? (
+              <Button variant="tertiary" onPress={() => setCreating(true)}>
+                <Plus aria-hidden />
+                Create collection
+              </Button>
+            ) : null}
+          </>
+        }
+      />
+      {canCreate ? <CreateCollectionDialog isOpen={creating} onClose={() => setCreating(false)} /> : null}
+    </>
   );
 }
 
 /* ═══════════════ Page ═══════════════ */
 
-/** Knowledge › Browse (preview `P.catalog`, features/hub.js): one search field, topic shortcuts, a document grid; filters and the quick preview are drawers. */
+/**
+ * Knowledge › Browse (preview `P.catalog`, features/hub.js): one search field, topic shortcuts, reading lists
+ * shared with you (landing), then the documents with inline filters, Views, sort and layout. The URL holds the set.
+ */
 export function BrowsePage() {
   const router = useRouter();
   const search = useSearchParams();
   const p = useMemo(() => parseBrowseQuery(search), [search]);
   const { id: ws, hasModule } = useWorkspace();
-  const facets = useMemo(() => browseFacets(hasModule("spaces")), [hasModule]);
+  const allFacets = useMemo(() => browseFacets(hasModule("spaces")), [hasModule]);
+  /** Filter facets: everything but topic, which the pills own. */
+  const facets = useMemo(() => allFacets.filter((f) => f.id !== "topic"), [allFacets]);
   const cat = useCatalog(p);
   const topics = useTopics();
   const views = useSavedSearches();
-  const lockedBases = useKnowledgeBases({ showLocked: true });
+  const allBases = useKnowledgeBases({ showLocked: true });
   const { toResource } = useKnowledgeModel();
   const label = useFacetLabel({ owners: (p.filters.owner ?? []).map((o) => `workspaces/${ws}/members/${o}`), sources: (p.filters.src ?? []).filter((s) => s !== "upload") });
 
-  const [filtersOpen, setFiltersOpen] = useState(false);
-  const [saveOpen, setSaveOpen] = useState(false);
-  
   const apply = (next: BrowseParams) => router.replace(browseHref(next), { scroll: false });
 
   /* Search: typing searches documents (debounced into the URL). */
@@ -230,18 +232,14 @@ export function BrowsePage() {
 
   const n = activeCount(p);
   const pt = pillTopic(p);
-  const extra = n - (pt ? 1 : 0);
   const landing = !p.q && !n;
-  const key = setKey(p);
-  const existing = (views.data ?? []).some((v) => setKey(savedSearchParams(v, topics.data ?? [])) === key);
-  const optLabel = (f: keyof BrowseParams["filters"], v: string) => cat.facets[f]?.find((o) => o.value === v)?.label ?? label(f, v);
+  const optLabel = (f: BrowseFacetId, v: string) => cat.facets[f]?.find((o) => o.value === v)?.label ?? label(f, v);
   const labels = filterLabels(p, optLabel);
 
   const onTopic = (v: string) => apply({ ...p, filters: { ...p.filters, topic: v ? [v] : [] } });
-  /** Clears the advanced filters; the topic shortcut stays, since it is visible and has its own All. */
-  const clearFilters = () => apply({ ...p, filters: pt ? { topic: [pt] } : {}, saved: false });
-  const unfilter = (f: keyof BrowseParams["filters"] | "saved", v?: string) =>
-    f === "saved" ? apply({ ...p, saved: false }) : apply({ ...p, filters: { ...p.filters, [f]: (p.filters[f] ?? []).filter((x) => x !== v) } });
+  /** Clear all: every filter, the topic included (the search words stay; they have their own ×). */
+  const clearFilters = () => apply({ ...p, filters: {} });
+  const unfilter = (f: BrowseFacetId, v: string) => apply({ ...p, filters: { ...p.filters, [f]: (p.filters[f] ?? []).filter((x) => x !== v) } });
 
   /** Ask AI: the query (or the filtered set) becomes a cited conversation grounded in these documents. */
   const ask = () => {
@@ -271,12 +269,14 @@ export function BrowsePage() {
   const sort = (p.sort || defaultSort(p)) as CatalogSort;
   const def = defaultSort(p);
   const rows = cat.rows.map((x) => ({ x, r: toResource(x.item ?? {}) }));
+  /** Context every result on the page shares (one collection, one topic) — said once by the filters, not on every card. */
   const shared = (() => {
     if (rows.length < 2) return [] as ("kb" | "topic")[];
     const one = (f: (r: Resource) => string) => new Set(rows.map(({ r }) => f(r))).size === 1;
     return [one((r) => r.base?.name ?? "") && "kb", one((r) => r.topics[0] ?? "") && "topic"].filter(Boolean) as ("kb" | "topic")[];
   })();
-  const locked = (lockedBases.data ?? []).some((b) => b.access === "LOCKED");
+  const lockedBases = (allBases.data ?? []).filter((b) => b.access === "LOCKED");
+  const lockedFilter = (p.filters.kb ?? []).map((id) => lockedBases.find((b) => resourceId(b.name) === id)).find((b) => !!b);
   const loadingFirst = cat.isPending && !cat.rows.length && !cat.isError;
   const emptyCatalog = cat.poolSize === 0 && landing;
 
@@ -286,10 +286,115 @@ export function BrowsePage() {
     return p.q && labels.length ? `${p.q} · ${name}`.slice(0, 60) : name;
   })();
 
+  const chips = allFacets.flatMap((f) =>
+    (p.filters[f.id] ?? [])
+      .filter((v) => !(f.id === "topic" && v === pt))
+      .map((v) => (
+        <button key={`${f.id}:${v}`} type="button" className="cat-chip" aria-label={`Remove filter ${f.label}: ${optLabel(f.id, v)}`} onClick={() => unfilter(f.id, v)}>
+          <span className="cat-chip__k">{f.label}</span>
+          <span className="truncate" translate={(cat.facets[f.id]?.find((o) => o.value === v)?.ui ?? label.ui(f.id, v)) ? undefined : "no"}>
+            {optLabel(f.id, v)}
+          </span>
+          <X className="i i-xs" aria-hidden />
+        </button>
+      )),
+  );
+
+  const results = cat.isError && !cat.rows.length ? (
+    p.q ? (
+      <EmptyState
+        icon={AlertCircle}
+        tone="danger"
+        boxed
+        compact
+        title="This didn’t load"
+        description="Searching didn’t work just now. Try again, or clear the search to browse with filters."
+        actions={
+          <>
+            <Button variant="tertiary" onPress={() => void cat.refetch()}>
+              <RotateCw aria-hidden />
+              Try again
+            </Button>
+            <Button variant="tertiary" onPress={clearQ}>
+              Clear search
+            </Button>
+          </>
+        }
+      />
+    ) : (
+      <ErrorState error={cat.error} onRetry={cat.refetch} compact />
+    )
+  ) : cat.isPending && !cat.rows.length ? (
+    <div className="cat-cards" aria-busy="true">
+      {Array.from({ length: 6 }, (_, i) => (
+        <CardSkeleton key={i} />
+      ))}
+    </div>
+  ) : cat.total ? (
+    <>
+      <div className="cat-results">
+        {p.view === "list" ? (
+          <ResourceList>
+            {rows.map(({ x, r }) => (
+              <ResourceRow key={r.id} resource={r} q={p.q} snippet={plainSnippet(snippetOf(x))} onOpen={() => select(r, x)} />
+            ))}
+          </ResourceList>
+        ) : (
+          <div className="cat-cards">
+            {rows.map(({ x, r }) => (
+              <ResourceCard key={r.id} resource={r} q={p.q} passage={passageOf(x)} hide={shared} onOpen={() => select(r, x)} />
+            ))}
+          </div>
+        )}
+      </div>
+      {cat.total > PER_PAGE ? (
+        <Pager
+          page={cat.page}
+          pageSize={PER_PAGE}
+          total={cat.total}
+          onPageChange={(n2) => {
+            cat.setPage(n2);
+            window.scrollTo({ top: 0 });
+          }}
+        />
+      ) : null}
+    </>
+  ) : lockedFilter ? (
+    // Filtered to a collection the caller can't read: say so and offer Request access, never an empty result.
+    <LockedCollection base={lockedFilter} />
+  ) : (
+    <EmptyState
+      icon={Search}
+      boxed
+      compact
+      title={p.q ? `No documents match “${p.q}”` : "No documents match these filters"}
+      description={p.q ? "Try other words, or ask the assistant — it can answer from passages a title search misses." : "Try fewer filters."}
+      actions={
+        <>
+          {n ? (
+            <Button variant="tertiary" onPress={clearFilters}>
+              Clear filters
+            </Button>
+          ) : null}
+          {p.q ? (
+            <>
+              <Button variant="tertiary" onPress={clearQ}>
+                Clear search
+              </Button>
+              <Button variant="primary" onPress={ask}>
+                <Sparkles aria-hidden />
+                Ask AI
+              </Button>
+            </>
+          ) : null}
+        </>
+      }
+    />
+  );
+
   return (
     <Page className="cat">
-      <PageChrome crumbs={[{ label: "Knowledge" }]} />
-      <KnowledgeHeader active="browse" />
+      <KnowledgeHeader />
       {emptyCatalog ? (
         <EmptyKnowledge />
       ) : loadingFirst && landing && cat.poolSize === null ? (
@@ -297,12 +402,13 @@ export function BrowsePage() {
       ) : (
         <>
           <div className="cat-top">
+            {/* One field: typing searches documents; Ask AI turns the same words into a cited answer. */}
             <SearchField aria-label="Search documents" value={text} onChange={setText} onClear={clearQ} className="cat-search">
               <SearchField.Group>
                 <SearchField.SearchIcon>
                   <Search className="i" aria-hidden />
                 </SearchField.SearchIcon>
-                <SearchField.Input ref={inputRef} placeholder={cat.poolSize !== null ? `Search ${fmtNum(cat.poolSize)} documents` : "Search documents"} autoComplete="off" />
+                <SearchField.Input ref={inputRef} placeholder="Search documents" autoComplete="off" />
                 {text ? <SearchField.ClearButton aria-label="Clear search" /> : null}
                 {p.q ? (
                   <span className="cat-search__ask">
@@ -320,65 +426,73 @@ export function BrowsePage() {
             <TopicBar p={p} options={cat.facets.topic ?? []} topics={topics.data ?? []} onTopic={onTopic} />
           </div>
 
-          {(() => {
-            const chips = facets.flatMap((f) =>
-              (p.filters[f.id] ?? [])
-                .filter((v) => !(f.id === "topic" && v === pt))
-                .map((v) => (
-                  <Button key={`${f.id}:${v}`} variant="ghost" className="cat-chip" aria-label={`Remove filter ${f.label}: ${optLabel(f.id, v)}`} onPress={() => unfilter(f.id, v)}>
-                    <span className="cat-chip__k">{f.label}</span>
-                    <span className="truncate" translate="no">
-                      {optLabel(f.id, v)}
-                    </span>
-                    <X className="i i-xs" aria-hidden />
-                  </Button>
-                )),
-            );
-            if (p.saved)
-              chips.unshift(
-                <Button key="saved" variant="ghost" className="cat-chip" aria-label="Remove filter Saved" onPress={() => unfilter("saved")}>
-                  <Bookmark className="i i-xs" fill="currentColor" aria-hidden />
-                  <span>Saved by me</span>
-                  <X className="i i-xs" aria-hidden />
-                </Button>,
-              );
-            const save = p.q || n ? (
-              existing ? (
-                <span className="cat-saved-view">
-                  <Check className="i i-xs" aria-hidden />
-                  View saved
-                </span>
-              ) : (
-                <button type="button" className="link-button" onClick={() => setSaveOpen(true)}>
-                  Save view
-                  <Bookmark className="i i-sm" aria-hidden />
-                </button>
-              )
-            ) : null;
-            if (!chips.length && !save) return null;
-            return (
-              <div className="cat-chips">
-                {chips}
-                {chips.length ? (
-                  <button type="button" className="link-button" onClick={clearFilters}>
-                    Clear all
-                  </button>
-                ) : null}
-                <span className="grow" />
-                {save}
-              </div>
-            );
-          })()}
-
-          {landing && cat.page === 1 ? <ContinueReading /> : null}
+          {landing && cat.page === 1 ? <SharedLists /> : null}
 
           <section className="cat-main" aria-label="Documents">
+            <FilterBar
+              p={p}
+              options={cat.facets}
+              onApply={apply}
+              facets={facets}
+              total={cat.total}
+              end={
+                <>
+                  <ViewsMenu p={p} views={views.data ?? []} topics={topics.data ?? []} onApply={apply} suggestion={suggestion} summary={describeParams(p, optLabel)} />
+                  <Dropdown>
+                    <Button variant="ghost" size="sm" className="cat-sort" aria-label={`Sort: ${SORTS_CATALOG[sort]}`}>
+                      <ArrowUpDown aria-hidden className="i" />
+                      <span>{SORTS_CATALOG[sort]}</span>
+                      <ChevronDown aria-hidden className="i" />
+                    </Button>
+                    <Dropdown.Popover placement="bottom end">
+                      <Dropdown.Menu
+                        aria-label="Sort by"
+                        selectionMode="single"
+                        selectedKeys={[sort]}
+                        onAction={(k) => apply({ ...p, sort: String(k) === def ? "" : (String(k) as CatalogSort) })}
+                      >
+                        <Dropdown.Section>
+                          <Header>Sort by</Header>
+                          {(Object.keys(SORTS_CATALOG) as CatalogSort[])
+                            .filter((k) => k !== "relevance" || p.q)
+                            .map((k) => (
+                              <Dropdown.Item key={k} id={k} textValue={SORTS_CATALOG[k]}>
+                                <Label>{SORTS_CATALOG[k]}</Label>
+                                <Dropdown.ItemIndicator />
+                              </Dropdown.Item>
+                            ))}
+                        </Dropdown.Section>
+                      </Dropdown.Menu>
+                    </Dropdown.Popover>
+                  </Dropdown>
+                  <span className="cat-layoutsw">
+                    <Segmented
+                      label="Layout"
+                      value={p.view}
+                      onChange={(v) => apply({ ...p, view: v })}
+                      options={[
+                        { value: "grid", label: "Grid", icon: LayoutGrid, iconOnly: true },
+                        { value: "list", label: "List", icon: List, iconOnly: true },
+                      ]}
+                    />
+                  </span>
+                </>
+              }
+            />
+            {/* The result count with the choices that produced it. */}
             <div className="cat-head">
               <h2 className="cat-head__title">{title}</h2>
-              {!cat.isError ? (
+              {!cat.isError && !cat.isPending ? (
                 <span className="cat-count" role="status">
-                  {cat.isPending ? "" : plural(cat.total, "document")}
+                  <span aria-hidden>{fmtNum(cat.total)}</span>
+                  <span className="sr-only">{plural(cat.total, "document")}</span>
                 </span>
+              ) : null}
+              {chips.length ? (
+                <div className="cat-chips">
+                  {chips}
+                  <LinkButton onPress={clearFilters}>Clear all</LinkButton>
+                </div>
               ) : null}
               <span className="grow" />
               {!p.q && n && cat.total ? (
@@ -390,167 +504,12 @@ export function BrowsePage() {
                   <Tooltip.Content>Get an overview with sources from these documents</Tooltip.Content>
                 </Tooltip>
               ) : null}
-              <Button variant={extra ? "secondary" : "ghost"} size="sm" className={clsx(extra && "is-set")} onPress={() => setFiltersOpen(true)}>
-                <SlidersVertical aria-hidden />
-                {extra ? `Filters · ${extra}` : "Filters"}
-              </Button>
-              <Dropdown>
-                <Button variant="ghost" size="sm" aria-label={`Sort: ${SORTS_CATALOG[sort]}`}>
-                  <ArrowUpDown aria-hidden />
-                  {SORTS_CATALOG[sort]}
-                  <ChevronDown aria-hidden />
-                </Button>
-                <Dropdown.Popover placement="bottom end">
-                  <Dropdown.Menu
-                    aria-label="Sort by"
-                    selectionMode="single"
-                    selectedKeys={[sort]}
-                    onAction={(k) => apply({ ...p, sort: String(k) === def ? "" : (String(k) as CatalogSort) })}
-                  >
-                    <Dropdown.Section>
-                      <Header>Sort by</Header>
-                      {(Object.keys(SORTS_CATALOG) as CatalogSort[])
-                        .filter((k) => k !== "relevance" || p.q)
-                        .map((k) => (
-                          <Dropdown.Item key={k} id={k} textValue={SORTS_CATALOG[k]}>
-                            <Label>{SORTS_CATALOG[k]}</Label>
-                            <Dropdown.ItemIndicator />
-                          </Dropdown.Item>
-                        ))}
-                    </Dropdown.Section>
-                  </Dropdown.Menu>
-                </Dropdown.Popover>
-              </Dropdown>
-              <Segmented
-                className="cat-layoutsw"
-                label="Layout"
-                value={p.view}
-                onChange={(v) => apply({ ...p, view: v })}
-                options={[
-                  { value: "grid", label: "Grid", icon: LayoutGrid, iconOnly: true },
-                  { value: "list", label: "List", icon: List, iconOnly: true },
-                ]}
-              />
             </div>
-            {cat.isError && !cat.rows.length ? (
-              p.q ? (
-                <EmptyState
-                  icon={AlertCircle}
-                  tone="danger"
-                  boxed
-                  compact
-                  title="This didn’t load"
-                  description="Searching didn’t work just now. Try again, or clear the search to browse with filters."
-                  actions={
-                    <>
-                      <Button variant="tertiary" onPress={() => void cat.refetch()}>
-                        <RotateCw aria-hidden />
-                        Try again
-                      </Button>
-                      <Button variant="secondary" onPress={clearQ}>
-                        Clear search
-                      </Button>
-                    </>
-                  }
-                />
-              ) : (
-                <ErrorState error={cat.error} onRetry={cat.refetch} compact />
-              )
-            ) : cat.isPending && !cat.rows.length ? (
-              <div className="cat-cards" aria-busy="true">
-                {Array.from({ length: 6 }, (_, i) => (
-                  <div key={i} className="doc-card" aria-hidden>
-                    <span className="skeleton cat-skel-media" />
-                    <div className="doc-card__body">
-                      <span className="skeleton skeleton--line" style={{ width: "70%" }} />
-                      <span className="skeleton skeleton--line" style={{ width: "95%", height: 10 }} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : cat.total ? (
-              <>
-                <div className="cat-results">
-                  {p.view === "list" ? (
-                    <ResourceList>
-                      {rows.map(({ x, r }) => (
-                        <ResourceRow key={r.id} resource={r} q={p.q} snippet={plainSnippet(snippetOf(x))} onOpen={() => select(r, x)} />
-                      ))}
-                    </ResourceList>
-                  ) : (
-                    <div className="cat-cards">
-                      {rows.map(({ x, r }) => (
-                        <ResourceCard key={r.id} resource={r} q={p.q} passage={passageOf(x)} hide={shared} onOpen={() => select(r, x)} />
-                      ))}
-                    </div>
-                  )}
-                </div>
-                {cat.total > PER_PAGE ? (
-                  <Pager
-                    page={cat.page}
-                    pageSize={PER_PAGE}
-                    total={cat.total}
-                    onPageChange={(n2) => {
-                      cat.setPage(n2);
-                      window.scrollTo({ top: 0 });
-                    }}
-                  />
-                ) : null}
-              </>
-            ) : (
-              <EmptyState
-                icon={Search}
-                boxed
-                compact
-                title={p.q ? `No documents match “${p.q}”` : "No documents match these filters"}
-                description={p.q ? "Try other words, or ask the assistant — it can answer from passages a title search misses." : "Try fewer filters."}
-                actions={
-                  <>
-                    {n ? (
-                      <Button variant="secondary" onPress={clearFilters}>
-                        Clear filters
-                      </Button>
-                    ) : null}
-                    {p.q ? (
-                      <>
-                        <Button variant="secondary" onPress={clearQ}>
-                          Clear search
-                        </Button>
-                        <Button variant="primary" onPress={ask}>
-                          <Sparkles aria-hidden />
-                          Ask AI
-                        </Button>
-                      </>
-                    ) : null}
-                  </>
-                }
-              />
-            )}
+            {results}
           </section>
-          {locked ? (
-            <NextLink className="cat-locked" href="/bases">
-              <Lock className="i i-sm" aria-hidden />
-              <span>Some knowledge bases aren’t shared with you</span>
-              <ArrowRight className="i i-sm" aria-hidden />
-            </NextLink>
-          ) : null}
+          {lockedBases.length && !lockedFilter ? <LockedNote bases={lockedBases} /> : null}
         </>
       )}
-
-      <FiltersDrawer
-        isOpen={filtersOpen}
-        onClose={() => setFiltersOpen(false)}
-        params={p}
-        facets={facets}
-        options={cat.facets}
-        total={cat.total}
-        savedCount={cat.savedCount}
-        views={views.data ?? []}
-        topics={topics.data ?? []}
-        onApply={apply}
-        onClear={clearFilters}
-      />
-      <SaveViewDialog isOpen={saveOpen} onClose={() => setSaveOpen(false)} params={p} suggestion={suggestion} description={describeParams(p, optLabel)} />
     </Page>
   );
 }

@@ -1,8 +1,8 @@
 "use client";
 
-import { Button, buttonVariants } from "@heroui/react";
+import { Button, buttonVariants, Dropdown, Label } from "@heroui/react";
 import clsx from "clsx";
-import { CheckCheck, Download, EyeOff, History, Pencil } from "lucide-react";
+import { CheckCheck, Download, Ellipsis, EyeOff, History, Info, Pencil } from "lucide-react";
 import NextLink from "next/link";
 import { useRef, useState } from "react";
 
@@ -11,32 +11,33 @@ import { Callout } from "@/components/ui/Callout";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { FileIcon } from "@/components/ui/FileIcon";
 import { KeyValue } from "@/components/ui/KeyValue";
-import { StatusChip } from "@/components/ui/StatusChip";
 import { ApiError, resourceId } from "@/lib/api/client";
 import { fmtDateTime, fmtSize } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 
 import type { Contribution } from "../../api";
+import { DemoChip } from "../../components/KnowledgeHeader";
 import { LifecycleChip } from "../../components/LifecycleChip";
 import { ContributionTimeline } from "../../library/components/ContributionTimeline";
 import { contributionHref, lastEvent, type ContributionEventView } from "../../library/contributions";
-import { lifecycleKey, type Resource } from "../../model";
+import { LIFECYCLE, lifecycleKey, type Resource } from "../../model";
 import { useDocumentOperations } from "../../operations";
 import { useItem, useMemberNames } from "../../queries";
+import { docFormat } from "../format";
 import { NO_MARKS } from "../marks";
-import { isSpreadsheetType } from "../rendition";
 import { useReaderContent } from "../queries";
 import { RailSection } from "./AboutPane";
-import { BackButton, DownloadButton, Meta, NothingToShow, PanelToggle, RAIL_MIN, Rail, SkeletonPage, Updated, useWidth } from "./ReaderParts";
-import { RenditionView } from "./RenditionView";
+import { DocumentViewer } from "./DocumentViewer";
+import { Meta, NothingToShow, Rail, SkeletonPage, Updated } from "./ReaderParts";
+import { renditionPageCount, RenditionView } from "./RenditionView";
 import { useRendition } from "./useRendition";
 
 const NO_PREVIEW: Readonly<Record<string, true>> = { zip: true, png: true, jpg: true, jpeg: true };
 
 /**
  * A document that isn't knowledge yet (preview `submissionView`): in review, changes requested,
- * not approved or unpublished. Seen only by its contributor and the base's reviewers: a preview
- * with its lifecycle and who can see it — no Ask, no saving or collecting.
+ * not approved or unpublished. Seen only by its contributor and the collection's reviewers: a
+ * preview with its lifecycle and who can see it — no Ask, no saving or adding to reading lists.
  */
 export function SubmissionView({ resource: r, contribution: c }: { resource: Resource; contribution: Contribution | null }) {
   const { member, can, workspace } = useWorkspace();
@@ -48,7 +49,7 @@ export function SubmissionView({ resource: r, contribution: c }: { resource: Res
   const names = useMemberNames([contributor, c?.decision?.reviewer, ...(c?.events ?? []).map((e) => e.actor)]);
   const target = useItem(c?.targetCollection || c?.suggestions?.collection || null);
   const original = useItem(c?.replacesItem || null);
-  const base = target.data?.displayName || (r.isPersonal ? "" : r.base?.displayName) || "its knowledge base";
+  const base = target.data?.displayName || (r.isPersonal ? "" : r.base?.displayName) || "";
   const life = lifecycleKey({ item: r.item, contribution: c });
   const stage = life === "analyzing" || life === "review" ? "review" : life;
   const track = contributionHref(c ? resourceId(c.name) : null);
@@ -59,14 +60,14 @@ export function SubmissionView({ resource: r, contribution: c }: { resource: Res
   const content = useReaderContent(r.id, undefined, { enabled: preview });
   const rendition = useRendition(r.id, content.data);
   const rd = rendition.doc;
-  const sheet = isSpreadsheetType(r.mime);
-  const pageCount = Math.max(content.data?.pageAssets?.length ?? 0, ...(rd?.blocks.map((b) => b.page ?? 0) ?? [0]));
+  const format = docFormat({ ext: r.ext, mime: r.mime });
+  const scrollRef = useRef<HTMLDivElement>(null);
   const cantPreview = (
     <NothingToShow
       title="This file can’t be previewed"
       description="Download it to view."
       actions={
-        <Button variant="secondary" onPress={() => void ops.download(r)}>
+        <Button variant="tertiary" onPress={() => void ops.download(r)}>
           <Download className="i" aria-hidden />
           Download
         </Button>
@@ -88,24 +89,29 @@ export function SubmissionView({ resource: r, contribution: c }: { resource: Res
       />
     );
   else if (!rd?.blocks.length) canvas = <NothingToShow />;
-  else canvas = <RenditionView rendition={rd} marks={NO_MARKS} sheet={sheet} pageCount={pageCount} />;
+  else {
+    const assetPages = content.data?.pageAssets?.length ?? 0;
+    canvas = (
+      <DocumentViewer format={format} count={renditionPageCount(rd, format, assetPages)} scrollRef={scrollRef}>
+        <RenditionView rendition={rd} marks={NO_MARKS} format={format} pageCount={assetPages} runningHead={[r.title, workspace.displayName ?? ""]} />
+      </DocumentViewer>
+    );
+  }
 
-  /* Layout */
-  const rootRef = useRef<HTMLDivElement>(null);
-  const width = useWidth(rootRef);
-  const [railPref, setRailPref] = useState<boolean | null>(null);
-  const open = railPref ?? (width === 0 || width >= RAIL_MIN);
+  /* Side panel: closed by default */
+  const [open, setOpen] = useState(false);
 
-  /* Header */
+  /* Header: the decision and Track sit in the top row with the trail; the head is the document's identity */
   const meta = [
     r.typeLabel,
-    base !== "its knowledge base" && <span translate="no">{base}</span>,
+    base && <span translate="no">{base}</span>,
     mine ? "Contributed by you" : <span>Contributed by {names.get(contributor) || "someone"}</span>,
     c?.createTime && <Updated key="s" at={c.createTime} prefix="Submitted" />,
   ];
+  // One primary: Review (reviewers) or Revise (the contributor, when changes were asked for — it opens the same place as Track).
   const main =
     reviewer && stage === "review" && c ? (
-      <NextLink href={`/documents?tab=review&sel=${resourceId(c.name)}`} className={buttonVariants({ variant: "primary" })}>
+      <NextLink href={`/studio?tab=review&sel=${resourceId(c.name)}`} className={buttonVariants({ variant: "primary" })}>
         <CheckCheck className="i" aria-hidden />
         Review
       </NextLink>
@@ -115,6 +121,32 @@ export function SubmissionView({ resource: r, contribution: c }: { resource: Res
         Revise
       </NextLink>
     ) : null;
+  const trackBtn =
+    mine && stage !== "changes" ? (
+      <NextLink href={track} className={buttonVariants({ variant: main ? "secondary" : "primary" })}>
+        <History className="i" aria-hidden />
+        Track
+      </NextLink>
+    ) : null;
+  const more = (
+    <Dropdown>
+      <Button isIconOnly size="md" variant="ghost" aria-label="More actions" className="button--muted">
+        <Ellipsis aria-hidden />
+      </Button>
+      <Dropdown.Popover placement="bottom end">
+        <Dropdown.Menu aria-label="More actions" onAction={(key) => (key === "details" ? setOpen(!open) : void ops.download(r))}>
+          <Dropdown.Item id="details" textValue={open ? "Hide details and history" : "Details and history"}>
+            <Info className="i" aria-hidden />
+            <Label>{open ? "Hide details and history" : "Details and history"}</Label>
+          </Dropdown.Item>
+          <Dropdown.Item id="download" textValue="Download">
+            <Download className="i" aria-hidden />
+            <Label>Download</Label>
+          </Dropdown.Item>
+        </Dropdown.Menu>
+      </Dropdown.Popover>
+    </Dropdown>
+  );
 
   /* Banner: why only some people can see it, and what happens next */
   const byName = (e?: ContributionEventView) => (e?.by === me && me ? "You" : (e?.by && names.get(e.by)) || "A reviewer");
@@ -126,7 +158,7 @@ export function SubmissionView({ resource: r, contribution: c }: { resource: Res
     ) : null;
   const audience = (
     <>
-      Only {mine ? "you" : <span translate="no">{contributorName}</span>} and the reviewers of <span translate="no">{base}</span> can see it.
+      Only {mine ? "you" : <span translate="no">{contributorName}</span>} and the reviewers of <span translate="no">{base || "its collection"}</span> can see it.
     </>
   );
   let banner: React.ReactNode;
@@ -151,7 +183,7 @@ export function SubmissionView({ resource: r, contribution: c }: { resource: Res
     banner = (
       <Callout
         tone="danger"
-        title="Not approved"
+        title={LIFECYCLE.rejected.label}
         description={
           <>
             {quote(e)}
@@ -168,14 +200,26 @@ export function SubmissionView({ resource: r, contribution: c }: { resource: Res
 
   const crumbs =
     mine || !reviewer
-      ? [{ label: "Knowledge", href: "/knowledge" }, { label: "My library", href: "/knowledge/library?tab=contributions" }, { label: r.title }]
-      : [{ label: "Documents", href: "/documents?tab=review" }, { label: r.title }];
+      ? [{ label: "Knowledge", href: "/knowledge" }, { label: "My contributions", href: "/contributions" }, { label: r.title }]
+      : [{ label: "Review", href: "/studio?tab=review" }, { label: r.title }];
 
   return (
-    <div className="rdr rdr--sub" ref={rootRef}>
-      <PageChrome crumbs={crumbs} />
+    <div className="rdr rdr--sub">
+      <PageChrome
+        hero
+        title={r.title}
+        extra={<LifecycleChip lifecycle={life} />}
+        meta={<Meta parts={meta} className="row gap-6" />}
+        actions={
+          <>
+            {main}
+            {trackBtn}
+            {more}
+          </>
+        }
+        crumbs={crumbs}
+      />
       <header className="rdr-head">
-        <BackButton />
         <div className="rdr-head__row">
           <FileIcon type={r.ext} mime={r.mime} name={r.fileName} size="lg" />
           <div className="rdr-head__main">
@@ -184,36 +228,25 @@ export function SubmissionView({ resource: r, contribution: c }: { resource: Res
                 {r.title}
               </h1>
               <LifecycleChip lifecycle={life} />
-              {workspace.demo ? <StatusChip label="Demo data" tone="default" dot={false} size="sm" tooltip="This workspace holds fictional demo content." /> : null}
+              <DemoChip />
             </div>
             <Meta parts={meta} />
-          </div>
-          <div className="rdr-head__actions">
-            {main}
-            {mine ? (
-              <NextLink href={track} className={clsx(buttonVariants({ variant: main ? "secondary" : "primary" }), main && "rdr-wide")}>
-                <History className="i" aria-hidden />
-                Track
-              </NextLink>
-            ) : null}
-            <DownloadButton onPress={() => void ops.download(r)} />
-            <PanelToggle open={open} onToggle={() => setRailPref(!open)} />
           </div>
         </div>
       </header>
       <div className={clsx("rdr-body", open && "has-rail")}>
-        <div className="rdr-canvas" id="rdr-scroll">
+        <div className="rdr-canvas" id="rdr-scroll" ref={scrollRef}>
           <div className="rdr-banners">{banner}</div>
           {canvas}
         </div>
         {open ? (
-          <Rail tabs={[{ id: "about", label: "About" }]} tab="about" onTab={() => undefined} onClose={() => setRailPref(false)}>
-            <RailSection title="Contribution">
+          <Rail title="About this contribution" onClose={() => setOpen(false)}>
+            <section className="rdr-sec">
               <KeyValue
                 pairs={[
                   ["Status", <LifecycleChip key="s" lifecycle={life} size="sm" />],
-                  ["Knowledge base", <span translate="no">{base}</span>],
-                  ["Contributed by", mine ? "You" : <span translate="no">{names.get(contributor) || "Someone"}</span>],
+                  ["Collection", <span translate="no">{base || "—"}</span>],
+                  ["Contributed by", mine ? "You" : names.get(contributor) ? <span translate="no">{names.get(contributor)}</span> : "Someone"],
                   c?.createTime ? ["Submitted", fmtDateTime(c.createTime)] : null,
                   c?.replacesItem
                     ? [
@@ -230,7 +263,7 @@ export function SubmissionView({ resource: r, contribution: c }: { resource: Res
                   ["File", `${(r.ext || "file").toUpperCase()} · ${fmtSize(r.sizeBytes)}`],
                 ]}
               />
-            </RailSection>
+            </section>
             {c ? (
               <RailSection title="History">
                 <ContributionTimeline contribution={c} compact />

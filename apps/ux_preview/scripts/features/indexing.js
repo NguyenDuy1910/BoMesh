@@ -105,15 +105,19 @@
     const queued = all.reduce((a, w) => a + (statOf(w).queue || 0), 0), failed = failedJobs().length;
     return esc(`${attention ? `${plural(attention, 'workspace')} need${attention === 1 ? 's' : ''} attention` : 'Every workspace is healthy'} · ${plural(queued, 'job')} queued · ${plural(failed, 'failed job')} in the last 24 hours.`);
   }
-  const TABS = ['workspaces', 'jobs', 'policies'];
+  /** Indexing's sections are sidebar sub-rows of Indexing (pageSections); "By workspace" so it never reads as the Workspaces page. */
+  const sections = () => pageSections('/p/indexing', [
+    { id: 'workspaces', label: 'By workspace', title: 'Indexing', count: X.pIndexAlerts() || 0, tone: 'danger' },
+    { id: 'jobs', label: 'Jobs', title: 'Indexing jobs', count: failedJobs().length, tone: 'danger' },
+    { id: 'policies', label: 'Policies', title: 'Indexing policies' },
+  ]);
+  (X.sections ||= {}).indexing = () => sections().nav();
   P.pIndexing = ({ query }) => {
     const live = S.pageState === 'live' && !S.navLoading;
-    const tab = TABS.includes(query.tab) ? query.tab : 'workspaces';
-    const failed = failedJobs().length;
-    const t = contextBar(tabs([{ id: 'workspaces', label: 'Workspaces', count: X.pIndexAlerts() || null, alert: true }, { id: 'jobs', label: 'Jobs', count: failed || null }, { id: 'policies', label: 'Policies' }], tab, '/p/indexing'));
+    const s = sections(), tab = s.section(query);
     // Privacy is stated where file metadata appears (Jobs, the drawers), not as a page banner.
     const ok = () => `<div class="pix">${{ workspaces: () => wsSection() + errSection(), jobs: jobsSection, policies: policySection }[tab]()}</div>`;
-    return `<div class="page">${pageHeader({ title: 'Indexing', extra: PREVIEW, meta: live ? summary() : '' })}${t}
+    return `<div class="page">${pageHeader({ title: s.title(query), extra: PREVIEW, meta: live && tab === 'workspaces' ? summary() : '' })}
       ${gate({
         ok,
         loading: () => skelRows(8),

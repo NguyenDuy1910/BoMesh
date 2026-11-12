@@ -43,7 +43,6 @@
       <div class="field"><span class="label">Background tint</span>${seg({ value: L.base, options: BASES.map(([id, l]) => [id, l]), act: 'look-base', label: 'Background tint', full: true })}<div class="description">How much the accent colors the canvas, cards, borders and text.</div></div>
       <div class="field"><span class="label">Corner radius</span>${seg({ value: L.radius, options: RADII.map(([id, l]) => [id, l === 'Extra large' ? 'XL' : l]), act: 'look-radius', label: 'Corner radius', full: true })}</div>
       <div class="field"><span class="label">Font</span>${fonts}</div>
-      <p class="description">Status colors (success, warning, danger) and cited-evidence highlights keep their meaning in every theme.</p>
     </div>`;
     return `<div class="stack gap-20 appearance">
       <div class="field"><span class="label">Mode</span>${seg({ value: S.theme, options: [['light', 'Light', 'sun'], ['dark', 'Dark', 'moon'], ['system', 'System', 'monitor']], act: 'look-mode', label: 'Mode', full: true })}</div>

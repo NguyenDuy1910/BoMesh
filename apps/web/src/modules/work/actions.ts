@@ -140,15 +140,19 @@ export function useWorkActions(artifact: Artifact): WorkActions {
     [artifact.audience, patch],
   );
 
+  /** Unpublished work goes at once (Undo brings it back); a published quiz takes students' results with it, so that asks first. */
   const remove = useCallback(async () => {
     const published = artifact.kind === "QUIZ" && artifact.audience === "SPACE";
-    const ok = await confirm({
-      title: `Delete “${artifact.displayName}”?`,
-      description: published ? "Students lose access and its results are deleted." : "You can undo this right after.",
-      confirmLabel: "Delete",
-      tone: "danger",
-    });
-    if (!ok) return;
+    if (
+      published &&
+      !(await confirm({
+        title: `Delete “${artifact.displayName}”?`,
+        description: "Students lose access and their results are deleted.",
+        confirmLabel: "Delete",
+        tone: "danger",
+      }))
+    )
+      return;
     try {
       await deleteArtifact(id, key);
       refresh();
@@ -156,10 +160,7 @@ export function useWorkActions(artifact: Artifact): WorkActions {
       toast(`Deleted “${artifact.displayName}”`, {
         undo: () =>
           void undeleteArtifact(id, key)
-            .then((a) => {
-              refresh(a);
-              toast("Restored");
-            })
+            .then((a) => refresh(a))
             .catch((e) => toast(errorMessage(e), { tone: "danger" })),
       });
     } catch (e) {

@@ -1,11 +1,12 @@
 "use client";
 
-import { Button, InputGroup, ProgressBar } from "@heroui/react";
+import { Button, InputGroup } from "@heroui/react";
 import { CheckCircle, CircleDashed, Eye, EyeOff, Layers } from "lucide-react";
 import NextLink from "next/link";
 import { useState, type ReactNode } from "react";
 
 import { LanguagePicker } from "@/components/shell/LanguagePicker";
+import { ProgressBar } from "@/components/ui/ProgressBar";
 import { PASSWORD_RULES, passwordStrength } from "@/modules/auth/validation";
 
 /** `.auth` page: form column (+ optional aside), as in the preview's auth layout. */
@@ -72,18 +73,14 @@ export function PasswordInput({ autoComplete, autoFocus }: { autoComplete: strin
   );
 }
 
-/** Strength meter + rules under a new-password input (`.au-strength`); render inside its TextField. */
+/** Strength meter + rules under a new-password input (`.au-strength`); render inside its TextField once there's a password. */
 export function PasswordStrength({ value }: { value: string }) {
   const strength = passwordStrength(value);
   return (
     <div className="au-strength" aria-live="polite">
       {strength ? (
         <div className="row gap-8">
-          <ProgressBar aria-label="Password strength" value={strength.value} color={strength.tone} size="sm">
-            <ProgressBar.Track>
-              <ProgressBar.Fill />
-            </ProgressBar.Track>
-          </ProgressBar>
+          <ProgressBar value={strength.value} tone={strength.tone} label="Password strength" />
           <span className="t-xs medium au-strength__label">{strength.label}</span>
         </div>
       ) : null}

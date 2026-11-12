@@ -2,16 +2,17 @@
 
 import { Spinner } from "@heroui/react";
 import clsx from "clsx";
+import { Check, CircleDashed, Clock, LoaderCircle, Minus, TriangleAlert, type LucideIcon } from "lucide-react";
 
 import { fmtDateTime, rel } from "@/lib/format";
 
 import type { Contribution } from "../../api";
-import { timelineSteps, type TimelineStep } from "../contributions";
+import { progressSteps, timelineSteps, type ContributionEventView, type ProgressState } from "../contributions";
 import { useContributionViews, type ContributionView } from "../useContributionViews";
 
-/** The history list (preview `X.ctb.timeline`) for an already resolved contribution view. */
-export function TimelineSteps({ view, compact = false }: { view: ContributionView; compact?: boolean }) {
-  const steps: TimelineStep[] = timelineSteps(view.contribution, view.ctx);
+/** The history list (preview `X.ctb.timeline`) for an already resolved contribution view. `quoted`: the event the state alert shows. */
+export function TimelineSteps({ view, compact = false, quoted }: { view: ContributionView; compact?: boolean; quoted?: ContributionEventView }) {
+  const steps = timelineSteps(view.contribution, view.ctx, quoted);
   if (!steps.length) return <p className="t-sm muted">No history yet.</p>;
   return (
     <ol className={clsx("ctb-tl", compact && "ctb-tl--compact")}>
@@ -47,4 +48,46 @@ export function TimelineSteps({ view, compact = false }: { view: ContributionVie
 export function ContributionTimeline({ contribution, compact = false }: { contribution: Contribution; compact?: boolean }) {
   const { view } = useContributionViews([contribution]);
   return <TimelineSteps view={view(contribution)} compact={compact} />;
+}
+
+const PROG_ICON: Readonly<Record<ProgressState, readonly [LucideIcon, string]>> = {
+  done: [Check, "success"],
+  current: [Clock, "accent"],
+  issue: [TriangleAlert, "warning"],
+  skipped: [Minus, ""],
+  todo: [CircleDashed, ""],
+};
+const PROG_SR: Readonly<Record<ProgressState, string>> = { done: "Done", current: "In progress", issue: "Needs attention", skipped: "Skipped", todo: "Not yet" };
+
+/** Submitted → Analyzed → In review → Approved → Published (preview `stepper`, the Studio's `.flow-steps`). */
+export function ProgressStepper({ view }: { view: ContributionView }) {
+  return (
+    <ol className="flow-steps" aria-label="Progress">
+      {progressSteps(view.contribution, view.ctx).map((s) => {
+        const [Icon, tone] = s.busy ? ([LoaderCircle, "accent"] as const) : PROG_ICON[s.state];
+        return (
+          <li key={s.label} className={clsx("flow-steps__item", `is-${s.state}`, s.busy && "is-busy")}>
+            <span className={clsx("flow-steps__dot", tone && `flow-steps__dot--${tone}`)} aria-hidden>
+              <Icon className="i i-xs" />
+            </span>
+            <div className="grow">
+              <div className="t-sm">
+                <span className="medium">{s.label}</span>
+                <span className="sr-only">{PROG_SR[s.state]}</span>
+              </div>
+              <div className="flow-steps__text">
+                {s.text}
+                {s.at ? (
+                  <span className="muted" title={fmtDateTime(s.at)}>
+                    {" "}
+                    · {rel(s.at)}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
 }

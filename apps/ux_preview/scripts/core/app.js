@@ -37,7 +37,7 @@ function render() {
   else { const sc = $('#scroll'); if (sc) sc.scrollTop = 0; $$('#app input[data-indeterminate]').forEach(el => (el.indeterminate = true)); }
   syncOverflow(changed); syncHeader();
   if (S.popover) positionPopover();   // after scroll positions are restored, so it stays on its trigger
-  document.title = (cur.r.title || 'BoMesh') + ' · BoMesh';
+  document.title = (S.head?.title || cur.r.title || 'BoMesh') + ' · BoMesh';
   try { AFTER[cur.r.page]?.({ params: cur.params, query: cur.query, changed }); } catch (e) { console.error(e); }
   if (changed) { const af = $('#app [data-autofocus]'); if (af) af.focus(); }
   persist();

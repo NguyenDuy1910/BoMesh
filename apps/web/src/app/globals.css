@@ -21,6 +21,8 @@
 @import "../styles/pages/governance.css";
 @import "../styles/pages/contribute.css";
 @import "../styles/pages/curation.css";
+@import "../styles/pages/studio.css";
+@import "../styles/pages/taxonomy.css";
 @import "../styles/pages/indexing.css";
 @import "../styles/pages/sources.css";
 @import "../styles/pages/people.css";
@@ -32,3 +34,4 @@
 @import "../styles/pages/requests.css";
 @import "../styles/pages/work-research.css";
 @import "../styles/pages/appearance.css";
+@import "../styles/pages/inbox.css";

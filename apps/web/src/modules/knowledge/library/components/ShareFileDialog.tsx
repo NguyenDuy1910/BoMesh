@@ -2,18 +2,19 @@
 
 import { Button, Description, Label, ListBox, Select, TextArea, TextField } from "@heroui/react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Send } from "lucide-react";
+import { Send, Share } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { toast } from "@/components/ui/Toast";
-import { errorMessage, resourceId } from "@/lib/api/client";
+import { errorMessage } from "@/lib/api/client";
 import { useWorkspace } from "@/lib/workspace";
 
 import { createContribution } from "../../api";
 import { KnowledgeModal } from "../../components/KnowledgeModal";
 import type { Resource } from "../../model";
 import { invalidateKnowledge, useContributionTargets } from "../../queries";
+import { contributionHref } from "../contributions";
 
 const SUGGEST = "suggest";
 
@@ -34,7 +35,7 @@ export function ShareFileDialog({ resource, onClose }: { resource: Resource; onC
       const c = await createContribution(ws, { kind: "NEW_DOCUMENT", item: resource.name, targetCollection: kb || undefined, note: note.trim() || undefined });
       invalidateKnowledge(qc, ws);
       onClose();
-      toast("Sent for review", { action: { label: "Track", onPress: () => router.push(`/knowledge/library?tab=contributions&open=${resourceId(c.name)}`) } });
+      toast(`Sent “${resource.title}” for review`, { action: { label: "Open", onPress: () => router.push(contributionHref(c.name)) } });
     } catch (e) {
       toast(errorMessage(e), { tone: "danger" });
     } finally {
@@ -49,10 +50,11 @@ export function ShareFileDialog({ resource, onClose }: { resource: Resource; onC
       size="sm"
       guard={busy}
       title="Share as knowledge"
+      icon={Share}
       description={<span translate="no">{resource.title}</span>}
       footer={
         <>
-          <Button variant="tertiary" onPress={onClose} isDisabled={busy}>
+          <Button variant="ghost" onPress={onClose} isDisabled={busy}>
             Cancel
           </Button>
           <Button variant="primary" onPress={() => void send()} isPending={busy}>
@@ -64,7 +66,7 @@ export function ShareFileDialog({ resource, onClose }: { resource: Resource; onC
     >
       <div className="stack gap-16">
         <Select value={kb || SUGGEST} onChange={(v) => setKb(v === SUGGEST ? "" : String(v))}>
-          <Label>Knowledge base</Label>
+          <Label>Collection</Label>
           <Select.Trigger>
             <Select.Value />
             <Select.Indicator />

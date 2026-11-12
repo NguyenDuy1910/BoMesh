@@ -1,7 +1,7 @@
 "use client";
 
 import { Button, Dropdown, Header, Label } from "@heroui/react";
-import { Pause, Shield, UserPlus, Users } from "lucide-react";
+import { Pause, Shield, Users } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import {
@@ -23,7 +23,7 @@ import {
 } from "@/components/ui";
 import { plural, rel } from "@/lib/format";
 
-import { roleGuard } from "../model";
+import { needsTools, roleGuard } from "../model";
 import type { Directory, Person } from "../queries";
 import { RoleSelect } from "./RoleSelect";
 import { useMemberActions } from "./useMemberActions";
@@ -52,13 +52,13 @@ function GroupChips({ ids, dir, max = 2 }: { ids: readonly string[]; dir: Direct
   );
 }
 
+/** Members (preview `membersTab`): search, filters and bulk role/suspend from 7 members; inline role, instant with Undo. */
 export function MembersTab({
   query,
   filters,
   onFiltersChange,
   fresh,
   onOpen,
-  onAdd,
   canAdd,
 }: {
   query: { data?: Directory; isPending: boolean; isError: boolean; error: unknown; refetch: () => unknown };
@@ -66,7 +66,6 @@ export function MembersTab({
   onFiltersChange: (next: MemberFilters) => void;
   fresh: ReadonlySet<string>;
   onOpen: (person: Person) => void;
-  onAdd: () => void;
   canAdd: boolean;
 }) {
   const dir = query.data;
@@ -100,6 +99,9 @@ export function MembersTab({
   }, [dir, filters, sort]);
 
   const filtered = Boolean(filters.q || filters.role || filters.status);
+  const tools = needsTools(dir?.people.length ?? 0, filtered);
+  // Workspace memberships may carry no last-activity time at all; then the column would only repeat "Not yet".
+  const tracksActivity = Boolean(dir?.people.some((p) => p.member.lastActiveTime));
 
   const columns: DataTableColumn<Person>[] = dir
     ? [
@@ -116,7 +118,7 @@ export function MembersTab({
                   <span className="cell-title truncate" translate="no">
                     {p.displayName}
                   </span>
-                  {p.user === dir.self ? <StatusChip label="You" dot={false} size="sm" /> : null}
+                  {p.user === dir.self ? <StatusChip label="You" dot={false} size="sm" /> : p.state === "SUSPENDED" ? <StatusChip kind="member" value="suspended" size="sm" /> : null}
                 </span>
                 <span className="cell-sub truncate" translate="no">
                   {p.email}
@@ -151,57 +153,47 @@ export function MembersTab({
           },
         },
         { id: "groups", header: "Groups", hideOnMobile: true, className: "hide-md", cell: (p) => <GroupChips ids={p.groups} dir={dir} /> },
-        {
-          id: "last",
-          header: "Last active",
-          sortValue: (p) => Date.parse(p.member.lastActiveTime ?? "") || 0,
-          cell: (p) => <span className="ppl-nowrap muted">{p.member.lastActiveTime ? rel(p.member.lastActiveTime) : "Not yet"}</span>,
-        },
-        { id: "status", header: "Status", cell: (p) => <StatusChip kind="member" value={p.state?.toLowerCase()} /> },
+        ...(tracksActivity
+          ? [
+              {
+                id: "last",
+                header: "Last active",
+                sortValue: (p: Person) => Date.parse(p.member.lastActiveTime ?? "") || 0,
+                cell: (p: Person) => <span className="ppl-nowrap muted">{p.member.lastActiveTime ? rel(p.member.lastActiveTime) : "Not yet"}</span>,
+              },
+            ]
+          : []),
       ]
     : [];
 
   return (
     <>
-      <div className="toolbar">
-        <SearchInput value={filters.q} onChange={(q) => set({ q })} placeholder="Search by name or email" label="Search people" />
-        {dir ? (
-          <>
-            <FilterButton label="Role" value={filters.role} onChange={(role) => set({ role })} options={dir.roles.map((r) => ({ value: r.name, label: r.label }))} />
-            <FilterButton
-              label="Status"
-              value={filters.status}
-              onChange={(status) => set({ status })}
-              options={[
-                { value: "ACTIVE", label: "Active" },
-                { value: "SUSPENDED", label: "Suspended" },
-              ]}
-            />
-            <ClearFilters isActive={Boolean(filters.role || filters.status)} onClear={() => set({ role: "", status: "" })} />
-            <span className="toolbar__end t-sm muted num">{plural(rows.length, "person", "people")}</span>
-          </>
-        ) : null}
-      </div>
+      {tools ? (
+        <div className="toolbar">
+          <SearchInput value={filters.q} onChange={(q) => set({ q })} placeholder="Search by name or email" label="Search people" />
+          {dir ? (
+            <>
+              <FilterButton label="Role" value={filters.role} onChange={(role) => set({ role })} options={dir.roles.map((r) => ({ value: r.name, label: r.label }))} />
+              <FilterButton
+                label="Status"
+                value={filters.status}
+                onChange={(status) => set({ status })}
+                options={[
+                  { value: "ACTIVE", label: "Active" },
+                  { value: "SUSPENDED", label: "Suspended" },
+                ]}
+              />
+              <ClearFilters isActive={Boolean(filters.role || filters.status)} onClear={() => set({ role: "", status: "" })} />
+              <span className="toolbar__end t-sm muted num">{plural(rows.length, "person", "people")}</span>
+            </>
+          ) : null}
+        </div>
+      ) : null}
       <Gate
         query={query}
         skeleton={<SkeletonRows rows={8} />}
         isEmpty={(d) => d.people.length <= 1 && !filtered}
-        empty={
-          <EmptyState
-            icon={Users}
-            boxed
-            title="Only you are here"
-            description="Add people who already have a BoMesh account. They can start asking right away."
-            actions={
-              canAdd ? (
-                <Button variant="primary" onPress={onAdd}>
-                  <UserPlus className="i" aria-hidden />
-                  Add people
-                </Button>
-              ) : null
-            }
-          />
-        }
+        empty={<EmptyState icon={Users} boxed title="Only you are here" description="Add people who already have a BoMesh account. They can start asking right away." />}
       >
         {() =>
           !rows.length ? (
@@ -217,11 +209,11 @@ export function MembersTab({
                 setSort(next);
                 setPage(1);
               }}
-              selectedIds={canAdd ? selected : undefined}
-              onSelectionChange={canAdd ? setSelected : undefined}
+              selectedIds={canAdd && tools ? selected : undefined}
+              onSelectionChange={canAdd && tools ? setSelected : undefined}
               onRowAction={onOpen}
               rowClassName={(p) => (fresh.has(p.id) ? "table__row--new" : undefined)}
-              footer={<Pager page={page} pageSize={PAGE} total={rows.length} onPageChange={setPage} />}
+              footer={rows.length > PAGE ? <Pager page={page} pageSize={PAGE} total={rows.length} onPageChange={setPage} /> : undefined}
               bulkActions={(ids, clear) => (
                 <>
                   <Dropdown>

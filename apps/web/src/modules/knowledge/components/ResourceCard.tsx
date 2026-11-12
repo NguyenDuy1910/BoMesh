@@ -1,16 +1,17 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import type { KeyboardEvent } from "react";
+import { useState } from "react";
 
 import { FileIcon } from "@/components/ui/FileIcon";
 import { StatusChip } from "@/components/ui/StatusChip";
+import { plural } from "@/lib/format";
 
 import { clip, FORMAT_TONE, focusSection, indexStatusOf, type Glance, type Resource } from "../model";
+import { openDocumentPreview } from "../preview/store";
 import { useGlance, useKnowledgeModel } from "../queries";
 import { HighlightText } from "./HighlightText";
-import { ResourceActions } from "./ResourceActions";
-import { ResDot, stop } from "./ResourceRow";
+import { ResourceMenu, SaveButton } from "./ResourceActions";
+import { onActivateKey, ResDot, stop } from "./ResourceRow";
 import { TrustMark } from "./TrustChip";
 
 export interface ResourceCardProps {
@@ -21,51 +22,62 @@ export interface ResourceCardProps {
   passage?: { text: string; where?: string } | null;
   /** Context every card in the set shares, so it isn't repeated ("kb", "topic"). */
   hide?: readonly ("kb" | "topic")[];
-  /** What selecting the card does (e.g. open a quick preview); default opens the Reader. */
+  /** What selecting the card does; default opens the shared document preview. */
   onOpen?: (resource: Resource) => void;
-  /** Load the document's content for the preview (default true; off for very large sets). */
+  /** Where the card lives (`originParam`), so the preview's Open full document leads back here. */
+  from?: string;
+  /** Type tile instead of a content preview (e.g. when previews in a set would look alike). */
+  plain?: boolean;
+  /** Read the document's content for the preview (default true; off for very large sets). */
   loadPreview?: boolean;
 }
 
+/** Length as the file's own app would put it (preview `glance.extent`): pages, slides, a spreadsheet — or just the format for web-like files. */
+function extentOf(g: Glance, ext: string): string {
+  if (g.layout === "sheet") return "Spreadsheet";
+  if (g.layout === "slides") return plural(g.count, "slide");
+  if (ext === "md" || ext === "markdown") return "Markdown";
+  if (ext === "html" || ext === "htm") return "Web page";
+  if (ext === "txt") return "Plain text";
+  return plural(g.count, "page");
+}
+
 /**
- * Document card (preview `X.res.card`; DESIGN_SYSTEM "Document card and preview"): a content preview,
- * the title, one line on what it's for, type · topic (or base), trust only when it matters.
- * Save and ⋯ appear on hover/focus (always on touch). Double-click opens the Reader.
+ * Document card (preview `X.res.card`; DESIGN_SYSTEM "Document card and preview"): recognise a document and
+ * judge it without opening it — a content preview, the title, one line on what it's for, type · topic
+ * (or collection), and trust only when it matters. Save and ⋯ appear on hover/focus (always on touch).
+ * The whole card opens the preview, Enter/Space too.
  */
-export function ResourceCard({ resource: r, q = "", passage, hide = [], onOpen, loadPreview = true }: ResourceCardProps) {
-  const router = useRouter();
+export function ResourceCard({ resource: r, q = "", passage, hide = [], onOpen, from, plain = false, loadPreview = true }: ResourceCardProps) {
   const { ctx } = useKnowledgeModel();
-  // The cover and the extent come with the item itself. Reading the document's content is only
-  // worth a request when searching, where the card must show the matching section — otherwise a
-  // grid of N documents would issue N content requests to render N pictures the list already has.
-  const needsContent = loadPreview && !!q && !r.thumbnailUri;
-  const glance = useGlance(r, { enabled: needsContent });
-  const reader = `/doc/${r.id}${q ? `?q=${encodeURIComponent(q)}` : ""}`;
-  const open = () => (onOpen ? onOpen(r) : router.push(reader));
-  const onKeyDown = (e: KeyboardEvent) => {
-    if (e.target !== e.currentTarget) return;
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      open();
-    }
-  };
+  // Text documents preview their most useful section, so their content is read; sheets and slides show
+  // their first page, which comes with the item — their content is only read when searching.
+  const textual = r.format !== "sheet" && r.format !== "slides" && r.format !== "image";
+  const glance = useGlance(r, { enabled: loadPreview && !plain && (textual || !!q) });
+  const open = () => (onOpen ? onOpen(r) : openDocumentPreview({ item: r.name, q: q || undefined, from }));
   const topic = r.topics[0];
-  const where = !hide.includes("topic") && topic ? (ctx.topicNames?.get(topic) ?? "") : !hide.includes("kb") ? (r.base?.displayName ?? "") : "";
+  const byTopic = !hide.includes("topic") && !!topic;
+  const where = byTopic ? (ctx.topicNames?.get(topic) ?? "") : !hide.includes("kb") ? (r.base?.displayName ?? "") : "";
   const about = r.summary || glance?.opening || "";
   const status = indexStatusOf(r);
-  const hasPreview = !!r.thumbnailUri || !!glance || !!passage;
   const KindIcon = r.kindMeta.icon;
+  // An unreachable page image (storage host down, expired link) falls back like a missing one; remembered per URL so
+  // re-renders don't retry it. Kept here so the corner format badge disappears with it (the type tile shows the format).
+  const [broken, setBroken] = useState<string | null>(null);
+  const thumb = r.thumbnailUri && r.thumbnailUri !== broken ? r.thumbnailUri : undefined;
   return (
-    <article className="doc-card" role="button" tabIndex={0} aria-label={r.title} onClick={open} onDoubleClick={() => router.push(reader)} onKeyDown={onKeyDown}>
+    <article className="doc-card" role="button" tabIndex={0} aria-label={r.title} onClick={open} onKeyDown={onActivateKey(open)}>
       <div className="doc-card__media">
-        <CardPreview resource={r} glance={glance} q={q} passage={passage} />
-        {hasPreview ? (
+        <CardPreview resource={r} glance={plain ? null : glance} q={q} passage={plain ? null : passage} broken={broken} onBroken={setBroken} />
+        {!plain && (glance || thumb || passage?.text) ? (
           <span className="doc-card__type">
             <FileIcon type={r.ext} mime={r.mime} size="sm" />
           </span>
         ) : null}
-        <div className="doc-card__actions" onClick={stop} onKeyDown={stop} onDoubleClick={stop}>
-          <ResourceActions resource={r} q={q} />
+        {glance ? <span className="doc-card__extent">{extentOf(glance, r.ext)}</span> : null}
+        <div className="doc-card__actions" onClick={stop} onKeyDown={stop}>
+          <SaveButton resource={r} />
+          <ResourceMenu resource={r} q={q} />
         </div>
       </div>
       <div className="doc-card__body">
@@ -85,7 +97,7 @@ export function ResourceCard({ resource: r, q = "", passage, hide = [], onOpen, 
               {where ? (
                 <>
                   <ResDot />
-                  <span translate="no">{where}</span>
+                  <span translate={!byTopic && r.base?.personal ? undefined : "no"}>{where}</span>
                 </>
               ) : null}
             </span>
@@ -99,26 +111,24 @@ export function ResourceCard({ resource: r, q = "", passage, hide = [], onOpen, 
 }
 
 /**
- * Card preview: the document's own first page whenever ingestion rendered one — a cover, a title page
- * or a figure says what a file is faster than any sentence from it. Only when there is no page image
- * do we fall back to the most useful section at a readable size (the matching one when searching),
- * then a search passage, then a tinted type tile.
+ * Card preview (preview `X.res.preview`). Text documents show their most useful section at a readable size
+ * (the matching one when searching); sheets and slides show their first page. Without a readable rendition:
+ * the search passage, else the first page image ingestion rendered, else a tinted type tile.
  * Decorative: the card's text says the same for assistive tech.
  */
-function CardPreview({ resource: r, glance: g, q, passage }: { resource: Resource; glance: Glance | null; q: string; passage?: { text: string; where?: string } | null }) {
-  // While searching, what matched is the point of the card, so the passage the search already
-  // returned (or a section from loaded content) outranks the cover. Browsing shows the cover.
-  const searching = !!q && (!!passage?.text || !!g?.sections.length);
-  const cover = r.thumbnailUri ?? g?.pageImage;
-  if (cover && !searching) {
-    return (
-      <div className={g?.layout === "slides" ? "doc-thumb doc-thumb--slide" : "doc-thumb"} aria-hidden inert>
-        {/* eslint-disable-next-line @next/next/no-img-element -- signed, short-lived page image */}
-        <img src={cover} alt="" className="h-full w-full object-cover object-top" decoding="async" />
-      </div>
-    );
-  }
-  const focus = g?.sections.length ? focusSection(g, r.kind, q, r.title) : null;
+function CardPreview({ resource: r, glance: g, q, passage, broken, onBroken }: { resource: Resource; glance: Glance | null; q: string; passage?: { text: string; where?: string } | null; broken: string | null; onBroken: (url: string) => void }) {
+  const src = r.thumbnailUri ?? g?.pageImage;
+  const cover = src && src !== broken ? src : undefined;
+  const image = cover ? (
+    <div className={r.format === "slides" ? "doc-thumb doc-thumb--slide" : "doc-thumb"} aria-hidden inert>
+      {/* eslint-disable-next-line @next/next/no-img-element -- signed, short-lived page image */}
+      <img src={cover} alt="" className="h-full w-full object-cover object-top" decoding="async" onError={() => onBroken(cover)} />
+    </div>
+  ) : null;
+  // Sheets and slides are their first page. A text document shows its best section (a search passage while
+  // its content loads); its first page only when it has neither.
+  if (image && (g ? g.layout !== "text" : !(q && passage?.text))) return image;
+  const focus = g?.layout === "text" && g.sections.length ? focusSection(g, r.kind, q, r.title) : null;
   if (focus) {
     const s = focus.section;
     const items = s.blocks.filter((b) => b.kind === "li" || b.kind === "row");
@@ -188,14 +198,13 @@ function CardPreview({ resource: r, glance: g, q, passage }: { resource: Resourc
       </div>
     );
   }
+  if (image) return image;
+  // The tile names the format and kind only: the card's title and summary sit right below it.
   const tone = FORMAT_TONE[r.format] ?? "default";
   const KindIcon = r.kindMeta.icon;
   return (
     <div className={`doc-thumb doc-thumb--blank doc-thumb--${tone}`} aria-hidden>
       <FileIcon type={r.ext} mime={r.mime} size="lg" />
-      <span className="doc-thumb__title" translate="no">
-        {r.title}
-      </span>
       <span className="doc-thumb__kind">
         <KindIcon className="i i-xs" aria-hidden />
         {r.typeLabel}

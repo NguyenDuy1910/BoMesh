@@ -43,14 +43,14 @@ D.workspaces = [
 D.permCatalog = [
   { group: 'Workspace', items: [['tenant.read', 'View the workspace overview'], ['tenant.manage', 'Change workspace settings and assistant setup']] },
   { group: 'People', items: [['user.manage', 'Add, suspend and remove members'], ['group.manage', 'Create and manage groups'], ['role.manage', 'Create and edit roles'], ['access.manage', 'Approve or deny access requests']] },
-  { group: 'Knowledge', items: [['knowledge.read', 'Ask questions and browse knowledge'], ['knowledge.contribute', 'Contribute documents for review'], ['knowledge.manage', 'Create knowledge bases; review and publish what is submitted to bases they own']] },
+  { group: 'Knowledge', items: [['knowledge.read', 'Ask questions and browse knowledge'], ['knowledge.contribute', 'Contribute documents for review'], ['knowledge.manage', 'Create collections; review and publish what is submitted to bases they own']] },
   { group: 'Sources', items: [['source.manage', 'Connect and manage sources and schedules'], ['ingestion.read', 'View sync history'], ['ingestion.run', 'Start syncs and reprocess documents'], ['ingestion.manage', 'Cancel any running sync']] },
   { group: 'Activity', items: [['audit.read', 'View the activity log and sign-ins']] },
 ];
 D.roles = [
   { id: 'r-admin', name: 'Workspace admin', system: true, desc: 'Full control of this workspace.', perms: ALL_TENANT },
   { id: 'r-member', name: 'Member', system: true, desc: 'Ask questions, browse the knowledge they can access and contribute documents for review.', perms: ['tenant.read', 'knowledge.read', 'knowledge.contribute'] },
-  { id: 'r-km', name: 'Knowledge manager', system: false, desc: 'Owns knowledge bases, reviews what is submitted to them and manages the sources that feed them.', perms: ['tenant.read', 'knowledge.read', 'knowledge.contribute', 'knowledge.manage', 'source.manage', 'ingestion.read', 'ingestion.run'] },
+  { id: 'r-km', name: 'Knowledge manager', system: false, desc: 'Owns collections, reviews what is submitted to them and manages the sources that feed them.', perms: ['tenant.read', 'knowledge.read', 'knowledge.contribute', 'knowledge.manage', 'source.manage', 'ingestion.read', 'ingestion.run'] },
   { id: 'r-auditor', name: 'Auditor', system: false, desc: 'Reviews activity and sign-ins. Cannot change anything.', perms: ['tenant.read', 'knowledge.read', 'audit.read'] },
 ];
 D.groups = [
@@ -82,7 +82,7 @@ D.members = [
 /* Accounts that exist on the platform but are not members yet (adding requires an existing account). */
 D.knownAccounts = ['kevin.ng@northwind.com', 'rosa.diaz@northwind.com', 'nam.tran@northwind.com', 'grace.lee@northwind.com'];
 
-/* Knowledge bases. memberRole = what the Member persona holds: owner|editor|viewer|none (visible, locked)|null (hidden). */
+/* Collections. memberRole = what the Member persona holds: owner|editor|viewer|none (visible, locked)|null (hidden). */
 D.kbs = [
   { id: 'kb-mine', name: 'My files', personal: true, desc: 'Only you can see these. Use them in your own chats.', color: '#4F5865', memberRole: 'owner', general: 'private', shares: [], updated: ago(2 * DAY) },
   { id: 'kb-hr', name: 'HR Policies', desc: 'Employee handbook, leave, travel and benefits policies.', color: '#B4467A', memberRole: 'viewer', general: 'workspace', shares: [{ kind: 'group', id: 'g-peopleops', role: 'owner' }, { kind: 'user', id: 'u-an', role: 'editor' }], updated: ago(2 * HOUR) },
@@ -130,7 +130,7 @@ D.docs = [
   legal.forEach((n, i) => D.docs.push(mkDoc('kb-legal', 'd-legal-' + i, `${n}.pdf`, { source: 'src-legal', addedBy: 'Executed contracts', updated: ago((12 + i * 4) * DAY) })));
 })();
 
-/* Connected accounts (a sign-in to an app) and sources (what is synced into which knowledge base). */
+/* Connected accounts (a sign-in to an app) and sources (what is synced into which collection). */
 D.accounts = [
   { id: 'acc-conf', app: 'confluence', label: 'northwind.atlassian.net', user: 'linh.tran@northwind.com', status: 'connected', connected: ago(160 * DAY), checked: ago(6 * MIN) },
   { id: 'acc-gd', app: 'gdrive', label: 'ops@northwind.com', user: 'ops@northwind.com', status: 'expired', connected: ago(120 * DAY), checked: ago(26 * HOUR) },
@@ -164,8 +164,8 @@ D.audit = [
   [40 * MIN, 'u-ben', 'Started a sync', 'Sources', 'Product Docs space', 'success'],
   [2 * HOUR, 'system', 'Sync finished with issues', 'Sources', 'People Ops space', 'failure'],
   [3 * HOUR, 'u-linh', 'Changed role to Knowledge manager', 'People', 'Ben Walker', 'success'],
-  [5 * HOUR, 'u-tuan', 'Shared knowledge base with Engineering', 'Knowledge', 'Engineering Runbooks', 'success'],
-  [6 * HOUR, 'u-tuan', 'Created knowledge base', 'Knowledge', 'Engineering Runbooks', 'success'],
+  [5 * HOUR, 'u-tuan', 'Shared collection with Engineering', 'Knowledge', 'Engineering Runbooks', 'success'],
+  [6 * HOUR, 'u-tuan', 'Created collection', 'Knowledge', 'Engineering Runbooks', 'success'],
   [9 * HOUR, 'u-sara', 'Paused a source', 'Sources', 'Executed contracts', 'success'],
   [26 * HOUR, 'system', 'Sync failed', 'Sources', 'Sales Enablement', 'failure'],
   [28 * HOUR, 'u-linh', 'Suspended member', 'People', 'Hoa Vu', 'success'],
@@ -295,7 +295,7 @@ const docsIn = kbId => D.docs.filter(d => d.kb === kbId && !d.archived && (!d.st
 const groupMembers = gid => D.members.filter(m => m.groups.includes(gid));
 const actorName = id => id === 'system' ? 'BoMesh' : (memberById(id)?.name || id);
 const KB_ROLE_RANK = { none: 0, viewer: 1, editor: 2, owner: 3 };
-/** The caller's role on a knowledge base: owner | editor | viewer | none (visible, locked) | null (hidden).
+/** The caller's role on a collection: owner | editor | viewer | none (visible, locked) | null (hidden).
     Personal bases belong to their owner; admins own everything; otherwise the best of a direct user
     share, the per-persona `access` map (seeded workspaces) and the `memberRole` default (Northwind). */
 function kbRole(kb) {

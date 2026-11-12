@@ -43,7 +43,7 @@ function chip(label, o = {}) {
 }
 /* Status vocabulary — one place, plain language. Healthy steady states are quiet (tertiary). */
 const STATUS = {
-  doc: { ready: ['success', 'Ready', 'tertiary'], processing: ['accent', 'Processing', 'soft', 1], pending: ['default', 'Waiting'], failed: ['danger', 'Failed'], outdated: ['warning', 'Needs update'], unsupported: ['default', 'Not searchable'] },
+  doc: { ready: ['success', 'Ready', 'tertiary'], processing: ['accent', 'Publishing', 'soft', 1], pending: ['default', 'Waiting to publish'], failed: ['danger', 'Couldn’t publish'], outdated: ['warning', 'Update available'], unsupported: ['default', 'Not searchable'] },
   source: { healthy: ['success', 'Up to date', 'tertiary'], syncing: ['accent', 'Syncing', 'soft', 1], failed: ['danger', 'Sync failed'], reconnect: ['danger', 'Reconnect needed'], paused: ['default', 'Paused'] },
   account: { connected: ['success', 'Connected', 'tertiary'], expired: ['danger', 'Reconnect needed'], error: ['warning', 'Can’t reach'], disabled: ['default', 'Disabled'] },
   run: { queued: ['accent', 'Queued', 'soft', 1], running: ['accent', 'In progress', 'soft', 1], completed: ['success', 'Completed', 'tertiary'], partial: ['warning', 'Completed with issues'], failed: ['danger', 'Failed'], cancelled: ['default', 'Cancelled'] },
@@ -91,7 +91,7 @@ const itemIcon = (icon, tone = '', size = '') => `<span class="item-icon ${tone 
 /** Declare the page's header. Two shapes:
     - Index pages (no `lead`): nothing renders in the page. The title (H1), its chip (`extra`), a short status line (`meta`;
       `desc` is accepted as the same) and the page's actions sit in the top row, so content starts right under it.
-    - Entity pages (`lead`: a space, knowledge base, collection, request…): a compact identity block opens the page (mark, H1,
+    - Entity pages (`lead`: a space, collection, reading list, request…): a compact identity block opens the page (mark, H1,
       `desc` as its meta lines); the top row keeps the parent trail and the actions, and shows the title once the block
     scrolls away. `heading` replaces the hero's plain H1 when the title is interactive (e.g. rename). `inPage: true` is for
     surfaces that draw their own identity block with the H1 (the reader): the top row treats it as a hero but nothing is
@@ -104,10 +104,20 @@ function pageHeader({ title, desc = '', meta = '', actions = '', extra = '', lea
 /** Parents of the current page for the top row: crumbs([{label, to}, …, {label: current}]). The last item is the current page;
     the top row shows the parents as a quiet trail (only the nearest one, as a Back button, on phones). */
 function crumbs(list) { S.crumbs = list; return ''; }
-/** ContextualToolbar: the page's section tabs (and, optionally, compact tools on the right) in one row that sticks under the top
-    row while the page scrolls. The only sticky row a page adds; filters and search stay in the content. */
+/** ContextualToolbar: views of ONE thing (an entity's tabs — a space, a collection — or the views of one list, like Work's
+    Mine · Shared) in one row that sticks under the top row. An area's sections are never tabs: they are sidebar sub-rows
+    (pageSections). The only sticky row a page adds; filters and search stay in the content. */
 function contextBar(nav, tools = '') {
   return `<div class="ctx-bar">${nav}${tools ? `<div class="ctx-bar__tools">${tools}</div>` : ''}</div>`;
+}
+/** An area's sections as sidebar sub-rows of its row (shell navItem `children`): defs [{ id, label, title?, count?, tone? }] for
+    the page at `path`, addressed by ?tab=. The current one is the page's ?tab= (or `fallback`). `section(query)` resolves the
+    page's section; `title` is what the top row shows for it (default: its label). */
+function pageSections(path, defs, fallback = defs[0]?.id) {
+  const of = query => (defs.some(d => d.id === query?.tab) ? query.tab : fallback);
+  const nav = () => { const cur = S.cur, here = cur?.path === path ? of(cur.query) : ''; return defs.map(d => ({ ...d, to: `${path}?tab=${d.id}`, current: d.id === here })); };
+  const title = query => { const d = defs.find(x => x.id === of(query)); return d?.title || d?.label || ''; };
+  return { nav, section: of, title };
 }
 function section(title, body, { desc = '', actions = '', id = '' } = {}) {
   return `<section class="section" ${id ? `id="${id}"` : ''}><div class="section__header"><div class="grow"><h2 class="section__title">${esc(title)}</h2>${desc ? `<p class="section__description">${desc}</p>` : ''}</div>${actions ? `<div class="row gap-8">${actions}</div>` : ''}</div>${body}</section>`;

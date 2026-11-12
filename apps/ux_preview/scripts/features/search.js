@@ -1,5 +1,5 @@
 /* Search (/search?q=): a grouped overview of one query across the workspace — documents (the resource catalog, same ranking
-   and access rules as Knowledge), collections, knowledge bases, conversations and, for people managers, people. Documents show
+   and access rules as Knowledge), reading lists, collections, conversations and, for people managers, people. Documents show
    the top five and hand the full set to Knowledge (its filters and sort); other types open their full list here (?tab=type).
    One matcher and one highlighter for every group: accent-insensitive words matched at word starts (catalog.js markTokens),
    shown with the neutral search highlight — never the amber evidence colour. Asking the assistant is one click. */
@@ -38,7 +38,7 @@
     const s = shareLabel(c);
     return item({
       lead: itemIcon('layers', '', 'sm'), title: markTokens(c.name, toks), desc: c.desc ? markTokens(c.desc, toks) : '',
-      meta: `<span class="row gap-4">${ic(s.icon, 'i-xs')}${esc(s.label)}</span> · ${plural(c.items.length, 'item')}`, href: '/knowledge/collections/' + c.id,
+      meta: `<span class="row gap-4">${ic(s.icon, 'i-xs')}${esc(s.label)}</span> · ${plural(c.items.length, 'item')}`, href: '/knowledge/lists/' + c.id,
     });
   };
   const kbItem = (k, toks) => {
@@ -53,14 +53,14 @@
 
   P.search = ({ query }) => {
     const q = (query.q || '').trim();
-    const box = `<h1 class="sr-only">Search</h1><div class="srch-top">${searchField({ id: 'srch-q', value: query.q || '', act: 'srch-q', size: 'lg', autofocus: true, placeholder: 'Search documents, knowledge bases and conversations', label: 'Search' })}</div>`;
-    if (!q) return `<div class="page page--narrow">${box}${emptyState({ icon: 'search', title: 'Search your workspace', desc: 'Find documents by name or content, knowledge bases and past conversations.' })}</div>`;
+    const box = `<h1 class="sr-only">Search</h1><div class="srch-top">${searchField({ id: 'srch-q', value: query.q || '', act: 'srch-q', size: 'lg', autofocus: true, placeholder: 'Search documents, collections and conversations', label: 'Search' })}</div>`;
+    if (!q) return `<div class="page page--narrow">${box}${emptyState({ icon: 'search', title: 'Search your workspace', desc: 'Find documents by name or content, collections and past conversations.' })}</div>`;
 
     const r = results(q), toks = r.toks;
     const groups = [
       { id: 'docs', label: 'Documents', rows: r.docs, render: rows => X.res.rows(rows, { q, data: { q } }) },
-      { id: 'cols', label: 'Collections', rows: r.cols, item: colItem },
-      { id: 'kbs', label: 'Knowledge bases', rows: r.kbs, item: kbItem },
+      { id: 'cols', label: 'Reading lists', rows: r.cols, item: colItem },
+      { id: 'kbs', label: 'Collections', rows: r.kbs, item: kbItem },
       { id: 'convs', label: 'Conversations', rows: r.convs, item: convItem },
       can('user.manage') && { id: 'people', label: 'People', rows: r.people, item: personItem },
     ].filter(Boolean);

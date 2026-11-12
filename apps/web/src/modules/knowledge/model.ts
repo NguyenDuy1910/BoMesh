@@ -111,7 +111,11 @@ export type DocumentTypeLabels = ReadonlyMap<string, string>;
 
 export function kindMeta(kind: string, labels?: DocumentTypeLabels): KindMeta {
   const known = RESOURCE_KINDS[kind];
-  const label = labels?.get(kind) ?? known?.label ?? (kind ? kind[0].toUpperCase() + kind.slice(1).replace(/[_-]+/g, " ") : RESOURCE_KINDS.reference.label);
+  // Types named after a format ("pdf") read as the format ("PDF"), not a humanized key ("Pdf").
+  const label =
+    labels?.get(kind) ??
+    known?.label ??
+    (Object.hasOwn(FORMATS, kind) ? FORMATS[kind as FormatKey].label : kind ? kind[0].toUpperCase() + kind.slice(1).replace(/[_-]+/g, " ") : RESOURCE_KINDS.reference.label);
   return known ? { ...known, label } : { label, plural: label, icon: File, group: "Reference" };
 }
 
@@ -252,15 +256,15 @@ export interface LifecycleMeta {
 }
 
 export const LIFECYCLE: Readonly<Record<LifecycleKey, LifecycleMeta>> = {
-  analyzing: { tone: "accent", label: "Analyzing", icon: Sparkles, live: true, desc: "Reading the file and suggesting a type, topics and a knowledge base." },
+  analyzing: { tone: "accent", label: "Analyzing", icon: Sparkles, live: true, desc: "Reading the file and suggesting a type, topics and a collection." },
   review: { tone: "accent", label: "In review", icon: Clock, desc: "A reviewer will check it before it’s published." },
   changes: { tone: "warning", label: "Changes requested", icon: Pencil, desc: "A reviewer asked for changes before it can be published." },
-  rejected: { tone: "danger", label: "Not approved", icon: CircleX, desc: "It won’t be published." },
+  rejected: { tone: "danger", label: "Declined", icon: CircleX, desc: "A reviewer declined it. It won’t be published." },
   withdrawn: { tone: "default", label: "Withdrawn", icon: Archive, desc: "You withdrew it. Reviewers don’t see it anymore." },
   queued: { tone: "default", label: "Waiting to publish", icon: Clock, desc: "Approved. It becomes searchable once it’s published." },
   publishing: { tone: "accent", label: "Publishing", icon: LoaderCircle, live: true, desc: "It will be searchable in a few minutes." },
   published: { tone: "success", label: "Published", icon: CircleCheck, quiet: true, desc: "Searchable and available to the assistant." },
-  update: { tone: "warning", label: "Update available", icon: RefreshCw, desc: "The original changed. Answers use the previous version until it’s republished." },
+  update: { tone: "warning", label: "Update available", icon: RefreshCw, desc: "The original changed at its source. Answers use the previous version until you publish the update." },
   failed: { tone: "danger", label: "Couldn’t publish", icon: CircleAlert, desc: "It was approved but couldn’t be made searchable." },
   merged: { tone: "success", label: "Published as new version", icon: CircleCheck, quiet: true, desc: "It replaced the earlier version of the document." },
   stored: { tone: "default", label: "Stored, not searchable", icon: File, desc: "This file type can’t be searched. People can still download it." },
@@ -305,7 +309,7 @@ export const LIFE_GROUPS: ReadonlyArray<readonly [string, string, readonly Lifec
   ["attention", "Needs attention", ["failed", "queued", "update"]],
   ["publishing", "Publishing", ["publishing"]],
   ["published", "Published", ["published", "stored", "merged"]],
-  ["rejected", "Not approved", ["rejected"]],
+  ["rejected", "Declined", ["rejected"]],
   ["unpublished", "Unpublished", ["unpublished"]],
 ];
 
@@ -316,10 +320,12 @@ export interface ModelContext {
   workspaceId: string;
   /** The caller's PERSONAL collection name ("My files"). */
   personalCollection?: string;
+  /** Every personal collection the caller can see (theirs and, for admins, other members'). */
+  personalCollections?: ReadonlySet<string>;
   documentTypes?: DocumentTypeLabels;
   /** Topic name → display name. */
   topicNames?: ReadonlyMap<string, string>;
-  /** Collection name → display name (knowledge bases, `ancestors` facet values, item ancestors). */
+  /** Collection name → display name (root collections, `ancestors` facet values, item ancestors). */
   collectionNames?: ReadonlyMap<string, string>;
 }
 
@@ -351,8 +357,9 @@ export interface Resource {
   typeLabel: string;
   /** Topic names (resource names). */
   topics: string[];
-  /** The knowledge base (root collection) or the parent collection when the root isn't known. */
-  base: { name: string; id: string; displayName: string } | null;
+  /** The collection (root collection) or the parent collection when the root isn't known. `personal`: a member's own
+   *  files, named by the UI (“My files”, “Lan’s files”), so the name is translated, unlike collection names. */
+  base: { name: string; id: string; displayName: string; personal: boolean } | null;
   isPersonal: boolean;
   /** Member resource name accountable for the content. */
   owner?: string;
@@ -372,13 +379,14 @@ export interface Resource {
   thumbnailUri?: string;
 }
 
-/** The knowledge base an item lives in: the root ancestor (FULL view) else the parent when known. */
+/** The collection an item lives in: the root ancestor (FULL view) else the parent when known. */
 function baseOf(item: Item, ctx: ModelContext): Resource["base"] {
   const root = item.ancestors?.[0];
   const name = root?.name || item.parentItem || "";
   if (!name) return null;
-  const displayName = root?.displayName || ctx.collectionNames?.get(name) || "";
-  return { name, id: lastSegment(name), displayName };
+  const displayName = ctx.collectionNames?.get(name) || root?.displayName || "";
+  const personal = name === ctx.personalCollection || !!ctx.personalCollections?.has(name);
+  return { name, id: lastSegment(name), displayName, personal };
 }
 
 /**
@@ -485,7 +493,7 @@ export const FACETS: readonly FacetDef[] = [
   { id: "kind", label: "Type", field: "document.documentType" },
   { id: "owner", label: "Owner", field: "document.owner" },
   { id: "src", label: "Source", field: "document.origin.source" },
-  { id: "kb", label: "Knowledge base", field: "ancestors" },
+  { id: "kb", label: "Collection", field: "ancestors" },
   { id: "trust", label: "Trust", field: "document.verification.state" },
   { id: "upd", label: "Updated", field: "updateTime", single: true },
   { id: "fmt", label: "Format", field: "document.mimeType" },

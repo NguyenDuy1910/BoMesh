@@ -1,6 +1,6 @@
 "use client";
 
-import { Alert, Button, FieldError, Form, Input, Label, TextField } from "@heroui/react";
+import { Alert, Button, Description, FieldError, Form, Input, Label, TextField } from "@heroui/react";
 import { Link2Off, MailCheck } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState, type FormEvent } from "react";
@@ -65,7 +65,18 @@ export function PasswordResetRequestPage() {
           <h1 className="t-title au-title">Reset your password</h1>
           <p className="muted au-sub">Enter your account email and we’ll send you a link to choose a new password.</p>
           <Form onSubmit={submit} method="post" validationBehavior="aria" className="flex flex-col gap-16">
-            <TextField className="field" type="email" value={email} onChange={setEmail} isInvalid={!!error} autoFocus autoComplete="email">
+            <TextField
+              className="field"
+              type="email"
+              value={email}
+              onChange={(v) => {
+                setEmail(v);
+                setError(undefined);
+              }}
+              isInvalid={!!error}
+              autoFocus
+              autoComplete="email"
+            >
               <Label>Work email</Label>
               <Input placeholder="name@company.com" />
               <FieldError>{error}</FieldError>
@@ -134,10 +145,19 @@ export function PasswordResetCompletePage({ token }: { token: string }) {
           <h1 className="t-title au-title">Choose a new password</h1>
           <p className="muted au-sub">You’ll be signed out everywhere and can sign in with the new password.</p>
           <Form onSubmit={submit} method="post" validationBehavior="aria" className="flex flex-col gap-16">
-            <TextField className="field" value={pw} onChange={setPw} isInvalid={!!error} autoFocus>
+            <TextField
+              className="field"
+              value={pw}
+              onChange={(v) => {
+                setPw(v);
+                setError(undefined);
+              }}
+              isInvalid={!!error}
+              autoFocus
+            >
               <Label>New password</Label>
               <PasswordInput autoComplete="new-password" />
-              <PasswordStrength value={pw} />
+              {pw ? <PasswordStrength value={pw} /> : error ? null : <Description>At least 8 characters, with letters and numbers.</Description>}
               <FieldError>{error}</FieldError>
             </TextField>
             {formError ? <FormAlert>{formError}</FormAlert> : null}

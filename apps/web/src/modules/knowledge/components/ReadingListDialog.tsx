@@ -1,80 +1,111 @@
 "use client";
 
-import { Button, Description, FieldError, Input, Label, TextArea, TextField } from "@heroui/react";
+import { Button, FieldError, Input, Label, ListBox, Select, TextArea, TextField } from "@heroui/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Check, Globe, Layers, List, Lock, Pencil, Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { ChoiceGroup, type Choice } from "@/components/ui/ChoiceGroup";
 import { toast } from "@/components/ui/Toast";
-import { errorMessage, resourceId } from "@/lib/api/client";
+import { errorMessage } from "@/lib/api/client";
 import { plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { spacesListQuery } from "@/modules/spaces/queries";
 
-import { createReadingList, createReadingListEntry, testSpacePermissions, updateReadingList, type ReadingList } from "../api";
+import { createReadingList, createReadingListEntry, testSpacePermissions, updateReadingList, type ReadingList, type Space } from "../api";
 import { knowledgeKeys } from "../queries";
+import { readingListHref } from "./AddToReadingListDialog";
 import { KnowledgeModal } from "./KnowledgeModal";
 
 export interface ReadingListDialogProps {
-  /** Edit this list; omit to create one. */
+  /** Edit this reading list; omit to create one. */
   list?: ReadingList;
-  /** Items to add to a new list. */
+  /** Items the new reading list starts with. */
   items?: string[];
   isOpen: boolean;
   onClose: () => void;
 }
 
-/**
- * Create / edit a collection (preview `M['col-edit']`, API ReadingList). Sharing: only me, a space the caller
- * leads or staffs, or everyone (`readingLists.publish`). A collection never grants access.
- */
-export function ReadingListDialog({ list, items = [], isOpen, onClose }: ReadingListDialogProps) {
-  const { id: ws, workspace, can, hasModule } = useWorkspace();
-  const router = useRouter();
+type Scope = "private" | "space" | "workspace";
+const MASK = ["displayName", "description", "audience", "space"];
+
+/** Spaces whose materials the caller may curate (preview `linkableSpaces`): leads and staff with `materials.create`. */
+function useRunSpaces(enabled: boolean) {
+  const { id: ws, hasModule } = useWorkspace();
   const qc = useQueryClient();
-  const [name, setName] = useState(list?.displayName ?? "");
-  const [desc, setDesc] = useState(list?.description ?? "");
-  const [share, setShare] = useState(list?.audience === "SPACE" ? `space:${list.space}` : (list?.audience ?? "PRIVATE"));
-  const [touched, setTouched] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const spaces = useQuery({
+  return useQuery({
     queryKey: [ws, "spaces", "curated"],
-    enabled: isOpen && hasModule("spaces"),
+    enabled: enabled && hasModule("spaces"),
     queryFn: async () => {
-      const all = (await qc.fetchQuery(spacesListQuery(ws))).filter((s) => s.callerRole === "roles/spaceLead" || s.callerRole === "roles/spaceStaff");
+      const all = (await qc.fetchQuery(spacesListQuery(ws))).filter((s) => s.state !== "DELETED" && (s.callerRole === "roles/spaceLead" || s.callerRole === "roles/spaceStaff"));
       const ok = await Promise.all(all.map((s) => testSpacePermissions(ws, s.name ?? "", ["materials.create"]).then((p) => p.length > 0, () => false)));
       return all.filter((_, i) => ok[i]);
     },
   });
+}
+
+/**
+ * Create / edit a reading list (preview `M['col-edit']`, API ReadingList). Who can see it: only me, the
+ * members of a space the caller runs, or everyone (`readingLists.publish`). A space the list is already
+ * shared with stays selectable. Reading lists never grant access to the documents in them.
+ */
+export function ReadingListDialog({ list, items = [], isOpen, onClose }: ReadingListDialogProps) {
+  const { id: ws, workspace, can } = useWorkspace();
+  const router = useRouter();
+  const qc = useQueryClient();
+  const run = useRunSpaces(isOpen);
+  const [name, setName] = useState(list?.displayName ?? "");
+  const [desc, setDesc] = useState(list?.description ?? "");
+  const [scope, setScope] = useState<Scope>(list?.audience === "WORKSPACE" ? "workspace" : list?.audience === "SPACE" ? "space" : "private");
+  const [spacePick, setSpace] = useState(list?.audience === "SPACE" ? (list.space ?? "") : "");
+  const [touched, setTouched] = useState(false);
+  const [busy, setBusy] = useState(false);
   const error = touched && !name.trim() ? "Enter a name." : "";
-  const options: Choice[] = [
-    { value: "PRIVATE", title: "Only me", description: "A personal reading list." },
-    ...(spaces.data ?? []).map((s) => ({ value: `space:${s.name}`, title: s.displayName, description: `Members of this ${s.spaceType ?? "space"} can see it.` })),
-    ...(can("readingLists.publish") ? [{ value: "WORKSPACE", title: `Everyone in ${workspace.displayName}`, description: "Shown on Home for everyone." }] : []),
+
+  // A space it is already shared with stays selectable even if the caller no longer runs it.
+  const mine: Pick<Space, "name" | "displayName">[] = run.data ?? [];
+  const current = list?.audience === "SPACE" && list.space && !mine.some((s) => s.name === list.space) ? [{ name: list.space, displayName: "Current space" }] : [];
+  const spaces = [...current, ...mine];
+  const space = spaces.some((s) => s.name === spacePick) ? spacePick : (spaces[0]?.name ?? "");
+  const options: Choice<Scope>[] = [
+    { value: "private", title: "Only me", description: "A personal reading list.", icon: Lock },
+    ...(spaces.length
+      ? [{ value: "space" as const, title: "A space", description: spaces.length === 1 ? `Members of ${spaces[0].displayName}.` : "Its members can see it.", icon: Layers }]
+      : []),
+    ...(can("readingLists.publish") || list?.audience === "WORKSPACE"
+      ? [{ value: "workspace" as const, title: "Everyone", description: `Anyone in ${workspace.displayName}.`, icon: Globe }]
+      : []),
   ];
-  if (!options.some((o) => o.value === share)) options.push({ value: share, title: "Current sharing", description: "" });
+
+  const bodyOf = (): ReadingList => {
+    const audience = scope === "space" && space ? "SPACE" : scope === "workspace" ? "WORKSPACE" : "PRIVATE";
+    return { displayName: name.trim(), description: desc.trim(), audience, space: audience === "SPACE" ? space : undefined };
+  };
 
   async function save() {
+    if (busy) return;
     setTouched(true);
     if (!name.trim()) return;
-    const audience = share.startsWith("space:") ? "SPACE" : (share as "PRIVATE" | "WORKSPACE");
-    const body: ReadingList = { displayName: name.trim(), description: desc.trim(), audience, space: audience === "SPACE" ? share.slice(6) : undefined };
     setBusy(true);
+    const refresh = () => void qc.invalidateQueries({ queryKey: knowledgeKeys.readingLists(ws) });
     try {
       if (list?.name) {
-        await updateReadingList(ws, list.name, { ...body, etag: list.etag }, ["displayName", "description", "audience", "space"]);
-        void qc.invalidateQueries({ queryKey: knowledgeKeys.readingLists(ws) });
+        const prev: ReadingList = { displayName: list.displayName, description: list.description ?? "", audience: list.audience, space: list.space };
+        const saved = await updateReadingList(ws, list.name, { ...bodyOf(), etag: list.etag }, MASK);
+        refresh();
         onClose();
-        toast("Collection saved");
+        toast("Reading list saved", {
+          undo: () => void updateReadingList(ws, list.name ?? "", { ...prev, etag: saved.etag }, MASK).then(refresh, (e: unknown) => toast(errorMessage(e), { tone: "danger" })),
+        });
         return;
       }
-      const created = await createReadingList(ws, body);
+      const created = await createReadingList(ws, bodyOf());
       for (const item of items) await createReadingListEntry(ws, created.name ?? "", item);
-      void qc.invalidateQueries({ queryKey: knowledgeKeys.readingLists(ws) });
+      refresh();
       onClose();
-      router.push(`/knowledge/collections/${resourceId(created.name)}`);
-      toast(`Created “${created.displayName}”`);
+      router.push(readingListHref(created.name));
+      toast(items.length ? `Created “${created.displayName}”` : `Created “${created.displayName}”. Add resources to start the list.`);
     } catch (e) {
       toast(errorMessage(e), { tone: "danger" });
     } finally {
@@ -82,39 +113,90 @@ export function ReadingListDialog({ list, items = [], isOpen, onClose }: Reading
     }
   }
 
+  const n = items.length;
   return (
     <KnowledgeModal
       isOpen={isOpen}
       onClose={onClose}
       size="md"
-      title={list ? "Edit collection" : "New collection"}
-      description={items.length ? `${plural(items.length, "resource")} will be added` : undefined}
+      guard={busy}
+      title={list ? "Edit reading list" : "New reading list"}
+      icon={list ? Pencil : List}
+      description={
+        list
+          ? "Change its name, description or who can see it."
+          : n
+            ? `A reading list that starts with ${plural(n, "resource")}.`
+            : "A reading list you can order, annotate and share."
+      }
+      footerStart="Documents keep their own access."
       footer={
         <>
-          <Button variant="tertiary" onPress={onClose} isDisabled={busy}>
+          <Button variant="ghost" onPress={onClose} isDisabled={busy}>
             Cancel
           </Button>
           <Button variant="primary" onPress={() => void save()} isPending={busy}>
-            {list ? "Save" : "Create"}
+            {list ? <Check className="i" aria-hidden /> : <Plus className="i" aria-hidden />}
+            {list ? "Save changes" : "Create reading list"}
           </Button>
         </>
       }
     >
-      <TextField value={name} onChange={setName} isRequired isInvalid={!!error} maxLength={60} autoFocus onKeyDown={(e) => e.key === "Enter" && void save()}>
-        <Label>Name</Label>
-        <Input placeholder="e.g. Thesis reading list" />
-        <FieldError>{error}</FieldError>
-      </TextField>
-      <TextField className="mt-16" value={desc} onChange={setDesc} maxLength={200}>
-        <Label>
-          Description <span className="label__opt">(optional)</span>
-        </Label>
-        <TextArea rows={2} />
-      </TextField>
-      <div className="field mt-16">
-        <span className="label">Who can see it</span>
-        <ChoiceGroup label="Who can see it" value={share} options={options} onChange={setShare} />
-        <Description className="description mt-4">People still need access to a resource to open it.</Description>
+      <div className="kn-form">
+        <TextField
+          value={name}
+          onChange={(v) => {
+            setName(v);
+            if (v.trim()) setTouched(false);
+          }}
+          isRequired
+          isInvalid={!!error}
+          isDisabled={busy}
+          maxLength={60}
+          autoFocus
+        >
+          <Label>Name</Label>
+          <Input placeholder="e.g. On-call reading list" onKeyDown={(e) => e.key === "Enter" && void save()} />
+          <FieldError>{error}</FieldError>
+        </TextField>
+        <TextField value={desc} onChange={setDesc} maxLength={200} isDisabled={busy}>
+          <Label>
+            Description <span className="label__opt">(optional)</span>
+          </Label>
+          <TextArea rows={2} placeholder="What it’s for and who should read it" />
+        </TextField>
+        {options.length > 1 ? (
+          <div className="field col-scope">
+            <span className="label">Who can see it</span>
+            <ChoiceGroup label="Who can see it" value={scope} options={options} onChange={setScope} columns={options.length} isDisabled={busy} />
+            {scope === "space" && spaces.length > 1 ? (
+              <div className="col-space">
+                <Select value={space} onChange={(v) => setSpace(String(v))} isDisabled={busy}>
+                  <Label>Which space?</Label>
+                  <Select.Trigger>
+                    <Select.Value />
+                    <Select.Indicator />
+                  </Select.Trigger>
+                  <Select.Popover>
+                    <ListBox>
+                      {spaces.map((s) => (
+                        <ListBox.Item key={s.name} id={s.name ?? ""} textValue={s.displayName ?? ""}>
+                          {s.displayName}
+                          <ListBox.ItemIndicator />
+                        </ListBox.Item>
+                      ))}
+                    </ListBox>
+                  </Select.Popover>
+                </Select>
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <p className="col-only">
+            <Lock className="i i-sm" aria-hidden />
+            <span>Only you can see it.</span>
+          </p>
+        )}
       </div>
     </KnowledgeModal>
   );

@@ -1,6 +1,8 @@
 "use client";
 
 import { Radio, RadioGroup } from "@heroui/react";
+import clsx from "clsx";
+import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 export interface Choice<V extends string = string> {
@@ -8,6 +10,8 @@ export interface Choice<V extends string = string> {
   title: ReactNode;
   description?: ReactNode;
   isDisabled?: boolean;
+  /** An icon tile in place of the radio dot (preview `choice--icon`); three or more icon choices in a row read as tiles. */
+  icon?: LucideIcon;
 }
 
 export interface ChoiceGroupProps<V extends string = string> {
@@ -24,9 +28,10 @@ export interface ChoiceGroupProps<V extends string = string> {
 
 /**
  * Radio cards for consequential choices (preview `choiceGroup()`, HeroUI RadioGroup):
- * each option is a bordered card with radio, title and description; the selected card gets an accent ring.
+ * each option is a bordered card with a radio (or an icon tile), title and description; the selected card gets an accent ring.
  */
 export function ChoiceGroup<V extends string = string>({ value, options, onChange, label, columns = 1, name, isDisabled }: ChoiceGroupProps<V>) {
+  const tiles = columns >= 3 && options.some((o) => o.icon);
   return (
     <RadioGroup
       aria-label={label}
@@ -34,18 +39,24 @@ export function ChoiceGroup<V extends string = string>({ value, options, onChang
       value={value}
       onChange={(next) => onChange(next as V)}
       isDisabled={isDisabled}
-      className="choice-group"
+      className={clsx("choice-group", tiles && "choice-group--tiles")}
       style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
     >
-      {options.map((option) => (
-        <Radio key={option.value} value={option.value} isDisabled={option.isDisabled} className="choice">
+      {options.map(({ value: v, title, description, isDisabled: off, icon: Icon }) => (
+        <Radio key={v} value={v} isDisabled={off} className={clsx("choice", Icon && "choice--icon")}>
           <Radio.Content className="choice__content">
-            <Radio.Control>
-              <Radio.Indicator />
-            </Radio.Control>
+            {Icon ? (
+              <span className="choice__icon" aria-hidden="true">
+                <Icon className="i" />
+              </span>
+            ) : (
+              <Radio.Control>
+                <Radio.Indicator />
+              </Radio.Control>
+            )}
             <span className="grow">
-              <span className="choice__title">{option.title}</span>
-              {option.description ? <span className="choice__desc">{option.description}</span> : null}
+              <span className="choice__title">{title}</span>
+              {description ? <span className="choice__desc">{description}</span> : null}
             </span>
           </Radio.Content>
         </Radio>

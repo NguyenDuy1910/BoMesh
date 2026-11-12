@@ -1,19 +1,19 @@
 "use client";
 
-import { Button, Description, FieldError, Input, Label, Modal, Spinner, TextField } from "@heroui/react";
-import { ExternalLink } from "lucide-react";
+import { Button, Description, FieldError, Input, Label, Modal, Radio, RadioGroup, Spinner, TextField } from "@heroui/react";
+import { Check, ExternalLink, KeyRound, ShieldCheck } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
-import { AppIcon, Callout, ChoiceGroup, List, ListItem, StatusChip, toast } from "@/components/ui";
-import { ApiError, errorMessage, resourceId } from "@/lib/api/client";
+import { AppIcon, Callout, List, ListItem, StatusChip, toast } from "@/components/ui";
+import { ApiError, errorMessage } from "@/lib/api/client";
 import { plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 
 import { connectConfluence, isCancelled, signInAgain, signInNew, TokenRejected } from "../accounts";
 import { createSync, type Connection, type Connector } from "../api";
 import { confluenceErrors, connectedConfluenceHosts, EMPTY_CONFLUENCE, type ConfluenceErrors, type ConfluenceInput } from "../connect-form";
-import { accountLabel, accountStatus, accountUser, appKey, appName, providerOf, sourceName } from "../model";
+import { accountLabel, accountStatus, accountUser, appKey, appName, providerOf, sourceHref, sourceName } from "../model";
 import { closeIngestionOverlay, openWizard } from "../overlays";
 import type { PendingAuthorization } from "../oauth";
 import { useConnections, useConnectors, useInvalidateIngestion, useSources } from "../queries";
@@ -25,6 +25,9 @@ export const connectable = (connectors: readonly Connector[] | undefined) => (co
 
 /** "Site and API token" / "Sign in with Google". */
 export const authHint = (connector: string) => (connector === CONFLUENCE ? "Site and API token" : `Sign in with ${providerOf(connector)}`);
+
+/** After a failed submit, focus the first invalid field in the open dialog (preview validate-on-submit). */
+export const focusInvalid = () => requestAnimationFrame(() => document.querySelector<HTMLElement>('.modal__dialog [aria-invalid="true"]')?.focus());
 
 /** Site, email and API token (preview `confForm`). The token is never shown again. */
 export function ConfluenceFields({ value, errors, onChange, onSubmit, isDisabled }: { value: ConfluenceInput; errors: ConfluenceErrors; onChange: (value: ConfluenceInput, field: keyof ConfluenceInput) => void; onSubmit: () => void; isDisabled?: boolean }) {
@@ -105,7 +108,7 @@ export function ConnectAccountDialog({ connector: fixed }: { connector?: string 
   const done = (connection: Connection) => {
     refresh();
     closeIngestionOverlay();
-    toast(`Connected ${accountLabel(connection)}`, { action: { label: "Connect source", onPress: () => openWizard({ connector: connection.connector, connection: connection.name }) } });
+    toast(`Connected ${accountLabel(connection)}`, { action: { label: "Add source", onPress: () => openWizard({ connector: connection.connector, connection: connection.name }) } });
   };
 
   async function go() {
@@ -113,12 +116,13 @@ export function ConnectAccountDialog({ connector: fixed }: { connector?: string 
     if (current === CONFLUENCE) {
       const found = confluenceErrors(conf, hosts);
       setErrors(found);
-      if (Object.keys(found).length) return;
+      if (Object.keys(found).length) return focusInvalid();
       setBusy(true);
       try {
         done(await connectConfluence(id, conf));
       } catch (error) {
         setErrors({ token: error instanceof TokenRejected ? error.message : errorMessage(error) });
+        focusInvalid();
       } finally {
         setBusy(false);
       }
@@ -144,12 +148,22 @@ export function ConnectAccountDialog({ connector: fixed }: { connector?: string 
   const title = fixed ? `Connect ${appName(fixed)} account` : "Connect account";
   const waiting = phase === "waiting";
   return (
-    <Modal.Backdrop isOpen isDismissable={!waiting && !busy} onOpenChange={(o) => !o && closeIngestionOverlay()}>
+    <Modal.Backdrop isOpen isDismissable={!waiting && !busy} isKeyboardDismissDisabled={waiting || busy} onOpenChange={(o) => !o && closeIngestionOverlay()}>
       <Modal.Container size="md" scroll="inside">
         <Modal.Dialog>
           {waiting ? null : <Modal.CloseTrigger aria-label="Close" />}
           <Modal.Header>
-            <Modal.Heading>{title}</Modal.Heading>
+            {fixed ? (
+              <AppIcon app={appKey(fixed)} size="lg" className="modal__icon" />
+            ) : (
+              <span className="modal__icon" aria-hidden>
+                <KeyRound />
+              </span>
+            )}
+            <div className="grow">
+              <Modal.Heading>{title}</Modal.Heading>
+              {waiting ? null : <p className="modal__description">Sources sign in with it to read the folders and spaces you pick.</p>}
+            </div>
           </Modal.Header>
           <Modal.Body>
             {waiting ? (
@@ -158,19 +172,36 @@ export function ConnectAccountDialog({ connector: fixed }: { connector?: string 
               <div className="stack gap-16">
                 {phase === "error" ? <Callout tone="danger" description={`${provider} didn’t confirm the sign-in. Try again.`} /> : null}
                 {fixed ? null : (
-                  <div className="field src-choices">
+                  <div className="field">
                     <span className="label">App</span>
-                    <ChoiceGroup
-                      label="App"
-                      columns={2}
+                    <RadioGroup
+                      aria-label="App"
                       value={current}
-                      options={apps.map((c) => ({ value: c.name ?? "", title: appName(c.name, apps), description: authHint(c.name ?? "") }))}
+                      isDisabled={busy}
                       onChange={(v) => {
                         setApp(v);
                         setErrors({});
                         setPhase("idle");
                       }}
-                    />
+                      className="choice-group"
+                      style={{ gridTemplateColumns: `repeat(${Math.min(2, apps.length) || 1}, minmax(0, 1fr))` }}
+                    >
+                      {apps.map((c) => (
+                        <Radio key={c.name} value={c.name ?? ""} className="choice acc-app">
+                          <Radio.Content className="choice__content">
+                            <AppIcon app={appKey(c.name)} />
+                            <span className="grow src-min">
+                              <span className="choice__title" style={{ display: "block" }}>
+                                {appName(c.name, apps)}
+                              </span>
+                              <span className="choice__desc" style={{ display: "block" }}>
+                                {authHint(c.name ?? "")}
+                              </span>
+                            </span>
+                          </Radio.Content>
+                        </Radio>
+                      ))}
+                    </RadioGroup>
                   </div>
                 )}
                 {current === CONFLUENCE ? (
@@ -185,25 +216,29 @@ export function ConnectAccountDialog({ connector: fixed }: { connector?: string 
                     }}
                   />
                 ) : (
-                  <p className="description">
-                    You’ll sign in with {provider} in a new window. BoMesh only reads the {current === "connectors/google_drive" ? "folders" : "content"} you choose.
-                  </p>
+                  <div className="acc-note">
+                    <ShieldCheck className="i i-sm" aria-hidden />
+                    <span>
+                      You’ll sign in with {provider} in a new window. BoMesh only reads the {current === "connectors/google_drive" ? "folders" : "content"} you choose.
+                    </span>
+                  </div>
                 )}
               </div>
             )}
           </Modal.Body>
           <Modal.Footer>
             {waiting ? (
-              <Button variant="secondary" onPress={() => pending.current?.cancel()}>
+              <Button variant="ghost" onPress={() => pending.current?.cancel()}>
                 Cancel
               </Button>
             ) : (
               <>
-                <Button slot="close" variant="secondary" isDisabled={busy}>
+                <Button slot="close" variant="ghost" isDisabled={busy}>
                   Cancel
                 </Button>
                 {current === CONFLUENCE ? (
                   <Button variant="primary" isPending={busy} onPress={() => void go()}>
+                    {busy ? null : <Check className="i" aria-hidden />}
                     Verify and connect
                   </Button>
                 ) : (
@@ -249,6 +284,8 @@ export function ReconnectDialog({ connection: name }: { connection: string }) {
     try {
       await pending.current.done;
     } catch (error) {
+      // A cancelled or failed sign-in can leave the account waiting for authorization.
+      refresh();
       if (error instanceof ApiError) toast(errorMessage(error), { tone: "danger" });
       setPhase(isCancelled(error) || error instanceof ApiError ? "idle" : "error");
       return;
@@ -263,24 +300,49 @@ export function ReconnectDialog({ connection: name }: { connection: string }) {
     if (!fixed.length) toast(`${app} reconnected`);
     else
       toast(`${app} reconnected. Syncing ${sourceName(fixed[0]!)}${fixed.length > 1 ? ` and ${plural(fixed.length - 1, "other source")}` : ""}…`, {
-        action: { label: "View", onPress: () => router.push(`/sources?open=${resourceId(fixed[0]!.name)}`) },
+        action: { label: "Open", onPress: () => router.push(sourceHref(fixed[0]!.name)) },
       });
   }
 
   const waiting = phase === "waiting";
+  if (!connection)
+    return (
+      <Modal.Backdrop isOpen onOpenChange={(o) => !o && closeIngestionOverlay()}>
+        <Modal.Container size="sm" scroll="inside">
+          <Modal.Dialog>
+            <Modal.CloseTrigger aria-label="Close" />
+            <Modal.Header>
+              <span className="modal__icon modal__icon--default" aria-hidden>
+                <KeyRound />
+              </span>
+              <div className="grow">
+                <Modal.Heading>Account removed</Modal.Heading>
+                <p className="modal__description">It was disconnected in the meantime.</p>
+              </div>
+            </Modal.Header>
+            <Modal.Footer>
+              <Button slot="close" variant="primary">
+                Close
+              </Button>
+            </Modal.Footer>
+          </Modal.Dialog>
+        </Modal.Container>
+      </Modal.Backdrop>
+    );
   return (
-    <Modal.Backdrop isOpen isDismissable={!waiting} onOpenChange={(o) => !o && closeIngestionOverlay()}>
+    <Modal.Backdrop isOpen isDismissable={!waiting} isKeyboardDismissDisabled={waiting} onOpenChange={(o) => !o && closeIngestionOverlay()}>
       <Modal.Container size="md" scroll="inside">
         <Modal.Dialog>
           {waiting ? null : <Modal.CloseTrigger aria-label="Close" />}
           <Modal.Header>
-            <div className="row gap-12">
-              {waiting ? null : <AppIcon app={appKey(connection?.connector)} size="lg" className="modal__icon" />}
-              <Modal.Heading>{connection ? title : "Account removed"}</Modal.Heading>
+            <AppIcon app={appKey(connection.connector)} size="lg" className="modal__icon" />
+            <div className="grow">
+              <Modal.Heading>{title}</Modal.Heading>
+              {waiting ? null : <p className="modal__description">{`Sign in again as ${accountUser(connection)} to resume syncing. Synced documents stay searchable.`}</p>}
             </div>
           </Modal.Header>
           <Modal.Body>
-            {!connection ? null : waiting ? (
+            {waiting ? (
               <WaitingState title={`Finish signing in with ${provider}`} description={`Sign in as ${accountUser(connection)}, then come back here.`} />
             ) : (
               <>
@@ -297,18 +359,17 @@ export function ReconnectDialog({ connection: name }: { connection: string }) {
                     actions={<StatusChip kind="account" value={accountStatus(connection)} />}
                   />
                 </List>
-                <p className="description mt-12">Synced documents stay searchable. Syncing resumes once you sign in.</p>
               </>
             )}
           </Modal.Body>
           <Modal.Footer>
             {waiting ? (
-              <Button variant="secondary" onPress={() => pending.current?.cancel()}>
+              <Button variant="ghost" onPress={() => pending.current?.cancel()}>
                 Cancel
               </Button>
-            ) : connection ? (
+            ) : (
               <>
-                <Button slot="close" variant="secondary">
+                <Button slot="close" variant="ghost">
                   Cancel
                 </Button>
                 <Button variant="primary" onPress={() => void go()}>
@@ -316,10 +377,6 @@ export function ReconnectDialog({ connection: name }: { connection: string }) {
                   <ExternalLink className="i" aria-hidden />
                 </Button>
               </>
-            ) : (
-              <Button slot="close" variant="secondary">
-                Close
-              </Button>
             )}
           </Modal.Footer>
         </Modal.Dialog>

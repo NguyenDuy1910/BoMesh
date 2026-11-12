@@ -1,40 +1,52 @@
 "use client";
 
-import { ArrowDown, ArrowUp, ClipboardList, Files, House, MessageSquare, Plus, RefreshCw, UserPlus, Users } from "lucide-react";
-import { useRef } from "react";
+import { ArrowDown, ArrowUp, ClipboardList, Files, MessageSquare, RefreshCw, UserPlus, Users } from "lucide-react";
 
-import { BarsChart, EmptyState, ErrorState, Page, PageHeader, Section, SkeletonCards, SkeletonRows, StatCard } from "@/components/ui";
-import { PageChrome } from "@/components/shell/page-chrome";
-import { fmtDate, fmtNum, pct, plural } from "@/lib/format";
+import { ErrorState, Page, PageHeader, Section, SkeletonCards, SkeletonRows, Sparkline, StatCard } from "@/components/ui";
+import { fmtNum, pct, plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
-import { LinkButton, PanelCard } from "@/modules/curation/components/parts";
-import { useCuratedItems } from "@/modules/curation/queries";
+import { LinkButton } from "@/modules/curation/components/parts";
 
 import type { WorkspaceOverview } from "../api";
-import { useOverview, useServiceRequests, useSources } from "../queries";
-import { Attention } from "./Attention";
+import { useOverview, useSearchable, useServiceRequests, useSources } from "../queries";
+import { AttentionList, useAttention } from "./Attention";
+import { Health, healthDue, useHealthMetrics } from "./Health";
 import { KnowledgeGaps } from "./KnowledgeGaps";
+import { SetupGuide, isFreshWorkspace, setupNext, useSetupSteps } from "./Setup";
 
 const kpi = (o: WorkspaceOverview | undefined, key: string) => o?.kpis?.find((k) => k.key === key);
 
-/** Overview (preview `P.overview`): what needs me first, then how the week went and where knowledge falls short. */
+/**
+ * Overview (preview `P.overview`): what needs me first (operations), then Knowledge health (the Review queues),
+ * knowledge gaps and how the week went. A workspace with nothing set up gets the setup checklist as the whole page.
+ */
 export function OverviewPage() {
-  const { workspace, can } = useWorkspace();
+  const { can } = useWorkspace();
   const week = useOverview("P7D");
-  const month = useOverview("P30D");
-  const usageRef = useRef<HTMLDivElement>(null);
-
-  const flashUsage = () => {
-    const el = usageRef.current?.querySelector<HTMLElement>(".ov-usage");
-    if (!el) return;
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
-    el.classList.remove("ov-flash");
-    void el.offsetWidth;
-    el.classList.add("ov-flash");
-  };
+  const steps = useSetupSteps(week.data);
+  const fresh = isFreshWorkspace(steps);
+  const items = useAttention(week.data, setupNext(steps));
+  const health = useHealthMetrics();
+  const n = items ? items.length + healthDue(health) : null;
+  const meta = fresh || n === null ? undefined : n ? (n === 1 ? "1 thing needs you" : `${fmtNum(n)} things need you`) : "Nothing needs you right now";
 
   let body;
-  if (week.isPending) {
+  if (week.isError) {
+    body = <ErrorState error={week.error} title="The overview didn’t load" onRetry={() => void week.refetch()} />;
+  } else if (fresh && steps) {
+    body = (
+      <>
+        <SetupGuide steps={steps} />
+        {can("members.create") ? (
+          <div className="mt-16">
+            <LinkButton href="/people?tab=members&add=1" variant="secondary" size="md" icon={UserPlus}>
+              Add people
+            </LinkButton>
+          </div>
+        ) : null}
+      </>
+    );
+  } else if (!week.data || !items) {
     body = (
       <>
         <SkeletonRows rows={3} />
@@ -43,52 +55,28 @@ export function OverviewPage() {
         </div>
       </>
     );
-  } else if (week.isError) {
-    body = <ErrorState error={week.error} title="The overview didn’t load" onRetry={() => void week.refetch()} />;
-  } else if (!kpi(week.data, "rootCollections")?.value) {
-    body = (
-      <EmptyState
-        icon={House}
-        boxed
-        title="Your workspace is ready"
-        description="Add knowledge and people. Activity and health show up here."
-        actions={
-          <>
-            {can("items.create") ? (
-              <LinkButton href="/bases?new=1" variant="primary" size="md" icon={Plus}>
-                Create knowledge base
-              </LinkButton>
-            ) : null}
-            {can("members.create") ? (
-              <LinkButton href="/people?add=1" variant="secondary" size="md" icon={UserPlus}>
-                Add people
-              </LinkButton>
-            ) : null}
-          </>
-        }
-      />
-    );
   } else {
     body = (
       <>
         <Section title="Needs attention">
-          <Attention overview={week.data} />
+          <AttentionList items={items} />
         </Section>
+        {health ? (
+          <Section title="Knowledge health">
+            <Health metrics={health} />
+          </Section>
+        ) : null}
+        <KnowledgeGaps />
         <Section title="This week">
-          <Kpis overview={week.data} onQuestions={flashUsage} />
+          <Kpis overview={week.data} />
         </Section>
-        <div className="ov-split mt-16" ref={usageRef}>
-          <UsageCard overview={month.data} isPending={month.isPending} />
-          <KnowledgeGaps />
-        </div>
       </>
     );
   }
 
   return (
     <Page>
-      <PageChrome crumbs={[{ label: "Overview" }]} />
-      <PageHeader title="Overview" description={<span translate="no">{workspace.displayName}</span>} />
+      <PageHeader title="Overview" meta={meta} />
       {body}
     </Page>
   );
@@ -99,7 +87,7 @@ function Delta({ now, prev }: { now: number; prev: number | undefined }) {
   const Icon = d < 0 ? ArrowDown : ArrowUp;
   return (
     <>
-      <span className={`ov-delta${d < 0 ? " ov-delta--down" : ""}`}>
+      <span className={d < 0 ? "ov-delta ov-delta--down" : "ov-delta"}>
         <Icon className="i i-xs" aria-hidden />
         {Math.abs(d)}%
       </span>{" "}
@@ -108,17 +96,18 @@ function Delta({ now, prev }: { now: number; prev: number | undefined }) {
   );
 }
 
-function Kpis({ overview, onQuestions }: { overview: WorkspaceOverview; onQuestions: () => void }) {
-  const { hasModule, can } = useWorkspace();
-  const items = useCuratedItems();
+/** This week (preview `kpis()`): every card opens where its number comes from; Questions carries its own 14-day trend. */
+function Kpis({ overview }: { overview: WorkspaceOverview }) {
+  const { hasModule } = useWorkspace();
+  const month = useOverview("P30D");
+  const searchable = useSearchable();
   const sources = useSources();
   const service = useServiceRequests();
   const questions = kpi(overview, "questions");
   const active = kpi(overview, "activeMembers");
-
-  // Published documents in shared bases and how many of them are searchable.
-  const published = (items.data ?? []).filter((d) => d.document?.publicationState === "PUBLISHED");
-  const ready = published.filter((d) => d.document?.indexingState === "SUCCEEDED").length;
+  const trend = (month.data?.dailyUsage ?? []).slice(-14).map((d) => Number(d.questionCount ?? 0));
+  const published = searchable.data?.published ?? 0;
+  const ready = searchable.data?.ready ?? 0;
 
   let last;
   if (hasModule("requests")) {
@@ -139,7 +128,7 @@ function Kpis({ overview, onQuestions }: { overview: WorkspaceOverview; onQuesti
     );
   } else {
     const all = sources.data?.length ?? 0;
-    const bad = (sources.data ?? []).filter((s) => s.state === "FAILED" || s.state === "REAUTHORIZATION_REQUIRED").length;
+    const bad = (sources.data ?? []).filter((s) => s.state === "FAILED" || s.state === "REAUTHORIZATION_REQUIRED" || s.lastSync?.state === "FAILED").length;
     last = (
       <StatCard
         icon={RefreshCw}
@@ -152,46 +141,30 @@ function Kpis({ overview, onQuestions }: { overview: WorkspaceOverview; onQuesti
         }
         meta={bad ? `${plural(bad, "source")} need${bad === 1 ? "s" : ""} attention` : "All syncing"}
         tone={bad ? "danger" : "success"}
-        href={can("sources.list") ? "/sources" : undefined}
+        href={sources.data ? "/studio?tab=sources" : undefined}
       />
     );
   }
 
   return (
     <div className="grid cols-4">
-      <StatCard icon={MessageSquare} label="Questions this week" value={fmtNum(questions?.value ?? 0)} meta={<Delta now={questions?.value ?? 0} prev={questions?.previousValue} />} tone="accent" onPress={onQuestions} />
+      <StatCard icon={MessageSquare} label="Questions this week" value={fmtNum(questions?.value ?? 0)} meta={<Delta now={questions?.value ?? 0} prev={questions?.previousValue} />} tone="accent">
+        {trend.length ? (
+          <div className="ov-spark" aria-hidden>
+            <Sparkline values={trend} height={28} />
+          </div>
+        ) : null}
+      </StatCard>
       <StatCard icon={Users} label="Active people" value={fmtNum(active?.value ?? 0)} meta={<Delta now={active?.value ?? 0} prev={active?.previousValue} />} href="/people" />
       <StatCard
         icon={Files}
         label="Documents searchable"
-        value={`${pct(ready, published.length)}%`}
-        meta={`${fmtNum(ready)} of ${fmtNum(published.length)} published documents`}
-        tone={ready < published.length ? "warning" : "success"}
-        href="/documents?tab=all"
+        value={`${pct(ready, published)}%`}
+        meta={`${fmtNum(ready)} of ${fmtNum(published)} published documents`}
+        tone={ready < published ? "warning" : "success"}
+        href="/studio?tab=documents"
       />
       {last}
     </div>
-  );
-}
-
-function UsageCard({ overview, isPending }: { overview: WorkspaceOverview | undefined; isPending: boolean }) {
-  const days = overview?.dailyUsage ?? [];
-  const values = days.map((d) => Number(d.questionCount ?? 0));
-  const total = values.reduce((a, b) => a + b, 0);
-  return (
-    <PanelCard title="Questions, last 30 days" className="ov-usage">
-      {isPending ? (
-        <SkeletonRows rows={3} />
-      ) : (
-        <>
-          <div className="stat__value">{fmtNum(total)}</div>
-          <BarsChart values={values} height={140} labels={days.map((d) => fmtDate(d.date))} label="Questions per day" />
-          <div className="row between t-xs muted">
-            <span>{days[0] ? fmtDate(days[0].date) : ""}</span>
-            <span>Today</span>
-          </div>
-        </>
-      )}
-    </PanelCard>
   );
 }

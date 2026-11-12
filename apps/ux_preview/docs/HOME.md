@@ -54,7 +54,7 @@ Three equal cards, each one target with a title and a one-line hint from real da
 | Find a document | *Search {n} documents by title, topic or content* | Knowledge → Browse with its search field focused (`home-find`) |
 | Ask a question | *Answers from {workspace} documents, with citations* | AI Chat (`/chat`), its scope and starters as they are |
 | Contribute knowledge (`knowledge.contribute`) | *Share a document; a reviewer publishes it* | The Contribute dialog |
-| Your library (everyone else) | *Saved documents, your files and collections* | Knowledge → My library |
+| Your library (everyone else) | *Saved documents, your files and reading lists* | Knowledge → Saved |
 
 Hidden in the Empty state (the empty state carries Contribute and Browse knowledge instead).
 
@@ -68,7 +68,7 @@ The last four documents you opened (*Opened 1 h ago · Policy*), opening the Rea
 Source-backed changes, never generated statements: a document's new version with its owner's change note (*Standing production access removed; just-in-time access for up to 8 hours* — Access Control Policy · Version 4), or a recent announcement with its summary. Ready, published documents the person can read; changes older than 120 days and announcements older than 60 days drop off; a change disappears once you've opened the document after it. Ranked by your reading and saved topics, your spaces, verification and recency; four at most. The change is the headline, kind and date above, source document and version below. Opens the document preview.
 
 ### Explore knowledge (main)
-One card per topic domain that holds readable documents: tinted icon, name, *{n} documents*, the domain's description and up to three of its largest topics. The card (its name is the stretched link) opens Knowledge filtered to the domain; a topic opens it filtered to that topic (`catalogHref`). Counts come from the same topic facet Knowledge uses, over the readable pool. *All knowledge* → Knowledge. Hierarchy, filters and collections stay in Knowledge.
+One card per topic domain that holds readable documents: tinted icon, name, *{n} documents*, the domain's description and up to three of its largest topics. The card (its name is the stretched link) opens Knowledge filtered to the domain; a topic opens it filtered to that topic (`catalogHref`). Counts come from the same topic facet Knowledge uses, over the readable pool. *All knowledge* → Knowledge. Hierarchy, filters and reading lists stay in Knowledge.
 
 ### Start here · Recommended for you (main)
 Three documents, each with title, what it's for (summary or opening paragraph) and why it's here; a row opens the document preview. First visit (no reading history and no conversations): *Start here*, placed above Explore — what admins featured (*Recommended by {workspace}*), topped up with often-opened verified documents. Returning people: *Recommended for you*, below Explore — related to what they read (*Because you read ADR-031*), from their spaces, or featured; one per reason first, nothing they have opened, nothing already in What's new. Admins edit featured documents from the section's sliders button (shown when the section holds featured documents) or ⌘K *Edit featured documents*: rows open the document, × removes with Undo, *Add documents* opens a searchable picker.

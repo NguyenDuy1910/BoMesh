@@ -7,18 +7,20 @@ import { useState } from "react";
 import { Callout, ChoiceGroup, Segmented, SwitchRow } from "@/components/ui";
 
 import type { WorkKind } from "../kinds";
-import { DEFAULT_CRITERIA, DRAFT_TYPES, LENGTHS, SUGGESTED_CRITERIA, TONES, type DraftType, type Length, type Tone, type WorkOptions } from "../model";
+import { criteriaFor, DRAFT_TYPES, LENGTHS, suggestionsFor, TONES, type DraftType, type Length, type Tone, type WorkOptions } from "../model";
 
 interface Props {
   kind: WorkKind;
   opts: WorkOptions;
   onChange: (patch: Partial<WorkOptions>) => void;
   staffQuiz: boolean;
+  /** The chosen space's type: a review's criteria follow it until the person picks their own. */
+  spaceType?: string;
 }
 
 /** Kind-specific options in the new-work flow (preview `kind.options(f, ctx)`). */
-export function NewWorkOptions({ kind, opts, onChange, staffQuiz }: Props) {
-  if (kind === "EVIDENCE_REVIEW") return <ReviewOptions opts={opts} onChange={onChange} />;
+export function NewWorkOptions({ kind, opts, onChange, staffQuiz, spaceType }: Props) {
+  if (kind === "EVIDENCE_REVIEW") return <ReviewOptions opts={opts} onChange={onChange} spaceType={spaceType} />;
   if (kind === "DRAFT") return <DraftOptions opts={opts} onChange={onChange} />;
   if (kind === "STUDY_GUIDE")
     return (
@@ -85,10 +87,10 @@ export function NewWorkOptions({ kind, opts, onChange, staffQuiz }: Props) {
   );
 }
 
-function ReviewOptions({ opts, onChange }: { opts: WorkOptions; onChange: (patch: Partial<WorkOptions>) => void }) {
+function ReviewOptions({ opts, onChange, spaceType }: { opts: WorkOptions; onChange: (patch: Partial<WorkOptions>) => void; spaceType?: string }) {
   const [draft, setDraft] = useState("");
-  const criteria = opts.criteria ?? [...DEFAULT_CRITERIA];
-  const all = [...new Set([...DEFAULT_CRITERIA, ...SUGGESTED_CRITERIA, ...criteria])];
+  const criteria = opts.criteria ?? criteriaFor(spaceType);
+  const all = [...new Set([...criteriaFor(spaceType), ...suggestionsFor(spaceType), ...criteria])];
   const toggle = (label: string) => onChange({ criteria: criteria.includes(label) ? criteria.filter((c) => c !== label) : [...criteria, label] });
   const add = () => {
     const label = draft.trim();
@@ -97,48 +99,37 @@ function ReviewOptions({ opts, onChange }: { opts: WorkOptions; onChange: (patch
     setDraft("");
   };
   return (
-    <div className="stack gap-16">
-      <div className="field">
-        <span className="label" id="rv-opt-label">
-          Compare sources on
-        </span>
-        <div className="rv-chips" role="group" aria-labelledby="rv-opt-label">
-          {all.map((label) => {
-            const on = criteria.includes(label);
-            return (
-              <button key={label} type="button" className="rv-chip" aria-pressed={on} onClick={() => toggle(label)}>
-                {on ? <Check className="i i-sm" aria-hidden /> : <Plus className="i i-sm" aria-hidden />}
-                {label}
-              </button>
-            );
-          })}
-        </div>
-        <div className="row gap-8 mt-8">
-          <TextField aria-label="Add your own criterion" value={draft} onChange={setDraft} className="grow">
-            <Input
-              placeholder="Add your own, e.g. Cost"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  add();
-                }
-              }}
-            />
-          </TextField>
-          <Button size="sm" variant="tertiary" onPress={add}>
-            Add
-          </Button>
-        </div>
-        <div className="description">Each criterion becomes a column. Every cell cites the passage it comes from.</div>
+    <div className="field">
+      <span className="label" id="rv-opt-label">
+        Compare sources on
+      </span>
+      <div className="description">Each criterion becomes a column. Every cell cites the passage it comes from.</div>
+      <div className="rv-chips" role="group" aria-labelledby="rv-opt-label">
+        {all.map((label) => {
+          const on = criteria.includes(label);
+          return (
+            <button key={label} type="button" className="rv-chip" aria-pressed={on} onClick={() => toggle(label)}>
+              {on ? <Check className="i i-sm" aria-hidden /> : <Plus className="i i-sm" aria-hidden />}
+              {label}
+            </button>
+          );
+        })}
       </div>
-      <div className="field">
-        <span className="label">Sources at most</span>
-        <Segmented
-          label="Sources at most"
-          value={String(opts.maxPapers ?? 6)}
-          options={["4", "6", "8"].map((v) => ({ value: v, label: v }))}
-          onChange={(v) => onChange({ maxPapers: Number(v) })}
-        />
+      <div className="row gap-8 mt-8">
+        <TextField aria-label="Add your own criterion" value={draft} onChange={setDraft} className="grow">
+          <Input
+            placeholder="Add your own, e.g. Time to migrate"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                add();
+              }
+            }}
+          />
+        </TextField>
+        <Button size="sm" onPress={add}>
+          Add
+        </Button>
       </div>
     </div>
   );

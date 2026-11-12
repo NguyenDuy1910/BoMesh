@@ -2,7 +2,7 @@
    published documents trustworthy and findable — topics to confirm (first syncs at scale: published, but filed with
    low confidence or without a topic; decided per group, D.classGroups), re-verification cycles, missing details
    (topics, owner, summary) and possible duplicates. The topics themselves are the taxonomy (features/masterdata.js).
-   Scope: published documents in the knowledge bases the caller can edit (admins: all).
+   Scope: published documents in the collections the caller can edit (admins: all).
    Exports: X.gov = { queues, counts(), queue(id) }, X.khReview(). Actions: kh-*, cg-*.
    Menus: kh-review, kh-topic, kh-dup, cg-more (its Move to another topic… opens the topic list). Drawer: kh-dup. Models: core/catalog.js, core/lifecycle.js. */
 (() => {
@@ -14,12 +14,12 @@
     D.audit.unshift({ id: uid('ev'), at: Date.now(), actor: me().id, action, type: 'Knowledge', target, outcome: 'success', ip: '10.4.12.30', device: 'Chrome on macOS' });
   }
   const kbName = d => kbById(d.kb)?.name || '';
-  const ownerOf = d => res(d).owner || 'the knowledge base owner';
+  const ownerOf = d => res(d).owner || 'the collection owner';
   /** Keep a selection bucket in step with rows that still exist (rows are derived and vanish once fixed). */
   function pruneSel(u, valid) { Object.keys(u.sel || {}).forEach(id => { if (!valid.has(id)) delete u.sel[id]; }); }
 
   /* ═══════════════ Signals ═══════════════ */
-  /** Published documents the caller looks after: editable, non-personal knowledge bases. */
+  /** Published documents the caller looks after: editable, non-personal collections. */
   const scope = () => readableResources().filter(d => { const kb = kbById(d.kb); return kb && !kb.personal && canEditKb(kb); });
   const REASONS = {
     expired: { label: 'Verification expired', icon: 'clock', rank: 0 },
@@ -71,7 +71,7 @@
     const kbOpts = [...new Map(all.map(x => [x.d.kb, kbName(x.d)])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
     const reasonOpts = Object.entries(REASONS).filter(([k]) => all.some(x => x.reason === k)).map(([k, r]) => [k, r.label]);
     const tools = needsTools(all.length, 'khReview', ['kb', 'reason'])
-      ? `${searchField({ uiKey: 'khReview', placeholder: 'Search documents' })}${kbOpts.length > 1 || u.kb ? filterButton('Knowledge base', 'khReview', 'kb', kbOpts) : ''}${reasonOpts.length > 1 || u.reason ? filterButton('Reason', 'khReview', 'reason', reasonOpts) : ''}${clearFilters('khReview', ['kb', 'reason'])}` : '';
+      ? `${searchField({ uiKey: 'khReview', placeholder: 'Search documents' })}${kbOpts.length > 1 || u.kb ? filterButton('Collection', 'khReview', 'kb', kbOpts) : ''}${reasonOpts.length > 1 || u.reason ? filterButton('Reason', 'khReview', 'reason', reasonOpts) : ''}${clearFilters('khReview', ['kb', 'reason'])}` : '';
     const toolbar = tools ? `<div class="toolbar">${tools}</div>` : '';
     let rows = all.filter(x => (!u.kb || x.d.kb === u.kb) && (!u.reason || x.reason === u.reason) && matchesQ('khReview', x.d.name, res(x.d).owner, kbName(x.d)));
     rows = applySort(rows, 'khReview', { name: x => x.d.name.toLowerCase(), due: x => x.due || 9e15 });
@@ -136,7 +136,7 @@
     if (u.gap && !GAPS[u.gap]) u.gap = '';
     const gapOpts = Object.keys(GAPS).filter(g => counts[g] || g === u.gap).map(g => [g, `${GAPS[g].label} · ${fmtNum(counts[g])}`]);
     const kbOpts = [...new Map(all.map(x => [x.d.kb, kbName(x.d)])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
-    const toolbar = needsTools(all.length, 'khDetails', ['gap', 'kb']) ? `<div class="toolbar">${searchField({ uiKey: 'khDetails', placeholder: 'Search documents' })}${gapOpts.length > 1 || u.gap ? filterButton('Missing', 'khDetails', 'gap', gapOpts) : ''}${kbOpts.length > 1 || u.kb ? filterButton('Knowledge base', 'khDetails', 'kb', kbOpts) : ''}${clearFilters('khDetails', ['gap', 'kb'])}</div>` : '';
+    const toolbar = needsTools(all.length, 'khDetails', ['gap', 'kb']) ? `<div class="toolbar">${searchField({ uiKey: 'khDetails', placeholder: 'Search documents' })}${gapOpts.length > 1 || u.gap ? filterButton('Missing', 'khDetails', 'gap', gapOpts) : ''}${kbOpts.length > 1 || u.kb ? filterButton('Collection', 'khDetails', 'kb', kbOpts) : ''}${clearFilters('khDetails', ['gap', 'kb'])}</div>` : '';
     let rows = all.filter(x => (!u.gap || x.gaps.includes(u.gap)) && (!u.kb || x.d.kb === u.kb) && matchesQ('khDetails', x.d.name, kbName(x.d)));
     rows = applySort(rows, 'khDetails', { name: x => x.d.name.toLowerCase(), updated: x => x.d.updated });
     if (!rows.length) {
@@ -170,7 +170,7 @@
       <td class="table__cell table__cell--actions"><div class="row gap-4 none">${actions}</div></td></tr>`;
   }
 
-  /** Add a topic to documents (keeps any topics they inherit from their knowledge base). */
+  /** Add a topic to documents (keeps any topics they inherit from their collection). */
   function applyTopic(ids, tid) {
     const docs = ids.map(docById).filter(d => d && X.res.canEditRes(d) && !res(d).topics.includes(tid));
     if (!docs.length) { toast(`Already tagged with “${topicName(tid)}”`, { tone: 'accent' }); return; }
@@ -232,7 +232,7 @@
   };
   A['kh-dup-open'] = el => openDrawer('kh-dup', { key: el.dataset.key });
 
-  /** Who points at a document: collections (names only when the caller can see them), saved lists and recent reads. */
+  /** Who points at a document: reading lists (names only when the caller can see them), saved lists and recent reads. */
   function refsOf(d) {
     const cols = (D.collections || []).filter(c => !c.archived && (c.items || []).some(i => i.doc === d.id));
     const seen = cols.filter(canSeeCollection);
@@ -243,8 +243,8 @@
     const excerpt = text.length > 420 ? text.slice(0, 420).replace(/\s+\S*$/, '') + '…' : text;
     const r = refsOf(d);
     const refs = [
-      ...r.cols.map(c => `<li>${ic('list', 'i-sm muted')}<a class="link" href="#/knowledge/collections/${esc(c.id)}">${esc(c.name)}</a></li>`),
-      r.hidden && `<li>${ic('lock', 'i-sm muted')}<span>${plural(r.hidden, 'private collection')}</span></li>`,
+      ...r.cols.map(c => `<li>${ic('list', 'i-sm muted')}<a class="link" href="#/knowledge/lists/${esc(c.id)}">${esc(c.name)}</a></li>`),
+      r.hidden && `<li>${ic('lock', 'i-sm muted')}<span>${plural(r.hidden, 'private reading list')}</span></li>`,
       r.saved && `<li>${ic('bookmark', 'i-sm muted')}<span>Saved by ${plural(r.saved, 'person', 'people')}</span></li>`,
       r.recent && `<li>${ic('history', 'i-sm muted')}<span>Recently opened by ${plural(r.recent, 'person', 'people')}</span></li>`,
     ].filter(Boolean);
@@ -273,7 +273,7 @@
   A['kh-dup-merge'] = el => merge(el.dataset.key, el.dataset.swap === '1');
   A['kh-dup-dismiss'] = el => dismiss(el.dataset.key);
 
-  /** Archive one copy and repoint collections, saved lists and recent reads to the one kept. Undo restores everything. */
+  /** Archive one copy and repoint reading lists, saved lists and recent reads to the one kept. Undo restores everything. */
   function merge(key, swap = false) {
     const p = pairByKey(key); if (!p) return;
     const { keep, dup } = sides(p, swap); if (!X.res.canEditRes(dup)) return;

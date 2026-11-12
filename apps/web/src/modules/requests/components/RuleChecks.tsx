@@ -14,8 +14,8 @@ const CHECK_UI: Record<CheckState, [LucideIcon, string]> = {
   wait: [CircleDashed, "Not checked yet"],
 };
 
-/** Eligibility lines with numbered policy citations (preview `checkLines`); a number opens the source. */
-export function RuleChecks({ lines }: { lines: readonly CheckLine[] }) {
+/** Eligibility lines with numbered policy citations (preview `checkLines`); a number opens the source in the document preview. */
+export function RuleChecks({ lines, notes = true }: { lines: readonly CheckLine[]; notes?: boolean }) {
   let n = 0;
   return (
     <ul className="rq-checks">
@@ -38,7 +38,7 @@ export function RuleChecks({ lines }: { lines: readonly CheckLine[] }) {
                 ) : null}
               </div>
               {c.detail ? <div className="rq-check__detail">{c.detail}</div> : null}
-              {c.consequence ? <div className="rq-check__note">{c.consequence}</div> : null}
+              {notes && c.consequence ? <div className="rq-check__note">{c.consequence}</div> : null}
             </div>
           </li>
         );

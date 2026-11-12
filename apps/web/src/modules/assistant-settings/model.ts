@@ -46,13 +46,16 @@ export const rolesOf = (d: AssistantDraft): string[] | null => {
   return keys.length ? keys : null;
 };
 
+/** The list an audience sees: its own, else Everyone's (`""`). Resolution is role → Everyone. */
+export const startersFor = (d: AssistantDraft, audience: string): Starter[] => (audience && d.starters[audience] ? d.starters[audience] : (d.starters[""] ?? []));
+
 export function toDraft(a: AssistantLike): AssistantDraft {
-  const starters: Record<string, Starter[]> = {};
+  // Everyone's list always exists; a role's own list only when it has starters.
+  const starters: Record<string, Starter[]> = { "": [] };
   for (const s of a.starterPrompts ?? []) {
     const keys = s.roles?.length ? s.roles : [""];
     for (const key of keys) (starters[key] ??= []).push({ title: s.title ?? "", prompt: s.prompt ?? "" });
   }
-  if (!Object.keys(starters).length) starters[""] = [];
   return {
     instructions: a.instructions ?? "",
     style: a.answerLength ?? "BALANCED",

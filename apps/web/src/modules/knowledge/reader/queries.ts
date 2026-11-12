@@ -114,10 +114,10 @@ export function useRelated(item: string, { enabled = true }: { enabled?: boolean
 }
 
 /**
- * Visible collections (reading lists) that include this document. ListReadingLists has no
- * item filter, so each visible list's entries are read (cached per list).
+ * Visible reading lists that include this document. ListReadingLists has no item filter, so each
+ * visible list's entries are read (cached per list).
  */
-export function useCollectionsIncluding(item: string, { enabled = true }: { enabled?: boolean } = {}) {
+export function useReadingListsIncluding(item: string, { enabled = true }: { enabled?: boolean } = {}) {
   const { id } = useWorkspace();
   const lists = useReadingLists();
   const visible = useMemo(() => (enabled ? (lists.data ?? []).filter((l) => l.type !== "FEATURED").slice(0, 50) : []), [enabled, lists.data]);

@@ -1,37 +1,39 @@
 "use client";
 
-import { Button, buttonVariants, Checkbox } from "@heroui/react";
+import { Button, Checkbox } from "@heroui/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookOpen, ChevronDown, Files, Link as LinkIcon, Link2, Sparkles, Upload, X } from "lucide-react";
+import clsx from "clsx";
+import { BookOpen, ChevronDown, CircleAlert, Files, Library, Link2, Plus, Sparkles, Upload, X } from "lucide-react";
 import NextLink from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
-import { DataTable, EmptyState, FileIcon, IconButton, ItemIcon, NoMatches, SearchInput, SkeletonRows, ErrorState, toast } from "@/components/ui";
+import { BulkBar, EmptyState, ErrorState, FileIcon, IconButton, ItemIcon, NoMatches, SearchInput, SkeletonRows, toast } from "@/components/ui";
 import { errorMessage, resourceId } from "@/lib/api/client";
-import { plural, rel } from "@/lib/format";
+import { plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { createMaterial, deleteMaterial, listAllItems, quote, type Item } from "@/modules/knowledge/api";
+import { BaseMark } from "@/modules/knowledge/bases/components/BaseMark";
 import { openContribute } from "@/modules/knowledge/components/contribute-store";
 import { KnowledgeModal } from "@/modules/knowledge/components/KnowledgeModal";
-import { LifecycleChip } from "@/modules/knowledge/components/LifecycleChip";
 import { ResourceList, ResourceRow } from "@/modules/knowledge/components/ResourceRow";
 import { useKnowledgeModel } from "@/modules/knowledge/queries";
-import { newWorkHref, workflowsFor } from "@/modules/work/kinds";
+import { catalogHref } from "@/modules/knowledge/model";
+import { originParam, readerHref } from "@/modules/knowledge/reader/links";
+import { newWorkHref, workflowsFor } from "@/modules/work";
 
 import { invalidateSpaces, useSpaceBases, useSpaceMaterials } from "../queries";
-import type { SpaceView } from "./context";
-import { Menu } from "./Menu";
+import { TOOLS_MIN, type SpaceView } from "./context";
+import { Menu, type MenuNode } from "./Menu";
 
 const isEditor = (b: Item) => b.access === "EDITOR" || b.access === "OWNER";
 
-/** Materials (preview `materialsTab`): documents of the linked bases, plus resources linked from other bases. */
+/** Materials (preview `materialsTab`): documents of the linked collections, plus documents linked from other collections. */
 export function MaterialsTab({ view }: { view: SpaceView }) {
   const { space, sid, manage, can } = view;
-  const { settings, hasModule } = useWorkspace();
+  const { id: ws, settings, hasModule } = useWorkspace();
   const router = useRouter();
   const qc = useQueryClient();
-  const { id: ws } = useWorkspace();
   const bases = useSpaceBases(space);
   const materials = useSpaceMaterials(sid);
   const model = useKnowledgeModel();
@@ -43,18 +45,42 @@ export function MaterialsTab({ view }: { view: SpaceView }) {
   const editable = readable.filter(isEditor);
   const own = new Set(readable.map((b) => b.name));
   const linked = (materials.data ?? []).filter((m) => m.item.itemType === "DOCUMENT" && !m.item.ancestors?.some((a) => own.has(a.name)) && !own.has(m.item.parentItem));
-  const canLink = can("materials.create");
-  const workflows = hasModule("work") && view.role ? workflowsFor(settings, space) : [];
+  const workflows = hasModule("work") && !view.visitor ? workflowsFor(settings, space) : [];
   const pick = workflows.length > 0;
   const needle = q.trim().toLowerCase();
   const linkedMatches = needle ? linked.filter((m) => (m.item.displayName ?? "").toLowerCase().includes(needle)) : linked;
+  const total = readable.reduce((n, b) => n + (b.collection?.documentCount ?? 0), 0) + linked.length;
+  const openDoc = (item: string) => router.push(readerHref({ item, from: originParam({ kind: "space", id: sid }) }));
 
-  const linkButton = canLink ? (
-    <Button variant="tertiary" onPress={() => setLinking(true)}>
-      <Link2 aria-hidden />
-      Link resources
-    </Button>
-  ) : null;
+  /** Add materials ▾ (preview `addMaterials`): contribute to a linked collection, link a collection, link documents. */
+  function addMaterials(variant: "primary" | "tertiary"): ReactNode {
+    if (!manage)
+      return editable.length === 1 ? (
+        <Button variant={variant} onPress={() => openContribute({ collection: editable[0].name })}>
+          <Upload aria-hidden />
+          Contribute
+        </Button>
+      ) : null;
+    const nodes: MenuNode[] = editable.map((b) => ({
+      id: `contribute-${b.name}`,
+      label: editable.length === 1 ? "Contribute documents" : `Contribute to ${b.displayName}`,
+      icon: Upload,
+      run: () => openContribute({ collection: b.name }),
+    }));
+    nodes.push({ id: "link-collection", label: "Link a collection", icon: Library, run: () => router.push(`/space/${sid}?tab=settings`) });
+    if (can("materials.create")) nodes.push({ id: "link-docs", label: "Link documents", icon: Link2, run: () => setLinking(true) });
+    return (
+      <Menu label="Add materials" nodes={nodes}>
+        <Button variant={variant}>
+          <Plus aria-hidden />
+          Add materials
+          <ChevronDown aria-hidden />
+        </Button>
+      </Menu>
+    );
+  }
+
+  const dialog = linking ? <LinkDocumentsDialog view={view} exclude={new Set(linked.map((m) => m.item.name ?? ""))} ownBases={own} onClose={() => setLinking(false)} /> : null;
 
   if (bases.isError && !bases.data) return <ErrorState error={bases.error} onRetry={bases.refetch} />;
   if (bases.isPending || materials.isPending) return <SkeletonRows rows={6} />;
@@ -66,20 +92,10 @@ export function MaterialsTab({ view }: { view: SpaceView }) {
           icon={BookOpen}
           boxed
           title="No materials yet"
-          description={manage ? "Link a knowledge base so members can read and ask about its documents." : "Nothing has been shared here yet."}
-          actions={
-            <>
-              {manage ? (
-                <NextLink href={`/space/${sid}?tab=settings`} className={buttonVariants({ variant: "primary" })}>
-                  <LinkIcon aria-hidden />
-                  Link knowledge
-                </NextLink>
-              ) : null}
-              {linkButton}
-            </>
-          }
+          description={manage ? "Link a collection or single documents so members can read and ask about them." : "Nothing has been shared here yet."}
+          actions={addMaterials("primary")}
         />
-        {linking ? <LinkResourcesDialog view={view} exclude={new Set(linked.map((m) => m.item.name ?? ""))} ownBases={own} onClose={() => setLinking(false)} /> : null}
+        {dialog}
       </>
     );
 
@@ -98,62 +114,62 @@ export function MaterialsTab({ view }: { view: SpaceView }) {
     }
   }
 
+  const add = addMaterials("tertiary");
+  const search = total >= TOOLS_MIN || q ? <SearchInput value={q} onChange={setQ} placeholder="Search materials" /> : null;
+  const toggle = (id: string, on: boolean) => {
+    const next = new Set(selected);
+    if (on) next.add(id);
+    else next.delete(id);
+    setSelected(next);
+  };
+
   return (
     <>
-      <div className="toolbar">
-        <SearchInput value={q} onChange={setQ} placeholder="Search materials" />
-        <div className="toolbar__end">
-          {linkButton}
-          {editable.length === 1 ? (
-            <Button variant="tertiary" onPress={() => openContribute({ collection: editable[0].name })}>
-              <Upload aria-hidden />
-              Add materials
-            </Button>
-          ) : null}
+      {search || add ? (
+        <div className="toolbar">
+          {search}
+          <div className="toolbar__end">{add}</div>
         </div>
-      </div>
-      <div className="stack gap-24">
+      ) : null}
+      <div className={clsx("sp-mats", pick && selected.size > 0 && "has-sel")}>
         {readable.map((b) => (
-          <BaseGroup
-            key={b.name}
-            base={b}
-            q={needle}
-            multi={editable.length > 1}
-            pick={pick}
-            selected={selected}
-            onSelected={setSelected}
-          />
+          <CollectionGroup key={b.name} base={b} q={needle} pick={pick} selected={selected} onToggle={toggle} onOpen={openDoc} />
         ))}
         {linkedMatches.length ? (
-          <div className="sp-mat">
+          <section className="sp-mat">
             <div className="sp-mat__head">
               <ItemIcon icon={Link2} size="sm" />
-              <span className="sp-mat__name truncate">Linked from other knowledge bases</span>
-              <span className="t-sm muted none">{plural(linked.length, "resource")}</span>
+              <span className="sp-mat__name truncate">Linked from other collections</span>
+              <span className="t-sm muted none">{plural(linked.length, "document")}</span>
             </div>
             <ResourceList>
-              {linkedMatches.map((m) => (
-                <ResourceRow
-                  key={m.material}
-                  resource={model.toResource(m.item)}
-                  compact
-                  trail={
-                    can("materials.delete") ? (
-                      <Button variant="ghost" size="sm" onPress={() => void unlink(m.material, m.item)}>
-                        Unlink
-                      </Button>
-                    ) : undefined
-                  }
-                />
-              ))}
+              {linkedMatches.map((m) => {
+                const id = resourceId(m.item.name);
+                return (
+                  <ResourceRow
+                    key={m.material}
+                    resource={model.toResource(m.item)}
+                    compact
+                    onOpen={() => openDoc(id)}
+                    selected={selected.has(id)}
+                    onSelectChange={pick ? (on) => toggle(id, on) : undefined}
+                    trail={
+                      can("materials.delete") ? (
+                        <span className="reveal-on-hover">
+                          <IconButton icon={X} tip="Unlink from this space" size="sm" onPress={() => void unlink(m.material, m.item)} />
+                        </span>
+                      ) : undefined
+                    }
+                  />
+                );
+              })}
             </ResourceList>
-          </div>
+          </section>
         ) : null}
-        {needle && !linkedMatches.length && readable.length === 0 ? <NoMatches what="documents" onClear={() => setQ("")} /> : null}
+        {needle && !linkedMatches.length && !readable.length ? <NoMatches what="documents" onClear={() => setQ("")} /> : null}
       </div>
-      {pick && selected.size > 0 ? (
-        <div className="bulk-bar" role="toolbar" aria-label="Bulk actions">
-          <span className="bulk-bar__count">{selected.size} selected</span>
+      {pick ? (
+        <BulkBar count={selected.size} onClear={() => setSelected(new Set())}>
           <Menu
             label="Use in a workflow"
             placement="bottom start"
@@ -179,149 +195,110 @@ export function MaterialsTab({ view }: { view: SpaceView }) {
               <ChevronDown aria-hidden />
             </Button>
           </Menu>
-          <IconButton icon={X} tip="Clear selection" size="sm" onPress={() => setSelected(new Set())} />
-        </div>
+        </BulkBar>
       ) : null}
-      {linking ? <LinkResourcesDialog view={view} exclude={new Set(linked.map((m) => m.item.name ?? ""))} ownBases={own} onClose={() => setLinking(false)} /> : null}
+      {dialog}
     </>
   );
 }
 
-interface BaseGroupProps {
+interface CollectionGroupProps {
   base: Item;
   q: string;
-  /** More than one editable base: per-group "Add documents". */
-  multi: boolean;
   pick: boolean;
   selected: Set<string>;
-  onSelected: (ids: Set<string>) => void;
+  onToggle: (id: string, on: boolean) => void;
+  onOpen: (id: string) => void;
 }
 
-/** One linked knowledge base: its published documents (editors also see lifecycle). */
-function BaseGroup({ base, q, multi, pick, selected, onSelected }: BaseGroupProps) {
+/** One linked collection: its documents as shared resource rows (preview `group`). */
+function CollectionGroup({ base, q, pick, selected, onToggle, onOpen }: CollectionGroupProps) {
   const { id: ws } = useWorkspace();
+  const model = useKnowledgeModel();
   const edit = isEditor(base);
   const docs = useQuery({
     queryKey: [ws, "items", "spaceMaterials", base.name],
-    queryFn: () => listAllItems(ws, { filter: `ancestors:${quote(base.name ?? "")} AND itemType = DOCUMENT`, orderBy: "updateTime desc" }, 500),
+    queryFn: () => listAllItems(ws, { filter: `ancestors:${quote(base.name ?? "")} AND itemType = DOCUMENT`, orderBy: "updateTime desc", view: "FULL" }, 500),
   });
   const all = docs.data ?? [];
   const rows = q ? all.filter((d) => (d.displayName ?? "").toLowerCase().includes(q)) : all;
   if (q && docs.isSuccess && !rows.length) return null;
-  const ids = new Set(rows.map((d) => resourceId(d.name)));
 
   const head = (
     <div className="sp-mat__head">
-      <ItemIcon icon={BookOpen} size="sm" />
-      <NextLink className="sp-mat__name truncate" href={`/bases/${resourceId(base.name)}`} translate="no">
+      <BaseMark base={base} size={24} />
+      <NextLink className="sp-mat__name truncate" href={catalogHref({ filters: { kb: [resourceId(base.name)] } })} translate="no">
         {base.displayName}
       </NextLink>
       <span className="t-sm muted none">{plural(docs.data?.length ?? base.collection?.documentCount ?? 0, "document")}</span>
-      {edit && multi ? (
-        <>
-          <span className="grow" />
-          <Button variant="ghost" size="sm" onPress={() => openContribute({ collection: base.name })}>
-            <Upload aria-hidden />
-            Add documents
-          </Button>
-        </>
-      ) : null}
     </div>
   );
 
-  if (docs.isError && !docs.data)
-    return (
-      <div className="sp-mat">
-        {head}
-        <ErrorState error={docs.error} onRetry={docs.refetch} />
-      </div>
+  let body: ReactNode;
+  if (docs.isError && !docs.data) body = <ErrorState error={docs.error} onRetry={docs.refetch} />;
+  else if (!docs.data) body = <SkeletonRows rows={3} />;
+  else if (!all.length)
+    body = (
+      <EmptyState
+        icon={Files}
+        compact
+        boxed
+        title="No documents yet"
+        description={edit ? "Contribute slides, readings or reports. They’re published after review." : undefined}
+        actions={
+          edit ? (
+            <Button variant="tertiary" onPress={() => openContribute({ collection: base.name })}>
+              <Upload aria-hidden />
+              Contribute
+            </Button>
+          ) : null
+        }
+      />
     );
-  if (!docs.data)
-    return (
-      <div className="sp-mat">
-        {head}
-        <SkeletonRows rows={3} />
-      </div>
-    );
-  if (!all.length)
-    return (
-      <div className="sp-mat">
-        {head}
-        <EmptyState
-          icon={Files}
-          compact
-          boxed
-          title="No documents yet"
-          description={edit ? "Add slides, readings or past papers. They’re published after review." : undefined}
-          actions={
-            edit ? (
-              <Button variant="tertiary" onPress={() => openContribute({ collection: base.name })}>
-                <Upload aria-hidden />
-                Add documents
-              </Button>
-            ) : null
-          }
-        />
-      </div>
+  else
+    body = (
+      <ResourceList>
+        {rows.map((d) => {
+          const id = resourceId(d.name);
+          return (
+            <ResourceRow
+              key={d.name}
+              resource={model.toResource(d)}
+              compact
+              onOpen={() => onOpen(id)}
+              selected={selected.has(id)}
+              onSelectChange={pick ? (on) => onToggle(id, on) : undefined}
+            />
+          );
+        })}
+      </ResourceList>
     );
 
   return (
-    <div className="sp-mat">
+    <section className="sp-mat">
       {head}
-      <DataTable<Item>
-        label={base.displayName ?? "Documents"}
-        rows={rows}
-        getRowId={(d) => resourceId(d.name)}
-        rowHref={(d) => `/doc/${resourceId(d.name)}`}
-        selectedIds={pick ? new Set([...selected].filter((i) => ids.has(i))) : undefined}
-        onSelectionChange={
-          pick
-            ? (next) => {
-                const merged = new Set([...selected].filter((i) => !ids.has(i)));
-                for (const i of next) merged.add(i);
-                onSelected(merged);
-              }
-            : undefined
-        }
-        rowLabel={(d) => d.displayName ?? ""}
-        columns={[
-          {
-            id: "name",
-            header: "Name",
-            primary: true,
-            cell: (d) => (
-              <div className="row gap-12">
-                <FileIcon name={d.displayName} mime={d.document?.mimeType} />
-                <span className="cell-title truncate" translate="no">
-                  {d.displayName}
-                </span>
-              </div>
-            ),
-          },
-          { id: "updated", header: "Updated", className: "sp-nowrap", mobileLabel: "Updated", cell: (d) => rel(d.updateTime) },
-          ...(edit ? [{ id: "status", header: "Status", cell: (d: Item) => <LifecycleChip item={d} size="sm" /> }] : []),
-        ]}
-      />
-    </div>
+      {body}
+    </section>
   );
 }
 
-interface LinkResourcesDialogProps {
+interface LinkDocumentsDialogProps {
   view: SpaceView;
   /** Items already linked. */
   exclude: Set<string>;
-  /** The space's own bases (their documents are already materials). */
+  /** The space's own collections (their documents are already materials). */
   ownBases: Set<string | undefined>;
   onClose: () => void;
 }
 
-/** Link resources (preview `M['sp-link-res']`): pin documents from other bases; access doesn't change. */
-function LinkResourcesDialog({ view, exclude, ownBases, onClose }: LinkResourcesDialogProps) {
+/** Link documents (preview `M['sp-link-res']`): show documents from other collections in Materials; access doesn't change. */
+function LinkDocumentsDialog({ view, exclude, ownBases, onClose }: LinkDocumentsDialogProps) {
   const { id: ws } = useWorkspace();
   const qc = useQueryClient();
   const model = useKnowledgeModel();
   const [q, setQ] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
+  const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const catalog = useQuery({
     queryKey: [ws, "items", "spaceLinkCatalog"],
@@ -333,15 +310,19 @@ function LinkResourcesDialog({ view, exclude, ownBases, onClose }: LinkResources
     .filter((d) => !model.ctx.personalCollection || d.ancestors?.[0]?.name !== model.ctx.personalCollection)
     .filter((d) => !needle || (d.displayName ?? "").toLowerCase().includes(needle))
     .slice(0, 25);
+  const n = picked.length;
 
   async function link() {
-    if (!picked.length) return;
+    if (!n) {
+      setErr("Select at least one document.");
+      return;
+    }
     setBusy(true);
     try {
       const made = await Promise.all(picked.map((item) => createMaterial(ws, view.sid, resourceId(item))));
       void invalidateSpaces(qc, ws);
       onClose();
-      toast(`Linked ${plural(made.length, "resource")} to ${view.space.displayName}`, {
+      toast(`Linked ${plural(made.length, "document")} to ${view.space.displayName}`, {
         undo: () =>
           void Promise.all(made.map((m) => deleteMaterial(ws, m.name ?? "")))
             .then(() => invalidateSpaces(qc, ws))
@@ -358,58 +339,73 @@ function LinkResourcesDialog({ view, exclude, ownBases, onClose }: LinkResources
       isOpen
       onClose={onClose}
       guard={busy}
-      title="Link resources"
-      description={<span translate="no">{view.space.displayName}</span>}
+      size="lg"
+      icon={Link2}
+      title="Link documents"
+      description="Show documents from other collections in Materials and use them in workflows. Who can open them doesn’t change."
+      footerStart={<span>{n ? `${plural(n, "document")} selected` : "They stay in their collection."}</span>}
       footer={
         <>
-          <Button variant="tertiary" onPress={onClose} isDisabled={busy}>
+          <Button variant="ghost" onPress={onClose} isDisabled={busy}>
             Cancel
           </Button>
-          <Button variant="primary" onPress={() => void link()} isPending={busy} isDisabled={!picked.length}>
-            {picked.length ? `Link ${plural(picked.length, "resource")}` : "Link"}
+          <Button variant="primary" onPress={() => void link()} isPending={busy}>
+            <Link2 aria-hidden />
+            {n ? `Link ${plural(n, "document")}` : "Link documents"}
           </Button>
         </>
       }
     >
-      <SearchInput value={q} onChange={setQ} placeholder="Search the catalog" fullWidth autoFocus />
-      <div className="res-picks mt-12 sp-link-picks">
-        {catalog.isPending ? (
+      <SearchInput value={q} onChange={setQ} placeholder="Search by title or topic" fullWidth autoFocus />
+      {catalog.isPending ? (
+        <div className="mt-12">
           <SkeletonRows rows={4} />
-        ) : catalog.isError ? (
-          <ErrorState error={catalog.error} onRetry={catalog.refetch} boxed={false} />
-        ) : found.length ? (
-          found.map((d) => {
+        </div>
+      ) : catalog.isError ? (
+        <ErrorState error={catalog.error} onRetry={catalog.refetch} boxed={false} />
+      ) : found.length ? (
+        <div className="option-list sp-options mt-12" role="group" aria-label="Documents">
+          {found.map((d) => {
             const r = model.toResource(d);
             return (
-              <div key={d.name} className="res-pick">
-                <Checkbox
-                  isSelected={picked.includes(d.name ?? "")}
-                  onChange={(on) => setPicked(on ? [...picked, d.name ?? ""] : picked.filter((x) => x !== d.name))}
-                >
-                  <Checkbox.Content>
-                    <Checkbox.Control>
-                      <Checkbox.Indicator />
-                    </Checkbox.Control>
-                    <span className="stack">
-                      <span className="medium" translate="no">
+              <Checkbox
+                key={d.name}
+                className="checkbox"
+                isSelected={picked.includes(d.name ?? "")}
+                onChange={(on) => {
+                  setErr("");
+                  setPicked(on ? [...picked, d.name ?? ""] : picked.filter((x) => x !== d.name));
+                }}
+              >
+                <Checkbox.Content className="checkbox__label">
+                  <Checkbox.Control>
+                    <Checkbox.Indicator />
+                  </Checkbox.Control>
+                  <span className="sp-opt">
+                    <FileIcon name={d.displayName} mime={d.document?.mimeType} size="sm" />
+                    <span className="sp-opt__text">
+                      <span className="sp-opt__title truncate" translate="no">
                         {r.title}
                       </span>
-                      <span className="t-xs muted">
+                      <span className="sp-opt__meta truncate">
                         {r.typeLabel} · <span translate="no">{r.base?.displayName ?? ""}</span>
                       </span>
                     </span>
-                  </Checkbox.Content>
-                </Checkbox>
-              </div>
+                  </span>
+                </Checkbox.Content>
+              </Checkbox>
             );
-          })
-        ) : (
-          <p className="t-sm muted" style={{ padding: 12 }}>
-            {needle ? "No resources match." : "Nothing left to link."}
-          </p>
-        )}
-      </div>
-      <p className="t-xs muted mt-12">Linked resources show in Materials. They stay in their knowledge base, and access doesn’t change.</p>
+          })}
+        </div>
+      ) : (
+        <p className="t-sm muted sp-options__empty">{needle ? "No documents match. Try another word." : "Every document you can read is already here."}</p>
+      )}
+      {err ? (
+        <div className="field-error mt-8" role="alert">
+          <CircleAlert className="i" aria-hidden />
+          <span>{err}</span>
+        </div>
+      ) : null}
     </KnowledgeModal>
   );
 }

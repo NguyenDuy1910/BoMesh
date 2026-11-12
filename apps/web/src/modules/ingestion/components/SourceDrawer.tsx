@@ -1,26 +1,28 @@
 "use client";
 
-import { Button, Card, Dropdown } from "@heroui/react";
-import { ArrowUpRight, BookOpen, ChevronRight, Folder, History, MoreHorizontal, Pause, Play, Plug, RefreshCw, Trash2 } from "lucide-react";
-import NextLink from "next/link";
+import { Button, Card, Dropdown, Separator } from "@heroui/react";
+import { ArrowUpRight, BookOpen, Clock, Folder, History, MoreHorizontal, Pause, Play, Plug, RefreshCw, Trash2 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { Callout, ChoiceGroup, EmptyState, IconButton, KeyValue, List, ListItem, SkeletonRows, StatusChip } from "@/components/ui";
+import { Callout, ChoiceGroup, Disclosure, EmptyState, IconButton, KeyValue, LinkButton, List, ListItem, SkeletonRows, StatusChip } from "@/components/ui";
 import { resourceId } from "@/lib/api/client";
-import { fmtDateTime, plural, rel, relFuture } from "@/lib/format";
+import { fmtDateTime, fmtNum, plural, rel, relFuture } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
-import { baseColor } from "@/modules/knowledge/bases/model";
 import { useItem } from "@/modules/knowledge/queries";
 
 import type { SourceActions } from "../actions";
 import type { Connection, Source, Sync } from "../api";
-import { accountLabel, accountStatus, accountUser, appName, canTogglePause, lastSyncText, POLICY, POLICY_CHOICES, policyOf, scopeText, sourceName, sourceStatus, syncDeltaText, syncStatus } from "../model";
+import { accountLabel, accountStatus, accountUser, appName, canTogglePause, lastSyncText, POLICY, POLICY_CHOICES, policyOf, scopeText, sourceName, sourceStatus, syncDeltaText, syncedWithIssues, syncStatus } from "../model";
 import { openReconnect } from "../overlays";
 import { useSource, useSyncs } from "../queries";
-import { draftDirty, draftFrom, nextSyncAt, tzShort, type ScheduleDraft } from "../schedule";
+import { draftDirty, draftFrom, nextSyncAt, scheduleText, tzShort, type ScheduleDraft } from "../schedule";
 import { ScheduleFields } from "./ScheduleFields";
 import { Sheet, SheetSection } from "./Sheet";
-import { SourceAppIcon, SourceStatusChip, useParamState } from "./shared";
+import { CollectionLink, SourceAppIcon, SourceStatusChip, useParamState, useSyncIndex } from "./shared";
+
+/** Studio → Sync history filtered to one source. */
+export const historyHref = (source: string | undefined) => `/studio?tab=sources&view=history&source=${resourceId(source)}`;
 
 /** The source drawer (preview `DR['src-source']`), opened by `?open=<source id>`. */
 export function SourceDrawer({
@@ -46,7 +48,7 @@ export function SourceDrawer({
   if (!source) {
     return (
       <Sheet isOpen onClose={close} title={query.isError ? "Source disconnected" : "Source"}>
-        {query.isError ? <EmptyState icon={Plug} title="This source was disconnected" description="Documents it synced stay in their knowledge base." /> : <SkeletonRows rows={5} />}
+        {query.isError ? <EmptyState icon={Plug} title="This source was disconnected" description="Documents it synced stay in their collection." /> : <SkeletonRows rows={5} />}
       </Sheet>
     );
   }
@@ -69,22 +71,23 @@ function SourceSheet({
   onOpenSync: (sync: Sync) => void;
 }) {
   const { can } = useWorkspace();
-  const { set } = useParamState();
+  const router = useRouter();
   const manage = can("sources.create");
   const connection = connections.get(source.connection);
-  const kb = useItem(source.targetCollection);
-  const kbName = kb.data?.displayName;
+  const collection = useItem(source.targetCollection);
+  const collectionName = collection.data?.displayName;
+  const syncs = useSyncs(source.name, 5);
   const status = sourceStatus(source);
   const syncing = status === "syncing";
   const paused = status === "paused";
+  const waiting = source.pendingDocumentCount ?? 0;
+  const [policyOpen, setPolicyOpen] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(focus === "schedule");
 
   useEffect(() => {
     if (focus !== "schedule") return;
-    const frame = requestAnimationFrame(() => {
-      const section = document.getElementById("src-sched");
-      section?.scrollIntoView({ block: "start" });
-      section?.querySelector<HTMLElement>("[aria-checked='true'],[aria-pressed='true'],[data-selected='true']")?.focus();
-    });
+    setScheduleOpen(true);
+    const frame = requestAnimationFrame(() => document.getElementById("src-sched")?.scrollIntoView({ block: "start" }));
     return () => cancelAnimationFrame(frame);
   }, [focus]);
 
@@ -95,14 +98,15 @@ function SourceSheet({
         <Dropdown.Menu
           aria-label="Source actions"
           onAction={(key) => {
-            if (key === "history") set({ tab: "history", source: resourceId(source.name), status: null, page: null, open: null, focus: null });
-            if (key === "disconnect") void actions.disconnect(source, kbName).then((done) => done && onClose());
+            if (key === "history") router.push(historyHref(source.name));
+            if (key === "disconnect") void actions.disconnect(source, collectionName).then((done) => done && onClose());
           }}
         >
           <Dropdown.Item id="history" textValue="View sync history">
             <History className="i" aria-hidden />
             View sync history
           </Dropdown.Item>
+          <Separator />
           <Dropdown.Item id="disconnect" textValue="Disconnect" variant="danger">
             <Trash2 className="i" aria-hidden />
             Disconnect
@@ -112,13 +116,30 @@ function SourceSheet({
     </Dropdown>
   ) : null;
 
+  // One primary: the state's fix (Reconnect when expired, Publish when files wait), else Sync now.
   let footer = null;
   if (manage) {
+    const syncNow = (primary: boolean) => (
+      <Button variant={primary ? "primary" : "secondary"} isDisabled={!connection || paused} isPending={syncing} onPress={() => void actions.syncNow(source)}>
+        <RefreshCw className="i" aria-hidden />
+        {syncing ? "Syncing…" : "Sync now"}
+      </Button>
+    );
     if (status === "reconnect")
       footer = (
         <Button variant="primary" onPress={() => openReconnect(source.connection)}>
           Reconnect
         </Button>
+      );
+    else if (waiting && !syncing)
+      footer = (
+        <>
+          {syncNow(false)}
+          <Button variant="primary" onPress={() => void actions.publish([source])}>
+            <Play className="i" aria-hidden />
+            {`Publish ${fmtNum(waiting)}`}
+          </Button>
+        </>
       );
     else
       footer = (
@@ -127,73 +148,73 @@ function SourceSheet({
             {paused ? <Play className="i" aria-hidden /> : <Pause className="i" aria-hidden />}
             {paused ? "Resume" : "Pause"}
           </Button>
-          <Button variant="primary" isDisabled={!connection || paused} isPending={syncing} onPress={() => void actions.syncNow(source)}>
-            <RefreshCw className="i" aria-hidden />
-            {syncing ? "Syncing…" : "Sync now"}
-          </Button>
+          {syncNow(true)}
         </>
       );
   }
 
   const app = connection?.connector;
+  const policy = POLICY[policyOf(source)];
   return (
     <Sheet
       isOpen
       onClose={onClose}
       lead={<SourceAppIcon source={source} connections={connections} size="lg" />}
       title={sourceName(source)}
-      description={`${appName(app)}${connection ? ` · ${accountLabel(connection)}` : ""}`}
+      description={appName(app)}
       headActions={menu}
       footer={footer}
     >
-      <Summary source={source} connection={connection} kbName={kbName} actions={actions} manage={manage} />
+      <Summary source={source} connection={connection} collectionName={collectionName} syncs={syncs.data} onOpenSync={onOpenSync} documents={collection.data?.collection?.documentCount} />
       <SheetSection title="What it syncs">
         <List>
           <ListItem lead={app === "connectors/google_drive" ? <Folder className="i muted" aria-hidden /> : <BookOpen className="i muted" aria-hidden />} title={scopeText(source)} contentTitle />
         </List>
       </SheetSection>
-      <SheetSection title="Destination">
-        <List>
-          <ListItem
-            lead={<span className="src-kb__dot src-kb__dot--lg" style={{ background: baseColor(source.targetCollection) }} aria-hidden />}
-            title={kbName ?? (kb.isError ? "Removed knowledge base" : "Knowledge base")}
-            contentTitle
-            description={kb.data?.collection?.childCount != null ? plural(kb.data.collection.childCount, "item") : undefined}
-            actions={kb.data ? <ChevronRight className="i muted" aria-hidden /> : undefined}
-            href={kb.data ? `/bases/${resourceId(source.targetCollection)}?tab=documents` : undefined}
-          />
-        </List>
-      </SheetSection>
-      <SheetSection title="New and changed files" id="src-policy">
-        <PolicyForm source={source} manage={manage} actions={actions} />
-      </SheetSection>
       {manage ? (
-        <SheetSection title="Schedule" id="src-sched">
-          <ScheduleForm key={`${source.name}-${source.etag}`} source={source} actions={actions} />
-        </SheetSection>
-      ) : null}
-      <RecentSyncs source={source} onOpenSync={onOpenSync} />
-      {manage ? (
-        <SheetSection title="Disconnect">
-          <div className="src-danger">
-            <p className="description grow">Stops syncing. Documents already in {kbName || "the knowledge base"} stay.</p>
-            <Button variant="danger-soft" size="sm" onPress={() => void actions.disconnect(source, kbName).then((done) => done && onClose())}>
-              Disconnect
-            </Button>
+        <SheetSection title="Settings" id="src-sched">
+          <div className="stack gap-8">
+            <Disclosure icon={policy.icon} title="New and changed files" summary={policy.label} isOpen={policyOpen} onOpenChange={setPolicyOpen}>
+              <PolicyForm source={source} manage actions={actions} />
+            </Disclosure>
+            <Disclosure icon={Clock} title="Sync schedule" summary={scheduleText(source.schedule)} isOpen={scheduleOpen} onOpenChange={setScheduleOpen}>
+              <ScheduleForm key={`${source.name}-${source.etag}`} source={source} actions={actions} />
+            </Disclosure>
           </div>
         </SheetSection>
-      ) : null}
+      ) : (
+        <SheetSection title="New and changed files" id="src-policy">
+          <PolicyForm source={source} manage={false} actions={actions} />
+        </SheetSection>
+      )}
+      <RecentSyncs source={source} syncs={syncs.data} isPending={syncs.isPending} onOpenSync={onOpenSync} />
     </Sheet>
   );
 }
 
-function Summary({ source, connection, kbName, actions, manage }: { source: Source; connection: Connection | undefined; kbName: string | undefined; actions: SourceActions; manage: boolean }) {
+function Summary({
+  source,
+  connection,
+  collectionName,
+  documents,
+  syncs,
+  onOpenSync,
+}: {
+  source: Source;
+  connection: Connection | undefined;
+  collectionName: string | undefined;
+  documents: number | undefined;
+  syncs: readonly Sync[] | undefined;
+  onOpenSync: (sync: Sync) => void;
+}) {
   const status = sourceStatus(source);
-  const lastError = useSyncs(source.name, 5).data?.find((x) => x.name === source.lastSync?.sync)?.error?.message;
+  const byName = useSyncIndex(syncs);
+  const lastError = byName.get(source.lastSync?.sync ?? "")?.error?.message;
   const app = appName(connection?.connector);
+  const waiting = source.pendingDocumentCount ?? 0;
   let top = null;
   if (status === "reconnect")
-    top = <Callout tone="danger" title={`${app} access expired`} description={`Sign in again as ${accountUser(connection)}. Documents in ${kbName || "the knowledge base"} stay searchable.`} />;
+    top = <Callout tone="danger" title={`${app} access expired`} description={`Sign in again as ${accountUser(connection)}. Documents in ${collectionName || "the collection"} stay searchable.`} />;
   else if (status === "failed") top = <Callout tone="danger" title="Last sync failed" description={lastError || "Try syncing again."} />;
   else if (!connection) top = <Callout tone="warning" title="No account" description="The account this source used is no longer connected." />;
   else if (status === "paused") top = <Callout title="Paused" description="Scheduled syncs are off until you resume." />;
@@ -205,23 +226,27 @@ function Summary({ source, connection, kbName, actions, manage }: { source: Sour
       </Card>
     );
   }
-  const waiting = source.pendingDocumentCount ?? 0;
-  if (!top && waiting)
-    top = (
+  // The fix (Publish) is the footer's primary; the alert only explains.
+  if (!top && waiting) top = <Callout tone="accent" title={`${plural(waiting, "document")} waiting to publish`} description="They synced into the collection but aren’t searchable yet." />;
+  // Files that couldn't be read are their own problem, shown beside any other note.
+  let issues = null;
+  if (syncedWithIssues(source)) {
+    const run = byName.get(source.lastSync?.sync ?? "");
+    issues = (
       <Callout
-        tone="accent"
-        title={`${plural(waiting, "document")} waiting to publish`}
-        description="Synced into the knowledge base. Publish them to make them searchable."
+        tone="warning"
+        title={`${plural(source.lastSync?.failedCount ?? 0, "file")} couldn’t be read in the last sync`}
+        description="Everything else synced."
         actions={
-          manage ? (
-            <Button size="sm" variant="primary" onPress={() => void actions.publish([source])}>
-              <Play className="i" aria-hidden />
-              Publish
+          run ? (
+            <Button size="sm" variant="secondary" onPress={() => onOpenSync(run)}>
+              See files
             </Button>
           ) : null
         }
       />
     );
+  }
 
   const last = source.lastSync;
   const draft = draftFrom(source.schedule);
@@ -243,10 +268,15 @@ function Summary({ source, connection, kbName, actions, manage }: { source: Sour
 
   return (
     <section className="drawer__section">
-      {top ? <div className="mb-16">{top}</div> : null}
+      {top || issues ? (
+        <div className="stack gap-8 mb-16">
+          {top}
+          {issues}
+        </div>
+      ) : null}
       <KeyValue
         pairs={[
-          ["Status", <SourceStatusChip key="s" source={source} />],
+          ["Status", <SourceStatusChip key="s" source={source} syncs={byName} />],
           [
             "Last sync",
             last && last.state !== "RUNNING" ? (
@@ -260,6 +290,13 @@ function Summary({ source, connection, kbName, actions, manage }: { source: Sour
             ),
           ],
           ["Next sync", nextCell],
+          [
+            "Collection",
+            <div key="c" className="row gap-8 src-min">
+              <CollectionLink name={source.targetCollection} label={collectionName} />
+              {documents != null ? <span className="t-sm muted none">{plural(documents, "document")}</span> : null}
+            </div>,
+          ],
           [
             "Account",
             <div key="a" className="row gap-8 wrap">
@@ -277,25 +314,30 @@ function Summary({ source, connection, kbName, actions, manage }: { source: Sour
           ],
         ]}
       />
+      <ReviewLine source={source} />
     </section>
   );
 }
 
-function PolicyForm({ source, manage, actions }: { source: Source; manage: boolean; actions: SourceActions }) {
+/** Synced files from this source that wait for a reviewer (review-first policy). */
+function ReviewLine({ source }: { source: Source }) {
   const { can } = useWorkspace();
-  const current = policyOf(source);
   const inReview = source.inReviewCount ?? 0;
-  const queue = inReview ? (
-    <div className="row gap-8 wrap mt-8">
+  if (!inReview) return null;
+  return (
+    <div className="row gap-8 wrap mt-12">
       <span className="t-sm muted">{`${plural(inReview, "file")} from this source waiting in review`}</span>
       {can("contributions.review") ? (
-        <NextLink href="/documents?tab=review" className="link-button">
+        <LinkButton href="/studio?tab=review&queue=submissions" icon={ArrowUpRight}>
           Open review
-          <ArrowUpRight className="i i-sm" aria-hidden />
-        </NextLink>
+        </LinkButton>
       ) : null}
     </div>
-  ) : null;
+  );
+}
+
+function PolicyForm({ source, manage, actions }: { source: Source; manage: boolean; actions: SourceActions }) {
+  const current = policyOf(source);
   if (!manage) {
     const meta = POLICY[current];
     const Icon = meta.icon;
@@ -306,7 +348,6 @@ function PolicyForm({ source, manage, actions }: { source: Source; manage: boole
           <span className="medium">{meta.label}</span>
         </div>
         <p className="description mt-4">{meta.desc}</p>
-        {queue}
       </>
     );
   }
@@ -314,7 +355,6 @@ function PolicyForm({ source, manage, actions }: { source: Source; manage: boole
     <>
       <ChoiceGroup label="New and changed files" value={current} options={POLICY_CHOICES} onChange={(v) => void actions.setPolicy(source, v)} />
       <p className="description mt-8">Applies from the next sync. Files already published stay published.</p>
-      {queue}
     </>
   );
 }
@@ -350,22 +390,21 @@ function ScheduleForm({ source, actions }: { source: Source; actions: SourceActi
   );
 }
 
-function RecentSyncs({ source, onOpenSync }: { source: Source; onOpenSync: (sync: Sync) => void }) {
-  const { set } = useParamState();
-  const syncs = useSyncs(source.name, 5);
-  const list = syncs.data ?? [];
+function RecentSyncs({ source, syncs, isPending, onOpenSync }: { source: Source; syncs: readonly Sync[] | undefined; isPending: boolean; onOpenSync: (sync: Sync) => void }) {
+  const router = useRouter();
+  const list = syncs ?? [];
   return (
     <SheetSection
       title="Recent syncs"
       actions={
         list.length ? (
-          <Button variant="ghost" size="sm" onPress={() => set({ tab: "history", source: resourceId(source.name), status: null, page: null, open: null, focus: null })}>
+          <Button variant="ghost" size="sm" onPress={() => router.push(historyHref(source.name))}>
             View all
           </Button>
         ) : null
       }
     >
-      {syncs.isPending ? (
+      {isPending ? (
         <SkeletonRows rows={2} />
       ) : list.length ? (
         <List>
@@ -385,4 +424,3 @@ function RecentSyncs({ source, onOpenSync }: { source: Source; onOpenSync: (sync
     </SheetSection>
   );
 }
-

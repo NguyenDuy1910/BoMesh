@@ -2,14 +2,14 @@
 /* Document lifecycle — contribution, curation and publication are separate steps.
 
    Contribute  Anyone with knowledge.contribute uploads a file and picks (or lets the assistant
-               suggest) the knowledge base. Nothing is published: the document is a submission
+               suggest) the collection. Nothing is published: the document is a submission
                (stage 'review') visible only to its contributor and that base's reviewers.
-   Curate      Reviewers (owners of the target knowledge base; workspace admins own all) work in Knowledge Studio.
+   Curate      Reviewers (owners of the target collection; workspace admins own all) work in Knowledge Studio.
                The assistant classifies every incoming document against the workspace's taxonomy (topics with
                their keywords, synonyms, rules and examples) and suggests type, topics (existing or proposed),
-               knowledge base, summary and flags; reviewers approve, request changes or decline. Only workspace
+               collection, summary and flags; reviewers approve, request changes or decline. Only workspace
                admins change the taxonomy (import it, edit topics, accept or dismiss proposed topics).
-   Publish     Approval publishes: the document joins its knowledge base and is processed
+   Publish     Approval publishes: the document joins its collection and is processed
                (status pending → processing → ready). Only published + ready content reaches
                Browse, search, the reader and the assistant (core/catalog.js pools).
 
@@ -19,7 +19,7 @@
 
 /* ═══════════════ Who can do what ═══════════════ */
 const canContribute = () => can('knowledge.contribute');
-/** Knowledge bases a person may submit to: shared bases they can read that accept contributions. */
+/** Collections a person may submit to: shared bases they can read that accept contributions. */
 const contributionTargets = () => visibleKbs().filter(k => !k.personal && canReadKb(k) && k.contribute !== false);
 /** Reviewers of a base: its owners (workspace admins own every base). */
 const canReviewKb = kb => !!kb && !kb.personal && !kb.archived && kbRole(kb) === 'owner';
@@ -35,7 +35,7 @@ function canSeeDoc(d) {
   return stageOf(d) === 'published' ? canReadKb(kb) : isMine(d) || canReviewKb(kb);
 }
 
-/* ═══════════════ Knowledge base access (one vocabulary everywhere) ═══════════════
+/* ═══════════════ Collection access (one vocabulary everywhere) ═══════════════
    General access and roles use these words in every surface: create dialog, chips, the Access tab,
    filters, Share, Request access and the connect-source wizard. */
 const KB_ACCESS = {
@@ -60,7 +60,7 @@ const KB_ROLE_OPTIONS = Object.entries(KB_ROLES).map(([k, r]) => [k, r.label]);
 
 /* ═══════════════ Lifecycle (one label for people) ═══════════════ */
 const LIFECYCLE = {
-  analyzing: { tone: 'accent', label: 'Analyzing', icon: 'sparkles', live: true, desc: 'Reading the file and suggesting a type, topics and a knowledge base.' },
+  analyzing: { tone: 'accent', label: 'Analyzing', icon: 'sparkles', live: true, desc: 'Reading the file and suggesting a type, topics and a collection.' },
   review: { tone: 'accent', label: 'In review', icon: 'clock', desc: 'A reviewer will check it before it’s published.' },
   changes: { tone: 'warning', label: 'Changes requested', icon: 'pencil', desc: 'A reviewer asked for changes before it can be published.' },
   rejected: { tone: 'danger', label: 'Declined', icon: 'x-circle', desc: 'A reviewer declined it. It won’t be published.' },
@@ -177,7 +177,7 @@ function titleSim(a, b) {
 const phrase = s => ' ' + fold(s).replace(/[^a-z0-9]+/g, ' ').trim() + ' ';
 /** Topic suggestions from these signals, strongest first: a rule on where the file comes from, keywords or synonyms found
     in the title or note, distinctive words of the topic name, the topics of similar published documents, a title close to
-    one of the topic's examples, and what the target knowledge base mostly holds. `doc` ({ name, path, type, source }) is
+    one of the topic's examples, and what the target collection mostly holds. `doc` ({ name, path, type, source }) is
     needed for rules and examples; without it they don't count.
     Returns [{id, score, why:{keywords[], synonyms[], name, similar, example, rule, base}}] (best first, max 3) — `why` is shown to the reviewer. */
 function topicMatches(text, kb, similar = [], doc = null) {
@@ -216,7 +216,7 @@ function topicEvidence(w = {}) {
     w.name && 'the title names it',
     ex && canSeeDoc(ex) && `close to the example “${docTitle(ex)}”`,
     o && canSeeDoc(o) && `like “${docTitle(o)}”`,
-    w.base && !w.keywords?.length && !w.synonyms?.length && !w.name && !w.rule && 'common in this knowledge base',
+    w.base && !w.keywords?.length && !w.synonyms?.length && !w.name && !w.rule && 'common in this collection',
   ].filter(Boolean);
 }
 /** Documents from sources that publish automatically skip review, so the assistant applies its confident taxonomy
@@ -281,7 +281,7 @@ function reclassifyOpen() {
   open.forEach(d => { delete d.ai; aiOf(d); });
   return open.length;
 }
-/** Suggest a knowledge base for a file the contributor didn't place: the one whose topics best match its title. */
+/** Suggest a collection for a file the contributor didn't place: the one whose topics best match its title. */
 function suggestKb(name) {
   const cands = contributionTargets(); if (!cands.length) return null;
   const words = new Set(tokens(name));
@@ -340,7 +340,7 @@ function analyzeSoon(d, ms = 1800) {
   d.ai = { status: 'analyzing' };
   setTimeout(() => { if (!D.docs.includes(d) || d.ai?.status !== 'analyzing') return; d.ai = null; aiOf(d); refresh(); }, ms);
 }
-/** Submit files for review. files: [{name, size, type, kb?, confirmed?}] — per file, the knowledge base and the details the contributor
+/** Submit files for review. files: [{name, size, type, kb?, confirmed?}] — per file, the collection and the details the contributor
     confirmed ({ kind, topics, summary }; aiOf starts from them). opts: { kb?, note?, versionOf? }. Returns the new documents. */
 function submitFiles(files, { kb, note = '', versionOf } = {}) {
   const base = versionOf ? docById(versionOf) : null;
@@ -357,7 +357,7 @@ function submitFiles(files, { kb, note = '', versionOf } = {}) {
     return d;
   });
 }
-/** Move a private file (My files) into review for a knowledge base — same document, no copy. */
+/** Move a private file (My files) into review for a collection — same document, no copy. */
 function submitPrivate(d, kbId, note = '') {
   d.kb = kbId; d.stage = 'review'; d.status = 'pending';
   d.submission = { by: me().id, at: Date.now(), note, kbBy: 'contributor', events: [{ at: Date.now(), by: me().id, kind: 'submitted', text: note }] };

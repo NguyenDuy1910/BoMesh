@@ -11,7 +11,7 @@
   const OPEN_SR = ['submitted', 'in_review'], DONE_SR = ['approved', 'declined', 'completed'];
   const svcType = id => (D.requestTypes || []).find(t => t.id === id);
   const officeIds = () => new Set((D.spaces || []).filter(s => s.type === 'office' && !s.archived).map(s => s.id));
-  const docsTo = () => studioHref('library');
+  const docsTo = () => studioHref('documents');
   function audit(action, target, type = 'Knowledge') { D.audit.unshift({ id: uid('ev'), at: Date.now(), actor: me().id, action, type, target, outcome: 'success', ip: '10.4.12.30', device: 'Chrome on macOS' }); }
 
   /* ── Needs attention: derived from D, so an item disappears once resolved ── */
@@ -47,8 +47,11 @@
       const r = reqs[0], one = reqs.length === 1, people = new Set(reqs.map(x => x.user)).size;
       const kbs = [...new Set(reqs.map(x => kbById(x.kb)?.name).filter(Boolean))];
       const title = one ? `${actorName(r.user)} asked for ${KB_ROLES[r.role === 'editor' ? 'editor' : 'viewer'].label} access` : `${plural(people, 'person', 'people')} waiting for access`;
-      items.push({ id: 'req', tone: 'warning', icon: 'user-plus', title, desc: esc(one ? [kbById(r.kb)?.name, r.note && `“${r.note}”`].filter(Boolean).join(' · ') : `To ${names(kbs)}`), actions: btn('Open requests', { v: 'secondary', size: 'sm', href: '/people?tab=requests' }) });
+      items.push({ id: 'req', tone: 'warning', icon: 'user-plus', title, desc: esc(one ? [kbById(r.kb)?.name, r.note && `“${r.note}”`].filter(Boolean).join(' · ') : `To ${names(kbs)}`), actions: btn('Open access requests', { v: 'secondary', size: 'sm', href: '/people?tab=requests' }) });
     }
+    // Setup left unfinished: one row naming what's missing and where to fix it (the full checklist is only for a new workspace).
+    const next = X.setupNext?.();
+    if (next) items.push({ id: 'setup', tone: 'accent', icon: next.icon || 'list', title: next.title, desc: esc(next.desc), actions: next.actions });
     // Most urgent first: broken (danger), then waiting on you (warning), then routine (accent, default).
     const rank = { danger: 0, warning: 1, accent: 2, default: 3 };
     return items.sort((a, b) => rank[a.tone] - rank[b.tone]);
@@ -131,7 +134,7 @@
           : iconBtn('x', 'Dismiss', { size: 'sm', act: 'ov-gap-dismiss', data: { id: g.id } }),
       });
     });
-    return section('Knowledge gaps', list(rows, 'ov-attn ov-gaps'), { desc: 'Frequent questions knowledge couldn’t answer well.' });
+    return section('Knowledge gaps', list(rows, 'ov-attn ov-gaps'));
   }
   MENUS['ov-gap'] = el => {
     const g = D.gaps.find(x => x.id === el.dataset.id); if (!g) return [];
@@ -152,7 +155,7 @@
       // A new workspace: the setup guide is the whole page (bases → taxonomy → sources → first sync).
       empty: () => `${X.setupGuide?.({ force: true }) || ''}<div class="mt-16">${btn('Add people', { icon: 'user-plus', act: 'ov-add-people' })}</div>`,
       ok: () => `${X.setupGuide?.() || ''}${section('Needs attention', attentionHtml())}
-        ${health.length ? section('Knowledge health', healthHtml(health), { desc: 'What waits in Knowledge Studio → Review. Each number opens its queue.' }) : ''}
+        ${health.length ? section('Knowledge health', healthHtml(health)) : ''}
         ${gapsSection()}
         ${section('This week', kpis())}`,
     });
@@ -202,6 +205,6 @@
     const prevUpdated = kb.updated; kb.updated = Date.now();
     audit('Answered a frequent question', `${doc.name} → ${kb.name}`);
     closeModal(); refresh();
-    toast(`Saved to ${kb.name}. People get this answer now.`, { action: { label: 'Undo', run: () => { D.docs = D.docs.filter(d => d !== doc); D.gaps.splice(Math.min(i, D.gaps.length), 0, g); kb.updated = prevUpdated; refresh(); toast('Answer removed', { tone: 'accent' }); } } });
+    toast(`Saved to ${kb.name}. People get this answer now.`, { action: { label: 'Undo', run: () => { D.docs = D.docs.filter(d => d !== doc); D.gaps.splice(Math.min(i, D.gaps.length), 0, g); kb.updated = prevUpdated; refresh(); } } });
   };
 })();

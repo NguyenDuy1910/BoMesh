@@ -4,18 +4,18 @@
    up-next list used by space pages. Prefix: home-. HeroUI tokens only;
    domain colours come from data (--tone). */
 
-.home { display: flex; flex-direction: column; gap: 32px; padding-top: 40px; }
+/* The greeting is Home's only header (the top row stays empty): one notch above section titles, close to the top row. */
+.home { display: flex; flex-direction: column; gap: 28px; padding-top: var(--space-6); }
 
 /* ───── Header ───── */
 .home-head { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.home-title { font-size: 28px; line-height: 36px; font-weight: 600; letter-spacing: -0.02em; text-wrap: balance; }
-.home-lede { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 0; font-size: 15px; line-height: 22px; color: var(--muted); }
-/* The second clause reads as part of the same sentence, separated by a middot. */
+.home-title { font-size: var(--text-2xl); line-height: var(--leading-2xl); font-weight: 600; letter-spacing: -0.015em; text-wrap: balance; }
+.home-lede { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 0; font-size: var(--text-md); line-height: var(--leading-md); color: var(--muted); }
 .home-lede__fresh::before { content: "·"; margin: 0 8px; }
 
 /* ───── Intent cards: find · ask · contribute ───── */
 .home-starts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: -8px; }
-.home-start { position: relative; display: flex; align-items: flex-start; gap: 14px; min-width: 0; width: 100%; padding: 16px; border-radius: var(--radius-2xl); background: var(--surface); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); color: var(--foreground); font: inherit; text-align: left; cursor: pointer; transition: box-shadow var(--dur-fast), background-color var(--dur-fast); }
+.home-start { position: relative; display: flex; align-items: flex-start; gap: 14px; min-width: 0; width: 100%; padding: 16px 16px 16px 16px; border-radius: var(--radius-2xl); background: var(--surface); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); color: var(--foreground); font: inherit; text-align: left; cursor: pointer; transition: box-shadow var(--dur-fast), background-color var(--dur-fast); }
 .home-start > .item-icon { flex: none; }
 .home-start__body { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; padding-top: 1px; }
 .home-start__title { font-size: 14px; line-height: 20px; font-weight: 600; }
@@ -32,26 +32,31 @@
 .home-body { display: grid; grid-template-columns: minmax(0, 1fr) 340px; align-items: start; gap: 32px; min-width: 0; }
 .home-body--single { grid-template-columns: minmax(0, 1fr); }
 .home-main, .home-aside { display: flex; flex-direction: column; gap: 36px; min-width: 0; }
-.home-sec--caught-up { grid-column: 1 / -1; }
 
 .home-sec { min-width: 0; }
 .home-sec__head { display: flex; align-items: center; gap: 8px; min-height: 28px; margin-bottom: 10px; }
 .home-sec__title { font-size: 15px; line-height: 22px; font-weight: 600; letter-spacing: -0.01em; }
 .home-sec__head > .button { flex: none; }
 .home-ok { position: relative; z-index: 1; display: inline-flex; flex: none; color: var(--success-soft-foreground); }
+.home-tone--warning { color: var(--warning-soft-foreground); }
 
-/* Rows (attention, continue, recommended) share the shared List/ListItem surface. */
+/* Rows (attention, continue, recommended) share the ListBox surface. */
 .home-list .item { padding: 11px 14px; }
 .home-list .item__title { gap: 6px; }
 .home-list .item__desc { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .home-list .res-dot { margin: 0 6px; }
 
-/* Reveal actions use the shared `.reveal-on-hover` utility in components.css. */
+/* Recommended / Start here: title, what it's for, why it's here */
+.home-rec { align-items: flex-start; }
+.home-rec .item__lead { padding-top: 1px; }
+.home-rec__body { display: flex; flex-direction: column; gap: 3px; flex: 1 1 auto; min-width: 0; }
+.home-rec__title { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 14px; line-height: 20px; font-weight: 500; }
+.home-rec__about { font-size: 13px; line-height: 19px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.home-rec__why { font-size: 12px; line-height: 16px; color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 
 /* ───── What's new: the change itself is the headline ───── */
 .home-feed { display: flex; flex-direction: column; border-radius: var(--radius-2xl); background: var(--surface); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); overflow: hidden; }
-/* A button, not a link: it opens the document preview in place (preview `doc-preview`). */
-.home-news { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 14px 16px; color: var(--foreground); text-align: left; cursor: pointer; background: none; border: 0; font: inherit; transition: background-color var(--dur-fast); }
+.home-news { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 14px 16px; color: var(--foreground); transition: background-color var(--dur-fast); }
 .home-news + .home-news { border-top: 1px solid var(--separator); }
 .home-news:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--focus); }
 @media (hover: hover) { .home-news:hover { background: var(--surface-hover); } }
@@ -105,25 +110,25 @@
 /* ───── Responsive ───── */
 /* Tablets and phones: one column. Main and aside dissolve into it so what needs you leads, then where you left off. */
 @container app (max-width: 1023px) {
-  .home { gap: 28px; padding-top: 32px; }
+  .home { gap: 28px; padding-top: var(--space-5); }
   .home-body { display: flex; flex-direction: column; align-items: stretch; gap: 32px; }
   .home-main, .home-aside { display: contents; }
   .home-sec--attention { order: 1; }
   .home-sec--continue { order: 2; }
-  .home-sec--reading { order: 3; }
+  .home-sec--start { order: 3; }
   .home-sec--news { order: 4; }
   .home-sec--explore { order: 5; }
+  .home-sec--rec { order: 6; }
   .home-body--single .home-topics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   /* Three narrow cards: icon above the text so the hint keeps two readable lines. */
   .home-start { flex-direction: column; gap: 10px; }
   .home-start__go { display: none; }
 }
 @container app (max-width: 679px) {
-  .home { gap: 24px; padding-top: 16px; }
+  .home { gap: 24px; padding-top: var(--space-3); }
   .home-body { gap: 28px; }
-  .home-title { font-size: 22px; line-height: 30px; }
-  .home-lede { flex-direction: column; font-size: 14px; line-height: 20px; }
-  /* Stacked on phones: the middot would dangle at the start of the line. */
+  .home-title { font-size: var(--text-xl); line-height: var(--leading-xl); }
+  .home-lede { flex-direction: column; }
   .home-lede__fresh::before { content: none; }
   /* Intent cards become one compact list: icon, title and a one-line hint. */
   .home-starts { grid-template-columns: minmax(0, 1fr); gap: 0; margin-top: -4px; border-radius: var(--radius-2xl); background: var(--surface); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); overflow: hidden; }
@@ -138,3 +143,8 @@
   .home-topic { padding: 14px; }
   .home-topic__desc { display: none; }
 }
+
+/* ───── Web-only ───── */
+/* What's new and recommended rows are buttons (they open the document preview in place), not links. */
+.home-news, .home-rec { width: 100%; text-align: left; cursor: pointer; background: none; border: 0; font: inherit; }
+.home-aside[hidden] { display: none; }

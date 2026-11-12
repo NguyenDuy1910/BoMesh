@@ -32,11 +32,14 @@ function signInError(error: unknown): string {
 export function SignInForm({
   initialId = "",
   showForgot = false,
+  googleLast = false,
   onSignedIn,
 }: {
   /** Prefilled email or username; the password field takes focus when given. */
   initialId?: string;
   showForgot?: boolean;
+  /** Sign in page: the password form first, then "or" and Google (preview `P.signin`). The dialog leads with Google. */
+  googleLast?: boolean;
   onSignedIn: (session: StoredSession) => Promise<void> | void;
 }) {
   const [id, setId] = useState(initialId);
@@ -74,27 +77,37 @@ export function SignInForm({
 
   const forgotHref = id.includes("@") ? `/password-reset?email=${encodeURIComponent(id.trim())}` : "/password-reset";
 
+  const google = googleClientId ? (
+    <GoogleSignInButton
+      clientId={googleClientId}
+      disabled={!!busy}
+      onCredential={(credential) => void enter(() => signInWithGoogle(credential), "google")}
+      onError={(message) => setErrors({ form: message })}
+    />
+  ) : null;
+  const or = googleClientId ? (
+    <div className="au-or" role="separator">
+      <span>or</span>
+    </div>
+  ) : null;
+
   return (
     <>
-      {googleClientId ? (
+      {googleLast ? null : (
         <>
-          <GoogleSignInButton
-            clientId={googleClientId}
-            disabled={!!busy}
-            onCredential={(credential) => void enter(() => signInWithGoogle(credential), "google")}
-            onError={(message) => setErrors({ form: message })}
-          />
-          <div className="au-or" role="separator">
-            <span>or</span>
-          </div>
+          {google}
+          {or}
         </>
-      ) : null}
+      )}
       {/* POST: a submit before hydration must never put the password in the address bar. */}
       <Form onSubmit={submit} method="post" validationBehavior="aria" className="flex flex-col">
         <TextField
           className="field"
           value={id}
-          onChange={setId}
+          onChange={(v) => {
+            setId(v);
+            if (errors.id) setErrors((e) => ({ ...e, id: undefined }));
+          }}
           isInvalid={!!errors.id}
           autoComplete="username"
           name="username"
@@ -104,7 +117,17 @@ export function SignInForm({
           <Input ref={idRef} placeholder="name@company.com" />
           <FieldError>{errors.id}</FieldError>
         </TextField>
-        <TextField ref={pwRef} className="field mt-16" value={pw} onChange={setPw} isInvalid={!!errors.pw} name="password">
+        <TextField
+          ref={pwRef}
+          className="field mt-16"
+          value={pw}
+          onChange={(v) => {
+            setPw(v);
+            if (errors.pw) setErrors((e) => ({ ...e, pw: undefined }));
+          }}
+          isInvalid={!!errors.pw}
+          name="password"
+        >
           <Label>Password</Label>
           <PasswordInput autoComplete="current-password" autoFocus={!!initialId} />
           <FieldError>{errors.pw}</FieldError>
@@ -128,6 +151,12 @@ export function SignInForm({
           Sign in
         </Button>
       </Form>
+      {googleLast ? (
+        <>
+          {or}
+          {google}
+        </>
+      ) : null}
     </>
   );
 }

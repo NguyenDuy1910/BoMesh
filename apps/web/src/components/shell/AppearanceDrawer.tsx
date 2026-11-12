@@ -1,19 +1,22 @@
 "use client";
 
-import { Button, ColorSwatchPicker, Drawer, Label, Slider, type Color } from "@heroui/react";
-import { Check, Monitor, Moon, RefreshCw, Sun } from "lucide-react";
+import { Button, Chip, ColorSwatchPicker, Drawer, Label, Slider, type Color } from "@heroui/react";
+import clsx from "clsx";
+import { Check, Monitor, Moon, Palette, RefreshCw, Settings, Sun } from "lucide-react";
 import { useEffect, type CSSProperties } from "react";
 
-import { Callout } from "@/components/ui/Callout";
+import { Disclosure } from "@/components/ui/Disclosure";
 import { Segmented } from "@/components/ui/Segmented";
 import { toast } from "@/components/ui/Toast";
 import {
   ACCENTS,
   accentHex,
+  accentOf,
   BASES,
   DEFAULT_LOOK,
   ensureFont,
   FONTS,
+  fontById,
   getAppearance,
   previewHue,
   RADII,
@@ -23,6 +26,7 @@ import {
   setMode,
   setThemePreset,
   THEMES,
+  themeById,
   themeLabel,
   themePreview,
   type NamedTheme,
@@ -34,8 +38,8 @@ import { useAppearance } from "./useAppearance";
 
 const CUSTOM = "custom";
 
-/** Mini preview of a named theme, drawn from its own colours. */
-function ThemeCard({ theme, on, dark }: { theme: NamedTheme; on: boolean; dark: boolean }) {
+/** Mini preview of a named theme, drawn from its own colours. The default theme is featured as the recommendation. */
+function ThemeCard({ theme, on, dark, featured = false }: { theme: NamedTheme; on: boolean; dark: boolean; featured?: boolean }) {
   const p = themePreview(theme, dark);
   const style = {
     "--tp-bg": p.bg,
@@ -49,7 +53,13 @@ function ThemeCard({ theme, on, dark }: { theme: NamedTheme; on: boolean; dark: 
     fontFamily: p.font,
   } as CSSProperties;
   return (
-    <button type="button" className="theme-card" aria-pressed={on} aria-label={`${theme.label} theme`} onClick={() => setThemePreset(theme.id)}>
+    <button
+      type="button"
+      className={clsx("theme-card", featured && "theme-card--featured")}
+      aria-pressed={on}
+      aria-label={`${theme.label} theme`}
+      onClick={() => setThemePreset(theme.id)}
+    >
       <span className="theme-card__preview" style={style} aria-hidden>
         <span className="theme-card__side">
           <i />
@@ -66,10 +76,22 @@ function ThemeCard({ theme, on, dark }: { theme: NamedTheme; on: boolean; dark: 
           </span>
         </span>
       </span>
-      <span className="theme-card__meta">
-        <span className="theme-card__name">{theme.label}</span>
-        <span className="theme-card__note">{theme.note}</span>
-      </span>
+      {featured ? (
+        <span className="theme-card__meta">
+          <span className="row gap-8">
+            <span className="theme-card__name">{theme.label}</span>
+            <Chip size="sm" color="accent" variant="soft">
+              Recommended
+            </Chip>
+          </span>
+          <span className="theme-card__note theme-card__note--wrap">Indigo on a near-neutral canvas. Easy on the eyes all day.</span>
+        </span>
+      ) : (
+        <span className="theme-card__meta">
+          <span className="theme-card__name">{theme.label}</span>
+          <span className="theme-card__note">{theme.note}</span>
+        </span>
+      )}
       {on && (
         <span className="theme-card__check">
           <Check className="i" aria-hidden />
@@ -79,6 +101,8 @@ function ThemeCard({ theme, on, dark }: { theme: NamedTheme; on: boolean; dark: 
   );
 }
 
+/** Mode; the default theme featured, the others behind “More themes”; accent, tint, radius and font behind “Customize”. A
+ * disclosure starts open when what it holds is in use (preview `controls()`). */
 function Controls() {
   const { mode, look, dark } = useAppearance();
   const custom = look.accent === CUSTOM;
@@ -89,6 +113,10 @@ function Controls() {
     const hit = swatches.find((s) => s.hex.toUpperCase() === hex);
     setLook({ accent: hit ? hit.id : CUSTOM });
   };
+  const featured = themeById(DEFAULT_LOOK.theme);
+  const others = THEMES.filter((t) => t.id !== DEFAULT_LOOK.theme);
+  const current = others.find((t) => t.id === look.theme);
+  const isCustom = look.theme === CUSTOM;
 
   return (
     <div className="stack gap-20 appearance">
@@ -107,99 +135,107 @@ function Controls() {
         />
       </div>
       <div className="field">
-        <div className="row">
-          <span className="label grow">Theme</span>
-          <span className="t-xs muted">{themeLabel(look)}</span>
-        </div>
-        <div className="theme-gallery">
-          {THEMES.map((t) => (
-            <ThemeCard key={t.id} theme={t} on={look.theme === t.id} dark={dark} />
-          ))}
-        </div>
-      </div>
-      <hr className="separator" />
-      <h3 className="t-subheading">Customize</h3>
-      <div className="field">
-        <span className="label">Accent color</span>
-        {/* Swatch ids are their colours, which follow the mode and hue; React Aria can't change an item's id, so remount. */}
-        <ColorSwatchPicker
-          key={[...swatches.map((s) => s.hex), customHex].join()}
-          aria-label="Accent color"
-          value={custom ? customHex : (swatches.find((s) => s.id === look.accent)?.hex ?? swatches[0].hex)}
-          onChange={onAccent}
-        >
-          {swatches.map((s) => (
-            <ColorSwatchPicker.Item key={s.id} color={s.hex} aria-label={s.label}>
-              <ColorSwatchPicker.Swatch />
-              <ColorSwatchPicker.Indicator />
-            </ColorSwatchPicker.Item>
-          ))}
-          <ColorSwatchPicker.Item color={customHex} aria-label="Custom hue">
-            <span className="color-swatch-picker__swatch hue-swatch" aria-hidden />
-            <ColorSwatchPicker.Indicator />
-          </ColorSwatchPicker.Item>
-        </ColorSwatchPicker>
-        {custom && (
-          <Slider
-            className="hue-field mt-12"
-            minValue={0}
-            maxValue={360}
-            step={1}
-            value={Math.round(look.hue)}
-            onChange={(v) => previewHue(Number(v))}
-            onChangeEnd={(v) => setLook({ accent: CUSTOM, hue: Number(v) })}
-          >
-            <div className="row">
-              <Label className="t-xs muted grow">Hue</Label>
-              <Slider.Output className="mono t-xs muted">{({ state }) => `${Math.round(state.values[0])}°`}</Slider.Output>
+        <span className="label">Theme</span>
+        <div className="stack gap-8">
+          {featured ? <ThemeCard theme={featured} on={look.theme === featured.id} dark={dark} featured /> : null}
+          <Disclosure icon={Palette} title="More themes" summary={current ? current.label : `${others.length} themes`} defaultOpen={Boolean(current)}>
+            <div className="theme-gallery">
+              {others.map((t) => (
+                <ThemeCard key={t.id} theme={t} on={look.theme === t.id} dark={dark} />
+              ))}
             </div>
-            <Slider.Track className="hue-track">
-              <Slider.Thumb />
-            </Slider.Track>
-          </Slider>
-        )}
-        <div className="description">Buttons, links, selection, focus rings and highlights.</div>
-      </div>
-      <div className="field">
-        <span className="label">Background tint</span>
-        <Segmented
-          full
-          label="Background tint"
-          value={look.base}
-          onChange={(base) => setLook({ base })}
-          options={BASES.map((b) => ({ value: b.id, label: b.label }))}
-        />
-        <div className="description">How much the accent colors the canvas, cards, borders and text.</div>
-      </div>
-      <div className="field">
-        <span className="label">Corner radius</span>
-        <Segmented
-          full
-          label="Corner radius"
-          value={look.radius}
-          onChange={(radius) => setLook({ radius })}
-          options={RADII.map((r) => ({ value: r.id, label: r.label === "Extra large" ? "XL" : r.label }))}
-        />
-      </div>
-      <div className="field">
-        <span className="label">Font</span>
-        <div className="font-options" role="group" aria-label="Font">
-          {FONTS.map((f) => (
-            <button
-              key={f.id}
-              type="button"
-              className="font-option"
-              aria-pressed={look.font === f.id}
-              style={{ fontFamily: f.stack }}
-              onClick={() => setLook({ font: f.id })}
-            >
-              <span className="font-option__sample">Aa</span>
-              <span className="font-option__name">{f.label}</span>
-            </button>
-          ))}
+          </Disclosure>
         </div>
       </div>
-      <Callout description="Status colors (success, warning, danger) and cited-evidence highlights keep their meaning in every theme." />
+      <Disclosure
+        icon={Settings}
+        title="Customize"
+        summary={isCustom ? "Custom" : `${accentOf(look).label} · ${RADII.find((r) => r.id === look.radius)?.label ?? ""} · ${fontById(look.font).label}`}
+        defaultOpen={isCustom}
+      >
+        <div className="stack gap-20">
+          <div className="field">
+            <span className="label">Accent color</span>
+            {/* Swatch ids are their colours, which follow the mode and hue; React Aria can't change an item's id, so remount. */}
+            <ColorSwatchPicker
+              key={[...swatches.map((s) => s.hex), customHex].join()}
+              aria-label="Accent color"
+              value={custom ? customHex : (swatches.find((s) => s.id === look.accent)?.hex ?? swatches[0].hex)}
+              onChange={onAccent}
+            >
+              {swatches.map((s) => (
+                <ColorSwatchPicker.Item key={s.id} color={s.hex} aria-label={s.label}>
+                  <ColorSwatchPicker.Swatch />
+                  <ColorSwatchPicker.Indicator />
+                </ColorSwatchPicker.Item>
+              ))}
+              <ColorSwatchPicker.Item color={customHex} aria-label="Custom hue">
+                <span className="color-swatch-picker__swatch hue-swatch" aria-hidden />
+                <ColorSwatchPicker.Indicator />
+              </ColorSwatchPicker.Item>
+            </ColorSwatchPicker>
+            {custom && (
+              <Slider
+                className="hue-field mt-12"
+                minValue={0}
+                maxValue={360}
+                step={1}
+                value={Math.round(look.hue)}
+                onChange={(v) => previewHue(Number(v))}
+                onChangeEnd={(v) => setLook({ accent: CUSTOM, hue: Number(v) })}
+              >
+                <div className="row">
+                  <Label className="t-xs muted grow">Hue</Label>
+                  <Slider.Output className="mono t-xs muted">{({ state }) => `${Math.round(state.values[0])}°`}</Slider.Output>
+                </div>
+                <Slider.Track className="hue-track">
+                  <Slider.Thumb />
+                </Slider.Track>
+              </Slider>
+            )}
+            <div className="description">Buttons, links, selection, focus rings and highlights.</div>
+          </div>
+          <div className="field">
+            <span className="label">Background tint</span>
+            <Segmented
+              full
+              label="Background tint"
+              value={look.base}
+              onChange={(base) => setLook({ base })}
+              options={BASES.map((b) => ({ value: b.id, label: b.label }))}
+            />
+            <div className="description">How much the accent colors the canvas, cards, borders and text.</div>
+          </div>
+          <div className="field">
+            <span className="label">Corner radius</span>
+            <Segmented
+              full
+              label="Corner radius"
+              value={look.radius}
+              onChange={(radius) => setLook({ radius })}
+              options={RADII.map((r) => ({ value: r.id, label: r.label === "Extra large" ? "XL" : r.label }))}
+            />
+          </div>
+          <div className="field">
+            <span className="label">Font</span>
+            <div className="font-options" role="group" aria-label="Font">
+              {FONTS.map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  className="font-option"
+                  aria-pressed={look.font === f.id}
+                  style={{ fontFamily: f.stack }}
+                  onClick={() => setLook({ font: f.id })}
+                >
+                  <span className="font-option__sample">Aa</span>
+                  <span className="font-option__name">{f.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </Disclosure>
     </div>
   );
 }

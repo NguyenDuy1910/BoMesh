@@ -18,9 +18,9 @@ import {
 /**
  * Browse (/knowledge) catalog state: the URL is the result set (preview `core/catalog.js`).
  * The model's FACETS are the dimensions SearchItems can filter on; Browse adds two it can only
- * count or not count at all — Space (space materials and space knowledge bases) and Language
- * (`document.languageCode` is a facet, not a filter field). Those, and "Only documents I saved",
- * are answered locally over the readable pool (see `useCatalog`).
+ * count or not count at all — Space (space materials and space collections) and Language
+ * (`document.languageCode` is a facet, not a filter field). Those are answered locally over the
+ * readable pool (see `useCatalog`). Saved documents live in Knowledge → Saved, not here.
  */
 
 export type BrowseFacetId = FacetId | "space" | "lang";
@@ -35,14 +35,14 @@ export interface BrowseFacetDef {
   single?: boolean;
 }
 
-/** Drawer order (preview FACETS). Space only with the Spaces module. */
+/** Facet order (preview FACETS). Space only with the Spaces module. */
 export const BROWSE_FACETS: readonly BrowseFacetDef[] = [
   { id: "topic", label: "Topic" },
   { id: "space", label: "Space" },
   { id: "kind", label: "Type" },
   { id: "owner", label: "Owner" },
   { id: "src", label: "Source" },
-  { id: "kb", label: "Knowledge base" },
+  { id: "kb", label: "Collection" },
   { id: "trust", label: "Trust" },
   { id: "upd", label: "Updated", single: true },
   { id: "fmt", label: "Format" },
@@ -51,10 +51,13 @@ export const BROWSE_FACETS: readonly BrowseFacetDef[] = [
 
 export const browseFacets = (spaces: boolean) => BROWSE_FACETS.filter((f) => f.id !== "space" || spaces);
 
-/** Facets SearchItems can't filter on: selecting one (or "saved") switches to the local pool. */
+/** Filters shown as their own buttons (the ones people narrow by most); the others sit under More filters. Topic is the pills. */
+export const INLINE_FACETS: readonly BrowseFacetId[] = ["kind", "upd", "trust", "owner"];
+
+/** Facets SearchItems can't filter on: selecting one switches to the local pool. */
 export const LOCAL_FACETS: readonly BrowseFacetId[] = ["space", "lang"];
 
-export const isLocal = (p: BrowseParams) => !!p.saved || LOCAL_FACETS.some((f) => p.filters[f]?.length);
+export const isLocal = (p: BrowseParams) => LOCAL_FACETS.some((f) => p.filters[f]?.length);
 
 export const PER_PAGE = 24;
 
@@ -63,6 +66,7 @@ const read = (q: QueryLike, key: string) => (q instanceof URLSearchParams ? q.ge
 
 export function parseBrowseQuery(query: QueryLike): BrowseParams {
   const p: BrowseParams = parseCatalogQuery(query);
+  delete p.saved;
   for (const id of LOCAL_FACETS) {
     const values = read(query, id).split(",").filter(Boolean);
     if (values.length) p.filters[id] = values;
@@ -70,13 +74,12 @@ export function parseBrowseQuery(query: QueryLike): BrowseParams {
   return p;
 }
 
-/** Params → query record in the preview's key order (q, sort, view, saved, facets). */
+/** Params → query record in the preview's key order (q, sort, view, facets). */
 export function browseQueryOf(p: BrowseParams): Record<string, string> {
   const out: Record<string, string> = {};
   if (p.q) out.q = p.q;
   if (p.sort) out.sort = p.sort;
   if (p.view === "list") out.view = "list";
-  if (p.saved) out.saved = "1";
   for (const f of BROWSE_FACETS) {
     const v = p.filters[f.id];
     if (v?.length) out[f.id] = v.join(",");
@@ -92,7 +95,7 @@ export const browseHref = (p: BrowseParams) => {
 /** Identity of a result set, ignoring the layout (preview `setKey`). */
 export const setKey = (p: BrowseParams) => new URLSearchParams(browseQueryOf({ ...p, view: "grid" })).toString();
 
-export const activeCount = (p: BrowseParams) => Object.values(p.filters).reduce((n, v) => n + (v?.length ?? 0), 0) + (p.saved ? 1 : 0);
+export const activeCount = (p: BrowseParams) => Object.values(p.filters).reduce((n, v) => n + (v?.length ?? 0), 0);
 
 /** The one topic the shortcuts represent: a single selected domain or topic. */
 export const pillTopic = (p: BrowseParams) => (p.filters.topic?.length === 1 ? p.filters.topic[0] : "");
@@ -107,26 +110,14 @@ type Label = (facet: BrowseFacetId, value: string) => string;
 /** Every selected value's name, facet by facet (preview `filterLabels`). */
 export const filterLabels = (p: BrowseParams, label: Label) => BROWSE_FACETS.flatMap((f) => (p.filters[f.id] ?? []).map((v) => label(f.id, v)));
 
-/** One line naming a result set: “q” · values · Saved (preview `describe`, the Save view dialog). */
-export const describeParams = (p: BrowseParams, label: Label) => [p.q && `“${p.q}”`, ...filterLabels(p, label), p.saved && "Saved"].filter(Boolean).join(" · ");
-
-/** A saved view's summary: “q” · Topic: A, B · Saved only, else "All resources" (preview library `viewSummary`). */
-export function viewSummary(p: BrowseParams, label: Label): string {
-  const parts: string[] = [];
-  if (p.q) parts.push(`“${p.q}”`);
-  for (const f of BROWSE_FACETS) {
-    const values = p.filters[f.id];
-    if (values?.length) parts.push(`${f.label}: ${values.map((v) => label(f.id, v)).join(", ")}`);
-  }
-  if (p.saved) parts.push("Saved only");
-  return parts.join(" · ") || "All resources";
-}
+/** One line naming a result set: “q” · values (preview `describe`, the Save view dialog). */
+export const describeParams = (p: BrowseParams, label: Label) => [p.q && `“${p.q}”`, ...filterLabels(p, label)].filter(Boolean).join(" · ");
 
 /* ═══════════════ Saved views ↔ SavedSearch ═══════════════ */
 
 const LAYOUT: Readonly<Record<string, "grid" | "list">> = { GRID: "grid", LIST: "list", TABLE: "list" };
 
-/** What a saved view stores: the query, the API filter, the order and the layout. Space, Language and "saved" aren't API filters. */
+/** What a saved view stores: the query, the API filter, the order and the layout. Space and Language aren't API filters. */
 export function savedSearchOf(p: BrowseParams, ws: string, displayName: string): SavedSearch {
   const sort = p.sort || defaultSort(p);
   return {
@@ -140,7 +131,7 @@ export function savedSearchOf(p: BrowseParams, ws: string, displayName: string):
 
 /** Browse state a saved view can't keep (named for the Save view dialog). */
 export function unsavable(p: BrowseParams): string[] {
-  return [p.filters.space?.length && "Space", p.filters.lang?.length && "Language", p.saved && "Only documents I saved"].filter((x): x is string => !!x);
+  return [p.filters.space?.length && "Space", p.filters.lang?.length && "Language"].filter((x): x is string => !!x);
 }
 
 const CLAUSE = /(document\.topics|document\.documentType|document\.owner|document\.origin\.source|ancestors|document\.verification\.state|document\.mimeType|updateTime)\s*(:|>=|=)\s*("(?:[^"\\]|\\.)*"|[A-Z_]+)/g;
@@ -206,10 +197,7 @@ export function savedSearchParams(s: SavedSearch, topics: readonly Topic[] = [])
   return p;
 }
 
-/** `/knowledge?…` for a saved view. */
-export const savedSearchHref = (s: SavedSearch, topics?: readonly Topic[]) => browseHref(savedSearchParams(s, topics));
-
-/* ═══════════════ Local answers (saved only, Space, Language) ═══════════════ */
+/* ═══════════════ Local answers (Space, Language) ═══════════════ */
 
 export interface LocalContext {
   ws: string;

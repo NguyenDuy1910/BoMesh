@@ -13,7 +13,7 @@ export interface BaseMarkProps {
   locked?: boolean;
 }
 
-/** Knowledge base mark (preview `X.kbMark`): coloured initial; lock when locked; person glyph for My files. */
+/** Collection mark (preview `X.kbMark`): coloured initial; lock when locked; person glyph for My files. */
 export function BaseMark({ base, size = 36, locked = isLocked(base as Item) }: BaseMarkProps) {
   const personal = isPersonal(base as Item);
   const iconClass = size < 28 ? "i i-xs" : size < 36 ? "i i-sm" : "i";

@@ -172,20 +172,19 @@
 
 /* ───── Library, Publishing problems and history ───── */
 .cur-nowrap { white-space: nowrap; }
-.cur-origin, .cur-vis { min-width: 0; max-width: 100%; }
-.cur-origin > .app-icon, .cur-vis > .i { flex: none; }
+.cur-origin { min-width: 0; max-width: 100%; }
+.cur-origin > .app-icon { flex: none; }
 .cur-owner { min-width: 0; }
 .cur-owner > .truncate { display: block; }
 @container app (min-width: 680px) {
   .cur-all .table__content, .cur-prob .table__content { table-layout: fixed; width: 100%; }
   .cur-all .table__column:nth-child(1), .cur-prob .table__column:nth-child(1) { width: 48px; }
-  /* Library: Name · Origin · Owner · Lifecycle · Visibility · Updated · actions */
-  .cur-all .table__column:nth-child(3) { width: 14%; }
-  .cur-all .table__column:nth-child(4) { width: 11%; }
+  /* Library: Name · Origin · Owner · Lifecycle · Updated · actions (wide enough for the longest fix: Publish update + ⋯) */
+  .cur-all .table__column:nth-child(3) { width: 16%; }
+  .cur-all .table__column:nth-child(4) { width: 13%; }
   .cur-all .table__column:nth-child(5) { width: 150px; }
-  .cur-all .table__column:nth-child(6) { width: 13%; }
-  .cur-all .table__column:nth-child(7) { width: 96px; }
-  .cur-all .table__column:nth-child(8) { width: 136px; }
+  .cur-all .table__column:nth-child(6) { width: 104px; }
+  .cur-all .table__column:nth-child(7) { width: 176px; }
   /* Publishing problems: Name · Problem · Origin · Updated · fix */
   .cur-prob .table__column:nth-child(3) { width: 28%; }
   .cur-prob .table__column:nth-child(4) { width: 16%; }
@@ -236,11 +235,10 @@
 }
 @container app (max-width: 1023px) {
   .cur-split { grid-template-columns: 260px minmax(0, 1fr); }
-  /* Library: Owner and Visibility give way first (Origin and Lifecycle stay). */
+  /* Library: Owner gives way first (Origin and Lifecycle stay). */
   .cur-all .table__column:nth-child(4), .cur-all .table__cell:nth-child(4) { display: none; }
-  .cur-all .table__column:nth-child(6), .cur-all .table__cell:nth-child(6) { display: none; }
   .cur-prob .table__column:nth-child(4), .cur-prob .table__cell:nth-child(4) { display: none; }
-  .cur-all .table__column:nth-child(7), .cur-prob .table__column:nth-child(5) { width: 88px; }
+  .cur-all .table__column:nth-child(6), .cur-prob .table__column:nth-child(5) { width: 88px; }
 }
 @container app (max-width: 760px) {
   .cur-detail__nav .t-xs { display: none; }

@@ -128,7 +128,8 @@ test("actionLabel turns API method names into plain words", () => {
   assert.equal(actionLabel("CreateSession"), "Signed in");
   assert.equal(actionLabel("UpdateWorkspaceSettings"), "Updated workspace settings");
   assert.equal(actionLabel("EnableConnector"), "Turned on connector");
-  assert.equal(actionLabel("PauseWorkspaceIngestion"), "Paused workspace ingestion");
+  assert.equal(actionLabel("PauseWorkspaceIngestion"), "Paused indexing");
+  assert.equal(actionLabel("SuspendWorkspace"), "Suspended workspace");
   assert.equal(actionLabel(undefined), "Unknown action");
 });
 

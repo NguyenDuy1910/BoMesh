@@ -2,7 +2,7 @@
    Two panes: a tree (search, the topics the assistant proposed, domains with their topics and document counts,
    archived ones last; keyboard navigable) and the selected node's detail (?node=<topic or domain id> | __proposed | __new).
    A topic carries its business description, guidance for the assistant, keywords and synonyms, optional rules on where
-   a file comes from, example documents, how its documents spread over the knowledge bases, and a box to test
+   a file comes from, example documents, how its documents spread over the collections, and a box to test
    classification. The assistant classifies incoming documents with it (core/lifecycle.js topicMatches); the same topics
    are Browse's pills and filters. Edits are a draft per node with one savebar (Save / Discard); saving re-classifies the
    submissions still in review (Undo). Published documents keep their topics.
@@ -66,7 +66,7 @@
     return { topic: id => byTopic.get(id) || 0, domain: id => byDomain.get(id) || 0, review: id => rv.get(id) || 0, reviewDomain: id => rvDomain.get(id) || 0 };
   }
   const usedBy = (t, n = topicCounts()) => (t.parent ? n.topic(t.id) + n.review(t.id) : n.domain(t.id) + n.reviewDomain(t.id) + kidsOf(t.id).length);
-  /** Published documents the caller can read, per knowledge base, tagged with any of `ids` (a topic, or a domain and its topics). */
+  /** Published documents the caller can read, per collection, tagged with any of `ids` (a topic, or a domain and its topics). */
   function perKb(ids) {
     const set = new Set(ids), m = new Map();
     readableResources().forEach(d => { if (res(d).topics.some(id => set.has(id))) m.set(d.kb, (m.get(d.kb) || 0) + 1); });
@@ -117,10 +117,10 @@
       empty,
       ok: () => {
         ensureCodes();
-        const props = visibleProposals(), picked = query.node || '';
+        const props = visibleProposals(), picked = query.node || '', bare = query.show === 'bare';
         if (!domains().length && !DRAFTS()[NEW] && !props.length) return empty();
-        const n = topicCounts(), id = resolveNode(picked, props);
-        return `<div class="${cx('tx', picked && 'tx--picked')}">${summaryBar()}<div class="tx-panes">${treePane(id, n, props)}<div class="tx-main" id="tx-main">${detail(id, n, props)}</div></div></div>`;
+        const n = topicCounts(), id = resolveNode(picked || (bare ? leaves().find(isBare)?.id || '' : ''), props);
+        return `<div class="${cx('tx', picked && 'tx--picked')}">${summaryBar(bare)}<div class="tx-panes">${treePane(id, n, props, bare)}<div class="tx-main" id="tx-main">${detail(id, n, props)}</div></div></div>`;
       },
     });
   }
@@ -132,15 +132,19 @@
     return props.length ? PROPOSED : domains()[0]?.id || '';
   }
 
-  /** One quiet line above both panes: what the taxonomy holds and where it came from; Export and Template under ⋯. */
-  function summaryBar() {
-    const tops = leaves(), kws = tops.reduce((a, t) => a + topicKeywords(t).length, 0), bare = tops.filter(t => !topicKeywords(t).length && !topicSynonyms(t).length).length;
+  /** A topic the assistant can only match by name: no keywords and no synonyms. Filling these in is the taxonomy's main upkeep. */
+  const isBare = t => !topicKeywords(t).length && !topicSynonyms(t).length;
+  /** One quiet line above both panes: what the taxonomy holds and where it came from; Export and Template under ⋯. Topics
+      without keywords are a toggle that narrows the tree to them (?show=bare), so the fix is one click away. */
+  function summaryBar(bareOn = false) {
+    const tops = leaves(), kws = tops.reduce((a, t) => a + topicKeywords(t).length, 0), bare = tops.filter(isBare).length;
     const last = (D.masterImports || [])[0];
     const counts = `<span class="medium">${esc(`${plural(domains().length, 'domain')} · ${plural(tops.length, 'topic')} · ${plural(kws, 'keyword')}`)}</span>`;
     const source = last ? `${DOT}<span>${esc(`Last imported ${rel(last.at)} by ${actorName(last.by)}`)}</span>${DOT}<span translate="no">${esc(last.file)}</span>` : `${DOT}<span>Not imported yet</span>`;
-    const hint = bare ? `${DOT}<span class="tx-sum__warn" data-tip="${esc('The assistant matches them by name only.')}" tabindex="0">${esc(`${plural(bare, 'topic')} without keywords`)}</span>` : '';
+    const hint = bare || bareOn ? `${DOT}<button type="button" class="tx-sum__warn" data-act="tx-bare" aria-pressed="${bareOn}" data-tip="${esc(bareOn ? 'Show every topic' : 'The assistant matches them by name only. Show just these.')}">${esc(`${plural(bare, 'topic')} without keywords`)}</button>` : '';
     return `<div class="tx-sum"><p class="tx-sum__text">${counts}${source}${hint}</p>${iconBtn('more', 'More taxonomy actions', { size: 'sm', menu: 'md-more' })}</div>`;
   }
+  A['tx-bare'] = () => setQuery({ show: S.cur.query.show === 'bare' ? '' : 'bare' });
   MENUS['md-more'] = () => [
     { label: 'Export taxonomy', icon: 'download', run: exportCsv },
     { label: 'Download template', icon: 'table', run: templateCsv },
@@ -153,9 +157,11 @@
     return `<li role="treeitem" id="tx-n-${esc(id)}" class="${cx('tx-item', cls)}" aria-level="${level}" aria-selected="${id === sel}" ${expanded != null ? `aria-expanded="${expanded}"` : ''} tabindex="${id === focusId ? 0 : -1}" data-id="${esc(id)}">`
       + `<div class="${cx('tx-row', id === sel && 'is-selected')}" data-act="tx-node" data-id="${esc(id)}">${inner}</div>${group}</li>`;
   }
-  function treePane(sel, n, props) {
+  function treePane(sel, n, props, bare = false) {
     const u = TREE(), q = fold(u.q || '').trim(), drafts = DRAFTS();
-    const hit = t => !q || termsOf(t).some(s => fold(s).includes(q));
+    const hit = t => (!q || termsOf(t).some(s => fold(s).includes(q))) && (!bare || isBare(t));
+    // A topic with no words to recognise it by carries a warning dot (its fix: add keywords in its detail).
+    const warn = t => (isBare(t) ? `<span class="tx-row__warn" role="img" aria-label="${esc('No keywords')}" data-tip="${esc('No keywords')}"></span>` : '');
     const dot = id => (drafts[id] && isDirty(id) ? `<span class="tx-row__dot" role="img" aria-label="${esc('Unsaved changes')}" data-tip="${esc('Unsaved changes')}"></span>` : '');
     const chev = (id, open) => `<span class="tx-row__chev" data-act="tx-toggle" data-id="${esc(id)}" aria-hidden="true">${ic(open ? 'chevron-down' : 'chevron-right', 'i-sm')}</span>`;
     const count = (v, cls = '') => `<span class="${cx('tx-row__count', cls)}">${v ? fmtNum(v) : ''}</span>`;
@@ -163,13 +169,13 @@
     const newItem = level => ({ id: NEW, level, inner: `<span class="tx-row__code">${esc(clean(newDraft.code) || '—')}</span><span class="tx-row__name">${esc(clean(newDraft.name) || (newDraft.domain ? 'New domain' : 'New topic'))}</span>${dot(NEW)}`, cls: 'is-new' });
     // Flat model first, so roving focus can fall back to the first item when the selection is hidden.
     const items = [];
-    if (props.length && !q) items.push({ id: PROPOSED, level: 1, inner: `${ic('sparkles', 'i-sm tx-row__icon')}<span class="tx-row__name">${esc(`Proposed by the assistant (${props.length})`)}</span>`, cls: 'tx-item--prop' });
+    if (props.length && !q && !bare) items.push({ id: PROPOSED, level: 1, inner: `${ic('sparkles', 'i-sm tx-row__icon')}<span class="tx-row__name">${esc(`Proposed by the assistant (${props.length})`)}</span>`, cls: 'tx-item--prop' });
     domains().forEach(dm => {
-      const all = kidsOf(dm.id), domHit = hit(dm), kids = domHit ? all : all.filter(hit);
+      const all = kidsOf(dm.id), domHit = !bare && hit(dm), kids = domHit ? all : all.filter(hit);
       const draftHere = newDraft && !newDraft.domain && newDraft.parent === dm.id;
-      if (q && !domHit && !kids.length) return;
-      const open = q ? true : !u.closed[dm.id];
-      const children = open ? [...kids.map(t => ({ id: t.id, level: 2, inner: `<span class="tx-row__code">${esc(t.code || '')}</span><span class="tx-row__name" translate="no">${esc(t.name)}</span>${dot(t.id)}${count(n.topic(t.id))}` })), ...(draftHere ? [newItem(2)] : [])] : [];
+      if ((q || bare) && !domHit && !kids.length) return;
+      const open = q || bare ? true : !u.closed[dm.id];
+      const children = open ? [...kids.map(t => ({ id: t.id, level: 2, inner: `<span class="tx-row__code">${esc(t.code || '')}</span><span class="tx-row__name" translate="no">${esc(t.name)}</span>${warn(t)}${dot(t.id)}${count(n.topic(t.id))}` })), ...(draftHere ? [newItem(2)] : [])] : [];
       items.push({ id: dm.id, level: 1, expanded: open, inner: `${chev(dm.id, open)}<span class="md-code md-code--domain">${esc(dm.code || '')}</span><span class="tx-row__name tx-row__name--domain" translate="no">${esc(dm.name)}</span>${dot(dm.id)}${count(n.domain(dm.id))}`, children });
     });
     if (newDraft?.domain) items.push(newItem(1));
@@ -282,9 +288,9 @@
     const parts = [
       headHtml(t, f, n, isDomain),
       isNew || f.ident ? identHtml(key, f, isDomain) : '',
-      descSec(key, f, isDomain),
-      ...(isDomain ? [isNew ? '' : domainTopicsSec(t, n)]
-        : [guideSec(key, f), termsSec(key, f), rulesSec(key, f), examplesSec(key, f, t)]),
+      // A topic's job is to recognise documents, so its words lead; the description (for people) and guidance follow.
+      ...(isDomain ? [descSec(key, f, isDomain), isNew ? '' : domainTopicsSec(t, n)]
+        : [termsSec(key, f), descSec(key, f, isDomain), guideSec(key, f), rulesSec(key, f), examplesSec(key, f, t)]),
       isNew ? '' : distSec(t, isDomain, n),
       isNew || isDomain ? '' : testSec(t, f, dirty),
     ];
@@ -295,11 +301,11 @@
 
   function descSec(key, f, isDomain) {
     return sec('Description', textarea({ id: 'tx-desc', bind: `txDraft.${key}.desc`, value: f.desc, rows: 2, placeholder: isDomain ? 'What this domain groups, in a sentence' : 'What this topic covers, in your business’s words', attrs: `maxlength="300" aria-labelledby="tx-desc-h" data-input="tx-input" data-id="${key}"` }),
-      { id: 'tx-desc-h', desc: esc(isDomain ? 'Shown on Home’s topic cards.' : 'Reviewers and people browsing read it to pick the right topic.') });
+      { id: 'tx-desc-h', desc: esc(isDomain ? 'Shown on Home’s topic cards.' : 'For people choosing a topic.') });
   }
   function guideSec(key, f) {
     return sec('Guidance for the assistant', textarea({ id: 'tx-guide', bind: `txDraft.${key}.guidance`, value: f.guidance, rows: 3, placeholder: 'Use for…\nNot for…', attrs: `maxlength="600" aria-labelledby="tx-guide-h" data-input="tx-input" data-id="${key}"` }),
-      { id: 'tx-guide-h', desc: esc('The assistant reads this when it classifies a document: when to use the topic, and what belongs elsewhere.') });
+      { id: 'tx-guide-h', desc: esc('When to use it, and what belongs elsewhere.') });
   }
   /** Keywords and synonyms as chips with an input that adds on Enter or comma; synonyms are marked. */
   function chipEditor(key, f, list, { label, placeholder, syn }) {
@@ -309,7 +315,7 @@
   }
   function termsSec(key, f) {
     return sec('Keywords & synonyms', `<div class="tx-terms">${chipEditor(key, f, 'keywords', { label: 'Keywords', placeholder: 'Add a keyword, then Enter' })}${chipEditor(key, f, 'synonyms', { label: 'Synonyms', placeholder: 'Add a synonym, then Enter', syn: true })}</div>`,
-      { desc: esc('Words and phrases in a title or note that mean a document is about this topic. Synonyms are other names people use for it; both count the same. They are one signal among several.') });
+      { desc: esc('Words in a title or note that mean a document belongs here.') });
   }
   const sourceOptions = () => [['upload', 'Uploaded files'], ...D.sources.map(s => [s.id, s.name])];
   function rulesSec(key, f) {
@@ -321,7 +327,7 @@
       return `<li class="tx-rule"><span class="tx-rule__word">When</span>${select({ id: `tx-rf-${i}`, bind: `txDraft.${key}.rules.${i}.field`, value: r.field, options: Object.entries(RULE_FIELDS), change: 'tx-rule-field', size: 'sm', label: 'What to check', attrs: `data-id="${key}" data-i="${i}"` })}${select({ id: `tx-ro-${i}`, bind: `txDraft.${key}.rules.${i}.op`, value: r.op, options: ops, change: 'tx-redraw', size: 'sm', label: 'Condition' })}${value}<span class="tx-rule__word">${ic('arrow-right', 'i-xs')}<span>file it here</span></span>${iconBtn('x', 'Remove rule', { size: 'sm', act: 'tx-rule-rm', data: { id: key, i } })}</li>`;
     }).join('');
     return sec('Rules', `${rows ? `<ul class="tx-rules">${rows}</ul>` : ''}${btn('Add rule', { v: 'ghost', size: 'sm', icon: 'plus', act: 'tx-rule-add', data: { id: key } })}`,
-      { optional: true, desc: esc('Where a file comes from can settle its topic. A matching rule is strong evidence, stronger than keywords.') });
+      { optional: true, desc: esc('A matching source or folder settles the topic.') });
   }
   /** Published documents the caller can read that could be examples: by title when searching, else the most-read ones already tagged here. */
   function exampleCandidates(f, t) {
@@ -345,7 +351,7 @@
     }
     const add = !open ? btn('Add example', { v: 'ghost', size: 'sm', icon: 'plus', act: 'tx-ex-open', data: { id: key } }) : '';
     return sec('Examples', `${docs.length ? `<div class="tx-chips tx-chips--docs">${chips}</div>` : ''}${picker}${add}`,
-      { desc: esc('Two or three documents that clearly belong here. A new document with a similar title leans towards this topic.') });
+      { desc: esc('Two or three documents that clearly belong here.') });
   }
   function distSec(t, isDomain, n) {
     const ids = isDomain ? [t.id, ...kidsOf(t.id).map(x => x.id)] : [t.id];
@@ -358,7 +364,7 @@
       rv && `<a class="link" href="#${studioHref('review', { queue: 'submissions' })}">${esc(`${fmtNum(rv)} in review`)}</a>`,
     ].filter(Boolean);
     return sec('Distribution', list + (pending.length ? `<p class="tx-dist__pending">${ic('clock', 'i-sm')}<span>${pending.join(DOT)}</span></p>` : ''),
-      { aside: `<span class="tx-sec__meta">${esc(`${plural(total, 'published document')} · ${plural(rows.length, 'knowledge base')}`)}</span>` });
+      { aside: `<span class="tx-sec__meta">${esc(`${plural(total, 'published document')} · ${plural(rows.length, 'collection')}`)}</span>` });
   }
   function domainTopicsSec(dm, n) {
     const kids = kidsOf(dm.id);
@@ -414,7 +420,8 @@
   /** Proposals come from all open submissions (names only); document titles are listed only for documents the caller can see. */
   const visibleProposals = () => { D.docs.filter(d => !d.archived && stageOf(d) === 'review' && !d.ai).forEach(aiOf); return openProposals(); };
   function proposedDetail(props) {
-    const head = `<header class="tx-head"><div class="tx-head__main"><div class="tx-head__title-row">${itemIcon('sparkles', 'accent', 'sm')}<h2 class="tx-head__title">Proposed by the assistant</h2></div><p class="tx-head__meta"><span>${esc('Documents in review mention these and no topic covers them. Accepting adds the topic and tags those documents; publishing never waits for it.')}</span></p></div></header>`;
+    // One line of what accepting does; the rows themselves show why each was proposed.
+    const head = `<header class="tx-head"><div class="tx-head__main"><div class="tx-head__title-row">${itemIcon('sparkles', 'accent', 'sm')}<h2 class="tx-head__title">Proposed by the assistant</h2></div><p class="tx-head__meta"><span>${esc('Accepting adds the topic and tags the documents that mention it.')}</span></p></div></header>`;
     const body = props.length ? `<ul class="md-props">${props.map(propCard).join('')}</ul>` : emptyState({ icon: 'check-circle', tone: 'success', title: 'Nothing proposed', desc: esc('When documents in review keep mentioning a theme no topic covers, it shows up here.'), compact: true });
     return `<div class="tx-detail">${back()}${head}${body}</div>`;
   }
@@ -424,7 +431,7 @@
   }
   function propDocs(p) {
     const docs = (p.docs || []).map(docById).filter(Boolean), seen = docs.filter(canSeeDoc), hidden = docs.length - seen.length;
-    const link = d => `<a class="md-prop__doc link" href="#${esc(studioHref(stageOf(d) === 'review' ? 'review' : 'library', { sel: d.id }))}"><span class="truncate">${esc(d.name)}</span></a>`;
+    const link = d => `<a class="md-prop__doc link" href="#${esc(studioHref(stageOf(d) === 'review' ? 'review' : 'documents', { sel: d.id }))}"><span class="truncate">${esc(d.name)}</span></a>`;
     return `<span class="md-prop__docs"><span>${esc(`Suggested by ${plural(docs.length, 'document')}`)}${seen.length ? ':' : ''}</span>${seen.map(link).join('<span aria-hidden="true">,</span>')}${hidden && seen.length ? `<span>${esc(`+${hidden} more`)}</span>` : ''}</span>`;
   }
   /** A proposal reads as a sentence (name, in which domain, why) with Accept; editing opens only when Rename, Change domain or Merge is chosen. */

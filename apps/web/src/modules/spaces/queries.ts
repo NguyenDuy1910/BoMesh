@@ -249,7 +249,7 @@ export function useUpNext({ space, limit = 6, queue = true }: { space?: string; 
   });
 }
 
-/* ═══════════════ Knowledge bases a space can link ═══════════════ */
+/* ═══════════════ Collections a space can link ═══════════════ */
 
 export interface LinkableBase {
   base: Item;
@@ -259,7 +259,7 @@ export interface LinkableBase {
   readable: boolean;
 }
 
-/** Shared knowledge bases (no personal "My files"), with what the caller may do with them. */
+/** Shared collections (no personal "My files"), with what the caller may do with them. */
 export function useLinkableBases(enabled = true) {
   const { id } = useWorkspace();
   return useQuery({
@@ -273,7 +273,7 @@ export function useLinkableBases(enabled = true) {
   });
 }
 
-/** The knowledge bases linked to a space (`Space.collections`), as items; unreadable ones come back LOCKED or are skipped. */
+/** The collections linked to a space (`Space.collections`), as items; unreadable ones come back LOCKED or are skipped. */
 export function useSpaceBases(space: Space | undefined) {
   const { id } = useWorkspace();
   const names = space?.collections ?? [];

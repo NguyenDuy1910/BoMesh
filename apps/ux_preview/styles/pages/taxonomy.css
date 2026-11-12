@@ -7,7 +7,10 @@
 .tx-sum { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .tx-sum__text { flex: 1 1 auto; min-width: 0; margin: 0; font-size: 13px; line-height: 20px; color: var(--muted); overflow-wrap: anywhere; }
 .tx-sum__text .medium { color: var(--foreground); }
-.tx-sum__warn { color: var(--warning-soft-foreground); border-radius: var(--radius-sm); }
+/* Topics without keywords: a toggle that narrows the tree to them (pressed: soft warning fill). */
+.tx-sum__warn { padding: 0 6px; margin: 0 -2px; border-radius: var(--radius-sm); color: var(--warning-soft-foreground); font: inherit; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; }
+.tx-sum__warn:hover { text-decoration-style: solid; }
+.tx-sum__warn[aria-pressed="true"] { background: var(--warning-soft); text-decoration: none; }
 .tx-sum__warn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 
 /* Two panes: tree | detail */
@@ -38,6 +41,8 @@
 .tx-row__count { flex: none; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .tx-row.is-selected .tx-row__count { color: inherit; }
 .tx-row__dot { flex: none; width: 6px; height: 6px; border-radius: var(--radius-full); background: var(--warning); }
+/* No keywords: a hollow warning ring, so it never reads as the filled "unsaved" dot. */
+.tx-row__warn { flex: none; width: 7px; height: 7px; border-radius: var(--radius-full); box-shadow: inset 0 0 0 1.5px var(--warning); }
 .tx-item.is-new .tx-row__name { font-style: italic; }
 
 /* Detail */

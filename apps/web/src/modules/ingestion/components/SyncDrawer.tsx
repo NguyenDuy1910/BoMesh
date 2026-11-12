@@ -199,7 +199,7 @@ export function SyncDrawer({ param, connections, actions }: { param: string | nu
         </ol>
       </SheetSection>
       {failures.length ? (
-        <SheetSection title="Couldn’t sync">
+        <SheetSection title="Couldn’t read">
           <List>
             {failures.map((f, i) => (
               <ListItem key={`${f.resourceId}-${i}`} lead={<FileIcon name={f.displayName} size="sm" />} title={f.displayName || f.resourceId || "File"} contentTitle description={f.message || "This file couldn’t be read."} />

@@ -144,7 +144,7 @@
       { icon: 'sparkles', tone: 'accent', title: 'Ask a question', desc: `Answers from ${curWs().name} documents, with citations`, href: '/chat' },
       canContribute()
         ? { icon: 'upload', title: 'Contribute knowledge', desc: 'Share a document; a reviewer publishes it', act: 'contribute' }
-        : { icon: 'bookmark', title: 'Your library', desc: 'Saved documents, your files and collections', href: '/knowledge/library' },
+        : { icon: 'bookmark', title: 'Your library', desc: 'Saved documents, your files and reading lists', href: '/knowledge/library' },
     ];
     const card = c => {
       const inner = `${itemIcon(c.icon, c.tone || '')}<span class="home-start__body"><span class="home-start__title">${esc(c.title)}</span><span class="home-start__desc">${esc(c.desc)}</span></span>${ic('arrow-right', 'i-sm home-start__go')}`;
@@ -163,7 +163,7 @@
     const n = canReview() ? reviewQueue().length : 0;
     if (n) out.push({ href: '/studio?tab=review', lead: itemIcon('inbox', 'accent', 'sm'), title: `${plural(n, 'document')} to review`, sub: 'Waiting for your decision' });
     if (hasModule('spaces') || hasModule('requests')) X.upNext({ limit: 4 }).filter(it => it.kind === 'reply' || (it.at - NOW < 2 * DAY && it.at > NOW - DAY)).slice(0, 1).forEach(it => out.push({
-      href: it.action?.href || '/inbox', act: it.action?.act, data: it.action?.data, lead: itemIcon(KIND_ICON[it.kind] || 'calendar', 'warning', 'sm'), title: it.title, sub: when(it).text, tone: 'warning',
+      href: it.action?.href, act: it.action?.act || (it.action?.href ? '' : 'inbox-show'), data: it.action?.data, lead: itemIcon(KIND_ICON[it.kind] || 'calendar', 'warning', 'sm'), title: it.title, sub: when(it).text, tone: 'warning',
     }));
     return out.slice(0, 3);
   }

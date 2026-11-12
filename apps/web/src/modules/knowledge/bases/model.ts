@@ -1,10 +1,10 @@
-import { Globe, Lock, User, type LucideIcon } from "lucide-react";
+import { Globe, Lock, User, Users, type LucideIcon } from "lucide-react";
 
 import { resourceId, type Schema } from "@/lib/api/client";
 import { hashOf } from "@/lib/format";
 
 /**
- * Knowledge bases (root COLLECTION items) — pure helpers for the preview's
+ * Collections (root COLLECTION items) — pure helpers for the preview's
  * `features/knowledge.js`: marks, general access, roles and sharing on top of
  * the collection IAM policy (api_design.md §1: `roles/collection{Viewer,Editor,Owner}`,
  * principal `workspaceMembers` = everyone in the workspace).
@@ -20,7 +20,7 @@ export type AccessRequest = Schema<"Request">;
 /** Preview `COLORS` (knowledge.js); defined as `--kb-color-N` in knowledge.css. */
 const KB_COLOR_COUNT = 8;
 
-/** Stable mark colour of a base (the API stores none): `var(--kb-color-N)` from the bare item ID. */
+/** Stable mark colour of a collection (the API stores none): `var(--kb-color-N)` from the bare item ID. */
 export function baseColor(item: string): string {
   return `var(--kb-color-${hashOf(resourceId(item)) % KB_COLOR_COUNT})`;
 }
@@ -33,7 +33,13 @@ export const isEditor = (item: Item | null | undefined) => item?.access === "EDI
 export const NAME_MAX = 60;
 export const DESC_MAX = 200;
 
-/** Preview `nameError`: required, ≤ 60 characters, unique among live bases (case-insensitive). */
+/** Knowledge Studio → Collections. */
+export const COLLECTIONS_HREF = "/studio?tab=collections";
+
+/** A collection's management page (`tab` = access | sources | settings). */
+export const collectionHref = (collection: string | undefined, tab?: string) => `/studio/collections/${resourceId(collection)}${tab ? `?tab=${tab}` : ""}`;
+
+/** Preview `nameError`: required, ≤ 60 characters, unique among live collections (case-insensitive). */
 export function nameError(name: string, bases: readonly Item[], selfName?: string): string {
   const n = name.trim();
   if (!n) return "Enter a name.";
@@ -55,8 +61,8 @@ export type ShareRole = keyof typeof ROLE_OF;
 export const ROLE_LABEL: Record<ShareRole, string> = { owner: "Owner", editor: "Editor", viewer: "Viewer" };
 export const ROLE_RANK: Record<ShareRole, number> = { viewer: 1, editor: 2, owner: 3 };
 export const ROLE_DESC: Record<ShareRole, string> = {
-  viewer: "Can search and read documents.",
-  editor: "Can also edit document details.",
+  viewer: "Can search and read its documents.",
+  editor: "Can also add documents and edit their details.",
   owner: "Can also review submissions and manage access and settings.",
 };
 export const ROLES: readonly ShareRole[] = ["viewer", "editor", "owner"];
@@ -67,8 +73,8 @@ const roleKey = (role: string): ShareRole | null => {
 };
 
 /**
- * General access of a base. Exact with the policy (owners); without it only LOCKED is
- * known (restricted) — readers can't tell workspace-wide from shared (see the slice report).
+ * General access of a collection. Exact with the policy (owners); without it only LOCKED is
+ * known (restricted) — readers can't tell workspace-wide from shared.
  */
 export function generalAccessOf(item: Item, policy?: Policy | null): AccessKey | null {
   if (isPersonal(item)) return "personal";
@@ -86,15 +92,18 @@ export interface AccessInfo {
   long: string;
 }
 
-/** Preview `kbAccess`: chip label and the sentence under General access. */
+/** General access choices in the preview's order (`KB_ACCESS`). */
+export const GENERAL_ACCESS: readonly GeneralAccess[] = ["workspace", "restricted", "private"];
+
+/** Preview `kbAccess` / `KB_ACCESS` + `kbAccessDesc`: chip label, icon and the sentence under General access. */
 export function accessInfo(key: AccessKey, workspaceName: string, spaceName?: string): AccessInfo {
   if (key === "personal") return { icon: User, label: "Only you", long: "Only you can see this." };
-  if (key === "workspace") return { icon: Globe, label: "Everyone", long: `Everyone in ${workspaceName} can find it and ask about it.` };
-  if (key === "private") return { icon: Lock, label: "Owners only", long: "Only owners can find it." };
+  if (key === "workspace") return { icon: Globe, label: "Everyone", long: `Anyone in ${workspaceName || "the workspace"} can find it and ask about it.` };
+  if (key === "private") return { icon: Lock, label: "Private", long: "Only its owners." };
   return {
-    icon: Lock,
+    icon: Users,
     label: "Restricted",
-    long: spaceName ? `Members of ${spaceName} and the people and groups below can find it.` : "Only the people and groups below can find it.",
+    long: spaceName ? `Only the people and groups you add, plus members of ${spaceName}.` : "Only the people and groups you add.",
   };
 }
 

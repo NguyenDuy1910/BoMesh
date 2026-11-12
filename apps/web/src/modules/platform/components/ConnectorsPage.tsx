@@ -1,14 +1,13 @@
 "use client";
 
-import { Button, Description, Input, Label, Modal, TextField } from "@heroui/react";
+import { Button, Description, FieldError, Input, Label, Modal, TextField } from "@heroui/react";
 import { useQuery } from "@tanstack/react-query";
-import { Plug } from "lucide-react";
-import { useState } from "react";
+import { ChevronRight, Plug } from "lucide-react";
+import { useState, type ReactNode } from "react";
 
-import { PageChrome } from "@/components/shell/page-chrome";
 import {
   AppIcon,
-  confirm,
+  appOf,
   EmptyState,
   ErrorState,
   Gate,
@@ -18,6 +17,7 @@ import {
   Page,
   PageHeader,
   PreviewChip,
+  Section,
   SkeletonCards,
   SkeletonRows,
   StatusChip,
@@ -32,33 +32,29 @@ import { disableConnector, enableConnector, listConnectorRequests, updateConnect
 import { AUTH_LABEL, connectorApp, connectorStatus, lastSegment } from "../model";
 import { pk, useConnectors, useInvalidatePlatform, useIsPlatformAdmin, usePlatformWorkspaces } from "../queries";
 import { PlatformDrawer, PREVIEW_TIP, useUrlState } from "./shared";
+import { WorkspaceDrawer } from "./WorkspaceDrawer";
 
-/** Enable / disable with the preview's confirm and Undo. */
+/** The built-in upload "connector": every workspace has it; it isn't in the connector catalog. */
+const UPLOAD = "upload";
+
+/** On/off is reversible (documents stay searchable): at once, with Undo (preview `setConnector`). */
 function useConnectorToggle() {
   const invalidate = useInvalidatePlatform();
-  const set = async (c: Connector, on: boolean, { undo = true } = {}) => {
+  return async (c: Connector) => {
+    const on = c.state !== "ACTIVE";
     try {
       const updated = await (on ? enableConnector(c) : disableConnector(c));
       await invalidate(pk.connectors);
-      toast(
-        on ? `${c.displayName} is available to workspaces` : `Turned off ${c.displayName}`,
-        undo ? { undo: () => void set(updated, !on, { undo: false }) } : {},
-      );
+      toast(on ? `${c.displayName} is available to workspaces` : `Turned off ${c.displayName}. Workspaces stop syncing from it.`, {
+        undo: () =>
+          void (on ? disableConnector(updated) : enableConnector(updated))
+            .then(() => invalidate(pk.connectors))
+            .catch((error: unknown) => toast(errorMessage(error), { tone: "danger" })),
+      });
     } catch (error) {
       toast(errorMessage(error), { tone: "danger" });
     }
   };
-  const toggle = async (c: Connector) => {
-    if (c.state !== "ACTIVE") return set(c, true);
-    const ok = await confirm({
-      title: `Turn off ${c.displayName}?`,
-      description: `${plural(c.workspaceCount ?? 0, "workspace")} will stop syncing from it. Their documents stay searchable.`,
-      confirmLabel: "Turn off",
-      tone: "danger",
-    });
-    if (ok) await set(c, false, { undo: false });
-  };
-  return { set, toggle };
 }
 
 /** Shared OAuth client: client ID and a write-only secret. */
@@ -67,10 +63,11 @@ function OauthClientForm({ connector }: { connector: Connector }) {
   const [clientId, setClientId] = useState(connector.oauthClient?.clientId ?? "");
   const [secret, setSecret] = useState("");
   const [busy, setBusy] = useState(false);
+  const [idError, setIdError] = useState<string>();
   const dirty = clientId.trim() !== (connector.oauthClient?.clientId ?? "") || secret.trim() !== "";
   const save = async () => {
     if (!clientId.trim()) {
-      toast("Enter the client ID.", { tone: "danger" });
+      setIdError("Enter the client ID.");
       return;
     }
     setBusy(true);
@@ -87,9 +84,18 @@ function OauthClientForm({ connector }: { connector: Connector }) {
   };
   return (
     <div className="stack gap-16">
-      <TextField fullWidth value={clientId} onChange={setClientId}>
+      <TextField
+        fullWidth
+        value={clientId}
+        onChange={(v) => {
+          setClientId(v);
+          setIdError(undefined);
+        }}
+        isInvalid={Boolean(idError)}
+      >
         <Label>Client ID</Label>
         <Input className="mono" spellCheck={false} autoComplete="off" />
+        <FieldError>{idError}</FieldError>
       </TextField>
       <TextField fullWidth value={secret} onChange={setSecret} type="password">
         <Label>Client secret</Label>
@@ -108,6 +114,7 @@ function OauthClientForm({ connector }: { connector: Connector }) {
             onPress={() => {
               setClientId(connector.oauthClient?.clientId ?? "");
               setSecret("");
+              setIdError(undefined);
             }}
           >
             Discard
@@ -118,11 +125,25 @@ function OauthClientForm({ connector }: { connector: Connector }) {
   );
 }
 
-/** Preview `DR['pf-con']`: status, sign-in method, usage, availability switch (+ OAuth client). */
+/** Preview `DR['pf-con']`: status, sign-in method, usage and the "Available to workspaces" switch (+ OAuth client). */
 function ConnectorDrawer({ connectorId, connectors, onClose }: { connectorId: string | null; connectors: readonly Connector[] | undefined; onClose: () => void }) {
   const isAdmin = useIsPlatformAdmin();
-  const { toggle } = useConnectorToggle();
+  const toggle = useConnectorToggle();
   if (!connectorId) return <PlatformDrawer isOpen={false} onClose={onClose} title="">{null}</PlatformDrawer>;
+
+  if (connectorId === UPLOAD) {
+    return (
+      <PlatformDrawer isOpen onClose={onClose} lead={<AppIcon app="upload" size="lg" />} title="File upload" description="PDF, Office, text and ZIP files uploaded directly.">
+        <div className="drawer__section">
+          <KeyValue pairs={[["Status", <StatusChip key="s" kind="connector" value="builtin" />]]} />
+        </div>
+        <div className="drawer__section">
+          <SwitchRow title="Available to workspaces" description="Built in. Every workspace can upload files, so it can’t be turned off." isSelected isDisabled onChange={() => undefined} />
+        </div>
+      </PlatformDrawer>
+    );
+  }
+
   const c = connectors?.find((x) => lastSegment(x.name) === connectorId);
   if (!c) {
     return (
@@ -132,40 +153,28 @@ function ConnectorDrawer({ connectorId, connectors, onClose }: { connectorId: st
     );
   }
   const on = c.state === "ACTIVE";
+  const used = plural(c.workspaceCount ?? 0, "workspace");
   return (
-    <PlatformDrawer
-      isOpen
-      onClose={onClose}
-      lead={<AppIcon app={connectorApp(c.name)} size="lg" />}
-      title={c.displayName}
-      description={c.description}
-      footer={
-        <Button variant="tertiary" onPress={onClose}>
-          Done
-        </Button>
-      }
-    >
+    <PlatformDrawer isOpen onClose={onClose} lead={<AppIcon app={connectorApp(c.name)} size="lg" />} title={c.displayName} description={c.description}>
       <div className="drawer__section">
         <KeyValue
           pairs={[
             ["Status", <StatusChip key="s" kind="connector" value={connectorStatus(c.state)} />],
-            ["Sign-in method", c.authenticationType ? AUTH_LABEL[c.authenticationType] : "—"],
-            ["Used by", plural(c.workspaceCount ?? 0, "workspace")],
-            c.authenticationType === "OAUTH" && ["Client secret", c.oauthClient?.secretConfigured ? "Stored" : "Not set"],
+            c.authenticationType && c.authenticationType !== "NONE" && ["Sign-in method", AUTH_LABEL[c.authenticationType]],
+            ["Used by", used],
           ]}
         />
       </div>
-      {isAdmin && c.state !== "UNSUPPORTED" ? (
-        <div className="drawer__section">
-          <SwitchRow
-            title="Available to workspaces"
-            description={on ? "Workspace admins can connect it as a source." : "Workspaces can’t connect it. Existing documents stay searchable."}
-            isSelected={on}
-            onChange={() => void toggle(c)}
-          />
-        </div>
-      ) : null}
-      {isAdmin && c.authenticationType === "OAUTH" && c.state !== "UNSUPPORTED" ? (
+      <div className="drawer__section">
+        <SwitchRow
+          title="Available to workspaces"
+          description={on ? "Workspace admins can connect it as a source." : `Workspaces can’t connect it. ${used} stopped syncing; their documents stay searchable.`}
+          isSelected={on}
+          isDisabled={!isAdmin}
+          onChange={() => void toggle(c)}
+        />
+      </div>
+      {isAdmin && c.authenticationType === "OAUTH" ? (
         <div className="drawer__section">
           <h3 className="drawer__section-title">Sign-in client</h3>
           <OauthClientForm key={c.etag} connector={c} />
@@ -175,8 +184,8 @@ function ConnectorDrawer({ connectorId, connectors, onClose }: { connectorId: st
   );
 }
 
-/** Preview `M['pf-con-demand']`: workspaces that asked for an unavailable connector. */
-function DemandDialog({ connector, onClose }: { connector: Connector | null; onClose: () => void }) {
+/** Preview `M['pf-con-demand']`: workspaces that asked for a connector this deployment doesn't have. */
+function DemandDialog({ connector, onClose, onOpenWorkspace }: { connector: Connector | null; onClose: () => void; onOpenWorkspace: (id: string) => void }) {
   const workspaces = usePlatformWorkspaces();
   const requests = useQuery({
     queryKey: ["platform", "connector-requests", connector?.name],
@@ -184,15 +193,22 @@ function DemandDialog({ connector, onClose }: { connector: Connector | null; onC
     enabled: Boolean(connector && workspaces.data),
   });
   const byId = new Map((workspaces.data ?? []).map((w) => [lastSegment(w.name), w]));
-  const count = connector?.requestCount ?? 0;
+  const count = requests.data?.length ?? connector?.requestCount ?? 0;
   return (
     <Modal.Backdrop isOpen={Boolean(connector)} onOpenChange={(open) => !open && onClose()}>
       <Modal.Container size="md" scroll="inside">
         <Modal.Dialog>
           <Modal.CloseTrigger aria-label="Close" />
           <Modal.Header>
-            <Modal.Heading>{connector?.displayName} requests</Modal.Heading>
-            <p className="modal__description">{plural(count, "workspace")} asked for this connector.</p>
+            <div className="row gap-12">
+              <Modal.Icon className="modal__icon--default" aria-hidden>
+                {appOf(connectorApp(connector?.name))?.glyph(20) ?? <Plug className="i" />}
+              </Modal.Icon>
+              <div className="grow">
+                <Modal.Heading>{connector?.displayName} requests</Modal.Heading>
+                <p className="modal__description">{`${plural(count, "workspace")} asked for this connector. It isn’t on this deployment yet.`}</p>
+              </div>
+            </div>
           </Modal.Header>
           <Modal.Body>
             {requests.isError ? (
@@ -208,22 +224,21 @@ function DemandDialog({ connector, onClose }: { connector: Connector | null; onC
                       key={request.name}
                       lead={<WorkspaceMark name={w?.displayName ?? "?"} size={28} />}
                       title={<span translate="no">{w?.displayName ?? "Removed workspace"}</span>}
+                      label={w?.displayName}
                       description={request.title || "Asked for this connector"}
                       meta={fmtDate(request.createTime)}
+                      actions={w ? <ChevronRight className="i i-sm muted" aria-hidden /> : undefined}
+                      onPress={w ? () => onOpenWorkspace(workspaceId) : undefined}
                     />
                   );
                 })}
               </List>
             ) : (
-              <EmptyState
-                icon={Plug}
-                title={count ? "These requests aren’t readable here" : "No requests yet"}
-                description={count ? "They were filed in workspaces whose Requests module is off." : undefined}
-                compact
-              />
+              <EmptyState icon={Plug} title="No requests yet" description="Workspaces that ask for it appear here." compact />
             )}
           </Modal.Body>
           <Modal.Footer>
+            <span className="modal__footer-start t-xs muted">Connectors are added in the deployment configuration.</span>
             <Button slot="close" variant="primary">
               Done
             </Button>
@@ -234,89 +249,88 @@ function DemandDialog({ connector, onClose }: { connector: Connector | null; onC
   );
 }
 
-/** Preview `P.pConnectors`: one card per connector, one action per card. */
+/** One card pattern for every connector: the whole card opens its drawer (or, for requested ones, who asked). */
+function ConnectorCard({ app, name, status, foot, onPress }: { app: string; name: ReactNode; status: ReactNode; foot: string; onPress: () => void }) {
+  return (
+    <button type="button" className="card card--action pf-con" onClick={onPress}>
+      <span className="row gap-12 pf-con__head">
+        <AppIcon app={app} size="lg" />
+        <span className="stack gap-4 grow">
+          <span className="card__title truncate">{name}</span>
+          <span className="pf-con__sub">{status}</span>
+        </span>
+        <ChevronRight className="i pf-con__chev" aria-hidden />
+      </span>
+      <span className="pf-con__foot t-sm muted">{foot}</span>
+    </button>
+  );
+}
+
+/** Preview `P.pConnectors`: available connectors (incl. built-in upload), then the requested ones. */
 export function ConnectorsPage() {
   const url = useUrlState();
-  const isAdmin = useIsPlatformAdmin();
   const connectors = useConnectors();
-  const workspaces = usePlatformWorkspaces();
-  const { set } = useConnectorToggle();
   const [demand, setDemand] = useState<Connector | null>(null);
-
-  const open = (c: Connector) => url.set({ open: lastSegment(c.name) });
-
-  const card = (c: Connector) => {
-    const status = connectorStatus(c.state);
-    const needsSecret = c.authenticationType === "OAUTH" && !c.oauthClient?.secretConfigured;
-    const meta =
-      status === "unavailable" ? (
-        <button type="button" className="link-button t-sm" onClick={() => setDemand(c)}>
-          Requested by {plural(c.requestCount ?? 0, "workspace")}
-        </button>
-      ) : (
-        <span className="t-sm muted">{status === "disabled" ? "Workspaces can’t connect it" : `Used by ${plural(c.workspaceCount ?? 0, "workspace")}`}</span>
-      );
-    const action =
-      status === "enabled" || (status === "disabled" && (needsSecret || !isAdmin)) ? (
-        <Button size="sm" variant="tertiary" onPress={() => open(c)}>
-          {isAdmin ? "Configure" : "View"}
-        </Button>
-      ) : status === "disabled" ? (
-        <Button size="sm" variant="secondary" onPress={() => void set(c, true)}>
-          Enable
-        </Button>
-      ) : null;
-    return (
-      <div key={c.name} className="card pf-con">
-        <div className="row gap-12">
-          <AppIcon app={connectorApp(c.name)} size="lg" />
-          <div className="stack gap-4 grow">
-            <span className="card__title truncate">{c.displayName}</span>
-            <span>
-              <StatusChip kind="connector" value={status} />
-            </span>
-          </div>
-        </div>
-        <div className="pf-con__foot">
-          {meta}
-          {action}
-        </div>
-      </div>
-    );
-  };
 
   return (
     <Page>
-      <PageChrome crumbs={[{ label: "Connectors" }]} />
-      <PageHeader title="Connectors" description="Apps that workspaces can connect." chips={<PreviewChip tooltip={PREVIEW_TIP} />} />
+      <PageHeader title="Connectors" chips={<PreviewChip tooltip={PREVIEW_TIP} />} />
       <Gate
         query={connectors}
         skeleton={<SkeletonCards cards={6} />}
         isEmpty={(data) => data.length === 0}
         empty={<EmptyState icon={Plug} title="No connectors installed" description="Connectors appear once they’re part of this deployment." boxed />}
       >
-        {(all) => (
-          <div className="grid cols-3">
-            <div className="card pf-con">
-              <div className="row gap-12">
-                <AppIcon app="upload" size="lg" />
-                <div className="stack gap-4 grow">
-                  <span className="card__title truncate">File upload</span>
-                  <span>
-                    <StatusChip kind="connector" value="builtin" />
-                  </span>
+        {(all) => {
+          const available = all.filter((c) => c.state !== "UNSUPPORTED");
+          const asked = all.filter((c) => c.state === "UNSUPPORTED").sort((a, b) => (b.requestCount ?? 0) - (a.requestCount ?? 0));
+          return (
+            <>
+              <Section title="Available to workspaces" description="Workspace admins can connect these as sources. Open one to turn it on or off.">
+                <div className="grid cols-3">
+                  <ConnectorCard app="upload" name="File upload" status={<StatusChip kind="connector" value="builtin" />} foot="Always on" onPress={() => url.set({ open: UPLOAD })} />
+                  {available.map((c) => (
+                    <ConnectorCard
+                      key={c.name}
+                      app={connectorApp(c.name)}
+                      name={c.displayName}
+                      status={<StatusChip kind="connector" value={connectorStatus(c.state)} />}
+                      foot={c.state === "DISABLED" ? "Workspaces can’t connect it" : `Used by ${plural(c.workspaceCount ?? 0, "workspace")}`}
+                      onPress={() => url.set({ open: lastSegment(c.name) })}
+                    />
+                  ))}
                 </div>
-              </div>
-              <div className="pf-con__foot">
-                <span className="t-sm muted">{workspaces.data ? `Used by ${plural(workspaces.data.length, "workspace")}` : "Always available"}</span>
-              </div>
-            </div>
-            {all.map(card)}
-          </div>
-        )}
+              </Section>
+              {asked.length ? (
+                <Section title="Requested" description="Not on this deployment yet. Open one to see who asked.">
+                  <div className="grid cols-3">
+                    {asked.map((c) => (
+                      <ConnectorCard
+                        key={c.name}
+                        app={connectorApp(c.name)}
+                        name={c.displayName}
+                        status={<StatusChip kind="connector" value="unavailable" />}
+                        foot={`Requested by ${plural(c.requestCount ?? 0, "workspace")}`}
+                        onPress={() => setDemand(c)}
+                      />
+                    ))}
+                  </div>
+                </Section>
+              ) : null}
+            </>
+          );
+        }}
       </Gate>
       <ConnectorDrawer connectorId={url.get("open") || null} connectors={connectors.data} onClose={() => url.set({ open: null })} />
-      <DemandDialog connector={demand} onClose={() => setDemand(null)} />
+      <DemandDialog
+        connector={demand}
+        onClose={() => setDemand(null)}
+        onOpenWorkspace={(id) => {
+          setDemand(null);
+          url.set({ workspace: id });
+        }}
+      />
+      <WorkspaceDrawer workspaceId={url.get("workspace") || null} onClose={() => url.set({ workspace: null })} />
     </Page>
   );
 }

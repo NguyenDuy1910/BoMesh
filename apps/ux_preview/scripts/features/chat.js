@@ -16,7 +16,7 @@ function findMsg(id) { for (const conv of D.convs) { const m = conv.messages.fin
 const canDoc = d => !!d && canReadKb(kbById(d.kb));
 const visCites = m => (m.citations || []).filter(c => canDoc(docById(c.doc)));
 const plain = t => String(t || '').replace(/\[([^\]]+)\]\(\/[^)\s]*\)/g, '$1').replace(/\*\*|\*/g, '').replace(/\s?\[\d+\]/g, '').replace(/^\|.*$/gm, '').replace(/\n{3,}/g, '\n\n').trim();
-/** The caller's personal knowledge base ("My files") in this workspace. */
+/** The caller's personal collection ("My files") in this workspace. */
 const mineKb = () => D.kbs.find(k => k.personal && (!k.owner || k.owner === me().id))?.id || 'kb-mine';
 const normFile = f => typeof f === 'string' ? { name: f, type: f.split('.').pop().toLowerCase(), kind: 'upload', doc: D.docs.find(d => d.kb === mineKb() && d.name === f)?.id } : f;
 /** Conversations are private to their owner when they have one (seeded shared demo threads don't). */
@@ -27,7 +27,7 @@ function makeTitle(q) {
   if (w.length > 6) t += '…';
   return t.charAt(0).toUpperCase() + t.slice(1);
 }
-/** Drop names of knowledge bases the caller can't read from step labels. */
+/** Drop names of collections the caller can't read from step labels. */
 function clean(s) {
   D.kbs.filter(k => !canReadKb(k)).forEach(k => { s = String(s).split(' and ' + k.name).join('').split(k.name + ' and ').join('').split(', ' + k.name).join(''); });
   return s;
@@ -267,7 +267,7 @@ function answer(q, scope = [], fileNames = [], space = null) {
   const names = searched.map(k => k.name);
   const searchLabel = names.length <= 2 ? names.join(' and ') : `${names[0]}, ${names[1]} and ${names.length - 2} more`;
   const noRes = restricted => {
-    const r = { text: 'I couldn’t find this in the knowledge you can access.', citations: [], searchLabel, activity: [{ kind: 'search', label: `Searched ${plural(searched.length, 'knowledge base')}`, detail: 'No relevant passages' }], noResults: { scoped: scope.length > 0, restricted: restricted || lockedExists }, files };
+    const r = { text: 'I couldn’t find this in the knowledge you can access.', citations: [], searchLabel, activity: [{ kind: 'search', label: `Searched ${plural(searched.length, 'collection')}`, detail: 'No relevant passages' }], noResults: { scoped: scope.length > 0, restricted: restricted || lockedExists }, files };
     // Not covered where the caller searched: offer who can answer; unscoped misses become a knowledge gap.
     if (!restricted && hasModule('requests')) { const n = askNext(q, scope, space); r.next = n.length ? n : null; if (!scope.length) r.gap = { q: q.trim(), kb: null }; }
     return r;
@@ -281,7 +281,7 @@ function answer(q, scope = [], fileNames = [], space = null) {
   pr.citations.forEach(c => { const d = docById(c.doc); c.page = Math.max(1, Math.min(c.page, d.pages)); });
   const readDocs = [...new Set(pr.citations.map(c => c.doc))].map(docById);
   const activity = [
-    { kind: 'search', label: `Searched ${names.length <= 2 && names.length ? searchLabel : plural(searched.length, 'knowledge base')}`, detail: `${pr.citations.length * 3 + 1} relevant passages` },
+    { kind: 'search', label: `Searched ${names.length <= 2 && names.length ? searchLabel : plural(searched.length, 'collection')}`, detail: `${pr.citations.length * 3 + 1} relevant passages` },
     ...fileNames.map(f => ({ kind: 'read', label: `Read ${f}`, detail: 'your attachment' })),
     ...readDocs.map(d => ({ kind: 'read', label: `Read ${d.name}`, detail: plural(pr.citations.filter(c => c.doc === d.id).length, 'passage') })),
     ...extra,
@@ -326,7 +326,7 @@ function md(text, ctx) {
 }
 
 /* ═══════════════ Composer ═══════════════ */
-/** What the composer searches: the open conversation, or the home composer. Both carry scope (knowledge base ids) and space (context). */
+/** What the composer searches: the open conversation, or the home composer. Both carry scope (collection ids) and space (context). */
 function scopeHolder() { const conv = S.cur?.r.page === 'chatThread' && convById(S.cur.params.id); if (conv) { conv.scope ??= []; return conv; } return composer(composerKey()); }
 const readableKbsOf = sp => (sp?.kbs || []).filter(id => canReadKb(kbById(id)));
 /** Spaces offered as a scope: mine, with knowledge I can read. */
@@ -382,7 +382,7 @@ function afterComposer(changed) {
   if (changed) { scopeUi().kbs = false; setTimeout(() => { const t = $('#chat-input'); if (!t || document.activeElement !== t && document.activeElement !== document.body && document.activeElement) return; t.focus({ preventScroll: true }); const n = t.value.length; t.setSelectionRange(n, n); }, 0); }
 }
 A['chat-draft'] = el => grow(el);
-/* Scope picker (Popover): "Search in" is one choice — the whole workspace, one of my spaces, or specific knowledge bases.
+/* Scope picker (Popover): "Search in" is one choice — the whole workspace, one of my spaces, or specific collections.
    Only that last choice reveals the knowledge-base checklist (multi-select), so a space and a base with the same name never sit side by side. */
 const scopeUi = () => ui('chatScope', { kbs: false });
 function scopeMode(h) { const sp = holderSpace(h); return sp ? 'sp:' + sp.id : h.scope.length || scopeUi().kbs ? 'kbs' : 'all'; }
@@ -392,10 +392,10 @@ function scopeOpt(value, on, icon, label, meta) {
 }
 PO['chat-scope'] = () => {
   const h = scopeHolder(), mode = scopeMode(h), spaces = scopeSpaces(), kbs = visibleKbs().filter(canReadKb);
-  const radios = [scopeOpt('all', mode === 'all', 'layers', allLabel(), plural(kbs.length, 'knowledge base')),
-    ...spaces.map(s => scopeOpt('sp:' + s.id, mode === 'sp:' + s.id, spaceType(s.type).icon, s.name, `Space · ${plural(readableKbsOf(s).length, 'knowledge base')}`)),
-    scopeOpt('kbs', mode === 'kbs', 'book', 'Specific knowledge bases', mode === 'kbs' && h.scope.length ? `${h.scope.length} selected` : 'Choose one or more')].join('');
-  const list = mode === 'kbs' ? `<div class="chat-scope-pop__kbs" role="group" aria-label="Knowledge bases">${kbs.map(k => checkbox({ checked: h.scope.includes(k.id), act: 'chat-scope-kb', data: { id: k.id }, label: `${ic(k.personal ? 'user' : 'book', 'i-sm chat-opt__icon')}<span class="chat-opt__body"><span class="chat-opt__label truncate">${esc(k.name)}</span><span class="chat-opt__meta">${k.personal ? 'Only you' : plural(docCount(k), 'document')}</span></span>` })).join('')}</div>` : '';
+  const radios = [scopeOpt('all', mode === 'all', 'layers', allLabel(), plural(kbs.length, 'collection')),
+    ...spaces.map(s => scopeOpt('sp:' + s.id, mode === 'sp:' + s.id, spaceType(s.type).icon, s.name, `Space · ${plural(readableKbsOf(s).length, 'collection')}`)),
+    scopeOpt('kbs', mode === 'kbs', 'book', 'Specific collections', mode === 'kbs' && h.scope.length ? `${h.scope.length} selected` : 'Choose one or more')].join('');
+  const list = mode === 'kbs' ? `<div class="chat-scope-pop__kbs" role="group" aria-label="Collections">${kbs.map(k => checkbox({ checked: h.scope.includes(k.id), act: 'chat-scope-kb', data: { id: k.id }, label: `${ic(k.personal ? 'user' : 'book', 'i-sm chat-opt__icon')}<span class="chat-opt__body"><span class="chat-opt__label truncate">${esc(k.name)}</span><span class="chat-opt__meta">${k.personal ? 'Only you' : plural(docCount(k), 'document')}</span></span>` })).join('')}</div>` : '';
   return { title: 'Search in', body: `<div class="chat-scope-pop"><div class="chat-scope-pop__group" role="radiogroup" aria-label="Search in">${radios}</div>${list}</div>` };
 };
 A['chat-scope-set'] = el => {
@@ -500,7 +500,7 @@ function aiInner(conv, m) {
   if ((m.state || 'done') === 'done') {
     if (m.noResults) {
       h += `<div class="row gap-8 wrap mt-12">${m.noResults.scoped ? btn(`Ask again in ${allLabel().replace(/^All/, 'all')}`, { v: 'secondary', size: 'sm', icon: 'layers', act: 'chat-unscope', data: { msg: m.id } }) : ''}${btn('Browse knowledge', { v: 'ghost', size: 'sm', icon: 'book', href: '/knowledge' })}</div>`;
-      if (m.noResults.restricted) h += `<p class="chat-hint">${ic('lock', 'i-xs')}<span>Some knowledge bases are restricted. You can request access from Knowledge.</span></p>`;
+      if (m.noResults.restricted) h += `<p class="chat-hint">${ic('lock', 'i-xs')}<span>Some collections are restricted. You can request access from Knowledge.</span></p>`;
     } else if (m.partial || vis.length < all.length) h += `<p class="chat-hint">${ic('lock', 'i-xs')}<span>Knowledge you can’t access may have more on this.</span></p>`;
     if (m.lowConf) h += `<p class="chat-hint">${ic('info', 'i-xs')}<span>The sources don’t settle this, so it’s been flagged to the people who keep this knowledge.</span></p>`;
     h += X.chatFiles?.cards(m) || '';
@@ -719,7 +719,7 @@ A['chat-variant'] = el => { const { m } = findMsg(el.dataset.msg); if (!m?.varia
 A['chat-steps'] = el => { const u = cui(); u.open[el.dataset.msg] = !u.open[el.dataset.msg]; refresh(); };
 A['chat-run'] = el => { const u = cui(); u.open[el.dataset.k] = !u.open[el.dataset.k]; const { m } = findMsg(el.dataset.k.split(':run:')[0]); m ? paint(m) : refresh(); };
 
-/** Shared entry point: start a new conversation with question q, optionally scoped to a knowledge base or a space (its knowledge), with one resource (doc) or several (docs, comma list) attached as references. Empty q opens /chat with that scope chosen. */
+/** Shared entry point: start a new conversation with question q, optionally scoped to a collection or a space (its knowledge), with one resource (doc) or several (docs, comma list) attached as references. Empty q opens /chat with that scope chosen. */
 A['chat-ask'] = el => {
   const { q = '', kb, space, doc, docs } = el?.dataset || {};
   const sp = space && hasModule('spaces') ? spaceById(space) : null;

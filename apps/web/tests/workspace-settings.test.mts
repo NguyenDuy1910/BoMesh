@@ -6,10 +6,10 @@ import {
   identityDirty,
   identityErrors,
   identityPatch,
-  isOverridden,
   moduleChanged,
   resetBody,
   setupBody,
+  setupChanges,
   setupOf,
   spaceTypeKeys,
   spaceTypesWith,
@@ -47,17 +47,18 @@ test("setupOf reads the API defaults: absent modules are on, an empty workflow l
   assert.deepEqual(setupOf({ workflows: [{ key: "DRAFT", enabled: true }, { key: "QUIZ", enabled: false }] }).workflows, ["DRAFT"]);
 });
 
-test("template comparison marks changed modules and offers a reset", () => {
+test("template comparison counts changed settings and offers a reset", () => {
   const enterprise = TEMPLATES.ENTERPRISE;
   const defaults = setupOf({
     modules: { spaces: false, work: false, requests: false },
     workflows: workflowsWith(enterprise.workflows),
   });
-  assert.equal(isOverridden(defaults, enterprise), false);
+  assert.equal(setupChanges(defaults, enterprise), 0);
   const allOn = setupOf({});
   assert.equal(moduleChanged(allOn, enterprise, "spaces"), true);
-  assert.equal(isOverridden(allOn, enterprise), true);
-  assert.equal(isOverridden(setupOf({ spaceTypes: [{ key: "course", displayName: "C", enabled: true }] }), TEMPLATES.CAMPUS), true);
+  // 3 modules, 2 space types missing, 2 extra workflows.
+  assert.equal(setupChanges(allOn, enterprise), 7);
+  assert.equal(setupChanges(setupOf({ spaceTypes: [{ key: "course", displayName: "C", enabled: true }] }), TEMPLATES.CAMPUS), 2);
 });
 
 test("space type lists keep custom keys, labels and icons and add missing known types", () => {

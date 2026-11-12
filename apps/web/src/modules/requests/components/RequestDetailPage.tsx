@@ -1,13 +1,13 @@
 "use client";
 
-import { Button, Description, Dropdown, FieldError, Label, Separator, TextArea, TextField } from "@heroui/react";
-import { ArrowRight, BookOpen, Check, CheckCircle2, ClipboardList, Clock, Eye, Lock, MessageCircle, Send, Sparkles, Undo2, Users, X, XCircle } from "lucide-react";
+import { Button, Checkbox, Description, Dropdown, FieldError, Label, TextArea, TextField } from "@heroui/react";
+import { ArrowRight, BookOpen, Check, CheckCircle2, ClipboardList, Clock, Eye, Lock, MessageCircle, MoreHorizontal, Send, Sparkles, Undo2, Users, X, XCircle } from "lucide-react";
 import NextLink from "next/link";
 import { useRouter } from "next/navigation";
 import { Fragment, useState, type ReactNode } from "react";
 
 import { PageChrome } from "@/components/shell/page-chrome";
-import { Callout, confirm, EmptyState, ErrorState, KeyValue, Page, PageHeader, SkeletonRows, SwitchRow, toast, UserAvatar } from "@/components/ui";
+import { confirm, EmptyState, ErrorState, ItemIcon, KeyValue, Page, PageHeader, SkeletonRows, SwitchRow, toast, UserAvatar } from "@/components/ui";
 import { ApiError, errorMessage, resourceId } from "@/lib/api/client";
 import { fmtDateTime, plural, rel } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
@@ -19,7 +19,6 @@ import { useSpaceMembers } from "@/modules/spaces/queries";
 import {
   clip,
   fieldText,
-  firstName,
   fmtDay,
   isActive,
   isOpen,
@@ -38,9 +37,9 @@ import {
   type RequestType,
   type Space,
 } from "../model";
-import { useDecider, useRequest, useRequestAction, useRequestMessages, useRequests, useRequestType, type RequestAction } from "../queries";
+import { useDecider, useRequest, useRequestAction, useRequestMessages, useRequests, useRequestType, type DeciderPermission, type RequestAction } from "../queries";
 import { AskSpaceDialog } from "./AskSpaceDialog";
-import { LinkButton, RqCard } from "./parts";
+import { ButtonLink, RqCard } from "./parts";
 import { RequestStatusChip, SlaText, StepChip } from "./RequestStatus";
 import { RuleChecks } from "./RuleChecks";
 
@@ -60,9 +59,9 @@ export function RequestDetailPage({ requestId }: { requestId: string }) {
             title={denied ? "You can’t open this request" : "This request doesn’t exist"}
             description={denied ? "Only the person who sent it and the staff handling it can see it." : "The link may be old or mistyped."}
             actions={
-              <LinkButton href="/requests" variant="primary">
+              <ButtonLink href="/requests" variant="primary">
                 Go to requests
-              </LinkButton>
+              </ButtonLink>
             }
           />
         </Page>
@@ -87,6 +86,8 @@ export function RequestDetailPage({ requestId }: { requestId: string }) {
 
 const shortIdOf = (id: string) => id.slice(0, 8).toUpperCase();
 
+type People = Map<string, { name: string; roles: string[] }>;
+
 function RequestView({ request: r }: { request: Request }) {
   const { member } = useWorkspace();
   const spaceId = resourceId(r.space);
@@ -101,10 +102,11 @@ function RequestView({ request: r }: { request: Request }) {
   const action = useRequestAction(resourceId(r.name));
   const [asking, setAsking] = useState(false);
 
-  const people = new Map<string, { name: string; roles: string[] }>();
+  const people: People = new Map();
   for (const m of spaceMembers.data ?? []) if (m.member) people.set(m.member, { name: m.displayName ?? "", roles: m.roles ?? [] });
   const requesterName = requester?.displayName || people.get(r.requester ?? "")?.name || "Someone";
   const nameOf = (who: string | undefined) => (who === r.requester ? requesterName : (people.get(who ?? "")?.name ?? (who === member.name ? (member.displayName ?? "You") : "Someone")));
+  const title = requestTitle(r, type);
 
   const withdraw = async () => {
     const ok = await confirm({
@@ -117,6 +119,7 @@ function RequestView({ request: r }: { request: Request }) {
     action.mutate({ type: "withdraw" }, { onSuccess: () => toast("Request withdrawn"), onError: (e) => toast(errorMessage(e), { tone: "danger" }) });
   };
 
+  // Where it was sent and when it's due sit under the title; the request ID is in the trail.
   const sub: ReactNode[] = [
     isQuestion(r) ? "Question" : null,
     sp?.displayName ? <span translate="no">{sp.displayName}</span> : null,
@@ -125,39 +128,50 @@ function RequestView({ request: r }: { request: Request }) {
 
   return (
     <Page className="rq-page rq-page--item">
-      <PageChrome crumbs={[{ label: "Requests", href: staff && !isReq ? "/requests?tab=queue" : "/requests" }, { label: shortId(r) }]} />
       <PageHeader
-        lead={sp ? <SpaceMark space={sp} size={40} /> : null}
-        title={<span translate={isQuestion(r) || r.title ? "no" : undefined}>{requestTitle(r, type)}</span>}
+        title={title}
+        heading={<span translate={isQuestion(r) || r.title ? "no" : undefined}>{title}</span>}
+        lead={sp ? <SpaceMark space={sp} size={40} /> : <ItemIcon icon={isQuestion(r) ? MessageCircle : ClipboardList} />}
         chips={<RequestStatusChip request={r} mine={isReq} space={sp} />}
-        description={
+        meta={
           sub.length ? (
             <span className="rq-sub">
               {sub.map((x, i) => (
-                <span key={i} className="rq-sub">
+                <Fragment key={i}>
                   {i ? <span aria-hidden>·</span> : null}
                   {x}
-                </span>
+                </Fragment>
               ))}
             </span>
           ) : undefined
         }
+        // Withdrawing is rare and ends the request: it lives in ⋯.
         actions={
           isReq && isActive(r) ? (
-            <Button variant="ghost" onPress={withdraw} isPending={action.isPending && action.variables?.type === "withdraw"}>
-              <Undo2 className="i" aria-hidden />
-              Withdraw
-            </Button>
+            <Dropdown>
+              <Dropdown.Trigger aria-label="More" className="button button--ghost button--icon-only button--muted">
+                <MoreHorizontal className="i" aria-hidden />
+              </Dropdown.Trigger>
+              <Dropdown.Popover placement="bottom end">
+                <Dropdown.Menu aria-label="More" onAction={(key) => key === "withdraw" && void withdraw()}>
+                  <Dropdown.Item id="withdraw" textValue="Withdraw request" variant="danger">
+                    <Undo2 className="i" aria-hidden />
+                    <Label>Withdraw request</Label>
+                  </Dropdown.Item>
+                </Dropdown.Menu>
+              </Dropdown.Popover>
+            </Dropdown>
           ) : undefined
         }
+        crumbs={[{ label: "Requests", href: staff && !isReq ? "/requests?tab=queue" : "/requests" }, { label: shortId(r) }]}
       />
       <div className="rq-detail">
         <div className="rq-main">
-          <Thread request={r} space={sp} messages={messages.data ?? []} isPending={messages.isPending} isError={messages.isError} onRetry={() => void messages.refetch()} nameOf={nameOf} people={people} />
-          <Composer request={r} space={sp} isReq={isReq} staff={staff} can={decider.can} requesterName={requesterName} assigneeName={r.assignee ? nameOf(r.assignee) : undefined} messages={messages.data ?? []} onAsk={() => setAsking(true)} />
+          <Thread request={r} type={type} space={sp} messages={messages.data ?? []} isPending={messages.isPending} isError={messages.isError} onRetry={() => void messages.refetch()} nameOf={nameOf} people={people} />
+          <Composer request={r} space={sp} isReq={isReq} staff={staff} can={decider.can} requesterName={requesterName} assigneeName={r.assignee ? nameOf(r.assignee) : undefined} onAsk={() => setAsking(true)} />
         </div>
         <aside className="rq-side" aria-label="Request details">
-          <SideCards request={r} type={type} space={sp} isReq={isReq} staff={staff} canAssign={decider.can("requests.update")} requesterName={requesterName} requesterEmail={requester?.email} people={people} nameOf={nameOf} />
+          <SideCards request={r} isReq={isReq} staff={staff} canAssign={decider.can("requests.update")} requesterName={requesterName} requesterEmail={requester?.email} people={people} nameOf={nameOf} />
         </aside>
       </div>
       {sp ? <AskSpaceDialog space={sp} isOpen={asking} onClose={() => setAsking(false)} /> : null}
@@ -184,6 +198,7 @@ function stepOf(r: Request, m: RequestMessage, lastStaff: RequestMessage | undef
 
 function Thread({
   request: r,
+  type: t,
   space: sp,
   messages,
   isPending,
@@ -193,17 +208,20 @@ function Thread({
   people,
 }: {
   request: Request;
+  type: RequestType | null;
   space: Space | null;
   messages: RequestMessage[];
   isPending: boolean;
   isError: boolean;
   onRetry: () => void;
   nameOf: (who: string | undefined) => string;
-  people: Map<string, { name: string; roles: string[] }>;
+  people: People;
 }) {
   const { member } = useWorkspace();
   const you = (who: string | undefined) => (who === member.name ? "You" : nameOf(who));
   const lastStaff = [...messages].reverse().find((m) => m.author !== r.requester);
+  // What was asked sits right under "submitted": staff read it before they decide, requesters see what they sent.
+  const answers = isQuestion(r) ? [] : (t?.fields ?? []).map((f) => [f.displayName || f.key, fieldText(f, (r.fields ?? {})[f.key])] as const);
   const entries: Entry[] = [];
   entries.push({
     key: "submitted",
@@ -211,6 +229,16 @@ function Thread({
     node: (
       <>
         <Event icon={Send} who={you(r.requester)} text={isQuestion(r) ? `asked ${teamWord(sp)}` : "submitted this request"} at={r.createTime} />
+        {answers.length ? (
+          <dl className="rq-answers rq-answers--thread">
+            {answers.map(([k, v]) => (
+              <div key={k}>
+                <dt>{k}</dt>
+                <dd translate="no">{v === "—" ? <span className="muted">—</span> : v}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : null}
         {r.assistantContext?.answer ? (
           <div className="rq-ai rq-ai--thread">
             <Sparkles className="i i-sm" aria-hidden />
@@ -240,7 +268,7 @@ function Thread({
                 {you(m.author)}
               </span>
               {role ? <span className="rq-msg__role">{role}</span> : null}
-              <time className="rq-time" title={fmtDateTime(m.createTime)}>
+              <time className="rq-time" title={fmtDateTime(m.createTime)} dateTime={m.createTime}>
                 {rel(m.createTime)}
               </time>
             </header>
@@ -285,7 +313,7 @@ function Thread({
   );
 }
 
-function Event({ icon: Icon, who, text, at, step }: { icon: typeof Send; who: string; text: string; at?: string; step?: ReactNode }) {
+function Event({ icon: Icon, who, text, at }: { icon: typeof Send; who: string; text: string; at?: string }) {
   return (
     <div className="rq-event">
       <span className="rq-event__icon">
@@ -300,20 +328,21 @@ function Event({ icon: Icon, who, text, at, step }: { icon: typeof Send; who: st
           </>
         ) : null}
         {text}
-        {step ? <> {step}</> : null}
       </span>
-      <time className="rq-time" title={fmtDateTime(at)}>
+      <time className="rq-time" title={fmtDateTime(at)} dateTime={at}>
         {rel(at)}
       </time>
     </div>
   );
 }
 
+const faqHref = (item: string, answer?: string) => `/doc/${resourceId(item)}${answer ? `?q=${encodeURIComponent(clip(answer, 120))}&page=1` : ""}`;
+
 function FaqLink({ item, answer, course }: { item: string; answer?: string; course: boolean }) {
   const doc = useItem(item);
   if (doc.isError || doc.data?.state === "DELETED") return null;
   return (
-    <NextLink className="rq-faq-link" href={`/doc/${resourceId(item)}${answer ? `?q=${encodeURIComponent(clip(answer, 120))}&page=1` : ""}`} title={doc.data?.displayName}>
+    <NextLink className="rq-faq-link" href={faqHref(item, answer)} title={doc.data?.displayName}>
       <BookOpen className="i i-sm" aria-hidden />
       <span className="truncate">{course ? "Added to the course FAQ" : "Added to the FAQ"}</span>
     </NextLink>
@@ -322,6 +351,10 @@ function FaqLink({ item, answer, course }: { item: string; answer?: string; cour
 
 /* ═══════════════ Composer ═══════════════ */
 
+/**
+ * Requesters: one Send. Staff: one Send for the note (it can ask the requester for information, which pauses
+ * the SLA), then the decision (preview `composer`).
+ */
 function Composer({
   request: r,
   space: sp,
@@ -330,17 +363,15 @@ function Composer({
   can,
   requesterName,
   assigneeName,
-  messages,
   onAsk,
 }: {
   request: Request;
   space: Space | null;
   isReq: boolean;
   staff: boolean;
-  can: (p: "requests.get" | "requests.update" | "requests.approve" | "requests.deny" | "requests.sendBack" | "requests.answer" | "requests.close") => boolean;
+  can: (p: DeciderPermission) => boolean;
   requesterName: string;
   assigneeName?: string;
-  messages: RequestMessage[];
   onAsk: () => void;
 }) {
   const { member } = useWorkspace();
@@ -349,10 +380,10 @@ function Composer({
   const [text, setText] = useState("");
   const [err, setErr] = useState("");
   const [faq, setFaq] = useState(true);
+  const [ask, setAsk] = useState(false);
   const [declining, setDeclining] = useState(false);
-  const first = firstName(requesterName);
   const faqTarget = sp?.collections?.[0];
-  const faqBase = useItem(staff && isQuestion(r) ? faqTarget : undefined);
+  const faqCollection = useItem(staff && isQuestion(r) ? faqTarget : undefined);
   const faqPerms = useItemPermissions(faqTarget, { enabled: staff && isQuestion(r) && !!faqTarget });
   const course = sp?.spaceType === "course";
 
@@ -386,15 +417,17 @@ function Composer({
       </div>
     ) : null;
 
+  const canAssign = !isReq && staff && !r.assignee && can("requests.update");
   /** Staff who act on an unassigned request take it (preview `post`). */
-  const run = async (a: RequestAction, success: () => void) => {
+  const run = async (a: RequestAction, success: (updated: Request | null) => void) => {
     try {
-      if (!isReq && staff && !r.assignee && can("requests.update") && a.type !== "message") await action.mutateAsync({ type: "assign", assignee: member.name ?? "" });
-      await action.mutateAsync(a);
-      if (!isReq && staff && !r.assignee && can("requests.update") && a.type === "message") await action.mutateAsync({ type: "assign", assignee: member.name ?? "" });
+      if (canAssign && a.type !== "message") await action.mutateAsync({ type: "assign", assignee: member.name ?? "" });
+      const updated = await action.mutateAsync(a);
+      if (canAssign && a.type === "message") await action.mutateAsync({ type: "assign", assignee: member.name ?? "" });
       setText("");
       setErr("");
-      success();
+      setAsk(false);
+      success(updated);
     } catch (e) {
       toast(errorMessage(e), { tone: "danger" });
     }
@@ -405,79 +438,72 @@ function Composer({
   };
   const body = text.trim();
   const busy = action.isPending;
+  const needsInfo = r.state === "NEEDS_INFO";
+  const asking = ask && !needsInfo;
 
   const reply = () => {
     if (!body) return need("Write a message first.");
-    void run({ type: "message", text: body }, () =>
-      toast(isReq ? `Sent. ${assigneeName ? firstName(assigneeName) : "The office"} will see it in their queue` : `Sent to ${first}`),
-    );
+    void run({ type: "message", text: body }, () => toast(isReq ? `Sent. ${assigneeName || "The office"} will see it in their queue` : `Sent to ${requesterName}`));
   };
   const askInfo = () => {
-    if (!body) return need(`Say what you need from ${first}.`);
-    void run({ type: "sendBack", message: body }, () => toast(`Asked ${first} for information. The SLA clock pauses until they reply`));
+    if (!body) return need(`Say what you need from ${requesterName}.`);
+    void run({ type: "sendBack", message: body }, () => toast(`Asked ${requesterName} for information. The SLA clock pauses until they reply`));
   };
-  const approve = () => void run({ type: "approve", message: body || undefined }, () => toast(`Approved. ${first} will be notified`));
+  const approve = () => void run({ type: "approve", message: body || undefined }, () => toast(`Approved. ${requesterName} will be notified`));
+  const kbName = faqCollection.data?.displayName;
+  const canFaq = staff && !isReq && isQuestion(r) && !!kbName && faqPerms.can("items.create");
   const answer = () => {
     if (!body) return need("Write the answer first.");
-    const publish = faq && faqTarget && faqPerms.can("items.create") ? faqTarget : undefined;
-    void (async () => {
-      try {
-        if (staff && !r.assignee && can("requests.update")) await action.mutateAsync({ type: "assign", assignee: member.name ?? "" });
-        const updated = await action.mutateAsync({ type: "answer", answer: body, publishToCollection: publish });
-        setText("");
-        setErr("");
-        const doc = updated?.faqItem;
-        if (doc) toast(`Answer sent and added to the ${course ? "course " : ""}FAQ`, { action: { label: "Open FAQ", onPress: () => router.push(`/doc/${resourceId(doc)}`) } });
-        else toast(`Answer sent to ${first}`);
-      } catch (e) {
-        toast(errorMessage(e), { tone: "danger" });
-      }
-    })();
+    const publish = faq && canFaq ? faqTarget : undefined;
+    void run({ type: "answer", answer: body, publishToCollection: publish }, (updated) => {
+      const doc = updated?.faqItem;
+      if (doc) toast(course ? "Answer sent and added to the course FAQ" : "Answer sent and added to the FAQ", { action: { label: "Open FAQ", onPress: () => router.push(faqHref(doc, body)) } });
+      else toast(`Answer sent to ${requesterName}`);
+    });
   };
 
+  const send = (variant: "primary" | "secondary") => (
+    // Staff Send: a plain message, or — with "Ask … for information" ticked — a request for information that pauses the SLA.
+    <Button variant={variant} onPress={asking ? askInfo : reply} isPending={busy}>
+      <Send className="i" aria-hidden />
+      Send
+    </Button>
+  );
   let label: string;
   let placeholder: string;
-  let actions: ReactNode;
+  let decide: ReactNode;
   if (isReq) {
-    label = r.state === "NEEDS_INFO" ? "Your reply" : "Add a message";
-    placeholder = r.state === "NEEDS_INFO" ? "Answer the question above." : `Add details for ${sp?.displayName || "the office"}.`;
-    actions = (
-      <Button variant="primary" onPress={reply} isPending={busy}>
+    label = needsInfo ? "Your reply" : "Add a message";
+    placeholder = needsInfo ? "Answer the question above." : `Add details for ${sp?.displayName || "the office"}.`;
+    // Prominent only when the office is waiting on the requester; otherwise there's nothing to do but wait.
+    decide = (
+      <Button variant={needsInfo ? "primary" : "secondary"} onPress={reply} isPending={busy}>
         <Send className="i" aria-hidden />
-        {r.state === "NEEDS_INFO" ? "Send reply" : "Send"}
+        {needsInfo ? "Send reply" : "Send"}
       </Button>
     );
   } else if (isQuestion(r)) {
     label = "Your answer";
-    placeholder = `Answer ${first}. Cite the slide or document if you can.`;
-    actions = (
-      <>
-        {r.state !== "NEEDS_INFO" && can("requests.sendBack") ? (
-          <Button variant="tertiary" onPress={askInfo} isDisabled={busy}>
-            Ask for information
-          </Button>
-        ) : null}
-        {can("requests.answer") ? (
-          <Button variant="primary" onPress={answer} isPending={busy}>
-            <Send className="i" aria-hidden />
-            Answer
-          </Button>
-        ) : null}
-      </>
-    );
-  } else {
-    label = `Message to ${first}`;
-    placeholder = `Reply, ask ${first} for something, or add a note to your decision.`;
-    actions = (
-      <>
-        {r.state !== "NEEDS_INFO" && can("requests.sendBack") ? (
-          <Button variant="tertiary" onPress={askInfo} isDisabled={busy}>
-            Ask for information
-          </Button>
-        ) : null}
-        <Button variant="tertiary" onPress={reply} isDisabled={busy}>
-          Reply
+    placeholder = asking ? `What do you need from ${requesterName}?` : `Answer ${requesterName}. Cite the slide or document if you can.`;
+    decide =
+      asking || !can("requests.answer") ? (
+        send("primary")
+      ) : (
+        <Button variant="primary" onPress={answer} isPending={busy}>
+          <Send className="i" aria-hidden />
+          Answer
         </Button>
+      );
+  } else if (asking) {
+    label = `Message to ${requesterName}`;
+    placeholder = `What do you need from ${requesterName}?`;
+    decide = send("primary");
+  } else {
+    label = `Message to ${requesterName}`;
+    placeholder = `Write to ${requesterName}, or add a note to your decision.`;
+    decide = (
+      <>
+        {send("secondary")}
         {can("requests.deny") ? (
           <Button variant="danger-soft" onPress={() => setDeclining(true)} isDisabled={busy}>
             Decline
@@ -493,39 +519,54 @@ function Composer({
     );
   }
 
-  const ask = isReq && r.state === "NEEDS_INFO" ? [...messages].reverse().find((m) => m.author !== r.requester) : undefined;
-  const kbName = faqBase.data?.displayName;
-
   return (
     <div className="card rq-composer">
-      {isReq && r.state === "NEEDS_INFO" ? (
-        <Callout tone="warning" title={`${sp?.displayName || "The office"} needs more information`} description={ask ? <span translate="no">{clip(ask.text, 220)}</span> : undefined} />
-      ) : null}
       <TextField className="field" value={text} onChange={(v) => (setText(v), err && setErr(""))} isInvalid={!!err}>
         <Label>{label}</Label>
         <TextArea id="rq-text" rows={3} placeholder={placeholder} translate="no" />
         <FieldError>{err}</FieldError>
       </TextField>
-      {staff && !isReq && isQuestion(r) && kbName && faqPerms.can("items.create") ? (
+      {canFaq && !asking ? (
         <SwitchRow
-          title={`Add this answer to the ${course ? "course " : ""}FAQ`}
+          title={course ? "Add this answer to the course FAQ" : "Add this answer to the FAQ"}
           description={`Saved to ${kbName} so the assistant can answer it next time.`}
           isSelected={faq}
           onChange={setFaq}
         />
       ) : null}
+      {!isReq && !needsInfo && can("requests.sendBack") ? (
+        <div className="rq-composer__ask">
+          <Checkbox
+            isSelected={ask}
+            onChange={(on) => {
+              setAsk(on);
+              setErr("");
+              requestAnimationFrame(() => document.getElementById("rq-text")?.focus());
+            }}
+          >
+            <Checkbox.Content className="checkbox__label">
+              <Checkbox.Control>
+                <Checkbox.Indicator />
+              </Checkbox.Control>
+              <span>
+                {`Ask ${requesterName} for information`} <span className="muted">(pauses the SLA)</span>
+              </span>
+            </Checkbox.Content>
+          </Checkbox>
+        </div>
+      ) : null}
       <div className="rq-composer__actions">
-        <div className="rq-composer__btns">{actions}</div>
+        <div className="rq-composer__btns">{decide}</div>
       </div>
       <DeclineDialog
         isOpen={declining}
-        first={first}
+        requester={requesterName}
         initial={body}
         onClose={() => setDeclining(false)}
         onDecline={(reason) =>
           void run({ type: "deny", message: reason }, () => {
             setDeclining(false);
-            toast(`Declined. ${first} will see your reason`);
+            toast(`Declined. ${requesterName} will see your reason`);
           })
         }
         isPending={busy}
@@ -534,12 +575,11 @@ function Composer({
   );
 }
 
-function DeclineDialog({ isOpen, first, initial, onClose, onDecline, isPending }: { isOpen: boolean; first: string; initial: string; onClose: () => void; onDecline: (reason: string) => void; isPending: boolean }) {
-  if (!isOpen) return null;
-  return <DeclineForm first={first} initial={initial} onClose={onClose} onDecline={onDecline} isPending={isPending} />;
+function DeclineDialog({ isOpen, ...props }: { isOpen: boolean; requester: string; initial: string; onClose: () => void; onDecline: (reason: string) => void; isPending: boolean }) {
+  return isOpen ? <DeclineForm {...props} /> : null;
 }
 
-function DeclineForm({ first, initial, onClose, onDecline, isPending }: { first: string; initial: string; onClose: () => void; onDecline: (reason: string) => void; isPending: boolean }) {
+function DeclineForm({ requester, initial, onClose, onDecline, isPending }: { requester: string; initial: string; onClose: () => void; onDecline: (reason: string) => void; isPending: boolean }) {
   const [text, setText] = useState(initial);
   const [err, setErr] = useState("");
   const submit = () => {
@@ -552,24 +592,27 @@ function DeclineForm({ first, initial, onClose, onDecline, isPending }: { first:
       isOpen
       onClose={onClose}
       guard={isPending}
-      size="sm"
+      size="md"
+      icon={XCircle}
+      tone="danger"
       title="Decline this request?"
-      description={`${first} sees your reason and can send a new request.`}
+      description={`${requester} sees your reason and can send a new request.`}
       footer={
         <>
-          <Button variant="tertiary" onPress={onClose} isDisabled={isPending}>
+          <Button variant="ghost" onPress={onClose} isDisabled={isPending}>
             Cancel
           </Button>
           <Button variant="danger" onPress={submit} isPending={isPending}>
-            Decline
+            <XCircle className="i" aria-hidden />
+            Decline request
           </Button>
         </>
       }
     >
       <TextField className="field" value={text} onChange={(v) => (setText(v), err && setErr(""))} isRequired isInvalid={!!err}>
         <Label>Reason</Label>
-        <TextArea rows={4} placeholder="For example: the re-grading window for this exam closed on Oct 28." autoFocus translate="no" />
-        {err ? <FieldError>{err}</FieldError> : <Description>{" "}</Description>}
+        <TextArea rows={4} placeholder="For example: this needs sign-off from your manager first." autoFocus translate="no" />
+        {err ? <FieldError>{err}</FieldError> : <Description>Say why, and what they can do instead.</Description>}
       </TextField>
     </KnowledgeModal>
   );
@@ -587,9 +630,9 @@ function ClosedNote({ request: r, space: sp, isReq, onAsk }: { request: Request;
       </Button>
     ) : null
   ) : st !== "completed" && r.requestType ? (
-    <LinkButton size="sm" href={`/requests/new?space=${resourceId(r.space)}&type=${resourceId(r.requestType)}`}>
+    <ButtonLink size="sm" href={`/requests/new?space=${resourceId(r.space)}&type=${resourceId(r.requestType)}`}>
       Send a new request
-    </LinkButton>
+    </ButtonLink>
   ) : null;
   return (
     <div className="rq-closed">
@@ -606,8 +649,6 @@ function ClosedNote({ request: r, space: sp, isReq, onAsk }: { request: Request;
 
 function SideCards({
   request: r,
-  type: t,
-  space: sp,
   isReq,
   staff,
   canAssign,
@@ -617,20 +658,17 @@ function SideCards({
   nameOf,
 }: {
   request: Request;
-  type: RequestType | null;
-  space: Space | null;
   isReq: boolean;
   staff: boolean;
   canAssign: boolean;
   requesterName: string;
   requesterEmail?: string;
-  people: Map<string, { name: string; roles: string[] }>;
+  people: People;
   nameOf: (who: string | undefined) => string;
 }) {
   const { member } = useWorkspace();
   const all = useRequests();
   const action = useRequestAction(resourceId(r.name));
-  const answers = isQuestion(r) ? [] : (t?.fields ?? []).map((f) => [f.displayName || f.key, fieldText(f, (r.fields ?? {})[f.key])] as const);
   const staffPeople = [...people.entries()]
     .filter(([, p]) => p.roles.some((x) => STAFF_ROLES.includes(x)))
     .sort(([a], [b]) => Number(b === member.name) - Number(a === member.name));
@@ -673,12 +711,7 @@ function SideCards({
             <Users className="i" aria-hidden />
           </Dropdown.Trigger>
           <Dropdown.Popover placement="bottom end">
-            <Dropdown.Menu
-              aria-label="Assign to"
-              selectionMode="single"
-              selectedKeys={r.assignee ? [r.assignee] : []}
-              onAction={(key) => assign(key === "__none__" ? null : String(key))}
-            >
+            <Dropdown.Menu aria-label="Assign to" selectionMode="single" selectedKeys={r.assignee ? [r.assignee] : []} onAction={(key) => assign(key === "__none__" ? null : String(key))}>
               <Dropdown.Section>
                 <Dropdown.Item id="__label__" isDisabled textValue="Assign to">
                   <Label className="t-xs muted">Assign to</Label>
@@ -711,25 +744,9 @@ function SideCards({
   return (
     <>
       <RqCard className="rq-side-card" title="Details">
-        {answers.length ? (
-          <>
-            <dl className="rq-answers">
-              {answers.map(([k, v]) => (
-                <div key={k}>
-                  <dt>{k}</dt>
-                  <dd translate="no">{v === "—" ? <span className="muted">—</span> : v}</dd>
-                </div>
-              ))}
-            </dl>
-            <Separator />
-          </>
-        ) : null}
         <KeyValue
           pairs={[
-            ["Request", <span className="num">{shortId(r)}</span>],
-            ["Sent to", <span translate="no">{sp?.displayName || "—"}</span>],
             ["Submitted", fmtDateTime(r.createTime)],
-            isOpen(r) && r.dueTime ? (staff && !isReq ? ["SLA", <SlaText request={r} />] : ["Expected by", fmtDay(r.dueTime)]) : null,
             [
               "Assignee",
               <span className="rq-assignee">

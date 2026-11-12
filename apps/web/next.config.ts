@@ -20,6 +20,32 @@ const nextConfig: NextConfig = {
     // Keep module resolution at the app that owns Next.js dependencies.
     root: __dirname,
   },
+  // Addresses retired by the current IA (preview router aliases): old bookmarks and links land on their new home.
+  // Next passes the request's query through, with the destination's own keys taking precedence.
+  async redirects() {
+    const libraryTab = (value: string, destination: string) => ({
+      source: "/knowledge/library",
+      has: [{ type: "query" as const, key: "tab", value }],
+      destination,
+      permanent: true,
+    });
+    return [
+      { source: "/inbox", destination: "/home", permanent: true },
+      { source: "/chats", destination: "/chat", permanent: true },
+      { source: "/bases", destination: "/studio?tab=collections", permanent: true },
+      { source: "/bases/:id", destination: "/studio/collections/:id", permanent: true },
+      { source: "/documents", destination: "/studio?tab=documents", permanent: true },
+      { source: "/sources", destination: "/studio?tab=sources", permanent: true },
+      { source: "/connections", destination: "/studio?tab=sources&view=accounts", permanent: true },
+      { source: "/knowledge/collections/:id", destination: "/knowledge/lists/:id", permanent: true },
+      { source: "/knowledge/browse", destination: "/knowledge", permanent: true },
+      libraryTab("contributions", "/contributions"),
+      libraryTab("recent", "/recent"),
+      libraryTab("collections", "/knowledge/library?tab=lists"),
+      { source: "/access", destination: "/people", permanent: true },
+      { source: "/p/models", destination: "/p/health", permanent: true },
+    ];
+  },
 };
 
 export default nextConfig;

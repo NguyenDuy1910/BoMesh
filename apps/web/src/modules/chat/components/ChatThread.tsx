@@ -1,8 +1,8 @@
 "use client";
 
-import { Button, Skeleton } from "@heroui/react";
+import { Button, Skeleton, Tooltip } from "@heroui/react";
 import { useQueryClient } from "@tanstack/react-query";
-import { MessageSquare, MessageSquarePlus, RotateCcw, Share } from "lucide-react";
+import { MessageSquare, RotateCcw, Share, Users, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -12,20 +12,22 @@ import { PageChrome, type Crumb } from "@/components/shell/page-chrome";
 import { confirm } from "@/components/ui/Confirm";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
+import { FileIcon } from "@/components/ui/FileIcon";
+import { Tip } from "@/components/ui/Tip";
 import { toast } from "@/components/ui/Toast";
 import { ApiError, errorMessage, resourceId } from "@/lib/api/client";
 import { useOpened } from "@/lib/lazy";
 import { useWorkspace } from "@/lib/workspace";
-import { confirmLeaveFileEdit, useComposerFiles, useFileDrop } from "@/modules/artifacts";
+import { askForChanges, confirmLeaveFileEdit, fileNameOf, fileViewOf, revisionNumber, useArtifact, useComposerFiles, useFileDrop, useRevising, type Artifact } from "@/modules/artifacts";
+import { isSheetView } from "@/modules/artifacts/model";
 import { openDocumentPreview } from "@/modules/knowledge/preview/store";
 import { ConversationMenu, useConversationProject } from "@/modules/projects";
 import { useMySpaces } from "@/modules/spaces";
 
 import { chatKeys, submitFeedback, updateConversation, type ConversationScope, type Message } from "../api";
-import { useConversation, useMessages } from "../queries";
+import { useConversation, useMessages, useShareSummary } from "../queries";
 import { dismissTurn, sendTurn, sentFiles, stopTurn, useLiveTurn, useStreamingConversation, type AnswerAttempt, type SentFile } from "../runtime";
 import { buildThread, RETRY_MODIFIER, type AnswerView } from "../thread";
-import type { AnswerSource } from "../turn";
 import { Composer, useDraft } from "./Composer";
 import { Answer, UserMessage, type RetryMode } from "./ThreadMessages";
 
@@ -33,9 +35,17 @@ import { Answer, UserMessage, type RetryMode } from "./ThreadMessages";
 const FilePanel = dynamic(() => import("@/modules/artifacts/components/FilePanel").then((m) => m.FilePanel), { ssr: false });
 const FeedbackDialog = dynamic(() => import("./FeedbackDialog").then((m) => m.FeedbackDialog), { ssr: false });
 const ShareConversationDialog = dynamic(() => import("./ShareConversationDialog").then((m) => m.ShareConversationDialog), { ssr: false });
+const ProjectDialogs = dynamic(() => import("@/modules/projects/components/ProjectDialogs").then((m) => m.ProjectDialogs), { ssr: false });
 
-/** The side panel is only ever a generated file now: citations open the shared document preview. */
-type Panel = { kind: "file"; artifact: string };
+/**
+ * The side panel is only ever a generated file: citations open the shared document preview. While it is open the
+ * thread composer edits that file, unless its "Editing" chip was removed (`ctxOff`).
+ */
+type Panel = { kind: "file"; artifact: string; ctxOff?: boolean };
+
+/** Suggested changes for the open file (preview `quickAsks`). */
+const QUICK_SHEET = ["Sort by largest amount", "Add a total row", "Add a status column"];
+const QUICK_DOC = ["Make it shorter", "More formal tone", "Add an at-a-glance table"];
 
 const RETRY_SUFFIX: Record<RetryMode, string> = { again: "", all: "", ...RETRY_MODIFIER };
 
@@ -99,6 +109,26 @@ export function ChatThread({ id }: { id: string }) {
   const rows = useMemo(() => buildThread(messages.data ?? [], live), [messages.data, live, live?.turn]);
   const streamingHere = streamingIn === id;
   const busy = !!streamingIn;
+  const shareSummary = useShareSummary(id, { enabled: !!conv });
+
+  /* The file the composer edits: the open panel's file, unless its chip was removed (preview `editTarget`). */
+  const target = useArtifact(panel && !panel.ctxOff ? panel.artifact : null).data ?? null;
+  const revising = useRevising(target?.name ?? "");
+  const askChanges = (instructions: string, file: Artifact) => {
+    if (revising) {
+      toast(`Wait for version ${revising} of ${fileNameOf(file)} to finish.`, { tone: "accent" });
+      return false;
+    }
+    void askForChanges(queryClient, {
+      workspace: ws,
+      artifact: file.name ?? "",
+      title: fileNameOf(file),
+      etag: file.etag,
+      instructions,
+      nextVersion: revisionNumber(file.revision) + 1,
+    });
+    return true;
+  };
 
   /* Keep the newest text in view while streaming, unless the reader scrolled up. */
   useLayoutEffect(() => {
@@ -127,9 +157,10 @@ export function ChatThread({ id }: { id: string }) {
   const onSend = () => {
     const message = draft.trim();
     if (!message || !files.ready) return;
-    if (send({ message, attachments: files.attachments, files: sentFiles(files.files) })) {
+    const sent = target ? askChanges(message, target) : send({ message, attachments: files.attachments, files: sentFiles(files.files) });
+    if (sent) {
       setDraft("");
-      files.clear();
+      if (!target) files.clear();
     }
   };
 
@@ -200,7 +231,7 @@ export function ChatThread({ id }: { id: string }) {
   };
   const openFile = async (artifact: string) => {
     if (panel?.kind === "file" && panel.artifact !== artifact && !(await confirmLeaveFileEdit())) return;
-    setPanel({ kind: "file", artifact });
+    setPanel({ kind: "file", artifact, ctxOff: panel?.artifact === artifact ? panel.ctxOff : false });
   };
   const closePanel = useCallback(async () => {
     if (panel?.kind === "file" && !(await confirmLeaveFileEdit())) return;
@@ -228,33 +259,28 @@ export function ChatThread({ id }: { id: string }) {
     }
   };
 
-  /* ─── Chrome ─── */
-  const space = scope.spaces?.[0] ? (spaces.data ?? []).find((s) => s.name === scope.spaces![0]) ?? null : null;
+  /* ─── Chrome: the title is the top row's H1, Share and ⋯ its actions; the thread starts right under it. ─── */
+  const space = scope.spaces?.[0] ? ((spaces.data ?? []).find((s) => s.name === scope.spaces![0]) ?? null) : null;
   const crumbs: Crumb[] = space
-    ? [{ label: "Spaces", href: "/spaces" }, { label: space.displayName, href: `/space/${resourceId(space.name)}` }, { label: title }]
+    ? [{ label: "Spaces", href: "/spaces" }, { label: space.displayName, href: `/space/${resourceId(space.name)}` }]
     : project
-      ? [{ label: project.displayName, href: `/project/${project.id}` }, { label: title }]
-      : [{ label: "Conversations", href: "/chats" }, { label: title }];
+      ? [{ label: "Projects", href: "/projects" }, { label: project.displayName, href: `/project/${project.id}` }]
+      : [{ label: "AI Chat", href: "/chat" }];
 
   const unavailable = conversation.error instanceof ApiError && conversation.error.isNotFound;
   if (unavailable || conv?.deleteTime) {
     return (
       <div className="page">
-        <PageChrome crumbs={[{ label: "Conversations", href: "/chats" }, { label: "Not found" }]} />
+        <PageChrome title="Not found" crumbs={[{ label: "AI Chat", href: "/chat" }]} />
         <EmptyState
           icon={MessageSquare}
           title="This conversation isn’t available"
           description="It may have been deleted, or it belongs to someone else."
           actions={
-            <>
-              <Button variant="primary" onPress={() => router.push("/chat")}>
-                <MessageSquarePlus className="i" aria-hidden />
-                New chat
-              </Button>
-              <Button variant="secondary" onPress={() => router.push("/chats")}>
-                Conversations
-              </Button>
-            </>
+            <Button variant="primary" onPress={() => router.push("/chat")}>
+              <MessageSquare className="i" aria-hidden />
+              Go to AI Chat
+            </Button>
           }
         />
       </div>
@@ -263,20 +289,52 @@ export function ChatThread({ id }: { id: string }) {
 
   const error = conversation.error ?? messages.error;
   const loading = conversation.isPending || (messages.isPending && !live);
+  const shareButton = (
+    <Button variant="ghost" size="sm" onPress={() => setSharing(true)}>
+      {shareSummary ? <Users className="i" aria-hidden /> : <Share className="i" aria-hidden />}
+      {shareSummary ? "Shared" : "Share"}
+    </Button>
+  );
+
+  /* Editing a file: an "Editing …" chip (removable) in the composer and quick changes above it (preview `ctxChip`, `quickAsks`). */
+  const targetName = target ? fileNameOf(target) : "";
+  const editingChip = target ? (
+    <Tip content="Your message asks for changes to this file">
+      <span className="wk-chip wk-chip--ctx">
+        <FileIcon size="sm" mime={target.mimeType} name={targetName} />
+        <span className="wk-chip__meta">Editing</span>
+        <span className="wk-chip__name truncate" translate="no">
+          {targetName}
+        </span>
+        <Tooltip>
+          <button type="button" className="wk-chip__x" aria-label={`Stop editing ${targetName}`} onClick={() => setPanel((p) => (p ? { ...p, ctxOff: true } : p))}>
+            <X className="i i-xs" aria-hidden />
+          </button>
+          <Tooltip.Content>Ask about something else</Tooltip.Content>
+        </Tooltip>
+      </span>
+    </Tip>
+  ) : null;
+  const quick = target && !streamingHere ? (isSheetView(fileViewOf(target.mimeType)) ? QUICK_SHEET : QUICK_DOC) : [];
 
   return (
     <div className="split chat-split">
       <PageChrome
-        crumbs={conv ? crumbs : [{ label: "Conversations", href: "/chats" }]}
+        title={conv ? title : undefined}
+        crumbs={crumbs}
         actions={
           conv ? (
-            <>
-              <Button variant="ghost" size="sm" onPress={() => setSharing(true)}>
-                <Share className="i" aria-hidden />
-                Share
-              </Button>
+            <span className="chat-top-actions">
+              {shareSummary ? (
+                <Tooltip>
+                  {shareButton}
+                  <Tooltip.Content>{shareSummary}</Tooltip.Content>
+                </Tooltip>
+              ) : (
+                shareButton
+              )}
               <ConversationMenu conversation={conv} />
-            </>
+            </span>
           ) : null
         }
       />
@@ -291,7 +349,6 @@ export function ChatThread({ id }: { id: string }) {
             </div>
           ) : (
             <>
-              <h1 className="sr-only">{title}</h1>
               <div className="chat-thread">
                 {rows.map((row, i) => {
                   if (row.kind === "user") {
@@ -346,27 +403,49 @@ export function ChatThread({ id }: { id: string }) {
         </div>
         <div className="chat-dock">
           <div className="chat-dock__inner">
+            {quick.length && target ? (
+              <div className="wk-quick" role="group" aria-label={`Suggested changes to ${targetName}`}>
+                {quick.map((q) => (
+                  <Button key={q} variant="tertiary" size="sm" onPress={() => askChanges(q, target)}>
+                    {q}
+                  </Button>
+                ))}
+              </div>
+            ) : null}
             <Composer
               draft={draft}
               onDraftChange={setDraft}
               attachments={files}
               scope={scope}
               onScopeChange={(next) => void onScopeChange(next)}
-              placeholder="Ask a follow-up"
+              placeholder={target ? `Ask for changes to ${targetName}` : "Ask a follow-up"}
               onSend={onSend}
               streaming={streamingHere}
               onStop={() => stopTurn(id)}
+              chips={editingChip}
+              hideScope={!!target}
             />
           </div>
         </div>
       </div>
       {panel?.kind === "file" ? <FilePanel key={panel.artifact} artifact={panel.artifact} onClose={() => setPanel(null)} /> : null}
-      {conv && sharingOpened ? <ShareConversationDialog conversation={id} title={title} isOpen={sharing} onClose={() => setSharing(false)} /> : null}
+      {conv && sharingOpened ? (
+        <ShareConversationDialog
+          conversation={id}
+          title={title}
+          questions={rows.filter((r) => r.kind === "user").length}
+          updated={conv.lastMessageTime || conv.updateTime}
+          isOpen={sharing}
+          onClose={() => setSharing(false)}
+        />
+      ) : null}
+      <ProjectDialogs />
       {feedbackOpened ? (
         <FeedbackDialog
           isOpen={!!commentFor}
+          question={rows.flatMap((r) => (r.kind === "answer" && r.answer.message === commentFor ? [r.answer.questionText] : []))[0]}
           onClose={() => setCommentFor(null)}
-          onSubmit={(comment) => (commentFor ? onFeedback(commentFor, "UNHELPFUL", undefined, comment.slice(0, 1000)) : Promise.resolve())}
+          onSubmit={(comment) => (commentFor ? onFeedback(commentFor, "UNHELPFUL", undefined, comment) : Promise.resolve())}
         />
       ) : null}
     </div>

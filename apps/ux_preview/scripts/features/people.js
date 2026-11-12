@@ -3,7 +3,6 @@
 (() => {
   'use strict';
 
-  const TABS = ['members', 'groups', 'roles', 'requests'];
   const AREA = 'People';
   /** Knowledge access role words, one map product-wide (core/lifecycle.js KB_ROLES). */
   const accessLabel = r => (KB_ROLES[r] || KB_ROLES.viewer).label;
@@ -52,22 +51,23 @@
   /** One primary action per tab: the thing you came to that tab to do. */
   const TAB_ACTION = {
     members: () => can('user.manage') ? btn('Add people', { v: 'primary', icon: 'user-plus', act: 'member-add' }) : '',
-    groups: () => can('group.manage') ? btn('Create group', { v: 'primary', icon: 'plus', act: 'ppl-group-create' }) : '',
-    roles: () => can('role.manage') ? btn('Create role', { v: 'primary', icon: 'plus', act: 'ppl-role-create' }) : '',
+    groups: () => can('group.manage') ? btn('New group', { v: 'primary', icon: 'plus', act: 'ppl-group-create' }) : '',
+    roles: () => can('role.manage') ? btn('New role', { v: 'primary', icon: 'plus', act: 'ppl-role-create' }) : '',
     requests: () => '',
   };
+  /** People's sections are sidebar sub-rows of People (pageSections); Access requests counts who's waiting. */
+  const sections = () => pageSections('/people', [
+    { id: 'members', label: 'Members' },
+    { id: 'groups', label: 'Groups' },
+    { id: 'roles', label: 'Roles' },
+    { id: 'requests', label: 'Access requests', count: pendingRequests().length },
+  ]);
+  (X.sections ||= {}).people = () => sections().nav();
   P.people = ({ query }) => {
-    const tab = TABS.includes(query.tab) ? query.tab : 'members';
-    const pend = pendingRequests().length;
-    const head = pageHeader({ title: 'People', actions: TAB_ACTION[tab]() });
-    const t = tabs([
-      { id: 'members', label: 'Members' },
-      { id: 'groups', label: 'Groups' },
-      { id: 'roles', label: 'Roles' },
-      { id: 'requests', label: 'Requests', count: pend || null, alert: true },
-    ], tab, '/people');
+    const s = sections(), tab = s.section(query);
+    const head = pageHeader({ title: s.title(query), actions: TAB_ACTION[tab]() });
     const body = { members: membersTab, groups: groupsTab, roles: rolesTab, requests: requestsTab }[tab]();
-    return `<div class="page">${head}${contextBar(t)}${body}</div>`;
+    return `<div class="page">${head}${body}</div>`;
   };
 
   /* ══════════════ Members ══════════════ */
@@ -233,11 +233,11 @@
     const lastSi = D.signins.filter(s => s.user === m.id).sort((a, b) => b.at - a.at)[0];
     const sec = (title, html) => `<section class="drawer__section"><h3 class="drawer__section-title">${esc(title)}</h3>${html}</section>`;
     const kbShown = f.allKb ? grants : grants.slice(0, KB_PREVIEW);
-    const plus = everyone.length ? `<p class="t-sm muted ${grants.length ? 'mt-8' : ''}">${grants.length ? `Plus ${plural(everyone.length, 'knowledge base')} everyone can open.` : `Only the ${plural(everyone.length, 'knowledge base')} everyone can open.`}</p>` : '';
-    const kbHtml = role.id === 'r-admin' ? `<p class="t-sm muted">Workspace admins can open every knowledge base.</p>`
+    const plus = everyone.length ? `<p class="t-sm muted ${grants.length ? 'mt-8' : ''}">${grants.length ? `Plus ${plural(everyone.length, 'collection')} everyone can open.` : `Only the ${plural(everyone.length, 'collection')} everyone can open.`}</p>` : '';
+    const kbHtml = role.id === 'r-admin' ? `<p class="t-sm muted">Workspace admins can open every collection.</p>`
       : grants.length ? list(kbShown.map(a => item({ lead: kbDot(a.kb), title: esc(a.kb.name), desc: esc(a.via), meta: esc(accessLabel(a.role)), href: kbManageHref(a.kb, 'access') })))
         + (grants.length > KB_PREVIEW ? `<div class="mt-8">${linkBtn(f.allKb ? 'Show fewer' : `Show all ${grants.length}`, { act: 'ui-toggle', data: { path: 'pplMD.allKb' } })}</div>` : '') + plus
-      : plus || `<p class="t-sm muted">No knowledge bases shared with ${esc(first(m.name))}.</p>`;
+      : plus || `<p class="t-sm muted">No collections shared with ${esc(first(m.name))}.</p>`;
     const notice = m.status === 'suspended' ? alertBox('danger', 'Suspended', `${esc(first(m.name))} can’t sign in until reactivated.`, btn('Reactivate', { v: 'secondary', size: 'sm', icon: 'play', act: 'ppl-md-reactivate', data: { id } }))
       : invited ? alertBox('accent', 'Invite sent', `${esc(m.email)} hasn’t accepted yet. Sent ${esc(rel(m.invitedAt || m.joined).toLowerCase())}. Their role and groups apply once they join.`, btn('Resend invite', { v: 'secondary', size: 'sm', icon: 'send', act: 'ppl-invite-resend', data: { id } }), { icon: 'mail' }) : '';
     const body = (notice ? `<div class="mb-16">${notice}</div>` : '') +
@@ -380,7 +380,7 @@
         return `<div class="${cx('card card--action ppl-group', fresh.has(g.id) && 'ppl-fresh')}" role="button" tabindex="0" data-act="ppl-group-open" data-id="${g.id}">
           <span class="card__title truncate">${esc(g.name)}</span>
           <p class="t-sm muted clamp-2 ppl-group__desc">${esc(g.desc || 'No description')}</p>
-          <div class="row between gap-8">${ms.length ? `<span class="row gap-8"><span class="avatar-group">${ms.slice(0, 4).map(m => avatar(m.name, 'sm')).join('')}</span><span class="t-xs muted num">${plural(ms.length, 'member')}</span></span>` : '<span class="t-xs muted">No members</span>'}<span class="t-xs muted">${kbs.length ? plural(kbs.length, 'knowledge base') : ''}</span></div></div>`;
+          <div class="row between gap-8">${ms.length ? `<span class="row gap-8"><span class="avatar-group">${ms.slice(0, 4).map(m => avatar(m.name, 'sm')).join('')}</span><span class="t-xs muted num">${plural(ms.length, 'member')}</span></span>` : '<span class="t-xs muted">No members</span>'}<span class="t-xs muted">${kbs.length ? plural(kbs.length, 'collection') : ''}</span></div></div>`;
       }).join('')}</div>`,
     });
   }
@@ -433,9 +433,9 @@
       ${q ? `<div class="mt-8">${cands.length ? list(cands.map(m => item({ lead: avatar(m.name, 'sm'), title: esc(m.name), desc: esc(m.email), act: 'ppl-gd-add', data: { id, member: m.id }, cls: 'ppl-cand', trail: `<span class="ppl-cand__add">${ic('plus', 'i-sm')}Add</span>` }))) : `<p class="t-sm muted">No one else matches “${esc(f.q)}”.</p>`}</div>` : ''}` : '';
     const members = ms.length ? list(ms.map(m => item({ lead: avatar(m.name, 'sm'), title: esc(m.name), desc: esc(roleById(m.roleId)?.name || ''), trail: manage ? `<span class="reveal-on-hover">${iconBtn('x', `Remove ${m.name} from group`, { size: 'sm', act: 'ppl-gd-rm', data: { id, member: m.id } })}</span>` : '' })))
       : q ? '' : `<p class="t-sm muted">${manage ? 'No one is in this group yet. Search above to add people.' : 'No one is in this group yet.'}</p>`;
-    const kbList = kbs.length ? list(kbs.map(k => { const s = k.shares.find(x => x.kind === 'group' && x.id === id); return item({ lead: kbDot(k), title: esc(k.name), meta: esc(accessLabel(s.role)), href: kbManageHref(k, 'access') }); })) : `<p class="t-sm muted">Not shared with any knowledge base yet. Share from a knowledge base’s Access tab.</p>`;
+    const kbList = kbs.length ? list(kbs.map(k => { const s = k.shares.find(x => x.kind === 'group' && x.id === id); return item({ lead: kbDot(k), title: esc(k.name), meta: esc(accessLabel(s.role)), href: kbManageHref(k, 'access') }); })) : `<p class="t-sm muted">Not shared with any collection yet. Share from a collection’s Access tab.</p>`;
     const body = `<section class="drawer__section"><h3 class="drawer__section-title">Members · ${fmtNum(ms.length)}</h3>${addBox}<div class="mt-12">${members}</div></section>
-      <section class="drawer__section"><h3 class="drawer__section-title">Knowledge bases</h3>${kbList}</section>`;
+      <section class="drawer__section"><h3 class="drawer__section-title">Collections</h3>${kbList}</section>`;
     return {
       title: g.name, desc: g.desc ? esc(g.desc) : '', lead: itemIcon('users', 'accent'), body,
       headActions: manage ? iconBtn('more', 'More actions', { menu: 'ppl-gd-more', data: { id } }) : '',
@@ -457,14 +457,21 @@
     const g = groupById(el.dataset.id); if (!g) return; const ms = groupMembers(g.id); const kbs = groupKbs(g.id);
     confirmAction({
       title: `Delete ${g.name}?`, confirm: 'Delete group', danger: true, icon: 'trash',
-      body: `<span>${ms.length ? 'Its members stay in the workspace but lose access that came from this group.' : 'No one is in this group.'}</span>${kbs.length ? ` <span>${kbs.length === 1 ? 'One knowledge base stops being shared with it.' : `${kbs.length} knowledge bases stop being shared with it.`}</span>` : ''}`,
+      body: `<span>${ms.length ? 'Its members stay in the workspace but lose access that came from this group.' : 'No one is in this group.'}</span>${kbs.length ? ` <span>${kbs.length === 1 ? 'One collection stops being shared with it.' : `${kbs.length} collections stop being shared with it.`}</span>` : ''}`,
       onConfirm: () => {
-        D.groups.splice(D.groups.indexOf(g), 1);
+        // Everything it touched is restorable, so the toast offers Undo like every other reversible delete.
+        const at = D.groups.indexOf(g), memberOf = ms.map(m => [m, [...m.groups]]), shares = kbs.map(k => [k, [...k.shares]]);
+        D.groups.splice(at, 1);
         D.members.forEach(m => { m.groups = m.groups.filter(x => x !== g.id); });
         D.kbs.forEach(k => { k.shares = k.shares.filter(s => !(s.kind === 'group' && s.id === g.id)); });
         kbs.forEach(k => X.kbSyncPersonas?.(k, ms.map(m => m.id)));
-        audit('Deleted group', g.name);
-        S.drawer = null; refresh(); toast(`Deleted ${g.name}`);
+        const ev = audit('Deleted group', g.name);
+        S.drawer = null; refresh();
+        toast(`Deleted ${g.name}`, { action: { label: 'Undo', run: () => {
+          if (!groupById(g.id)) D.groups.splice(at, 0, g);
+          memberOf.forEach(([m, gs]) => (m.groups = gs)); shares.forEach(([k, s]) => (k.shares = s));
+          kbs.forEach(k => X.kbSyncPersonas?.(k, ms.map(m => m.id))); unaudit([ev]); refresh();
+        } } });
       },
     });
   };
@@ -589,7 +596,7 @@
   /* ══════════════ Requests ══════════════ */
   function reqSentence(r) {
     const m = memberById(r.user); const kb = kbById(r.kb);
-    return `<span class="medium">${esc(m?.name || 'Someone')}</span> wants <span class="medium">${esc(accessLabel(r.role))}</span> access to ${kb ? `<a class="link" href="#${kbManageHref(kb, 'access')}">${esc(kb.name)}</a>` : 'a knowledge base'}`;
+    return `<span class="medium">${esc(m?.name || 'Someone')}</span> wants <span class="medium">${esc(accessLabel(r.role))}</span> access to ${kb ? `<a class="link" href="#${kbManageHref(kb, 'access')}">${esc(kb.name)}</a>` : 'a collection'}`;
   }
   function reqItem(r) {
     const m = memberById(r.user);
@@ -609,7 +616,7 @@
     ui('pplQ', { open: false });
     const pend = pendingRequests().sort((a, b) => b.at - a.at);
     const decided = D.requests.filter(r => r.status !== 'pending').sort((a, b) => (b.decidedAt || b.at) - (a.decidedAt || a.at));
-    const none = () => emptyState({ icon: 'check-check', boxed: true, title: 'No pending requests', desc: 'When someone asks for access to a restricted knowledge base, it shows up here.' });
+    const none = () => emptyState({ icon: 'check-check', boxed: true, title: 'No pending requests', desc: 'When someone asks for access to a restricted collection, it shows up here.' });
     const main = gate({ loading: () => skelRows(3), empty: none, ok: () => pend.length ? list(pend.map(reqItem)) : none() });
     const live = S.pageState === 'live' && !S.navLoading;
     const history = live && decided.length ? `<div class="mt-24">${disclosure({ path: 'pplQ.open', icon: 'history', title: 'Recently decided', summary: fmtNum(decided.length), body: list(decided.map(decidedItem)) })}</div>` : '';
@@ -620,7 +627,7 @@
     const key = Object.keys(PERSONAS).find(k => PERSONAS[k].id === userId); if (!key || !kb) return undefined;
     return kb.access ? kb.access[key] : key === 'member' ? kb.memberRole : undefined;
   }
-  /** Approve: grant a direct share on the knowledge base (and, for demo personas, the role they now hold). */
+  /** Approve: grant a direct share on the collection (and, for demo personas, the role they now hold). */
   A['req-approve'] = el => {
     const r = D.requests.find(x => x.id === el.dataset.id); if (!r || r.status !== 'pending') return;
     const kb = kbById(r.kb); const m = memberById(r.user);

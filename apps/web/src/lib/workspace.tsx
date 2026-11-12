@@ -45,6 +45,7 @@ export const WORKSPACE_PERMISSIONS = [
   "auditEvents.export",
   "knowledgeGaps.list",
   "spaces.create",
+  "spaces.update",
   "requests.list",
   "artifacts.create",
   "readingLists.create",

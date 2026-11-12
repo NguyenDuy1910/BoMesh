@@ -48,6 +48,10 @@ export const SPACE_PERMISSIONS = [
   "materials.create",
   "materials.delete",
   "requestTypes.list",
+  "requestTypes.create",
+  "requestTypes.update",
+  "requestTypes.delete",
+  "requestTypes.undelete",
   "requests.approve",
 ] as const;
 export type SpacePermission = (typeof SPACE_PERMISSIONS)[number];
@@ -257,6 +261,44 @@ export function listRequestTypes(workspace: string, space: string): Promise<Requ
         }),
       ),
     (page) => page.requestTypes,
+  );
+}
+
+export function createRequestType(workspace: string, space: string, type: RequestType): Promise<RequestType> {
+  return call(
+    api.POST("/api/v1/workspaces/{workspace}/spaces/{space}/requestTypes", {
+      params: { path: sp(workspace, space), query: { requestId: requestId() } },
+      body: type,
+    }),
+  );
+}
+
+export function updateRequestType(name: string, patch: RequestType, updateMask: readonly string[]): Promise<RequestType> {
+  const { workspace, space, id } = child(name);
+  return call(
+    api.PATCH("/api/v1/workspaces/{workspace}/spaces/{space}/requestTypes/{requestType}", {
+      params: { path: { workspace, space, requestType: id }, query: { updateMask: updateMask.join(",") } },
+      body: patch,
+    }),
+  );
+}
+
+export function deleteRequestType(name: string, etag?: string): Promise<RequestType> {
+  const { workspace, space, id } = child(name);
+  return call(
+    api.DELETE("/api/v1/workspaces/{workspace}/spaces/{space}/requestTypes/{requestType}", {
+      params: { path: { workspace, space, requestType: id }, query: { etag } },
+    }),
+  );
+}
+
+export function undeleteRequestType(name: string): Promise<RequestType> {
+  const { workspace, space, id } = child(name);
+  return call(
+    api.POST("/api/v1/workspaces/{workspace}/spaces/{space}/requestTypes/{requestType}:undelete", {
+      params: { path: { workspace, space, requestType: id } },
+      body: {},
+    }),
   );
 }
 

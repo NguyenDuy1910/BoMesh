@@ -9,11 +9,11 @@ import { useKnowledgeBases } from "@/modules/knowledge/queries";
 import { baseColor } from "@/modules/knowledge/bases/model";
 
 import { analyzePolicy, type IamAnalysis } from "../api";
-import { CAN, topCollectionRole } from "../model";
+import { ACCESS_LABEL, topCollectionRole } from "../model";
 import { peopleKeys } from "../queries";
 
 export interface BaseAccess {
-  /** Bare item ID of the knowledge base. */
+  /** Bare item ID of the collection. */
   id: string;
   name: string;
   /** How access comes: "Shared directly", group names or "Everyone". */
@@ -25,7 +25,7 @@ const collectionRoles = (analysis: IamAnalysis | undefined) =>
   new Map((analysis?.results ?? []).filter((r) => r.resource?.includes("/items/")).map((r) => [resourceId(r.resource), topCollectionRole(r.roles)]));
 
 /**
- * Knowledge bases a principal can open and why (preview `kbAccess`), from AnalyzeWorkspaceIamPolicy:
+ * Collections a principal can open and why (preview `kbAccess`), from AnalyzeWorkspaceIamPolicy:
  * `everyone` (workspaceMembers) and each group explain shared access; the rest of the user's
  * effective roles count as shared directly. `groups` is the (draft) group list to show.
  */
@@ -64,7 +64,7 @@ export function useKnowledgeAccess({ user, groups, currentGroups, groupLabel }: 
   return { data, isPending: pending, isError: failed };
 }
 
-/** Coloured dot leading a knowledge-base row (preview `kbDot`); `id` is the base's item ID. */
+/** Coloured dot leading a collection row (preview `kbDot`); `id` is the collection's item ID. */
 export function BaseDot({ id }: { id: string }) {
   return <span className="ppl-dot" style={{ background: baseColor(id) }} aria-hidden />;
 }
@@ -83,8 +83,8 @@ export function KnowledgeAccessList({ access, empty, linkTab, showVia = true }: 
           title={a.name}
           contentTitle
           description={showVia ? <span translate={a.via === "Shared directly" || a.via === "Everyone" ? undefined : "no"}>{a.via}</span> : undefined}
-          meta={CAN[a.role] ?? "Can view"}
-          href={`/bases/${a.id}${linkTab ? `?tab=${linkTab}` : ""}`}
+          meta={ACCESS_LABEL[a.role] ?? "Viewer"}
+          href={`/studio/collections/${a.id}${linkTab ? `?tab=${linkTab}` : ""}`}
         />
       ))}
     </List>

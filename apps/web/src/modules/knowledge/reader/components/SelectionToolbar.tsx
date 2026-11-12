@@ -17,10 +17,11 @@ interface Selected {
 }
 
 /**
- * Ask-about-a-selection toolbar (preview `#doc-sel`): after selecting 12–800 characters on a page,
- * "Ask about this" (in the rail) or "Copy". Scrolling, Escape or a new address dismisses it.
+ * Selection toolbar (preview `#doc-sel`): after selecting 12–800 characters on a page, Ask (answers
+ * in the side panel; absent on an older version or a document that can't be asked) or Copy.
+ * Scrolling, Escape or a new address dismisses it.
  */
-export function SelectionToolbar({ root, onAsk }: { root: RefObject<HTMLElement | null>; onAsk: (text: string) => void }) {
+export function SelectionToolbar({ root, onAsk }: { root: RefObject<HTMLElement | null>; onAsk?: (text: string) => void }) {
   const [sel, setSel] = useState<Selected | null>(null);
 
   useEffect(() => {
@@ -76,17 +77,20 @@ export function SelectionToolbar({ root, onAsk }: { root: RefObject<HTMLElement 
       aria-label="Selection actions"
       style={{ position: "fixed", left: sel.left, top: sel.top }}
     >
-      <Button
-        size="sm"
-        variant="ghost"
-        onPress={() => {
-          onAsk(sel.text);
-          setSel(null);
-        }}
-      >
-        <Sparkles className="i" aria-hidden />
-        Ask about this
-      </Button>
+      {onAsk ? (
+        <Button
+          size="sm"
+          variant="ghost"
+          aria-label="Ask about this passage"
+          onPress={() => {
+            onAsk(sel.text);
+            setSel(null);
+          }}
+        >
+          <Sparkles className="i" aria-hidden />
+          Ask
+        </Button>
+      ) : null}
       <Button size="sm" variant="ghost" onPress={() => void copy()}>
         <Copy className="i" aria-hidden />
         Copy

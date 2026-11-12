@@ -6,8 +6,35 @@ import { useMemo } from "react";
 import { resourceId } from "@/lib/api/client";
 import { useWorkspace } from "@/lib/workspace";
 
+import { listContributions, listItems, quote } from "../api";
+import { knowledgeKeys } from "../queries";
 import { getItemIamPolicy, listAccessRequests, listActiveMembers, listGroups } from "./api";
 import { isOwner, isPendingRequest, type AccessRequest, type Item, type Policy } from "./model";
+
+/**
+ * What waits on a collection's reviewers (preview `reviewAlert`): submissions in review, and documents that
+ * were approved but couldn't be published (indexing FAILED). `enabled` = the caller reviews it.
+ */
+export function useCollectionReviewCounts(collection: Item | null | undefined, enabled: boolean) {
+  const { id } = useWorkspace();
+  const name = collection?.name ?? "";
+  const inReview = `targetCollection = ${quote(name)} AND state = IN_REVIEW`;
+  const failed = `itemType = DOCUMENT AND ancestors:${quote(name)} AND document.indexingState = FAILED`;
+  const submissions = useQuery({
+    queryKey: knowledgeKeys.contributionList(id, `collectionReview|${inReview}`),
+    queryFn: () => listContributions(id, { filter: inReview }),
+    enabled: enabled && !!name,
+  });
+  const problems = useQuery({
+    queryKey: knowledgeKeys.list(id, { filter: failed, pageSize: 100 }),
+    queryFn: () => listItems(id, { filter: failed, pageSize: 100 }),
+    enabled: enabled && !!name,
+  });
+  return {
+    submissions: submissions.data?.length ?? 0,
+    problems: problems.data ? (problems.data.totalSize ?? problems.data.items?.length ?? 0) : 0,
+  };
+}
 
 /** Keys live under `[ws, "items"]` so every knowledge invalidation refreshes them too. */
 export const basesKeys = {

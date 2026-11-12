@@ -23,8 +23,8 @@ export function RqCard({ title, description, icon, className, children }: { titl
   );
 }
 
-/** A link styled as a button (navigation, not an action). */
-export function LinkButton({
+/** A link styled as a button (navigation, not an action; preview `btn(label, { href })`). */
+export function ButtonLink({
   href,
   children,
   icon: Icon,

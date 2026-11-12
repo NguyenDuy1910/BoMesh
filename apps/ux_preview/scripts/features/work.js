@@ -104,13 +104,13 @@
 
   /* ═══════════════ Materials ═══════════════ */
   const usable = d => d.status === 'ready' || d.status === 'outdated';
-  /** Documents grouped by knowledge base: the space's materials (its bases, then documents linked from other bases), plus My files for private work. */
+  /** Documents grouped by collection: the space's materials (its bases, then documents linked from other bases), plus My files for private work. */
   function docGroups(sp, mine) {
     const kbs = sp ? (sp.kbs || []).map(kbById) : visibleKbs().filter(k => !k.personal);
     if (mine || !sp) kbs.push(...visibleKbs().filter(k => k.personal));
     const groups = [...new Set(kbs)].filter(k => k && !k.archived && canReadKb(k)).map(kb => ({ name: kb.name, docs: docsIn(kb.id) }));
     const linked = sp && X.spaceLinkedDocs ? X.spaceLinkedDocs(sp) : [];
-    if (linked.length) groups.push({ name: 'Linked from other knowledge bases', docs: linked });
+    if (linked.length) groups.push({ name: 'Linked from other collections', docs: linked });
     return groups.filter(g => g.docs.length);
   }
   const docsForSpace = (sp, o = {}) => docGroups(sp, o.mine).flatMap(g => g.docs);
@@ -119,7 +119,7 @@
   function sourcePicker(f, o = {}) {
     const sp = spaceById(f.space), uiKey = o.uiKey || 'workNew';
     const groups = docGroups(sp, o.mine ?? privateFlow(f.workflow));
-    if (!groups.length) return emptyState({ icon: 'files', title: 'No materials here yet', desc: sp ? `${esc(sp.name)} has no documents you can read.` : 'Add documents to a knowledge base first.', boxed: true, compact: true });
+    if (!groups.length) return emptyState({ icon: 'files', title: 'No materials here yet', desc: sp ? `${esc(sp.name)} has no documents you can read.` : 'Add documents to a collection first.', boxed: true, compact: true });
     const q = (f.q || '').trim().toLowerCase();
     const shown = groups.map(g => ({ ...g, docs: g.docs.filter(d => !q || d.name.toLowerCase().includes(q)) })).filter(g => g.docs.length);
     const pickable = shown.flatMap(g => g.docs).filter(usable);
@@ -460,7 +460,7 @@
       if (evs.length) D.events = D.events.filter(e => e.work !== w.id);
       audit('Deleted work', w.title);
       go('/work');
-      toast(`Deleted “${w.title}”`, { action: { label: 'Undo', run: () => { works().splice(Math.min(i, works().length), 0, w); if (evs.length) (D.events ??= []).push(...evs); refresh(); toast('Restored'); } } });
+      toast(`Deleted “${w.title}”`, { action: { label: 'Undo', run: () => { works().splice(Math.min(i, works().length), 0, w); if (evs.length) (D.events ??= []).push(...evs); refresh(); } } });
     };
     if (w.status !== 'published') { run(); return; }
     confirmAction({ title: `Delete “${w.title}”?`, body: 'Students lose access and their results are deleted.', confirm: 'Delete', danger: true, onConfirm: run });

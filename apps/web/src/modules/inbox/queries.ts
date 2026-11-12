@@ -28,9 +28,10 @@ export const inboxKeys = {
   contribution: (ws: string, id: string) => [ws, "contributions", "one", id, "inbox"] as const,
 };
 
+/** The caller's notifications; the bell's unread count keeps itself fresh while the app is open. */
 export function useNotifications() {
   const { id, memberId } = useWorkspace();
-  return useQuery({ queryKey: inboxKeys.all(id), queryFn: () => listNotifications(id, memberId) });
+  return useQuery({ queryKey: inboxKeys.all(id), queryFn: () => listNotifications(id, memberId), staleTime: 30_000, refetchInterval: 60_000 });
 }
 
 /** Requests and contributions the notifications point at (for Approve / Reply / Revise); failures just leave the plain Open. */

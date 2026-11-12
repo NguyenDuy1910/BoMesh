@@ -2,7 +2,7 @@
    archive, download) and the rendition model — the readable text of a
    resource, split into pages, outline and passages — used by the reader
    (reader.js), the review preview (curation.js), search snippets and answers.
-   The document inventory itself lives in Knowledge Studio → Library (curation.js).
+   The document inventory itself lives in Knowledge Studio → Documents (curation.js).
    Exports: X.whoCanSee, X.downloadDocument, X.processDocs, X.archiveDocs,
    X.docFix, X.docModel, X.docText. */
 (() => {
@@ -29,7 +29,7 @@
   /* ── Download (browser-native local copy) ── */
   function downloadDocument(doc) {
     const kb = kbById(doc.kb);
-    const rows = [['Document', doc.name], ['Knowledge base', kb?.name || doc.kb], ['Status', lifecycleOf(doc).label], ['Type', String(doc.type || '').toUpperCase()], ['Pages', doc.pages || '—'], ['Updated', fmtDateTime(doc.updated)], ['Source', docSub(doc)]];
+    const rows = [['Document', doc.name], ['Collection', kb?.name || doc.kb], ['Status', lifecycleOf(doc).label], ['Type', String(doc.type || '').toUpperCase()], ['Pages', doc.pages || '—'], ['Updated', fmtDateTime(doc.updated)], ['Source', docSub(doc)]];
     const msg = `Downloaded ${doc.name}`;
     if (doc.type === 'pdf') return savePdf(withExt(doc.name, '.pdf'), doc.name, rows.map(([k, v]) => `${k}: ${v}`), msg);
     if (['xlsx', 'xls', 'csv'].includes(doc.type)) return saveCsv(withExt(doc.name, '.csv'), [['Field', 'Value'], ...rows], msg);
@@ -98,7 +98,7 @@
         onDone?.(); refresh();
         const kbName = kbById(docs[0].kb)?.name;
         audit(one ? 'Archived document' : `Archived ${plural(docs.length, 'document')}`, one ? docs[0].name : kbName);
-        toast(one ? `Archived “${docs[0].name}”` : `Archived ${plural(docs.length, 'document')}`, { action: { label: 'Undo', run: () => { docs.forEach(d => (d.archived = false)); refresh(); toast(one ? `Restored “${docs[0].name}”` : `Restored ${plural(docs.length, 'document')}`); } } });
+        toast(one ? `Archived “${docs[0].name}”` : `Archived ${plural(docs.length, 'document')}`, { action: { label: 'Undo', run: () => { docs.forEach(d => (d.archived = false)); refresh(); } } });
       },
     });
   }
@@ -115,8 +115,8 @@
   M['doc-move'] = ({ ids, from }) => {
     const targets = moveTargets(from), f = ui('docMove'), n = ids.length, src = kbById(from);
     const title = n === 1 ? 'Move document' : `Move ${plural(n, 'document')}`;
-    if (!targets.length) return { title, icon: 'folder', size: 'sm', body: emptyState({ icon: 'folder', title: 'Nowhere to move it', desc: 'There’s no other knowledge base you can edit.', compact: true }), foot: btn('Close', { v: 'primary', act: 'close-modal' }) };
-    const err = f.tried && !f.to ? 'Choose a knowledge base.' : '';
+    if (!targets.length) return { title, icon: 'folder', size: 'sm', body: emptyState({ icon: 'folder', title: 'Nowhere to move it', desc: 'There’s no other collection you can edit.', compact: true }), foot: btn('Close', { v: 'primary', act: 'close-modal' }) };
+    const err = f.tried && !f.to ? 'Choose a collection.' : '';
     const opt = k => {
       const w = X.whoCanSee(k);
       return `<label class="radio mv-opt"><input type="radio" name="doc-move-to" value="${esc(k.id)}" ${f.to === k.id ? 'checked' : ''} data-change="doc-move-pick" data-value="${esc(k.id)}"><span class="radio__control" aria-hidden="true"></span>${X.kbMark ? X.kbMark(k, 24) : ''}<span class="grow"><span class="radio__label mv-opt__name">${esc(k.name)}</span><span class="radio__desc mv-opt__who">${ic(w.icon, 'i-xs')}<span class="truncate">${esc(w.label)}</span></span></span></label>`;
@@ -124,7 +124,7 @@
     return {
       title, icon: 'folder', size: 'md',
       desc: n === 1 ? `“${esc(docById(ids[0])?.name || '')}” · from ${esc(src?.name || '')}` : `From ${esc(src?.name || '')}`,
-      body: `<div class="field"><span class="label" id="doc-move-label">Move to</span><div class="option-list mv-list" role="radiogroup" aria-labelledby="doc-move-label" ${err ? 'aria-invalid="true" aria-describedby="doc-move-err"' : ''}>${targets.map(opt).join('')}</div>${err ? `<div class="field-error" id="doc-move-err" role="alert">${ic('alert-circle')}<span>${esc(err)}</span></div>` : `<div class="description">Who can see ${n === 1 ? 'it' : 'them'} follows the new knowledge base.</div>`}</div>`,
+      body: `<div class="field"><span class="label" id="doc-move-label">Move to</span><div class="option-list mv-list" role="radiogroup" aria-labelledby="doc-move-label" ${err ? 'aria-invalid="true" aria-describedby="doc-move-err"' : ''}>${targets.map(opt).join('')}</div>${err ? `<div class="field-error" id="doc-move-err" role="alert">${ic('alert-circle')}<span>${esc(err)}</span></div>` : `<div class="description">Who can see ${n === 1 ? 'it' : 'them'} follows the new collection.</div>`}</div>`,
       footStart: 'You can undo right after.',
       foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn('Move', { v: 'primary', icon: 'folder', act: 'doc-move-go' }),
     };
@@ -137,7 +137,7 @@
     docs.forEach(d => (d.kb = target.id)); target.updated = Date.now();
     closeModal(); S.drawer = null; refresh();
     audit(`Moved ${plural(docs.length, 'document')}`, target.name);
-    toast(`Moved ${plural(docs.length, 'document')} to ${target.name}`, { action: { label: 'Undo', run: () => { docs.forEach(d => (d.kb = from)); refresh(); toast(`Moved ${plural(docs.length, 'document')} back`); } } });
+    toast(`Moved ${plural(docs.length, 'document')} to ${target.name}`, { action: { label: 'Undo', run: () => { docs.forEach(d => (d.kb = from)); refresh(); } } });
   };
 
   /** The fix an editor can apply to a file that isn't readable (or changed at the source); '' when none. */
@@ -577,7 +577,7 @@
     'kb-eng': n => [['When to use this', [`Use ${n} when you are on call and something needs attention.`]], ['Steps', null, ['Acknowledge the page within five minutes.', 'Check the dashboards linked in the alert.', 'Post status in #incidents every 30 minutes.']], ['Escalation', ['If you can’t mitigate within 30 minutes, page the secondary on-call engineer.']]],
     default: n => [['Notes', [`Working notes for ${n}.`]], ['Key points', null, ['Confirm goals and owners for the next quarter.', 'Agree on the timeline and the next check-in.', 'Share a short summary with the team afterwards.']], ['Next steps', ['Follow up within a week with the open questions.']]],
   };
-  /** Finx knowledge bases: used only for resources whose kind has no generator below. */
+  /** Finx collections: used only for resources whose kind has no generator below. */
   const FALLBACK = {
     'kb-fx-eng': n => [['Context', [`${n} records how Platform Engineering builds and runs Finx services.`]], ['Guidance', null, ['Follow the Engineering Handbook unless this page says otherwise.', 'Link the ADR or ticket that motivated a change.', 'Ask in #eng-platform when something is unclear.']], ['Owner', ['Platform Engineering reviews this page every six months.']]],
     'kb-fx-pay': n => [['Context', [`${n} belongs to the Payments Platform team (gateway, card authorization, NAPAS 247 and QR).`]], ['Guidance', null, ['Payment APIs follow ADR-031: every POST carries an Idempotency-Key.', 'Changes to payment flows need a Payments Platform reviewer.', 'Incidents follow the Incident Response Plan.']], ['On call', ['Page the Payments Platform on-call for anything customer-facing.']]],

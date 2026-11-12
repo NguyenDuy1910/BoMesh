@@ -562,7 +562,7 @@
     const r = create(t, { question: text }, { ...(tried ? { aiTried: tried } : {}), ...(p.conv ? { from: p.conv } : {}), ...(p.about ? { about: p.about } : {}) });
     delete S.ui.rqAsk;
     closeModal(); refresh();
-    toast(`Question sent to ${teamWord(sp)}`, { action: { label: 'View', run: () => go('/requests/' + r.id) } });
+    toast(`Question sent to ${teamWord(sp)}`, { action: { label: 'Open', run: () => go('/requests/' + r.id) } });
   };
 
   /* ═══════════════ /requests/:id ═══════════════ */

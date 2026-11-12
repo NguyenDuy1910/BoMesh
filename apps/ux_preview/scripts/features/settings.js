@@ -134,18 +134,20 @@
     </div>`;
   }
 
+  /** Settings' sections are sidebar sub-rows of Settings (pageSections). */
+  const sections = () => pageSections('/settings', [{ id: 'general', label: 'General' }, { id: 'setup', label: 'Workspace setup' }]);
+  (X.sections ||= {}).settings = () => sections().nav();
   P.settings = ({ query }) => {
     /* Archiving lives under General › Advanced; the old Danger zone link opens it there. */
     if (query.tab === 'danger') ui('setAdv', {}).open = true;
-    const tab = query.tab === 'setup' ? 'setup' : 'general';
-    const head = pageHeader({ title: 'Settings' });
-    const t = contextBar(tabs([{ id: 'general', label: 'General' }, { id: 'setup', label: 'Workspace setup' }], tab, '/settings'));
+    const s = sections(), tab = s.section(query);
+    const head = pageHeader({ title: s.title(query) });
     const body = gate({
       loading: () => `<div class="card stack gap-16" aria-busy="true">${[30, 60, 45].map(w => `<span class="skeleton skeleton--line" style="width:${w}%"></span><span class="skeleton" style="height:36px"></span>`).join('')}</div>`,
       error: () => errorState({ title: 'Settings didn’t load', desc: 'Try again. Your settings haven’t changed.' }),
       ok: () => (tab === 'setup' ? setupHtml() : generalHtml()),
     });
-    return `<div class="page page--narrow">${head}${t}${body}</div>`;
+    return `<div class="page page--narrow">${head}${body}</div>`;
   };
 
   A['set-touch'] = el => { const k = el.dataset.field; const f = form(); if (k && !f.touched[k]) f.touched[k] = true; refresh(); };

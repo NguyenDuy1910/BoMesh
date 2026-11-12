@@ -74,7 +74,8 @@ function frameRect() { return $('#frame').getBoundingClientRect(); }
 function positionMenu() {
   const m = $('#menu'); if (!m) return; const fr = frameRect(); const r = m.getBoundingClientRect();
   if (r.right > fr.right - 8) m.style.left = Math.max(8, S.menu.anchorRight - r.width) + 'px';
-  if (r.bottom > fr.bottom - 8) m.style.top = Math.max(8, S.menu.anchorTop - r.height - 6) + 'px';
+  // A side menu (data-menu-side="right", the rail's sections) slides up to fit; one under its trigger flips above it.
+  if (r.bottom > fr.bottom - 8) m.style.top = Math.max(8, S.menu.side ? fr.height - r.height - 8 : S.menu.anchorTop - r.height - 6) + 'px';
 }
 function focusFirst(sel) {
   requestAnimationFrame(() => {
@@ -189,12 +190,17 @@ A['popover-close'] = () => closePopover(true);
 
 /* ── Menus ── */
 function openMenu(trigger, items, key) {
-  const fr = frameRect(); const r = trigger.getBoundingClientRect();
-  S.menu = { key: key || 'm', items, x: r.left - fr.left, y: r.bottom - fr.top + 4, anchorRight: r.right - fr.left, anchorTop: r.top - fr.top, trigger };
+  const fr = frameRect(); const r = trigger.getBoundingClientRect(), side = trigger.dataset.menuSide === 'right';
+  S.menu = { key: key || 'm', items, x: side ? r.right - fr.left + 8 : r.left - fr.left, y: side ? r.top - fr.top - 6 : r.bottom - fr.top + 4, anchorRight: r.right - fr.left, anchorTop: r.top - fr.top, side, trigger };
   trigger.setAttribute('aria-expanded', 'true');
   renderLayer(); requestAnimationFrame(() => $('#menu .menu-item:not([disabled])')?.focus());
 }
-function closeMenu(refocus) { const t = S.menu?.trigger; S.menu = null; renderLayer(); t?.setAttribute('aria-expanded', 'false'); if (refocus && t && document.body.contains(t)) t.focus(); }
+function closeMenu(refocus) {
+  let t = S.menu?.trigger; S.menu = null; renderLayer();
+  // A live page (sync ticks) may have re-rendered the trigger meanwhile: find it again by id.
+  if (t && !t.isConnected && t.id) t = $('#' + CSS.escape(t.id));
+  t?.setAttribute('aria-expanded', 'false'); if (refocus && t?.isConnected) t.focus();
+}
 MENUS.filter = el => {
   const { ui: uiKey, field: f } = el.dataset; const opts = JSON.parse(el.dataset.opts); const v = ui(uiKey)[f] || '';
   return [{ label: 'Any ' + el.dataset.label.toLowerCase(), checked: !v, run: () => { ui(uiKey)[f] = ''; ui(uiKey).page = 1; refresh(); } }, { sep: true },
@@ -217,16 +223,19 @@ function paletteResults(raw) {
     return out;
   }
   const unread = X.inboxUnread?.() || 0;
-  // Off-sidebar destinations lead (Inbox), then the sidebar's own pages in its order: Workspace, Your work, Manage.
-  const pages = [...MORE_PAGES.map(p => (p.to === '/inbox' && unread ? { ...p, meta: `${unread} unread` } : p)), ...memberNav(), ...yourWorkNav(), ...manageNav(), ...(isOperator() ? [{ label: 'Platform console', to: '/p/workspaces', icon: 'layers' }] : [])].filter(n => n.to);
-  const goTo = pages.filter(p => m(p.label) || m(tr(p.label) || '')).sort((a, b) => strong(b.label) - strong(a.label)).slice(0, q ? 6 : 4).map(p => ({ label: p.label, icon: p.icon, meta: p.meta, run: () => go(p.to), hit: strong(p.label) }));
+  // Inbox (the bell's popover) leads, then the sidebar's own pages in its order: Workspace, Your work, Manage. Typing also finds a
+  // row's sections (Saved, Review, Sources…), named with their parent.
+  const inbox = { label: 'Inbox', icon: 'inbox', meta: unread ? `${unread} unread` : '', run: () => A['inbox-show']?.() };
+  const withKids = n => [n, ...(q ? navKids(n).map(k => ({ label: k.label, icon: n.icon, meta: n.label, to: k.to })) : [])];
+  const pages = [inbox, ...[...memberNav(), ...yourWorkNav(), ...manageNav()].flatMap(withKids), ...(isOperator() ? [{ label: 'Platform console', to: '/p/workspaces', icon: 'layers' }] : [])];
+  const goTo = pages.filter(p => m(p.label) || m(tr(p.label) || '')).sort((a, b) => strong(b.label) - strong(a.label)).slice(0, q ? 6 : 4).map(p => ({ label: p.label, icon: p.icon, meta: p.meta, run: p.run || (() => go(p.to)), hit: strong(p.label) }));
   const actions = [
     { label: 'New chat', icon: 'message-plus', run: () => go('/chat') },
     canContribute() && { label: 'Contribute a document', icon: 'upload', run: () => A['contribute']?.() },
-    { label: 'New collection', icon: 'list-plus', run: () => A['col-new']?.() },
-    can('knowledge.manage') && { label: 'Create knowledge base', icon: 'book', run: () => goThen(studioHref('bases'), () => A['kb-create']?.()) },
+    { label: 'New reading list', icon: 'list-plus', run: () => A['col-new']?.() },
+    can('knowledge.manage') && { label: 'New collection', icon: 'book', run: () => goThen(studioHref('collections'), () => A['kb-create']?.()) },
     isAdmin() && X.homeFeatured && { label: 'Edit featured documents', icon: 'sliders', run: () => X.homeFeatured() },
-    can('source.manage') && { label: 'Connect a source', icon: 'plug', run: () => goThen(studioHref('sources'), () => A['src-connect']?.()) },
+    can('source.manage') && { label: 'Add source', icon: 'plug', run: () => goThen(studioHref('sources'), () => A['src-connect']?.()) },
     can('user.manage') && { label: 'Add people', icon: 'user-plus', run: () => goThen('/people', () => A['member-add']?.()) },
     { label: resolvedTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode', icon: resolvedTheme() === 'dark' ? 'sun' : 'moon', run: () => setTheme(resolvedTheme() === 'dark' ? 'light' : 'dark') },
     { label: 'Appearance', icon: 'palette', meta: themeLabel(), run: () => X.appearance.open() },
@@ -246,9 +255,9 @@ function paletteResults(raw) {
   add('Search or ask', question ? [ask, search] : [search, ask]);
   add('Documents', catalogSearch(parseCatalogQuery({ q })).rows.slice(0, 5).map(({ doc: d }) => ({ label: bareName(d.name), icon: kindMeta(res(d).kind).icon, meta: kbById(d.kb)?.name || '', run: () => go('/doc/' + d.id + '?q=' + encodeURIComponent(q)) })));
   add('Conversations', myConvs().filter(c => m(c.title)).slice(0, 4).map(c => ({ label: c.title, icon: 'message', meta: rel(c.at), run: () => go('/chat/' + c.id) })));
-  add('Collections', visibleCollections().filter(c => m(c.name)).slice(0, 3).map(c => ({ label: c.name, icon: 'list', meta: plural(c.items.length, 'item'), run: () => go('/knowledge/collections/' + c.id) })));
+  add('Collections', visibleCollections().filter(c => m(c.name)).slice(0, 3).map(c => ({ label: c.name, icon: 'list', meta: plural(c.items.length, 'item'), run: () => go('/knowledge/lists/' + c.id) })));
   // A base opens its documents in Knowledge; a locked one asks for access.
-  add('Knowledge bases', visibleKbs().filter(k => m(k.name)).slice(0, 4).map(k => ({ label: k.name, icon: k.personal ? 'user' : kbRole(k) === 'none' ? 'lock' : 'book', meta: kbRole(k) === 'none' ? 'Request access' : plural(docsIn(k.id).length, 'document'), run: () => (kbRole(k) === 'none' ? A['kb-request']?.({ dataset: { kb: k.id } }) : go(kbHref(k))) })));
+  add('Collections', visibleKbs().filter(k => m(k.name)).slice(0, 4).map(k => ({ label: k.name, icon: k.personal ? 'user' : kbRole(k) === 'none' ? 'lock' : 'book', meta: kbRole(k) === 'none' ? 'Request access' : plural(docsIn(k.id).length, 'document'), run: () => (kbRole(k) === 'none' ? A['kb-request']?.({ dataset: { kb: k.id } }) : go(kbHref(k))) })));
   if (hasModule('spaces')) add('Spaces', visibleSpaces().filter(s => m(s.name) || m(s.code || '')).slice(0, 5).map(s => ({ label: s.name, icon: spaceType(s.type).icon, meta: [s.code, spaceType(s.type).label].filter(Boolean).join(' · '), run: () => go('/space/' + s.id) })));
   if (hasModule('work')) add('Work', (D.works || []).filter(w => (w.owner === me().id || w.visibility === 'space' && spaceRole(spaceById(w.space))) && m(w.title)).slice(0, 4).map(w => ({ label: w.title, icon: WORKFLOWS[w.workflow]?.icon || 'sparkles', meta: spaceById(w.space)?.name || '', run: () => go('/work/' + w.id) })));
   if (can('user.manage')) add('People', D.members.filter(p => m(p.name) || m(p.email)).slice(0, 4).map(p => ({ label: p.name, icon: 'user', meta: roleById(p.roleId)?.name, run: () => goThen('/people', () => A['member-open']?.({ dataset: { id: p.id } })) })));

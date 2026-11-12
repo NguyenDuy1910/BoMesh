@@ -2,18 +2,19 @@
 
 import { Button } from "@heroui/react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowUp, BookOpen, Calendar, ClipboardList, List as ListIcon, Lock, Megaphone, MoreHorizontal, Pencil, Plus, Trash2, Upload, X } from "lucide-react";
-import NextLink from "next/link";
+import { ArrowUp, Calendar, ClipboardList, List as ListIcon, Megaphone, MoreHorizontal, Pencil, Plus, Trash2, Upload, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { Callout, EmptyState, ErrorState, ItemIcon, List, ListItem, Section, SkeletonRows, StatusChip, UserAvatar, confirm, toast } from "@/components/ui";
+import { Callout, EmptyState, ErrorState, ItemIcon, LinkButton, List, ListItem, Section, SkeletonRows, StatusChip, UserAvatar, confirm, toast } from "@/components/ui";
 import { errorMessage, resourceId } from "@/lib/api/client";
 import { plural, rel } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
+import { BaseMark } from "@/modules/knowledge/bases/components/BaseMark";
 import { openContribute } from "@/modules/knowledge/components/contribute-store";
 import { useMemberNames, useReadingLists } from "@/modules/knowledge/queries";
-import { newWorkHref, workflowsFor } from "@/modules/work/kinds";
+import { catalogHref } from "@/modules/knowledge/model";
+import { newWorkHref, workflowsFor } from "@/modules/work";
 
 import { createAnnouncement, createSpaceEvent, deleteAnnouncement, deleteSpaceEvent, joinSpace, updateAnnouncement, type Announcement } from "../api";
 import { invalidateSpaces, useAnnouncements, useRequestTypes, useSpaceBases, useUpNext, type UpNextItem } from "../queries";
@@ -23,25 +24,27 @@ import { UpNextList } from "./UpNextList";
 
 export interface OverviewActions {
   postAnnouncement: (announcement?: Announcement) => void;
-  editEvent: (item: UpNextItem) => void;
+  /** Add an event (no item) or edit one. */
+  editEvent: (item?: UpNextItem) => void;
 }
 
-/** Overview (preview `overviewTab`): announcements and Up next; request catalog, workflows, knowledge and collections beside. */
+/** Overview (preview `overviewTab`): Up next and announcements; request catalog, workflows, collections and reading lists beside. */
 export function OverviewTab({ view, actions }: { view: SpaceView; actions: OverviewActions }) {
-  const { space, sid, manage, visitor, can } = view;
+  const { space, sid, manage, visitor, staff, newInHeader, can } = view;
   const { settings, hasModule } = useWorkspace();
   const router = useRouter();
-  const member = !!view.role || manage;
   const bases = useSpaceBases(space);
   const catalog = useRequestTypes(sid);
   const lists = useReadingLists(`audience = SPACE AND space = "${space.name}"`);
-  const workflows = !visitor && hasModule("work") ? workflowsFor(settings, space) : [];
+  // Staff start work from the header; members get the same workflows here.
+  const workflows = !visitor && !newInHeader && !staff && hasModule("work") ? workflowsFor(settings, space) : [];
 
-  const editable = (bases.data ?? []).find((b) => b.access === "EDITOR" || b.access === "OWNER");
-  const hasDocs = (bases.data ?? []).some((b) => b.access !== "LOCKED" && (b.collection?.documentCount ?? 0) > 0);
-  const setup = manage && bases.isSuccess && !hasDocs && editable;
-  const visibleBases = (bases.data ?? []).filter((b) => b.collection?.kind !== "PERSONAL");
-  const spaceLists = (lists.data ?? []).filter((l) => l.space === space.name);
+  const linked = bases.data ?? [];
+  const editable = linked.find((b) => b.access === "EDITOR" || b.access === "OWNER");
+  const hasDocs = linked.some((b) => b.access !== "LOCKED" && (b.collection?.documentCount ?? 0) > 0);
+  const setup = manage && bases.isSuccess && !hasDocs ? editable : undefined;
+  const collections = linked.filter((b) => b.collection?.kind !== "PERSONAL");
+  const readingLists = (lists.data ?? []).filter((l) => l.space === space.name);
 
   const side = (
     <>
@@ -76,45 +79,33 @@ export function OverviewTab({ view, actions }: { view: SpaceView; actions: Overv
           </List>
         </Section>
       ) : null}
-      {visibleBases.length ? (
-        <Section
-          title="Knowledge"
-          actions={
-            manage ? (
-              <NextLink className="link-button" href={`/space/${sid}?tab=settings`}>
-                Manage
-              </NextLink>
-            ) : null
-          }
-        >
+      {collections.length ? (
+        <Section title="Knowledge">
           <List className="sp-side-list">
-            {visibleBases.map((b) => {
-              const ok = b.access !== "LOCKED";
-              return (
-                <ListItem
-                  key={b.name}
-                  lead={<ItemIcon icon={ok ? BookOpen : Lock} size="sm" />}
-                  title={b.displayName}
-                  contentTitle
-                  description={ok ? plural(b.collection?.documentCount ?? 0, "document") : "Locked"}
-                  href={`/bases/${resourceId(b.name)}`}
-                />
-              );
-            })}
+            {collections.map((b) => (
+              <ListItem
+                key={b.name}
+                lead={<BaseMark base={b} size={28} />}
+                title={b.displayName}
+                contentTitle
+                description={b.access !== "LOCKED" ? plural(b.collection?.documentCount ?? 0, "document") : "Locked"}
+                href={catalogHref({ filters: { kb: [resourceId(b.name)] } })}
+              />
+            ))}
           </List>
         </Section>
       ) : null}
-      {spaceLists.length ? (
-        <Section title="Collections">
+      {readingLists.length ? (
+        <Section title="Reading lists">
           <List className="sp-side-list">
-            {spaceLists.map((c) => (
+            {readingLists.map((c) => (
               <ListItem
                 key={c.name}
                 lead={<ItemIcon icon={ListIcon} tone="accent" size="sm" />}
                 title={c.displayName}
                 contentTitle
                 description={plural(c.itemCount ?? 0, "item")}
-                href={`/knowledge/collections/${resourceId(c.name)}`}
+                href={`/knowledge/lists/${resourceId(c.name)}`}
               />
             ))}
           </List>
@@ -122,20 +113,20 @@ export function OverviewTab({ view, actions }: { view: SpaceView; actions: Overv
       ) : null}
     </>
   );
-  const hasSide = !!catalog.data?.length || workflows.length > 0 || visibleBases.length > 0 || spaceLists.length > 0;
+  const hasSide = !!catalog.data?.length || workflows.length > 0 || collections.length > 0 || readingLists.length > 0;
 
   return (
     <>
-      {setup && editable ? (
+      {setup ? (
         <div className="mb-24">
           <Callout
             tone="accent"
             title="Add materials to get started"
             description="Members can ask about them and use them in workflows."
             actions={
-              <Button size="sm" variant="tertiary" onPress={() => openContribute({ collection: editable.name })}>
+              <Button size="sm" variant="tertiary" onPress={() => openContribute({ collection: setup.name })}>
                 <Upload aria-hidden />
-                Add materials
+                Contribute documents
               </Button>
             }
           />
@@ -143,11 +134,9 @@ export function OverviewTab({ view, actions }: { view: SpaceView; actions: Overv
       ) : null}
       <div className="sp-overview">
         <div className="sp-overview__main">
-          {member ? (
-            <>
-              <Announcements view={view} onPost={actions.postAnnouncement} canPost={can("announcements.create")} canEdit={can("announcements.update")} />
-              <UpNext view={view} onEdit={actions.editEvent} />
-            </>
+          <UpNext view={view} onEdit={actions.editEvent} />
+          {can("announcements.list") ? (
+            <Announcements view={view} onPost={actions.postAnnouncement} canPost={can("announcements.create")} canEdit={can("announcements.update")} />
           ) : (
             <VisitorJoin view={view} onJoined={() => router.refresh()} />
           )}
@@ -261,9 +250,7 @@ function Announcements({ view, onPost, canPost, canEdit }: { view: SpaceView; on
         })}
         {all.length > 3 ? (
           <div>
-            <Button variant="ghost" size="sm" className="link-button" onPress={() => setShowAll(!showAll)}>
-              {showAll ? "Show fewer" : `Show all ${all.length}`}
-            </Button>
+            <LinkButton onPress={() => setShowAll(!showAll)}>{showAll ? "Show fewer" : `Show all ${all.length}`}</LinkButton>
           </div>
         ) : null}
       </div>
@@ -286,11 +273,17 @@ function Announcements({ view, onPost, canPost, canEdit }: { view: SpaceView; on
   );
 }
 
-function UpNext({ view, onEdit }: { view: SpaceView; onEdit: (item: UpNextItem) => void }) {
+/**
+ * Up next for this space (preview: the space's own queue is counted on its tab, so it's left out; empty sections are omitted).
+ * Space events are the web's source of Up next, so people who may add events keep the section (and its Add event) when empty.
+ */
+function UpNext({ view, onEdit }: { view: SpaceView; onEdit: (item?: UpNextItem) => void }) {
   const { id: ws } = useWorkspace();
   const qc = useQueryClient();
-  const query = useUpNext({ space: view.sid, limit: 5 });
+  const query = useUpNext({ space: view.sid, limit: 5, queue: false });
+  const canAdd = view.can("events.create");
   const canEdit = view.can("events.update");
+  const items = query.data ?? [];
 
   async function remove(item: UpNextItem) {
     const e = item.event;
@@ -311,43 +304,44 @@ function UpNext({ view, onEdit }: { view: SpaceView; onEdit: (item: UpNextItem) 
     }
   }
 
+  if (!query.data || (!items.length && !canAdd)) return null;
+  const add = canAdd ? (
+    <Button variant="ghost" size="sm" onPress={() => onEdit()}>
+      <Plus aria-hidden />
+      Add event
+    </Button>
+  ) : null;
   return (
-    <Section title="Up next">
-      {query.data === undefined && query.isError ? (
-        <ErrorState error={query.error} onRetry={query.refetch} />
-      ) : query.data === undefined ? (
-        <SkeletonRows rows={2} />
-      ) : (
-        <UpNextList
-          items={query.data}
-          space={view.sid}
-          empty={<EmptyState icon={Calendar} title="Nothing coming up" description="Deadlines and events for this space show up here." compact boxed />}
-          renderActions={
-            canEdit
-              ? (item) =>
-                  item.event ? (
-                    <Menu
-                      label="Event options"
-                      nodes={[
-                        { id: "edit", label: "Edit", icon: Pencil, run: () => onEdit(item) },
-                        { sep: "1" },
-                        { id: "delete", label: "Delete", icon: Trash2, danger: true, run: () => void remove(item) },
-                      ]}
-                    >
-                      <Button isIconOnly size="sm" variant="ghost" aria-label="Event options" className="button--muted">
-                        <MoreHorizontal aria-hidden />
-                      </Button>
-                    </Menu>
-                  ) : null
-              : undefined
-          }
-        />
-      )}
+    <Section title="Up next" actions={items.length ? add : null}>
+      <UpNextList
+        items={items}
+        space={view.sid}
+        empty={<EmptyState icon={Calendar} title="Nothing coming up" description="Deadlines and events for this space show up here." actions={add} compact boxed />}
+        renderActions={
+          canEdit
+            ? (item) =>
+                item.event ? (
+                  <Menu
+                    label="Event options"
+                    nodes={[
+                      { id: "edit", label: "Edit", icon: Pencil, run: () => onEdit(item) },
+                      { sep: "1" },
+                      { id: "delete", label: "Delete", icon: Trash2, danger: true, run: () => void remove(item) },
+                    ]}
+                  >
+                    <Button isIconOnly size="sm" variant="ghost" aria-label="Event options" className="button--muted">
+                      <MoreHorizontal aria-hidden />
+                    </Button>
+                  </Menu>
+                ) : null
+            : undefined
+        }
+      />
     </Section>
   );
 }
 
-/** Visitors of an open space read the catalog; announcements and Up next are for members (`:join`). */
+/** Visitors of an open space who can't read announcements: they join with `:join`. */
 function VisitorJoin({ view, onJoined }: { view: SpaceView; onJoined: () => void }) {
   const { id: ws } = useWorkspace();
   const qc = useQueryClient();

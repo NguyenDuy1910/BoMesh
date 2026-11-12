@@ -24,11 +24,12 @@ import { useEffect, useRef, useState, type Key } from "react";
 import { Callout } from "@/components/ui/Callout";
 import { FileIcon } from "@/components/ui/FileIcon";
 import { IconButton } from "@/components/ui/IconButton";
+import { Tip } from "@/components/ui/Tip";
+import { useWorkspace } from "@/lib/workspace";
 import { ArtifactCards, AttachmentChip } from "@/modules/artifacts";
 import { useItem } from "@/modules/knowledge/queries";
 
-import { plainAnswer } from "../citations";
-import { copyText, downloadPdf, downloadWord } from "../download";
+import { copyRich, copyText, downloadPdf, downloadWord } from "../download";
 import type { SentFile } from "../runtime";
 import type { AnswerView } from "../thread";
 import type { AnswerSource } from "../turn";
@@ -93,7 +94,7 @@ export function UserMessage({ id, text, files, canEdit, editing, onEdit, onCance
           />
           <div className="row gap-8">
             <span className="grow t-xs muted">The answer below will be replaced.</span>
-            <Button size="sm" variant="secondary" onPress={onCancel}>
+            <Button size="sm" variant="ghost" onPress={onCancel}>
               Cancel
             </Button>
             <Button size="sm" variant="primary" isDisabled={!draft.trim()} onPress={() => onSave(draft.trim())}>
@@ -158,6 +159,7 @@ interface Shown {
 /** One answer (preview `aiInner`): steps, text with markers, states, files, sources, actions. */
 export function Answer(props: AnswerProps) {
   const { answer, title, showSteps, busy, scoped, activeCite, activeArtifact, onCite, onOpenArtifact, onRetry, onFeedback, onFeedbackComment } = props;
+  const { workspace } = useWorkspace();
   const attempts: Shown[] = [...answer.earlier, answer];
   const [index, setIndex] = useState(attempts.length - 1);
   useEffect(() => setIndex(attempts.length - 1), [attempts.length]);
@@ -166,6 +168,7 @@ export function Answer(props: AnswerProps) {
   const streaming = shown.state === "streaming";
   const visible = shown.sources.filter((s) => s.available);
   const seconds = answer.finishedAt && answer.startedAt ? Math.max(1, Math.round((answer.finishedAt - answer.startedAt) / 1000)) : undefined;
+  const askAll = `Ask again in all of ${workspace.displayName ?? "the workspace"}`;
 
   // Built only from knowledge this person can't read: show nothing of it.
   if (shown.sources.length && !visible.length && !streaming) {
@@ -174,11 +177,11 @@ export function Answer(props: AnswerProps) {
         <Callout
           icon={Lock}
           title="This answer uses knowledge you can’t access"
-          description="Ask a workspace admin if you need it, or ask again to search what you can access."
+          description="Ask a workspace admin if you need it, or ask again to search only what you can access."
           actions={
-            <Button size="sm" variant="secondary" isDisabled={busy} onPress={() => onRetry(answer, "again")}>
+            <Button size="sm" variant="secondary" isDisabled={busy} onPress={() => onRetry(answer, "all")}>
               <RotateCcw className="i" aria-hidden />
-              Ask again
+              Ask again with what I can access
             </Button>
           }
         />
@@ -190,36 +193,12 @@ export function Answer(props: AnswerProps) {
   const settled = shown.state === "COMPLETED";
   const cite = (n: number) => onCite(n, { ...answer, sources: shown.sources });
 
-  const retryMenu = (
-    <Dropdown>
-      <IconButton icon={RotateCcw} tip="Retry" size="sm" />
-      <Dropdown.Popover placement="bottom start">
-        <Dropdown.Menu aria-label="Retry" disabledKeys={busy ? ["again", "detail", "shorter", "all"] : []} onAction={(key: Key) => onRetry(answer, key as RetryMode)}>
-          <Dropdown.Item id="again" textValue="Try again">
-            <RotateCcw className="i" aria-hidden />
-            <Label>Try again</Label>
-          </Dropdown.Item>
-          <Dropdown.Item id="detail" textValue="More detail">
-            <ListIcon className="i" aria-hidden />
-            <Label>More detail</Label>
-          </Dropdown.Item>
-          <Dropdown.Item id="shorter" textValue="Shorter">
-            <SlidersHorizontal className="i" aria-hidden />
-            <Label>Shorter</Label>
-          </Dropdown.Item>
-          {scoped ? (
-            <Dropdown.Section>
-              <Separator />
-              <Dropdown.Item id="all" textValue="Search all knowledge">
-                <Layers className="i" aria-hidden />
-                <Label>Search all knowledge</Label>
-              </Dropdown.Item>
-            </Dropdown.Section>
-          ) : null}
-        </Dropdown.Menu>
-      </Dropdown.Popover>
-    </Dropdown>
-  );
+  /** One Copy: the answer as formatted text with Markdown as its plain flavour; markers of sources you can't open are dropped. */
+  const copy = () => {
+    const open = new Set(visible.flatMap((s) => [s.n, ...(s.aliases ?? [])]));
+    const markdown = shown.text.replace(/\s?\[(\d+)\]/g, (m, n: string) => (open.has(Number(n)) ? m : ""));
+    void copyRich(markdown, answerRef.current?.querySelector(".chat-answer")?.innerHTML ?? null);
+  };
 
   const message = shown.message;
   const downMenu = (
@@ -236,12 +215,11 @@ export function Answer(props: AnswerProps) {
             else onFeedback(message, "UNHELPFUL", k);
           }}
         >
-          <Dropdown.Section selectionMode="single" selectedKeys={shown.rating === "UNHELPFUL" && shown.reason && REASONS.includes(shown.reason) ? [shown.reason] : []}>
+          <Dropdown.Section>
             <Header>What was wrong?</Header>
             {REASONS.map((r) => (
               <Dropdown.Item key={r} id={r} textValue={r}>
                 <Label>{r}</Label>
-                <Dropdown.ItemIndicator />
               </Dropdown.Item>
             ))}
             <Dropdown.Item id="other" textValue="Something else…">
@@ -269,26 +247,41 @@ export function Answer(props: AnswerProps) {
       <Dropdown.Popover placement="bottom start">
         <Dropdown.Menu
           aria-label="More"
+          disabledKeys={busy ? ["detail", "shorter", "all"] : []}
           onAction={(key: Key) => {
-            if (key === "md") void copyText(shown.text, "Copied as Markdown");
+            if (key === "detail" || key === "shorter" || key === "all") onRetry(answer, key);
             if (key === "word") downloadWord(title, answerRef.current?.querySelector(".chat-answer") ?? null, shown.text, shown.sources);
             if (key === "pdf") downloadPdf(title, shown.text, shown.sources);
           }}
         >
-          <Dropdown.Item id="md" textValue="Copy as Markdown">
-            <Copy className="i" aria-hidden />
-            <Label>Copy as Markdown</Label>
-          </Dropdown.Item>
           <Dropdown.Section>
-            <Separator />
-            <Dropdown.Item id="word" textValue="Download as Word">
+            <Header>Rewrite</Header>
+            <Dropdown.Item id="detail" textValue="More detail">
+              <ListIcon className="i" aria-hidden />
+              <Label>More detail</Label>
+            </Dropdown.Item>
+            <Dropdown.Item id="shorter" textValue="Shorter">
+              <SlidersHorizontal className="i" aria-hidden />
+              <Label>Shorter</Label>
+            </Dropdown.Item>
+            {scoped ? (
+              <Dropdown.Item id="all" textValue={askAll}>
+                <Layers className="i" aria-hidden />
+                <Label>{askAll}</Label>
+              </Dropdown.Item>
+            ) : null}
+          </Dropdown.Section>
+          <Separator />
+          <Dropdown.Section>
+            <Header>Download</Header>
+            <Dropdown.Item id="word" textValue="Word document">
               <Download className="i" aria-hidden />
-              <Label className="grow">Download as Word</Label>
+              <Label className="grow">Word document</Label>
               <span className="menu-item__meta">.doc</span>
             </Dropdown.Item>
-            <Dropdown.Item id="pdf" textValue="Download as PDF">
+            <Dropdown.Item id="pdf" textValue="PDF">
               <Download className="i" aria-hidden />
-              <Label className="grow">Download as PDF</Label>
+              <Label className="grow">PDF</Label>
               <span className="menu-item__meta">.pdf</span>
             </Dropdown.Item>
           </Dropdown.Section>
@@ -351,8 +344,8 @@ export function Answer(props: AnswerProps) {
               <IconButton icon={ChevronRight} tip="Next answer" size="sm" isDisabled={index >= attempts.length - 1 || busy} onPress={() => setIndex(index + 1)} />
             </span>
           ) : null}
-          <IconButton icon={Copy} tip="Copy" size="sm" onPress={() => void copyText(plainAnswer(shown.text))} />
-          {retryMenu}
+          <IconButton icon={Copy} tip="Copy" size="sm" onPress={copy} />
+          <IconButton icon={RotateCcw} tip="Retry" size="sm" isDisabled={busy} onPress={() => onRetry(answer, "again")} />
           <IconButton
             icon={ThumbsUp}
             tip="Good answer"
@@ -368,18 +361,28 @@ export function Answer(props: AnswerProps) {
   );
 }
 
-/** A source under an answer (preview `.chat-source`): number, file type, title. */
+/** One chip per cited document (preview `sourcesHtml`): its numbers open the matching passages. */
 function SourceChip({ source: s, active, onPress }: { source: AnswerSource; active: boolean; onPress: () => void }) {
   const item = useItem(s.item);
-  const page = s.passages.find((p) => p.page)?.page;
+  const pages = [...new Set(s.passages.map((p) => p.page).filter((p): p is number => !!p))];
+  const ns = [s.n, ...(s.aliases ?? [])];
   const title = s.title || item.data?.displayName || "Document";
+  const where = pages.length > 1 ? `, pages ${pages.join(", ")}` : pages.length ? `, page ${pages[0]}` : "";
   return (
-    <button type="button" className="chat-source" aria-pressed={active} aria-label={`Source ${s.n}: ${title}${page ? `, page ${page}` : ""}`} onClick={onPress}>
-      <span className="chat-source__n">{s.n}</span>
-      <FileIcon mime={item.data?.document?.mimeType} name={item.data?.document?.fileName ?? title} size="sm" />
-      <span className="truncate" translate="no">
-        {title}
-      </span>
-    </button>
+    <Tip content={`${title}${where.replace(/^, /, " · ")}`}>
+      <button type="button" className="chat-source" aria-pressed={active} aria-label={`${ns.length > 1 ? "Sources" : "Source"} ${ns.join(", ")}: ${title}${where}`} onClick={onPress}>
+        <span className="chat-source__ns" aria-hidden>
+          {ns.map((n) => (
+            <span key={n} className="chat-source__n">
+              {n}
+            </span>
+          ))}
+        </span>
+        <FileIcon mime={item.data?.document?.mimeType} name={item.data?.document?.fileName ?? title} size="sm" />
+        <span className="truncate" translate="no">
+          {title}
+        </span>
+      </button>
+    </Tip>
   );
 }

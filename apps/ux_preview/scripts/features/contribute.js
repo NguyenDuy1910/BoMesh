@@ -35,8 +35,8 @@
   }
 
   /* ═══════════════ Contribute dialog ═══════════════
-     Contribute to a knowledge base: pick files → Analyzing (the assistant reads them against the workspace's taxonomy) →
-     Check the details (title, type, topics with their evidence, knowledge base and who will see it, summary, flags) →
+     Contribute to a collection: pick files → Analyzing (the assistant reads them against the workspace's taxonomy) →
+     Check the details (title, type, topics with their evidence, collection and who will see it, summary, flags) →
      Submit for review; what the contributor confirmed travels with the submission (submission.confirmed, read by aiOf).
      Upload to My files and Submit a new version stay one step. */
   /** A['contribute']({dataset:{kb?, versionOf?, private?}}). kb preselects a base (a personal base means My files). */
@@ -44,7 +44,7 @@
     const ds = el?.dataset || {}, kb = kbById(ds.kb), base = ds.versionOf ? docById(ds.versionOf) : null;
     if (base && (!canShare() || !canSeeDoc(base))) { toast('You can’t submit a new version of this document', { tone: 'danger' }); return; }
     const share = !!base || (canShare() && ds.private !== '1' && !kb?.personal);
-    if (!share && !personalKb()) { toast('You can’t add files to any knowledge base', { tone: 'danger' }); return; }
+    if (!share && !personalKb()) { toast('You can’t add files to any collection', { tone: 'danger' }); return; }
     S.ui.ctb = { mode: share ? 'share' : 'private', step: 'pick', meta: {}, kb: kb && contributionTargets().includes(kb) ? kb.id : '', note: '', files: [], busy: false, versionOf: base?.id || '', touched: false, showNote: false };
     openModal('contribute', {});
   };
@@ -69,7 +69,7 @@
     const sampleList = pool.filter(s => !have.has(s.name));
     const sampleHtml = f.busy || full || !sampleList.length ? '' : `<div class="ctb-samples"><span class="t-xs muted">Or try a sample:</span>${sampleList.map(s => btn(s.name, { v: 'outline', size: 'sm', icon: 'plus', act: 'ctb-sample', data: { name: s.name, size: Math.round(s.size) } })).join('')}</div>`;
     // Destination first, as a choice the rest of the dialog follows (title, description, fields, button).
-    const choose = !base && !f.busy && canShare() && personalKb() ? `<div class="field ctb-dest"><span class="label">Where should it go?</span>${choiceGroup({ name: 'ctb-dest', value: f.mode, act: 'ctb-dest', cols: 2, options: [['share', 'Contribute to a knowledge base', 'Your team can find it once a reviewer publishes it.', 'share'], ['private', 'Upload to My files', 'Only you can see it. Ask about it in chat.', 'lock']] })}</div>` : '';
+    const choose = !base && !f.busy && canShare() && personalKb() ? `<div class="field ctb-dest"><span class="label">Where should it go?</span>${choiceGroup({ name: 'ctb-dest', value: f.mode, act: 'ctb-dest', cols: 2, options: [['share', 'Contribute to a collection', 'Your team can find it once a reviewer publishes it.', 'share'], ['private', 'Upload to My files', 'Only you can see it. Ask about it in chat.', 'lock']] })}</div>` : '';
     const note = f.note.trim();
     const noteErr = base && f.touched && !note ? 'Say what changed.' : '';
     const versionFields = base && !f.busy ? `<div class="ctb-fields">${field({ id: 'ctb-note', label: 'What changed?', required: true, error: noteErr, desc: 'Reviewers see this next to the current version.', control: textarea({ id: 'ctb-note', bind: 'ctb.note', value: f.note, rows: 3, placeholder: 'e.g. Corrected section 2 and updated the dates', invalid: !!noteErr, attrs: 'maxlength="400" data-input="kn-revalidate" data-form="ctb"' }) })}</div>` : '';
@@ -132,20 +132,20 @@
     refresh();
     submittedToast(docs, 'Submitted the new version for review');
   }
-  /** Track opens the contribution in My contributions; reviewers who can decide it themselves get Review now. */
+  /** Open opens the contribution in My contributions; reviewers who can decide it themselves get Review now (the review queue). */
   function submittedToast(docs, msg) {
     const review = can('knowledge.manage') && docs.every(d => canReviewKb(kbById(d.kb)));
     toast(msg || (docs.length === 1 ? 'Submitted for review' : `Submitted ${plural(docs.length, 'document')} for review`), {
-      action: review ? { label: 'Review now', run: () => go('/studio?tab=review&sel=' + docs[0].id) } : { label: 'Track', run: () => go(href(docs.length === 1 ? docs[0].id : '')) },
+      action: review ? { label: 'Review now', run: () => go('/studio?tab=review&sel=' + docs[0].id) } : { label: 'Open', run: () => go(href(docs.length === 1 ? docs[0].id : '')) },
     });
   }
 
-  /* ── Analyzing → Check the details (Contribute to a knowledge base) ── */
+  /* ── Analyzing → Check the details (Contribute to a collection) ── */
   const ANALYZE_MS = 1200;
   const KIND_OPTS = () => Object.entries(RESOURCE_KINDS).map(([id, k]) => [id, k.label]);
   const andList = xs => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
   /** What the assistant reads from one file before the contributor confirms it: title, type, topics matched against the workspace's
-      taxonomy (with their evidence), the best-fitting knowledge base (unless one was chosen), a summary and flags. */
+      taxonomy (with their evidence), the best-fitting collection (unless one was chosen), a summary and flags. */
   function suggest(x, preset) {
     const probe = { id: x.id, name: x.name, type: x.type, source: 'upload' };
     const title = stemOf(x.name).replace(/_+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -176,7 +176,7 @@
     const rows = valid.map(x => item({ lead: fileIcon(x.type), title: esc(x.name), desc: fmtSize(x.size), trail: spinner('sm') }));
     return {
       size: 'lg', icon: 'sparkles', title: 'Analyzing',
-      desc: 'The assistant suggests a title, type, topics and knowledge base. You check them next.',
+      desc: 'The assistant suggests a title, type, topics and collection. You check them next.',
       body: `<div class="ctb-analyzing" role="status" aria-live="polite">${spinner()}<span>Reading the file and matching it against ${esc(ws)}’s taxonomy…</span></div>${list(rows)}`,
       foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn('Check the details', { v: 'primary', loading: true, disabled: true }),
     };
@@ -203,7 +203,7 @@
         ${field({ id: 'ctb-kind-' + x.id, label: 'Type', control: select({ id: 'ctb-kind-' + x.id, bind: key + '.kind', value: m.kind, options: KIND_OPTS() }) })}
       </div>
       ${topics}
-      ${field({ id: 'ctb-kb-' + x.id, label: 'Knowledge base', desc: kbDesc, control: select({ id: 'ctb-kb-' + x.id, bind: key + '.kb', value: m.kb, options: contributionTargets().map(k => [k.id, k.name]), change: 'ctb-meta-kb' }) })}
+      ${field({ id: 'ctb-kb-' + x.id, label: 'Collection', desc: kbDesc, control: select({ id: 'ctb-kb-' + x.id, bind: key + '.kb', value: m.kb, options: contributionTargets().map(k => [k.id, k.name]), change: 'ctb-meta-kb' }) })}
       ${field({ id: 'ctb-sum-' + x.id, label: 'Summary', desc: 'Shown in search results and to reviewers.', control: textarea({ id: 'ctb-sum-' + x.id, bind: key + '.summary', value: m.summary, rows: 2, attrs: 'maxlength="280"' }) })}
     </section>`;
   }
@@ -286,9 +286,9 @@
   }
   /** What happens next (or what happened last) beyond the stored events. */
   function tail(d) {
-    const l = lifecycleOf(d), kb = kbById(d.kb)?.name || 'the knowledge base', e = lastEvent(d);
+    const l = lifecycleOf(d), kb = kbById(d.kb)?.name || 'the collection', e = lastEvent(d);
     switch (l.key) {
-      case 'analyzing': return { icon: 'sparkles', tone: 'accent', title: 'The assistant is reading it', desc: 'It suggests a type, topics and a knowledge base for the reviewer.', live: true };
+      case 'analyzing': return { icon: 'sparkles', tone: 'accent', title: 'The assistant is reading it', desc: 'It suggests a type, topics and a collection for the reviewer.', live: true };
       case 'review': return { icon: 'clock', title: 'Waiting for a reviewer', desc: `The reviewers of ${kb} check it before it’s published.`, next: true };
       case 'changes': return { icon: 'pencil', title: isMine(d) ? 'Waiting for your revision' : 'Waiting for a revision', next: true };
       case 'queued': return { icon: 'clock', title: 'Waiting to publish', next: true };
@@ -319,7 +319,7 @@
   const PROG_ICON = { done: ['check', 'success'], current: ['clock', 'accent'], issue: ['alert', 'warning'], skipped: ['minus', ''], todo: ['circle-dashed', ''] };
   const PROG_SR = { done: 'Done', current: 'In progress', issue: 'Needs attention', skipped: 'Skipped', todo: 'Not yet' };
   function progressSteps(d) {
-    const k = lifecycleOf(d).key, sub = d.submission || {}, kb = kbById(d.kb), base = kb?.name || 'the knowledge base', mine = isMine(d);
+    const k = lifecycleOf(d).key, sub = d.submission || {}, kb = kbById(d.kb), base = kb?.name || 'the collection', mine = isMine(d);
     const by = e => (e?.by && e.by !== me().id ? ` by ${actorName(e.by)}` : '');
     const sent = [...(sub.events || [])].reverse().find(e => e.kind === 'submitted' || e.kind === 'resubmitted');
     const ok = lastBy(d, 'approved'), who = kb ? X.whoCanSee(kb).label : '';
@@ -327,7 +327,7 @@
     const confirmed = !!sub.confirmed;
     const submitted = { state: 'done', at: sent?.at || sub.at, text: `${sent?.kind === 'resubmitted' ? 'Resubmitted' : 'Sent'} to ${base}` };
     const analyzed = k === 'analyzing' ? { state: 'current', busy: true, text: 'Reading the file and matching it against the taxonomy…' }
-      : { state: 'done', text: confirmed ? `Type, topics and knowledge base confirmed by ${mine ? 'you' : contributorName(d)}` : 'Type, topics and knowledge base suggested' };
+      : { state: 'done', text: confirmed ? `Type, topics and collection confirmed by ${mine ? 'you' : contributorName(d)}` : 'Type, topics and collection suggested' };
     const review = k === 'analyzing' ? { state: 'todo', text: `The reviewers of ${base} check it` }
       : k === 'review' ? { state: 'current', text: `Waiting for a reviewer of ${base}` }
         : k === 'changes' ? { state: 'issue', text: `Changes requested${by(lastBy(d, 'changes'))}`, at: lastBy(d, 'changes')?.at }
@@ -367,7 +367,7 @@
       return `<section><h3 class="ctb-sec__title">How it’s classified</h3>${kv([
         ['Type', esc(kindMeta(r.kind).label)],
         ['Topics', r.topics.length ? `<span class="ctb-topics">${r.topics.map(id => chip(topicName(id), { size: 'sm' })).join('')}</span>` : '<span class="muted">None</span>'],
-        ['Knowledge base', esc(r.kb?.name || '—')],
+        ['Collection', esc(r.kb?.name || '—')],
       ])}</section>`;
     }
     if (!['review', 'changes'].includes(st) && !d.ai) return '';
@@ -381,7 +381,7 @@
     return `<section>${head}${kv([
       ['Type', `<span class="row gap-6">${esc(kindMeta(ai.kind.value).label)}${ai.kind.by === 'contributor' ? '' : pctOf(ai.kind.conf, d)}</span>`],
       ['Topics', topics.length ? `<span class="ctb-topics">${topics.join('')}</span>` : '<span class="muted">No clear topic</span>'],
-      ['Knowledge base', `<span class="stack gap-2"><span>${esc(kb?.name || '—')}</span><span class="t-xs muted">${esc(kbBy)}</span></span>`],
+      ['Collection', `<span class="stack gap-2"><span>${esc(kb?.name || '—')}</span><span class="t-xs muted">${esc(kbBy)}</span></span>`],
     ])}${flags}<p class="t-xs muted mt-8">Reviewers can change these before publishing.</p></section>`;
   }
   const revKey = id => 'ctbRev-' + id;
@@ -406,7 +406,7 @@
     if (l.key === 'failed') return { html: alertBox('danger', 'Couldn’t publish — the reviewers have been told', 'It was approved, but the file couldn’t be made searchable. You don’t need to do anything.') };
     return { html: '' };
   }
-  /** One contribution. Each fact appears once: the file and (when no section names it) the knowledge base in the subtitle, where it
+  /** One contribution. Each fact appears once: the file and (when no section names it) the collection in the subtitle, where it
       stands in Progress (plus an alert with the reviewer's message), the details in their section, every event in History (collapsed). */
   DR['ctb'] = ({ id }) => {
     const d = docById(id);
@@ -432,7 +432,7 @@
       case 'changes': footStart = withdrawBtn; foot = btn('Resubmit', { v: 'primary', icon: 'send', act: 'ctb-resubmit', data: did }); break;
       case 'published': case 'publishing': case 'queued': case 'update': case 'stored': case 'merged':
         foot = (canShare() ? btn('Submit a new version', { icon: 'upload', act: 'ctb-new-version', data: { id: openId } }) : '') + btn('Open', { v: 'primary', icon: 'file-text', act: 'ctb-doc', data: { id: openId } }); break;
-      case 'rejected': foot = btn('Remove', { v: 'danger-soft', icon: 'trash', act: 'ctb-withdraw', data: did }); break;
+      case 'rejected': foot = btn('Withdraw', { v: 'danger-soft', icon: 'trash', act: 'ctb-withdraw', data: did }); break;
     }
     return { size: 'lg', title: docTitle(d), lead: fileIcon(d.type), desc, body, foot, footStart };
   };
@@ -488,7 +488,7 @@
     return {
       size: 'md', title: 'Share as knowledge', icon: 'share',
       desc: `Send “${esc(docTitle(d))}” for review. It leaves My files; once published, your team can find it.`,
-      body: `<div class="kn-form">${field({ id: 'ctbs-kb', label: 'Knowledge base', desc: f.suggested && f.kb === f.suggested ? 'Suggested by the assistant. A reviewer confirms it.' : `Reviewed by the owners of ${esc(kbById(f.kb)?.name || '')}.`, control: select({ id: 'ctbs-kb', bind: 'ctbShare.kb', value: f.kb, change: 'ctb-share-kb', options: contributionTargets().map(k => [k.id, k.name]), attrs: dis }) })}
+      body: `<div class="kn-form">${field({ id: 'ctbs-kb', label: 'Collection', desc: f.suggested && f.kb === f.suggested ? 'Suggested by the assistant. A reviewer confirms it.' : `Reviewed by the owners of ${esc(kbById(f.kb)?.name || '')}.`, control: select({ id: 'ctbs-kb', bind: 'ctbShare.kb', value: f.kb, change: 'ctb-share-kb', options: contributionTargets().map(k => [k.id, k.name]), attrs: dis }) })}
         ${field({ id: 'ctbs-note', label: 'Note for reviewers', optional: true, control: textarea({ id: 'ctbs-note', bind: 'ctbShare.note', value: f.note, rows: 2, placeholder: 'What it covers and who it helps', attrs: `maxlength="400" ${dis}` }) })}</div>`,
       footStart: 'Until it’s published, only you and the reviewers can see it.',
       foot: btn('Cancel', { v: 'ghost', act: 'close-modal', disabled: f.busy }) + btn('Send for review', { v: 'primary', icon: 'send', act: 'ctb-share-go', loading: f.busy }),
@@ -501,7 +501,7 @@
     f.busy = true; S.modal.props.guard = true; refreshLayer(); await sleep(500);
     submitPrivate(d, kb.id, (f.note || '').trim());
     closeModal(); refresh();
-    toast(`Sent “${docTitle(d)}” for review`, { action: { label: 'Track', run: () => go(href(d.id)) } });
+    toast(`Sent “${docTitle(d)}” for review`, { action: { label: 'Open', run: () => go(href(d.id)) } });
   };
 
   /* ═══════════════ Inbox ═══════════════ */
@@ -514,7 +514,7 @@
     const live = d.mergedInto ? docById(d.mergedInto) : d;
     const ready = e?.kind === 'approved' && live && isPublishedStage(live) && live.status === 'ready';
     if (ready) {
-      out.push({ id: `ctb-${d.id}-pub`, icon: 'check-circle', tone: 'ok', title: `${name} is published`, body: e.text ? `${actorName(e.by)}: “${e.text}”` : `Searchable in ${kbById(live.kb)?.name || 'its knowledge base'}.`, at: Math.max(e.at, live.updated || 0), to });
+      out.push({ id: `ctb-${d.id}-pub`, icon: 'check-circle', tone: 'ok', title: `${name} is published`, body: e.text ? `${actorName(e.by)}: “${e.text}”` : `Searchable in ${kbById(live.kb)?.name || 'its collection'}.`, at: Math.max(e.at, live.updated || 0), to });
     } else if (e) {
       const [icon, tone] = NOTICE[e.kind], by = actorName(e.by);
       const title = e.kind === 'changes' ? `${by} asked for changes to ${name}` : e.kind === 'rejected' ? `${name} was declined` : `${by} approved ${name}`;

@@ -68,7 +68,7 @@ export interface PublishTarget {
   personal: boolean;
 }
 
-/** Knowledge bases the caller may add documents to (`items.create`), plus "My files". */
+/** Collections the caller may add documents to (`items.create`), plus "My files". */
 export function usePublishTargets({ enabled = true }: { enabled?: boolean } = {}) {
   const { id, member } = useWorkspace();
   return useQuery({

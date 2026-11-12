@@ -1,15 +1,15 @@
 "use client";
 
 import { Dropdown, Header, Label, Separator } from "@heroui/react";
-import { ChevronsUpDown, Command, Globe, Layers, LogOut, Monitor, Moon, Route, Settings, Sun, type LucideIcon } from "lucide-react";
+import { ChevronsUpDown, CircleHelp, Command, Globe, LogOut, Moon, Route, Settings, Sun } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import { toast } from "@/components/ui/Toast";
 import { UserAvatar } from "@/components/ui/UserAvatar";
 import { LANGUAGES, languageName, useLanguage } from "@/lib/i18n";
-import { PLATFORM_CONSOLE, type ShellMode } from "@/lib/navigation";
-import { isPlatformOperator, useSession } from "@/lib/session";
-import { accentColor, setMode, themeLabel, type ThemeMode } from "@/lib/theme";
+import type { ShellMode } from "@/lib/navigation";
+import { useSession } from "@/lib/session";
+import { MODE_LABEL, themeLabel } from "@/lib/theme";
 import { useOptionalWorkspace } from "@/lib/workspace";
 import { signOut, useRoleDisplayName } from "@/modules/auth/api";
 
@@ -17,11 +17,6 @@ import { changeLanguage } from "./language";
 import { openAppearance, openPreferences, openShortcuts, startTour } from "./overlays";
 import { useAppearance } from "./useAppearance";
 
-const MODES: { mode: ThemeMode; label: string; icon: LucideIcon }[] = [
-  { mode: "light", label: "Light", icon: Sun },
-  { mode: "dark", label: "Dark", icon: Moon },
-  { mode: "system", label: "Match system", icon: Monitor },
-];
 
 /** The signed-in person's role line: workspace role, or platform role in the console. */
 export function useRoleLine(mode: ShellMode): string {
@@ -49,55 +44,48 @@ export function AccountMenu({ mode }: { mode: ShellMode }) {
     });
   };
 
+  const coarse = typeof window !== "undefined" && window.matchMedia("(hover: none), (pointer: coarse)").matches;
+  const help = [!coarse && "shortcuts", !platform && "tour"].filter(Boolean);
+  const ModeIcon = appearance.dark ? Moon : Sun;
+
+  // Who you are (opens Preferences), the two personal settings with their current value, Help, Sign out — seven rows at
+  // most, so Sign out is always visible. Mode and theme live in the Appearance drawer; the console in the workspace switcher.
   return (
     <Dropdown>
       <Dropdown.Trigger className="user-button" aria-label="Account and preferences">
         <UserAvatar name={name} />
-        <span className="grow stack">
+        <span className="grow stack user-button__text">
           <span className="user-button__name truncate" translate="no">
             {name}
           </span>
-          <span className="user-button__meta truncate" translate="no">
-            {session?.user.email}
-          </span>
+          <span className="user-button__meta truncate">{role}</span>
         </span>
-        <ChevronsUpDown className="i i-sm muted" aria-hidden />
+        <ChevronsUpDown className="i i-sm" aria-hidden />
       </Dropdown.Trigger>
-      <Dropdown.Popover placement="top start" offset={4} className="shell-menu">
+      <Dropdown.Popover placement="top start" offset={4}>
         <Dropdown.Menu aria-label="Account">
           <Dropdown.Section>
-            <Dropdown.Item id="me" textValue={name} onAction={openPreferences}>
+            <Dropdown.Item id="me" textValue={name} onAction={() => openPreferences()}>
               <UserAvatar name={name} size="lg" />
               <span className="stack grow" style={{ minWidth: 0 }}>
                 <span className="medium truncate" translate="no">
                   {name}
                 </span>
-                <span className="t-xs muted truncate">{role}</span>
+                <span className="t-xs muted truncate" translate="no">
+                  {session?.user.email}
+                </span>
               </span>
+              <Settings className="i menu-item__trail" aria-hidden />
             </Dropdown.Item>
           </Dropdown.Section>
           <Separator />
           <Dropdown.Section>
-            <Dropdown.Item id="prefs" textValue="Preferences" onAction={openPreferences}>
-              <Settings className="i" aria-hidden />
-              <Label>Preferences</Label>
-            </Dropdown.Item>
-          </Dropdown.Section>
-          <Dropdown.Section selectionMode="single" selectedKeys={[`mode:${appearance.mode}`]}>
-            <Header>Appearance</Header>
-            {MODES.map(({ mode: m, label, icon: Icon }) => (
-              <Dropdown.Item key={m} id={`mode:${m}`} textValue={label} onAction={() => setMode(m)}>
-                <Icon className="i" aria-hidden />
-                <Label>{label}</Label>
-                <Dropdown.ItemIndicator />
-              </Dropdown.Item>
-            ))}
-          </Dropdown.Section>
-          <Dropdown.Section>
-            <Dropdown.Item id="theme" textValue="Theme and colors…" onAction={openAppearance}>
-              <span className="i theme-dot" style={{ background: accentColor(appearance.look, appearance.dark) }} aria-hidden />
-              <Label className="grow">Theme and colors…</Label>
-              <span className="menu-item__meta">{themeLabel(appearance.look)}</span>
+            <Dropdown.Item id="appearance" textValue="Appearance" onAction={openAppearance}>
+              <ModeIcon className="i" aria-hidden />
+              <Label className="grow">Appearance</Label>
+              <span className="menu-item__meta">
+                {MODE_LABEL[appearance.mode]} · {themeLabel(appearance.look)}
+              </span>
             </Dropdown.Item>
             <Dropdown.SubmenuTrigger>
               <Dropdown.Item id="language" textValue="Language">
@@ -107,7 +95,7 @@ export function AccountMenu({ mode }: { mode: ShellMode }) {
                   {languageName(language)}
                 </span>
               </Dropdown.Item>
-              <Dropdown.Popover className="shell-menu">
+              <Dropdown.Popover>
                 <Dropdown.Menu aria-label="Language">
                   <Dropdown.Section selectionMode="single" selectedKeys={[language]}>
                     <Header>Language</Header>
@@ -128,24 +116,32 @@ export function AccountMenu({ mode }: { mode: ShellMode }) {
                 </Dropdown.Menu>
               </Dropdown.Popover>
             </Dropdown.SubmenuTrigger>
-          </Dropdown.Section>
-          <Separator />
-          <Dropdown.Section>
-            <Dropdown.Item id="shortcuts" textValue="Keyboard shortcuts" onAction={openShortcuts}>
-              <Command className="i" aria-hidden />
-              <Label>Keyboard shortcuts</Label>
-            </Dropdown.Item>
-            {!platform ? (
-              <Dropdown.Item id="tour" textValue="Product tour" onAction={startTour}>
-                <Route className="i" aria-hidden />
-                <Label>Product tour</Label>
-              </Dropdown.Item>
-            ) : null}
-            {isPlatformOperator(session) && !platform ? (
-              <Dropdown.Item id="platform" textValue="Platform console" onAction={() => router.push(PLATFORM_CONSOLE.href)}>
-                <Layers className="i" aria-hidden />
-                <Label>Platform console</Label>
-              </Dropdown.Item>
+            {help.length ? (
+              <Dropdown.SubmenuTrigger>
+                <Dropdown.Item id="help" textValue="Help">
+                  <CircleHelp className="i" aria-hidden />
+                  <Label className="grow">Help</Label>
+                </Dropdown.Item>
+                <Dropdown.Popover>
+                  <Dropdown.Menu aria-label="Help">
+                    <Dropdown.Section>
+                      <Header>Help</Header>
+                      {!coarse ? (
+                        <Dropdown.Item id="shortcuts" textValue="Keyboard shortcuts" onAction={openShortcuts}>
+                          <Command className="i" aria-hidden />
+                          <Label>Keyboard shortcuts</Label>
+                        </Dropdown.Item>
+                      ) : null}
+                      {!platform ? (
+                        <Dropdown.Item id="tour" textValue="Product tour" onAction={startTour}>
+                          <Route className="i" aria-hidden />
+                          <Label>Product tour</Label>
+                        </Dropdown.Item>
+                      ) : null}
+                    </Dropdown.Section>
+                  </Dropdown.Menu>
+                </Dropdown.Popover>
+              </Dropdown.SubmenuTrigger>
             ) : null}
           </Dropdown.Section>
           <Separator />

@@ -154,7 +154,7 @@
 
   /** The state a person sees: the stored status, except a finished sync where some files couldn't be read ('partial'). */
   const srcState = s => (s.status === 'healthy' && s.last?.failed ? 'partial' : s.status);
-  /** Status chip for a source (rows, drawer, knowledge base Sources tab). "Up to date" only after a clean sync. */
+  /** Status chip for a source (rows, drawer, collection Sources tab). "Up to date" only after a clean sync. */
   function statusChip(s) {
     const bf = bfRun(s);
     if (bf) return bf.status === 'paused' ? chip('First sync paused', { dot: true }) : chip('First sync', { tone: 'accent', dot: true, live: true });
@@ -166,7 +166,7 @@
 
   /* ═══════════════ Sync engine (simulated) ═══════════════ */
   const TICK_PAGES = ['kbDetail', 'overview'];
-  const FULL_PAGES = [...TICK_PAGES, 'studio', 'library', 'docViewer', 'inbox'];
+  const FULL_PAGES = [...TICK_PAGES, 'studio', 'library', 'docViewer'];
   /** Repaint whatever shows sync state. Progress ticks repaint only sync-aware views (the Studio only on its Sources tab). */
   function rerender(full) {
     if (document.activeElement?.tagName === 'SELECT') { setTimeout(() => rerender(full), 500); return; }
@@ -220,12 +220,6 @@
     processDocs(docs); audit('Started publishing', s.name);
     toast(`Publishing ${plural(docs.length, 'document')} from ${s.name}`); rerender(true);
   };
-  A['src-process-all'] = () => {
-    const list = D.sources.filter(s => s.status !== 'syncing'); const docs = list.flatMap(waitingDocs);
-    if (!docs.length) return;
-    processDocs(docs); audit(`Started publishing ${plural(docs.length, 'document')}`, 'Sources');
-    toast(`Publishing ${plural(docs.length, 'document')}`); rerender(true);
-  };
   /** A synced file that waits for a reviewer: a submission with no person behind it (via 'sync'). versionOf marks a changed file. */
   function syncSubmission(src, name, { versionOf } = {}) {
     const at = Date.now();
@@ -278,7 +272,7 @@
         const parts = [affected.length && `publishing ${plural(affected.length, 'document')}`, toReview.length && `${plural(toReview.length, 'document')} ${pol === 'uncertain' ? 'held for review' : 'sent to review'}`, run.counts.failed && `${run.counts.failed} couldn’t be read`].filter(Boolean);
         const action = toReview.length && canReview() ? { label: 'Review', run: () => go(studioHref('review', { queue: 'submissions' })) }
           : run.counts.failed ? { label: 'View', run: () => openDrawer('src-run', { id: run.id }) }
-          : kb ? { label: 'View', run: () => go(can('knowledge.manage') ? studioHref('library', { kb: kb.id }) : kbHref(kb)) } : undefined;
+          : kb ? { label: 'View', run: () => go(can('knowledge.manage') ? studioHref('documents', { kb: kb.id }) : kbHref(kb)) } : undefined;
         toast(`${src.name} synced · ${parts.join(' · ') || 'no changes'}`, { tone: run.counts.failed ? 'accent' : 'success', action });
       }
     }
@@ -397,53 +391,25 @@
   X.src = { boot, startSync, resumeAccount, attach, detachAccount, schedText, rerender, audit, statusChip, open: id => A['src-open']({ dataset: { id } }) };
 
   /* ═══════════════ Knowledge Studio → Sources ═══════════════ */
-  /** One tab for everything that brings documents in: the sources, their sync history and the accounts they sign in
+  /** One section for everything that brings documents in: the sources, their sync history and the accounts they sign in
       with (an account is a source's credential, not a destination of its own). Views switch with one segmented
-      control; problems sit above it whichever view is open. People's contributions are the other intake channel: one
-      quiet line says how many came in and that they meet synced files in the same Review. The Studio owns the header
-      and its Connect source action. */
+      control; problems are fixed on their own rows. The Studio owns the header and its Add source action. */
   const VIEWS = [['sources', 'Sources'], ['history', 'Sync history'], ['accounts', 'Accounts']];
-  /** Contributions from people (not syncs) to shared bases this calendar month. */
-  function contributionsThisMonth() {
-    const now = new Date(), start = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-    return D.docs.filter(d => d.submission?.by && d.submission.via !== 'sync' && (d.submission.at || 0) >= start && !kbById(d.kb)?.personal).length;
-  }
-  function intakeLine() {
-    const n = contributionsThisMonth();
-    return `<p class="src-intake">${ic('users', 'i-sm')}<span>${esc(`Contributions from people: ${fmtNum(n)} this month`)}</span><span aria-hidden="true">·</span><span>reviewed before publishing</span>${canReview() ? `<span aria-hidden="true">·</span>${linkBtn('Open review', { href: studioHref('review', { queue: 'submissions' }), size: 'sm' })}` : ''}</p>`;
-  }
   function sourcesTabBody({ query }) {
     boot();
     const view = VIEWS.some(([v]) => v === query.view) ? query.view : 'sources';
     const live = S.pageState === 'live' && !S.navLoading;
-    const alerts = live ? attention() : '';
-    const counts = { sources: live ? D.sources.length : '', accounts: live ? D.accounts.length : '' };
-    const control = `<div class="src-views">${seg({ value: view, act: 'src-view', label: 'Sources views', options: VIEWS.map(([v, l]) => [v, counts[v] ? `${l} · ${fmtNum(counts[v])}` : l]) })}</div>`;
+    // Problems are fixed on their own row (Reconnect, Retry, Publish n), not in banners above the list; an expired account
+    // shows on the Accounts view, whose label says so.
+    const expired = live ? D.accounts.filter(a => a.status === 'expired').length : 0;
+    const counts = { sources: live ? fmtNum(D.sources.length) : '', accounts: expired ? `${fmtNum(expired)} expired` : live ? fmtNum(D.accounts.length) : '' };
+    const control = `<div class="src-views">${seg({ value: view, act: 'src-view', label: 'Sources views', options: VIEWS.map(([v, l]) => [v, counts[v] ? `${l} · ${counts[v]}` : l]) })}</div>`;
     const body = view === 'history' ? tabHistory() : view === 'accounts' ? (X.acc?.view?.() ?? skelRows(3)) : tabSources();
-    return `${alerts}${live ? intakeLine() : ''}${control}${body}`;
+    return `${control}${body}`;
   }
   X.src.tab = sourcesTabBody;
   A['src-view'] = el => setQuery({ tab: 'sources', view: el.dataset.value === 'sources' ? '' : el.dataset.value });
-  /** One alert per problem, each with its fix right here: an expired account → Reconnect; a failed source → Sync now;
-      files that synced but didn't publish → Publish all. */
-  function attention() {
-    const out = [], byAcc = {};
-    D.sources.filter(s => s.status === 'reconnect').forEach(s => (byAcc[s.account] ||= []).push(s));
-    Object.entries(byAcc).forEach(([accId, list]) => {
-      const acc = accById(accId), who = list.length === 1 ? list[0].name : `${list[0].name} and ${plural(list.length - 1, 'other source')}`;
-      out.push(alertBox('danger', `${who} can’t sync — ${appName(list[0].app)} access expired`, `Sign in again${acc?.user ? ` as ${esc(acc.user)}` : ''}. Synced documents stay searchable.`, btn('Reconnect', { v: 'secondary', size: 'sm', icon: 'log-in', act: 'acc-reconnect', data: { id: accId } })));
-    });
-    // Expired accounts no source uses yet: still worth fixing before the next source needs them.
-    D.accounts.filter(a => a.status === 'expired' && !byAcc[a.id]).forEach(a => out.push(alertBox('warning', `${a.label} access expired`, `Sign in again as ${esc(a.user)} before connecting a source with it.`, btn('Reconnect', { v: 'secondary', size: 'sm', icon: 'log-in', act: 'acc-reconnect', data: { id: a.id } }))));
-    D.sources.filter(s => s.status === 'failed').forEach(s => out.push(alertBox('danger', `${s.name} couldn’t sync`, esc(s.last?.error || 'Try syncing again.'), btn('Sync now', { v: 'secondary', size: 'sm', icon: 'refresh', act: 'src-sync', data: { id: s.id } }))));
-    const waitSrc = D.sources.filter(s => s.status !== 'syncing' && waitingDocs(s).length);
-    if (waitSrc.length) {
-      const n = waitSrc.reduce((a, s) => a + waitingDocs(s).length, 0);
-      out.push(alertBox('accent', `${plural(n, 'synced document')} waiting to publish`, `From ${esc(waitSrc.map(s => s.name).join(', '))}. They synced but haven’t been published yet.`, btn('Publish all', { v: 'secondary', size: 'sm', icon: 'play', act: 'src-process-all' })));
-    }
-    return out.length ? `<div class="stack gap-8 mb-16">${out.join('')}</div>` : '';
-  }
-  const emptySources = () => emptyState({ icon: 'plug', title: 'Connect your first source', desc: 'Keep a knowledge base in sync with Google Drive or Confluence.', actions: btn('Connect source', { v: 'primary', icon: 'plus', act: 'src-connect' }), boxed: true });
+  const emptySources = () => emptyState({ icon: 'plug', title: 'No sources yet', desc: 'Keep a collection in sync with Google Drive or Confluence.', actions: X.src.addBtn(), boxed: true });
 
   /* ── Sources tab ── */
   function tabSources() {
@@ -457,7 +423,7 @@
         let rows = D.sources.filter(s => (!u.status || (u.status === 'attention' ? ['failed', 'reconnect'].includes(s.status) : srcState(s) === u.status)) && matchesQ('srcList', s.name, kbById(s.kb)?.name, accById(s.account)?.label, appName(s.app), ...(s.scope || [])));
         rows = applySort(rows, 'srcList', { name: s => s.name.toLowerCase(), last: s => s.last?.at || 0 });
         if (!rows.length) return toolbar + noMatches('srcList', ['status'], 'sources');
-        const head = sortHead('Source', 'name', 'srcList') + th('Knowledge base') + th('Schedule') + sortHead('Last sync', 'last', 'srcList') + th('Status') + th('<span class="sr-only">Actions</span>', 'table__column--actions');
+        const head = sortHead('Source', 'name', 'srcList') + th('Collection') + th('Schedule') + sortHead('Last sync', 'last', 'srcList') + th('Status') + th('<span class="sr-only">Actions</span>', 'table__column--actions');
         return toolbar + table({ label: 'Sources', head, rows: rows.map(srcRow) });
       },
     });
@@ -471,12 +437,15 @@
     const b = r.backfill;
     return `<div class="src-syncing">${statusChip(s)}<span class="src-syncing__bar" data-tip="${esc(`${fmtNum(b.read)} of ${plural(bfTotal(b), 'file')} read`)}">${progress(bfPct(b), r.status === 'paused' ? 'warning' : '', 'First sync progress')}<span class="num t-xs muted">${fmtCompact(b.read)}/${fmtCompact(bfTotal(b))}</span></span></div>`;
   }
-  /** The one visible row action. Broken sources are fixed from the alert above the list (and the row's ⋯);
-      healthy rows keep Sync now as a quiet icon that shows on hover or focus. A first sync pauses rather than cancels. */
+  /** The one visible row action: the row's fix when it has one (Reconnect, Retry, Publish n), else what it's doing (Pause a
+      first sync, Cancel a sync, Resume), else Sync now as a quiet icon on hover or focus. A first sync pauses rather than cancels. */
   function rowActKind(s) {
     if (bfRun(s)) return 'bf';
     if (s.status === 'syncing') return 'cancel';
+    if (s.status === 'reconnect') return 'reconnect';
+    if (s.status === 'failed') return 'retry';
     if (s.status === 'paused') return 'resume';
+    if (waitingDocs(s).length) return 'publish';
     if (s.status === 'healthy' && accById(s.account)?.status === 'connected') return 'sync';
     return '';
   }
@@ -484,7 +453,10 @@
     const k = rowActKind(s);
     if (k === 'bf') return bfRun(s).status === 'paused' ? btn('Resume', { size: 'sm', icon: 'play', act: 'src-bf-toggle', data: { id: s.id } }) : iconBtn('pause', 'Pause first sync', { size: 'sm', act: 'src-bf-toggle', data: { id: s.id } });
     if (k === 'cancel') return btn('Cancel', { v: 'ghost', size: 'sm', act: 'src-cancel', data: { id: s.id } });
+    if (k === 'reconnect') return btn('Reconnect', { size: 'sm', icon: 'log-in', act: 'acc-reconnect', data: { id: s.account } });
+    if (k === 'retry') return btn('Retry', { size: 'sm', icon: 'refresh', act: 'src-sync', data: { id: s.id } });
     if (k === 'resume') return btn('Resume', { size: 'sm', icon: 'play', act: 'src-pause', data: { id: s.id } });
+    if (k === 'publish') return btn(`Publish ${fmtNum(waitingDocs(s).length)}`, { size: 'sm', icon: 'play', act: 'src-process', data: { id: s.id } });
     if (k === 'sync') return iconBtn('refresh', 'Sync now', { size: 'sm', act: 'src-sync', data: { id: s.id }, cls: 'src-quiet' });
     return '';
   }
@@ -594,7 +566,7 @@
   };
   A['src-disconnect'] = el => {
     const s = srcById(el.dataset.id); if (!s) return; const kb = kbById(s.kb);
-    confirmAction({ title: `Disconnect ${s.name}?`, body: `Documents already in ${esc(kb?.name || 'the knowledge base')} stay. New changes stop syncing.`, confirm: 'Disconnect', danger: true, onConfirm: () => {
+    confirmAction({ title: `Disconnect ${s.name}?`, body: `Documents already in ${esc(kb?.name || 'the collection')} stay. New changes stop syncing.`, confirm: 'Disconnect', danger: true, onConfirm: () => {
       const r = runById(s.runId); if (r?.status === 'running' || (r?.backfill && r.status === 'paused')) stopRun(r);
       D.sources.splice(D.sources.indexOf(s), 1);
       D.docs.forEach(d => { if (d.source === s.id) d.source = 'upload'; });
@@ -627,7 +599,7 @@
   function sourceSummary(s, acc, kb) {
     let top = '';
     const bf = bfRun(s);
-    if (s.status === 'reconnect') top = alertBox('danger', `${appName(s.app)} access expired`, `Sign in again as ${esc(acc?.user || 'the account owner')}. Documents in ${esc(kb?.name || 'the knowledge base')} stay searchable.`);
+    if (s.status === 'reconnect') top = alertBox('danger', `${appName(s.app)} access expired`, `Sign in again as ${esc(acc?.user || 'the account owner')}. Documents in ${esc(kb?.name || 'the collection')} stay searchable.`);
     else if (s.status === 'failed') top = alertBox('danger', 'Last sync failed', esc(s.last?.error || 'Try syncing again.'));
     else if (!acc) top = alertBox('warning', 'No account', 'Choose an account to sync again.', btn('Choose account', { size: 'sm', menu: 'src-acc-switch', data: { id: s.id } }));
     // A first sync shows its card beside any problem above; otherwise the problem replaces the state note.
@@ -639,7 +611,7 @@
     }
     const waiting = waitingDocs(s).length;
     // The fix (Publish) is the footer's primary; the alert only explains.
-    if (!top && waiting) top = alertBox('accent', `${plural(waiting, 'document')} waiting to publish`, 'They synced into the knowledge base but aren’t searchable yet.');
+    if (!top && waiting) top = alertBox('accent', `${plural(waiting, 'document')} waiting to publish`, 'They synced into the collection but aren’t searchable yet.');
     // Files that couldn't be read are their own problem, shown beside any other note.
     if (srcState(s) === 'partial' && !['reconnect', 'failed', 'syncing'].includes(s.status)) {
       const run = runsOf(s.id).find(r => r.status === 'partial');
@@ -648,8 +620,8 @@
     const last = s.last ? `${rel(s.last.at)} · <span class="${s.last.result === 'failed' ? 'text-danger' : s.last.failed ? 'text-warning' : ''}">${esc(lastText(s.last).toLowerCase())}</span>` : 'Never';
     const next = bf ? 'After the first sync' : s.status === 'paused' ? 'Paused' : s.next ? `${relFuture(s.next)} <span class="muted">· ${esc(fmtDateTime(s.next))}</span>` : s.schedule.freq === 'manual' ? 'When someone clicks Sync now' : s.status === 'reconnect' ? 'After you reconnect' : '—';
     const accCell = `<div class="row gap-8 wrap">${acc ? `<span class="truncate">${esc(acc.label)}</span>${acc.status !== 'connected' ? status('account', acc.status) : ''}` : '<span class="muted">None</span>'}${srcCan() ? btn('Change', { v: 'ghost', size: 'sm', menu: 'src-acc-switch', data: { id: s.id } }) : ''}</div>`;
-    const kbCell = kb ? `<div class="row gap-8 src-min">${kbLink(kb)}<span class="t-sm muted none">${esc(plural(docsIn(kb.id).length, 'document'))}</span></div>` : '<span class="muted">Removed knowledge base</span>';
-    return `<section class="drawer__section">${top ? `<div class="mb-16">${top}</div>` : ''}${kv([['Status', s.status === 'syncing' && !bf ? status('source', 'syncing') : statusChip(s)], ['Last sync', last], ['Next sync', next], ['Knowledge base', kbCell], ['Account', accCell]])}${reviewLine(s)}</section>`;
+    const kbCell = kb ? `<div class="row gap-8 src-min">${kbLink(kb)}<span class="t-sm muted none">${esc(plural(docsIn(kb.id).length, 'document'))}</span></div>` : '<span class="muted">Removed collection</span>';
+    return `<section class="drawer__section">${top ? `<div class="mb-16">${top}</div>` : ''}${kv([['Status', s.status === 'syncing' && !bf ? status('source', 'syncing') : statusChip(s)], ['Last sync', last], ['Next sync', next], ['Collection', kbCell], ['Account', accCell]])}${reviewLine(s)}</section>`;
   }
   /** Synced files from this source that wait for a reviewer (review-first policy). */
   function reviewLine(s) {
@@ -667,7 +639,7 @@
   }
   DR['src-source'] = p => {
     const s = srcById(p.id);
-    if (!s) return { title: 'Source disconnected', body: emptyState({ icon: 'plug', title: 'This source was disconnected', desc: 'Documents it synced stay in their knowledge base.' }) };
+    if (!s) return { title: 'Source disconnected', body: emptyState({ icon: 'plug', title: 'This source was disconnected', desc: 'Documents it synced stay in their collection.' }) };
     const kb = kbById(s.kb), acc = accById(s.account), canM = srcCan();
     const syncing = s.status === 'syncing', paused = s.status === 'paused', bf = bfRun(s);
     const filt = s.filters ? `<p class="bf-filters">${ic('filter', 'i-sm')}<span>${filtersLine(s.filters)}</span></p>` : '';
@@ -747,7 +719,7 @@
   }
   function runSteps(r) {
     const c = r.counts, el = r.status === 'running' ? Date.now() - r.started : (r.dur || 0), kb = kbById(r.kb);
-    const s1 = { label: 'Find changes' }, s2 = { label: 'Read documents' }, s3 = { label: kb ? `Add to ${kb.name}` : 'Add to the knowledge base' };
+    const s1 = { label: 'Find changes' }, s2 = { label: 'Read documents' }, s3 = { label: kb ? `Add to ${kb.name}` : 'Add to the collection' };
     if (r.status === 'failed' && !c.total) { s1.st = 'failed'; s1.note = `Couldn’t open ${appName(runApp(r))}`; s1.dur = el; s2.st = s3.st = 'pending'; s2.note = s3.note = 'Not started'; }
     else if (r.status === 'running' || r.status === 'queued') { s1.st = 'done'; s1.note = `Found ${plural(c.total, 'changed document')}`; s1.dur = Math.min(el * 0.15, 20e3); s2.st = 'active'; s2.note = `${c.ok + c.failed} of ${c.total} read`; s3.st = 'pending'; s3.note = 'After reading'; }
     else if (r.status === 'cancelled') { s1.st = 'done'; s1.note = `Found ${plural(c.total, 'changed document')}`; s2.st = 'stopped'; s2.note = `Cancelled after ${c.ok} of ${c.total}`; s3.st = 'stopped'; s3.note = `${c.ok} kept`; }
@@ -853,7 +825,16 @@
   }
   const leaves = n => n.kids ? n.kids.flatMap(leaves) : [n];
   const nodeDocs = n => leaves(n).reduce((a, l) => a + l.docs, 0);
-  function nodeState(n, sel) { const L = leaves(n); const k = L.filter(l => sel[l.id]).length; return k === 0 ? 'none' : k === L.length ? 'all' : 'some'; }
+  /** The source that already syncs a node (the node or a folder above it), other than the one being edited. A source lands in
+      one collection for good (its target collection is fixed), so that folder can't be picked again: its documents are
+      already in that collection. */
+  function takenBy(w, id) {
+    const idx = treeIdx(w.app), match = (i, p) => idx.path[i] === p || idx.path[i].endsWith(' / ' + p) || idx.path[i].replace(/^Shared drives \/ /, '') === p;
+    for (let a = id; a; a = idx.parent[a]) { const s = D.sources.find(x => x.app === w.app && x.id !== w.srcId && (x.scope || []).some(p => match(a, p))); if (s) return s; }
+    return null;
+  }
+  /** With a wizard (w), a node's state counts only the leaves that can still be picked. */
+  function nodeState(n, sel, w) { const L = w ? leaves(n).filter(l => !takenBy(w, l.id)) : leaves(n); const k = L.filter(l => sel[l.id]).length; return k === 0 ? 'none' : k === L.length ? 'all' : 'some'; }
   function selItems(app, sel) { const out = []; const walk = nodes => nodes.forEach(n => { const st = nodeState(n, sel); if (st === 'all') out.push(n); else if (st === 'some') walk(n.kids); }); walk(TREE[app] || []); return out; }
   const treeMatch = (n, q) => n.name.toLowerCase().includes(q) || (n.kids || []).some(k => treeMatch(k, q));
   function wizName(w, items) {
@@ -891,6 +872,19 @@
   }
   X.src.openWizard = openWizard;
   A['src-connect'] = el => openWizard({ kb: el?.dataset?.kb, app: el?.dataset?.app, acc: el?.dataset?.acc });
+  /** Accounts a new source can read with right away (connected, and their app's content can be browsed here). */
+  const reusableAccounts = () => D.accounts.filter(a => a.status === 'connected' && TREE[a.app]);
+  /** "Add source", the one way to add a source anywhere (Sources, a collection's Sources, empty states). A source is one set of
+      folders or spaces synced into one collection, read with an account, so the menu starts from the accounts already
+      connected (straight to choosing what to sync; folders another source already syncs are marked) and ends with
+      "Connect another account…". With none connected it opens the wizard at the app. `kb` preselects the collection. */
+  X.src.addBtn = ({ kb = '', v = 'primary', size } = {}) => btn('Add source', { v, size, icon: 'plus', ...(reusableAccounts().length ? { menu: 'src-add' } : { act: 'src-connect' }), data: kb ? { kb } : undefined });
+  MENUS['src-add'] = el => {
+    const kb = el.dataset.kb || '';
+    return [{ section: 'Use a connected account' },
+      ...reusableAccounts().map(a => ({ label: a.label, meta: appName(a.app), run: () => openWizard({ kb, app: a.app, acc: a.id }) })),
+      { sep: true }, { label: 'Connect another account…', icon: 'plug', run: () => openWizard({ kb }) }];
+  };
   function prepTree(w) { if (w.openFor === w.app) return; w.open = {}; w.sel = {}; w.q = ''; if (w.app === 'gdrive') TREE.gdrive.forEach(n => (w.open[n.id] = true)); w.openFor = w.app; }
   function wizGo(w, step) {
     w.step = step; w.ask = false; w.selErr = ''; w.oauthErr = '';
@@ -946,7 +940,7 @@
     }).join('')}</ol>`;
   }
   M['src-wizard'] = () => {
-    const w = S.ui.srcWiz; if (!w) return { title: 'Connect a source', body: '' };
+    const w = S.ui.srcWiz; if (!w) return { title: 'Add source', body: '' };
     const scope = w.mode === 'scope', s = scope && srcById(w.srcId);
     const desc = scope ? esc(`${s?.name || ''} · ${appName(w.app)}`)
       : w.step === 1 ? 'Where are the documents? Pick the app that keeps them.'
@@ -957,7 +951,7 @@
     const f = wizFoot(w);
     return {
       size: 'lg', noClose: w.oauth === 'waiting' || !!w.rcAcc, closeAct: 'src-wiz-close',
-      title: scope ? 'Change what’s synced' : 'Connect a source', icon: w.app ? appIcon(w.app) : 'plug', tone: w.app ? 'default' : 'accent', desc,
+      title: scope ? 'Change what’s synced' : 'Add source', icon: w.app ? appIcon(w.app) : 'plug', tone: w.app ? 'default' : 'accent', desc,
       head: scope ? '' : stepper(w), body: `<div class="${cx('src-wiz', !scope && 'src-wiz--steps')}">${body}</div>`, foot: f.foot, footStart: f.start,
     };
   };
@@ -1012,9 +1006,12 @@
       if (q && !force && !treeMatch(n, q)) return '';
       const kids = n.kids || [];
       const open = q ? (kids.some(k => treeMatch(k, q)) || !!w.open[n.id]) : !!w.open[n.id];
-      const st = nodeState(n, w.sel), icon = w.app === 'gdrive' ? 'folder' : n.space ? 'book' : 'file-text';
+      const st = nodeState(n, w.sel, w), icon = w.app === 'gdrive' ? 'folder' : n.space ? 'book' : 'file-text', taken = takenBy(w, n.id);
+      const label = `<span class="row gap-8 src-min">${ic(icon, 'i-sm muted')}<span class="truncate">${esc(n.name)}</span></span>`;
+      // Already synced by another source: shown, not pickable, with where it goes (its documents are already there).
+      if (taken) return `<div class="src-tree__row is-taken" style="--depth:${depth}"><span class="src-tree__tog" aria-hidden="true"></span>${checkbox({ label, checked: false, disabled: true })}<span class="src-tree__taken truncate" data-tip="${esc(`${taken.name} already syncs it`)}">${esc(`In ${kbById(taken.kb)?.name || 'another collection'}`)}</span></div>`;
       const tog = kids.length ? btn('', { v: 'ghost', size: 'sm', icon: open ? 'chevron-down' : 'chevron-right', act: 'src-wiz-tog', data: { id: n.id }, muted: true, aria: `aria-expanded="${open}" aria-label="${open ? 'Collapse' : 'Expand'} ${esc(n.name)}"`, cls: 'src-tree__tog' }) : '<span class="src-tree__tog" aria-hidden="true"></span>';
-      return `<div class="${cx('src-tree__row', st !== 'none' && 'is-on')}" style="--depth:${depth}">${tog}${checkbox({ label: `<span class="row gap-8 src-min">${ic(icon, 'i-sm muted')}<span class="truncate">${esc(n.name)}</span></span>`, checked: st === 'all', indeterminate: st === 'some', act: 'src-wiz-check', data: { id: n.id } })}<span class="src-tree__count num">${fmtNum(nodeDocs(n))}</span></div>` + (kids.length && open ? treeRows(kids, depth + 1, w, q, force || hit) : '');
+      return `<div class="${cx('src-tree__row', st !== 'none' && 'is-on')}" style="--depth:${depth}">${tog}${checkbox({ label, checked: st === 'all', indeterminate: st === 'some', act: 'src-wiz-check', data: { id: n.id } })}<span class="src-tree__count num">${fmtNum(nodeDocs(n))}</span></div>` + (kids.length && open ? treeRows(kids, depth + 1, w, q, force || hit) : '');
     }).join('');
   }
   function step3(w) {
@@ -1032,8 +1029,8 @@
     const content = items.length ? `${idx.path[items[0].id]}${items.length > 1 ? ` +${items.length - 1}` : ''}` : '';
     const change = w.skipAcc ? linkBtn('Change', { act: 'src-wiz-goto', data: { step: 2 }, cls: 'src-recap__change' }) : '';
     const recap = `<div class="src-recap">${appIcon(w.app)}<div class="grow src-min"><div class="medium truncate">${esc(wizName(w, items))}</div><div class="t-xs muted truncate">${esc([acc?.label, content, items.length && `${fmtNum(est.K)} to sync`].filter(Boolean).join(' · '))}</div></div>${change}</div>`;
-    const kbF = field({ id: 'src-w-kb', label: 'Knowledge base', required: true, error: w.err.kb, desc: w.kbAuto && w.kb === w.kbAuto ? 'Suggested from what you picked. Change it if it belongs elsewhere.' : 'People who can see this knowledge base can find what syncs into it.', control: select({ id: 'src-w-kb', bind: 'srcWiz.kb', value: w.kb, options: [['', 'Choose a knowledge base'], ...kbs.map(k => [k.id, k.name]), ['__new', 'New knowledge base…']], change: 'src-wiz-kb', attrs: w.err.kb ? 'aria-invalid="true" aria-describedby="src-w-kb-err"' : '' }) });
-    // A new base made here starts like one made from Create knowledge base: Everyone can see it (changeable in its Access tab).
+    const kbF = field({ id: 'src-w-kb', label: 'Collection', required: true, error: w.err.kb, desc: w.kbAuto && w.kb === w.kbAuto ? 'Suggested from what you picked. Change it if it belongs elsewhere.' : 'People who can see this collection can find what syncs into it.', control: select({ id: 'src-w-kb', bind: 'srcWiz.kb', value: w.kb, options: [['', 'Choose a collection'], ...kbs.map(k => [k.id, k.name]), ['__new', 'New collection…']], change: 'src-wiz-kb', attrs: w.err.kb ? 'aria-invalid="true" aria-describedby="src-w-kb-err"' : '' }) });
+    // A new base made here starts like one made from Create collection: Everyone can see it (changeable in its Access tab).
     const nameF = w.kb === '__new' ? field({ id: 'src-w-kbname', label: 'Name', required: true, error: w.err.kbName, desc: `<span>${esc(kbAccessDesc('workspace'))}</span> <span>You can change who sees it in its Access tab.</span>`, control: input({ id: 'src-w-kbname', bind: 'srcWiz.kbName', value: w.kbName, placeholder: 'e.g. Marketing Assets', invalid: !!w.err.kbName, attrs: 'data-input="src-wiz-kbinput"', onEnter: 'src-wiz-next' }) }) : '';
     const n = plural(est.K, 'file');
     const then = est.K > BF_LARGE ? `The first sync reads about ${n} over about ${plural(bfHours(est.K), 'hour')}; documents become searchable as they’re read.`
@@ -1081,8 +1078,8 @@
   A['src-wiz-tog'] = el => { const w = ui('srcWiz'); w.open[el.dataset.id] = !w.open[el.dataset.id]; refreshLayer(); };
   A['src-wiz-check'] = el => {
     const w = ui('srcWiz'); const n = treeIdx(w.app).byId[el.dataset.id]; if (!n) return;
-    const all = nodeState(n, w.sel) === 'all';
-    leaves(n).forEach(l => { if (all) delete w.sel[l.id]; else w.sel[l.id] = true; });
+    const all = nodeState(n, w.sel, w) === 'all';
+    leaves(n).filter(l => !takenBy(w, l.id)).forEach(l => { if (all) delete w.sel[l.id]; else w.sel[l.id] = true; });
     if (!all) w.selErr = ''; refreshLayer();
   };
   A['src-wiz-clear'] = () => { ui('srcWiz').sel = {}; refreshLayer(); };
@@ -1093,7 +1090,7 @@
   A['src-wiz-policy'] = el => { if (POLICY[el.dataset.value]) { const w = ui('srcWiz'); w.publish = el.dataset.value; w.pubSet = true; refreshLayer(); } };
   A['src-wiz-type'] = el => { const w = ui('srcWiz'), k = el.dataset.type; w.f.types = w.f.types.includes(k) ? w.f.types.filter(x => x !== k) : [...w.f.types, k]; w.selErr = ''; refreshLayer(); };
   A['src-wiz-filt'] = () => { ui('srcWiz').selErr = ''; refreshLayer(); };
-  function kbNameErr(v) { const n = (v || '').trim(); if (!n) return 'Name the new knowledge base.'; if (D.kbs.some(k => !k.archived && k.name.toLowerCase() === n.toLowerCase())) return 'A knowledge base with this name already exists.'; return ''; }
+  function kbNameErr(v) { const n = (v || '').trim(); if (!n) return 'Name the new collection.'; if (D.kbs.some(k => !k.archived && k.name.toLowerCase() === n.toLowerCase())) return 'A collection with this name already exists.'; return ''; }
   A['src-wiz-kbinput'] = () => { const w = ui('srcWiz'); if (!w.err.kbName) return; const e = kbNameErr(w.kbName); if (e !== w.err.kbName) { w.err.kbName = e; refreshLayer(); } };
   A['src-wiz-reacc'] = async el => {
     const w = ui('srcWiz'); if (w.busy) return; const acc = accById(el.dataset.id); if (!acc) return;
@@ -1145,7 +1142,7 @@
     if (kbId === '__new') {
       const k = { id: uid('kb'), name: w.kbName.trim(), desc: '', color: KB_COLORS[D.kbs.length % KB_COLORS.length], general: 'workspace', access: {}, shares: [{ kind: 'user', id: me().id, role: 'owner' }], updated: Date.now(), created: Date.now() };
       D.kbs.push(k); kbId = k.id; X.kbSyncPersonas?.(k);
-      D.audit.unshift({ id: uid('ev'), at: Date.now(), actor: me().id, action: 'Created knowledge base', type: 'Knowledge', target: k.name, outcome: 'success', ip: '10.4.12.30', device: 'Chrome on macOS' });
+      D.audit.unshift({ id: uid('ev'), at: Date.now(), actor: me().id, action: 'Created collection', type: 'Knowledge', target: k.name, outcome: 'success', ip: '10.4.12.30', device: 'Chrome on macOS' });
     }
     const idx = treeIdx(w.app), items = selItems(w.app, w.sel), est = wizEst(w);
     const schedule = { freq: w.freq, day: w.day, time: w.time, tz: w.tz, on: w.freq !== 'manual' };

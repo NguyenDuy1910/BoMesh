@@ -6,7 +6,7 @@ import { plural } from "@/lib/format";
 import { confirm, toast } from "@/components/ui";
 
 import { activateMember, addToGroup, createMember, deleteMember, suspendMember } from "../api";
-import { accountGuard, firstName, leavesNoAdmin, roleGuard } from "../model";
+import { accountGuard, leavesNoAdmin, roleGuard } from "../model";
 import { applyRoles, usePeopleClient, type Directory, type Person } from "../queries";
 
 const fail = (error: unknown) => toast(errorMessage(error), { tone: "danger" });
@@ -54,6 +54,7 @@ export function useMemberActions(dir: Directory | undefined) {
     });
   }
 
+  /** Suspend one or more members (preview `suspend`): applies at once with Undo; you and the last admin are skipped. */
   async function suspend(ids: readonly string[], after?: () => void) {
     if (!dir) return;
     const all = ids.map((id) => dir.personById.get(id)).filter((p): p is Person => Boolean(p) && p!.state !== "SUSPENDED");
@@ -63,13 +64,7 @@ export function useMemberActions(dir: Directory | undefined) {
       return;
     }
     const one = ms.length === 1;
-    const ok = await confirm({
-      title: one ? `Suspend ${ms[0].displayName}?` : `Suspend ${ms.length} people?`,
-      description: `${one ? firstName(ms[0].displayName) : "They"} won’t be able to sign in until reactivated. Nothing they own is deleted.${all.length > ms.length ? " You and the last admin are skipped." : ""}`,
-      confirmLabel: "Suspend",
-      tone: "danger",
-    });
-    if (!ok) return;
+    const skipped = all.length - ms.length;
     try {
       await Promise.all(ms.map((p) => suspendMember(ws, p.name)));
     } catch (error) {
@@ -79,7 +74,7 @@ export function useMemberActions(dir: Directory | undefined) {
     }
     after?.();
     refresh();
-    toast(one ? `Suspended ${ms[0].displayName}` : `Suspended ${ms.length} people`, {
+    toast((one ? `Suspended ${ms[0].displayName}` : `Suspended ${ms.length} people`) + (skipped ? ` · ${plural(skipped, "person", "people")} skipped` : ""), {
       undo: () => void Promise.all(ms.map((p) => activateMember(ws, p.name))).catch(fail).finally(refresh),
     });
   }
@@ -92,7 +87,7 @@ export function useMemberActions(dir: Directory | undefined) {
       return;
     }
     refresh();
-    toast(`${firstName(person.displayName)} can sign in again`, {
+    toast(`${person.displayName} can sign in again`, {
       undo: () => void suspendMember(ws, person.name).catch(fail).finally(refresh),
     });
   }

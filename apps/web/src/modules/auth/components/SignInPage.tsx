@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { Callout } from "@/components/ui/Callout";
+import { FileIcon } from "@/components/ui/FileIcon";
 import { getSession, sessionTransition, useSession, useSessionExpired, type StoredSession } from "@/lib/session";
 import { routeAfterSignIn } from "@/modules/auth/api";
 import { AuthLayout, AuthLink } from "@/modules/auth/components/AuthLayout";
@@ -29,12 +30,12 @@ function Proof() {
         </div>
         <div className="row gap-8 wrap au-proof__sources">
           <span className="au-source">
-            <span className="file-icon file-icon--pdf file-icon--sm">PDF</span>
+            <FileIcon type="pdf" size="sm" />
             <span className="truncate">Travel Policy.pdf</span>
             <span className="muted">p. 8</span>
           </span>
           <span className="au-source">
-            <span className="file-icon file-icon--sheet file-icon--sm">XLSX</span>
+            <FileIcon type="xlsx" size="sm" />
             <span className="truncate">Expense limits.xlsx</span>
           </span>
         </div>
@@ -73,18 +74,17 @@ export function SignInPage() {
     <AuthLayout aside={<Proof />}>
       <h1 className="t-title au-title">Sign in</h1>
       {params.get("reason") === "expired" ? (
-        <Callout
-          className="au-notice"
-          tone="accent"
-          icon={Clock}
-          title="Your session expired"
-          description="Sign in again to go back to where you were."
-        />
-      ) : null}
+        <div className="au-notice">
+          <Callout tone="accent" icon={Clock} title="Your session expired" description="Sign in again to go back to where you were." />
+        </div>
+      ) : (
+        <p className="muted au-sub">Welcome back. Pick up where your team left off.</p>
+      )}
       <SignInForm
         key={previous?.name}
         initialId={previous ? previous.user.email || previous.user.username : (params.get("email") ?? undefined)}
         showForgot
+        googleLast
         onSignedIn={signedIn}
       />
       <p className="au-foot">

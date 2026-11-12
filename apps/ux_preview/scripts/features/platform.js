@@ -115,7 +115,7 @@
       readyTimers.delete(w.id);
       if (w.status !== 'new') return;
       w.status = 'active'; delete w.readyAt; persist(); refresh();
-      toast(`${w.name} is ready`, { action: { label: 'View', run: () => goThen('/p/workspaces', () => A['pws-open']({ dataset: { id: w.id } })) } });
+      toast(`${w.name} is ready`, { action: { label: 'Open', run: () => goThen('/p/workspaces', () => A['pws-open']({ dataset: { id: w.id } })) } });
     }, Math.max(0, w.readyAt - Date.now()));
   }
   const TEMPLATE_OPTS = () => Object.entries(TEMPLATES).map(([id, t]) => [id, t.label]);

@@ -1,10 +1,10 @@
-/* Manage → Knowledge bases (/bases, /bases/:id): the governed homes their
+/* Manage → Collections (/bases, /bases/:id): the governed homes their
    owners and editors look after — access, the sources that feed them and their
    details — plus create, share and request access. Readers never navigate bases:
    a base's documents are a Browse filter (kbHref), and locked bases offer
    Request access from Browse (kb-locked). Adding documents goes through
    Contribute (contribute.js); review, publishing and the document inventory
-   live in Knowledge Studio → Review and Library (curation.js). */
+   live in Knowledge Studio → Review and Documents (curation.js). */
 (() => {
   'use strict';
 
@@ -76,7 +76,7 @@
   const kbSpace = kb => (hasModule('spaces') && kb.space ? spaceById(kb.space) : null);
   const spaceChip = sp => chip(sp.code || sp.name, { icon: spaceType(sp.type).icon, size: 'sm', tip: `${spaceType(sp.type).label} · ${sp.name}` });
 
-  /* ═══════════════════════════ Manage → Knowledge bases ═══════════════════════════ */
+  /* ═══════════════════════════ Manage → Collections ═══════════════════════════ */
   function sortKbs(rows, by) {
     const cmp = { updated: (a, b) => b.updated - a.updated, name: (a, b) => a.name.localeCompare(b.name), docs: (a, b) => docsIn(b.id).length - docsIn(a.id).length }[by] || ((a, b) => b.updated - a.updated);
     return [...rows].sort(cmp);
@@ -100,24 +100,23 @@
     const about = topics.length ? `<div class="kb-card__topics truncate" data-tip="Topics it mostly holds">${ic('tag', 'i-xs')}<span class="truncate" translate="no">${esc(topics.join(' · '))}</span></div>` : '';
     const text = `<div class="stack gap-2"><div class="kb-card__name truncate">${esc(kb.name)}</div><div class="kb-card__desc truncate">${esc(kb.desc || 'No description')}</div>${about}</div>`;
     const end = reqs ? chip(plural(reqs, 'access request'), { tone: 'warning', icon: 'user-plus', size: 'sm' }) : `<span class="truncate">Updated ${rel(kb.updated).replace(/^(Just now|Yesterday)$/, m => m.toLowerCase())}</span>`;
-    const count = `<span class="row gap-4">${ic('files', 'i-sm')}${plural(docsIn(kb.id).length, 'document')}${linked ? `<span class="muted" data-tip="Documents from other knowledge bases shown here without a copy">${esc(` · ${fmtNum(linked)} linked`)}</span>` : ''}</span>`;
+    const count = `<span class="row gap-4">${ic('files', 'i-sm')}${plural(docsIn(kb.id).length, 'document')}${linked ? `<span class="muted" data-tip="Documents from other collections shown here without a copy">${esc(` · ${fmtNum(linked)} linked`)}</span>` : ''}</span>`;
     return `<a class="card card--action kb-card" href="#${kbManageHref(kb)}">${top}${text}<div class="kb-card__foot">${count}${end}</div></a>`;
   }
-  /** Knowledge Studio → Knowledge bases (the Studio owns the header and its Create action). */
+  /** Knowledge Studio → Collections (the Studio owns the header and its Create action). */
   function basesTab() {
     const u = ui('kbList', { sort: 'updated' }), canCreate = can('knowledge.manage'), all = managedKbs();
     const rows = sortKbs(all.filter(k => matchesQ('kbList', k.name, k.desc) && (!u.access || accessKey(k) === u.access)), u.sort);
     // Search, access filter and sort only once there are enough bases to need them (or one is in use).
     const tools = needsTools(all.length, 'kbList', ['access']);
-    const toolbar = !tools ? '' : `<div class="toolbar">${searchField({ uiKey: 'kbList', placeholder: 'Search knowledge bases' })}${filterButton('Access', 'kbList', 'access', KB_ACCESS_OPTIONS)}${clearFilters('kbList', ['access'])}<div class="toolbar__end">${btn(SORTS[u.sort], { v: 'ghost', size: 'sm', icon: 'sort', menu: 'kb-sort', aria: `aria-label="Sort: ${esc(SORTS[u.sort])}"` })}</div></div>`;
-    const empty = () => emptyState({ icon: 'book', title: 'Create your first knowledge base', desc: 'A knowledge base decides who can read a team’s or a function’s documents. Sources and uploads land in one.', actions: canCreate ? btn('Create knowledge base', { v: 'primary', icon: 'plus', act: 'kb-create' }) : '', boxed: true });
-    const intro = '<p class="kb-intro">A knowledge base decides who can read its documents; topics, grouped in domains, say what they’re about. A document lives in one base and can be linked into others without a copy.</p>';
+    const toolbar = !tools ? '' : `<div class="toolbar">${searchField({ uiKey: 'kbList', placeholder: 'Search collections' })}${filterButton('Access', 'kbList', 'access', KB_ACCESS_OPTIONS)}${clearFilters('kbList', ['access'])}<div class="toolbar__end">${btn(SORTS[u.sort], { v: 'ghost', size: 'sm', icon: 'sort', menu: 'kb-sort', aria: `aria-label="Sort: ${esc(SORTS[u.sort])}"` })}</div></div>`;
+    const empty = () => emptyState({ icon: 'book', title: 'Create your first collection', desc: 'A collection decides who can read a team’s or a function’s documents. Sources and uploads land in one.', actions: canCreate ? btn('Create collection', { v: 'primary', icon: 'plus', act: 'kb-create' }) : '', boxed: true });
     const body = gate({
       loading: () => skelCards(6),
       empty,
-      ok: () => !all.length ? empty() : rows.length ? `<div class="grid cols-3">${rows.map(kbCard).join('')}</div>` : noMatches('kbList', ['access'], 'knowledge bases'),
+      ok: () => !all.length ? empty() : rows.length ? `<div class="grid cols-3">${rows.map(kbCard).join('')}</div>` : noMatches('kbList', ['access'], 'collections'),
     });
-    return `${S.pageState === 'empty' ? '' : intro + toolbar}${body}`;
+    return `${S.pageState === 'empty' ? '' : toolbar}${body}`;
   }
   X.kb = { ...(X.kb || {}), tab: basesTab };
   MENUS['kb-sort'] = () => [{ section: 'Sort by' }, ...Object.entries(SORTS).map(([v, l]) => ({ label: l, checked: ui('kbList').sort === v, run: () => { ui('kbList').sort = v; refresh(); } }))];
@@ -132,14 +131,14 @@
     const sp = f.space ? spaceById(f.space) : null, spaces = ownSpaces();
     const access = Object.entries(KB_ACCESS).map(([k, a]) => [k, a.label, esc(kbAccessDesc(k, sp?.name)), a.icon]);
     return {
-      title: 'Create knowledge base', icon: 'book', size: 'lg',
+      title: 'Create collection', icon: 'book', size: 'lg',
       desc: 'A home for a team’s or a topic’s documents. Add files or connect a source next.',
       body: `<div class="kn-form">${spaces.length ? `<div class="kb-create-row">` : ''}${field({ id: 'kbc-name', label: 'Name', required: true, error: shown, counter: `<span class="counter">${f.name.length}/60</span>`, control: input({ id: 'kbc-name', bind: 'kbCreate.name', value: f.name, placeholder: 'e.g. Payments runbooks', autofocus: true, onEnter: 'kb-create-go', invalid: !!shown, attrs: `data-live maxlength="60" ${dis}` }) })}
         ${spaces.length ? field({ id: 'kbc-space', label: 'Space', optional: true, desc: 'Its members can read it, even when restricted.', control: select({ id: 'kbc-space', bind: 'kbCreate.space', value: f.space, change: 'kb-create-space', options: [['', 'No space'], ...spaces.map(s => [s.id, s.code ? `${s.name} · ${s.code}` : s.name])], attrs: dis }) }) + '</div>' : ''}
         ${field({ id: 'kbc-desc', label: 'Description', optional: true, desc: 'Tells people what they can ask about.', control: input({ id: 'kbc-desc', bind: 'kbCreate.desc', value: f.desc, placeholder: 'e.g. Runbooks for the payment rails', onEnter: 'kb-create-go', attrs: `maxlength="200" ${dis}` }) })}
         <div class="field"><span class="label">Who can see it</span>${choiceGroup({ name: 'kbc-access', value: f.access, act: 'kb-create-access', options: access, cols: 3 })}</div></div>`,
       footStart: 'You’ll be its owner. You can change access any time.',
-      foot: btn('Cancel', { v: 'ghost', act: 'close-modal', disabled: f.busy }) + btn('Create knowledge base', { v: 'primary', icon: 'plus', act: 'kb-create-go', loading: f.busy }),
+      foot: btn('Cancel', { v: 'ghost', act: 'close-modal', disabled: f.busy }) + btn('Create collection', { v: 'primary', icon: 'plus', act: 'kb-create-go', loading: f.busy }),
     };
   };
   A['kb-create-space'] = () => refreshLayer();
@@ -155,13 +154,13 @@
     const kb = { id: uid('kb'), name, desc: f.desc.trim(), color: sp?.color || COLORS[D.kbs.length % COLORS.length], general: f.access, access: {}, shares: [{ kind: 'user', id: me().id, role: 'owner' }], updated: Date.now(), created: Date.now(), ...(sp ? { space: sp.id } : {}) };
     D.kbs.push(kb); syncPersonas(kb);
     if (sp && !(sp.kbs ||= []).includes(kb.id)) sp.kbs.push(kb.id);
-    audit('Created knowledge base', name);
+    audit('Created collection', name);
     closeModal(); go(kbManageHref(kb));
     toast(`Created “${name}”`, { action: { label: 'Contribute', run: () => A['contribute']?.({ dataset: { kb: kb.id } }) } });
   };
 
   /* ═══════════════════════════ One managed base ═══════════════════════════ */
-  /** Owners: access, sources, settings. Editors: the sources that feed it. Its documents are managed in Knowledge Studio → Library. */
+  /** Owners: access, sources, settings. Editors: the sources that feed it. Its documents are managed in Knowledge Studio → Documents. */
   function tabsFor(kb) {
     const own = kbRole(kb) === 'owner', t = [];
     if (own) t.push({ id: 'access', label: 'Access', count: pendingRequests().filter(r => r.kb === kb.id).length || '', alert: true });
@@ -170,15 +169,15 @@
     return t;
   }
   function unavailable() {
-    crumbs([{ label: 'Knowledge Studio', to: studioHref('bases') }, { label: 'Not available' }]);
-    return `<div class="page">${emptyState({ icon: 'book', title: 'This knowledge base isn’t available', desc: 'It may have been archived, or you don’t manage it.', actions: btn('Go to Knowledge bases', { v: 'primary', href: studioHref('bases') }), boxed: true })}</div>`;
+    crumbs([{ label: 'Knowledge Studio', to: studioHref('collections') }, { label: 'Not available' }]);
+    return `<div class="page">${emptyState({ icon: 'book', title: 'This collection isn’t available', desc: 'It may have been archived, or you don’t manage it.', actions: btn('Go to Collections', { v: 'primary', href: studioHref('collections') }), boxed: true })}</div>`;
   }
   P.kbDetail = ({ params, query }) => {
     const kb = kbById(params.id);
     if (!kb || kb.archived || kb.personal || !canEditKb(kb)) return unavailable();
-    crumbs([{ label: 'Knowledge Studio', to: '/studio' }, { label: 'Knowledge bases', to: studioHref('bases') }, { label: kb.name }]);
+    crumbs([{ label: 'Knowledge Studio', to: '/studio' }, { label: 'Collections', to: studioHref('collections') }, { label: kb.name }]);
     const tabList = tabsFor(kb), tab = tabList.some(t => t.id === query.tab) ? query.tab : tabList[0].id;
-    // Its documents: the Library for reviewers, otherwise what readers see in Browse.
+    // Its documents: Studio → Documents for reviewers, otherwise what readers see in Browse.
     // When the review alert shows, its actions already lead to Review, so the header doesn't repeat View documents (it moves to ⋯).
     const alert = reviewAlert(kb);
     const actions = (alert ? '' : btn('View documents', { icon: 'files', href: docsHrefOf(kb) }))
@@ -191,23 +190,18 @@
     const body = tab === 'sources' ? sourcesTab(kb) : tab === 'settings' ? settingsTab(kb) : accessTab(kb);
     return `<div class="page">${head}${alert}${tabList.length > 1 ? contextBar(tabs(tabList, tab, kbManageHref(kb))) : ''}${body}</div>`;
   };
-  const docsHrefOf = kb => (can('knowledge.manage') && canReviewKb(kb) ? studioHref('library', { kb: kb.id }) : kbHref(kb));
+  const docsHrefOf = kb => (can('knowledge.manage') && canReviewKb(kb) ? studioHref('documents', { kb: kb.id }) : kbHref(kb));
   /** Rare actions only: access and archiving live in their own tabs (Access, Settings), so they aren't repeated here. */
   MENUS['kb-more'] = el => {
     const kb = kbById(el.dataset.kb); if (!kb) return [];
     const onSources = S.cur.r.page === 'kbDetail' && (S.cur.query.tab || tabsFor(kb)[0].id) === 'sources';
     return [
       reviewAlert(kb) && { label: 'View documents', icon: 'files', run: () => go(docsHrefOf(kb)) },
-      can('source.manage') && !onSources && { label: 'Connect source', icon: 'plug', run: () => connect(kb.id) },
+      can('source.manage') && !onSources && { label: 'Add source', icon: 'plug', run: () => go(kbManageHref(kb, 'sources')) },
       // The link people can open: its documents in Browse.
       { label: 'Copy link', icon: 'link', run: () => copyText(location.href.split('#')[0] + '#' + kbHref(kb), 'Link copied') },
     ].filter(Boolean);
   };
-  function connect(kbId) {
-    if (A['src-connect']) A['src-connect']({ dataset: { kb: kbId } });
-    else goThen(studioHref('sources'), () => toast('Connect a source from here', { tone: 'accent' }));
-  }
-  A['kb-connect'] = el => connect(el.dataset.kb);
 
   /** For the base's reviewers: what's waiting in Review, with the task as the action. */
   function reviewAlert(kb) {
@@ -230,11 +224,12 @@
   }
   function sourcesTab(kb) {
     const srcs = D.sources.filter(s => s.kb === kb.id), manage = can('source.manage');
-    const empty = () => emptyState({ icon: 'plug', title: 'No sources connected', desc: manage ? 'Connect Google Drive or Confluence to keep this knowledge base up to date.' : 'Documents here are added by hand. Ask an admin to connect a source.', actions: manage ? btn('Connect source', { v: 'primary', icon: 'plug', act: 'kb-connect', data: { kb: kb.id } }) : '', boxed: true });
+    // Add source reuses a connected account (straight to picking folders; ones already synced elsewhere are marked), see sources.js.
+    const add = (v, size) => X.src?.addBtn?.({ kb: kb.id, v, size }) || '';
+    const empty = () => emptyState({ icon: 'plug', title: 'No sources yet', desc: manage ? 'Keep this collection in sync with Google Drive or Confluence.' : 'Documents here are added by hand. Ask an admin to add a source.', actions: manage ? add('primary') : '', boxed: true });
     return gate({
       loading: () => skelRows(3), empty,
-      // The tab already counts the sources: the toolbar only offers connecting another.
-      ok: () => !srcs.length ? empty() : (manage ? `<div class="toolbar"><div class="toolbar__end">${btn('Connect source', { size: 'sm', icon: 'plug', act: 'kb-connect', data: { kb: kb.id } })}</div></div>` : '')
+      ok: () => !srcs.length ? empty() : (manage ? `<div class="toolbar"><div class="toolbar__end">${add('secondary', 'sm')}</div></div>` : '')
         + list(srcs.map(s => item({ lead: appIcon(s.app, 'lg'), title: esc(s.name), titleExtra: X.src?.statusChip ? X.src.statusChip(s) : status('source', s.status), desc: esc(srcLine(s)), meta: esc((s.scope || []).join(', ')), trail: manage ? ic('chevron-right', 'muted') : '', act: manage ? 'kb-src-open' : undefined, data: { id: s.id } }))),
     });
   }
@@ -254,8 +249,8 @@
   /** Owners decide their base's requests here; workspace admins decide every request in People → Requests, so they get a link. */
   function requestsHtml(kb, reqs) {
     if (!reqs.length) return '';
-    if (!decidesHere(kb)) return `<div class="mb-16">${alertBox('warning', `${plural(reqs.length, 'person', 'people')} asked for access`, 'You decide access requests for every knowledge base in People.', btn('Open requests', { v: 'secondary', size: 'sm', href: '/people?tab=requests' }), { icon: 'user-plus' })}</div>`;
-    return section('Requests', list(reqs.map(requestRow)));
+    if (!decidesHere(kb)) return `<div class="mb-16">${alertBox('warning', `${plural(reqs.length, 'person', 'people')} asked for access`, 'You decide access requests for every collection in People.', btn('Open access requests', { v: 'secondary', size: 'sm', href: '/people?tab=requests' }), { icon: 'user-plus' })}</div>`;
+    return section('Access requests', list(reqs.map(requestRow)));
   }
   function accessTab(kb) {
     const st = ui('kbAccess-' + kb.id, { err: null });
@@ -279,7 +274,7 @@
       ok: () => `<div class="kb-narrow">
         ${requestsHtml(kb, reqs)}
         ${section('General access', general)}
-        ${section('People and groups', kb.shares.length ? list(kb.shares.map(row)) : emptyState({ icon: 'users', title: 'Not shared with anyone yet', desc: 'Share it to give people edit or owner rights.', boxed: true, compact: true }), { desc: 'Workspace admins can always manage every knowledge base.', actions: btn('Share', { v: 'secondary', size: 'sm', icon: 'user-plus', act: 'kb-share', data: { kb: kb.id } }) })}
+        ${section('People and groups', kb.shares.length ? list(kb.shares.map(row)) : emptyState({ icon: 'users', title: 'Not shared with anyone yet', desc: 'Share it to give people edit or owner rights.', boxed: true, compact: true }), { desc: 'Workspace admins can always manage every collection.', actions: btn('Share', { v: 'secondary', size: 'sm', icon: 'user-plus', act: 'kb-share', data: { kb: kb.id } }) })}
       </div>`,
     });
   }
@@ -291,7 +286,7 @@
   };
   A['kb-role'] = el => {
     const kb = kbById(el.dataset.kb), st = ui('kbAccess-' + kb.id), s = kb.shares.find(x => x.kind + ':' + x.id === el.dataset.key); if (!s) return;
-    if (s.role === 'owner' && el.value !== 'owner' && kb.shares.filter(x => x.role === 'owner').length === 1) { st.err = { key: el.dataset.key, msg: 'Every knowledge base needs an owner. Make someone else an owner first.' }; refresh(); return; }
+    if (s.role === 'owner' && el.value !== 'owner' && kb.shares.filter(x => x.role === 'owner').length === 1) { st.err = { key: el.dataset.key, msg: 'Every collection needs an owner. Make someone else an owner first.' }; refresh(); return; }
     st.err = null; s.role = el.value; syncShare(kb, s); refresh();
     audit(`Changed role to ${KB_ROLES[s.role].label}`, `${shareName(s)} → ${kb.name}`);
     toast(`${shareName(s)} is now ${s.role === 'owner' ? 'an owner' : 'a' + (s.role === 'editor' ? 'n editor' : ' viewer')}`);
@@ -366,7 +361,7 @@
     f.busy = true; S.modal.props.guard = true; refreshLayer(); await sleep(600);
     const added = f.picked.map(k => { const [kind, id] = k.split(':'); return { kind, id, role: f.role }; }), roles = snapRoles(kb);
     added.forEach(s => { kb.shares.push(s); syncShare(kb, s); });
-    audit(`Shared knowledge base with ${added.map(shareName).join(', ')}`, kb.name);
+    audit(`Shared collection with ${added.map(shareName).join(', ')}`, kb.name);
     closeModal(); refresh();
     toast(`Shared with ${added.length === 1 ? shareName(added[0]) : plural(added.length, 'person or group', 'people and groups')}`, { action: { label: 'Undo', run: () => { kb.shares = kb.shares.filter(s => !added.includes(s)); restoreRoles(kb, roles); refresh(); } } });
   };
@@ -383,8 +378,8 @@
         ${card(formSection('Details', 'Shown in Browse filters and when people choose what to ask about.',
           field({ id: 'kbs-name', label: 'Name', required: true, error: shown, counter: `<span class="counter">${f.name.length}/60</span>`, control: input({ id: 'kbs-name', bind: key + '.name', value: f.name, invalid: !!shown, onEnter: 'kb-set-save', attrs: `data-live maxlength="60" data-kb="${kb.id}" ${f.busy ? 'disabled' : ''}` }) })
           + field({ id: 'kbs-desc', label: 'Description', optional: true, counter: `<span class="counter">${f.desc.length}/200</span>`, control: textarea({ id: 'kbs-desc', bind: key + '.desc', value: f.desc, rows: 3, attrs: `data-live maxlength="200" ${f.busy ? 'disabled' : ''}` }) })), { cls: 'card--lg' })}
-        ${card(formSection('Archive knowledge base', `${n ? `Removes it and its ${plural(n, 'document')} from answers and search for everyone.` : 'Removes it for everyone.'} You can undo right after.`,
-          `<div>${btn('Archive knowledge base', { v: 'danger-soft', icon: 'archive', act: 'kb-archive', data: { kb: kb.id } })}</div>`), { cls: 'card--lg' })}
+        ${card(formSection('Archive collection', `${n ? `Removes it and its ${plural(n, 'document')} from answers and search for everyone.` : 'Removes it for everyone.'} You can undo right after.`,
+          `<div>${btn('Archive collection', { v: 'danger-soft', icon: 'archive', act: 'kb-archive', data: { kb: kb.id } })}</div>`), { cls: 'card--lg' })}
         ${dirty ? `<div class="savebar"><span class="savebar__text">Unsaved changes</span>${btn('Discard', { v: 'ghost', act: 'kb-set-discard', data: { kb: kb.id }, disabled: f.busy })}${btn('Save', { v: 'primary', act: 'kb-set-save', data: { kb: kb.id }, loading: f.busy })}</div>` : ''}
       </div>`,
     });
@@ -398,14 +393,14 @@
     f.busy = true; refresh(); await sleep(600);
     kb.name = f.name.trim(); kb.desc = f.desc.trim(); kb.updated = Date.now();
     S.ui['kbSet-' + kb.id] = { name: kb.name, desc: kb.desc, touched: false, busy: false };
-    audit('Updated knowledge base details', kb.name);
+    audit('Updated collection details', kb.name);
     refresh(); toast('Changes saved');
   };
   /** Archiving is reversible: it happens at once, with Undo (no confirmation). */
   A['kb-archive'] = el => {
     const kb = kbById(el.dataset.kb); if (!kb) return;
-    kb.archived = true; audit('Archived knowledge base', kb.name); go(studioHref('bases'));
-    toast(`Archived “${kb.name}”`, { action: { label: 'Undo', run: () => { kb.archived = false; audit('Restored knowledge base', kb.name); go(kbManageHref(kb, 'settings')); toast(`Restored “${kb.name}”`); } } });
+    kb.archived = true; audit('Archived collection', kb.name); go(studioHref('collections'));
+    toast(`Archived “${kb.name}”`, { action: { label: 'Undo', run: () => { kb.archived = false; audit('Restored collection', kb.name); go(kbManageHref(kb, 'settings')); toast(`Restored “${kb.name}”`); } } });
   };
 
   /* ═══════════════════════════ Request access ═══════════════════════════ */
@@ -422,9 +417,9 @@
   M['kb-locked'] = () => {
     const locked = visibleKbs().filter(k => kbRole(k) === 'none');
     return {
-      size: 'md', title: 'Restricted knowledge bases', icon: 'lock',
+      size: 'md', title: 'Restricted collections', icon: 'lock',
       desc: 'Their documents stay hidden until the owners share them with you.',
-      body: locked.length ? list(locked.map(kb => item({ lead: kbMark(kb, 32, true), title: esc(kb.name), desc: esc(kb.desc || ownersLabel(kb)), trail: requestAction(kb) }))) : `<p class="muted">Every knowledge base is shared with you.</p>`,
+      body: locked.length ? list(locked.map(kb => item({ lead: kbMark(kb, 32, true), title: esc(kb.name), desc: esc(kb.desc || ownersLabel(kb)), trail: requestAction(kb) }))) : `<p class="muted">Every collection is shared with you.</p>`,
       foot: btn('Close', { v: 'ghost', act: 'close-modal' }),
     };
   };

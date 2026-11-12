@@ -7,7 +7,7 @@
 const C = () => X.chat;
 const UIK = 'chats', PER = 20;
 
-/** Where a conversation lives: its project, else its space, else the one knowledge base it searched. */
+/** Where a conversation lives: its project, else its space, else the one collection it searched. */
 function context(c) {
   const proj = X.projects?.of(c);
   if (proj) return { label: proj.name, icon: 'folder' };

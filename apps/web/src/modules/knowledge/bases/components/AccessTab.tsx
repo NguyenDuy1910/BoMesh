@@ -1,10 +1,12 @@
 "use client";
 
-import { Button } from "@heroui/react";
+import { Button, buttonVariants } from "@heroui/react";
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, Globe, Lock, UserPlus, Users, X } from "lucide-react";
+import { AlertCircle, UserPlus, Users, X } from "lucide-react";
+import NextLink from "next/link";
 import { useState } from "react";
 
+import { Callout } from "@/components/ui/Callout";
 import { confirm } from "@/components/ui/Confirm";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Gate } from "@/components/ui/Gate";
@@ -17,7 +19,7 @@ import { StatusChip } from "@/components/ui/StatusChip";
 import { toast } from "@/components/ui/Toast";
 import { UserAvatar } from "@/components/ui/UserAvatar";
 import { errorMessage, resourceId } from "@/lib/api/client";
-import { rel } from "@/lib/format";
+import { plural, rel } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 
 import { updateItem } from "../../api";
@@ -25,9 +27,11 @@ import { invalidateKnowledge, useMemberNames } from "../../queries";
 import { approveRequest, denyRequest, getItemIamPolicy, setItemIamPolicy } from "../api";
 import {
   accessInfo,
+  GENERAL_ACCESS,
   generalAccessOf,
   ownerCount,
   requestRole,
+  ROLE_DESC,
   ROLE_LABEL,
   ROLES,
   sharesOf,
@@ -48,7 +52,7 @@ import { ShareDialog, ShareLead, useSharePeople } from "./ShareDialog";
 /** "is now an owner" / "a viewer" / "an editor". */
 const roleSentence = (role: ShareRole) => (role === "owner" ? "an owner" : role === "editor" ? "an editor" : "a viewer");
 
-/** Access tab (preview `accessTab(kb)`): requests, general access, people and groups. Owners only. */
+/** Access tab (preview `accessTab(kb)`): access requests, general access, people and groups. Owners only. */
 export function AccessTab({ base }: { base: Item }) {
   const { id: ws, workspace, member, can } = useWorkspace();
   const qc = useQueryClient();
@@ -62,6 +66,8 @@ export function AccessTab({ base }: { base: Item }) {
   const [busy, setBusy] = useState(false);
   const baseName = base.name ?? "";
   const meP = `user:${resourceId(member.user)}`;
+  /** Owners decide their collection's requests here; people who manage People decide every request there. */
+  const decidesHere = !can("members.create");
 
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: basesKeys.policy(ws, resourceId(baseName)) });
@@ -99,13 +105,13 @@ export function AccessTab({ base }: { base: Item }) {
     const ok = await change((p) => withGeneralAccess(p, next));
     if (!ok || quiet) return;
     toast(accessInfo(next, workspace.displayName ?? "", space?.displayName).long, {
-      undo: () => void setGeneral(prev, { quiet: true }).then(() => toast("Access restored")),
+      undo: () => void setGeneral(prev, { quiet: true }),
     });
   }
 
   async function setRole(s: Share, role: ShareRole, shares: Share[]) {
     if (s.role === "owner" && role !== "owner" && ownerCount(shares) === 1) {
-      setRowError({ principal: s.principal, message: "Every knowledge base needs an owner. Make someone else an owner first." });
+      setRowError({ principal: s.principal, message: "Every collection needs an owner. Make someone else an owner first." });
       return;
     }
     setRowError(null);
@@ -129,7 +135,7 @@ export function AccessTab({ base }: { base: Item }) {
     }
     if (await change((p) => withShares(p, [s.principal], null))) {
       toast(`Removed ${nameOf(s)}`, {
-        undo: () => void change((p) => withShares(p, [s.principal], s.role)).then((ok) => ok && toast(`Restored ${nameOf(s)}`)),
+        undo: () => void change((p) => withShares(p, [s.principal], s.role)),
       });
     }
   }
@@ -156,25 +162,42 @@ export function AccessTab({ base }: { base: Item }) {
         const info = general && general !== "personal" ? accessInfo(general, workspace.displayName ?? "", space?.displayName) : null;
         return (
           <div className="kb-narrow">
-            {requests.data.length ? (
-              <Section title="Requests">
+            {requests.data.length && !decidesHere ? (
+              <div className="mb-16">
+                <Callout
+                  tone="warning"
+                  icon={UserPlus}
+                  title={`${plural(requests.data.length, "person", "people")} asked for access`}
+                  description="You decide access requests for every collection in People."
+                  actions={
+                    <NextLink href="/people?tab=requests" className={buttonVariants({ variant: "secondary", size: "sm" })}>
+                      Open access requests
+                    </NextLink>
+                  }
+                />
+              </div>
+            ) : null}
+            {requests.data.length && decidesHere ? (
+              <Section title="Access requests">
                 <List>
                   {requests.data.map((r) => {
                     const who = requesters.get(r.requester ?? "") || "Someone";
+                    const role = requestRole(r);
                     return (
                       <ListItem
                         key={r.name}
+                        className="kb-req"
                         lead={<UserAvatar name={who} />}
                         title={who}
-                        titleExtra={<StatusChip label={requestRole(r) === "editor" ? "Edit" : "View"} size="sm" dot={false} />}
+                        titleExtra={<StatusChip label={ROLE_LABEL[role]} size="sm" dot={false} tooltip={ROLE_DESC[role]} />}
                         description={
                           <>
                             {r.question ? (
-                              <>
-                                “<span translate="no">{r.question}</span>” ·{" "}
-                              </>
+                              <span className="kb-req__note" translate="no">
+                                “{r.question}”
+                              </span>
                             ) : null}
-                            {rel(r.createTime)}
+                            <span className="kb-req__when">{rel(r.createTime)}</span>
                           </>
                         }
                         actions={
@@ -196,7 +219,8 @@ export function AccessTab({ base }: { base: Item }) {
             <Section title="General access">
               <List>
                 <ListItem
-                  lead={<ItemIcon icon={general === "workspace" ? Globe : Lock} />}
+                  className="kb-general"
+                  lead={info ? <ItemIcon icon={info.icon} /> : null}
                   title={info?.label ?? ""}
                   description={info?.long}
                   actions={
@@ -204,11 +228,7 @@ export function AccessTab({ base }: { base: Item }) {
                       label="General access"
                       value={(general === "personal" || !general ? "restricted" : general) as GeneralAccess}
                       isDisabled={busy}
-                      options={[
-                        ["workspace", `Everyone in ${workspace.displayName ?? ""}`],
-                        ["restricted", "Only people added"],
-                        ["private", "Only owners"],
-                      ]}
+                      options={GENERAL_ACCESS.map((key) => [key, accessInfo(key, workspace.displayName ?? "").label] as const)}
                       onChange={(v) => void setGeneral(v)}
                     />
                   }
@@ -217,9 +237,9 @@ export function AccessTab({ base }: { base: Item }) {
             </Section>
             <Section
               title="People and groups"
-              description="Workspace admins can always manage every knowledge base."
+              description="Workspace admins can always manage every collection."
               actions={
-                <Button variant="secondary" onPress={() => setSharing(true)}>
+                <Button variant="secondary" size="sm" onPress={() => setSharing(true)}>
                   <UserPlus className="i" aria-hidden />
                   Share
                 </Button>
@@ -234,6 +254,7 @@ export function AccessTab({ base }: { base: Item }) {
                     return (
                       <ListItem
                         key={s.principal}
+                        className="kb-share-row"
                         lead={<ShareLead who={{ kind: s.kind, name }} />}
                         title={
                           <span>

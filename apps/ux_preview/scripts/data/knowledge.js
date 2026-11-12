@@ -1,7 +1,7 @@
 'use strict';
 /* Knowledge seeds: taxonomy, resource metadata (type, topics, spaces, owner,
    verification, versions, summaries), the larger Finx catalog, plus each
-   persona's collections, saved resources, recent reads and saved views.
+   persona's reading lists, saved resources, recent reads and saved views.
    Loaded after mock.js and finx.js; uses the same seedWorkspace() scope.
    All Finx records are fictional demo data (see ws.demo). */
 
@@ -185,7 +185,7 @@
       'fx-lead-budget': { kind: 'sheet', topics: ['t-roadmap'], views: 42, summary: 'FY2027 operating and capital budget by department, approved by the board.' },
     });
 
-    /* ── The wider catalog: what each knowledge base holds after a few years of real use ──
+    /* ── The wider catalog: what each collection holds after a few years of real use ──
        row = [name, kind, topics, summary?, opts?]; opts: id, upd (days ago), due (verification due in days; null = no expiry),
        verify:false, by, owner, vi, status, error, dupOf, dupReason, contexts, pages. */
     const SRC = { 'kb-fx-eng': ['src-fx-eng', 'Engineering wiki'], 'kb-fx-pay': ['src-fx-pay', 'payments-docs'], 'kb-fx-data': ['src-fx-data', 'Data space'], 'kb-fx-ops': ['src-fx-ops', 'Operations procedures'], 'kb-fx-sec': ['src-fx-sec', 'GRC policies'], 'kb-fx-prod': ['src-fx-prod', 'Product shared drive'], 'kb-fx-pol': ['src-fx-pol', 'People policies'], 'kb-fx-lead': ['upload', 'Lý Thanh Tùng'] };
@@ -501,7 +501,7 @@
       },
     });
 
-    /* ── Collections, saved, recent, views ── */
+    /* ── Reading lists, saved, recent, views ── */
     D.collections = [
       { id: 'col-fx-new', name: 'New joiner essentials', desc: 'Read these in your first two weeks.', owner: 'u-fx-an', share: 'workspace', featured: true, created: P(120), updated: P(4),
         items: [{ doc: 'fx-pol-onboarding', note: 'Start here.' }, { doc: 'fx-pol-itacc' }, { doc: 'fx-pol-hybrid', note: 'Tuesday and Thursday are team days.' }, { doc: 'fx-sec-access', note: 'Before you ask for any production access.' }, { doc: 'fx-eng-handbook', note: 'Engineers: chapters 2–4.' }, { doc: 'fx-pol-conduct' }, { doc: 'fx-pol-travel' }, { doc: 'fx-sec-privacy' }] },
