@@ -90,7 +90,7 @@ export function PeoplePage() {
     ) : null;
 
   return (
-    <Page>
+    <Page width="wide">
       <PageHeader title={sectionTitle(peopleSections, tab)} actions={actions} />
       {tab === "members" ? (
         <MembersTab query={dir} filters={filters} onFiltersChange={setFilters} fresh={freshMembers} canAdd={can("members.create")} onOpen={(p) => go({ open: p.id })} />

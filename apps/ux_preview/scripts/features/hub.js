@@ -221,7 +221,7 @@
           <section class="cat-main" aria-label="Documents">${filterBar(p, r)}${resultsHead(p, r)}${r.total ? results(p, r) : noMatches(p)}</section>${lockedNote(p)}`;
       },
     });
-    return `<div class="page cat">${head}${body}</div>`;
+    return `<div class="page page--wide cat">${head}${body}</div>`;
   };
 
   /* ═══════════════ Actions ═══════════════ */

@@ -117,7 +117,7 @@
     const s = sections(), tab = s.section(query);
     // Privacy is stated where file metadata appears (Jobs, the drawers), not as a page banner.
     const ok = () => `<div class="pix">${{ workspaces: () => wsSection() + errSection(), jobs: jobsSection, policies: policySection }[tab]()}</div>`;
-    return `<div class="page">${pageHeader({ title: s.title(query), extra: PREVIEW, meta: live && tab === 'workspaces' ? summary() : '' })}
+    return `<div class="page page--wide">${pageHeader({ title: s.title(query), extra: PREVIEW, meta: live && tab === 'workspaces' ? summary() : '' })}
       ${gate({
         ok,
         loading: () => skelRows(8),

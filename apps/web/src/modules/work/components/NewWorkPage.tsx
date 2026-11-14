@@ -193,7 +193,7 @@ export function NewWorkPage() {
   const crumbs = [{ label: "Work", href: "/work" }, { label: "New" }];
   if (spacesOn && mySpacesQuery.isPending)
     return (
-      <Page narrow className="work-new">
+      <Page width="narrow" className="work-new">
         <PageHeader title="New work" crumbs={crumbs} />
         <SkeletonRows rows={4} />
       </Page>
@@ -383,7 +383,7 @@ export function NewWorkPage() {
   ];
 
   return (
-    <Page narrow className="work-new">
+    <Page width="narrow" className="work-new">
       <PageHeader title={wf ? wf.label : "New work"} crumbs={crumbs} />
       <ol className="work-steps" aria-label="Steps">
         {steps.map(([label, meta], i) => {

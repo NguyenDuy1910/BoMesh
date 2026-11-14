@@ -49,7 +49,10 @@ function persist() { clearTimeout(_persistTimer); _persistTimer = setTimeout(per
 function hydrate() {
   let saved; try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || 'null'); } catch (_) { return; }
   if (!saved || saved.version !== 8 || !saved.data?.global) return;
+  const seeded = { workspaces: D.workspaces, pWorkspaces: D.pWorkspaces };
   Object.entries(saved.data.global).forEach(([k, v]) => { if (DATA_KEYS.includes(k)) DB.global[k] = v; });
+  // Demo workspaces added to the seeds after this save (e.g. a new demo workspace) still appear, in seed order.
+  Object.entries(seeded).forEach(([k, list]) => list.forEach((w, i) => { if (!D[k].some(x => x.id === w.id)) D[k].splice(Math.min(i, D[k].length), 0, w); }));
   Object.entries(saved.data.ws || {}).forEach(([id, store]) => { DB.ws[id] ??= {}; Object.entries(store).forEach(([k, v]) => { if (WS_DATA_KEYS.has(k)) DB.ws[id][k] = v; }); });
   // Member workspaces are the same records as the platform list.
   D.pWorkspaces = D.pWorkspaces.map(w => { const m = D.workspaces.find(x => x.id === w.id); if (!m) return w; Object.assign(m, w); return m; });

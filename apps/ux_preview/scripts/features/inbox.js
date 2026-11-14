@@ -122,7 +122,7 @@
       pendingRequests().forEach(r => out.push(accessItem(r)));
       D.kbs.filter(k => !k.archived && !k.personal).forEach(kb => {
         const failed = docsIn(kb.id).filter(d => d.status === 'failed');
-        if (failed.length) out.push({ id: 'docs-' + kb.id, icon: 'file-text', tone: 'warn', title: `${plural(failed.length, 'document')} in ${kb.name} couldn’t be published`, body: failed.map(d => d.name).join(', '), at: Math.max(...failed.map(d => d.updated)), to: '/studio?tab=documents&life=attention', needs: true });
+        if (failed.length) out.push({ id: 'docs-' + kb.id, icon: 'file-text', tone: 'warn', title: `${plural(failed.length, 'document')} in ${kb.name} couldn’t be published`, body: failed.map(d => d.name).join(', '), at: Math.max(...failed.map(d => d.updated)), to: docsHref('issues', { kb: kb.id }), needs: true });
       });
       const gaps = D.gaps.filter(g => !g.dismissed);
       out.push({ id: 'a4', icon: 'sparkles', tone: 'info', title: `Weekly summary: ${fmtNum(D.usage.questions7)} questions, ${plural(gaps.length, 'knowledge gap')}`, body: gaps.length ? `Most asked without a good answer: “${[...gaps].sort((a, b) => b.n - a.n)[0].q}”` : 'Questions people asked and where knowledge fell short.', at: ago(2 * DAY), to: '/overview' });

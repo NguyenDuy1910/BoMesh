@@ -258,7 +258,7 @@
           // No reviewer on this path, so the assistant classifies the file against the taxonomy itself.
           const d = mkDoc(src.kb, uid('d'), docName(src.app), { source: src.id, addedBy: src.name, updated: Date.now(), status: 'pending' });
           // 'Review only what's uncertain': possible personal data or a near-copy of a published document waits for a reviewer.
-          // Classification confidence never holds a file back (low-confidence topics surface in Review → Topics to confirm instead).
+          // Classification confidence never holds a file back (low-confidence topics surface in Topics → Suggestions instead).
           if (pol === 'uncertain' && (PERSONAL_RE.test([d.name, d.summary].filter(Boolean).join(' ')) || similarDocs(d).some(x => x.sim >= 0.55))) { toReview.push(syncSubmission(src, d.name)); continue; }
           D.docs.push(d); autoClassify(d); affected.push(d);
         }
@@ -270,9 +270,9 @@
       processDocs(affected);
       if (run.trigger !== 'Scheduled') {
         const parts = [affected.length && `publishing ${plural(affected.length, 'document')}`, toReview.length && `${plural(toReview.length, 'document')} ${pol === 'uncertain' ? 'held for review' : 'sent to review'}`, run.counts.failed && `${run.counts.failed} couldn’t be read`].filter(Boolean);
-        const action = toReview.length && canReview() ? { label: 'Review', run: () => go(studioHref('review', { queue: 'submissions' })) }
+        const action = toReview.length && canReview() ? { label: 'Review', run: () => go(docsHref('review')) }
           : run.counts.failed ? { label: 'View', run: () => openDrawer('src-run', { id: run.id }) }
-          : kb ? { label: 'View', run: () => go(can('knowledge.manage') ? studioHref('documents', { kb: kb.id }) : kbHref(kb)) } : undefined;
+          : kb ? { label: 'View', run: () => go(can('knowledge.manage') ? docsHref('all', { kb: kb.id }) : kbHref(kb)) } : undefined;
         toast(`${src.name} synced · ${parts.join(' · ') || 'no changes'}`, { tone: run.counts.failed ? 'accent' : 'success', action });
       }
     }
@@ -292,8 +292,9 @@
   /** Resumes runs that were in flight (mock data or before a reload); idempotent. */
   function boot() {
     if ((ENG.bootedWs ||= {})[S.ws]) return; ENG.bootedWs[S.ws] = true; if (srcById('src-hr')) seedHistory();
-    // First syncs at scale (run.backfill) are never simulated file by file; they keep their counts.
-    D.runs.filter(r => (r.status === 'running' || r.status === 'queued') && !r.backfill).forEach(r => {
+    // First syncs at scale (run.backfill) are never simulated file by file; they keep their counts. Processing runs
+    // (kind 'process', no source) belong to Documents (features/documents.js resumes them).
+    D.runs.filter(r => r.source && (r.status === 'running' || r.status === 'queued') && !r.backfill).forEach(r => {
       const s = srcById(r.source);
       if (!s) { r.status = 'cancelled'; r.dur = Date.now() - r.started; delete r.plan; return; }
       r.status = 'running';
@@ -626,7 +627,7 @@
   /** Synced files from this source that wait for a reviewer (review-first policy). */
   function reviewLine(s) {
     const waiting = D.docs.filter(d => d.source === s.id && !d.archived && stageOf(d) === 'review').length;
-    return waiting ? `<div class="row gap-8 wrap mt-12"><span class="t-sm muted">${esc(`${plural(waiting, 'file')} from this source waiting in review`)}</span>${canReview() ? linkBtn('Open review', { href: studioHref('review', { queue: 'submissions' }), icon: 'arrow-up-right' }) : ''}</div>` : '';
+    return waiting ? `<div class="row gap-8 wrap mt-12"><span class="t-sm muted">${esc(`${plural(waiting, 'file')} from this source waiting in review`)}</span>${canReview() ? linkBtn('Open review', { href: docsHref('review'), icon: 'arrow-up-right' }) : ''}</div>` : '';
   }
   function schedForm(s) {
     const f = S.ui.srcSched?.id === s.id ? S.ui.srcSched : (schedInit(s), S.ui.srcSched);
@@ -732,20 +733,22 @@
   }
   /* ── First sync at scale: the pipeline, then what needs a person (issues, topics to confirm, held for review) ── */
   const RB_REASON = { duplicate: 'Possible duplicates', personal: 'Personal data', version: 'New versions' };
+  /** The sync's run, counted per step: it reads, classifies and decides (by the source's policy) everything it brings in,
+      and indexes what it publishes. What it held back waits in Documents → Review, not processed until approved. */
   function bfStages(r) {
     const b = r.backfill, tot = bfTotal(b), live = r.status === 'running', paused = r.status === 'paused', done = !bfLeft(b);
     const st = done ? 'done' : paused ? 'paused' : 'active';
     const pol = policyOf(srcById(r.source) || {}), gate = b.published + b.review + (b.declined || 0);
     return [
-      { label: 'Find files', st: 'done', n: fmtNum(b.found), pct: 100,
+      { label: 'Found', st: 'done', n: fmtNum(b.found), pct: 100,
         note: b.filtered ? `${fmtNum(b.filtered)} filtered out: ${b.filteredBy.map(([l, n]) => `${l} ${fmtNum(n)}`).join(' · ')}` : 'Nothing filtered out' },
       { label: 'Read', st: done && b.failed ? 'warn' : st, spin: live, n: `${fmtNum(b.read)} / ${fmtNum(tot)}`, pct: pct(b.read, tot),
-        note: b.failed ? `${fmtNum(b.failed)} couldn’t be read · see Issues` : 'Text and metadata' },
-      { label: 'Classify', st, n: fmtNum(b.classified), pct: pct(b.classified, tot),
-        note: `Against the taxonomy · ${fmtNum(b.topics.confident)} with a confident topic` },
-      { label: 'Publish gate', st, n: fmtNum(gate), pct: pct(gate, tot),
-        note: [POLICY[pol].label, `${fmtNum(b.published)} published`, b.review && `${fmtNum(b.review)} held for review`, b.declined && `${fmtNum(b.declined)} declined`].filter(Boolean).join(' · ') },
-      { label: 'Make searchable', st, n: fmtNum(b.published), pct: pct(b.published, tot), note: 'Searchable as soon as published' },
+        note: b.failed ? `${fmtNum(b.failed)} couldn’t be read · see Issues` : 'Text, tables and structure' },
+      { label: 'Classified', st, n: fmtNum(b.classified), pct: pct(b.classified, tot),
+        note: `Against your topics · ${fmtNum(b.topics.confident)} with a confident topic` },
+      { label: 'Decided', st, n: fmtNum(gate), pct: pct(gate, tot),
+        note: [POLICY[pol].label, b.review && `${fmtNum(b.review)} held for review`, b.declined && `${fmtNum(b.declined)} declined`].filter(Boolean).join(' · ') },
+      { label: 'Indexed', st, n: fmtNum(b.published), pct: pct(b.published, tot), note: 'What it published, searchable as soon as it’s indexed' },
     ];
   }
   const BF_ICON = { done: 'check', warn: 'alert', active: 'circle-dashed', paused: 'pause' };
@@ -766,7 +769,7 @@
       <p class="description mt-8">Published either way. Confirming a topic only changes where people browse a document.</p>`;
     const toConfirm = T.confirm + T.none;
     const batches = (D.reviewBatches || []).filter(x => x.run === r.id && x.status === 'open');
-    const quality = studioHref('review', { queue: 'confirm' }), reviewTo = studioHref('review', { queue: batches.length ? 'batches' : 'submissions' });
+    const quality = topicsHref('suggestions'), reviewTo = docsHref('review');
     const cls = sec('Classification', split, toConfirm && canReview() ? linkBtn('Confirm topics', { href: quality, act: 'src-leave', data: { to: quality }, icon: 'arrow-up-right', size: 'sm' }) : '');
     const held = b.review || batches.length
       ? list(batches.map(x => item({ lead: itemIcon(x.reason === 'personal' ? 'shield' : x.reason === 'version' ? 'git-compare' : 'copy', 'accent', 'sm'), title: esc(RB_REASON[x.reason] || x.reason), desc: esc(x.note || ''), meta: `<span class="num">${fmtNum(x.n)}</span>` })))

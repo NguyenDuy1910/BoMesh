@@ -191,7 +191,7 @@ export function AuditPage() {
   const to = selected ? related(selected) : null;
 
   return (
-    <Page>
+    <Page width="wide">
       <PageHeader
         title="Audit log"
         chips={<PreviewChip tooltip={PREVIEW_TIP} />}

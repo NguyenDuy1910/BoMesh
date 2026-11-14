@@ -69,7 +69,10 @@
   /* Layout */
   --sidebar-w: 248px;
   --rail-w: 56px;
-  --content-max: 1200px;
+  /* Page widths, one per kind of work (layout.css › PageLayout) */
+  --layout-form: 800px;
+  --layout-centered: 1200px;
+  --layout-conversation: 760px;
   --header-h: 48px;
 
   /* Z-index */

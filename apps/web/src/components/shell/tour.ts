@@ -22,7 +22,7 @@ export function useTourAutoStart(pathname: string, user: string | undefined, wor
     let tries = 0;
     let timer = 0;
     const wait = () => {
-      if (document.querySelector(".home-starts")) {
+      if (document.querySelector(".atlas .an--ws")) {
         window.localStorage.setItem(key, String(Date.now()));
         startTour();
       } else if (tries++ < 40) timer = window.setTimeout(wait, 300);

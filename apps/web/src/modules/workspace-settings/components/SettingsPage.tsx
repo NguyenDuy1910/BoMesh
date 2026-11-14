@@ -82,7 +82,7 @@ export function SettingsPage() {
   const legacyDanger = params.get("tab") === "danger";
   const tab = useSection(settingsSections, "general");
   return (
-    <Page narrow>
+    <Page width="narrow">
       <PageHeader title={sectionTitle(settingsSections, tab)} />
       {tab === "setup" ? <SetupTab /> : <GeneralTab key={workspace.etag} advancedOpen={legacyDanger} />}
     </Page>

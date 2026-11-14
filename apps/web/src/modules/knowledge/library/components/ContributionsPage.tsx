@@ -147,7 +147,7 @@ export function ContributionsPage() {
   }
 
   return (
-    <Page className="lib">
+    <Page width="wide" className="lib">
       <PageHeader title="My contributions" actions={canContribute ? <ContributeButton variant="primary" /> : null} />
       {body}
       {drawer}

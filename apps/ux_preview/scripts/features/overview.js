@@ -1,5 +1,5 @@
 /* Overview (/overview) — the admin home. Answers "what needs me?" first (operations: sources, accounts, access,
-   office queues), then Knowledge health (the Studio's Review queues as compact metrics, each a link to its queue),
+   office queues), then Knowledge health (Documents' and Topics' views as compact metrics, each a link to its view),
    then how the workspace is doing this week and where knowledge falls short.
    Module-aware: with Requests on it also watches office queues and SLA. */
 (() => {
@@ -11,7 +11,7 @@
   const OPEN_SR = ['submitted', 'in_review'], DONE_SR = ['approved', 'declined', 'completed'];
   const svcType = id => (D.requestTypes || []).find(t => t.id === id);
   const officeIds = () => new Set((D.spaces || []).filter(s => s.type === 'office' && !s.archived).map(s => s.id));
-  const docsTo = () => studioHref('documents');
+  const docsTo = () => docsHref('all', { stage: 'live' });
   function audit(action, target, type = 'Knowledge') { D.audit.unshift({ id: uid('ev'), at: Date.now(), actor: me().id, action, type, target, outcome: 'success', ip: '10.4.12.30', device: 'Chrome on macOS' }); }
 
   /* ── Needs attention: derived from D, so an item disappears once resolved ── */
@@ -62,27 +62,25 @@
     return list(items.map(it => item({ lead: itemIcon(it.icon, it.tone), title: esc(it.title), desc: `<span class="ov-line">${it.desc}</span>`, trail: it.actions, lines: 2 })), 'ov-attn');
   }
 
-  /* ── Knowledge health: one row of metrics, each opening its Review queue ── */
-  /** [label, value, queue, tone when non-zero, tip]. To publish decisions first, then what keeps published knowledge right. */
+  /* ── Knowledge health: one row of metrics, each opening its view in Knowledge Studio ── */
+  /** [label, value, href, tone when non-zero, tip]. What keeps documents from people first, then what keeps them right. */
   function healthMetrics() {
     const c = X.reviewQueues?.() || {};
-    if (!('submissions' in c)) return [];
+    if (!('review' in c)) return [];
     const ids = new Set(managedKbs().map(k => k.id));
     const pub = D.docs.filter(d => !d.archived && ids.has(d.kb) && stageOf(d) === 'published' && d.status === 'ready');
     const verified = pub.filter(d => trustOf(d).state === 'verified').length;
-    const waiting = c.submissions + c.batches;
     return [
-      ['Waiting for review', fmtNum(waiting), c.submissions || !c.batches ? 'submissions' : 'batches', waiting && 'accent', 'Submissions and sync batches waiting for a decision'],
-      ['Publishing problems', fmtNum(c.problems), 'problems', c.problems && 'danger', 'Couldn’t publish, changed at the source or waiting to publish'],
-      ['Topics to confirm', fmtNum(c.confirm), 'confirm', c.confirm && 'warning', 'Published from a first sync with a low-confidence topic or none'],
-      ['Re-verification due', fmtNum(c.reverify), 'reverify', c.reverify && 'warning', 'Verification expired or never happened'],
-      ['Missing details', fmtNum(c.details), 'details', c.details && 'warning', 'No topic, owner or summary'],
-      ['Possible duplicates', fmtNum(c.duplicates), 'duplicates', c.duplicates && 'warning', 'Near-identical documents that compete in answers'],
-      ['Verified', pub.length ? `${pct(verified, pub.length)}%` : '—', 'reverify', pub.length ? 'share' : '', `${fmtNum(verified)} of ${fmtNum(pub.length)} published documents are verified`],
+      ['Waiting for review', fmtNum(c.review), docsHref('review'), c.review && 'accent', 'Submissions and what syncs held back, waiting for a decision'],
+      ['Issues', fmtNum(c.issues), docsHref('issues'), c.issues && 'danger', 'Couldn’t be processed, or changed at the source since it was'],
+      ['Not processed', fmtNum(c.pending), docsHref('all', { processing: 'pending' }), c.pending && 'warning', 'Documents nobody has processed yet: search and the assistant can’t use them'],
+      ['Topic suggestions', fmtNum(c.suggestions), topicsHref('suggestions'), c.suggestions && 'warning', 'Topics to confirm, documents without a topic and new topics the assistant proposes'],
+      ['Quality', fmtNum(c.quality), docsHref('quality'), c.quality && 'warning', 'Re-verification due, missing owner or summary, possible duplicates'],
+      ['Verified', pub.length ? `${pct(verified, pub.length)}%` : '—', docsHref('quality', { part: 'reverify' }), pub.length ? 'share' : '', `${fmtNum(verified)} of ${fmtNum(pub.length)} published documents are verified`],
     ];
   }
   function healthHtml(metrics) {
-    const cell = ([label, value, queue, tone, tip]) => `<a class="${cx('health__item', tone && 'is-due', tone && 'health__item--' + tone)}" href="#${studioHref('review', { queue })}" data-tip="${esc(tip)}"><span class="health__value num">${esc(value)}</span><span class="health__label">${esc(label)}</span></a>`;
+    const cell = ([label, value, href, tone, tip]) => `<a class="${cx('health__item', tone && 'is-due', tone && 'health__item--' + tone)}" href="#${href}" data-tip="${esc(tip)}"><span class="health__value num">${esc(value)}</span><span class="health__label">${esc(label)}</span></a>`;
     return `<nav class="health" aria-label="Knowledge health">${metrics.map(cell).join('')}</nav>`;
   }
   /** Decisions waiting before documents reach people (counted in the page's "need you" line with the attention items). */

@@ -162,7 +162,7 @@
       });
     };
     const live = S.pageState === 'live' && !S.navLoading;
-    return `<div class="page">${pageHeader({ title: 'Workspaces', meta: live && all.length ? wsSummary(all) : '', extra: PREVIEW, actions: btn('Create workspace', { v: 'primary', icon: 'plus', act: 'pws-create' }) })}
+    return `<div class="page page--wide">${pageHeader({ title: 'Workspaces', meta: live && all.length ? wsSummary(all) : '', extra: PREVIEW, actions: btn('Create workspace', { v: 'primary', icon: 'plus', act: 'pws-create' }) })}
       ${gate({ ok: () => toolbar + tbl(), loading: () => skelRows(7), empty: () => emptyState({ icon: 'building', title: 'No workspaces yet', desc: 'Create one for each customer or team. Its first admin sets up the rest.', actions: btn('Create workspace', { icon: 'plus', act: 'pws-create' }), boxed: true }) })}</div>`;
   };
   AFTER.pWorkspaces = () => { if (newId) $('tr.table__row--new')?.scrollIntoView({ block: 'nearest' }); };
@@ -380,7 +380,7 @@
         foot: `<div class="table-foot"><span class="num">${plural(rows.length, 'account')}</span></div>`,
       });
     };
-    return `<div class="page">${pageHeader({ title: 'Users', extra: PREVIEW })}
+    return `<div class="page page--wide">${pageHeader({ title: 'Users', extra: PREVIEW })}
       ${gate({ ok: () => toolbar + tbl(), loading: () => skelRows(8), empty: () => emptyState({ icon: 'users', title: 'No accounts yet', desc: 'People appear here once they sign up or are invited to a workspace.', boxed: true }) })}</div>`;
   };
   A['pu-open'] = el => { if (userById(el.dataset.id)) openDrawer('pf-user', { id: el.dataset.id }); };
@@ -534,7 +534,7 @@
     const tools = X.auditLog.toolbar({ uiKey: 'pfa', placeholder: 'Search events', filters, count: live ? plural(rows.length, 'event') : '' });
     const tbl = () => rows.length ? X.auditLog.table({ rows, uiKey: 'pfa', label: 'Audit events', who: pWho, where: e => wsCell(e.ws), open: 'pf-ev-open' })
       : emptyState({ icon: 'search', boxed: true, compact: true, title: 'No events match', desc: 'Try a longer time window or clear the filters.', actions: btn('Reset filters', { act: 'pf-audit-reset' }) });
-    return `<div class="page">${pageHeader({ title: 'Audit log', extra: PREVIEW, actions: X.auditLog.exportActions('pf-audit-export', live) })}
+    return `<div class="page page--wide">${pageHeader({ title: 'Audit log', extra: PREVIEW, actions: X.auditLog.exportActions('pf-audit-export', live) })}
       ${gate({ ok: () => tools + tbl(), loading: () => skelRows(8), empty: () => emptyState({ icon: 'activity', title: 'No events recorded yet', desc: 'Changes to workspaces, accounts, connectors and indexing appear here.', boxed: true }) })}</div>`;
   };
   A['pf-audit-reset'] = () => { X.auditLog.reset('pfa', AUD_FIELDS); refresh(); };

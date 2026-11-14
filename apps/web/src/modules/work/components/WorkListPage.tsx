@@ -126,7 +126,7 @@ export function WorkListPage() {
     );
 
   return (
-    <Page>
+    <Page width="wide">
       <PageHeader title="Work" actions={flowsReady && flows.length ? <NewWorkMenu flows={flows} /> : null}>
         {showTabs ? (
           <SectionTabs

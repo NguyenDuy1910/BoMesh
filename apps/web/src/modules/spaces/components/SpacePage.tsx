@@ -322,7 +322,7 @@ function SpaceBody({ base }: { base: BaseView }) {
     );
 
   return (
-    <Page>
+    <Page width="wide">
       <PageHeader
         title={space.displayName}
         heading={<span translate="no">{space.displayName}</span>}

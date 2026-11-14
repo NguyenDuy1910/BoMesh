@@ -257,7 +257,7 @@
         return toolbar + list(rows.map(w => workItem(w, { owner: tab === 'shared' })), 'work-list');
       },
     });
-    return `<div class="page">${head}${tabsHtml}${body}</div>`;
+    return `<div class="page page--wide">${head}${tabsHtml}${body}</div>`;
   };
 
   /* ═══════════════ /work/new ═══════════════ */

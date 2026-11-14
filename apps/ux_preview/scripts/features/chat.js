@@ -884,14 +884,16 @@ A['esc-page'] = () => {
 
 /* ═══════════════ Product tour: Home, the real landing page ═══════════════
    Starts by itself the first time a person lands on Home in a workspace (remembered per person and workspace), and from
-   the account menu any time. Steps skip what isn't on screen (the sidebar on phones). The card never covers what it points
-   at: it sits beside the target, or as a bottom sheet on phones with the target scrolled above it. One way out: Skip tour (or Esc). */
+   the account menu any time. Home is the workspace's knowledge map: the tour shows its collections, how to find your way in
+   it, and one branch; then AI Chat and Search. Steps skip what isn't on screen (the sidebar on phones). The card never covers
+   what it points at: it sits beside the target, or as a bottom sheet on phones with the target scrolled above it. One way out:
+   Skip tour (or Esc). */
 DATA_KEYS.push('tourSeen');
 const touch = () => matchMedia('(hover: none)').matches;
 const TOUR = [
-  { sel: '.home-starts', title: 'Start from what you need', body: () => `Find a document, ask a question answered from ${curWs().name} documents with citations, or share what you know.` },
-  { sel: '.home-sec--attention, .home-sec--continue', title: 'Pick up where you left off', body: () => ($('.home-sec--continue') ? 'What needs you and the documents you were reading. Ask about a document right from its row.' : 'What needs you shows up here, with the documents you were reading once you start.') },
-  { sel: '.home-sec--explore', title: 'Explore what’s here', body: () => 'Each topic shows what it covers and how much there is. Open one to browse it in Knowledge.' },
+  { sel: '.atlas .an--ws', title: 'Everything this workspace knows', body: () => `The map starts at ${curWs().name}. Each tinted territory is one collection, drawn the way its documents are kept.` },
+  { sel: '.atlas-toolbar', title: 'Find your way', body: () => 'Type a name to narrow the map, hide the documents to see only the levels, or go straight to a collection.' },
+  { sel: '.atlas .an--root', title: 'Open any branch', body: () => (touch() ? 'Tap a box for its details; its handle opens or folds what’s inside. Drag to move, pinch to zoom.' : 'Select a box for its details; its handle opens or folds what’s inside. Drag to move, ⌘ or Ctrl and scroll to zoom.') },
   { sel: '#nav-chat', title: 'AI Chat', body: () => 'AI Chat: start a conversation or pick up an earlier one. Attach files or choose exactly what to search.' },
   { sel: '#side-search, #topbar-search', title: 'Find anything', body: () => touch() ? 'Search conversations, documents and pages.' : 'Search conversations, documents and pages, or press ⌘K.' },
 ];
@@ -951,7 +953,7 @@ X.startTour = () => {
 function tourAuto() {
   if (tourAt != null || !S.signedIn || S.cur?.r.page !== 'home' || S.pageState !== 'live' || S.modal || S.drawer || S.palette || S.menu) return;
   if (tourSeen()[tourKey()]) return;
-  if (S.navLoading || !$('.home-starts')) { setTimeout(tourAuto, 300); return; }
+  if (S.navLoading || !$('.atlas .an--ws, .home .empty-state')) { setTimeout(tourAuto, 300); return; }
   tourBegin();
 }
 /* Home re-renders (workspace switch, page state) keep the tour on its target. */
@@ -959,7 +961,7 @@ new MutationObserver(() => { if (tourAt != null) requestAnimationFrame(() => tou
 const tourDone = () => tourClose();
 A['chat-tour-step'] = el => {
   const n = tourAt + +el.dataset.d;
-  if (n >= tourSteps().length) { tourDone(); toast('You’re all set. Start with a topic or ask a question.'); return; }
+  if (n >= tourSteps().length) { tourDone(); toast('You’re all set. Open a document from the map or ask a question.'); return; }
   tourAt = Math.max(0, n); tourPaint(true);
 };
 A['chat-tour-skip'] = tourDone;

@@ -111,7 +111,7 @@
     const s = sections(), tab = s.section(query);
     const live = S.pageState === 'live' && !S.navLoading;
     const head = pageHeader({ title: s.title(query), actions: exportActions('act-export', live) });
-    return `<div class="page">${head}${tab === 'signins' ? signinsTab() : changesTab()}</div>`;
+    return `<div class="page page--wide">${head}${tab === 'signins' ? signinsTab() : changesTab()}</div>`;
   };
 
   function changesTab() {

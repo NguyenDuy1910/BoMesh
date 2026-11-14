@@ -217,7 +217,8 @@
       { id: 'mine', label: 'My requests', count: myRows.filter(isOpen).length || '' },
       { id: 'queue', label: 'Queue', count: q.filter(r => ACTIONABLE.includes(r.status)).length || '', alert: q.some(overdue) },
     ], tab, '/requests')) : '';
-    return `<div class="page rq-page">${head}${tb}${tab === 'queue' ? queueView(q) : mineView(myRows)}</div>`;
+    // The staff queue is a table and takes the full width; your own requests are a short list in the centred column.
+    return `<div class="${cx('page', tab === 'queue' && 'page--wide', 'rq-page')}">${head}${tb}${tab === 'queue' ? queueView(q) : mineView(myRows)}</div>`;
   };
 
   function mineView(rows) {

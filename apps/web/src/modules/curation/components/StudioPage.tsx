@@ -56,7 +56,7 @@ export function StudioPage() {
   if (!sections.length) return access.pending ? <SkeletonRows rows={6} /> : <NoAccess />;
 
   return (
-    <Page className="page--studio cur">
+    <Page width="wide" className="page--studio cur">
       {!explicit && landingPending ? (
         <>
           <PageHeader title="Knowledge Studio" />

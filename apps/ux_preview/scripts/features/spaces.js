@@ -3,9 +3,96 @@
    projects. Create a space, ask to join, announcements, materials from linked
    knowledge, the space's work and request queue (the Requests queue, scoped),
    members, settings (incl. request types). Settings opens from the header gear.
-   Shared: X.spaceMark(sp, size), X.spaceLinkedDocs(sp), A['space-ask']({dataset:{space, q?}}). Prefix: sp-. */
+   Shared: X.spaceMark(sp, size), X.spaceLinkedDocs(sp), A['space-ask']({dataset:{space, q?}}),
+   X.upNext({space?, limit?, queue?}) and X.upNextList(items, {empty?, space?}) — what's coming up in the caller's spaces
+   (a space's Up next, AI Chat's "what's due"). Prefix: sp-. */
 (() => {
   'use strict';
+
+  /* ═══════════════ Up next: events, quizzes, replies and queues that need the caller ═══════════════ */
+  const WAITING = ['submitted', 'in_review'];
+  const DUE_KINDS = ['deadline', 'quiz', 'queue'];
+  const KIND_ICON = { deadline: 'clock', quiz: 'check-circle', exam: 'file-text', meeting: 'users', reply: 'message', queue: 'inbox' };
+  const dayStart = ts => { const d = new Date(ts); d.setHours(0, 0, 0, 0); return d.getTime(); };
+  const dayDiff = ts => Math.round((dayStart(ts) - dayStart(NOW)) / DAY);
+  /** Relative, human wording for an up-next item: "Due tomorrow, 9:00 PM", "In 3 days", "Overdue · Oct 30". */
+  function when(it) {
+    if (it.kind === 'reply') return { text: 'Needs your reply', tone: 'soon' };
+    const due = DUE_KINDS.includes(it.kind), prefix = it.kind === 'queue' ? 'Oldest due' : 'Due', d = dayDiff(it.at);
+    if (it.at < NOW) return { text: due ? `${it.kind === 'queue' ? 'Oldest overdue' : 'Overdue'} · ${fmtDate(it.at)}` : fmtDate(it.at), tone: due ? 'danger' : '' };
+    const day = d <= 0 ? `today, ${fmtTime(it.at)}` : d === 1 ? `tomorrow, ${fmtTime(it.at)}` : d < 7 ? `in ${d} days` : fmtDate(it.at);
+    return { text: due ? `${prefix} ${day}` : day[0].toUpperCase() + day.slice(1), tone: due && d <= 1 ? 'soon' : '' };
+  }
+  const requestTypeOf = r => (D.requestTypes || []).find(t => t.id === r.type);
+  function attempted(w) {
+    if (X.work?.myAttempt) return !!X.work.myAttempt(w);
+    const id = me().id; return (w.data?.attempts || []).some(a => a?.user === id);
+  }
+  function eventVisible(e) {
+    const sp = e.space && spaceById(e.space);
+    if (e.space && (!sp || sp.archived)) return false;
+    if (e.audience === 'all') return true;
+    if (e.audience === 'staff') return isSpaceStaff(sp);
+    return !!spaceRole(sp);
+  }
+  /** The one action for an event; null = nothing left to do (e.g. quiz already taken). */
+  function eventAction(e, sp) {
+    const w = e.work && hasModule('work') && (D.works || []).find(x => x.id === e.work);
+    if (w) {
+      if (w.kind === 'quiz' && w.owner !== me().id && !isSpaceStaff(sp)) return attempted(w) ? null : { label: 'Take quiz', href: '/work/' + w.id, strong: true };
+      return { label: w.owner !== me().id ? 'Open' : w.status === 'published' ? 'Results' : 'Continue', href: '/work/' + w.id };
+    }
+    if (e.requestType && hasModule('requests')) {
+      if (isSpaceStaff(sp)) return { label: 'Review queue', href: `/space/${sp.id}?tab=queue` };
+      if (me().profile) return { label: 'Start request', act: 'upnext-request', data: { type: e.requestType } };
+    }
+    const doc = e.doc && docById(e.doc);
+    if (doc && canReadKb(kbById(doc.kb))) return { label: 'Open', href: '/doc/' + doc.id };
+    return sp ? { label: 'Open', href: '/space/' + sp.id } : undefined;
+  }
+  /** What's coming up for the caller: visible events plus quizzes to take, requests waiting on them and (staff) their queues. */
+  X.upNext = ({ space, limit = 6, queue = true } = {}) => {
+    const out = [], inScope = id => !space || id === space, eventWorks = new Set();
+    (D.events || []).forEach(e => {
+      if (!inScope(e.space) || !eventVisible(e) || e.at < NOW - 2 * DAY) return;
+      if (e.work) eventWorks.add(e.work);
+      const sp = spaceById(e.space), action = eventAction(e, sp);
+      if (action === null) return;
+      out.push({ id: e.id, title: e.title, at: e.at, space: e.space, kind: e.kind, action });
+    });
+    if (hasModule('work')) (D.works || []).forEach(w => {
+      const sp = spaceById(w.space);
+      if (w.kind !== 'quiz' || w.status !== 'published' || w.visibility !== 'space' || eventWorks.has(w.id) || !inScope(w.space)) return;
+      if (!sp || sp.archived || !spaceRole(sp) || isSpaceStaff(sp) || w.owner === me().id || attempted(w)) return;
+      out.push({ id: 'quiz-' + w.id, title: w.title, at: w.due || w.published || w.updated, space: w.space, kind: 'quiz', action: { label: 'Take quiz', href: '/work/' + w.id, strong: true } });
+    });
+    if (hasModule('requests')) {
+      (D.svcRequests || []).filter(r => r.requester === me().id && r.status === 'needs_info' && inScope(r.space)).forEach(r =>
+        out.push({ id: 'req-' + r.id, title: requestTypeOf(r)?.name || 'Request', at: r.updated, space: r.space, kind: 'reply', action: { label: 'Reply', href: '/requests/' + r.id, strong: true } }));
+      if (queue) (D.spaces || []).filter(sp => !sp.archived && inScope(sp.id) && isSpaceStaff(sp)).forEach(sp => {
+        const open = (D.svcRequests || []).filter(r => r.space === sp.id && WAITING.includes(r.status));
+        if (!open.length) return;
+        const oldest = open.reduce((a, b) => ((a.due || a.created) <= (b.due || b.created) ? a : b));
+        const questions = open.every(r => requestTypeOf(r)?.question);
+        out.push({ id: 'queue-' + sp.id, title: `${plural(open.length, questions ? 'question' : 'request')} waiting`, at: oldest.due || oldest.created, space: sp.id, kind: 'queue', action: { label: 'Review queue', href: `/space/${sp.id}?tab=queue` } });
+      });
+    }
+    return out.sort((a, b) => (b.kind === 'reply') - (a.kind === 'reply') || a.at - b.at).slice(0, limit);
+  };
+  /** List of up-next items, each with one action. Pass {space} to drop the space name (inside a space page). */
+  X.upNextList = (items, { empty, space } = {}) => {
+    if (!items.length) return empty ?? emptyState({ icon: 'calendar', title: 'You’re all caught up', desc: 'Deadlines, quizzes and requests that need you show up here.', compact: true, boxed: true });
+    return list(items.map(it => {
+      const w = when(it), sp = !space && it.space && spaceById(it.space), a = it.action;
+      const desc = `<span class="${cx('upnext-when', w.tone && 'upnext-when--' + w.tone)}" data-tip="${esc(fmtDateTime(it.at))}">${esc(w.text)}</span>${sp ? ` · ${esc(sp.name)}` : ''}`;
+      const trail = a ? btn(a.label, { v: a.strong ? 'secondary' : 'tertiary', size: 'sm', href: a.href, act: a.act, data: a.data }) : '';
+      return item({ lead: itemIcon(KIND_ICON[it.kind] || 'calendar', w.tone === 'danger' ? 'danger' : w.tone === 'soon' ? 'warning' : '', 'sm'), title: esc(it.title), desc, trail });
+    }), 'upnext');
+  };
+  A['upnext-request'] = el => {
+    const type = el?.dataset?.type;
+    if (A['rq-new']) A['rq-new']({ dataset: { type } }); else go('/requests/new' + (type ? '?type=' + type : ''));
+  };
 
   const COLORS = ['#2F6FB5', '#0E7C66', '#4E6B2E', '#B4467A', '#6B4FBF', '#C2620F', '#1F7A8C', '#A23B3B'];
   const DEFAULT_VIS = { course: 'members', research: 'discoverable', office: 'open', team: 'discoverable', project: 'members' };
@@ -144,7 +231,7 @@
         return rows.length ? grid(rows, tab) : noMatches('spList', [], 'spaces');
       },
     });
-    return `<div class="page">${head}${useTabs ? contextBar(tabs(tabList, tab, '/spaces')) : ''}${S.pageState === 'empty' ? '' : toolbar}${body}</div>`;
+    return `<div class="page page--wide">${head}${useTabs ? contextBar(tabs(tabList, tab, '/spaces')) : ''}${S.pageState === 'empty' ? '' : toolbar}${body}</div>`;
   };
 
   /* ── Create ── */
@@ -298,7 +385,7 @@
     const tab = tabList.some(t => t.id === query.tab) ? query.tab : tabList[0].id;
     const head = pageHeader({ title: sp.name, lead: spaceMark(sp, 48), desc: `<span class="sp-head__meta">${metaLine(sp)}</span>${peopleLine(sp, !visitor)}`, actions: headerActions(sp, ctx) });
     const body = { overview: overviewTab, materials: materialsTab, work: workTab, queue: queueTab, people: peopleTab }[tab](sp, ctx);
-    return `<div class="page">${head}${contextBar(tabs(tabList, tab, '/space/' + sp.id))}${body}</div>`;
+    return `<div class="page page--wide">${head}${contextBar(tabs(tabList, tab, '/space/' + sp.id))}${body}</div>`;
   };
 
   /* ── Overview ── */

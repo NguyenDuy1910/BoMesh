@@ -708,7 +708,7 @@ export function IndexingPage() {
   const open = url.get("open");
   const job = url.get("job");
   return (
-    <Page>
+    <Page width="wide">
       <PageHeader title={sectionTitle(indexingSections, tab)} chips={<PreviewChip tooltip={PREVIEW_TIP} />} meta={tab === "workspaces" ? summary() : undefined} />
       <div className="pix">{body()}</div>
       {open && rows ? <WorkspaceIndexDrawer workspace={byId.get(open)} row={rows.find((r) => r.workspaceId === open)} tasks={taskList} url={url} /> : null}

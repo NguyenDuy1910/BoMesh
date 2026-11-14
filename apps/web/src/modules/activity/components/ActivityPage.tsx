@@ -395,7 +395,7 @@ export function ActivityPage() {
   ) : null;
 
   return (
-    <Page>
+    <Page width="wide">
       <PageHeader title={sectionTitle(activitySections, tab)} actions={exportAction} />
       {tools ? (
         <div className="toolbar act-toolbar">

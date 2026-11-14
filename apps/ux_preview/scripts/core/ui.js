@@ -43,7 +43,7 @@ function chip(label, o = {}) {
 }
 /* Status vocabulary — one place, plain language. Healthy steady states are quiet (tertiary). */
 const STATUS = {
-  doc: { ready: ['success', 'Ready', 'tertiary'], processing: ['accent', 'Publishing', 'soft', 1], pending: ['default', 'Waiting to publish'], failed: ['danger', 'Couldn’t publish'], outdated: ['warning', 'Update available'], unsupported: ['default', 'Not searchable'] },
+  doc: { ready: ['success', 'Processed', 'tertiary'], processing: ['accent', 'Processing', 'soft', 1], pending: ['default', 'Not processed'], failed: ['danger', 'Processing failed'], outdated: ['warning', 'Outdated'], unsupported: ['default', 'Not supported'] },
   source: { healthy: ['success', 'Up to date', 'tertiary'], syncing: ['accent', 'Syncing', 'soft', 1], failed: ['danger', 'Sync failed'], reconnect: ['danger', 'Reconnect needed'], paused: ['default', 'Paused'] },
   account: { connected: ['success', 'Connected', 'tertiary'], expired: ['danger', 'Reconnect needed'], error: ['warning', 'Can’t reach'], disabled: ['default', 'Disabled'] },
   run: { queued: ['accent', 'Queued', 'soft', 1], running: ['accent', 'In progress', 'soft', 1], completed: ['success', 'Completed', 'tertiary'], partial: ['warning', 'Completed with issues'], failed: ['danger', 'Failed'], cancelled: ['default', 'Cancelled'] },
@@ -197,6 +197,21 @@ function textarea({ id, bind, value = '', placeholder = '', rows = 4, attrs = ''
 /** Native select (HeroUI Select visuals). options: [[value,label],…]. change → A[change](el). */
 function select({ id, bind, value, options, attrs = '', cls = '', change, size, label }) {
   return `<select class="${cx('select', size && 'select--' + size, cls)}" id="${id}" ${bind ? `data-bind="${bind}"` : ''} ${change ? `data-change="${change}"` : ''} ${label ? `aria-label="${esc(label)}"` : ''} ${attrs}>${options.map(o => { const [v, l] = Array.isArray(o) ? o : [o.value, o.label]; return `<option value="${esc(v)}" ${String(v) === String(value) ? 'selected' : ''}>${esc(l)}</option>`; }).join('')}</select>`;
+}
+/** Slider (HeroUI Slider visuals): a label with its value, a track whose filled part shows the value, optional end labels.
+    `input` fires while dragging (keep it light: update in place with setSlider), `change` once released. */
+function slider({ id, value, min = 0, max = 100, step = 1, input, change, label, valueText = '', ends }) {
+  const fill = ((value - min) / (max - min)) * 100;
+  return `<div class="slider"><div class="slider__head"><label class="slider__label" for="${id}">${esc(label)}</label><output class="slider__value num" for="${id}" id="${id}-val">${esc(valueText)}</output></div>`
+    + `<input type="range" class="slider__input" id="${id}" min="${min}" max="${max}" step="${step}" value="${value}" style="--fill:${fill}%" aria-valuetext="${esc(valueText)}" ${input ? `data-input="${input}"` : ''} ${change ? `data-change="${change}"` : ''}>`
+    + `${ends ? `<div class="slider__ends" aria-hidden="true"><span>${esc(ends[0])}</span><span>${esc(ends[1])}</span></div>` : ''}</div>`;
+}
+/** Move a slider's fill and value text in place (while dragging). */
+function setSlider(el, valueText) {
+  const min = +el.min || 0, max = +el.max || 100;
+  el.style.setProperty('--fill', `${((+el.value - min) / (max - min)) * 100}%`);
+  el.setAttribute('aria-valuetext', valueText);
+  const out = document.getElementById(`${el.id}-val`); if (out) out.textContent = valueText;
 }
 function switchCtl({ id, on, act, data, disabled, label }) {
   return `<button type="button" role="switch" class="switch" ${id ? `id="${id}"` : ''} aria-checked="${!!on}" ${label ? `aria-label="${esc(label)}"` : ''} ${act ? `data-act="${act}"` : ''} ${dataAttrs(data)} ${disabled ? 'disabled' : ''}></button>`;

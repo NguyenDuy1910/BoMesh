@@ -118,6 +118,7 @@ function toast(msg, o = {}) {
   el.innerHTML = `${ic(t.tone === 'danger' ? 'alert-circle' : t.tone === 'accent' ? 'info' : 'check-circle', 'toast__icon--' + t.tone)}<span class="toast__message">${esc(msg)}</span>${t.action ? btn(t.action.label, { v: 'ghost', size: 'sm', act: 'toast-action', data: { id: t.id }, cls: 'toast__action' }) : ''}${iconBtn('x', 'Dismiss', { size: 'sm', act: 'toast-close', data: { id: t.id } })}`;
   region.append(el);
   if (!_toastPaused) toastStart(t);
+  return t.id;
 }
 function dismissToast(id) {
   const t = S.toasts.find(x => x.id === id); if (!t) return;
@@ -234,7 +235,6 @@ function paletteResults(raw) {
     canContribute() && { label: 'Contribute a document', icon: 'upload', run: () => A['contribute']?.() },
     { label: 'New reading list', icon: 'list-plus', run: () => A['col-new']?.() },
     can('knowledge.manage') && { label: 'New collection', icon: 'book', run: () => goThen(studioHref('collections'), () => A['kb-create']?.()) },
-    isAdmin() && X.homeFeatured && { label: 'Edit featured documents', icon: 'sliders', run: () => X.homeFeatured() },
     can('source.manage') && { label: 'Add source', icon: 'plug', run: () => goThen(studioHref('sources'), () => A['src-connect']?.()) },
     can('user.manage') && { label: 'Add people', icon: 'user-plus', run: () => goThen('/people', () => A['member-add']?.()) },
     { label: resolvedTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode', icon: resolvedTheme() === 'dark' ? 'sun' : 'moon', run: () => setTheme(resolvedTheme() === 'dark' ? 'light' : 'dark') },

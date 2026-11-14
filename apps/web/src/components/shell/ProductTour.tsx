@@ -24,19 +24,23 @@ interface Step {
 
 const TOUR: Step[] = [
   {
-    sel: ".home-starts",
-    title: "Start from what you need",
-    body: ({ workspace }) => `Find a document, ask a question answered from ${workspace} documents with citations, or share what you know.`,
+    sel: ".atlas .an--ws",
+    title: "Everything this workspace knows",
+    body: ({ workspace }) => `The map starts at ${workspace}. Each tinted territory is one collection, drawn the way its documents are kept.`,
   },
   {
-    sel: ".home-sec--attention, .home-sec--continue",
-    title: "Pick up where you left off",
-    body: () =>
-      document.querySelector(".home-sec--continue")
-        ? "What needs you and the documents you were reading. Ask about a document right from its row."
-        : "What needs you shows up here, with the documents you were reading once you start.",
+    sel: ".atlas-toolbar",
+    title: "Find your way",
+    body: () => "Type a name to narrow the map, hide the documents to see only the levels, or go straight to a collection.",
   },
-  { sel: ".home-sec--explore", title: "Explore what’s here", body: () => "Each topic shows what it covers and how much there is. Open one to browse it in Knowledge." },
+  {
+    sel: ".atlas .an--root",
+    title: "Open any branch",
+    body: ({ touch }) =>
+      touch
+        ? "Tap a box for its details; its handle opens or folds what’s inside. Drag to move, pinch to zoom."
+        : "Select a box for its details; its handle opens or folds what’s inside. Drag to move, ⌘ or Ctrl and scroll to zoom.",
+  },
   { sel: "#nav-chat", title: "AI Chat", body: () => "AI Chat: start a conversation or pick up an earlier one. Attach files or choose exactly what to search." },
   {
     sel: "#side-search, #topbar-search",
@@ -174,7 +178,7 @@ export function ProductTour({ onStart }: { onStart: () => void }) {
     const n = (getTourStep() ?? 0) + d;
     if (n >= steps.length) {
       close();
-      toast("You’re all set. Start with a topic or ask a question.");
+      toast("You’re all set. Open a document from the map or ask a question.");
     } else setTourStep(Math.max(0, n));
   };
   const touch = typeof window !== "undefined" && window.matchMedia("(hover: none)").matches;

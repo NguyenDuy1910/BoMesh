@@ -16,7 +16,7 @@ import { SavedSection } from "./SavedSection";
 export function LibraryPage() {
   const tab = useSection(useLibrarySections(), "saved") as LibrarySection;
   return (
-    <Page className="lib">
+    <Page width="wide" className="lib">
       <KnowledgeHeader section={tab} actions={null} />
       {tab === "files" ? <FilesSection /> : tab === "lists" ? <ReadingListsSection /> : <SavedSection />}
     </Page>

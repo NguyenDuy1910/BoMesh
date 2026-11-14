@@ -1,21 +1,28 @@
-/* Knowledge Studio → Taxonomy (/studio?tab=taxonomy, workspace admins only): what documents are about — domains → topics.
-   Two panes: a tree (search, the topics the assistant proposed, domains with their topics and document counts,
-   archived ones last; keyboard navigable) and the selected node's detail (?node=<topic or domain id> | __proposed | __new).
+/* Knowledge Studio → Topics (/studio?tab=topics&view=topics, workspace admins only): what documents are about — domains →
+   topics — and how processing classifies documents with them.
+   Two panes: a tree (search, domains with their topics and document counts, archived ones last; keyboard navigable) and
+   the selected node's detail (?node=<topic or domain id> | __new).
    A topic carries its business description, guidance for the assistant, keywords and synonyms, optional rules on where
    a file comes from, example documents, how its documents spread over the collections, and a box to test
-   classification. The assistant classifies incoming documents with it (core/lifecycle.js topicMatches); the same topics
-   are Browse's pills and filters. Edits are a draft per node with one savebar (Save / Discard); saving re-classifies the
-   submissions still in review (Undo). Published documents keep their topics.
-   One workspace, one taxonomy: an admin imports it from a spreadsheet (code, name, parent_code, description, keywords,
+   classification. The pipeline classifies each document once, with all of it (core/lifecycle.js topicMatches; the model
+   prompt is document_profile.md, shown under ⋯ → Show the classification prompt); the same topics are Browse's pills and
+   filters. Edits are a draft per node with one savebar (Save / Discard); saving re-classifies the submissions in review
+   and re-checks the published documents the pipeline tagged — without indexing again, since topics live in the index's
+   metadata (Undo). Topics people chose stay.
+   The feedback loop: reviewers' corrections (D.classCorrections) become keyword candidates (Topics → Suggestions);
+   nothing changes the rules until an admin adds them. The auto-tag threshold (D.classPolicy) sits in the summary bar.
+   Topics the assistant proposes and keywords from corrections are decided in Topics → Suggestions (X.md.proposals(),
+   X.md.learn(); governance.js renders that view).
+   One workspace, one rule set: an admin imports it from a spreadsheet (code, name, parent_code, description, keywords,
    synonyms, guidance — missing columns are left as they are) and exports it. Rules and examples live only here.
    Phones: the tree first; a node opens as a full view with Back.
-   Exports: X.md = { tab({query}), proposalCount() }. Actions: md-* (md-edit opens a topic here from other screens),
-   tx-*. Modal: md-import. Menus: md-more, md-prop-more, tx-add, tx-more. */
+   Exports: X.md = { tab({query}), proposals(), learn() }. Actions: md-* (md-edit opens a topic here from other
+   screens), tx-*. Modal: md-import. Drawer: md-prompt. Menus: md-more, md-prop-more, tx-add, tx-more. */
 (() => {
   'use strict';
 
   const BASE = '/studio';
-  const PROPOSED = '__proposed', NEW = '__new', ARCHIVED = '__archived';
+  const NEW = '__new', ARCHIVED = '__archived';
   const COLS = ['code', 'name', 'parent_code', 'description', 'keywords', 'synonyms', 'guidance'];
   const ALL_COLS = { description: true, keywords: true, synonyms: true, guidance: true };
   const live = t => t && !t.archived;
@@ -72,7 +79,7 @@
     readableResources().forEach(d => { if (res(d).topics.some(id => set.has(id))) m.set(d.kb, (m.get(d.kb) || 0) + 1); });
     return [...m].map(([kb, n]) => ({ kb: kbById(kb), n })).filter(x => x.kb).sort((a, b) => b.n - a.n);
   }
-  /** Documents a first sync published with low confidence for these topics (Review → Topics to confirm). */
+  /** Documents a first sync published with low confidence for these topics (Topics → Suggestions). */
   const toConfirm = ids => openClassGroups().filter(g => ids.includes(g.topic)).reduce((a, g) => a + g.n, 0);
 
   /* ═══════════════ Drafts (one per node; one savebar) ═══════════════ */
@@ -107,46 +114,63 @@
   }
 
   /* ═══════════════ Tab ═══════════════ */
-  const proposalCount = () => (canManageTaxonomy() ? openProposals().length : 0);
   function tab({ query = {} } = {}) {
-    if (!canManageTaxonomy()) return emptyState({ icon: 'lock', title: 'Only workspace admins change the taxonomy', boxed: true });
-    const empty = () => `<div class="tx">${summaryBar()}${emptyState({ icon: 'database', title: 'No taxonomy yet', desc: 'Import your topics from a spreadsheet (Import, above), or add the first domain here.', actions: btn('Add domain', { v: 'secondary', icon: 'plus', act: 'tx-add', data: { kind: 'domain' } }), boxed: true })}</div>`;
+    if (!canManageTaxonomy()) return emptyState({ icon: 'lock', title: 'Only workspace admins change the topics', boxed: true });
+    const empty = () => `<div class="tx">${summaryBar()}${emptyState({ icon: 'database', title: 'No topics yet', desc: 'Import your topics from a spreadsheet (Import, above), or add the first domain here.', actions: btn('Add domain', { v: 'secondary', icon: 'plus', act: 'tx-add', data: { kind: 'domain' } }), boxed: true })}</div>`;
     return gate({
       loading: () => skelRows(6),
-      error: () => errorState({ title: 'The taxonomy didn’t load' }),
+      error: () => errorState({ title: 'The topics didn’t load' }),
       empty,
       ok: () => {
         ensureCodes();
-        const props = visibleProposals(), picked = query.node || '', bare = query.show === 'bare';
-        if (!domains().length && !DRAFTS()[NEW] && !props.length) return empty();
-        const n = topicCounts(), id = resolveNode(picked || (bare ? leaves().find(isBare)?.id || '' : ''), props);
-        return `<div class="${cx('tx', picked && 'tx--picked')}">${summaryBar(bare)}<div class="tx-panes">${treePane(id, n, props, bare)}<div class="tx-main" id="tx-main">${detail(id, n, props)}</div></div></div>`;
+        const picked = query.node || '', bare = query.show === 'bare';
+        if (!domains().length && !DRAFTS()[NEW]) return empty();
+        const n = topicCounts(), id = resolveNode(picked || (bare ? leaves().find(isBare)?.id || '' : ''));
+        return `<div class="${cx('tx', picked && 'tx--picked')}">${summaryBar(bare)}<div class="tx-panes">${treePane(id, n, bare)}<div class="tx-main" id="tx-main">${detail(id, n)}</div></div></div>`;
       },
     });
   }
-  /** ?node= when it exists; else what needs the admin first (proposals), else the first domain. */
-  function resolveNode(id, props) {
+  /** ?node= when it exists; else the first domain. */
+  function resolveNode(id) {
     if (id === NEW) return DRAFTS()[NEW] ? NEW : domains()[0]?.id || '';
-    if (id === PROPOSED) return PROPOSED;
     if (id && topicById(id)) return id;
-    return props.length ? PROPOSED : domains()[0]?.id || '';
+    return domains()[0]?.id || '';
   }
 
-  /** A topic the assistant can only match by name: no keywords and no synonyms. Filling these in is the taxonomy's main upkeep. */
+  /** A topic the pipeline can only match by name: no keywords and no synonyms. Filling these in is the rules' main upkeep. */
   const isBare = t => !topicKeywords(t).length && !topicSynonyms(t).length;
-  /** One quiet line above both panes: what the taxonomy holds and where it came from; Export and Template under ⋯. Topics
-      without keywords are a toggle that narrows the tree to them (?show=bare), so the fix is one click away. */
+  /** Of the published documents the pipeline tagged, how many it was at least `v` sure of. */
+  function thresholdEffect(v) {
+    const tagged = reclassifiable().filter(d => d.topics?.length);
+    return { n: tagged.filter(d => topicConfidence(d, d.topics[0]) >= v).length, of: tagged.length };
+  }
+  /** One quiet line above both panes: what the rules hold and where they came from, and how sure the pipeline must be to
+      tag by itself; Export, Template and the prompt under ⋯. Topics without keywords are a toggle that narrows the tree to
+      them (?show=bare), so the fix is one click away. */
   function summaryBar(bareOn = false) {
     const tops = leaves(), kws = tops.reduce((a, t) => a + topicKeywords(t).length, 0), bare = tops.filter(isBare).length;
     const last = (D.masterImports || [])[0];
     const counts = `<span class="medium">${esc(`${plural(domains().length, 'domain')} · ${plural(tops.length, 'topic')} · ${plural(kws, 'keyword')}`)}</span>`;
     const source = last ? `${DOT}<span>${esc(`Last imported ${rel(last.at)} by ${actorName(last.by)}`)}</span>${DOT}<span translate="no">${esc(last.file)}</span>` : `${DOT}<span>Not imported yet</span>`;
-    const hint = bare || bareOn ? `${DOT}<button type="button" class="tx-sum__warn" data-act="tx-bare" aria-pressed="${bareOn}" data-tip="${esc(bareOn ? 'Show every topic' : 'The assistant matches them by name only. Show just these.')}">${esc(`${plural(bare, 'topic')} without keywords`)}</button>` : '';
-    return `<div class="tx-sum"><p class="tx-sum__text">${counts}${source}${hint}</p>${iconBtn('more', 'More taxonomy actions', { size: 'sm', menu: 'md-more' })}</div>`;
+    const hint = bare || bareOn ? `${DOT}<button type="button" class="tx-sum__warn" data-act="tx-bare" aria-pressed="${bareOn}" data-tip="${esc(bareOn ? 'Show every topic' : 'The pipeline matches them by name only. Show just these.')}">${esc(`${plural(bare, 'topic')} without keywords`)}</button>` : '';
+    const v = classThreshold(), fx = thresholdEffect(v);
+    const tip = fx.of ? `Below it, a document is published without a topic and waits in Topics → Suggestions. At ${Math.round(v * 100)}%, ${fmtNum(fx.n)} of the ${fmtNum(fx.of)} documents the pipeline tagged would have cleared it.` : 'Below it, a document is published without a topic and waits in Topics → Suggestions.';
+    const thr = `<label class="tx-sum__thr" data-tip="${esc(tip)}"><span>Auto-tag at</span>${select({ id: 'md-thr', value: v, options: CLASS_THRESHOLDS.map(x => [x, `${Math.round(x * 100)}% sure`]), change: 'md-threshold', size: 'sm', label: 'How sure the pipeline must be to tag a document by itself' })}</label>`;
+    return `<div class="tx-sum"><p class="tx-sum__text">${counts}${source}${hint}</p>${thr}${iconBtn('more', 'More actions for topics', { size: 'sm', menu: 'md-more' })}</div>`;
   }
   A['tx-bare'] = () => setQuery({ show: S.cur.query.show === 'bare' ? '' : 'bare' });
+  /** The threshold applies to documents classified from now on; documents already tagged keep their topics. */
+  A['md-threshold'] = el => {
+    if (!canManageTaxonomy()) return;
+    const prev = D.classPolicy ? { ...D.classPolicy } : null, v = +el.value;
+    D.classPolicy = { ...(D.classPolicy || {}), threshold: v };
+    audit('Changed the auto-tag threshold', `${Math.round(v * 100)}%`); refresh();
+    toast(`The pipeline tags by itself at ${Math.round(v * 100)}% sure · applies to new documents`, { action: { label: 'Undo', run: () => { if (prev) D.classPolicy = prev; else delete D.classPolicy; refresh(); } } });
+  };
   MENUS['md-more'] = () => [
-    { label: 'Export taxonomy', icon: 'download', run: exportCsv },
+    { label: 'Show the classification prompt', icon: 'code', run: () => openDrawer('md-prompt', {}) },
+    { sep: true },
+    { label: 'Export topics', icon: 'download', run: exportCsv },
     { label: 'Download template', icon: 'table', run: templateCsv },
   ];
 
@@ -157,7 +181,7 @@
     return `<li role="treeitem" id="tx-n-${esc(id)}" class="${cx('tx-item', cls)}" aria-level="${level}" aria-selected="${id === sel}" ${expanded != null ? `aria-expanded="${expanded}"` : ''} tabindex="${id === focusId ? 0 : -1}" data-id="${esc(id)}">`
       + `<div class="${cx('tx-row', id === sel && 'is-selected')}" data-act="tx-node" data-id="${esc(id)}">${inner}</div>${group}</li>`;
   }
-  function treePane(sel, n, props, bare = false) {
+  function treePane(sel, n, bare = false) {
     const u = TREE(), q = fold(u.q || '').trim(), drafts = DRAFTS();
     const hit = t => (!q || termsOf(t).some(s => fold(s).includes(q))) && (!bare || isBare(t));
     // A topic with no words to recognise it by carries a warning dot (its fix: add keywords in its detail).
@@ -169,7 +193,6 @@
     const newItem = level => ({ id: NEW, level, inner: `<span class="tx-row__code">${esc(clean(newDraft.code) || '—')}</span><span class="tx-row__name">${esc(clean(newDraft.name) || (newDraft.domain ? 'New domain' : 'New topic'))}</span>${dot(NEW)}`, cls: 'is-new' });
     // Flat model first, so roving focus can fall back to the first item when the selection is hidden.
     const items = [];
-    if (props.length && !q && !bare) items.push({ id: PROPOSED, level: 1, inner: `${ic('sparkles', 'i-sm tx-row__icon')}<span class="tx-row__name">${esc(`Proposed by the assistant (${props.length})`)}</span>`, cls: 'tx-item--prop' });
     domains().forEach(dm => {
       const all = kidsOf(dm.id), domHit = !bare && hit(dm), kids = domHit ? all : all.filter(hit);
       const draftHere = newDraft && !newDraft.domain && newDraft.parent === dm.id;
@@ -225,8 +248,8 @@
   A['tx-node'] = el => selectNode(el.dataset.id);
   A['tx-toggle'] = el => toggleNode(el.dataset.id);
   A['tx-back'] = () => { const prev = S.cur?.query.node; setQuery({ node: '' }); requestAnimationFrame(() => $(`#tx-n-${CSS.escape(prev || '')}`)?.focus()); };
-  /** Other screens open a topic here (e.g. Review → Topics to confirm → Edit topic keywords). */
-  A['md-edit'] = el => go(studioHref('taxonomy', { node: el.dataset.id }));
+  /** Other screens open a topic here (e.g. Topics → Suggestions → Edit topic keywords). */
+  A['md-edit'] = el => go(topicsHref('topics', { node: el.dataset.id }));
   /** Tree keyboard: ↑↓ Home End move, → opens or enters a domain, ← closes it or goes to the parent, Enter/Space selects. */
   document.addEventListener('keydown', e => {
     const it = e.target.closest?.('.tx-tree [role="treeitem"]'); if (!it || e.target !== it || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -248,18 +271,17 @@
   /* ═══════════════ Detail ═══════════════ */
   const back = () => `<div class="tx-back">${btn('All topics', { v: 'ghost', size: 'sm', icon: 'arrow-left', act: 'tx-back' })}</div>`;
   const sec = (title, body, { desc = '', aside = '', id = '', optional = false } = {}) => `<section class="tx-sec" ${id ? `aria-labelledby="${id}"` : ''}><div class="tx-sec__head"><h3 class="tx-sec__title" ${id ? `id="${id}"` : ''}>${esc(title)}${optional ? '<span class="label__opt">(optional)</span>' : ''}</h3>${aside}</div>${desc ? `<p class="tx-sec__desc">${desc}</p>` : ''}${body}</section>`;
-  function detail(id, n, props) {
-    if (id === PROPOSED) return proposedDetail(props);
+  function detail(id, n) {
     if (id === NEW) return editorDetail(null, n);
     const t = topicById(id);
     if (!t) return `<div class="tx-detail">${back()}${emptyState({ icon: 'tag', title: 'Pick a topic', desc: 'Choose a domain or topic in the list to see and edit it.', compact: true })}</div>`;
     return t.archived ? archivedDetail(t) : editorDetail(t, n);
   }
 
-  /** "12 published · 2 in review" — published links to Browse, in review to the Review queue. */
+  /** "12 published · 2 in review" — published links to Browse, in review to Documents → Review. */
   function countLinks(id, pub, rv) {
     const a = pub ? `<a class="link" href="#${catalogHref({ filters: { topic: [id] } })}">${esc(`${fmtNum(pub)} published`)}</a>` : '<span>Not used yet</span>';
-    const b = rv ? `${DOT}<a class="link tx-review" href="#${studioHref('review', { queue: 'submissions' })}">${esc(`${fmtNum(rv)} in review`)}</a>` : '';
+    const b = rv ? `${DOT}<a class="link tx-review" href="#${docsHref('review')}">${esc(`${fmtNum(rv)} in review`)}</a>` : '';
     return a + b;
   }
   function headHtml(t, f, n, isDomain) {
@@ -295,7 +317,8 @@
       isNew || isDomain ? '' : testSec(t, f, dirty),
     ];
     const nErr = f.tried ? Object.keys(f.err || {}).length : 0;
-    const bar = dirty ? `<div class="savebar" role="region" aria-label="${esc('Unsaved changes')}"><span class="savebar__text">${esc(isNew ? (isDomain ? 'New domain' : 'New topic') : 'Unsaved changes')}${nErr ? esc(` · ${plural(nErr, 'field')} to fix`) : ''}</span>${btn('Discard', { v: 'ghost', act: 'tx-discard', data: { id: key } })}${btn(isNew ? (isDomain ? 'Add domain' : 'Add topic') : 'Save', { v: 'primary', icon: isNew ? 'plus' : 'check', act: 'tx-save', data: { id: key } })}</div>` : '';
+    const recheck = !isDomain && dirty ? reclassifiable().length : 0;
+    const bar = dirty ? `<div class="savebar" role="region" aria-label="${esc('Unsaved changes')}"><span class="savebar__text">${esc(isNew ? (isDomain ? 'New domain' : 'New topic') : 'Unsaved changes')}${nErr ? esc(` · ${plural(nErr, 'field')} to fix`) : recheck ? `<span class="savebar__hint">${esc(` · saving re-checks ${plural(recheck, 'document')} the pipeline tagged`)}</span>` : ''}</span>${btn('Discard', { v: 'ghost', act: 'tx-discard', data: { id: key } })}${btn(isNew ? (isDomain ? 'Add domain' : 'Add topic') : 'Save', { v: 'primary', icon: isNew ? 'plus' : 'check', act: 'tx-save', data: { id: key } })}</div>` : '';
     return `<div class="tx-detail">${back()}${parts.join('')}${bar}</div>`;
   }
 
@@ -360,8 +383,8 @@
       : `<p class="tx-sec__empty">${esc('No published documents yet.')}</p>`;
     const confirm = toConfirm(ids), rv = isDomain ? n.reviewDomain(t.id) : n.review(t.id);
     const pending = [
-      confirm && `<a class="link" href="#${studioHref('review', { queue: 'confirm' })}">${esc(`${fmtNum(confirm)} to confirm from a first sync`)}</a>`,
-      rv && `<a class="link" href="#${studioHref('review', { queue: 'submissions' })}">${esc(`${fmtNum(rv)} in review`)}</a>`,
+      confirm && `<a class="link" href="#${topicsHref('suggestions')}">${esc(`${fmtNum(confirm)} to confirm from a first sync`)}</a>`,
+      rv && `<a class="link" href="#${docsHref('review')}">${esc(`${fmtNum(rv)} in review`)}</a>`,
     ].filter(Boolean);
     return sec('Distribution', list + (pending.length ? `<p class="tx-dist__pending">${ic('clock', 'i-sm')}<span>${pending.join(DOT)}</span></p>` : ''),
       { aside: `<span class="tx-sec__meta">${esc(`${plural(total, 'published document')} · ${plural(rows.length, 'collection')}`)}</span>` });
@@ -419,11 +442,10 @@
   /* ── Proposed by the assistant (decided only here) ── */
   /** Proposals come from all open submissions (names only); document titles are listed only for documents the caller can see. */
   const visibleProposals = () => { D.docs.filter(d => !d.archived && stageOf(d) === 'review' && !d.ai).forEach(aiOf); return openProposals(); };
-  function proposedDetail(props) {
-    // One line of what accepting does; the rows themselves show why each was proposed.
-    const head = `<header class="tx-head"><div class="tx-head__main"><div class="tx-head__title-row">${itemIcon('sparkles', 'accent', 'sm')}<h2 class="tx-head__title">Proposed by the assistant</h2></div><p class="tx-head__meta"><span>${esc('Accepting adds the topic and tags the documents that mention it.')}</span></p></div></header>`;
-    const body = props.length ? `<ul class="md-props">${props.map(propCard).join('')}</ul>` : emptyState({ icon: 'check-circle', tone: 'success', title: 'Nothing proposed', desc: esc('When documents in review keep mentioning a theme no topic covers, it shows up here.'), compact: true });
-    return `<div class="tx-detail">${back()}${head}${body}</div>`;
+  /** Topics the assistant proposes, for Topics → Suggestions: workspace admins decide them; others see them read-only. */
+  function proposals() {
+    const props = visibleProposals();
+    return props.length ? `<ul class="md-props">${props.map(propCard).join('')}</ul>` : '';
   }
   function propForm(p) {
     const all = ui('mdProp', {});
@@ -431,7 +453,7 @@
   }
   function propDocs(p) {
     const docs = (p.docs || []).map(docById).filter(Boolean), seen = docs.filter(canSeeDoc), hidden = docs.length - seen.length;
-    const link = d => `<a class="md-prop__doc link" href="#${esc(studioHref(stageOf(d) === 'review' ? 'review' : 'documents', { sel: d.id }))}"><span class="truncate">${esc(d.name)}</span></a>`;
+    const link = d => `<a class="md-prop__doc link" href="#${esc(stageOf(d) === 'review' ? docsHref('review', { sel: d.id }) : '/doc/' + d.id)}"><span class="truncate">${esc(d.name)}</span></a>`;
     return `<span class="md-prop__docs"><span>${esc(`Suggested by ${plural(docs.length, 'document')}`)}${seen.length ? ':' : ''}</span>${seen.map(link).join('<span aria-hidden="true">,</span>')}${hidden && seen.length ? `<span>${esc(`+${hidden} more`)}</span>` : ''}</span>`;
   }
   /** A proposal reads as a sentence (name, in which domain, why) with Accept; editing opens only when Rename, Change domain or Merge is chosen. */
@@ -444,11 +466,77 @@
       + (f.parent === '__new' ? field({ id: `md-pdn-${id}`, label: 'New domain name', control: input({ id: `md-pdn-${id}`, bind: `mdProp.${p.id}.dname`, value: f.dname, size: 'sm', attrs: 'maxlength="60"' }) }) : '');
     else if (f.edit === 'merge') editor = field({ id: `md-pm-${id}`, label: 'Merge into', error: f.err, control: select({ id: `md-pm-${id}`, bind: `mdProp.${p.id}.into`, value: f.into, size: 'sm', change: 'md-redraw', options: [['', 'Choose a topic'], ...topicTree().flatMap(dm => dm.children.map(t => [t.id, `${dm.name} · ${t.name}`]))] }) });
     const main = f.edit === 'merge' ? btn('Merge', { v: 'secondary', size: 'sm', icon: 'git-compare', act: 'md-prop-merge', data: { id: p.id } }) : btn('Accept', { v: 'secondary', size: 'sm', icon: 'check', act: 'md-prop-accept', data: { id: p.id } });
-    const acts = (f.edit ? btn('Cancel', { v: 'ghost', size: 'sm', act: 'md-prop-cancel', data: { id: p.id } }) : '') + main + iconBtn('more', 'More actions', { size: 'sm', menu: 'md-prop-more', data: { id: p.id } });
+    const acts = !canManageTaxonomy() ? '<span class="t-xs muted">A workspace admin decides</span>'
+      : (f.edit ? btn('Cancel', { v: 'ghost', size: 'sm', act: 'md-prop-cancel', data: { id: p.id } }) : '') + main + iconBtn('more', 'More actions', { size: 'sm', menu: 'md-prop-more', data: { id: p.id } });
     return `<li class="md-prop" data-id="${id}">${itemIcon('sparkles', 'accent', 'sm')}
       <div class="md-prop__main"><div class="md-prop__title"><span class="medium" translate="no">${esc(f.name)}</span> <span class="muted">${where}</span></div>${propDocs(p)}${editor ? `<div class="md-prop__edit">${editor}</div>` : ''}</div>
       <div class="md-prop__acts">${acts}</div></li>`;
   }
+
+  /* ── Keywords from corrections: what reviewers' topic changes suggest (core/lifecycle.js correctionSuggestions) ── */
+  function learn() {
+    const list = correctionSuggestions();
+    return list.length ? `<ul class="md-learns">${list.map(learnCard).join('')}</ul>` : '';
+  }
+  /** Whole sentences per line (each translates as a unit); the topic opens from Open topic. */
+  function learnCard(s) {
+    const t = topicById(s.topic), n = s.corrections.length;
+    const from = s.from.length ? `${n === 1 ? 'The pipeline had filed it under' : 'The pipeline had filed them under'} ${s.from.map(topicName).join(', ')}.` : n === 1 ? 'The pipeline had found no topic for it.' : 'The pipeline had found no topic for them.';
+    const docs = s.corrections.slice(0, 3).map(c => { const d = docById(c.doc); return d && canSeeDoc(d) ? `<a class="link" href="#/doc/${esc(d.id)}" translate="no">${esc(docTitle(d))}</a>` : `<span translate="no">${esc(c.title)}</span>`; });
+    const more = n > 3 ? ` <span class="muted">${esc(`+${n - 3} more`)}</span>` : '';
+    const kws = s.phrases.length
+      ? `<div class="md-learn__row"><span class="t-label">${esc('Add as a keyword')}</span><div class="md-learn__chips">${s.phrases.map(p => `<button type="button" class="chip chip--soft chip--accent md-learn__kw" data-act="md-learn-kw" data-id="${esc(s.topic)}" data-kw="${esc(p.text)}" data-tip="${esc(`In ${p.n} of these titles`)}">${ic('plus', 'i-xs')}<span translate="no">${esc(p.text)}</span></button>`).join('')}</div></div>`
+      : `<p class="md-learn__note">${esc(n === 1 ? 'One correction isn’t a pattern yet. Add the document as an example, or wait for more.' : 'Their titles share no new word. Add them as examples instead.')}</p>`;
+    const misled = s.misled.map(m => `<p class="md-learn__why">${ic('info', 'i-sm')}<span>${esc(`Misled by “${m.text}”, a keyword of ${topicName(m.elsewhere)}.`)}</span></p>`).join('');
+    return `<li class="md-learn">
+      <div class="md-learn__title medium">${esc(`Reviewers moved ${plural(n, 'document')} to ${t?.name || ''}`)}</div>
+      <p class="md-learn__note">${esc(from)}</p>
+      <div class="md-learn__docs">${docs.join('<span aria-hidden="true">, </span>')}${more}</div>
+      ${kws}${misled}
+      <div class="md-learn__acts">${btn('Open topic', { v: 'ghost', size: 'sm', icon: 'tag', act: 'md-edit', data: { id: s.topic } })}${btn('Add as examples', { v: 'ghost', size: 'sm', icon: 'file-plus', act: 'md-learn-ex', data: { id: s.topic } })}${btn('Dismiss', { v: 'ghost', size: 'sm', act: 'md-learn-dismiss', data: { id: s.topic } })}</div></li>`;
+  }
+  const learnOf = id => correctionSuggestions().find(s => s.topic === id);
+  /** After a rule change (`before`: the topics as they were): re-classify submissions in review and re-check the published
+      documents the pipeline tagged (no re-indexing: topics live in the index's metadata). Says what happened, with one Undo
+      for all of it. */
+  function applyRuleChange(msg, before, undoRules, again = reclassifyOpen()) {
+    let rc = null, first = '';
+    const undo = { label: 'Undo', run: () => { rc?.revert(); undoRules(); if (again) reclassifyOpen(); refresh(); } };
+    rc = reclassifyPublished(before, () => {
+      if (!rc.checked) return;
+      const changed = rc.changed.length;
+      dismissToast(first);
+      toast(`${msg} · ${plural(rc.checked, 'document')} re-checked, ${changed ? `${plural(changed, 'document')} changed topic` : 'none changed topic'}. No re-indexing needed.`, { action: undo });
+    });
+    refresh();
+    first = toast(rc.checked ? `${msg} · re-checking ${plural(rc.checked, 'published document')}…` : `${msg}${again ? ` · ${plural(again, 'submission')} classified again` : ''}`, { action: undo });
+  }
+  /** Add a phrase reviewers' corrections share as a keyword of the topic they moved documents to. */
+  A['md-learn-kw'] = el => {
+    const s = learnOf(el.dataset.id), t = topicById(el.dataset.id), kw = el.dataset.kw; if (!s || !t || !kw || !canManageTaxonomy()) return;
+    const snap = snapTopics(), used = s.corrections.filter(c => fold(c.title).includes(fold(kw)));
+    t.keywords = [...topicKeywords(t), kw];
+    used.forEach(c => { c.status = 'used'; });
+    audit('Added a keyword from corrections', `${kw} → ${t.name}`);
+    applyRuleChange(`Added “${kw}” to ${t.name}`, snap, () => { D.topics = snap; used.forEach(c => { c.status = 'open'; }); });
+  };
+  /** Add the corrected documents as examples of the topic (at most five examples). */
+  A['md-learn-ex'] = el => {
+    const s = learnOf(el.dataset.id), t = topicById(el.dataset.id); if (!s || !t || !canManageTaxonomy()) return;
+    const ids = s.corrections.map(c => c.doc).filter(id => docById(id) && isPublishedStage(docById(id)) && !(t.examples || []).includes(id));
+    if (!ids.length) { toast('These documents aren’t published yet. Approve them first.', { tone: 'accent' }); return; }
+    const snap = snapTopics(), add = ids.slice(0, Math.max(0, 5 - (t.examples || []).length));
+    if (!add.length) { toast(`${t.name} already has five examples`, { tone: 'accent' }); return; }
+    t.examples = [...(t.examples || []), ...add];
+    const used = s.corrections.filter(c => add.includes(c.doc)); used.forEach(c => { c.status = 'used'; });
+    audit('Added examples from corrections', `${plural(add.length, 'document')} → ${t.name}`);
+    applyRuleChange(`Added ${plural(add.length, 'example')} to ${t.name}`, snap, () => { D.topics = snap; used.forEach(c => { c.status = 'open'; }); });
+  };
+  A['md-learn-dismiss'] = el => {
+    const s = learnOf(el.dataset.id); if (!s || !canManageTaxonomy()) return;
+    s.corrections.forEach(c => { c.status = 'dismissed'; }); refresh();
+    toast(`Dismissed ${plural(s.corrections.length, 'correction')}`, { action: { label: 'Undo', run: () => { s.corrections.forEach(c => { c.status = 'open'; }); refresh(); } } });
+  };
   const propOf = el => { const p = proposalById(el.dataset.id || el.closest?.('[data-id]')?.dataset.id); return p && p.status === 'open' ? p : null; };
   MENUS['md-prop-more'] = el => {
     const p = propOf(el); if (!p || !canManageTaxonomy()) return [];
@@ -597,14 +685,13 @@
       D.topics.splice(at + 1, 0, target);
       audit(isDomain ? 'Added a domain' : 'Added a topic', isDomain ? `${code} ${name}` : `${code} ${name} → ${topicName(f.parent)}`);
     }
-    const again = isDomain ? 0 : reclassifyOpen();
     delete DRAFTS()[key];
-    if (t) refresh(); else showNode(target.id);
-    toast(`${t ? 'Saved' : 'Added'} “${name}”${again ? ` · ${plural(again, 'submission')} classified again` : ''}`, { action: { label: 'Undo', run: () => {
-      D.topics = snap; if (again) reclassifyOpen();
-      audit('Undid a taxonomy change', name);
-      if (t) refresh(); else setQuery({ node: f.parent || '' });
-    } } });
+    if (!t) showNode(target.id);
+    const label = `${t ? 'Saved' : 'Added'} “${name}”`;
+    const undoRules = () => { D.topics = snap; audit('Undid a change to the topics', name); if (!t) setQuery({ node: f.parent || '' }); };
+    if (!isDomain) { applyRuleChange(label, snap, undoRules); return; }
+    if (t) refresh();
+    toast(label, { action: { label: 'Undo', run: () => { undoRules(); refresh(); } } });
   };
   MENUS['tx-more'] = el => {
     const t = topicById(el.dataset.id); if (!t || !canManageTaxonomy()) return [];
@@ -847,15 +934,72 @@
     openProposals().forEach(p => { const c = x.added.find(a => fold(a.name) === fold(p.name)); if (c) mergeProposal(p, idOf.get(c.code)); });
     const counts = { added: x.added.length, updated: x.updated.length, archived: x.archived.length };
     (D.masterImports ??= []).unshift({ id: uid('mdi'), file: f.file.name, by: me().id, at: Date.now(), mode: f.mode, counts });
-    audit('Imported the taxonomy', `${f.file.name} · ${counts.added} added, ${counts.updated} updated, ${counts.archived} archived`);
-    closeModal(); refresh();
-    toast(`Taxonomy updated: ${plural(changeCount(x), 'change')}${again ? ` · ${plural(again, 'submission')} classified again` : ''}`, {
-      action: { label: 'Undo', run: () => {
-        D.topics = snap.topics; D.masterImports = snap.imports; D.topicProposals = snap.props; snap.docs.forEach(([d, s]) => restoreDoc(d, s));
-        audit('Undid a taxonomy import', f.file.name); refresh(); toast('Import undone', { tone: 'accent' });
-      } },
-    });
+    audit('Imported topics', `${f.file.name} · ${counts.added} added, ${counts.updated} updated, ${counts.archived} archived`);
+    closeModal();
+    applyRuleChange(`Imported ${plural(changeCount(x), 'change')}`, snap.topics, () => {
+      D.topics = snap.topics; D.masterImports = snap.imports; D.topicProposals = snap.props; snap.docs.forEach(([d, s]) => restoreDoc(d, s));
+      audit('Undid an import of topics', f.file.name);
+    }, again);
   };
 
-  X.md = { tab, proposalCount };
+  /* ═══════════════ The classification prompt (document_profile.md, compiled) ═══════════════ */
+  /** What the pipeline's Classify step sends the model, built from the rules as they are now: instructions, the
+      taxonomy, the document's slot and the output schema. Prompts are code (backend prompts/ directory); this shows the
+      admin exactly what their rules turn into. */
+  const xmlEsc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  function compiledPrompt() {
+    ensureCodes();
+    const used = new Set(D.docs.map(d => res(d).kind)), kinds = Object.keys(RESOURCE_KINDS).filter(k => used.has(k) || k === 'reference').join(', ');
+    const thr = Math.round(classThreshold() * 100);
+    const tag = (k, v) => (v ? `      <${k}>${xmlEsc(v)}</${k}>\n` : '');
+    const tax = domains().map(dm => `  <domain code="${xmlEsc(dm.code)}" name="${xmlEsc(dm.name)}">\n${kidsOf(dm.id).map(t => `    <topic code="${xmlEsc(t.code)}" name="${xmlEsc(t.name)}">\n${tag('description', t.desc)}${tag('guidance', (t.guidance || '').replace(/\n/g, ' '))}${tag('keywords', topicKeywords(t).join('; '))}${tag('synonyms', topicSynonyms(t).join('; '))}${tag('examples', (t.examples || []).map(docById).filter(Boolean).map(d => d.name).join('; '))}    </topic>`).join('\n')}\n  </domain>`).join('\n');
+    return `You classify one document for ${curWs().name}. You see it once, when it is read; your answer is stored with it.
+
+Instructions:
+- type: one of ${kinds}.
+- summary: two sentences in the document's own language, saying what it is for.
+- topics: at most two topics from <taxonomy>, by code, each with a confidence from 0 to 1. Choose a topic only when the document is mainly about it. Follow each topic's guidance. Below ${thr}% the document is published without a topic and a person files it.
+- proposed_topic: when no topic fits and the document's subject is a theme of its own, a short name for it; otherwise null.
+- risks: any of personal_data, confidential, outdated, with the passage that shows it.
+Answer with JSON only.
+
+<taxonomy>
+${tax}
+</taxonomy>
+
+<document title="{title}" path="{path}" source="{source}" collection="{collection}">
+{first pages, up to 6,000 tokens}
+</document>
+
+Output schema:
+{
+  "type": "procedure",
+  "summary": "…",
+  "topics": [{ "code": "OPS-01", "confidence": 0.86 }],
+  "proposed_topic": null,
+  "risks": [{ "type": "personal_data", "quote": "…" }]
+}`;
+  }
+  const PROFILE_BLOCK = `<document_profile>
+type: {type}
+summary: {summary}
+</document_profile>`;
+  DR['md-prompt'] = () => {
+    const text = compiledPrompt(), tokens = Math.ceil(text.length / 4);
+    const rules = leaves().flatMap(t => (t.rules || []).map(r => `<li><span translate="no">${esc(ruleText(r))}</span> ${ic('arrow-right', 'i-xs')} <span class="md-code">${esc(t.code)}</span> <span translate="no">${esc(t.name)}</span></li>`));
+    const code = (s, label) => `<pre class="md-prompt__code" tabindex="0" aria-label="${esc(label)}" translate="no"><code>${esc(s)}</code></pre>`;
+    return {
+      size: 'xl', title: 'Classification prompt', lead: itemIcon('code', 'accent'),
+      desc: `document_profile.md, built from these rules. Sent once per document, about ${fmtNum(tokens)} tokens.`,
+      body: `<div class="md-prompt stack gap-16">
+        ${sec('Rules checked first', rules.length ? `<ul class="md-prompt__rules">${rules.join('')}</ul>` : `<p class="tx-sec__empty">${esc('No topic has a rule.')}</p>`, { desc: esc('A matching source or folder settles the topic without asking the model.') })}
+        ${sec('Prompt', code(text, 'Classification prompt'))}
+        ${sec('What reaches each passage', code(PROFILE_BLOCK, 'Document profile block'), { desc: esc('contextual_rag.md puts the type and summary before every passage it describes. Topics stay in the index’s metadata, so changing them needs no re-indexing.') })}
+      </div>`,
+      foot: btn('Close', { v: 'ghost', act: 'close-drawer' }) + btn('Copy prompt', { v: 'primary', icon: 'copy', act: 'md-prompt-copy' }),
+    };
+  };
+  A['md-prompt-copy'] = () => copyText(compiledPrompt(), 'Prompt copied');
+
+  X.md = { tab, proposals, learn };
 })();

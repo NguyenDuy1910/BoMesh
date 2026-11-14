@@ -7,7 +7,7 @@
 
 /* ───── AI Chat (/chat): start a conversation above, pick one up below ───── */
 .chat-home { position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; align-items: center; padding: var(--space-10) var(--space-6) var(--space-14); }
-.chat-home__inner { width: 100%; max-width: 760px; display: flex; flex-direction: column; gap: var(--space-10); }
+.chat-home__inner { width: 100%; max-width: var(--layout-conversation); display: flex; flex-direction: column; gap: var(--space-10); }
 .chat-home__start { display: flex; flex-direction: column; gap: var(--space-3); }
 .chat-home__title { font-size: var(--text-2xl); line-height: var(--leading-2xl); font-weight: var(--weight-semibold); letter-spacing: -0.015em; margin-bottom: var(--space-1); }
 
@@ -60,9 +60,9 @@
 .chat-split { flex: 1 1 auto; height: auto; min-height: 0; position: relative; }
 .chat-main { position: relative; }
 .chat-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
-.chat-thread { max-width: 760px; margin: 0 auto; padding: 32px 24px 24px; display: flex; flex-direction: column; gap: 32px; }
+.chat-thread { max-width: var(--layout-conversation); margin: 0 auto; padding: 32px 24px 24px; display: flex; flex-direction: column; gap: 32px; }
 .chat-dock { flex: none; padding: 0 24px 16px; }
-.chat-dock__inner { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 8px; }
+.chat-dock__inner { max-width: var(--layout-conversation); margin: 0 auto; display: flex; flex-direction: column; gap: 8px; }
 
 .chat-msg { min-width: 0; }
 .chat-msg--user { display: flex; justify-content: flex-end; }

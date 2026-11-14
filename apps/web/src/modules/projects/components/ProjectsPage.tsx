@@ -46,7 +46,7 @@ function ProjectsList() {
   const dev = projectsAdapter.status === "development" ? <PreviewChip label="Development data" tooltip={DEV_DATA_TOOLTIP} /> : null;
 
   return (
-    <Page narrow>
+    <Page width="narrow">
       {/* The empty state carries the one New project; with folders it moves to the header. */}
       <PageHeader title="Projects" chips={dev} actions={projects.length ? <NewProjectButton /> : null} />
       <Gate

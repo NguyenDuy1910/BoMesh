@@ -103,12 +103,19 @@ body.is-device { background: var(--surface-secondary); }
   .sidebar.is-rail .sidebar__footer { display: flex; justify-content: center; }
 }
 
-/* Main: the content column (--page-max, --page-px) is chosen by the page's width class and shared by the top row. One gutter
-   (32 px desktop, 24 px tablet, 16 px phone) for every width, so switching pages never moves the left edge. */
-.main { --page-max: var(--content-max); --page-px: var(--space-8); display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; }
-.main:has(.page--narrow) { --page-max: 800px; }
-.main:has(.page--wide) { --page-max: none; }
-.main:has(.page--studio) { --page-max: 1680px; }
+/* Main and PageLayout: every page takes the width its work needs, and the top row follows it. One gutter (--page-px: 32 px
+   desktop, 24 px tablet, 16 px phone) for every width, so switching pages never moves the left edge.
+   - .page            centered: dashboards, entity and mixed pages (Home's dashboard, Overview, a space, a collection) — 1200 px.
+   - .page--narrow    form: settings, forms and one focused list (Settings, New request, Recent, Search) — 800 px.
+   - .page--wide      workspace: tables, card grids, boards and split workbenches (Browse, Studio, People, Activity, Requests,
+                      Spaces, Work) — the whole width between the gutters, so large monitors show more rows and columns.
+   - .page--canvas    canvas: maps and other structures that grow sideways (Home's knowledge map) — full width; its compact
+                      toolbar may stick under the top row.
+   AI Chat and the Reader render no .page: they own their scrollers and centre a --layout-conversation column, with side
+   panels (files, Ask) taking the extra width. */
+.main { --page-max: var(--layout-centered); --page-px: var(--space-8); display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; }
+.main:has(.page--narrow) { --page-max: var(--layout-form); }
+.main:has(:is(.page--wide, .page--canvas)) { --page-max: none; }
 .main:not(:has(.page)) { --page-max: none; --page-px: var(--space-4); }
 
 /* CompactHeader: one 48 px row on the page background. Context (trail › title · chip · status) left, actions then global
@@ -150,6 +157,8 @@ a.topbar__crumb:focus-visible { outline: 2px solid var(--focus); outline-offset:
 /* PageLayout: content starts right under the top row, in the shared column. */
 .page { width: 100%; max-width: var(--page-max); margin: 0 auto; padding: var(--space-4) var(--page-px) var(--space-14); }
 .page:has(> :is(.ctx-bar, .page-hero):first-child) { padding-top: 0; }
+/* A canvas ends with its last panel: no reading-page tail. */
+.page--canvas { padding-bottom: var(--space-8); }
 /* Entity identity block (pageHeader with a lead): mark, H1, meta lines. Not sticky — the top row takes over its title. */
 .page-hero { display: flex; align-items: flex-start; gap: var(--space-3); min-width: 0; padding: var(--space-3) 0 var(--space-5); }
 .page-hero__lead { flex: none; }

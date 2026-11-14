@@ -43,9 +43,9 @@ route('/doc/:id', { page: 'docViewer', mode: 'workspace', nav: 'knowledge', titl
 // Workspace admin
 route('/overview', { page: 'overview', mode: 'workspace', nav: 'overview', title: 'Overview', perm: 'tenant.manage', simLoad: true });
 // Knowledge Studio: the one place knowledge is run, its sections listed under it in the sidebar —
-//   daily work: Review (one workbench: submissions, sync batches, publishing problems, quality queues) · Documents
-//   setup, in the order it's done: Collections (where documents live, who reads them) · Taxonomy (how they're
-//   classified; workspace admins) · Sources (what comes in, with the accounts it signs in with; source admins).
+//   Documents (every document: All · Review · Issues · Quality; publication and processing are separate states, and
+//   nothing is processed until someone chooses) · Collections (where documents live, who reads them) · Topics (what
+//   documents are about: the topics and their suggestions) · Sources (what comes in, with the accounts it signs in with).
 // Each section shows only to the people who can use it; the page itself is open to anyone with one (P.studio decides).
 route('/studio', { page: 'studio', mode: 'workspace', nav: 'studio', title: 'Knowledge Studio', simLoad: true });
 // One collection: access, the sources that feed it, settings (its owners and editors).
@@ -72,13 +72,8 @@ const REDIRECTS = [
   [/^\/chats$/, () => '/chat'],
   [/^\/knowledge\/library$/, (m, q) => (q.tab === 'contributions' ? `/contributions?${q.open ? 'open=' + encodeURIComponent(q.open) : ''}` : q.tab === 'recent' ? '/recent?' : null)],
   [/^\/(documents|knowledge-health)$/, () => '/studio'],
-  // Knowledge Studio sections renamed: Library → Documents, Master data → Taxonomy; Quality folded into Review.
-  [/^\/studio$/, (m, q) => {
-    const tab = { all: 'documents', library: 'documents', master: 'taxonomy', topics: 'taxonomy' }[q.tab];
-    if (tab) return `/studio?${new URLSearchParams({ ...q, tab })}`;
-    if (q.tab === 'quality') { const { seg, ...rest } = q; return `/studio?${new URLSearchParams({ ...rest, tab: 'review', queue: seg || 'quality' })}`; }
-    return null;
-  }],
+  // Old Studio sections (Review, Taxonomy, Library, Master data, Quality, Knowledge flow) land in Documents or Topics:
+  // P.studio's AFTER hook (features/curation.js legacyOf) rewrites ?tab=, ?mode=, ?queue=, ?life= and ?seg=.
   // Sources and Connections were pages of their own; now they are Knowledge Studio → Sources (accounts are one of its views).
   [/^\/sources$/, (m, q) => `/studio?${new URLSearchParams({ ...q, tab: 'sources', ...(q.tab === 'history' ? { view: 'history' } : {}) })}`],
   [/^\/connections$/, () => '/studio?tab=sources&view=accounts'],
@@ -89,7 +84,7 @@ const REDIRECTS = [
 function parseHash() {
   const h = decodeURI(location.hash.slice(1)) || (S.signedIn ? homeRoute() : '/signin');
   let [p, q = ''] = h.split('?');
-  // Redirects apply in order and chain (e.g. /documents?tab=all → /studio?tab=all → /studio?tab=documents).
+  // Redirects apply in order and chain (e.g. /documents → /studio, then Knowledge Studio rewrites its old tab).
   for (const [re, to] of REDIRECTS) {
     const m = p.match(re); if (!m) continue;
     const next = to(m, Object.fromEntries(new URLSearchParams(q))); if (next == null) continue;

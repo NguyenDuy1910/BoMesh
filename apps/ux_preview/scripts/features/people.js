@@ -67,7 +67,7 @@
     const s = sections(), tab = s.section(query);
     const head = pageHeader({ title: s.title(query), actions: TAB_ACTION[tab]() });
     const body = { members: membersTab, groups: groupsTab, roles: rolesTab, requests: requestsTab }[tab]();
-    return `<div class="page">${head}${body}</div>`;
+    return `<div class="page page--wide">${head}${body}</div>`;
   };
 
   /* ══════════════ Members ══════════════ */

@@ -1,5 +1,5 @@
 /* Workspace settings (/settings?tab=general|setup) — name and web address,
-   workspace ID, workspace setup (template, modules, space types, AI workflows)
+   workspace ID, workspace setup (template, modules, space types, AI workflows, knowledge map levels)
    and the archive request (a design proposal: backend contract pending).
    Archiving is a request: a platform admin archives the workspace or declines (platform.js);
    the decision shows here (ws.archiveDecision). */
@@ -77,7 +77,7 @@
   }
 
   /* ── Workspace setup: one platform, adapted per domain ── */
-  const SETUP_KEYS = ['template', 'modules', 'spaceTypes', 'workflows'];
+  const SETUP_KEYS = ['template', 'modules', 'spaceTypes', 'workflows', 'mapLevels'];
   const snapSetup = ws => clone(Object.fromEntries(SETUP_KEYS.map(k => [k, ws[k] ?? null])));
   function restoreSetup(ws, snap) { SETUP_KEYS.forEach(k => { if (snap[k] == null) delete ws[k]; else ws[k] = snap[k]; }); }
   const sameSet = (a, b) => [...a].sort().join() === [...b].sort().join();
@@ -93,10 +93,55 @@
   /** Template marks: the same icons the domain uses elsewhere (office building, course cap). */
   const TEMPLATE_ICON = { enterprise: 'building', campus: 'graduation' };
 
-  /** How far this workspace's setup is from its template, in plain counts. */
+  /** How far this workspace's setup is from its template, in plain counts (own map levels count as one). */
   function setupChanges(ws, tpl) {
     const diff = (a, b) => a.filter(x => !b.includes(x)).length + b.filter(x => !a.includes(x)).length;
-    return Object.keys(ws.modules || {}).length + (ws.spaceTypes ? diff(ws.spaceTypes, tpl.spaceTypes) : 0) + (ws.workflows ? diff(ws.workflows, tpl.workflows) : 0);
+    return Object.keys(ws.modules || {}).length + (ws.spaceTypes ? diff(ws.spaceTypes, tpl.spaceTypes) : 0) + (ws.workflows ? diff(ws.workflows, tpl.workflows) : 0) + (ws.mapLevels ? 1 : 0);
+  }
+
+  /* ── Knowledge map levels: typed, so a draft with the save bar; saving applies through applySetup (Undo) ── */
+  const MAX_LEVELS = 8, MAX_LEVEL_NAME = 30;
+  /** Template labels are English vocabulary: show them in the interface language. A workspace's own labels stay as typed. */
+  const shownLevels = ws => (ws.mapLevels ? [...ws.mapLevels] : wsTemplate(ws).levels.map(l => tr(l) ?? l));
+  const sameList = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+  const trimmed = list => list.map(s => s.trim());
+  const levelsDirty = (f, ws) => !sameList(trimmed(f.list), shownLevels(ws));
+  /** The draft starts from the saved levels and follows them (save, Undo, Reset, another language) until someone edits it. */
+  function levelsForm() {
+    const ws = curWs(), cur = shownLevels(ws); let f = S.ui.setLevels;
+    const stale = f && sameList(trimmed(f.list), f.base) && !sameList(f.base, cur);
+    if (!f || f.wsId !== ws.id || stale) f = S.ui.setLevels = { wsId: ws.id, base: cur, list: [...cur], touched: {}, tried: false };
+    return f;
+  }
+  function levelErrors(list) {
+    const e = {}, seen = new Set();
+    trimmed(list).forEach((v, i) => {
+      const k = v.toLowerCase();
+      if (!v) e[i] = 'Name this level.';
+      else if (seen.has(k)) e[i] = 'Each level needs its own name.';
+      seen.add(k);
+    });
+    return e;
+  }
+  function levelsHtml(ws) {
+    const f = levelsForm(), errs = levelErrors(f.list), n = f.list.length;
+    const show = i => ((f.tried || f.touched[i]) && errs[i]) || '';
+    /* The first four name map depths 1–4; any further ones are extra kinds a collection or folder can pick. */
+    const rows = f.list.map((v, i) => {
+      const extra = i >= 4, id = `set-lv${i}`;
+      return `<li class="set-level">
+        <span class="${cx('set-level__num', extra && 'set-level__num--extra')}" aria-hidden="true">${extra ? '–' : i + 1}</span>
+        <div class="set-level__field">${field({ id, error: show(i), control: input({ id, bind: `setLevels.list.${i}`, value: v, placeholder: extra ? 'Extra level' : `Level ${i + 1}`, invalid: !!show(i), onEnter: 'set-levels-save',
+          attrs: `aria-label="${extra ? 'Extra level name' : `Level ${i + 1} name`}" maxlength="${MAX_LEVEL_NAME}" data-input="set-levels-touch" data-i="${i}"` }) })}</div>
+        <div class="set-level__actions">
+          ${iconBtn('arrow-up', 'Move up', { size: 'sm', act: 'set-level-move', data: { i, d: -1 }, disabled: i === 0 })}
+          ${iconBtn('arrow-down', 'Move down', { size: 'sm', act: 'set-level-move', data: { i, d: 1 }, disabled: i === n - 1 })}
+          ${iconBtn('trash', n > 1 ? 'Remove level' : 'Keep at least one level', { size: 'sm', act: 'set-level-rm', data: { i }, disabled: n === 1 })}
+        </div>
+      </li>`;
+    }).join('');
+    return `<ol class="set-levels" aria-label="Knowledge map levels">${rows}</ol>
+      <div class="row between gap-8">${n < MAX_LEVELS ? btn('Add level', { size: 'sm', icon: 'plus', act: 'set-level-add' }) : '<span></span>'}<span class="t-xs muted num">${n}/${MAX_LEVELS}</span></div>`;
   }
   function setupHtml() {
     const ws = curWs(), tpl = wsTemplate(ws), tplId = wsTemplateId(ws);
@@ -126,14 +171,21 @@
       const box = checkbox({ label: optLabel(w.label, w.desc, off ? why : where, w.icon), checked: !off && flows.includes(id), act: 'set-workflow', data: { id }, disabled: !!off });
       return off ? `<span class="set-opt-off" data-tip="${esc(why)}" tabindex="0">${box}</span>` : box;
     }).join('')}</div>` : '';
+    const levelsBar = levelsDirty(levelsForm(), ws) ? `<div class="savebar" role="region" aria-label="Unsaved changes"><span class="savebar__text">Unsaved changes to knowledge map levels</span>${btn('Discard', { v: 'ghost', act: 'set-levels-discard' })}${btn('Save changes', { v: 'primary', act: 'set-levels-save' })}</div>` : '';
+    // The background itself is edited in one dialog (features/home.js), also opened from Home's header.
+    const bg = ws.mapBg, bgMeta = bg ? `Strength ${X.homeBg.strengthOf(bg.strength)}% · updated ${relLow(bg.at)}${bg.by ? ` by ${actorName(bg.by)}` : ''}` : 'The map uses the plain canvas.';
+    const background = `<div class="mapbg-setting"><span class="mapbg-thumb">${bg ? X.homeBg.backdrop(bg, bg.strength) : ic('image')}</span><div class="grow" style="min-width:0"><div class="medium truncate" translate="no">${esc(bg ? bg.name || 'Background image' : 'No background')}</div><div class="t-xs muted">${esc(bgMeta)}</div></div>${btn(bg ? 'Change' : 'Add background', { size: 'sm', icon: bg ? 'pencil' : 'image', act: 'home-bg' })}</div>`;
     return `<div class="set-form set-setup">
       ${formSection('Modules', 'Changes apply to everyone right away. Turning a module off hides it; nothing is deleted.', modules)}
       ${spaces ? formSection('Space types', 'How people group members, materials and work.', spaces) : ''}
       ${workflows ? formSection('AI workflows', 'Guided tasks people start from Work and from their spaces.', workflows) : ''}
-      ${formSection('Template', 'Sets which modules, space types and AI workflows this workspace starts with.', template + reset)}
-    </div>`;
+      ${formSection('Knowledge map levels', 'The first four name levels 1–4 of the map; a collection or folder can use any of them.', levelsHtml(ws))}
+      ${formSection('Map background', 'An image behind the knowledge map on Home, for everyone in this workspace. It’s softened so the map stays readable.', background)}
+      ${formSection('Template', 'Sets which modules, space types, AI workflows and map levels this workspace starts with.', template + reset)}
+    </div>${levelsBar}`;
   }
 
+  const relLow = ts => rel(ts).replace(/^(Just now|Yesterday)$/, m => m.toLowerCase());
   /** Settings' sections are sidebar sub-rows of Settings (pageSections). */
   const sections = () => pageSections('/settings', [{ id: 'general', label: 'General' }, { id: 'setup', label: 'Workspace setup' }]);
   (X.sections ||= {}).settings = () => sections().nav();
@@ -187,11 +239,36 @@
   A['set-template'] = el => {
     const ws = curWs(), id = el.dataset.value, next = TEMPLATES[id];
     if (!next || id === wsTemplateId(ws)) { refresh(); return; }
-    applySetup(w => { w.template = id; delete w.modules; delete w.spaceTypes; delete w.workflows; }, 'Changed workspace template', next.label, `${ws.name} now uses the ${next.label} template`);
+    S.ui.setLevels = null;
+    applySetup(w => { w.template = id; SETUP_KEYS.slice(1).forEach(k => delete w[k]); }, 'Changed workspace template', next.label, `${ws.name} now uses the ${next.label} template`);
   };
   A['set-reset'] = () => {
     const tpl = wsTemplate();
-    applySetup(w => { delete w.modules; delete w.spaceTypes; delete w.workflows; }, 'Reset workspace setup', tpl.label, `Back to the ${tpl.label} defaults`);
+    S.ui.setLevels = null;
+    applySetup(w => { SETUP_KEYS.slice(1).forEach(k => delete w[k]); }, 'Reset workspace setup', tpl.label, `Back to the ${tpl.label} defaults`);
+  };
+  A['set-levels-touch'] = el => { const f = levelsForm(), i = el.dataset.i; if (i != null) f.touched[i] = true; refresh(); };
+  A['set-level-add'] = () => {
+    const f = levelsForm(); if (f.list.length >= MAX_LEVELS) return;
+    f.list.push(''); refresh();
+    requestAnimationFrame(() => $(`#set-lv${f.list.length - 1}`)?.focus());
+  };
+  A['set-level-rm'] = el => { const f = levelsForm(); if (f.list.length <= 1) return; f.list.splice(+el.dataset.i, 1); f.touched = {}; refresh(); };
+  A['set-level-move'] = el => {
+    const f = levelsForm(), i = +el.dataset.i, j = i + +el.dataset.d;
+    if (j < 0 || j >= f.list.length) return;
+    [f.list[i], f.list[j]] = [f.list[j], f.list[i]]; f.touched = {}; refresh();
+    requestAnimationFrame(() => $(`[data-act="set-level-move"][data-i="${j}"][data-d="${el.dataset.d}"]:not(:disabled)`)?.focus());
+  };
+  A['set-levels-discard'] = () => { S.ui.setLevels = null; refresh(); };
+  /** Labels equal to the template's (in English or the interface language) mean "follow the template": nothing is stored. */
+  A['set-levels-save'] = () => {
+    const ws = curWs(), f = levelsForm(), errs = levelErrors(f.list);
+    if (!levelsDirty(f, ws)) return;
+    if (Object.keys(errs).length) { f.tried = true; refresh(); $('.set-levels [aria-invalid="true"]')?.focus(); return; }
+    const list = f.list.map(s => s.trim()), tpl = wsTemplate(ws).levels, isTpl = sameList(list, tpl) || sameList(list, tpl.map(l => tr(l) ?? l));
+    S.ui.setLevels = null;
+    applySetup(w => { if (isTpl) delete w.mapLevels; else w.mapLevels = list; }, 'Changed knowledge map levels', list.join(' › '), 'Knowledge map levels saved');
   };
   A['set-module'] = el => {
     const ws = curWs(), m = el.dataset.m, def = MODULES[m]; if (!def) return;

@@ -1,21 +1,19 @@
 'use strict';
-/* Document lifecycle — contribution, curation and publication are separate steps.
+/* Document lifecycle — every document, whatever its origin (a source's sync, an editor's upload, a member's contribution).
 
-   Contribute  Anyone with knowledge.contribute uploads a file and picks (or lets the assistant
-               suggest) the collection. Nothing is published: the document is a submission
-               (stage 'review') visible only to its contributor and that base's reviewers.
-   Curate      Reviewers (owners of the target collection; workspace admins own all) work in Knowledge Studio.
-               The assistant classifies every incoming document against the workspace's taxonomy (topics with
-               their keywords, synonyms, rules and examples) and suggests type, topics (existing or proposed),
-               collection, summary and flags; reviewers approve, request changes or decline. Only workspace
-               admins change the taxonomy (import it, edit topics, accept or dismiss proposed topics).
-   Publish     Approval publishes: the document joins its collection and is processed
-               (status pending → processing → ready). Only published + ready content reaches
-               Browse, search, the reader and the assistant (core/catalog.js pools).
-
-   stage:  review → changes ⇄ review → rejected | published → unpublished → published
-   status: index/processing state of a published document (pending | processing | ready | failed | outdated | unsupported)
-   Users see one combined lifecycle label (lifecycleOf); no one sees "index" or "embedding". */
+   Two independent states, as in the backend (item_model.md: publication and indexing are separate):
+   publication  can readers see it? — stage: review → changes ⇄ review → rejected | published ⇄ unpublished
+   processing   can search and the assistant use it? — status: pending (not processed) | processing (read → classified →
+                indexed, one ingestion run) | ready | failed | outdated | unsupported
+   Nothing is processed until someone asks: editors select documents in Knowledge Studio → Documents and press Process;
+   a reviewer approving a submission processes it too unless they untick it; a source's sync processes what it brings in.
+   A document is searchable only when it is published and processed (isSearchable).
+   Contribute  Anyone with knowledge.contribute uploads a file and picks (or lets the assistant suggest) the collection.
+               It is a submission (stage 'review'), visible only to its contributor and that base's reviewers.
+   Decide      Reviewers (owners of the target collection; workspace admins own all) approve, request changes or decline
+               in Knowledge Studio → Documents → Review. Corrections to the classification are recorded and turned into
+               topic keywords by workspace admins (Topics → Suggestions).
+   People see one combined lifecycle label (lifecycleOf); the Studio also shows publication and processing apart. */
 
 /* ═══════════════ Who can do what ═══════════════ */
 const canContribute = () => can('knowledge.contribute');
@@ -58,20 +56,24 @@ const KB_ROLES = {
 };
 const KB_ROLE_OPTIONS = Object.entries(KB_ROLES).map(([k, r]) => [k, r.label]);
 
-/* ═══════════════ Lifecycle (one label for people) ═══════════════ */
+/* ═══════════════ Lifecycle (one label for people) ═══════════════
+   Publication (can readers see it?) and processing (read, classified, indexed: can search and the assistant use it?) are
+   independent, as in the backend (`publicationState`, `indexingState`). Nothing is processed until someone asks: uploads and
+   approved contributions wait as Not processed until an editor processes them (Documents → Process); a source's sync
+   processes what it brings in. The label below names the one state that matters most for a reviewer. */
 const LIFECYCLE = {
   analyzing: { tone: 'accent', label: 'Analyzing', icon: 'sparkles', live: true, desc: 'Reading the file and suggesting a type, topics and a collection.' },
   review: { tone: 'accent', label: 'In review', icon: 'clock', desc: 'A reviewer will check it before it’s published.' },
   changes: { tone: 'warning', label: 'Changes requested', icon: 'pencil', desc: 'A reviewer asked for changes before it can be published.' },
   rejected: { tone: 'danger', label: 'Declined', icon: 'x-circle', desc: 'A reviewer declined it. It won’t be published.' },
-  queued: { tone: 'default', label: 'Waiting to publish', icon: 'clock', desc: 'Approved. It becomes searchable once it’s published.' },
-  publishing: { tone: 'accent', label: 'Publishing', icon: 'loader', live: true, desc: 'It will be searchable in a few minutes.' },
+  queued: { tone: 'default', label: 'Not processed', icon: 'circle-dashed', desc: 'Published, but not processed yet: people can open it from its collection; search and the assistant can’t use it until it’s processed.' },
+  publishing: { tone: 'accent', label: 'Processing', icon: 'loader', live: true, desc: 'Being read, classified and indexed. It will be searchable in a few minutes.' },
   published: { tone: 'success', label: 'Published', icon: 'check-circle', quiet: true, desc: 'Searchable and available to the assistant.' },
-  update: { tone: 'warning', label: 'Update available', icon: 'refresh', desc: 'The original changed at its source. Answers use the previous version until you publish the update.' },
-  failed: { tone: 'danger', label: 'Couldn’t publish', icon: 'alert-circle', desc: 'It was approved but couldn’t be made searchable.' },
+  update: { tone: 'warning', label: 'Changed at the source', icon: 'refresh', desc: 'The original changed at its source. Answers use the previous version until it’s processed again.' },
+  failed: { tone: 'danger', label: 'Processing failed', icon: 'alert-circle', desc: 'It couldn’t be read or indexed. Its fix is in Documents → Issues.' },
   merged: { tone: 'success', label: 'Published as new version', icon: 'check-circle', quiet: true, desc: 'It replaced the earlier version of the document.' },
   stored: { tone: 'default', label: 'Stored, not searchable', icon: 'file', desc: 'This file type can’t be searched. People can still download it.' },
-  unpublished: { tone: 'default', label: 'Unpublished', icon: 'eye-off', desc: 'Removed from search and answers. Reviewers can publish it again.' },
+  unpublished: { tone: 'default', label: 'Unpublished', icon: 'eye-off', desc: 'Hidden from readers, search and answers. Editors can publish it.' },
   archived: { tone: 'default', label: 'Archived', icon: 'archive', desc: 'Removed from the library.' },
 };
 const STATUS_TO_LIFE = { pending: 'queued', processing: 'publishing', ready: 'published', outdated: 'update', failed: 'failed', unsupported: 'stored' };
@@ -89,27 +91,99 @@ function lifecycleOf(d) {
 }
 /** Lifecycle chip (STATUS.life in ui.js uses the same vocabulary). */
 const lifeChip = (d, size) => { const l = lifecycleOf(d); return chip(l.label, { tone: l.tone, variant: l.quiet ? 'tertiary' : 'soft', dot: true, live: !!l.live, size, tip: l.desc }); };
-/** The Knowledge Studio flow, in order, then the two off-ramps: [key, label, lifecycle keys].
-    Every incoming document — contributed, synced or uploaded — moves In review → Publishing → Published;
-    Needs attention holds what stopped (and its fix), Not published what a reviewer turned away or took down. */
-const LIFE_GROUPS = [
-  ['review', 'In review', ['analyzing', 'review', 'changes']], ['publishing', 'Publishing', ['publishing']], ['published', 'Published', ['published', 'stored']],
-  ['attention', 'Needs attention', ['failed', 'queued', 'update']], ['closed', 'Not published', ['rejected', 'unpublished']],
-];
-/** Older addresses (?life=changes…) land on the group that now holds them. */
-const LIFE_GROUP_ALIAS = { changes: 'review', rejected: 'closed', unpublished: 'closed' };
+
+/* ═══════════════ Processing: read → classified → indexed, only when someone asks ═══════════════ */
+/** A document's processing state (the backend's indexingState), whatever its publication. Submissions aren't processed. */
+const PROCESSING = {
+  pending: { label: 'Not processed', tone: 'default', icon: 'circle-dashed', desc: 'Not read, classified or indexed yet. Search and the assistant can’t use it.' },
+  processing: { label: 'Processing', tone: 'accent', icon: 'loader', live: true, desc: 'Being read, classified against your topics and indexed.' },
+  ready: { label: 'Processed', tone: 'success', icon: 'check', desc: 'Read, classified and indexed: search and the assistant can use it once it’s published.' },
+  failed: { label: 'Failed', tone: 'danger', icon: 'alert-circle', desc: 'It couldn’t be read or indexed. Its fix is in Issues.' },
+  outdated: { label: 'Outdated', tone: 'warning', icon: 'refresh', desc: 'Changed since it was processed. Answers use the previous version until it’s processed again.' },
+  unsupported: { label: 'Not supported', tone: 'default', icon: 'file', desc: 'Images and archives can’t be processed. People can still download them.' },
+};
+const PROCESSING_ORDER = ['pending', 'processing', 'ready', 'failed', 'outdated', 'unsupported'];
+function processingOf(d) {
+  const st = stageOf(d);
+  if (st === 'review' || st === 'changes' || st === 'rejected' || st === 'merged') return 'pending';
+  return PROCESSING[d.status] ? d.status : 'ready';
+}
+/** Can it be processed (again)? Not while it runs, not an image or archive, not a submission. */
+const canProcess = d => !!d && !d.archived && ['published', 'unpublished'].includes(stageOf(d)) && ['pending', 'failed', 'outdated', 'ready'].includes(processingOf(d)) && !UNPROCESSABLE.includes(d.type);
+const UNPROCESSABLE = ['png', 'jpg', 'jpeg', 'zip'];
+/** Whether people can read it, in words (the publication state, apart from processing). */
+const publicationOf = d => ({ review: 'In review', changes: 'Changes requested', rejected: 'Declined', unpublished: 'Unpublished', merged: 'Merged into the document it updates' }[stageOf(d)] || 'Published');
+/** In search: published and processed — the only documents search and the assistant use (catalog.js isSearchable only
+    says the text is readable). */
+const inSearch = d => stageOf(d) === 'published' && d.status === 'ready';
+
+/* ═══════════════ Classification policy and what reviewers teach it ═══════════════ */
+/** Topics the pipeline is at least this sure of are applied; below it the document is published anyway and its topic
+    waits in Topics → Suggestions. Workspace admins set it on the Topics page. */
+const CLASS_THRESHOLDS = [0.6, 0.7, 0.8, 0.9];
+const classThreshold = () => D.classPolicy?.threshold ?? 0.7;
+/** Topics the pipeline chose (not a person): tagged by the assistant, or synced without anyone touching them. */
+const topicsByPipeline = d => d.classifiedBy === 'assistant' || (!d.classifiedBy && !d.submission && !!d.source && d.source !== 'upload');
+/** How sure the pipeline was of a topic it chose (deterministic in the prototype). */
+const topicConfidence = (d, topicId) => conf(d.id + topicId, 0.52, 0.96);
+/** Reviewers' corrections to the pipeline's topics: { id, doc, title, from:[ids], to:[ids], by, at, status: open | used |
+    dismissed }. They never change the rules by themselves: a workspace admin turns them into keywords or examples. */
+function recordCorrection(d, from, to) {
+  if (!to.some(id => !from.includes(id))) return null;
+  const c = { id: uid('cc'), doc: d.id, title: d.name, from: [...from], to: [...to], by: me().id, at: Date.now(), status: 'open' };
+  (D.classCorrections ??= []).unshift(c);
+  return c;
+}
+const openCorrections = () => (D.classCorrections || []).filter(c => c.status === 'open' && c.to.some(id => topicById(id) && !topicById(id).archived));
+/** Words that say nothing about a topic on their own (titles are full of them). */
+const PHRASE_STOP = new Set(['the', 'and', 'for', 'with', 'from', 'about', 'into', 'guide', 'policy', 'procedure', 'template', 'notes', 'report', 'update', 'draft', 'final', 'sop', 'quy trình', 'hướng dẫn', 'biểu mẫu', 'giao dịch', 'tài liệu']);
+/** Candidate keywords in a title, in its own spelling, lower-case: two-word phrases, plus single words in an English title
+    (a Vietnamese syllable alone means little) and acronyms in any title (NAPAS). A pair never borrows a word from a
+    stop phrase ("giao dịch", "hướng dẫn"): "soát giao" means nothing. */
+function phrasesOf(title) {
+  const raw = String(bareName(title)).normalize('NFC'), vi = /[^\u0000-\u007f]/.test(raw.replace(/[—–’“”]/g, ''));
+  const orig = raw.match(/[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*/gu) || [];
+  const words = orig.map(w => w.toLowerCase()).filter(w => !/^(v?\d+|\d{4})$/.test(w));
+  const used = new Set(words.flatMap((w, i) => (PHRASE_STOP.has(`${w} ${words[i + 1]}`) ? [i, i + 1] : [])));
+  const ok = (w, i) => w.length >= 3 && !PHRASE_STOP.has(w) && !used.has(i);
+  const pairs = words.slice(1).map((w, i) => [i, words[i], w]).filter(([i, a, b]) => ok(a, i) && ok(b, i + 1)).map(([, a, b]) => `${a} ${b}`);
+  const singles = vi ? orig.filter(w => /^[A-Z]{3,}$/.test(w)).map(w => w.toLowerCase()) : words.filter((w, i) => w.length >= 4 && ok(w, i));
+  return [...new Set([...pairs, ...singles])];
+}
+/** What the open corrections suggest, per topic reviewers moved documents to. `phrases`: words that two or more of those
+    titles share and the topic doesn't know yet (one correction isn't a pattern). `misled`: words in those titles that are
+    another topic's keyword — why the pipeline filed them there. [{ topic, corrections, from:[ids], phrases, misled }],
+    each phrase { text, n, elsewhere }. */
+function correctionSuggestions() {
+  const by = new Map();
+  openCorrections().forEach(c => c.to.filter(id => !c.from.includes(id) && topicById(id)).forEach(id => (by.get(id) || by.set(id, []).get(id)).push(c)));
+  const owner = new Map();
+  topicTree().flatMap(dm => dm.children).forEach(t => [...topicKeywords(t), ...topicSynonyms(t)].forEach(k => owner.set(fold(k), t.id)));
+  return [...by].map(([id, cs]) => {
+    const count = new Map();
+    cs.forEach(c => phrasesOf(c.title).forEach(p => count.set(p, (count.get(p) || 0) + 1)));
+    const all = [...count].filter(([p]) => owner.get(fold(p)) !== id && fold(p) !== fold(topicById(id).name))
+      .map(([text, n]) => ({ text, n, elsewhere: owner.get(fold(text)) || '' }))
+      .sort((a, b) => b.n - a.n || b.text.split(' ').length - a.text.split(' ').length || a.text.localeCompare(b.text));
+    const from = [...new Set(cs.flatMap(c => c.from.filter(f => !c.to.includes(f))))];
+    return { topic: id, corrections: cs, from, phrases: all.filter(p => !p.elsewhere && p.n >= 2).slice(0, 4), misled: all.filter(p => p.elsewhere).slice(0, 3) };
+  }).sort((a, b) => b.corrections.length - a.corrections.length);
+}
 
 /* ═══════════════ Queries ═══════════════ */
-/** Everything a reviewer curates: documents in bases they own (any stage), not archived unless asked. */
-const curatedDocs = ({ archived = false } = {}) => D.docs.filter(d => (archived || !d.archived) && canReviewKb(kbById(d.kb)));
+/** Everything a reviewer curates: documents in bases they own (any stage) — outside folders with their own access that leave
+    them out — not archived unless asked. */
+const curatedDocs = ({ archived = false } = {}) => D.docs.filter(d => (archived || !d.archived) && canReviewKb(kbById(d.kb)) && canReadFolder(docFolder(d)));
 /** Submissions waiting for a decision, oldest first. */
 const reviewQueue = () => curatedDocs().filter(d => stageOf(d) === 'review').sort((a, b) => (a.submission?.at || a.updated) - (b.submission?.at || b.updated));
 /** First syncs at scale hold risky files back in batches, one per reason (D.reviewBatches): the open ones in bases the caller reviews. */
 const openBatches = () => (D.reviewBatches || []).filter(b => b.status === 'open' && canReviewKb(kbById(b.kb)));
-/** Decisions waiting in Review: submissions plus open batches (what the Review tab and the Studio badge count). */
-const reviewDecisionCount = () => reviewQueue().length + openBatches().length;
 /** Published from a first sync but filed with low confidence or without a topic (D.classGroups): the open ones in bases the caller edits. */
 const openClassGroups = () => (D.classGroups || []).filter(g => g.status === 'open' && g.n > 0 && canEditKb(kbById(g.kb)));
+/** First syncs at scale in bases the caller reviews (their documents are counted, not listed). */
+const backfillRuns = () => (D.runs || []).filter(r => r.backfill && canReviewKb(kbById(r.kb)));
+/** Processing runs started from Documents (D.runs with kind 'process', no source): the one in flight, if any. */
+const activeProcessRun = () => (D.runs || []).find(r => r.kind === 'process' && r.status === 'running') || null;
 /** A run's at-scale counters (run.backfill), the one source of truth every surface reads. */
 const backfillOf = runId => (D.runs || []).find(r => r.id === runId)?.backfill || null;
 /** Move counters of a backfill by a delta ({ review: -n, published: n, 'topics.confident': n }); sign -1 undoes it. */
@@ -141,7 +215,7 @@ function genericTopicWords() {
   const n = new Map(); topicTree().flatMap(dm => dm.children).forEach(t => new Set(tokens(t.name)).forEach(w => n.set(w, (n.get(w) || 0) + 1)));
   return new Set([...n].filter(([, c]) => c > 1).map(([w]) => w));
 }
-/** Taxonomy (Knowledge Studio → Taxonomy): on each topic a workspace admin keeps keywords and synonyms (the same signal),
+/** Topics (Knowledge Studio → Topics): on each topic a workspace admin keeps keywords and synonyms (the same signal),
     optional rules on where a file comes from, and example documents. Guidance (t.guidance) is free text the assistant reads
     with the rest; the mock matcher below doesn't use it. */
 const topicKeywords = t => (t?.keywords || []).map(k => String(k).trim()).filter(Boolean);
@@ -166,7 +240,7 @@ function ruleMatches(r, doc) {
   const v = norm(r.value), vals = ruleValues(r.field, doc).filter(Boolean).map(norm);
   return !!v && (r.op === 'is' ? vals.some(x => x === v) : vals.some(x => x.includes(v)));
 }
-/** "folder path contains “Chargebacks”" — a rule in words (Taxonomy, Review's evidence). */
+/** "folder path contains “Chargebacks”" — a rule in words (Topics, Review's evidence). */
 const ruleText = r => `${RULE_FIELDS[r.field].toLowerCase()} ${RULE_OPS[r.op]} “${r.field === 'source' ? ruleSourceName(r.value) : r.value}”`;
 /** Title similarity (shared words over all words) — duplicates and topic examples. */
 function titleSim(a, b) {
@@ -178,15 +252,16 @@ const phrase = s => ' ' + fold(s).replace(/[^a-z0-9]+/g, ' ').trim() + ' ';
 /** Topic suggestions from these signals, strongest first: a rule on where the file comes from, keywords or synonyms found
     in the title or note, distinctive words of the topic name, the topics of similar published documents, a title close to
     one of the topic's examples, and what the target collection mostly holds. `doc` ({ name, path, type, source }) is
-    needed for rules and examples; without it they don't count.
+    needed for rules and examples; without it they don't count. `only` (a Set of topic ids) limits the candidates — a
+    processing run's chosen topics.
     Returns [{id, score, why:{keywords[], synonyms[], name, similar, example, rule, base}}] (best first, max 3) — `why` is shown to the reviewer. */
-function topicMatches(text, kb, similar = [], doc = null) {
+function topicMatches(text, kb, similar = [], doc = null, only = null) {
   const words = new Set(tokens(text)), stems = new Set([...words].map(w => w.slice(0, 5))), generic = genericTopicWords(), hay = phrase(text);
   const kbDocs = kb ? docsIn(kb.id) : [];
   const share = id => (kbDocs.length ? kbDocs.filter(x => res(x).topics.includes(id)).length / kbDocs.length : 0);
   const fromSimilar = new Map();
   similar.forEach(s => res(s.doc).topics.forEach(id => { if ((fromSimilar.get(id)?.sim || 0) < s.sim) fromSimilar.set(id, { sim: s.sim, doc: s.doc.id }); }));
-  const leaves = topicTree().flatMap(dm => dm.children);
+  const leaves = topicTree().flatMap(dm => dm.children).filter(t => !only || only.has(t.id));
   const found = k => phrase(k).trim() && hay.includes(phrase(k));
   const scored = leaves.map(t => {
     const tw = tokens(t.name).filter(w => !generic.has(w)), key = tw.length ? tw : tokens(t.name);
@@ -204,7 +279,7 @@ function topicMatches(text, kb, similar = [], doc = null) {
   const top = leaves.map(t => ({ id: t.id, score: share(t.id) })).sort((a, b) => b.score - a.score)[0];
   return top && top.score >= 0.25 ? [{ id: top.id, score: 0.3, why: { keywords: [], synonyms: [], name: false, similar: '', example: '', rule: null, base: true } }] : [];
 }
-/** A suggestion's evidence in words, strongest first (Review's Classification card, Taxonomy's test box). Documents the caller can't see aren't named. */
+/** A suggestion's evidence in words, strongest first (Publish's Classification card, the rules' test box). Documents the caller can't see aren't named. */
 function topicEvidence(w = {}) {
   const o = w.similar && docById(w.similar), ex = w.example && docById(w.example);
   const q = list => list.map(k => `“${k}”`).join(', ');
@@ -219,13 +294,60 @@ function topicEvidence(w = {}) {
     w.base && !w.keywords?.length && !w.synonyms?.length && !w.name && !w.rule && 'common in this collection',
   ].filter(Boolean);
 }
-/** Documents from sources that publish automatically skip review, so the assistant applies its confident taxonomy
-    matches itself (a rule, keywords, synonyms or the topic's own name; at most two). The rest stay untagged and show in Review → Missing details. */
-function autoClassify(d) {
+/** How sure the pipeline is of a match (topicMatches): weak evidence stays below 60 %, a rule or several keywords near the top. */
+const matchConf = (d, x) => (x.score < 0.5 ? conf(d.id + x.id, 0.48, 0.6) : Math.round(Math.min(0.97, conf(d.id + x.id, 0.66, 0.88) + (x.score > 1.2 ? 0.07 : 0)) * 100) / 100);
+/** The topics the pipeline applies by itself: matches with real evidence (a rule, keywords, synonyms or the topic's own
+    name) at or above the workspace's threshold, at most two. What it's less sure of is published without a topic and
+    waits in Topics → Suggestions. `ctx` is a processing run's classification context: { topics: [ids] (only these are
+    candidates; empty = all), note (read with the title, as the assistant would read it with the file) }. */
+function pipelineTopics(d, ctx = null) {
+  const only = ctx?.topics?.length ? new Set(ctx.topics) : null, text = ctx?.note ? `${d.name} ${ctx.note}` : d.name;
+  return topicMatches(text, kbById(d.kb), similarDocs(d), d, only)
+    .filter(x => (x.why.rule || x.why.keywords.length || x.why.synonyms.length || x.why.name) && matchConf(d, x) >= classThreshold()).slice(0, 2).map(x => x.id);
+}
+/** Classify a document nobody chose topics for (sources' syncs, processing runs). With a context, topics the pipeline
+    chose before are chosen again within it; topics a person chose always stay. The context stays on the document
+    (`classCtx`), so a later change to the topics re-checks it within the same choices. */
+function autoClassify(d, ctx = null) {
+  if (ctx && d.topics?.length && topicsByPipeline(d)) d.topics = [];
   if (d.topics?.length) return [];
-  const ids = topicMatches(d.name, kbById(d.kb), similarDocs(d), d).filter(x => x.why.rule || x.why.keywords.length || x.why.synonyms.length || x.why.name).slice(0, 2).map(x => x.id);
+  if (ctx) d.classCtx = ctx; else delete d.classCtx;
+  const ids = pipelineTopics(d, ctx);
   if (ids.length) { d.topics = ids; d.classifiedBy = 'assistant'; }
   return ids;
+}
+/** Processed, published documents whose topics the pipeline chose or never found: what a change to the topics re-checks
+    (a document that isn't processed hasn't been classified yet). */
+const reclassifiable = () => curatedDocs().filter(d => stageOf(d) === 'published' && d.status === 'ready' && (topicsByPipeline(d) || !d.topics?.length));
+/** The topics changed (`before`: the topics as they were): classify again the published documents whose
+    topics the pipeline chose (people's choices stay), and move those whose result the change actually alters. No indexing
+    again: topics live in the index's metadata, not in the passages' text. The documents show as Classifying for a moment.
+    Returns { checked, changed: [[doc, before, after, classifiedBy]], revert() } and finishes on its own (onDone);
+    revert() puts the topics back (before or after it finished). */
+function reclassifyPublished(before, onDone) {
+  const docs = reclassifiable(), now = D.topics;
+  D.topics = before;
+  const old = new Map(docs.map(d => [d, pipelineTopics(d, d.classCtx).join()]));
+  D.topics = now;
+  const changed = [];
+  docs.forEach(d => {
+    const next = pipelineTopics(d, d.classCtx), was = d.topics ? [...d.topics] : undefined;
+    if (next.length && next.join() !== old.get(d) && next.join() !== (was || []).join()) changed.push([d, was, next, d.classifiedBy]);
+    d.reclassifying = true;
+  });
+  let reverted = false;
+  setTimeout(() => {
+    docs.forEach(x => delete x.reclassifying);
+    if (reverted) return;
+    changed.forEach(([x, , next]) => { x.topics = next; x.classifiedBy = 'assistant'; });
+    onDone?.(); refresh();
+  }, 1600);
+  const revert = () => {
+    reverted = true;
+    docs.forEach(x => delete x.reclassifying);
+    changed.forEach(([x, was, , by]) => { if (was) x.topics = was; else delete x.topics; if (by) x.classifiedBy = by; else delete x.classifiedBy; });
+  };
+  return { checked: docs.length, changed, revert };
 }
 const titleWords = name => new Set(tokens(String(name).replace(/\.[a-z0-9]+$/i, '')).filter(w => !/^(v\d+|draft|update|updated|copy|final|new|\d{4})$/.test(w)));
 /** Similar published documents by title words (possible duplicate or earlier version). */
@@ -248,7 +370,7 @@ function aiOf(d) {
   const kb = kbById(d.kb), text = [d.name, d.submission?.note, c?.summary, d.summary].filter(Boolean).join(' ');
   const kind = c?.kind || d.kind || inferKind(d);
   const similar = similarDocs(d);
-  const matched = topicMatches(text, kb, similar, d).map(x => ({ id: x.id, why: x.why, conf: x.score < 0.5 ? conf(d.id + x.id, 0.48, 0.6) : Math.round(Math.min(0.97, conf(d.id + x.id, 0.66, 0.88) + (x.score > 1.2 ? 0.07 : 0)) * 100) / 100 }));
+  const matched = topicMatches(text, kb, similar, d).map(x => ({ id: x.id, why: x.why, conf: matchConf(d, x) }));
   const topics = c ? c.topics.filter(id => topicById(id)).map(id => { const m = matched.find(x => x.id === id); return { id, why: { ...(m?.why || {}), contributor: true }, conf: m?.conf ?? 1 }; }) : matched;
   const proposed = [];
   PROPOSAL_RULES.forEach(([re, name, parents]) => {
@@ -262,6 +384,7 @@ function aiOf(d) {
   else if (sim.length) flags.push({ type: 'duplicate', doc: sim[0].doc.id, sim: sim[0].sim, text: `Looks like “${sim[0].doc.name}” (${Math.round(sim[0].sim * 100)}% similar title)` });
   if (PERSONAL_RE.test(text)) flags.push({ type: 'personal', text: 'May contain personal data. Check before publishing.' });
   if (['png', 'jpg', 'jpeg', 'zip'].includes(d.type)) flags.push({ type: 'format', text: 'This file type can’t be searched; people could only download it.' });
+  else if (d.error) flags.push({ type: 'unreadable', text: d.error });
   const k = kindMeta(kind).label;
   d.ai = {
     status: 'done', at: Date.now(),
@@ -347,7 +470,7 @@ function submitFiles(files, { kb, note = '', versionOf } = {}) {
   return files.map(f => {
     const target = kbById(base?.kb || f.kb || kb) || suggestKb(f.name);
     const d = {
-      id: uid('d'), kb: target?.id, name: f.name, type: (f.type || f.name.split('.').pop() || 'file').toLowerCase(), size: Math.round(f.size || 120e3),
+      id: uid('d'), kb: target?.id, ...(f.folder && target?.id === f.kb ? { folder: f.folder } : {}), name: f.name, type: (f.type || f.name.split('.').pop() || 'file').toLowerCase(), size: Math.round(f.size || 120e3),
       status: 'pending', stage: 'review', source: 'upload', updated: Date.now(), addedBy: me().name, pages: Math.max(1, Math.round((f.size || 120e3) / 9e4) % 60 || 3), passages: 0, error: f.error || '',
       submission: { by: me().id, at: Date.now(), note: note.trim(), kbBy: base || f.kb || kb || f.confirmed ? 'contributor' : 'ai', ...(versionOf ? { versionOf } : {}), ...(f.confirmed ? { confirmed: f.confirmed } : {}), events: [{ at: Date.now(), by: me().id, kind: 'submitted', text: note.trim() }] },
     };
@@ -371,7 +494,10 @@ function resubmit(d, { note = '', file } = {}) {
 }
 /** Contributor withdraws a submission (tombstone). */
 function withdraw(d) { d.archived = true; event(d, 'withdrawn'); lifeAudit('Withdrew a submission', d.name); }
-/** Reviewer approves with the final classification and publishes. decision: { kind, topics, kb, summary, acceptProposals:[ids], asVersionOf }. Returns the published document. */
+/** Reviewer approves with the final classification and publishes. decision: { kind, topics, kb, summary, acceptProposals:[ids],
+    asVersionOf, teach, process }. `process` (default true): start processing it now, so it becomes searchable; untick it and
+    it's published but Not processed until someone processes it from Documents. `teach`: record a changed topic as a
+    correction for the topics. Returns the published document. */
 function approveAndPublish(d, decision = {}) {
   const ai = aiOf(d);
   (decision.acceptProposals || []).map(proposalById).filter(Boolean).forEach(p => { const t = acceptProposal(p); if (t) (decision.topics ??= ai.topics.map(x => x.id)).push(t.id); });
@@ -379,29 +505,34 @@ function approveAndPublish(d, decision = {}) {
     kind: decision.kind || ai.kind.value,
     topics: [...new Set(decision.topics || ai.topics.map(t => t.id))],
     summary: (decision.summary ?? ai.summary) || undefined,
+    classifiedBy: 'person',
   };
+  if (decision.teach) recordCorrection(d, ai.topics.map(t => t.id), meta.topics);
+  const process = decision.process !== false && !UNPROCESSABLE.includes(d.type);
+  const status = UNPROCESSABLE.includes(d.type) ? 'unsupported' : 'pending';
   const versionOf = decision.asVersionOf || d.submission?.versionOf;
   const orig = versionOf && docById(versionOf);
   event(d, 'approved', decision.note || '');
   if (orig) {
     const r = res(orig);
     orig.versions = [{ v: r.version + 1, at: Date.now(), by: contributorName(d), note: decision.note || d.submission?.note || 'New version' }, ...r.versions];
-    Object.assign(orig, { version: r.version + 1, size: d.size, type: d.type, status: 'pending', error: d.error || '', updated: Date.now(), ...meta });
+    Object.assign(orig, { version: r.version + 1, size: d.size, type: d.type, status, error: d.error || '', updated: Date.now(), ...meta });
     Object.assign(d, { stage: 'merged', mergedInto: orig.id });
     lifeAudit('Published a new version', orig.name);
-    X.processDocs?.([orig], { quiet: true });
+    if (process) X.processDocs?.([orig], { quiet: true });
     return orig;
   }
   if (decision.kb && decision.kb !== d.kb) d.kb = decision.kb;
-  Object.assign(d, { stage: 'published', status: 'pending', ...meta });
+  Object.assign(d, { stage: 'published', status, ...meta });
   lifeAudit('Approved and published a document', d.name);
-  X.processDocs?.([d], { quiet: true });
+  if (process) X.processDocs?.([d], { quiet: true });
   return d;
 }
 function requestChanges(d, text) { d.stage = 'changes'; event(d, 'changes', text); lifeAudit('Requested changes', d.name); }
 function rejectSubmission(d, text) { d.stage = 'rejected'; event(d, 'rejected', text); lifeAudit('Declined a submission', d.name); }
 function unpublish(d, text = '') { d.stage = 'unpublished'; event(d, 'unpublished', text); lifeAudit('Unpublished a document', d.name); }
-function republish(d) { d.stage = 'published'; event(d, 'published'); lifeAudit('Published a document again', d.name); X.processDocs?.([d], { quiet: true }); }
+/** Publishing again keeps how far it was processed (unpublishing never removes the index). */
+function republish(d) { d.stage = 'published'; event(d, 'published'); lifeAudit('Published a document again', d.name); }
 /** Restore a snapshot taken with snapDoc (Undo for any lifecycle change). */
 const snapDoc = d => JSON.parse(JSON.stringify(d));
 function restoreDoc(d, snap) { Object.keys(d).forEach(k => delete d[k]); Object.assign(d, snap); }

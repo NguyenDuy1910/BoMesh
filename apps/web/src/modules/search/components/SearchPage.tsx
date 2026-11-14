@@ -89,7 +89,7 @@ export function SearchPage() {
   const ask = () => q && router.push(`/chat?q=${encodeURIComponent(q)}&send=1`);
 
   return (
-    <Page narrow>
+    <Page width="narrow">
       <PageHeader title="Search" />
       <div className="srch-top">
         <SearchInput value={text} onChange={setText} label="Search" placeholder="Search documents, collections and conversations" size="md" fullWidth autoFocus />

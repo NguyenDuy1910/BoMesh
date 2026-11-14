@@ -29,7 +29,7 @@
     // Each section is its own page (the sidebar lists it under Knowledge); no header action: each section has its own.
     const head = X.res.hubHeader(tab);
     const body = { saved: savedTab, files: filesTab, lists: collectionsTab }[tab](kb);
-    return `<div class="page lib">${head}${body}</div>`;
+    return `<div class="page page--wide lib">${head}${body}</div>`;
   };
 
   /* ═══════════════ My contributions: what you shared, where it stands, what to do next ═══════════════ */
@@ -64,7 +64,7 @@
         })), 'lib-list');
       },
     });
-    return `<div class="page lib">${head}${body}</div>`;
+    return `<div class="page page--wide lib">${head}${body}</div>`;
   };
   /** ?open=<id> (Home, Inbox, the Reader's Track, the submit toast) opens that contribution once, then leaves the address clean. */
   AFTER.contributions = ({ query }) => {

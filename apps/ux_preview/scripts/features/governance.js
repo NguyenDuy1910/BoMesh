@@ -1,15 +1,15 @@
-/* Knowledge Studio → Review, the "To keep right" queues (rendered inside the Review workbench, curation.js): keeps
-   published documents trustworthy and findable — topics to confirm (first syncs at scale: published, but filed with
-   low confidence or without a topic; decided per group, D.classGroups), re-verification cycles, missing details
-   (topics, owner, summary) and possible duplicates. The topics themselves are the taxonomy (features/masterdata.js).
+/* Knowledge Studio → Topics → Suggestions and Documents → Quality (bodies rendered by curation.js).
+   Suggestions: what the pipeline wasn't sure of and what people taught it — topics the assistant proposes (workspace
+   admins decide; others see them read-only), keywords from reviewers' corrections (admins; features/masterdata.js), first
+   syncs' topic groups to confirm (published, but filed with low confidence or without a topic; D.classGroups) and processed
+   documents without a topic. Quality: re-verification cycles, missing owner or summary, possible duplicates.
    Scope: published documents in the collections the caller can edit (admins: all).
-   Exports: X.gov = { queues, counts(), queue(id) }, X.khReview(). Actions: kh-*, cg-*.
-   Menus: kh-review, kh-topic, kh-dup, cg-more (its Move to another topic… opens the topic list). Drawer: kh-dup. Models: core/catalog.js, core/lifecycle.js. */
+   Exports: X.gov = { counts(), suggestions(), suggestionCount(), queue(part) }, X.khReview().
+   Actions: kh-*, cg-*. Menus: kh-review, kh-topic, kh-dup, cg-more (its Move to another topic… opens the topic list).
+   Drawer: kh-dup. Models: core/catalog.js, core/lifecycle.js. */
 (() => {
   'use strict';
 
-  /** Review queue ids, in the order the queue chooser lists them. */
-  const QUEUES = ['confirm', 'reverify', 'details', 'duplicates'];
   function audit(action, target) {
     D.audit.unshift({ id: uid('ev'), at: Date.now(), actor: me().id, action, type: 'Knowledge', target, outcome: 'success', ip: '10.4.12.30', device: 'Chrome on macOS' });
   }
@@ -26,7 +26,7 @@
     never: { label: 'Never verified', icon: 'circle-dashed', rank: 1 },
   };
   /** { d, reason, note, due } when a document needs its owner to re-verify it, else null.
-      A document that changed at its source is a publishing state (fix: Publish update in Review → Publishing problems), not a trust check. */
+      A document that changed at its source is a processing state (fix: Process the update in Documents → Issues), not a trust check. */
   function reviewItem(d) {
     if (d.status === 'outdated') return null;
     const t = trustOf(d);
@@ -38,29 +38,50 @@
     .sort((a, b) => REASONS[a.reason].rank - REASONS[b.reason].rank || (a.due || 9e15) - (b.due || 9e15) || a.d.name.localeCompare(b.d.name));
 
   const GAPS = { topic: { label: 'No topic', icon: 'tag', noun: 'a topic' }, owner: { label: 'No owner', icon: 'user', noun: 'an owner' }, summary: { label: 'No summary', icon: 'note', noun: 'a summary' } };
-  const detailItems = (pool = scope()) => pool.map(d => ({ d, gaps: metadataGaps(d) })).filter(x => x.gaps.length);
+  /** Documents missing some of `kinds` (a topic is Suggestions', an owner or summary Quality's). A document that isn't
+      processed hasn't been classified, so it isn't "without a topic" yet. */
+  const detailItems = (pool = scope(), kinds = ['owner', 'summary']) => pool.filter(d => !kinds.includes('topic') || d.status === 'ready').map(d => ({ d, gaps: metadataGaps(d).filter(g => kinds.includes(g)) })).filter(x => x.gaps.length);
 
   X.khReview = () => (can('knowledge.manage') ? reviewItems() : []);
 
-  /* ═══════════════ Review queues ═══════════════ */
-  /** One line above each queue: what it finds and what to do about it (counts live on the queue chooser). */
+  /* ═══════════════ Topics → Suggestions and Documents → Quality ═══════════════ */
+  /** One line above each Quality list: what it finds and what to do about it (counts live on its tabs). */
   const HINT = {
-    confirm: 'Published, but filed with low confidence. Confirm in bulk; nobody is blocked meanwhile.',
     reverify: 'Verification expired or never happened. Verify what’s still right, or ask the owner to check.',
-    details: 'Documents without a topic, owner or summary are harder to find. Fill in what’s missing.',
+    details: 'Documents without an owner or a summary are harder to trust. Fill in what’s missing.',
     duplicates: 'Near-identical documents compete in answers. Compare each pair and keep one.',
   };
-  /** Items per queue: documents in topic groups to confirm, documents due, documents missing details, duplicate pairs. */
+  /** Items per list: documents in topic groups to confirm, documents without a topic, documents due, documents missing an
+      owner or summary, duplicate pairs. */
   function counts() {
-    if (!can('knowledge.manage')) return { confirm: 0, reverify: 0, details: 0, duplicates: 0 };
+    if (!can('knowledge.manage')) return { confirm: 0, notopic: 0, reverify: 0, details: 0, duplicates: 0 };
     const pool = scope();
-    return { confirm: openClassGroups().reduce((s, g) => s + g.n, 0), reverify: reviewItems(pool).length, details: detailItems(pool).length, duplicates: duplicateCandidates().length };
+    return { confirm: openClassGroups().reduce((s, g) => s + g.n, 0), notopic: detailItems(pool, ['topic']).length, reverify: reviewItems(pool).length, details: detailItems(pool).length, duplicates: duplicateCandidates().length };
   }
-  /** One queue's body (the Review workbench owns the page state and the chooser). */
+  /** One Quality list (the page owns the tabs). */
   function queue(id) {
     const pool = scope();
-    const body = id === 'confirm' ? tabConfirm(openClassGroups()) : id === 'reverify' ? tabReview(reviewItems(pool)) : id === 'details' ? tabDetails(detailItems(pool)) : tabDups(duplicateCandidates());
+    const body = id === 'reverify' ? tabReview(reviewItems(pool)) : id === 'details' ? tabDetails(detailItems(pool)) : tabDups(duplicateCandidates());
     return `<div class="kh gov"><p class="gov-summary">${esc(HINT[id])}</p>${body}</div>`;
+  }
+  /** Decisions about the topics themselves (workspace admins): proposed topics and keywords from corrections. */
+  const topicDecisions = () => (canManageTaxonomy() ? openProposals().length + correctionSuggestions().length : 0);
+  /** What Suggestions counts: topic decisions, topic groups to confirm (one each) and documents without a topic. */
+  const suggestionCount = () => (can('knowledge.manage') ? topicDecisions() + openClassGroups().length + detailItems(scope(), ['topic']).length : 0);
+  /** Suggestions: biggest decisions first — a topic to create files every document that mentions it, a keyword from
+      corrections re-files what reviewers keep moving, a group confirms hundreds at once, then documents one by one.
+      Nothing here holds anything back from people. */
+  function suggestions() {
+    const props = X.md?.proposals?.() || '', learn = canManageTaxonomy() ? X.md?.learn?.() || '' : '';
+    const groups = openClassGroups(), loose = detailItems(scope(), ['topic']);
+    if (!props && !learn && !groups.length && !loose.length) return emptyState({ icon: 'tag', tone: 'success', title: 'No suggestions', desc: 'Topics the pipeline wasn’t sure of, new topics it proposes and keywords from reviewers’ corrections show up here.', boxed: true });
+    const parts = [
+      props && section('New topics the assistant proposes', props, { desc: esc('Documents keep mentioning them and no topic covers them. Accepting adds the topic and tags those documents.') }),
+      learn && section('Keywords from reviewers’ corrections', learn, { desc: esc('When reviewers move documents to another topic, the words their titles share are keyword candidates. Nothing changes until you add one.') }),
+      groups.length && section('Topics to confirm', tabConfirm(groups), { desc: esc('Published by a first sync below the confidence threshold, or without a topic. Confirm in bulk.') }),
+      loose.length && section('Without a topic', tabDetails(loose, 'khTopicless'), { desc: esc('Processed, but no topic matched well enough.') }),
+    ].filter(Boolean);
+    return `<div class="kh gov gov--classify">${parts.join('')}</div>`;
   }
 
   /* ── Due for re-verification ── */
@@ -127,35 +148,35 @@
     toast(`Verified ${plural(docs.length, 'document')} until ${fmtDate(at + 180 * DAY)}`, { action: { label: 'Undo', run: () => { prev.forEach(([d, v]) => { if (v) d.verify = v; else delete d.verify; }); refresh(); } } });
   };
 
-  /* ── Missing details (metadata quality) ── */
-  function tabDetails(all) {
-    const u = ui('khDetails', { gap: '', kb: '', sel: {}, sug: {} });
-    if (!all.length) return emptyState({ icon: 'check-circle', tone: 'success', title: 'Every document is described', desc: 'Documents you look after all have a topic, an owner and a summary.', boxed: true });
+  /* ── Missing details: an owner or summary (Upkeep), or a topic (Classification) ── */
+  function tabDetails(all, K = 'khDetails') {
+    const u = ui(K, { gap: '', kb: '', sel: {} }), sug = ui('khDetails', { sug: {} }).sug ??= {};
+    if (!all.length) return emptyState({ icon: 'check-circle', tone: 'success', title: 'Every document is described', desc: 'Documents you look after all have an owner and a summary.', boxed: true });
     pruneSel(u, new Set(all.map(x => x.d.id)));
     const counts = Object.fromEntries(Object.keys(GAPS).map(g => [g, all.filter(x => x.gaps.includes(g)).length]));
     if (u.gap && !GAPS[u.gap]) u.gap = '';
     const gapOpts = Object.keys(GAPS).filter(g => counts[g] || g === u.gap).map(g => [g, `${GAPS[g].label} · ${fmtNum(counts[g])}`]);
     const kbOpts = [...new Map(all.map(x => [x.d.kb, kbName(x.d)])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
-    const toolbar = needsTools(all.length, 'khDetails', ['gap', 'kb']) ? `<div class="toolbar">${searchField({ uiKey: 'khDetails', placeholder: 'Search documents' })}${gapOpts.length > 1 || u.gap ? filterButton('Missing', 'khDetails', 'gap', gapOpts) : ''}${kbOpts.length > 1 || u.kb ? filterButton('Collection', 'khDetails', 'kb', kbOpts) : ''}${clearFilters('khDetails', ['gap', 'kb'])}</div>` : '';
-    let rows = all.filter(x => (!u.gap || x.gaps.includes(u.gap)) && (!u.kb || x.d.kb === u.kb) && matchesQ('khDetails', x.d.name, kbName(x.d)));
-    rows = applySort(rows, 'khDetails', { name: x => x.d.name.toLowerCase(), updated: x => x.d.updated });
+    const toolbar = needsTools(all.length, K, ['gap', 'kb']) ? `<div class="toolbar">${searchField({ uiKey: K, placeholder: 'Search documents' })}${gapOpts.length > 1 || u.gap ? filterButton('Missing', K, 'gap', gapOpts) : ''}${kbOpts.length > 1 || u.kb ? filterButton('Collection', K, 'kb', kbOpts) : ''}${clearFilters(K, ['gap', 'kb'])}</div>` : '';
+    let rows = all.filter(x => (!u.gap || x.gaps.includes(u.gap)) && (!u.kb || x.d.kb === u.kb) && matchesQ(K, x.d.name, kbName(x.d)));
+    rows = applySort(rows, K, { name: x => x.d.name.toLowerCase(), updated: x => x.d.updated });
     if (!rows.length) {
-      if (u.q || u.kb) return toolbar + noMatches('khDetails', ['gap', 'kb'], 'documents');
+      if (u.q || u.kb) return toolbar + noMatches(K, ['gap', 'kb'], 'documents');
       return toolbar + emptyState({ icon: 'check-circle', tone: 'success', title: `Every document has ${GAPS[u.gap]?.noun || 'its details'}`, boxed: true, compact: true });
     }
-    const page = paginate(rows, 'khDetails', 20);
-    const head = selAllCheck('khDetails', page.map(x => x.d.id)) + sortHead('Document', 'name', 'khDetails') + th('Missing') + sortHead('Updated', 'updated', 'khDetails', 'table__column--hide-sm') + th('<span class="sr-only">Actions</span>', 'table__column--actions');
-    const bulk = bulkBar('khDetails', btn('Apply topic', { v: 'ghost', size: 'sm', icon: 'tag', iconRight: 'chevron-down', menu: 'kh-topic', data: { ids: selIds('khDetails').join(',') } }));
-    return toolbar + table({ label: 'Missing details', head, rows: page.map(x => detailRow(x, u)), foot: pager(rows.length, 'khDetails', 20) }) + bulk;
+    const page = paginate(rows, K, 20), topics = all.some(x => x.gaps.includes('topic'));
+    const head = selAllCheck(K, page.map(x => x.d.id)) + sortHead('Document', 'name', K) + th('Missing') + sortHead('Updated', 'updated', K, 'table__column--hide-sm') + th('<span class="sr-only">Actions</span>', 'table__column--actions');
+    const bulk = topics ? bulkBar(K, btn('Apply topic', { v: 'ghost', size: 'sm', icon: 'tag', iconRight: 'chevron-down', menu: 'kh-topic', data: { ids: selIds(K).join(',') } })) : '';
+    return toolbar + table({ label: topics ? 'Without a topic' : 'Missing details', head, rows: page.map(x => detailRow(x, u, K, sug)), foot: pager(rows.length, K, 20) }) + bulk;
   }
-  function suggestionsHtml(d, sug) {
-    if (!sug) return '';
-    const body = sug.length
-      ? `<span class="t-xs muted">Suggested</span>${sug.map(t => btn(topicName(t), { size: 'sm', v: 'secondary', icon: 'plus', act: 'kh-sug-accept', data: { id: d.id, topic: t } })).join('')}`
+  function suggestionsHtml(d, s) {
+    if (!s) return '';
+    const body = s.length
+      ? `<span class="t-xs muted">Suggested</span>${s.map(t => btn(topicName(t), { size: 'sm', v: 'secondary', icon: 'plus', act: 'kh-sug-accept', data: { id: d.id, topic: t } })).join('')}`
       : '<span class="t-xs muted">No suggestions</span>';
     return `<div class="kh-sug">${body}${iconBtn('x', 'Dismiss suggestions', { size: 'sm', act: 'kh-sug-close', data: { id: d.id } })}</div>`;
   }
-  function detailRow(x, u) {
+  function detailRow(x, u, K, sug) {
     const d = x.d, needsTopic = x.gaps.includes('topic');
     const gaps = x.gaps.map(g => chip(GAPS[g].label, { size: 'sm', icon: GAPS[g].icon, tone: g === u.gap ? 'warning' : 'default' })).join('');
     // Add topic (its menu starts with the assistant's suggestions); the pencil covers owner and summary.
@@ -163,23 +184,33 @@
       ? btn('Add topic', { v: 'secondary', size: 'sm', icon: 'tag', iconRight: 'chevron-down', menu: 'kh-topic', data: { ids: d.id } }) + iconBtn('pencil', 'Edit details', { size: 'sm', act: 'res-edit', data: { id: d.id } })
       : btn('Edit details', { v: 'secondary', size: 'sm', icon: 'pencil', act: 'res-edit', data: { id: d.id } });
     return `<tr class="table__row" data-act="cur-doc" data-id="${esc(d.id)}" tabindex="0">
-      ${selCheck('khDetails', d.id, 'Select ' + d.name)}
+      ${selCheck(K, d.id, 'Select ' + d.name)}
       <td class="table__cell table__cell--primary"><div class="row gap-12">${fileIcon(d.type)}<div class="grow kh-min"><div class="cell-title truncate" data-tip="${esc(d.name)}">${esc(d.name)}</div><div class="cell-sub truncate">${esc(kbName(d))}</div></div></div></td>
-      <td class="table__cell kh-gaps"><div class="kh-chips">${gaps}</div>${needsTopic ? suggestionsHtml(d, u.sug[d.id]) : ''}</td>
+      <td class="table__cell kh-gaps"><div class="kh-chips">${gaps}</div>${needsTopic ? suggestionsHtml(d, sug[d.id]) : ''}</td>
       <td class="table__cell table__cell--hide-sm muted res-nowrap" data-tip="${esc(fmtDateTime(d.updated))}">${rel(d.updated)}</td>
       <td class="table__cell table__cell--actions"><div class="row gap-4 none">${actions}</div></td></tr>`;
   }
 
-  /** Add a topic to documents (keeps any topics they inherit from their collection). */
+  /** Add a topic to documents (keeps any topics they inherit from their collection). A person filing a document the pipeline
+      couldn't is a correction too: it's recorded for the topics (Topics → Suggestions). */
   function applyTopic(ids, tid) {
     const docs = ids.map(docById).filter(d => d && X.res.canEditRes(d) && !res(d).topics.includes(tid));
     if (!docs.length) { toast(`Already tagged with “${topicName(tid)}”`, { tone: 'accent' }); return; }
-    const prev = docs.map(d => [d, d.topics ? [...d.topics] : undefined]);
-    docs.forEach(d => { d.topics = [...res(d).topics, tid]; });
-    const u = ui('khDetails'); u.sel = {}; docs.forEach(d => { if (u.sug) delete u.sug[d.id]; });
+    const prev = docs.map(d => [d, d.topics ? [...d.topics] : undefined, d.classifiedBy]), corrections = (D.classCorrections || []).length;
+    docs.forEach(d => {
+      if (topicsByPipeline(d) || !d.topics?.length) recordCorrection(d, d.topics || [], [...res(d).topics, tid]);
+      d.topics = [...res(d).topics, tid]; d.classifiedBy = 'person';
+    });
+    const added = (D.classCorrections || []).length - corrections;
+    ['khDetails', 'khTopicless'].forEach(k => { if (S.ui[k]) S.ui[k].sel = {}; });
+    docs.forEach(d => { delete ui('khDetails').sug?.[d.id]; });
     audit(docs.length === 1 ? 'Added a topic to a document' : `Added a topic to ${plural(docs.length, 'document')}`, `${topicName(tid)} → ${docs.length === 1 ? docs[0].name : plural(docs.length, 'document')}`);
     refresh();
-    toast(docs.length === 1 ? `Added “${topicName(tid)}” to ${docs[0].name}` : `Added “${topicName(tid)}” to ${plural(docs.length, 'document')}`, { action: { label: 'Undo', run: () => { prev.forEach(([d, t]) => { if (t) d.topics = t; else delete d.topics; }); refresh(); } } });
+    toast(docs.length === 1 ? `Added “${topicName(tid)}” to ${docs[0].name}` : `Added “${topicName(tid)}” to ${plural(docs.length, 'document')}`, { action: { label: 'Undo', run: () => {
+      prev.forEach(([d, t, by]) => { if (t) d.topics = t; else delete d.topics; if (by) d.classifiedBy = by; else delete d.classifiedBy; });
+      if (added > 0) D.classCorrections.splice(0, added);
+      refresh();
+    } } });
   }
   MENUS['kh-topic'] = el => {
     const ids = (el.dataset.ids || '').split(',').filter(Boolean); if (!ids.length) return [];
@@ -202,8 +233,8 @@
     }));
     return out.sort((a, b) => b[1] - a[1]).slice(0, 3).map(x => x[0]);
   }
-  A['kh-suggest'] = el => { const d = docById(el.dataset.id); if (!d) return; ui('khDetails').sug[d.id] = suggestTopics(d); refresh(); };
-  A['kh-sug-close'] = el => { delete ui('khDetails').sug[el.dataset.id]; refresh(); };
+  A['kh-suggest'] = el => { const d = docById(el.dataset.id); if (!d) return; (ui('khDetails').sug ??= {})[d.id] = suggestTopics(d); refresh(); };
+  A['kh-sug-close'] = el => { delete ui('khDetails').sug?.[el.dataset.id]; refresh(); };
   A['kh-sug-accept'] = el => applyTopic([el.dataset.id], el.dataset.topic);
 
   /* ── Possible duplicates ── */
@@ -346,11 +377,11 @@
         <div class="cg-prop__kw" translate="no">${kws.map(k => chip(k, { size: 'sm' })).join('')}</div></div>
       ${admin ? `<div class="cg-prop__acts">${btn('Create topic & tag', { v: 'secondary', size: 'sm', icon: 'plus', act: 'cg-create', data: { id: g.id, name } })}</div>` : ''}</li>`).join('');
     const rest = left ? `<div class="cg-rest">${ic('info', 'i-sm')}<span>${esc(`${fmtNum(left)} still without a topic`)}</span>${admin
-      ? `<span aria-hidden="true">—</span><a class="link" href="#${studioHref('taxonomy')}">add keywords in Taxonomy</a>`
-      : '<span class="muted">A workspace admin can add keywords in Taxonomy.</span>'}</div>` : '';
+      ? `<span aria-hidden="true">—</span><a class="link" href="#${topicsHref('topics')}">add keywords to your topics</a>`
+      : '<span class="muted">A workspace admin can add keywords to the topics.</span>'}</div>` : '';
     return `<section class="cg-card cg-card--none" aria-label="No topic">
       <div class="cg-card__head">${itemIcon('help', 'warning')}<div class="cg-card__main"><div class="cg-card__title"><span class="medium">No topic</span></div>
-        <div class="cg-card__meta"><span>${esc(plural(g.n, 'document'))}</span>${SEP}<span>No topic in the taxonomy matched</span></div></div></div>
+        <div class="cg-card__meta"><span>${esc(plural(g.n, 'document'))}</span>${SEP}<span>No topic matched</span></div></div></div>
       ${props.length ? `<div class="cg-props"><div class="t-label">The assistant suggests</div><ul class="cg-prop-list">${rows}</ul></div>` : ''}${rest}${sampleDisclosure(g)}</section>`;
   }
   function tabConfirm(groups) {
@@ -414,5 +445,5 @@
       toast(same ? `${plural(n, 'document')} are back in Topics to confirm` : `“${t.name}” removed`, { tone: 'accent' });
     } } });
   };
-  X.gov = { queues: QUEUES, counts, queue };
+  X.gov = { counts, suggestions, suggestionCount, queue };
 })();

@@ -90,7 +90,7 @@ export function WorkspacesPage() {
   const filtered = Boolean(q || status || template);
 
   return (
-    <Page>
+    <Page width="wide">
       <PageHeader
         title="Workspaces"
         chips={<PreviewChip tooltip={PREVIEW_TIP} />}

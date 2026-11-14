@@ -393,7 +393,7 @@ export function BrowsePage() {
   );
 
   return (
-    <Page className="cat">
+    <Page width="wide" className="cat">
       <KnowledgeHeader />
       {emptyCatalog ? (
         <EmptyKnowledge />

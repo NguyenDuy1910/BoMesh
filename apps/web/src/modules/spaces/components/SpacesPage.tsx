@@ -149,7 +149,7 @@ export function SpacesPage() {
   }
 
   return (
-    <Page>
+    <Page width="wide">
       <PageHeader
         title="Spaces"
         actions={

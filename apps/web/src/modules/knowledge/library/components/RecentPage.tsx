@@ -260,7 +260,7 @@ export function RecentPage() {
   }
 
   return (
-    <Page narrow>
+    <Page width="narrow">
       <PageHeader title="Recent" />
       {body}
     </Page>

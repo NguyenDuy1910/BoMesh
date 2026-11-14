@@ -141,7 +141,7 @@ function ProjectBody({ id }: { id: string }) {
   const model = useConversationModel(true);
   if (model.isPending || model.isError) {
     return (
-      <Page narrow className="proj">
+      <Page width="narrow" className="proj">
         <PageChrome title="Project" crumbs={[PROJECTS_CRUMB]} />
         {model.isError ? <ErrorState error={model.error} onRetry={model.refetch} /> : <SkeletonRows rows={4} />}
       </Page>
@@ -173,7 +173,7 @@ function ProjectBody({ id }: { id: string }) {
   }
   const { project, conversations } = view;
   return (
-    <Page narrow className="proj">
+    <Page width="narrow" className="proj">
       <PageChrome title={project.displayName} crumbs={[PROJECTS_CRUMB]} hero />
       <header className="proj-head">
         <span className="proj-head__icon" aria-hidden>

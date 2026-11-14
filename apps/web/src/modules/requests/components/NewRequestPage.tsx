@@ -87,7 +87,7 @@ function Catalog({ spaceId }: { spaceId: string }) {
     />
   );
   return (
-    <Page narrow className="rq-page">
+    <Page width="narrow" className="rq-page">
       <PageHeader
         title="New request"
         actions={
@@ -192,14 +192,14 @@ function NewRequestForm({ spaceId, typeId }: { spaceId: string; typeId: string }
     );
   if ((type.isError && !type.data) || (space.isError && !space.data))
     return (
-      <Page narrow>
+      <Page width="narrow">
         <PageChrome crumbs={crumbsBase} />
         <ErrorState error={type.error ?? space.error} onRetry={() => (void type.refetch(), void space.refetch())} />
       </Page>
     );
   if (!type.data || !space.data)
     return (
-      <Page narrow>
+      <Page width="narrow">
         <PageChrome crumbs={crumbsBase} />
         <SkeletonRows rows={6} />
       </Page>
@@ -349,7 +349,7 @@ function FormBody({ type: t, space: sp }: { type: RequestType; space: Space }) {
     );
 
   return (
-    <Page narrow className="rq-page">
+    <Page width="narrow" className="rq-page">
       <PageHeader
         title={t.displayName}
         heading={<span translate="no">{t.displayName}</span>}

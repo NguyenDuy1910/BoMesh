@@ -106,12 +106,19 @@ body { --frame-h: 100dvh; container: app / inline-size; position: relative; heig
 /* The rail's tooltips (Sidebar `useRailTip`, preview `data-tip`): a label floating to the right of the row. */
 .rail-tip { position: fixed; z-index: calc(var(--z-toast) + 1); transform: translateY(-50%); max-width: 260px; padding: 6px 10px; border-radius: var(--radius-xl); background: var(--overlay); color: var(--overlay-foreground); box-shadow: var(--overlay-shadow); font-size: 12px; line-height: 16px; white-space: nowrap; pointer-events: none; animation: fade 120ms; }
 
-/* Main: the content column (--page-max, --page-px) is chosen by the page's width class and shared by the top row. One gutter
-   (32 px desktop, 24 px tablet, 16 px phone) for every width, so switching pages never moves the left edge. */
-.main { --page-max: var(--content-max); --page-px: var(--space-8); display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; }
-.main:has(.page--narrow) { --page-max: 800px; }
-.main:has(.page--wide) { --page-max: none; }
-.main:has(.page--studio) { --page-max: 1680px; }
+/* Main and PageLayout (components/ui/Page.tsx, preview layout.css): every page takes the width its work needs, and the top
+   row follows it. One gutter (--page-px: 32 px desktop, 24 px tablet, 16 px phone) for every width, so switching pages never
+   moves the left edge.
+   - .page            centered: dashboards, entity and mixed pages (Overview, a collection, a request) — 1200 px.
+   - .page--narrow    form: settings, forms and one focused list (Settings, New request, New work, Recent, Search) — 800 px.
+   - .page--wide      workspace: tables, card grids, boards and split workbenches (Browse, Library, Studio, People, Activity,
+                      the Requests queue, Spaces, Work, platform tables) — the whole width between the gutters.
+   - .page--canvas    canvas: Home's Knowledge Atlas — full width; the page fills the screen and the canvas pans (home.css).
+   AI Chat and the Reader render no .page: they own their scrollers and centre a --layout-conversation column, with side
+   panels taking the extra width. */
+.main { --page-max: var(--layout-centered); --page-px: var(--space-8); display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; }
+.main:has(.page--narrow) { --page-max: var(--layout-form); }
+.main:has(:is(.page--wide, .page--canvas)) { --page-max: none; }
 .main:not(:has(.page)) { --page-max: none; --page-px: var(--space-4); }
 
 /* CompactHeader: one 48 px row on the page background. Context (trail › title · chip · status) left, actions then global

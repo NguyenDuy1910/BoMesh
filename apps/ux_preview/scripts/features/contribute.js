@@ -39,13 +39,14 @@
      Check the details (title, type, topics with their evidence, collection and who will see it, summary, flags) →
      Submit for review; what the contributor confirmed travels with the submission (submission.confirmed, read by aiOf).
      Upload to My files and Submit a new version stay one step. */
-  /** A['contribute']({dataset:{kb?, versionOf?, private?}}). kb preselects a base (a personal base means My files). */
+  /** A['contribute']({dataset:{kb?, folder?, versionOf?, private?}}). kb preselects a base (a personal base means My files);
+      folder (a collection's Contents) is where its files land when they stay in that collection. */
   A['contribute'] = el => {
     const ds = el?.dataset || {}, kb = kbById(ds.kb), base = ds.versionOf ? docById(ds.versionOf) : null;
     if (base && (!canShare() || !canSeeDoc(base))) { toast('You can’t submit a new version of this document', { tone: 'danger' }); return; }
     const share = !!base || (canShare() && ds.private !== '1' && !kb?.personal);
     if (!share && !personalKb()) { toast('You can’t add files to any collection', { tone: 'danger' }); return; }
-    S.ui.ctb = { mode: share ? 'share' : 'private', step: 'pick', meta: {}, kb: kb && contributionTargets().includes(kb) ? kb.id : '', note: '', files: [], busy: false, versionOf: base?.id || '', touched: false, showNote: false };
+    S.ui.ctb = { mode: share ? 'share' : 'private', step: 'pick', meta: {}, kb: kb && contributionTargets().includes(kb) ? kb.id : '', folder: kb && folderById(ds.folder)?.kb === kb.id ? ds.folder : '', note: '', files: [], busy: false, versionOf: base?.id || '', touched: false, showNote: false };
     openModal('contribute', {});
   };
   M['contribute'] = () => {
@@ -136,7 +137,7 @@
   function submittedToast(docs, msg) {
     const review = can('knowledge.manage') && docs.every(d => canReviewKb(kbById(d.kb)));
     toast(msg || (docs.length === 1 ? 'Submitted for review' : `Submitted ${plural(docs.length, 'document')} for review`), {
-      action: review ? { label: 'Review now', run: () => go('/studio?tab=review&sel=' + docs[0].id) } : { label: 'Open', run: () => go(href(docs.length === 1 ? docs[0].id : '')) },
+      action: review ? { label: 'Review now', run: () => go(docsHref('review', { sel: docs[0].id })) } : { label: 'Open', run: () => go(href(docs.length === 1 ? docs[0].id : '')) },
     });
   }
 
@@ -177,7 +178,7 @@
     return {
       size: 'lg', icon: 'sparkles', title: 'Analyzing',
       desc: 'The assistant suggests a title, type, topics and collection. You check them next.',
-      body: `<div class="ctb-analyzing" role="status" aria-live="polite">${spinner()}<span>Reading the file and matching it against ${esc(ws)}’s taxonomy…</span></div>${list(rows)}`,
+      body: `<div class="ctb-analyzing" role="status" aria-live="polite">${spinner()}<span>Reading the file and matching it against ${esc(ws)}’s topics…</span></div>${list(rows)}`,
       foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn('Check the details', { v: 'primary', loading: true, disabled: true }),
     };
   }
@@ -189,11 +190,9 @@
       m.personal && alertBox('warning', 'May contain personal data', 'Remove personal details before you submit, or say in the note why they’re needed.'),
       m.dup && docById(m.dup.id) && alertBox('default', 'Possible duplicate', `Looks like “${esc(docTitle(docById(m.dup.id)))}” (${Math.round(m.dup.sim * 100)}% similar title). If it replaces that document, submit a new version of it instead.`, btn('Preview', { act: 'doc-preview', data: { id: m.dup.id } })),
     ].filter(Boolean).join('');
-    const chips = m.topics.map(id => `<span class="ctb-topic"><span class="truncate" translate="no">${esc(topicName(id))}</span><button type="button" class="ctb-topic__x" data-act="ctb-topic-remove" data-file="${esc(x.id)}" data-topic="${esc(id)}" aria-label="${esc(`Remove ${topicName(id)}`)}">${ic('x', 'i-xs')}</button></span>`).join('');
-    const addOpts = [['', 'Add topic…'], ...topicTree().flatMap(dm => dm.children.filter(t => !m.topics.includes(t.id)).map(t => [t.id, `${dm.name} · ${t.name}`]))];
-    const add = addOpts.length > 1 ? select({ id: 'ctb-add-' + x.id, value: '', options: addOpts, change: 'ctb-topic-add', size: 'sm', cls: 'ctb-topic-add', label: 'Add topic', attrs: `data-file="${esc(x.id)}"` }) : '';
+    const picker = topicPicker({ id: 'ctb-add-' + x.id, ids: m.topics, act: 'ctb-topic', data: { file: x.id }, label: 'Topics', empty: 'No clear topic. Add one if you know it.' });
     const why = m.topics.map(id => { const ev = m.why[id] ? topicEvidence(m.why[id]).join(' · ') : 'added by you'; return ev ? `<li><span class="medium" translate="no">${esc(topicName(id))}</span><span class="muted" aria-hidden="true"> — </span><span class="muted">${esc(ev)}</span></li>` : ''; }).join('');
-    const topics = `<div class="field"><span class="label" id="ctb-topics-${x.id}">Topics</span><div class="ctb-topics-edit" role="group" aria-labelledby="ctb-topics-${x.id}">${chips || '<span class="t-sm muted">No clear topic. Add one if you know it.</span>'}${add}</div>${why ? `<ul class="cur-why" aria-label="Why these topics">${why}</ul>` : ''}</div>`;
+    const topics = `<div class="field"><span class="label">Topics</span>${picker}${why ? `<ul class="cur-why" aria-label="Why these topics">${why}</ul>` : ''}</div>`;
     const kbDesc = who ? `<span class="row gap-4">${ic(who.icon, 'i-xs')}<span>${esc(`${who.label} will see it once published.`)}${m.kb === m.kbHint ? ' Suggested by the assistant.' : ''}</span></span>` : '';
     return `<section class="ctb-check" aria-label="${esc(`Details for ${x.name}`)}">
       ${many ? `<div class="ctb-check__file">${fileIcon(x.type, 'sm')}<span class="medium truncate">${esc(x.name)}</span><span class="t-xs muted none">${fmtSize(x.size)}</span></div>` : ''}
@@ -242,7 +241,7 @@
     if (S.modal?.name !== 'contribute' || ui('ctb') !== f) return;
     const files = valid.map(x => {
       const m = f.meta[x.id], ext = extOf(x.name);
-      return { name: m.title.trim() + (ext ? '.' + ext : ''), size: x.size, type: x.type, kb: m.kb || undefined, confirmed: { kind: m.kind, topics: [...m.topics], summary: m.summary.trim() } };
+      return { name: m.title.trim() + (ext ? '.' + ext : ''), size: x.size, type: x.type, kb: m.kb || undefined, folder: f.folder && m.kb === f.kb ? f.folder : undefined, confirmed: { kind: m.kind, topics: [...m.topics], summary: m.summary.trim() } };
     });
     closeModal();
     const docs = submitFiles(files, { note: f.note });
@@ -275,9 +274,9 @@
     switch (l.key) {
       case 'published': case 'update': case 'stored': return `Published · ${fmtDate(Math.max(d.updated || 0, e.at || 0))}`;
       case 'merged': { const o = docById(d.mergedInto); return `Published as a new version · ${fmtDate(o?.updated || e.at)}`; }
-      case 'publishing': return `Approved${by} · publishing now`;
-      case 'queued': return `Approved${by} · waiting to publish`;
-      case 'failed': return `Approved${by} · couldn’t publish`;
+      case 'publishing': return `Approved${by} · being processed`;
+      case 'queued': return `Approved${by} · not processed yet`;
+      case 'failed': return `Approved${by} · processing failed`;
       case 'analyzing': return `${e.kind === 'resubmitted' ? 'Resubmitted' : 'Submitted'} · ${relLow(e.at)} · the assistant is reading it`;
     }
     if (!e.kind || e.kind === 'submitted' && e.by === me().id) return `Submitted · ${relLow(e.at)}`;
@@ -291,12 +290,12 @@
       case 'analyzing': return { icon: 'sparkles', tone: 'accent', title: 'The assistant is reading it', desc: 'It suggests a type, topics and a collection for the reviewer.', live: true };
       case 'review': return { icon: 'clock', title: 'Waiting for a reviewer', desc: `The reviewers of ${kb} check it before it’s published.`, next: true };
       case 'changes': return { icon: 'pencil', title: isMine(d) ? 'Waiting for your revision' : 'Waiting for a revision', next: true };
-      case 'queued': return { icon: 'clock', title: 'Waiting to publish', next: true };
-      case 'publishing': return { icon: 'loader', tone: 'accent', title: 'Publishing', desc: 'It will be searchable in a few minutes.', live: true };
+      case 'queued': return { icon: 'clock', title: 'Waiting to be processed', desc: 'A reviewer chooses when it’s processed. Until then search and the assistant can’t use it.', next: true };
+      case 'publishing': return { icon: 'loader', tone: 'accent', title: 'Processing', desc: 'It will be searchable in a few minutes.', live: true };
       case 'published': case 'update': return e.kind === 'published' ? null : { icon: 'check-circle', tone: 'success', title: 'Published', desc: `Searchable in ${kb}.`, at: d.updated };
       case 'stored': return { icon: 'check-circle', tone: 'success', title: 'Published', desc: 'People can download it. This file type can’t be searched.', at: d.updated };
       case 'merged': { const o = docById(d.mergedInto); return { icon: 'check-circle', tone: 'success', title: 'Published as a new version', desc: o ? `It replaced the earlier version of “${o.name}”.` : '', at: o?.updated }; }
-      case 'failed': return { icon: 'alert-circle', tone: 'danger', title: 'Couldn’t publish', desc: 'The reviewers have been told.' };
+      case 'failed': return { icon: 'alert-circle', tone: 'danger', title: 'Processing failed', desc: 'The reviewers have been told.' };
       default: return null;
     }
   }
@@ -326,7 +325,7 @@
     const open = ['analyzing', 'review', 'changes'].includes(k);
     const confirmed = !!sub.confirmed;
     const submitted = { state: 'done', at: sent?.at || sub.at, text: `${sent?.kind === 'resubmitted' ? 'Resubmitted' : 'Sent'} to ${base}` };
-    const analyzed = k === 'analyzing' ? { state: 'current', busy: true, text: 'Reading the file and matching it against the taxonomy…' }
+    const analyzed = k === 'analyzing' ? { state: 'current', busy: true, text: 'Reading the file and matching it against the topics…' }
       : { state: 'done', text: confirmed ? `Type, topics and collection confirmed by ${mine ? 'you' : contributorName(d)}` : 'Type, topics and collection suggested' };
     const review = k === 'analyzing' ? { state: 'todo', text: `The reviewers of ${base} check it` }
       : k === 'review' ? { state: 'current', text: `Waiting for a reviewer of ${base}` }
@@ -337,11 +336,11 @@
       : k === 'rejected' ? { state: 'skipped', text: 'Won’t be published' }
         : { state: 'done', text: `Approved${by(ok)}`, at: ok?.at };
     const PUB = {
-      queued: { state: 'current', text: 'Waiting to publish' }, publishing: { state: 'current', busy: true, text: 'Making it searchable…' },
+      queued: { state: 'current', text: 'Published · waiting to be processed' }, publishing: { state: 'current', busy: true, text: 'Processing, so search can find it…' },
       published: { state: 'done', text: `Searchable · ${who}`, at: d.updated }, update: { state: 'done', text: `Searchable · ${who}`, at: d.updated },
       stored: { state: 'done', text: 'Stored · people can download it; this file type can’t be searched' },
       merged: { state: 'done', text: 'Published as a new version', at: docById(d.mergedInto)?.updated },
-      failed: { state: 'issue', text: 'Couldn’t publish · the reviewers have been told' },
+      failed: { state: 'issue', text: 'Processing failed · the reviewers have been told' },
       unpublished: { state: 'issue', text: `Unpublished${by(lastBy(d, 'unpublished'))}`, at: lastBy(d, 'unpublished')?.at },
       rejected: { state: 'skipped', text: 'Won’t be published' },
     };
@@ -403,7 +402,7 @@
     if (st === 'changes') { const e = lastBy(d, 'changes'); return { html: alertBox('warning', `${who(e?.by, d)} asked for changes`, quote(e)), quoted: e }; }
     if (st === 'rejected') { const e = lastBy(d, 'rejected'); return { html: alertBox('danger', `${who(e?.by, d)} declined it`, quote(e) || 'It won’t be published.'), quoted: e }; }
     if (st === 'unpublished') { const e = lastBy(d, 'unpublished'); return { html: alertBox('default', `${who(e?.by, d)} unpublished it`, quote(e)), quoted: e }; }
-    if (l.key === 'failed') return { html: alertBox('danger', 'Couldn’t publish — the reviewers have been told', 'It was approved, but the file couldn’t be made searchable. You don’t need to do anything.') };
+    if (l.key === 'failed') return { html: alertBox('danger', 'Processing failed — the reviewers have been told', 'It was approved, but the file couldn’t be processed for search. You don’t need to do anything.') };
     return { html: '' };
   }
   /** One contribution. Each fact appears once: the file and (when no section names it) the collection in the subtitle, where it

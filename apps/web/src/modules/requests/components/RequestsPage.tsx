@@ -26,7 +26,8 @@ export function RequestsPage() {
   const tab = hasQueue ? (asked === "mine" || asked === "queue" ? asked : mine.length || requests.isPending ? "mine" : "queue") : "mine";
 
   return (
-    <Page className="rq-page">
+    // The staff queue is a table and takes the full width; your own requests are a short list in the centred column.
+    <Page width={tab === "queue" ? "wide" : "centered"} className="rq-page">
       <PageHeader
         title="Requests"
         actions={

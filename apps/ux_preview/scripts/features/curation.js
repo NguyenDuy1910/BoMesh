@@ -1,41 +1,41 @@
-/* Knowledge Studio (/studio) — Manage → Knowledge Studio: the one place knowledge is run.
-   Its sections are sub-rows of Knowledge Studio in the sidebar, in two clusters:
-     daily work   Review (one workbench for everything that needs a person, picked with a queue chooser:
-                  To publish — Submissions · Sync batches · Publishing problems; To keep right — Topics to confirm ·
-                  Re-verification due · Missing details · Possible duplicates) · Documents (every document whatever its
-                  origin, along the flow: In review → Publishing → Published, plus Needs attention and Not published)
-     setup        Collections (where documents live, who reads them) · Taxonomy (how they're classified) ·
-                  Sources (what comes in, how often, how it's published; with the accounts it signs in with)
-   The setup group is in the order it's done the first time; the setup guide (X.setupGuide) walks it.
-   Tabs show only to people who can use them (X.studioTabs); bodies come from governance.js (X.gov.queue — the
-   "To keep right" queues), knowledge.js (X.kb.tab), masterdata.js (X.md.tab) and sources.js (X.src.tab).
-   Scope of review: documents in the collections the caller owns (workspace admins own all) — curatedDocs().
-   Readers never see any of this. Every document row opens the same drawer (cur-doc), which shows where the
-   document is in the flow; a row shows its state's fix.
-   Exports: X.reviewNotices(), X.studioTabs(), X.studioBadge(), X.setupGuide(), X.reviewQueues() (counts per queue,
-   for Overview → Knowledge health). Actions: cur-*. Menu: cur-row. Drawers: cur-doc, cur-compare.
-   Modals: cur-decide, rb-pii. Batch actions: rb-*. Model: core/lifecycle.js. */
+/* Knowledge Studio (/studio) — Manage → Knowledge Studio: the one place knowledge is run. Its sections are sub-rows of
+   Knowledge Studio in the sidebar, named after what they hold:
+     daily work   Documents — every document, whatever its origin, in four views (page tabs): All (the registry: filter
+                  by processing state, select documents and Process them — nothing is processed until someone asks),
+                  Review (submissions and what a sync held back), Issues (what couldn't be processed, what changed at its
+                  source, what a sync couldn't read) and Quality (re-verification, missing details, duplicates).
+     setup        Collections (where documents live, who reads them) · Topics (what documents are about: the topic tree
+                  and the suggestions the pipeline and reviewers make; features/masterdata.js, governance.js) · Sources
+                  (what comes in, how often, how it's published; with the accounts it signs in with). The setup guide
+                  (X.setupGuide) walks collections → topics → sources → first sync.
+   Publication and processing are independent (core/lifecycle.js): a document can be published and not processed (people
+   open it, search doesn't find it) or processed and unpublished (ready, hidden until someone publishes it).
+   Sections show only to people who can use them (X.studioTabs). Scope: documents in the collections the caller owns
+   (workspace admins own all) — curatedDocs(). Readers never see any of this. Every document row opens the same drawer
+   (cur-doc).
+   Exports: X.reviewQueues() (counts for Overview → Knowledge health), X.reviewNotices(), X.studioTabs(), X.studioBadge(),
+   X.setupGuide(), X.setupNext(). Actions: cur-*, doc-view, topic-view. Menu: cur-row. Drawers: cur-doc, cur-compare.
+   Modals: cur-decide, cur-process, rb-pii. Batch actions: rb-*. Model: core/lifecycle.js. */
 (() => {
   'use strict';
 
   const BASE = '/studio';
-  /** [id, label, group, who may use it]. Setup is listed in the order it's done: where → how classified → what comes in. */
+  /** Who works documents (review, issues, processing): reviewers. Who keeps the topics: workspace admins. */
+  const canWork = () => can('knowledge.manage') && canReview();
+  /** [id, label, group, who may use it]. Setup is listed in the order it's done: where → what about → what comes in. */
   const TAB_DEFS = [
-    ['review', 'Review', 'work', () => can('knowledge.manage') && canReview()],
-    ['documents', 'Documents', 'work', () => can('knowledge.manage') && canReview()],
+    ['documents', 'Documents', 'work', () => canWork()],
     ['collections', 'Collections', 'setup', () => canManageKbs()],
-    ['taxonomy', 'Taxonomy', 'setup', () => canManageTaxonomy()],
+    ['topics', 'Topics', 'setup', () => canManageTaxonomy() || canWork()],
     ['sources', 'Sources', 'setup', () => can('source.manage')],
   ];
-  /** Old section ids: Library → Documents, Master data/Topics → Taxonomy, Quality (and Knowledge health's tabs) → Review queues. */
-  const TAB_ALIAS = { all: 'documents', library: 'documents', master: 'taxonomy', topics: 'taxonomy', quality: 'review', details: 'review', duplicates: 'review' };
-  /** Review queues: [id, label, group]. To publish = decisions before documents reach people; to keep right = published ones. */
-  const QUEUES = [
-    ['submissions', 'Submissions', 'publish'], ['batches', 'Sync batches', 'publish'], ['problems', 'Publishing problems', 'publish'],
-    ['confirm', 'Topics to confirm', 'keep'], ['reverify', 'Re-verification due', 'keep'], ['details', 'Missing details', 'keep'], ['duplicates', 'Possible duplicates', 'keep'],
-  ];
-  const QIDS = QUEUES.map(q => q[0]), KEEP = QUEUES.filter(q => q[2] === 'keep').map(q => q[0]);
-  const QUEUE_GROUPS = [['publish', 'To publish'], ['keep', 'To keep right']];
+  /** Documents' views: [id, label, tone of its count]. Review and Issues keep documents from people; Quality never blocks. */
+  const VIEWS = [['all', 'All', ''], ['review', 'Review', 'accent'], ['issues', 'Issues', 'danger'], ['quality', 'Quality', '']];
+  const VIDS = VIEWS.map(v => v[0]);
+  /** Topics' views: the tree (workspace admins) and the suggestions (everyone who works documents). */
+  const TOPIC_VIEWS = [['topics', 'Topics'], ['suggestions', 'Suggestions']];
+  const topicViews = () => TOPIC_VIEWS.filter(([id]) => id === 'suggestions' || canManageTaxonomy()).map(v => v[0]);
+  const PARTS = [['reverify', 'Re-verification due'], ['details', 'Missing details'], ['duplicates', 'Possible duplicates']];
   const QK = 'curQ', PK = 'curProb', AK = 'curAll', PER = 25;
   const names = list => (list.length <= 2 ? list.join(' and ') : `${list.slice(0, 2).join(', ')} and ${plural(list.length - 2, 'other')}`);
   const relLow = ts => rel(ts).replace(/^(Just now|Yesterday)$/, m => m.toLowerCase());
@@ -45,7 +45,7 @@
   const flagsOf = d => aiOf(d).flags || [];
   const hasFlag = (d, type) => flagsOf(d).some(f => f.type === type);
   const srcKey = d => (d.source && d.source !== 'upload' ? d.source : 'upload');
-  /** Where a document came from: its source, a person's contribution, or an editor's upload (Documents' Origin column). */
+  /** Where a document came from: its source, a person's contribution, or an editor's upload (the Origin column). */
   const originKey = d => (srcKey(d) !== 'upload' ? d.source : d.submission?.by ? 'contrib' : 'upload');
   const drafts = () => ui('curDraft');
   const tabsAllowed = () => TAB_DEFS.filter(t => t[3]()).map(t => t[0]);
@@ -54,88 +54,115 @@
   const sourceProblems = () => (can('source.manage') ? (X.srcBadge?.() || 0) + (X.accBadge?.() || 0) : 0);
   /** Access requests a base owner decides here (workspace admins decide them in People). */
   const ownerRequests = () => (can('user.manage') ? 0 : pendingRequests().filter(r => kbRole(kbById(r.kb)) === 'owner').length);
-  /** Approved documents that stopped on the way to people: couldn't publish, changed at the source, waiting to publish. */
-  const PROBLEM_KEYS = ['failed', 'update', 'queued'];
-  const problemDocs = () => curatedDocs().filter(d => PROBLEM_KEYS.includes(lifeKey(d)));
-  /** Decisions waiting before documents reach people (the To publish queues): what the Review tab and the Studio badge count. */
+  /** Documents that stopped: couldn't be processed, or changed at the source since they were. */
+  const PROBLEM_KEYS = ['failed', 'update'];
+  const problemDocs = () => curatedDocs().filter(d => PROBLEM_KEYS.includes(lifeKey(d)) || (stageOf(d) === 'unpublished' && ['failed', 'outdated'].includes(d.status)));
+  /** Published or unpublished documents nobody has processed yet. */
+  const notProcessed = () => curatedDocs().filter(d => ['published', 'unpublished'].includes(stageOf(d)) && processingOf(d) === 'pending');
+  /** Decisions that keep documents from people (Review and Issues): what the sub-row and the Studio badge count. */
   const decisionCount = () => reviewQueue().length + openBatches().length + problemDocs().length;
-  /** Items per Review queue. Topics to confirm counts documents (decided per group). */
-  function queueCounts() {
+  /** Items per view: entries to decide (a batch is one), issue rows plus the error classes syncs report, documents to keep
+      right; and what isn't processed (Overview). */
+  function counts() {
     const g = X.gov?.counts?.() || {};
-    return { submissions: reviewQueue().length, batches: openBatches().length, problems: problemDocs().length, confirm: g.confirm || 0, reverify: g.reverify || 0, details: g.details || 0, duplicates: g.duplicates || 0 };
+    return {
+      review: reviewQueue().length + openBatches().length,
+      issues: problemDocs().length + backfillRuns().reduce((s, r) => s + (r.backfill.issues || []).length, 0),
+      quality: (g.reverify || 0) + (g.details || 0) + (g.duplicates || 0),
+      parts: { reverify: g.reverify || 0, details: g.details || 0, duplicates: g.duplicates || 0 },
+      pending: notProcessed().length,
+      suggestions: X.gov?.suggestionCount?.() || 0,
+    };
   }
-  /** For Overview → Knowledge health: counts per queue, empty when the caller doesn't review. */
-  X.reviewQueues = () => (can('knowledge.manage') && canReview() ? queueCounts() : {});
-  /** The tab the Studio opens on: what needs the caller first — the queue, then something broken, then the inventory. */
+  /** For Overview → Knowledge health: counts per view, empty when the caller doesn't review. */
+  X.reviewQueues = () => (canWork() ? counts() : {});
+  /** The section the Studio opens on: what needs the caller first — decisions, then something broken, then the first one. */
   function landing() {
     const ok = tabsAllowed();
-    if (ok.includes('review') && decisionCount()) return 'review';
+    if (ok.includes('documents') && decisionCount()) return 'documents';
     if (ok.includes('sources') && sourceProblems()) return 'sources';
-    return ok[0] || 'review';
+    return ok[0] || 'documents';
   }
-  function tabOf(query) {
-    const t = TAB_ALIAS[query.tab] || query.tab;
-    return tabsAllowed().includes(t) ? t : landing();
+  const tabOf = query => (tabsAllowed().includes(query.tab) ? query.tab : landing());
+  /** Documents' view: ?view=, else Review when ?sel= names a submission or batch, else Review while it has entries, else All. */
+  function viewOf(query, c = counts()) {
+    if (VIDS.includes(query.view)) return query.view;
+    if (query.sel || c.review) return 'review';
+    return 'all';
   }
-  /** The open Review queue: ?queue= (legacy ?seg= / Knowledge health tabs / `quality` → the first quality queue with items),
-      a ?sel= of a batch or submission, else the first queue with items. */
-  function queueOf(query, counts = queueCounts()) {
-    let q = query.queue || query.seg || (query.tab === 'details' || query.tab === 'duplicates' ? query.tab : '');
-    if (q === 'review') q = 'reverify';
-    if (q === 'quality') q = KEEP.find(k => counts[k]) || 'reverify';
-    if (QIDS.includes(q)) return q;
-    if (query.sel) return batchById(query.sel) ? 'batches' : 'submissions';
-    return QIDS.find(k => counts[k]) || 'submissions';
+  const topicViewOf = query => (topicViews().includes(query.view) ? query.view : topicViews()[0]);
+  /** Quality's open list: ?part=, else the first with items. */
+  function partOf(query, c = counts()) {
+    return PARTS.some(([id]) => id === query.part) ? query.part : PARTS.find(([id]) => c.parts[id])?.[0] || 'reverify';
   }
-  /** The sidebar badge counts what the landing tab shows (Review: the To publish decisions). */
+  /** Old addresses (Review, Documents, Taxonomy, Knowledge flow and their queues, stages and segments) → the view that
+      holds them now; null when the address is current. */
+  function legacyOf(q) {
+    const oldTab = ['flow', 'review', 'quality', 'details', 'duplicates', 'all', 'library', 'taxonomy', 'master'].includes(q.tab);
+    if (!oldTab && !q.queue && !q.life && !q.stage && !q.seg && !q.mode) return null;
+    const n = { ...q }; ['mode', 'queue', 'life', 'stage', 'seg'].forEach(k => delete n[k]);
+    const queue = q.queue || q.seg || (['details', 'duplicates'].includes(q.tab) ? q.tab : '');
+    const toSuggestions = ['confirm', 'classify'].includes(queue) || q.node === '__learn';
+    if (['taxonomy', 'master'].includes(q.tab) || q.mode === 'rules' || toSuggestions) {
+      n.tab = 'topics'; n.view = toSuggestions ? 'suggestions' : 'topics';
+      if (q.node === '__learn') delete n.node;
+      return n;
+    }
+    n.tab = 'documents';
+    if (['reverify', 'details', 'duplicates', 'quality', 'upkeep'].includes(queue) || q.tab === 'quality' || (queue === 'review' && q.tab !== 'review')) { n.view = 'quality'; if (PARTS.some(([id]) => id === queue)) n.part = queue; else if (queue === 'review') n.part = 'reverify'; }
+    else if (['problems', 'issues'].includes(queue) || q.life === 'attention' || q.stage === 'issue') n.view = 'issues';
+    else if (['submissions', 'batches', 'publish'].includes(queue) || ['review', 'changes'].includes(q.life) || q.stage === 'decide' || q.tab === 'review' || q.mode === 'needs') n.view = 'review';
+    else n.view = 'all';
+    return n;
+  }
+  /** The sidebar badge counts what the landing section shows (Documents: decisions that keep documents from people). */
   X.studioBadge = () => {
     const l = landing();
-    if (l === 'review') return { n: decisionCount(), tone: 'accent' };
+    if (l === 'documents') return { n: decisionCount(), tone: 'accent' };
     if (l === 'sources') return { n: sourceProblems(), tone: 'danger' };
     return { n: ownerRequests(), tone: 'accent' };
   };
-  const onReview = () => S.cur?.r.page === 'studio' && tabOf(S.cur.query) === 'review';
-  const onSplit = kind => onReview() && queueOf(S.cur.query) === kind;
-  /** What each section counts — only what waits on the caller: decisions to publish, access requests, proposed topics, broken sources. */
+  const onDocs = () => S.cur?.r.page === 'studio' && tabOf(S.cur.query) === 'documents';
+  const onReview = () => onDocs() && viewOf(S.cur.query) === 'review';
+  /** What each section counts — only what waits on the caller: decisions, access requests, topic decisions, broken sources. */
   const tabCounts = () => ({
-    review: { count: decisionCount() },
+    documents: { count: canWork() ? decisionCount() : 0 },
     collections: { count: ownerRequests() },
-    // Only workspace admins change the taxonomy, so only they get the section (and the proposed topics to decide).
-    taxonomy: { count: X.md?.proposalCount?.() || 0 },
+    topics: { count: X.gov?.suggestionCount?.() || 0, tone: 'default' },
     sources: { count: sourceProblems(), tone: 'danger' },
   });
   /** The Studio's sections as sidebar sub-rows of Knowledge Studio (core/shell.js navItem), in the order of TAB_DEFS; the first
       setup section starts a new cluster. A base's page (/studio/collections/:id) belongs to Collections. */
   X.studioNav = () => {
     const cur = S.cur, here = cur?.r.page === 'studio' ? tabOf(cur.query) : cur?.r.page === 'kbDetail' ? 'collections' : '';
-    const counts = tabCounts(), defs = TAB_DEFS.filter(t => t[3]());
-    return defs.map(([id, label, group], i) => ({ id, label, to: studioHref(id), current: id === here, gap: i > 0 && defs[i - 1][2] !== group, ...counts[id] }));
+    const tc = tabCounts(), defs = TAB_DEFS.filter(t => t[3]());
+    return defs.map(([id, label, group], i) => ({ id, label, to: studioHref(id), current: id === here, gap: i > 0 && defs[i - 1][2] !== group, ...tc[id] }));
   };
 
   /* ═══════════════ Badges and inbox ═══════════════ */
   X.reviewNotices = () => {
-    if (!can('knowledge.manage') || !canReview()) return [];
+    if (!canWork()) return [];
     const out = [], q = reviewQueue();
-    if (q.length) out.push({ id: 'cur-queue-' + q.length, icon: 'clock', tone: 'info', title: `${plural(q.length, 'document')} ${q.length === 1 ? 'is' : 'are'} waiting for your review`, body: names(q.map(d => d.name)), at: Math.max(...q.map(d => lastEvent(d).at)), to: studioHref('review', { queue: 'submissions' }), cta: 'Review' });
+    if (q.length) out.push({ id: 'cur-queue-' + q.length, icon: 'clock', tone: 'info', title: `${plural(q.length, 'document')} ${q.length === 1 ? 'is' : 'are'} waiting for your review`, body: names(q.map(d => d.name)), at: Math.max(...q.map(d => lastEvent(d).at)), to: docsHref('review'), cta: 'Review' });
     // Workspace admins already get one notice per base with failed publishes.
     if (!isAdmin()) reviewableKbs().forEach(kb => {
       const failed = curatedDocs().filter(d => d.kb === kb.id && lifeKey(d) === 'failed');
-      if (failed.length) out.push({ id: `cur-failed-${kb.id}-${failed.length}`, icon: 'alert-circle', tone: 'warn', title: `${plural(failed.length, 'document')} in ${kb.name} couldn’t be published`, body: failed.map(d => d.name).join(', '), at: Math.max(...failed.map(d => d.updated)), to: studioHref('review', { queue: 'problems', kb: kb.id }) });
+      if (failed.length) out.push({ id: `cur-failed-${kb.id}-${failed.length}`, icon: 'alert-circle', tone: 'warn', title: `${plural(failed.length, 'document')} in ${kb.name} couldn’t be published`, body: failed.map(d => d.name).join(', '), at: Math.max(...failed.map(d => d.updated)), to: docsHref('issues', { kb: kb.id }) });
     });
     return out;
   };
 
   /* ═══════════════ Setup guide ═══════════════ */
-  /** The first-time order, one step per setup tab, then the first sync. Each step: done, what it decides, where. */
+  /** The first-time order: where documents live, how they're classified, what comes in, then the first sync. */
   function setupSteps() {
     const kbs = D.kbs.filter(k => !k.archived && !k.personal), leaves = (D.topics || []).filter(t => t.parent && !t.archived);
     const keyed = leaves.filter(t => topicKeywords(t).length).length;
     const synced = D.sources.some(s => s.last?.at) || D.docs.some(d => d.source && d.source !== 'upload' && d.status === 'ready');
     return [
       { id: 'collections', done: kbs.length > 0, title: 'Create collections', desc: 'Where documents live and who can read them. Make one per access boundary — a team, a function, the whole company.', cta: 'New collection', act: 'kb-create' },
-      { id: 'taxonomy', done: !!(D.masterImports || []).length || (leaves.length && keyed / leaves.length >= 0.8), title: 'Load the taxonomy', desc: 'The domains and topics documents are filed under, with the words that recognise them. Import them before the first sync, so every document is classified as it arrives.', cta: 'Import taxonomy', act: 'md-import' },
+      { id: 'taxonomy', done: !!(D.masterImports || []).length || (leaves.length && keyed / leaves.length >= 0.8), title: 'Load your topics', desc: 'The domains and topics documents are filed under, with the words that recognise them. Import them before the first sync, so every document is classified when it’s processed.', cta: 'Import topics', act: 'md-import' },
       { id: 'sources', done: D.sources.length > 0, title: 'Add sources', desc: 'Pick the folders, the collection they land in, how often they sync and how documents are published.', cta: 'Add source', act: 'src-connect' },
-      { id: 'sync', done: synced, title: 'Check the first sync', desc: 'Watch it read, classify and publish. Review what the assistant wasn’t sure about, then let the schedule take over.', cta: 'Open Sources', href: studioHref('sources') },
+      { id: 'sync', done: synced, title: 'Check the first sync', desc: 'Watch it read, classify, index and publish. Decide what it held back, confirm the topics it wasn’t sure of, then let the schedule take over.', cta: 'Open Sources', href: studioHref('sources') },
     ];
   }
   /** The full checklist, only for a workspace with nothing set up yet (Overview's empty state; force: the prototype's Empty
@@ -154,95 +181,92 @@
     return `<section class="setup card" aria-label="Set up knowledge"><div class="setup__head"><h2 class="setup__heading grow">Set up knowledge</h2></div><ol class="setup__steps">${rows}</ol></section>`;
   };
   /** The next unfinished setup step as an Overview attention item ({ title, desc, actions }), or null. Named by what's
-      actually missing: topics without keywords can't classify anything, so that's the problem, not "load the taxonomy". */
+      actually missing: topics without keywords can't classify anything, so that's the problem, not "load the rules". */
   X.setupNext = () => {
     if (!isAdmin()) return null;
     const steps = setupSteps(), left = steps.filter(s => !s.done);
     if (!left.length || left.length === steps.length) return null;
     const s = left[0], leaves = (D.topics || []).filter(t => t.parent && !t.archived), bare = leaves.filter(t => !topicKeywords(t).length && !topicSynonyms(t).length).length;
-    if (s.id === 'taxonomy' && bare) return { icon: 'tag', title: `${plural(bare, 'topic')} without keywords`, desc: 'Documents aren’t filed under a topic until it has words to recognise it by.', actions: btn('Add keywords', { v: 'secondary', size: 'sm', href: studioHref('taxonomy', { show: 'bare' }) }) };
+    if (s.id === 'taxonomy' && bare) return { icon: 'tag', title: `${plural(bare, 'topic')} without keywords`, desc: 'Documents aren’t filed under a topic until it has words to recognise it by.', actions: btn('Add keywords', { v: 'secondary', size: 'sm', href: topicsHref('topics', { show: 'bare' }) }) };
     return { icon: 'list', title: s.title, desc: s.desc, actions: btn(s.cta, { v: 'secondary', size: 'sm', act: s.act, href: s.href }) };
   };
 
   /* ═══════════════ Page ═══════════════ */
-  /** The page's one primary action follows the section: Add documents, New collection, Import or Add source. Header buttons that
-      create say "New X" (the dialog's confirm says "Create"). Review has none: its decision bar is the primary. */
-  function headerAction(tab) {
+  /** The page's one primary action follows the section and view: Add documents (Documents; secondary in Review, where the
+      decision bar is the primary), Import (Topics), New collection or Add source. */
+  function headerAction(tab, view) {
     const upKb = S.ui[AK]?.kb;
-    if (tab === 'documents' && canContribute()) return btn('Add documents', { v: 'primary', icon: 'upload', act: 'contribute', data: upKb ? { kb: upKb } : undefined });
+    if (tab === 'topics') return canManageTaxonomy() && view === 'topics' ? btn('Import', { v: 'primary', icon: 'upload', act: 'md-import' }) : '';
+    if (tab === 'documents' && canContribute()) return btn('Add documents', { v: view === 'review' ? 'secondary' : 'primary', icon: 'upload', act: 'contribute', data: upKb ? { kb: upKb } : undefined });
     if (tab === 'collections' && can('knowledge.manage')) return btn('New collection', { v: 'primary', icon: 'plus', act: 'kb-create' });
-    if (tab === 'taxonomy') return btn('Import', { v: 'primary', icon: 'upload', act: 'md-import' });
     if (tab === 'sources') return X.src?.addBtn?.() || '';
     return '';
   }
+  const page = (head, body) => `<div class="page page--wide page--studio cur">${head}${body ?? skelRows(6)}</div>`;
   P.studio = ({ query }) => {
     const allowed = tabsAllowed();
     if (!allowed.length) return noAccessPage();
-    const tab = tabOf(query);
-    // The section's name is the title; the sidebar lists the sections under Knowledge Studio (X.studioNav), so the page has no tab bar.
-    const head = pageHeader({ title: TAB_DEFS.find(t => t[0] === tab)[1], extra: X.res.demoChip(), actions: headerAction(tab) });
-    const body = tab === 'review' ? reviewTab(query)
-      : tab === 'documents' ? documentsTab(query)
-        : tab === 'collections' ? X.kb?.tab?.({ query })
-          : tab === 'taxonomy' ? X.md?.tab?.({ query })
-            : X.src?.tab?.({ query });
-    return `<div class="page page--studio cur">${head}${body ?? skelRows(6)}</div>`;
+    const tab = tabOf(query), title = TAB_DEFS.find(t => t[0] === tab)[1], extra = X.res.demoChip();
+    if (tab === 'documents') {
+      const c = counts(), view = viewOf(query, c);
+      const body = view === 'review' ? reviewView(query, c) : view === 'issues' ? issuesView(c) : view === 'quality' ? qualityView(query, c) : documentsTab(query);
+      return page(pageHeader({ title, extra, actions: headerAction(tab, view) }), docTabs(view, c) + (view === 'all' || view === 'issues' ? processStrip() : '') + body);
+    }
+    if (tab === 'topics') {
+      const view = topicViewOf(query), ok = topicViews(), n = X.gov?.suggestionCount?.() || 0;
+      const nav = ok.length > 1 ? contextBar(tabs(TOPIC_VIEWS.filter(([id]) => ok.includes(id)).map(([id, label]) => ({ id, label, ...(id === 'suggestions' && n ? { count: n, tone: 'default' } : {}) })), view, BASE, { act: 'topic-view', label: 'Topics views' })) : '';
+      return page(pageHeader({ title, extra, actions: headerAction(tab, view) }), nav + (view === 'topics' ? X.md?.tab?.({ query }) : X.gov?.suggestions?.()));
+    }
+    // The section's name is the title; the sidebar lists the sections under Knowledge Studio (X.studioNav).
+    return page(pageHeader({ title, extra, actions: headerAction(tab) }), tab === 'collections' ? X.kb?.tab?.({ query }) : X.src?.tab?.({ query }));
   };
   const prevAfter = AFTER.studio;
   AFTER.studio = args => {
     prevAfter?.(args);
-    const { query } = args;
-    // Old addresses the router didn't rewrite (?tab=all|master|details|duplicates, ?seg=, ?queue=quality) land on the
-    // canonical one, so the tabs, the queue chooser and Back agree.
-    const legacyTab = !!TAB_ALIAS[query.tab];
-    const legacyQueue = tabOf(query) === 'review' && (!!query.seg || query.queue === 'quality' || query.tab === 'details' || query.tab === 'duplicates');
-    if (!legacyTab && !legacyQueue) return;
-    const q = { ...query, tab: tabOf(query) };
-    if (legacyQueue) q.queue = queueOf(query);
-    delete q.seg;
+    // Old addresses the router doesn't rewrite land on the current one, so the view and Back agree.
+    const q = legacyOf(args.query); if (!q) return;
+    Object.keys(q).forEach(k => q[k] === '' && delete q[k]);
     history.replaceState(null, '', '#' + BASE + '?' + new URLSearchParams(q));
     S.cur.query = q;
   };
+  A['topic-view'] = el => setQuery({ view: el.dataset.value, node: '', show: '' });
 
-  /* ═══════════════ Review: the workbench ═══════════════ */
-  /** The queue chooser: pills in two labelled groups with their counts (To publish counts are decisions and stand out;
-      To keep right counts are quiet). Empty queues hide unless open. Phones get one select. Hidden with a single queue. */
-  function chooser(cur, counts) {
-    const shown = QUEUES.filter(([id]) => counts[id] || id === cur);
-    if (shown.length < 2) return '';
-    const pill = ([id, label, g]) => {
-      const n = counts[id] || 0;
-      return `<button type="button" class="${cx('rq__pill', n && g === 'publish' && 'rq__pill--due')}" aria-pressed="${id === cur}" data-act="cur-queue" data-value="${id}">${esc(label)}${n ? `<span class="rq__n num">${fmtNum(n)}</span>` : ''}</button>`;
-    };
-    const groups = QUEUE_GROUPS.map(([g, label]) => {
-      const items = shown.filter(q => q[2] === g); if (!items.length) return '';
-      return `<div class="rq__group" role="group" aria-labelledby="rq-${g}"><span class="rq__label" id="rq-${g}">${esc(label)}</span><div class="rq__pills">${items.map(pill).join('')}</div></div>`;
-    }).join('');
-    const opts = QUEUE_GROUPS.map(([g, label]) => {
-      const items = shown.filter(q => q[2] === g); if (!items.length) return '';
-      return `<optgroup label="${esc(label)}">${items.map(([id, l]) => `<option value="${id}" ${id === cur ? 'selected' : ''}>${esc(counts[id] ? `${l} · ${fmtNum(counts[id])}` : l)}</option>`).join('')}</optgroup>`;
-    }).join('');
-    return `<div class="rq"><div class="rq__groups">${groups}</div><select class="select select--sm rq__select" data-change="cur-queue" aria-label="Review queue">${opts}</select></div>`;
+  /** Documents' four views (page tabs: views of one set of documents). Review and Issues count what keeps documents from
+      people (accent, danger); Quality counts quietly; All carries no count. */
+  function docTabs(view, c) {
+    const items = VIEWS.map(([id, label, tone]) => ({ id, label, ...(id !== 'all' && c[id] ? { count: c[id], alert: !!tone, tone: tone || 'default' } : {}) }));
+    return contextBar(tabs(items, view, BASE, { act: 'doc-view', label: 'Documents views' }));
   }
-  A['cur-queue'] = el => {
-    const v = el.tagName === 'SELECT' ? el.value : el.dataset.value; if (!QIDS.includes(v)) return;
-    [QK, PK, 'khReview', 'khDetails'].forEach(k => { if (S.ui[k]) { S.ui[k].sel = {}; S.ui[k].page = 1; } });
-    setQuery({ tab: 'review', queue: v, sel: '', seg: '' });
-  };
-  /** A queue that's done: say so, and point at the next queue with something in it. */
-  function queueDone(id, counts) {
-    const next = QUEUES.find(([q]) => q !== id && counts[q]);
+  A['doc-view'] = el => setQuery({ view: el.dataset.value, sel: '', part: '' });
+  /** One row of filter pills with counts (a select on phones): [id, label, count, tone]. */
+  function pillRow(items, cur, act, label) {
+    const pill = ([id, l, n, tone]) => `<button type="button" class="${cx('rq__pill', n && tone && 'rq__pill--' + tone)}" aria-pressed="${id === cur}" data-act="${act}" data-value="${id}">${esc(l)}${n ? `<span class="rq__n num">${fmtNum(n)}</span>` : ''}</button>`;
+    const opts = items.map(([id, l, n]) => `<option value="${id}" ${id === cur ? 'selected' : ''}>${esc(n ? `${l} · ${fmtNum(n)}` : l)}</option>`).join('');
+    return `<div class="rq"><div class="rq__groups"><div class="rq__pills" role="group" aria-label="${esc(label)}">${items.map(pill).join('')}</div></div><select class="select select--sm rq__select" data-change="${act}" aria-label="${esc(label)}">${opts}</select></div>`;
+  }
+  /** A processing run in flight: how far it is, with Show them and Stop (a run left in flight by a reload picks up here). */
+  function processStrip() {
+    const r = X.resumeProcessRun?.(); if (!r) return '';
+    const pct = Math.round((r.done + r.failed) / Math.max(1, r.total) * 100), c = r.context;
+    const ctx = c?.topics?.length ? `Classifying against ${plural(c.topics.length, 'topic')} you chose${c.note ? ', with your context' : ''}` : c?.note ? 'Classifying with your context' : '';
+    return `<div class="proc-strip" role="status">${spinner('sm')}<div class="proc-strip__main"><div class="proc-strip__text"><span class="medium">${esc(`Processing ${plural(r.total, 'document')}`)}</span><span class="muted">${esc(`${fmtNum(r.done)} processed${r.failed ? ` · ${fmtNum(r.failed)} failed` : ''} · ${pct}%`)}</span>${ctx ? `<span class="muted" data-tip="${esc(c.topics?.length ? c.topics.map(topicName).join(', ') : c.note)}">${esc(ctx)}</span>` : ''}</div>${progress(pct, '', 'Processing progress')}</div>
+      ${btn('Show them', { v: 'ghost', size: 'sm', act: 'cur-show-processing' })}${btn('Stop', { v: 'ghost', size: 'sm', act: 'cur-stop-processing' })}</div>`;
+  }
+  A['cur-show-processing'] = () => setQuery({ view: 'all', processing: 'processing' });
+  A['cur-stop-processing'] = () => { X.stopProcessRun?.(activeProcessRun()); toast('Stopped processing. What’s done stays processed; the rest is Not processed again.', { tone: 'accent' }); };
+  /** A view that's done: say so, and point at the next view with something in it. */
+  function viewDone(id, c) {
+    const next = VIEWS.find(([v]) => v !== id && v !== 'all' && c[v]);
     const COPY = {
-      submissions: ['You’re all caught up', 'New submissions to your collections show up here.'],
-      batches: ['No batches waiting', 'When a first sync holds files back, they show up here, one decision per reason.'],
-      problems: ['Everything approved is published', 'Documents that couldn’t publish or changed at their source show up here with their fix.'],
+      review: ['Nothing to review', 'Submissions and what a sync held back show up here, one decision each.'],
+      issues: ['No issues', 'Documents that couldn’t be processed, or changed at their source, show up here with their fix.'],
     };
-    const [title, desc] = COPY[id] || COPY.submissions;
-    const action = next ? btn(`Next: ${next[1]}`, { icon: 'arrow-right', act: 'cur-queue', data: { value: next[0] } }) : btn('See all documents', { href: studioHref('documents') });
+    const [title, desc] = COPY[id] || COPY.review;
+    const action = next ? btn(`Next: ${next[1]}`, { icon: 'arrow-right', act: 'doc-view', data: { value: next[0] } }) : btn('See all documents', { act: 'doc-view', data: { value: 'all' } });
     return emptyState({ icon: 'check-circle', tone: 'success', title, desc, actions: action, boxed: true });
   }
 
-  /* ── Submissions ── */
+  /* ── Publish: what syncs held back (one decision per batch) and submissions, in one list ── */
   const FILTERS = [['all', 'All'], ['flagged', 'Flagged'], ['version', 'New versions'], ['sync', 'From sources']];
   const FILTER_FN = {
     all: () => true,
@@ -256,25 +280,28 @@
     const rows = all.filter(d => fn(d) && (!u.kb || d.kb === u.kb) && matchesQ(QK, d.name, contributorName(d), kbById(d.kb)?.name, d.submission?.note));
     return { all, rows, order: rows.map(d => d.id) };
   }
-  /** Open batches (first syncs at scale), one decision each. */
-  function batchRows() { const rows = openBatches(); return { rows, order: rows.map(b => b.id) }; }
-  const splitRows = kind => (kind === 'batches' ? batchRows() : queueRows());
+  /** Batches first (each one decision for many files a first sync held back, with a sample), then submissions, oldest first. */
+  function publishRows() {
+    const subs = queueRows(), batches = openBatches();
+    return { subs, batches, order: [...batches.map(b => b.id), ...subs.order] };
+  }
   /** The open entry: ?sel when it's in the list, else the first. */
   function currentId({ order }) { const s = S.cur?.query.sel; return order.includes(s) ? s : order[0] || ''; }
-  /** The entry to open after deciding `skip` in a split queue: the next one down, else the one above. */
-  function nextEntry(skip, kind) {
-    const q = splitRows(kind), i = q.order.indexOf(currentId(q));
+  /** The entry to open after deciding `skip`: the next one down, else the one above. */
+  function nextEntry(skip) {
+    const q = publishRows(), i = q.order.indexOf(currentId(q));
     return q.order.slice(i + 1).find(id => !skip.has(id)) || q.order.slice(0, Math.max(0, i)).reverse().find(id => !skip.has(id)) || '';
   }
 
-  /** The reviewer's working copy of the assistant's suggestion (reset when the document is analyzed again). */
+  /** The reviewer's working copy of the pipeline's classification (reset when the document is classified again). `teach`:
+      a changed topic is recorded for Topics → Suggestions (on unless the reviewer turns it off); `process`: process it on approval. */
   function draftOf(d) {
     const ai = aiOf(d); if (ai.status !== 'done') return null;
     let f = drafts()[d.id];
-    if (!f || f.at !== ai.at) f = drafts()[d.id] = { at: ai.at, kind: ai.kind.value, topics: ai.topics.map(t => t.id), kb: d.kb, summary: ai.summary || '', asVersionOf: '' };
+    if (!f || f.at !== ai.at) f = drafts()[d.id] = { at: ai.at, kind: ai.kind.value, topics: ai.topics.map(t => t.id), kb: d.kb, summary: ai.summary || '', asVersionOf: '', teach: true, process: true };
     return f;
   }
-  const decisionOf = d => { const f = draftOf(d); return f ? { kind: f.kind, topics: [...f.topics], kb: f.kb, summary: f.summary.trim(), asVersionOf: f.asVersionOf || undefined } : {}; };
+  const decisionOf = d => { const f = draftOf(d); return f ? { kind: f.kind, topics: [...f.topics], kb: f.kb, summary: f.summary.trim(), asVersionOf: f.asVersionOf || undefined, teach: f.teach, process: f.process !== false } : {}; };
 
   function confBadge(c, edited) {
     if (edited) return '<span class="cur-conf cur-conf--edited">Edited</span>';
@@ -283,7 +310,7 @@
     return `<span class="cur-conf cur-conf--${p >= 80 ? 'hi' : p >= 60 ? 'mid' : 'lo'}" data-tip="Assistant confidence">${p}%</span>`;
   }
   /** Blocking risks get a labelled chip (readable on touch); informational signals stay a small icon with a tooltip. */
-  const FLAG_META = { duplicate: ['copy', 'Possible duplicate', 'warning', true], personal: ['shield', 'Personal data', 'danger', true], version: ['history', 'New version', 'accent'], format: ['file', 'Can’t be searched', 'default'] };
+  const FLAG_META = { duplicate: ['copy', 'Possible duplicate', 'warning', true], personal: ['shield', 'Personal data', 'danger', true], unreadable: ['alert-circle', 'Couldn’t be read', 'danger', true], version: ['history', 'New version', 'accent'], format: ['file', 'Can’t be searched', 'default'] };
   function flagIcons(d) {
     const ai = aiOf(d), flags = ai.flags || [];
     const meta = x => FLAG_META[x.type] || FLAG_META.format;
@@ -319,7 +346,10 @@
       </span>
     </div>`;
   }
-  function queuePanel({ all, rows }, cur) {
+  /** The Publish list: what syncs held back (no selection — each batch is already one decision for many), then the
+      submissions with their search, filter and selection. Labels only when both kinds are there. */
+  function queuePanel({ subs, batches }, cur) {
+    const { all, rows } = subs;
     const u = ui(QK), f = u.f || 'all', filtered = f !== 'all' || !!u.kb, long = all.length > MANY;
     const canFilter = filtered || queueKbs(all).length > 1 || FILTERS.some(([k]) => k !== 'all' && all.some(FILTER_FN[k]));
     const fLabel = [f !== 'all' && FILTERS.find(([k]) => k === f)?.[1], u.kb && kbById(u.kb)?.name].filter(Boolean).join(' · ');
@@ -329,13 +359,11 @@
     // With a selection, the floating bulk bar (queueBulk) carries the decisions; this row only offers Select all.
     const ids = rows.map(d => d.id), n = ids.filter(id => u.sel?.[id]).length;
     const selRow = n ? `<div class="cur-queue__sel">${checkbox({ checked: n === ids.length, indeterminate: n < ids.length, act: 'sel-all', data: { ui: QK, ids: ids.join(',') }, aria: 'Select all', label: n === ids.length ? 'All selected' : `Select all ${fmtNum(ids.length)}` })}</div>` : '';
+    const both = batches.length && all.length, label = t => (both ? `<div class="cur-queue__label t-label">${esc(t)}</div>` : '');
+    const held = batches.length ? label('Held back by a sync') + batches.map(b => batchItem(b, b.id === cur)).join('') : '';
     const items = rows.map(d => queueItem(d, d.id === cur)).join('');
-    const list = items ? `<div class="cur-queue__list" id="cur-queue" data-keep-scroll role="list">${items}</div>` : `<div class="cur-queue__none">${noMatches(QK, ['f', 'kb'], 'submissions')}</div>`;
-    return `<div class="${cx('cur-queue', n && 'has-sel')}">${tools}${selRow}${list}</div>`;
-  }
-  /** Batches are few (one per reason per first sync): no tools, no selection — each is already one decision for many. */
-  function batchList({ rows }, cur) {
-    return `<div class="cur-queue"><div class="cur-queue__list" id="cur-queue" data-keep-scroll role="list">${rows.map(b => batchItem(b, b.id === cur)).join('')}</div></div>`;
+    const subsHtml = all.length ? label('Submissions') + (items || `<div class="cur-queue__none">${noMatches(QK, ['f', 'kb'], 'submissions')}</div>`) : '';
+    return `<div class="${cx('cur-queue', n && 'has-sel')}">${all.length ? tools + selRow : ''}<div class="cur-queue__list" id="cur-queue" data-keep-scroll role="list">${held}${subsHtml}</div></div>`;
   }
   /** The queue's bulk decisions, in the same floating bar Documents and the other queues use. */
   const queueBulk = () => bulkBar(QK, btn('Decline…', { v: 'ghost', size: 'sm', icon: 'x-circle', act: 'cur-bulk-decline' }) + btn('Approve & publish', { v: 'secondary', size: 'sm', icon: 'check', act: 'cur-bulk-approve' }));
@@ -371,9 +399,10 @@
       if (x.type === 'version') return seen ? row('accent', 'history', `Replaces v${res(o).version} of “${o.name}”`, 'The current version stays published until you approve.', linkBtn('Open current', { href: '/doc/' + o.id })) : '';
       if (x.type === 'personal') return row('danger', 'shield', 'May contain personal data', 'Names, grades or ID numbers shouldn’t be shared. Check before publishing.');
       if (x.type === 'format') return row('default', 'file', 'Can’t be searched', esc(x.text));
+      if (x.type === 'unreadable') return row('danger', 'alert-circle', 'Couldn’t be read', esc(`${x.text} Published or not, it can’t be searched until the file is fixed.`));
       return '';
     }).filter(Boolean);
-    return out.length ? `<ul class="cur-risks" aria-label="What the assistant found">${out.join('')}</ul>` : '';
+    return out.length ? `<ul class="cur-risks" aria-label="What the pipeline found">${out.join('')}</ul>` : '';
   }
   /** The document itself, in its own pane: the first page at reading size, scrolling on its own. */
   function docPane(d) {
@@ -388,10 +417,10 @@
   const whyText = t => topicEvidence(t.why || {}).join(' · ');
   const byContributor = '<span class="t-xs muted">Chosen by the contributor</span>';
   function suggestionsCard(d, f) {
-    // The fields themselves show they're editable; the line only says when a person (not the assistant) chose them.
-    const ai = aiOf(d), from = ai.confirmed ? '<p class="cur-insp__sub">Confirmed by the contributor.</p>' : '';
+    // The fields show they're editable; the line says who chose them: the contributor, or the assistant against the topics.
+    const ai = aiOf(d), from = `<p class="cur-insp__sub">${esc(ai.confirmed ? 'Confirmed by the contributor.' : 'Suggested by the assistant, checked against your topics.')}</p>`;
     const sec = body => `<section class="cur-insp__sec cur-sugs" aria-labelledby="cur-cls-h"><h3 class="cur-insp__h" id="cur-cls-h">Classification</h3>${from}${body}</section>`;
-    if (!f) return sec(`<div class="cur-analyzing">${spinner()}<span>Reading the file and matching it against your taxonomy…</span></div>`);
+    if (!f) return sec(`<div class="cur-analyzing">${spinner()}<span>Reading the file and classifying it against your rules…</span></div>`);
     const kinds = Object.entries(RESOURCE_KINDS).map(([id, k]) => [id, k.label]);
     // What the contributor confirmed carries no assistant confidence: it says who chose it instead.
     const kindBadge = f.kind !== ai.kind.value ? confBadge(null, true) : ai.kind.by === 'contributor' ? byContributor : confBadge(ai.kind.conf);
@@ -402,30 +431,38 @@
     const chipsHtml = [...sugg.map(t => tchip(t.id, f.topics.includes(t.id), t.accepted ? '<span class="cur-conf cur-conf--new">New</span>' : t.why?.contributor ? '' : confBadge(t.conf))), ...extra.map(id => tchip(id, true, '<span class="cur-conf cur-conf--edited">Added</span>'))].join('');
     const addOpts = [['', 'Add topic…'], ...topicTree().flatMap(dm => dm.children.filter(t => !f.topics.includes(t.id)).map(t => [t.id, `${dm.name} · ${t.name}`]))];
     const why = sugg.filter(t => f.topics.includes(t.id) && whyText(t)).map(t => `<li><span class="medium" translate="no">${esc(topicName(t.id))}</span><span class="muted" aria-hidden="true"> — </span><span class="muted">${esc(whyText(t))}</span></li>`).join('');
-    const topics = sugRow('Topics', '', `<div class="cur-topics">${chipsHtml || '<span class="t-sm muted">No topic suggested</span>'}${addOpts.length > 1 ? select({ id: 'cur-add-topic', value: '', options: addOpts, change: 'cur-topic-add', size: 'sm', cls: 'cur-add-topic', label: 'Add topic', attrs: `data-id="${d.id}"` }) : ''}</div>`, why ? `<ul class="cur-why" aria-label="Why these topics">${why}</ul>` : '');
-    // Proposed new topics are decided in one place, Knowledge Studio → Taxonomy (workspace admins); publishing never waits for them.
+    // A changed topic teaches the rules (recorded as a correction; a workspace admin turns corrections into keywords).
+    const changed = f.topics.length !== sugg.length || f.topics.some(id => !sugg.some(t => t.id === id));
+    const teach = changed && !ai.confirmed ? `<div class="cur-teach">${checkbox({ checked: f.teach, act: 'cur-teach', data: { id: d.id }, label: 'Use my change to improve classification' })}<span class="cur-teach__hint">${esc(canManageTaxonomy() ? 'You’ll find it in Topics → Suggestions.' : 'Workspace admins see it in Topics → Suggestions.')}</span></div>` : '';
+    const topics = sugRow('Topics', '', `<div class="cur-topics">${chipsHtml || '<span class="t-sm muted">No topic suggested</span>'}${addOpts.length > 1 ? select({ id: 'cur-add-topic', value: '', options: addOpts, change: 'cur-topic-add', size: 'sm', cls: 'cur-add-topic', label: 'Add topic', attrs: `data-id="${d.id}"` }) : ''}</div>`, (why ? `<ul class="cur-why" aria-label="Why these topics">${why}</ul>` : '') + teach);
+    // Proposed new topics are decided in one place, Topics → Suggestions (workspace admins); publishing never waits for them.
     const props = (ai.proposed || []).map(proposalById).filter(p => p && p.status === 'open');
-    const decideIn = canManageTaxonomy() ? `<a class="link" href="#${studioHref('taxonomy')}">Decide in Taxonomy</a>` : '<span>A workspace admin decides.</span>';
+    const decideIn = canManageTaxonomy() ? `<a class="link" href="#${topicsHref('suggestions')}">Decide in Topics → Suggestions</a>` : '<span>A workspace admin decides.</span>';
     const proposed = props.length ? `<div class="cur-prop-note">${ic('sparkles', 'i-xs')}<div><span>${props.length === 1 ? 'Suggests a new topic:' : 'Suggests new topics:'}</span> ${props.map(p => `<span class="medium">${esc(p.name)}</span>`).join(', ')}<br><span>You can publish without it.</span> ${decideIn}</div></div>` : '';
     // Collection: where it lives decides who can see it.
     const version = !!(f.asVersionOf || d.submission?.versionOf);
     const kbs = reviewableKbs().filter(k => k.contribute !== false || k.id === d.kb);
-    const target = kbById(version ? docById(f.asVersionOf || d.submission.versionOf)?.kb : f.kb) || kbById(d.kb), who = X.whoCanSee(target);
+    const orig = version ? docById(f.asVersionOf || d.submission.versionOf) : null;
+    const target = kbById(orig ? orig.kb : f.kb) || kbById(d.kb), who = X.whoCanSee(target, orig ? docFolder(orig) : target.id === d.kb ? docFolder(d) : null);
     const kbBadge = version ? '' : ai.kb.by === 'ai' ? confBadge(ai.kb.conf, f.kb !== ai.kb.id) : f.kb !== d.kb ? confBadge(null, true) : byContributor;
     const kbCtl = version ? `<div class="cur-fixed">${X.kbMark(target, 20)}<span class="truncate">${esc(target.name)}</span></div>` : select({ id: 'cur-kb', bind: `curDraft.${d.id}.kb`, value: f.kb, options: kbs.map(k => [k.id, k.name]), change: 'cur-redraw', size: 'sm', label: 'Collection' });
     const kb = sugRow('Collection', kbBadge, kbCtl, `<div class="cur-who">${ic(who.icon, 'i-xs')}<span>${version ? 'Same as the current version · ' : ''}${esc(who.label)} will see it</span></div>`);
     const summary = sugRow('Summary', confBadge(null, f.summary.trim() !== (ai.summary || '').trim()), textarea({ id: 'cur-sum-' + d.id, bind: `curDraft.${d.id}.summary`, value: f.summary, rows: 3, attrs: 'maxlength="280" aria-label="Summary"' }));
     return sec(`<div class="cur-sug-list">${type}${topics}${proposed}${kb}${summary}</div>`);
   }
+  /** The decision footer: where it publishes, whether to process it now (on: it becomes searchable; off: published but Not
+      processed until someone processes it from All), and the three decisions. */
   function decisionBar(d, f) {
     const v = f && (f.asVersionOf || d.submission?.versionOf), o = v && docById(v);
-    const target = f && kbById(f.kb), hint = !f ? 'Waiting for the assistant…' : o ? `Publishes v${res(o).version + 1} of “${o.name}”` : `Publishes to ${target?.name || ''} · ${target ? X.whoCanSee(target).label : ''}`;
+    const target = f && kbById(f.kb), hint = !f ? 'Waiting for the assistant…' : o ? `Publishes v${res(o).version + 1} of “${o.name}”` : `Publishes to ${target?.name || ''} · ${target ? X.whoCanSee(target, target.id === d.kb ? docFolder(d) : null).label : ''}`;
+    const proc = f && !UNPROCESSABLE.includes(d.type) ? `<span class="cur-decide__proc" data-tip="${esc('Read, classify and index it so search and the assistant can use it.')}">${checkbox({ checked: f.process !== false, act: 'cur-proc', data: { id: d.id }, label: 'Process it now' })}</span>` : '';
     return `<footer class="cur-decide" role="group" aria-label="Decision">
-      <span class="cur-decide__hint truncate" data-tip="${esc(hint)}">${esc(hint)}</span>
-      <div class="cur-decide__btns">${btn('Decline', { v: 'ghost', act: 'cur-decline', data: { id: d.id } })}${btn('Request changes', { icon: 'pencil', act: 'cur-changes', data: { id: d.id } })}
-      ${btn(f ? 'Approve & publish' : 'Analyzing…', { v: 'primary', icon: f ? 'check' : '', act: 'cur-approve', data: { id: d.id }, disabled: !f, loading: !f })}</div>
+      <span class="cur-decide__hint truncate" data-tip="${esc(hint)}">${esc(hint)}</span>${proc}
+      <div class="cur-decide__btns">${btn('Decline', { v: 'ghost', act: 'cur-decline', data: { id: d.id } })}${btn('Request changes', { icon: 'pencil', act: 'cur-changes', data: { id: d.id }, tip: 'Request changes (R)' })}
+      ${btn(f ? 'Approve & publish' : 'Classifying…', { v: 'primary', icon: f ? 'check' : '', act: 'cur-approve', data: { id: d.id }, disabled: !f, loading: !f, tip: f ? 'Approve & publish (A)' : '' })}</div>
     </footer>`;
   }
+  A['cur-proc'] = el => { const f = draftOf(docById(el.dataset.id)); if (!f) return; f.process = f.process === false; refresh(); };
   const SEP = '<span aria-hidden="true"> · </span>';
   const navHtml = (pos, total) => `<div class="cur-detail__nav"><span class="t-xs muted num">${pos + 1} of ${total}</span>${iconBtn('chevron-up', 'Previous (K)', { size: 'sm', act: 'cur-step', data: { dir: -1 }, disabled: pos <= 0 })}${iconBtn('chevron-down', 'Next (J)', { size: 'sm', act: 'cur-step', data: { dir: 1 }, disabled: pos >= total - 1 })}</div>`;
   /** The workbench's right side: the document pane, then the inspector (who sent it, what the assistant found, its
@@ -495,65 +532,69 @@
     return `<aside class="cur-detail cur-insp rb-detail" id="cur-detail" aria-label="${esc(m.label)}">${head}<div class="cur-insp__body" data-keep-scroll>${why}${sample}</div>${bar}</aside>`;
   }
 
-  /* ── The workbench: chooser, then the open queue ── */
-  function reviewTab(query) {
-    const caughtUp = () => emptyState({ icon: 'check-circle', tone: 'success', title: 'You’re all caught up', desc: 'Submissions, sync batches, publishing problems and quality checks show up here.', actions: btn('See all documents', { href: studioHref('documents') }), boxed: true });
+  /* ── Review: what syncs held back and submissions, one workbench ── */
+  function reviewView(query, c) {
     return gate({
       loading: () => `<div class="cur-split cur-wb"><div class="cur-queue">${skelRows(6)}</div><div class="cur-pane">${skelRows(3)}</div><div class="cur-detail cur-insp">${skelRows(3)}</div></div>`,
-      empty: caughtUp,
+      empty: () => viewDone('review', c),
       ok: () => {
-        // ?kb= (from a collection page or a notice) preselects the base filter of Submissions and Publishing problems.
-        const qkb = query.kb || '';
-        [[QK, { q: '', f: 'all', kb: '', sel: {} }], [PK, { q: '', kb: '', life: '', sort: { key: 'updated', dir: 'desc' }, page: 1, sel: {} }]].forEach(([k, init]) => {
-          const u = ui(k, init); if (u._kb !== qkb) { u._kb = qkb; u.kb = qkb; }
-        });
-        const counts = queueCounts(), id = queueOf(query, counts);
-        if (!QIDS.some(k => counts[k]) && !query.queue) return caughtUp();
-        const body = id === 'submissions' ? submissionsQueue(query, counts)
-          : id === 'batches' ? batchesQueue(query, counts)
-            : id === 'problems' ? problemsQueue(counts)
-              : X.gov?.queue?.(id) ?? skelRows(4);
-        return chooser(id, counts) + body;
+        // ?kb= (from a collection page or a notice) preselects the base filter.
+        const qkb = query.kb || '', u = ui(QK, { q: '', f: 'all', kb: '', sel: {} });
+        if (u._kb !== qkb) { u._kb = qkb; u.kb = qkb; }
+        return publishQueue(query, c);
       },
     });
   }
-  function submissionsQueue(query, counts) {
-    const q = queueRows();
-    if (!q.all.length) return queueDone('submissions', counts);
-    const u = ui(QK), live = new Set(q.all.map(d => d.id));
+  /** One workbench for every publishing decision: a batch a sync held back opens its reason, sample and decision; a
+      submission opens the document beside its inspector. */
+  function publishQueue(query, c) {
+    const q = publishRows();
+    if (!q.order.length && !q.subs.all.length) return viewDone('review', c);
+    const u = ui(QK), live = new Set(q.subs.all.map(d => d.id));
     u.sel = Object.fromEntries(Object.entries(u.sel || {}).filter(([id, on]) => on && live.has(id)));
-    const cur = currentId(q), d = docById(cur), pos = q.order.indexOf(cur), total = q.order.length;
+    const cur = currentId(q), b = batchById(cur), d = b ? null : docById(cur), pos = q.order.indexOf(cur), total = q.order.length;
     const open = !!query.sel && cur === query.sel, selecting = selCount(QK) > 0;
-    return `<div class="${cx('cur-split', 'cur-wb', open && 'has-sel')}">${queuePanel(q, cur)}${d ? detailPanel(d, pos, total, selecting) : '<div class="cur-pane"></div><div class="cur-detail cur-insp"></div>'}</div>${queueBulk()}`;
+    const detail = b ? batchDetail(b, pos, total) : d ? detailPanel(d, pos, total, selecting) : '<div class="cur-pane"></div><div class="cur-detail cur-insp"></div>';
+    return `<div class="${cx('cur-split', 'cur-wb', b && 'cur-split--batch', open && 'has-sel')}">${queuePanel(q, cur)}${detail}</div>${queueBulk()}`;
   }
-  function batchesQueue(query, counts) {
-    const q = batchRows();
-    if (!q.rows.length) return queueDone('batches', counts);
-    const cur = currentId(q), b = batchById(cur), open = !!query.sel && cur === query.sel;
-    return `<div class="${cx('cur-split', 'cur-split--batch', open && 'has-sel')}">${batchList(q, cur)}${batchDetail(b, q.order.indexOf(cur), q.order.length)}</div>`;
+  /** Quality: three lists that keep published knowledge trustworthy, one at a time. */
+  function qualityView(query, c) {
+    const part = partOf(query, c);
+    const seg = PARTS.filter(([id]) => c.parts[id] || id === part).map(([id, label]) => ({ id, label, count: c.parts[id] || '' }));
+    const nav = seg.length > 1 ? `<div class="cur-parts">${tabs(seg, part, BASE, { act: 'cur-part', label: 'Quality', variant: 'primary' })}</div>` : '';
+    return nav + (X.gov?.queue?.(part) ?? skelRows(4));
   }
+  A['cur-part'] = el => setQuery({ part: el.dataset.value });
 
-  /* ── Publishing problems: approved documents that didn't reach people, each with its fix ── */
-  const PROBLEM_OPTS = [['failed', 'Couldn’t publish'], ['update', 'Changed at the source'], ['queued', 'Waiting to publish']];
-  function problemsQueue(counts) {
-    const u = ui(PK), docs = problemDocs();
-    if (!docs.length) return queueDone('problems', counts);
+  /* ── Issues: documents that couldn't be processed or changed at the source, each with its fix; files a sync couldn't read ── */
+  const PROBLEM_OPTS = [['failed', 'Processing failed'], ['update', 'Changed at the source']];
+  /** What first syncs couldn't read, by error class (counted, not listed): each class with its fix and its run. */
+  function syncIssues() {
+    const rows = backfillRuns().flatMap(r => (r.backfill.issues || []).map(([, label, n, fix]) => item({
+      lead: itemIcon('alert', 'warning', 'sm'), title: esc(label), desc: esc(`${fix} · ${r.srcName || srcById(r.source)?.name || ''}`), meta: `<span class="num">${fmtNum(n)}</span>`,
+      trail: btn('Open sync', { v: 'ghost', size: 'sm', act: 'src-run-open', data: { id: r.id } }),
+    })));
+    return rows.length ? section('Couldn’t be read in a sync', list(rows), { desc: esc('Fixed at the source, then the next sync reads them again.') }) : '';
+  }
+  function issuesView(c) {
+    const u = ui(PK, { q: '', kb: '', life: '', sort: { key: 'updated', dir: 'desc' }, page: 1, sel: {} }), docs = problemDocs(), fromSyncs = syncIssues();
+    if (!docs.length) return fromSyncs || viewDone('issues', c);
     const live = new Set(docs.map(d => d.id));
     u.sel = Object.fromEntries(Object.entries(u.sel || {}).filter(([id, on]) => on && live.has(id)));
     const kbOpts = queueKbs(docs).map(k => [k.id, k.name]), lifeOpts = PROBLEM_OPTS.filter(([k]) => docs.some(d => lifeKey(d) === k));
     const tools = needsTools(docs.length, PK, ['kb', 'life'])
-      ? `<div class="toolbar">${searchField({ uiKey: PK, placeholder: 'Search documents' })}${lifeOpts.length > 1 || u.life ? filterButton('Problem', PK, 'life', lifeOpts) : ''}${kbOpts.length > 1 || u.kb ? filterButton('Collection', PK, 'kb', kbOpts) : ''}${clearFilters(PK, ['kb', 'life'])}</div>` : '';
-    const hint = '<p class="gov-summary">Approved, but not in front of people yet. Each row shows its fix; select several to publish them together.</p>';
+      ? `<div class="toolbar">${searchField({ uiKey: PK, placeholder: 'Search documents' })}${lifeOpts.length > 1 || u.life ? filterButton('Issue', PK, 'life', lifeOpts) : ''}${kbOpts.length > 1 || u.kb ? filterButton('Collection', PK, 'kb', kbOpts) : ''}${clearFilters(PK, ['kb', 'life'])}</div>` : '';
+    const hint = '<p class="gov-summary">Couldn’t be processed, or changed at the source since it was. Each row shows its fix; select several to process them again together.</p>';
     let rows = docs.filter(d => (!u.kb || d.kb === u.kb) && (!u.life || lifeKey(d) === u.life) && matchesQ(PK, d.name, kbById(d.kb)?.name, originName(d)));
     rows = applySort(rows, PK, SORTERS);
-    if (!rows.length) return hint + tools + noMatches(PK, ['kb', 'life'], 'documents');
-    const page = paginate(rows, PK, PER);
-    const head = `${selAllCheck(PK, page.map(d => d.id))}${sortHead('Name', 'name', PK)}${th('Problem')}${th('Origin', 'table__column--hide-sm')}${sortHead('Updated', 'updated', PK)}${th('<span class="sr-only">Actions</span>', 'table__column--actions')}`;
-    const bulk = bulkBar(PK, btn('Publish', { v: 'ghost', size: 'sm', icon: 'upload', act: 'cur-prob-publish' }));
-    return hint + tools + `<div class="cur-prob">${table({ label: 'Publishing problems', head, rows: page.map(problemRow), foot: pager(rows.length, PK, PER) })}</div>` + bulk;
+    if (!rows.length) return hint + tools + noMatches(PK, ['kb', 'life'], 'documents') + fromSyncs;
+    const pageRows = paginate(rows, PK, PER);
+    const head = `${selAllCheck(PK, pageRows.map(d => d.id))}${sortHead('Name', 'name', PK)}${th('Issue')}${th('Origin', 'table__column--hide-sm')}${sortHead('Updated', 'updated', PK)}${th('<span class="sr-only">Actions</span>', 'table__column--actions')}`;
+    const bulk = bulkBar(PK, btn('Process again', { v: 'ghost', size: 'sm', icon: 'refresh', act: 'cur-prob-process' }));
+    return hint + tools + `<div class="cur-prob">${table({ label: 'Issues', head, rows: pageRows.map(problemRow), foot: pager(rows.length, PK, PER) })}</div>` + fromSyncs + bulk;
   }
   function problemRow(d) {
-    const on = !!ui(PK).sel?.[d.id], why = lifeKey(d) === 'failed' ? d.error || 'Publishing stopped partway.' : lifecycleOf(d).desc;
+    const on = !!ui(PK).sel?.[d.id], why = d.status === 'failed' ? d.error || 'Processing stopped partway.' : lifecycleOf(d).desc;
     return `<tr class="table__row" data-act="cur-doc" data-id="${d.id}" tabindex="0" ${on ? 'aria-selected="true"' : ''}>
       ${selCheck(PK, d.id, 'Select ' + d.name)}
       <td class="table__cell table__cell--primary"><div class="row gap-12">${fileIcon(d.type)}<div class="grow"><div class="cell-title truncate" data-tip="${esc(d.name)}">${esc(d.name)}</div><div class="cell-sub truncate">${esc(kbById(d.kb)?.name || '')}</div></div></div></td>
@@ -562,7 +603,7 @@
       <td class="table__cell muted cur-nowrap" data-tip="${esc(fmtDateTime(d.updated))}">${rel(d.updated)}</td>
       <td class="table__cell table__cell--actions"><div class="row gap-4 none">${rowFix(d)}<span class="reveal-on-hover">${iconBtn('more', 'More actions', { size: 'sm', menu: 'cur-row', data: { id: d.id, ctx: 'row' } })}</span></div></td></tr>`;
   }
-  A['cur-prob-publish'] = () => bulkPublish(PK);
+  A['cur-prob-process'] = () => processSelected(PK);
 
   /* ── Review actions ── */
   /** Scroll the detail's top into view (after picking or deciding). */
@@ -579,10 +620,10 @@
     pick(el.dataset.id);
   };
   A['cur-back'] = () => setQuery({ sel: '' });
-  /** J/K and the detail's arrows move through the open split queue (Submissions or Sync batches). */
+  /** J/K and the detail's arrows move through the Publish list (batches, then submissions). */
   function step(dir) {
-    const kind = queueOf(S.cur.query); if (kind !== 'submissions' && kind !== 'batches') return;
-    const q = splitRows(kind), { order } = q; if (!order.length) return;
+    if (!onReview()) return;
+    const q = publishRows(), { order } = q; if (!order.length) return;
     const i = order.indexOf(currentId(q)), n = order[Math.min(order.length - 1, Math.max(0, i + dir))];
     if (n && n !== order[i]) pick(n);
   }
@@ -590,47 +631,50 @@
   A['cur-redraw'] = () => refresh();
   A['cur-topic'] = el => { const f = draftOf(docById(el.dataset.id)); if (!f) return; const t = el.dataset.topic; f.topics = f.topics.includes(t) ? f.topics.filter(x => x !== t) : [...f.topics, t]; refresh(); };
   A['cur-topic-add'] = el => { const f = draftOf(docById(el.dataset.id)); if (!f || !el.value) return; if (!f.topics.includes(el.value)) f.topics.push(el.value); refresh(); };
+  A['cur-teach'] = el => { const f = draftOf(docById(el.dataset.id)); if (!f) return; f.teach = !f.teach; refresh(); };
   A['cur-asver'] = el => { const f = draftOf(docById(el.dataset.id)); if (!f) return; f.asVersionOf = f.asVersionOf === el.dataset.other ? '' : el.dataset.other; refresh(); };
 
-  /** Run a decision on queue items with Undo, then move on to the next item. */
+  /** Run a decision on submissions with Undo, then move on to the next entry of the Publish list. */
   function decide(docs, run, msg) {
-    const ids = new Set(docs.map(d => d.id)), next = nextEntry(ids, 'submissions'), here = onSplit('submissions');
-    const snaps = [];
+    const ids = new Set(docs.map(d => d.id)), next = nextEntry(ids), here = onReview();
+    const snaps = [], corrections = (D.classCorrections || []).length;
     docs.forEach(d => {
       snaps.push([d, snapDoc(d)]);
       const o = docById(drafts()[d.id]?.asVersionOf || d.submission?.versionOf);
       if (o && !snaps.some(([x]) => x === o)) snaps.push([o, snapDoc(o)]);
     });
     run();
+    const added = (D.classCorrections || []).length - corrections;
     const sel = ui(QK).sel || {}; docs.forEach(d => delete sel[d.id]);
-    // Stay in Submissions (its done state points at the next queue) instead of jumping to whichever queue has items.
-    if (here) { setQuery({ queue: 'submissions', sel: next }); requestAnimationFrame(showDetail); } else refresh();
-    toast(msg, { action: { label: 'Undo', run: () => undo(snaps, docs) } });
+    // Stay in Review (its done state points at the next view) instead of jumping elsewhere.
+    if (here) { setQuery({ view: 'review', sel: next }); requestAnimationFrame(showDetail); } else refresh();
+    toast(msg, { action: { label: 'Undo', run: () => { if (added > 0) D.classCorrections.splice(0, added); undo(snaps, docs); } } });
   }
   function undo(snaps, docs) {
     snaps.forEach(([d, s]) => restoreDoc(d, s));
-    if (onReview()) setQuery({ queue: 'submissions', sel: docs[0].id }); else refresh();
+    if (onDocs()) setQuery({ view: 'review', sel: docs[0].id }); else refresh();
     toast(docs.length === 1 ? `“${docs[0].name}” is back in review` : `${plural(docs.length, 'document')} are back in review`, { tone: 'accent' });
   }
-  /** Decide a batch: its status, the run's counters (so Sources, the run, Review and Documents agree), audit, Undo, then the next entry. */
+  /** Decide a batch: its status, the run's counters (so Sources, the run and Documents agree), audit, Undo, then the next
+      entry. Publishing a batch publishes its documents; the sync processes them, as it does everything it publishes. */
   const BATCH_AUDIT = { declined: 'Kept a batch unpublished', approved: 'Published a batch', replaced: 'Published a batch as new versions' };
   function batchToast(b, to) {
     const n = plural(b.n, 'document'), kb = kbById(b.kb)?.name || '';
-    if (to === 'approved') return `Publishing ${n} to ${kb}`;
-    if (to === 'replaced') return `Publishing ${n} as new versions`;
+    if (to === 'approved') return `Published ${n} to ${kb}`;
+    if (to === 'replaced') return `Published ${n} as new versions`;
     return { duplicate: `Kept the published ones. ${n} stay unpublished.`, personal: `Kept ${n} with personal data unpublished`, version: `Kept the current versions. ${n} stay unpublished.` }[b.reason];
   }
   function decideBatch(id, to) {
     const b = batchById(id); if (!b || b.status !== 'open' || !canReviewKb(kbById(b.kb)) || !BATCH_DELTA[to]) return;
-    const delta = BATCH_DELTA[to](b.n), next = nextEntry(new Set([b.id]), 'batches'), here = onSplit('batches');
+    const delta = BATCH_DELTA[to](b.n), next = nextEntry(new Set([b.id])), here = onReview();
     b.status = to; b.decided = { by: me().id, at: Date.now() };
     shiftBackfill(b.run, delta);
     lifeAudit(BATCH_AUDIT[to], `${BATCH[b.reason].label} · ${plural(b.n, 'document')} · ${srcById(b.source)?.name || kbById(b.kb)?.name || ''}`);
-    if (here) { setQuery({ queue: 'batches', sel: next }); requestAnimationFrame(showDetail); } else refresh();
+    if (here) { setQuery({ view: 'review', sel: next }); requestAnimationFrame(showDetail); } else refresh();
     toast(batchToast(b, to), { action: { label: 'Undo', run: () => {
       if (b.status !== to) return;
       b.status = 'open'; delete b.decided; shiftBackfill(b.run, delta, -1);
-      if (onReview()) setQuery({ queue: 'batches', sel: b.id }); else refresh();
+      if (onDocs()) setQuery({ view: 'review', sel: b.id }); else refresh();
       toast(`${plural(b.n, 'document')} are back in review`, { tone: 'accent' });
     } } });
   }
@@ -653,8 +697,10 @@
   const inQueue = id => { const d = docById(id); return d && stageOf(d) === 'review' && canReviewKb(kbById(d.kb)) ? d : null; };
   A['cur-approve'] = el => {
     const d = inQueue(el.dataset.id); if (!d || !draftOf(d)) return;
-    const dec = decisionOf(d), o = docById(dec.asVersionOf || d.submission?.versionOf);
-    const msg = o ? `Approved. “${o.name}” is publishing as v${res(o).version + 1}.` : `Approved “${d.name}”. Publishing to ${kbById(dec.kb || d.kb)?.name || 'its collection'}.`;
+    const dec = decisionOf(d), o = docById(dec.asVersionOf || d.submission?.versionOf), kb = kbById(dec.kb || d.kb)?.name || 'its collection';
+    // Processed now unless the reviewer unticked it; then it waits as Not processed (Documents → All).
+    const after = dec.process ? 'Processing it now.' : 'Not processed yet: process it from All when you’re ready.';
+    const msg = o ? `Published v${res(o).version + 1} of “${o.name}”. ${after}` : `Published “${d.name}” to ${kb}. ${after}`;
     decide([d], () => approveAndPublish(d, dec), msg);
   };
   A['cur-bulk-approve'] = () => {
@@ -662,10 +708,10 @@
     const docs = ids.map(inQueue).filter(Boolean);
     const personal = docs.filter(d => !analyzing(d) && hasFlag(d, 'personal')), busy = docs.filter(analyzing);
     const ok = docs.filter(d => !personal.includes(d) && !busy.includes(d));
-    const skipped = [personal.length && `${personal.length} with personal data`, busy.length && `${busy.length} still being analyzed`].filter(Boolean).join(' and ');
+    const skipped = [personal.length && `${personal.length} with personal data`, busy.length && `${busy.length} still being classified`].filter(Boolean).join(' and ');
     if (!ok.length) { toast(`Nothing published: ${skipped || 'select submissions first'}. Review ${personal.length + busy.length === 1 ? 'it' : 'them'} one by one.`, { tone: 'danger' }); return; }
     const decisions = new Map(ok.map(d => [d, decisionOf(d)]));
-    decide(ok, () => ok.forEach(d => approveAndPublish(d, decisions.get(d))), `Approved ${plural(ok.length, 'document')}${skipped ? ` · skipped ${skipped}` : ''}`);
+    decide(ok, () => ok.forEach(d => approveAndPublish(d, decisions.get(d))), `Published ${plural(ok.length, 'document')} and started processing them${skipped ? ` · skipped ${skipped}` : ''}`);
     // Keep the skipped ones selected so they're easy to find.
     ui(QK).sel = Object.fromEntries([...personal, ...busy].map(d => [d.id, true])); refresh();
   };
@@ -711,18 +757,19 @@
     else decide(docs, () => docs.forEach(x => rejectSubmission(x, text)), one ? `Declined “${d.name}”` : `Declined ${plural(docs.length, 'submission')}`);
   };
 
-  /* Keyboard (Submissions and Sync batches): J/K or ↓/↑ move through the queue; Enter opens the full preview. */
+  /* Keyboard (Publish): J/K or ↓/↑ move through the list; on a submission, Enter opens the full preview, A approves and
+     publishes, R asks for changes. */
   document.addEventListener('keydown', e => {
     if (!onReview() || S.modal || S.drawer || S.menu || S.palette || e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return;
-    const t = e.target, kind = queueOf(S.cur.query);
-    if (kind !== 'submissions' && kind !== 'batches') return;
+    const t = e.target;
     if (t.closest?.('input,textarea,select,[contenteditable="true"]')) return;
-    const k = e.key;
+    const k = e.key, id = currentId(publishRows()), d = !batchById(id) && inQueue(id);
     if (k === 'j' || k === 'J' || k === 'ArrowDown') { e.preventDefault(); step(1); return; }
     if (k === 'k' || k === 'K' || k === 'ArrowUp') { e.preventDefault(); step(-1); return; }
-    if (k === 'Enter' && kind === 'submissions' && !t.closest?.('button,a,[role="button"],label,[data-act]')) {
-      const id = currentId(queueRows()); if (id) { e.preventDefault(); go('/doc/' + id); }
-    }
+    if (!d || selCount(QK)) return;
+    if (k === 'Enter' && !t.closest?.('button,a,[role="button"],label,[data-act]')) { e.preventDefault(); go('/doc/' + d.id); }
+    else if (k === 'a' || k === 'A') { e.preventDefault(); A['cur-approve']({ dataset: { id: d.id } }); }
+    else if (k === 'r' || k === 'R') { e.preventDefault(); A['cur-changes']({ dataset: { id: d.id } }); }
   });
 
   /* ── Compare (possible duplicate) ── */
@@ -754,110 +801,120 @@
   };
   A['cur-cmp-pick'] = el => { const f = draftOf(docById(el.dataset.id)); if (f) f.asVersionOf = el.dataset.other; closeDrawer(); refresh(); };
 
-  /* ═══════════════ Documents ═══════════════ */
+  /* ═══════════════ All: the registry — filter by processing, select, Process ═══════════════ */
   const SORTERS = { name: d => d.name.toLowerCase(), updated: d => d.updated };
-  const LIFE_OF_GROUP = Object.fromEntries(LIFE_GROUPS.map(([k, , keys]) => [k, keys]));
-  const FACETS = ['kb', 'src', 'kind', 'topic'];
+  const FACETS = ['kb', 'pub', 'src', 'kind', 'topic'];
   function syncFromQuery(u, query) {
-    const qs = JSON.stringify([query.life, query.kb, query.src, query.topic, query.q]);
+    const qs = JSON.stringify([query.processing, query.kb, query.src, query.topic, query.q]);
     if (u._qs === qs) return;
-    Object.assign(u, { _qs: qs, life: LIFE_GROUP_ALIAS[query.life] || query.life || '', kb: query.kb || '', src: query.src || '', topic: query.topic || '', q: query.q || '', kind: '', page: 1, sel: {} });
+    Object.assign(u, { _qs: qs, proc: PROCESSING[query.processing] ? query.processing : '', kb: query.kb || '', src: query.src || '', topic: query.topic || '', q: query.q || '', kind: '', pub: '', page: 1, sel: {} });
   }
   /** Who or what a document came from, in words: its source, its contributor, or the editor who uploaded it. */
   const originName = d => (srcKey(d) !== 'upload' ? srcById(d.source)?.name || res(d).source.name : contributorName(d));
   const originCell = d => `<span class="row gap-6 cur-origin">${appIcon(res(d).source.app, 'sm')}<span class="truncate" data-tip="${esc(originName(d))}">${esc(originName(d))}</span></span>`;
-  /** Every filter but the stage: the flow strip counts within it (like a facet), the table narrows it further. */
-  const facetMatch = (d, u) => (!u.kb || d.kb === u.kb) && (!u.src || originKey(d) === u.src) && (!u.kind || res(d).kind === u.kind) && (!u.topic || res(d).topics.includes(u.topic)) && matchesQ(AK, d.name, contributorName(d), kbById(d.kb)?.name);
+  /** Processing state for the filter: only documents that can be processed have one (submissions and declined ones don't). */
+  const procKey = d => (['published', 'unpublished'].includes(stageOf(d)) ? processingOf(d) : '');
+  const PUBS = { published: 'Published', unpublished: 'Unpublished', review: 'In review' };
+  const pubKey = d => ({ changes: 'review' }[stageOf(d)] || stageOf(d));
+  /** Every filter but processing (the pill row is the processing filter). */
+  const facetMatch = (d, u) => (!u.kb || d.kb === u.kb) && (!u.pub || pubKey(d) === u.pub) && (!u.src || originKey(d) === u.src) && (!u.kind || resKind(d) === u.kind) && (!u.topic || resTopics(d).includes(u.topic)) && matchesQ(AK, d.name, contributorName(d), kbById(d.kb)?.name);
   function allRows(u) {
-    const docs = curatedDocs();
-    const rows = docs.filter(d => (!u.life || LIFE_OF_GROUP[u.life]?.includes(lifeKey(d))) && facetMatch(d, u));
-    return { docs, rows: applySort(rows, AK, SORTERS) };
+    const docs = curatedDocs(), pool = docs.filter(d => facetMatch(d, u));
+    const rows = pool.filter(d => !u.proc || procKey(d) === u.proc);
+    return { docs, pool, rows: applySort(rows, AK, SORTERS) };
   }
-  /** The flow strip: where every document is, read left to right (In review › Publishing › Published), with the two
-      off-ramps apart (Needs attention, Not published). It is the page's stage filter: pressing a step shows those documents. */
-  const FLOW_TIPS = {
-    review: 'Being classified, waiting for a reviewer, or back with the contributor.',
-    publishing: 'Approved and being made searchable.',
-    published: 'Searchable, and used in answers for everyone who can read its collection.',
-    attention: 'Couldn’t publish, waiting to publish, or changed at the source. Each row shows its fix; Review → Publishing problems fixes them together.',
-    closed: 'Declined by a reviewer or unpublished. Kept with their history.',
-  };
-  /** With a first sync at scale: what its batches and its published documents mean here (they're never rows of this table). */
-  const FLOW_TIPS_SCALE = {
-    review: 'Being classified, waiting for a reviewer, or back with the contributor. Batches a first sync held back are decided in Review and aren’t listed here.',
-    published: 'Searchable, and used in answers for everyone who can read its collection. Documents published by a first sync are counted in Sources.',
-  };
-  function flowStrip(docs, u) {
-    const pool = docs.filter(d => facetMatch(d, u)), count = k => pool.filter(d => LIFE_OF_GROUP[k].includes(lifeKey(d))).length;
-    // Open batches (thousands of documents each) are never added to In review's count or the table: decided in Review, its tooltip says so.
-    const held = u.kind || u.topic || (u.q || '').trim() ? 0 : openBatches().filter(b => (!u.kb || b.kb === u.kb) && (!u.src || b.source === u.src)).reduce((s, b) => s + b.n, 0);
-    const firstSync = (D.runs || []).some(r => r.backfill && canReviewKb(kbById(r.kb)));
-    const tips = { ...FLOW_TIPS, ...(held ? { review: FLOW_TIPS_SCALE.review } : {}), ...(firstSync ? { published: FLOW_TIPS_SCALE.published } : {}) };
-    // Each step is a label and a count; how it squares with Review is in its tooltip, not under the number.
-    const step = (k, label, n, tone = '') => `<button type="button" class="${cx('flow__step', tone && n && 'flow__step--' + tone)}" aria-pressed="${(u.life || '') === k}" data-act="cur-flow" data-value="${k}" ${tips[k] ? `data-tip="${esc(tips[k])}"` : ''}><span class="flow__label">${esc(label)}</span><span class="flow__count num">${fmtNum(n)}</span></button>`;
-    const [rv, pub, done, att, closed] = LIFE_GROUPS;
-    const sep = `<span class="flow__sep" aria-hidden="true">${ic('chevron-right', 'i-sm')}</span>`;
-    return `<div class="flow" role="group" aria-label="Where documents are">
-      ${step('', 'All', pool.length)}<span class="flow__div" aria-hidden="true"></span>
-      <div class="flow__main">${[rv, pub, done].map(([k, l]) => step(k, l, count(k), k === 'review' ? 'accent' : '')).join(sep)}</div>
-      <div class="flow__off">${step(att[0], att[1], count(att[0]), 'danger')}${step(closed[0], closed[1], count(closed[0]))}</div>
-    </div>`;
+  /** The processing pills: All, then each state with its count (Not processed accent, Failed danger), hiding empty ones. */
+  function procPills(pool, cur) {
+    const n = Object.fromEntries(PROCESSING_ORDER.map(k => [k, 0]));
+    pool.forEach(d => { const k = procKey(d); if (k) n[k]++; });
+    const tone = { pending: 'accent', failed: 'danger' };
+    const items = [['', 'All', pool.length, ''], ...PROCESSING_ORDER.filter(k => n[k] || k === cur).map(k => [k, PROCESSING[k].label, n[k], tone[k] || ''])];
+    return pillRow(items, cur, 'cur-proc-filter', 'Processing state');
   }
-  A['cur-flow'] = el => { const u = ui(AK), v = el.dataset.value || ''; u.life = u.life === v ? '' : v; u.page = 1; u.sel = {}; refresh(); };
+  A['cur-proc-filter'] = el => { const v = el.tagName === 'SELECT' ? el.value : el.dataset.value; const u = ui(AK); u.proc = u.proc === v ? '' : v; u.page = 1; u.sel = {}; refresh(); };
+  /** Processing: its state (a chip) and what that means for search. */
+  function procCell(d) {
+    const k = procKey(d);
+    if (!k) return '<span class="cell-sub">—</span>';
+    const p = PROCESSING[k], searchable = inSearch(d);
+    const line = { pending: 'Search can’t find it', processing: 'Reading, classifying, indexing…', ready: searchable ? `Searchable · v${res(d).version}` : 'Ready to publish', failed: d.error || 'Stopped partway', outdated: 'The previous version answers', unsupported: 'Download only' }[k];
+    return `<div class="stack gap-2">${chip(p.label, { tone: p.tone, variant: k === 'ready' ? 'tertiary' : 'soft', dot: true, live: !!p.live, size: 'sm', tip: p.desc })}<span class="${cx('cell-sub truncate', (k === 'failed' || k === 'outdated') && 'cur-ix--bad')}" data-tip="${esc(line)}">${esc(line)}</span></div>`;
+  }
+  /** Publication: can readers see it? */
+  function pubCell(d) {
+    const st = stageOf(d), icon = { published: 'eye', unpublished: 'eye-off', review: 'clock', changes: 'pencil', rejected: 'x-circle', merged: 'history' }[st] || 'eye';
+    return `<span class="${cx('cur-pub', 'cur-pub--' + st)}">${ic(icon, 'i-xs')}<span class="truncate">${esc(publicationOf(d))}</span></span>`;
+  }
+  /** Its topics and who chose them: the pipeline (with how sure it was), a person, or a suggestion still in review. */
+  function topicCell(d) {
+    const inReview = ['review', 'changes'].includes(stageOf(d)), ai = inReview && d.ai?.status === 'done' ? d.ai : null;
+    const ids = ai ? ai.topics.map(t => t.id) : d.topics || [];
+    if (d.error && (d.status === 'failed' || inReview)) return `<span class="cur-topic-cell is-none">${esc('Not classified: no text to read')}</span>`;
+    if (!ids.length) return `<span class="cur-topic-cell is-none">${esc(inReview ? 'Classifying…' : procKey(d) === 'pending' ? 'Classified when processed' : 'No topic')}</span>`;
+    const p = ai ? Math.round((ai.topics[0].conf || 0) * 100) : topicsByPipeline(d) ? Math.round(topicConfidence(d, ids[0]) * 100) : null;
+    const by = ai ? `Suggested · ${p}%` : p != null ? `Pipeline · ${p}%` : 'Set by a person';
+    const tone = p == null ? '' : p >= 80 ? 'hi' : p >= Math.round(classThreshold() * 100) ? 'mid' : 'lo';
+    return `<div class="stack gap-2 cur-topic-cell"><span class="truncate" translate="no">${esc(ids.map(topicName).join(', '))}</span><span class="${cx('cell-sub', tone && 'cur-by--' + tone)}">${esc(by)}</span></div>`;
+  }
   function allRow(d) {
-    const on = !!ui(AK).sel?.[d.id], r = res(d);
+    const on = !!ui(AK).sel?.[d.id];
     return `<tr class="table__row" data-act="cur-doc" data-id="${d.id}" tabindex="0" ${on ? 'aria-selected="true"' : ''}>
       ${selCheck(AK, d.id, 'Select ' + d.name)}
-      <td class="table__cell table__cell--primary"><div class="row gap-12">${fileIcon(d.type)}<div class="grow"><div class="cell-title truncate" data-tip="${esc(d.name)}">${esc(d.name)}</div><div class="cell-sub truncate">${esc([kbById(d.kb)?.name, ...r.topics.slice(0, 2).map(topicName)].filter(Boolean).join(' · '))}</div></div></div></td>
-      <td class="table__cell table__cell--hide-sm">${originCell(d)}</td>
-      <td class="table__cell table__cell--hide-sm cur-owner"><span class="truncate">${esc(r.owner || '—')}</span></td>
-      <td class="table__cell">${lifeChip(d, 'sm')}</td>
+      <td class="table__cell table__cell--primary"><div class="row gap-12">${fileIcon(d.type)}<div class="grow"><div class="cell-title truncate" data-tip="${esc(d.name)}">${esc(d.name)}</div><div class="cell-sub truncate"><span translate="no">${esc([kbById(d.kb)?.name, ...folderPath(docFolder(d)).map(f => f.name)].filter(Boolean).join(' › '))}</span><span aria-hidden="true"> · </span><span translate="no">${esc(originName(d))}</span></div></div></div></td>
+      <td class="table__cell">${procCell(d)}</td>
+      <td class="table__cell table__cell--hide-sm">${pubCell(d)}</td>
+      <td class="table__cell table__cell--hide-sm">${topicCell(d)}</td>
       <td class="table__cell muted cur-nowrap" data-tip="${esc(fmtDateTime(d.updated))}">${rel(d.updated)}</td>
       <td class="table__cell table__cell--actions"><div class="row gap-4 none">${rowFix(d)}<span class="reveal-on-hover">${iconBtn('more', 'More actions', { size: 'sm', menu: 'cur-row', data: { id: d.id, ctx: 'row' } })}</span></div></td></tr>`;
   }
   function documentsTab(query) {
-    const u = ui(AK, { q: '', life: '', kb: '', src: '', kind: '', topic: '', sort: { key: 'updated', dir: 'desc' }, page: 1, sel: {} });
+    const u = ui(AK, { q: '', proc: '', kb: '', pub: '', src: '', kind: '', topic: '', sort: { key: 'updated', dir: 'desc' }, page: 1, sel: {} });
     syncFromQuery(u, query);
     const empty = () => emptyState({ icon: 'files', title: 'No documents yet', desc: 'Documents added to the collections you look after show up here, whatever their origin.', actions: canContribute() ? btn('Add documents', { v: 'primary', icon: 'upload', act: 'contribute' }) : '', boxed: true });
     return gate({
       loading: () => skelRows(8),
       empty,
       ok: () => {
-        const { docs, rows } = allRows(u);
+        const { docs, pool, rows } = allRows(u);
         if (!docs.length) return empty();
         const live = new Set(docs.map(d => d.id));
         u.sel = Object.fromEntries(Object.entries(u.sel || {}).filter(([id, on]) => on && live.has(id)));
         const facets = allFacets(docs, u), sortLabel = u.sort?.key === 'name' ? 'Name' : 'Recently updated';
         const n = FACETS.filter(k => u[k]).length;
-        // Wide: one dropdown per facet. Narrow: one Filters button (a bottom sheet on phones) plus removable chips for what's on,
-        // so the first document isn't pushed below the fold. The sort menu stands in for the column headers on narrow screens.
-        // The stage is the flow strip above, never a second dropdown.
+        // Wide: one dropdown per facet. Narrow: one Filters button (a bottom sheet on phones) plus removable chips for what's on.
+        // Processing is the pill row under the toolbar, never a second dropdown.
         const wide = facets.map(f => filterButton(f.label, AK, f.key, f.opts)).join('') + clearFilters(AK, FACETS);
         const narrow = facets.length ? `<button type="button" class="${cx('filter-button', n && 'is-set')}" data-popover="cur-filters" aria-haspopup="dialog" aria-expanded="false">${ic('filter')}<span>Filters</span>${n ? badge(n, { tone: 'accent' }) : ''}</button>` : '';
         const chips = n ? `<div class="cur-fchips">${facets.filter(f => u[f.key]).map(f => `<button type="button" class="chip chip--soft chip--accent cur-fchip" data-act="cur-filter-set" data-field="${f.key}" data-value="" aria-label="${esc(`Remove filter: ${f.label}`)}">${esc(f.opts.find(o => o[0] === u[f.key])?.[1] || u[f.key])}${ic('x', 'i-xs')}</button>`).join('')}</div>` : '';
-        const toolbar = docs.length > MANY || u.q || n ? `<div class="toolbar cur-toolbar">${searchField({ uiKey: AK, placeholder: 'Search documents' })}
+        const toolbar = `<div class="toolbar cur-toolbar">${searchField({ uiKey: AK, placeholder: 'Search documents' })}
           <div class="cur-filters--wide">${wide}</div><div class="cur-filters--narrow">${narrow}</div>
-          <div class="toolbar__end cur-sortmenu">${btn(sortLabel, { v: 'ghost', size: 'sm', icon: 'sort', menu: 'cur-sort', aria: `aria-label="Sort: ${esc(sortLabel)}"` })}</div></div>${chips}` : '';
-        const flow = flowStrip(docs, u);
-        // Where things are, then the tools to browse the rest. Fixing several at once happens in Review → Publishing problems.
-        if (!rows.length) return flow + toolbar + noMatches(AK, ['life', ...FACETS], 'documents');
-        const page = paginate(rows, AK, PER);
-        const bulk = bulkBar(AK, btn('Publish', { v: 'ghost', size: 'sm', icon: 'upload', act: 'cur-bulk-publish' }) + btn('Unpublish', { v: 'ghost', size: 'sm', icon: 'eye-off', act: 'cur-bulk-unpublish' }) + btn('Archive', { v: 'ghost', size: 'sm', icon: 'archive', act: 'cur-bulk-archive' }));
-        // No Visibility column: who can read a document is its collection's audience (shown on the collection), the same for every row of it.
-        const head = `${selAllCheck(AK, page.map(d => d.id))}${sortHead('Name', 'name', AK)}${th('Origin', 'table__column--hide-sm')}${th('Owner', 'table__column--hide-sm')}${th('Lifecycle')}${sortHead('Updated', 'updated', AK)}${th('<span class="sr-only">Actions</span>', 'table__column--actions')}`;
-        return flow + toolbar + `<div class="cur-all">${table({ label: 'Documents', head, rows: page.map(allRow), foot: pager(rows.length, AK, PER) })}</div>` + bulk;
+          <div class="toolbar__end cur-sortmenu">${btn(sortLabel, { v: 'ghost', size: 'sm', icon: 'sort', menu: 'cur-sort', aria: `aria-label="Sort: ${esc(sortLabel)}"` })}</div></div>${chips}`;
+        const pills = procPills(pool, u.proc);
+        if (!rows.length) return toolbar + pills + noMatches(AK, FACETS, 'documents');
+        const pageRows = paginate(rows, AK, PER);
+        // Selecting the whole page offers the whole filtered list (the way to pick 1,000 documents to process at once).
+        const nSel = selCount(AK), allPage = pageRows.every(d => u.sel?.[d.id]);
+        const more = nSel && allPage && nSel < rows.length ? linkBtn(`Select all ${fmtNum(rows.length)}`, { act: 'cur-sel-matching' }) : '';
+        const bulk = bulkBar(AK, more + btn('Process', { v: 'secondary', size: 'sm', icon: 'play', act: 'cur-bulk-process' }) + btn('Publish', { v: 'ghost', size: 'sm', icon: 'eye', act: 'cur-bulk-publish' }) + btn('Unpublish', { v: 'ghost', size: 'sm', icon: 'eye-off', act: 'cur-bulk-unpublish' }) + btn('Archive', { v: 'ghost', size: 'sm', icon: 'archive', act: 'cur-bulk-archive' }));
+        // Processing and publication are separate columns: either can be where a document stopped. No Visibility column:
+        // who can read a document is its collection's (or folder's) audience.
+        const head = `${selAllCheck(AK, pageRows.map(d => d.id))}${sortHead('Name', 'name', AK)}${th('Processing state')}${th('Publication', 'table__column--hide-sm')}${th('Topics', 'table__column--hide-sm')}${sortHead('Updated', 'updated', AK)}${th('<span class="sr-only">Actions</span>', 'table__column--actions')}`;
+        return toolbar + pills + `<div class="cur-all">${table({ label: 'All documents', head, rows: pageRows.map(allRow), foot: pager(rows.length, AK, PER) })}</div>` + bulk;
       },
     });
   }
+  A['cur-sel-matching'] = () => { const u = ui(AK); u.sel = Object.fromEntries(allRows(u).rows.map(d => [d.id, true])); refresh(); };
   /** Facets Documents offers, only when they'd split it (or one is in use): [{ key, label, opts }]. */
   function allFacets(docs, u) {
     const kbs = queueKbs(docs);
     const srcs = [...new Set(docs.map(srcKey))].filter(k => k !== 'upload').map(srcById).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
     const origins = [docs.some(d => originKey(d) === 'contrib') && ['contrib', 'Contributions'], docs.some(d => originKey(d) === 'upload') && ['upload', 'Uploads'], ...srcs.map(s => [s.id, s.name])].filter(Boolean);
-    const kinds = [...new Set(docs.map(d => res(d).kind))].map(k => [k, kindMeta(k).label]).sort((a, b) => a[1].localeCompare(b[1]));
-    const topics = [...new Set(docs.flatMap(d => res(d).topics))].filter(id => topicById(id)).map(id => [id, topicName(id)]).sort((a, b) => a[1].localeCompare(b[1]));
+    const kinds = [...new Set(docs.map(resKind))].map(k => [k, kindMeta(k).label]).sort((a, b) => a[1].localeCompare(b[1]));
+    const topics = [...new Set(docs.flatMap(resTopics))].filter(id => topicById(id)).map(id => [id, topicName(id)]).sort((a, b) => a[1].localeCompare(b[1]));
+    const pubs = Object.entries(PUBS).filter(([k]) => docs.some(d => pubKey(d) === k));
     return [
       (kbs.length > 1 || u.kb) && { key: 'kb', label: 'Collection', opts: kbs.map(k => [k.id, k.name]) },
+      (pubs.length > 1 || u.pub) && { key: 'pub', label: 'Publication', opts: pubs },
       (origins.length > 1 || u.src) && { key: 'src', label: 'Origin', opts: origins },
       (kinds.length > 1 || u.kind) && { key: 'kind', label: 'Type', opts: kinds },
       (topics.length > 1 || u.topic) && { key: 'topic', label: 'Topic', opts: topics },
@@ -876,23 +933,94 @@
     const u = ui(AK), set = (key, dir) => { u.sort = { key, dir }; u.page = 1; refresh(); };
     return [{ section: 'Sort by' }, { label: 'Recently updated', checked: u.sort?.key !== 'name', run: () => set('updated', 'desc') }, { label: 'Name', checked: u.sort?.key === 'name', run: () => set('name', 'asc') }];
   };
-  /** Selected documents in a list (Documents or Publishing problems) the caller reviews. */
+  /** Selected documents in a list (All or Issues) the caller reviews. */
   const selectedIn = key => selIds(key).map(docById).filter(d => d && canReviewKb(kbById(d.kb)));
-  const canPublish = d => { const k = lifeKey(d); return k === 'unpublished' || k === 'queued' || k === 'update' || (k === 'failed' && !isLocked(d)); };
+  const canPublish = d => stageOf(d) === 'unpublished' && !d.archived;
   const canUnpublish = d => stageOf(d) === 'published' && !d.archived;
-  function publishDocs(docs) {
-    const again = docs.filter(d => stageOf(d) === 'unpublished'), rest = docs.filter(d => stageOf(d) !== 'unpublished');
-    again.forEach(republish);
-    if (rest.length) X.processDocs(rest, { quiet: true });
-  }
-  /** Publish (or retry, or publish the update of) what's selected; password-protected files are skipped and said so. */
+  /** Publish what's selected: readers see it at once; what isn't processed yet stays out of search until it is. */
   function bulkPublish(key) {
-    const docs = selectedIn(key), ok = docs.filter(canPublish), skipped = docs.length - ok.length;
-    if (!ok.length) { toast(docs.some(isLocked) ? 'Password-protected files can’t be published. Replace them or remove the password at the source.' : 'None of these need publishing', { tone: 'danger' }); return; }
-    ui(key).sel = {}; publishDocs(ok); refresh();
-    toast(`Publishing ${plural(ok.length, 'document')}${skipped ? ` · ${skipped} skipped` : ''}`, { tone: 'accent' });
+    const docs = selectedIn(key).filter(canPublish);
+    if (!docs.length) { toast('None of these are unpublished', { tone: 'danger' }); return; }
+    const snaps = docs.map(d => [d, snapDoc(d)]), raw = docs.filter(d => d.status !== 'ready').length;
+    docs.forEach(republish); ui(key).sel = {}; refresh();
+    toast(raw ? `Published ${plural(docs.length, 'document')} · ${raw} not processed yet, so search can’t find them` : `Published ${plural(docs.length, 'document')}`, { action: { label: 'Undo', run: () => { snaps.forEach(([d, s]) => restoreDoc(d, s)); refresh(); } } });
   }
   A['cur-bulk-publish'] = () => bulkPublish(AK);
+  /** Process what's selected: one dialog that says what will happen, then one processing run. */
+  function processSelected(key) {
+    const docs = selectedIn(key);
+    if (!docs.some(canProcess)) { toast(docs.some(d => d.status === 'processing') ? 'These are being processed already' : docs.some(d => UNPROCESSABLE.includes(d.type)) ? 'Images and archives can’t be processed.' : 'None of these can be processed', { tone: 'danger' }); return; }
+    openModal('cur-process', { key, ids: docs.map(d => d.id) });
+  }
+  A['cur-bulk-process'] = () => processSelected(AK);
+  /** A collection's usual topics: the ones it lists, then those its documents carry most (at most eight). */
+  function kbTopicIds(kb) {
+    const n = new Map();
+    docsIn(kb.id).forEach(d => (d.topics || []).forEach(id => n.set(id, (n.get(id) || 0) + 1)));
+    const live = id => { const t = topicById(id); return !!t?.parent && !t.archived; };
+    return [...new Set([...(kb.topics || []), ...[...n].sort((a, b) => b[1] - a[1]).map(([id]) => id)])].filter(live).slice(0, 8);
+  }
+  const PROC_DEFAULT = () => ({ scope: 'all', topics: [], expanded: false, note: '', noteOpen: false, tried: false });
+  const procKbs = ids => [...new Set(ids.map(docById).filter(canProcess).map(d => d.kb))].map(kbById).filter(kb => kb && kbTopicIds(kb).length);
+  /** The Process dialog: one decision (which topics the AI may suggest), one optional input (context) and the action.
+      Processing never publishes: people review, then publish. */
+  M['cur-process'] = ({ ids }) => {
+    const todo = ids.map(docById).filter(canProcess), n = todo.length;
+    const f = ui('curProcess', PROC_DEFAULT()), pages = todo.reduce((s, d) => s + (d.pages || 1), 0), mins = Math.max(1, Math.round(pages / 120));
+    const leaves = topicTree().flatMap(dm => dm.children), chosen = f.scope === 'chosen';
+    const sec = (label, control, body = '', opt = false) => `<section class="proc-sec"><div class="proc-sec__head"><h3 class="proc-sec__label">${esc(label)}${opt ? '<span class="label__opt">(optional)</span>' : ''}</h3>${control}</div>${body}</section>`;
+
+    // Topics: all of them, or a few the admin picks (one click loads the documents' collections' usual topics).
+    const loadable = chosen ? procKbs(ids).filter(kb => kbTopicIds(kb).some(id => !f.topics.includes(id))) : [];
+    const load = loadable.length ? linkBtn(loadable.length === 1 ? `Use ${loadable[0].name}’s topics` : 'Use their collections’ topics', { act: 'cur-proc-load' }) : '';
+    const hint = chosen ? (f.topics.length ? `The AI suggests only from these ${plural(f.topics.length, 'topic')}.` : 'Pick the topics the AI may suggest.') : `The AI suggests from all ${plural(leaves.length, 'topic')}.`;
+    const err = chosen && f.tried && !f.topics.length ? `<div class="field-error" role="alert">${ic('alert-circle')}<span>${esc('Select at least one topic, or use all topics.')}</span></div>` : '';
+    const picker = chosen ? topicPicker({ id: 'cur-proc-add', ids: f.topics, act: 'cur-proc-topic', label: 'Selected topics', domains: true, limit: 5, expanded: f.expanded, quiet: true }) : '';
+    const topics = sec('Topics', seg({ value: f.scope, act: 'cur-proc-scope', label: 'Topics the AI may suggest', size: 'sm', options: [['all', 'All topics'], ['chosen', 'Selected']] }),
+      `<p class="proc-sec__hint"><span>${esc(hint)}</span>${load}</p>${picker}${err}`);
+
+    // Context: secondary, closed until asked for.
+    const open = f.noteOpen || !!f.note;
+    const context = sec('Context for the AI', open ? '' : linkBtn('Add', { act: 'cur-proc-note' }),
+      open ? textarea({ id: 'cur-proc-note', bind: 'curProcess.note', value: f.note, rows: 2, placeholder: 'e.g. Scanned decisions and notices, 2015–2024', attrs: 'maxlength="300" aria-label="Context for the AI"' }) : '', true);
+    return {
+      size: 'md', icon: 'play', title: `Process ${plural(n, 'document')}`,
+      desc: esc(`The AI reads each file and suggests topics. About ${mins} min for ${fmtNum(pages)} pages; you can keep working.`),
+      body: `<div class="proc">${topics}${context}</div>`,
+      foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn(`Process ${plural(n, 'document')}`, { v: 'primary', icon: 'play', act: 'cur-process-go' }),
+    };
+  };
+  /** Selected starts from what the documents' collection usually holds, when only one collection is involved. */
+  A['cur-proc-scope'] = el => {
+    const f = ui('curProcess'); f.scope = el.dataset.value; f.tried = false;
+    if (f.scope === 'chosen' && !f.topics.length) { const kbs = procKbs(S.modal?.props?.ids || []); if (kbs.length === 1) f.topics = kbTopicIds(kbs[0]); }
+    refreshLayer();
+  };
+  A['cur-proc-load'] = () => {
+    const f = ui('curProcess');
+    f.topics = [...new Set([...f.topics, ...procKbs(S.modal?.props?.ids || []).flatMap(kbTopicIds)])]; f.tried = false; refreshLayer();
+  };
+  A['cur-proc-topic-add'] = el => {
+    const f = ui('curProcess'), v = el.value; if (!v) return;
+    const add = v.startsWith('domain:') ? (topicTree().find(dm => dm.id === v.slice(7))?.children || []).map(t => t.id) : [v];
+    f.topics = [...new Set([...f.topics, ...add])]; f.tried = false; refreshLayer();
+    requestAnimationFrame(() => $('#cur-proc-add')?.focus());
+  };
+  A['cur-proc-topic-remove'] = el => {
+    const f = ui('curProcess'); f.topics = f.topics.filter(id => id !== el.dataset.topic); refreshLayer();
+    requestAnimationFrame(() => $('#cur-proc-add')?.focus());
+  };
+  A['cur-proc-topic-more'] = () => { ui('curProcess').expanded = true; refreshLayer(); };
+  A['cur-proc-note'] = () => { ui('curProcess').noteOpen = true; refreshLayer(); requestAnimationFrame(() => $('#cur-proc-note')?.focus()); };
+  A['cur-process-go'] = () => {
+    const { key, ids } = S.modal.props, f = ui('curProcess'), docs = ids.map(docById).filter(canProcess);
+    if (f.scope === 'chosen' && !f.topics.length) { f.tried = true; refreshLayer(); requestAnimationFrame(() => $('#cur-proc-add')?.focus()); return; }
+    const note = f.note.trim(), context = f.scope === 'chosen' || note ? { topics: f.scope === 'chosen' ? [...f.topics] : [], note } : null;
+    closeModal(); ui(key).sel = {};
+    const run = X.processRun(docs, { context });
+    Object.assign(f, PROC_DEFAULT());
+    if (run) toast(`Processing ${plural(run.total, 'document')}`, { tone: 'accent', action: { label: 'Show them', run: () => A['cur-show-processing']() } });
+  };
   /** Unpublishing is reversible: it happens at once, with Undo (no confirmation). */
   function unpublishDocs(docs, onDone) {
     docs = docs.filter(canUnpublish);
@@ -907,14 +1035,14 @@
   /* ── One document: drawer + row menu ── */
   const closeDocDrawer = () => { if (S.drawer?.name === 'cur-doc') S.drawer = null; };
   const OPS = {
-    review: { label: 'Review', icon: 'check', run: d => { closeDocDrawer(); go(studioHref('review', { queue: 'submissions', sel: d.id })); } },
-    publish: { label: 'Publish now', icon: 'play', run: d => X.processDocs([d], { msg: `Publishing ${d.name}` }) },
-    retry: { label: 'Retry', icon: 'retry', run: d => X.processDocs([d], { msg: `Publishing ${d.name} again` }) },
+    review: { label: 'Review', icon: 'check', run: d => { closeDocDrawer(); go(docsHref('review', { sel: d.id })); } },
+    process: { label: 'Process', icon: 'play', run: d => X.processDocs([d], { msg: `Processing ${d.name}` }) },
+    retry: { label: 'Process again', icon: 'retry', run: d => X.processDocs([d], { msg: `Processing ${d.name} again` }) },
     replace: { label: 'Replace file', icon: 'upload', run: d => A['doc-replace']({ dataset: { id: d.id } }) },
-    // Changed at its source: republish from the source (never a file picker for synced documents).
-    update: { label: 'Publish update', icon: 'refresh', run: d => X.processDocs([d], { msg: `Publishing the update to ${d.name}` }) },
+    // Changed at its source: process the source's version (never a file picker for synced documents).
+    update: { label: 'Process the update', icon: 'refresh', run: d => X.processDocs([d], { msg: `Processing the update to ${d.name}` }) },
     source: { label: 'Open source', icon: 'plug', run: d => { closeDocDrawer(); if (can('source.manage') && A['src-open']) A['src-open']({ dataset: { id: d.source } }); else go(studioHref('sources')); } },
-    republish: { label: 'Publish again', icon: 'upload', run: d => { const s = snapDoc(d); republish(d); refresh(); toast(`Publishing “${d.name}” again`, { tone: 'accent', action: { label: 'Undo', run: () => { restoreDoc(d, s); refresh(); } } }); } },
+    republish: { label: 'Publish', icon: 'eye', run: d => { const s = snapDoc(d); republish(d); refresh(); toast(d.status === 'ready' ? `Published “${d.name}”` : `Published “${d.name}” · not processed yet, so search can’t find it`, { action: { label: 'Undo', run: () => { restoreDoc(d, s); refresh(); } } }); } },
     unpublish: { label: 'Unpublish', icon: 'eye-off', run: d => unpublishDocs([d]) },
     edit: { label: 'Edit details…', icon: 'pencil', run: d => A['res-edit']({ dataset: { id: d.id } }) },
     move: { label: 'Move to…', icon: 'folder', run: d => A['doc-move']({ dataset: { id: d.id } }) },
@@ -924,19 +1052,19 @@
     archive: { label: 'Archive', icon: 'archive', danger: true, run: d => X.archiveDocs([d], closeDocDrawer) },
   };
   /** Fixes a row shows as a visible button (actionable states only); everything else lives in ⋯. */
-  const ROW_FIX = new Set(['publish', 'retry', 'replace', 'update', 'republish', 'source']);
-  /** May the caller open the document drawer? Reviewers of its base; editors for published documents (the To keep right queues). */
+  const ROW_FIX = new Set(['process', 'retry', 'replace', 'update', 'republish', 'source']);
+  /** May the caller open the document drawer? Reviewers of its base; editors for published documents (Classification and Upkeep). */
   const canOpenDoc = d => { const kb = d && kbById(d.kb); return !!kb && (canReviewKb(kb) || (canEditKb(kb) && isPublishedStage(d))); };
   /** { main, more, tail } operations for a document's lifecycle state. Editors who don't review the base only open, edit and download. */
   function opsFor(d) {
     const k = lifeKey(d), live = ['published', 'update', 'stored', 'queued', 'failed', 'publishing'].includes(k);
     if (!canReviewKb(kbById(d.kb))) return { main: 'open', more: live ? ['edit'] : [], tail: ['download'] };
-    const synced = srcKey(d) !== 'upload' && !!srcById(d.source);
-    const main = { analyzing: 'review', review: 'review', queued: 'publish', failed: isLocked(d) ? (synced ? 'source' : 'replace') : 'retry', update: synced ? 'update' : 'replace', unpublished: 'republish', merged: d.mergedInto ? 'original' : 'open' }[k] || 'open';
-    const more = [main !== 'open' && 'open', live && 'edit', live && !kbById(d.kb)?.personal && 'move', canUnpublish(d) && 'unpublish'].filter(Boolean);
+    const synced = srcKey(d) !== 'upload' && !!srcById(d.source), raw = processingOf(d) === 'pending';
+    const main = { analyzing: 'review', review: 'review', queued: 'process', failed: isLocked(d) ? (synced ? 'source' : 'replace') : 'retry', update: synced ? 'update' : 'replace', unpublished: raw ? 'process' : 'republish', merged: d.mergedInto ? 'original' : 'open' }[k] || 'open';
+    const more = [main !== 'open' && 'open', k === 'unpublished' && main !== 'republish' && 'republish', (live || k === 'unpublished') && 'edit', (live || k === 'unpublished') && !kbById(d.kb)?.personal && 'move', canUnpublish(d) && 'unpublish'].filter(Boolean);
     return { main, more, tail: ['download', !d.archived && k !== 'merged' && 'archive'].filter(Boolean) };
   }
-  /** The state's fix as a small row button (Documents, Publishing problems), or ''. */
+  /** The state's fix as a small row button (All documents, Problems), or ''. */
   function rowFix(d) {
     const { main } = opsFor(d); if (!ROW_FIX.has(main)) return '';
     return btn(OPS[main].label, { v: 'secondary', size: 'sm', icon: OPS[main].icon, act: 'cur-op', data: { id: d.id, op: main } });
@@ -969,36 +1097,41 @@
     if (evs.length && lifeKey(d) === 'published' && evs.at(-1).kind !== 'unpublished') items.push({ icon: 'check-circle', tone: 'success', label: 'Published', at: Math.max(d.updated, evs.at(-1).at) });
     return `<ol class="cur-tl">${items.map(x => `<li class="cur-tl__item">${itemIcon(x.icon, x.tone, 'sm')}<div class="grow"><div class="t-sm"><span class="medium">${esc(x.label)}</span>${x.by ? ` · ${esc(x.by)}` : ''}</div>${x.text ? `<div class="cur-tl__text">“${esc(x.text)}”</div>` : ''}<div class="t-xs muted">${esc(fmtDateTime(x.at))}</div></div></li>`).join('')}</ol>`;
   }
-  /** Where a document is in the Studio flow — Received → Classified → Reviewed → Published — whatever its origin.
-      Each step: { label, state: done | current | issue | skipped | todo, text, at?, action? }. */
+  /** A document's progress, whatever its origin: Received → Reviewed → Published → Processed → Searchable. Publication and
+      processing are independent, so either can be done while the other isn't; Searchable needs both.
+      Each step: { label, state: done | current | issue | skipped | todo, text, at?, action?, busy? }. */
   function flowSteps(d) {
-    const k = lifeKey(d), sub = d.submission || {}, src = srcKey(d) !== 'upload' ? srcById(d.source) : null, kb = kbById(d.kb);
+    const k = lifeKey(d), st = stageOf(d), sub = d.submission || {}, src = srcKey(d) !== 'upload' ? srcById(d.source) : null, kb = kbById(d.kb);
     const ev = kind => [...(sub.events || [])].reverse().find(e => e.kind === kind);
-    const open = ['analyzing', 'review', 'changes'].includes(k);
-    const received = { label: 'Received', state: 'done', at: sub.at || d.updated,
-      text: sub.by ? `Contributed by ${actorName(sub.by)}` : src ? `Synced from ${src.name}` : `Uploaded by ${d.addedBy || 'an editor'}` };
-    const ai = open && d.ai?.status === 'done' ? d.ai : null;
-    const topics = open ? (ai ? ai.topics.map(t => t.id) : []) : res(d).topics, kind = kindMeta(ai ? ai.kind.value : res(d).kind).label;
-    const tagTopic = isPublishedStage(d) && X.res.canEditRes(d) ? btn('Add topic', { v: 'secondary', size: 'sm', icon: 'tag', iconRight: 'chevron-down', menu: 'kh-topic', data: { ids: d.id } }) : '';
-    const classified = k === 'analyzing' ? { state: 'current', busy: true, text: 'Matching it against the taxonomy…' }
-      : topics.length ? { state: 'done', text: `${kind} · ${topics.map(topicName).join(', ')}${open ? ' · suggested, the reviewer confirms' : d.classifiedBy === 'assistant' ? ' · tagged by the assistant' : ''}` }
-        : { state: 'issue', text: `${kind} · no topic yet`, action: tagTopic };
-    const by = e => (e?.by ? ` by ${actorName(e.by)}` : '');
+    const open = ['analyzing', 'review', 'changes'].includes(k), by = e => (e?.by ? ` by ${actorName(e.by)}` : '');
+    const received = { state: 'done', at: sub.at || d.updated, text: sub.by ? `Contributed by ${actorName(sub.by)}` : src ? `Synced from ${src.name}` : `Uploaded by ${d.addedBy || 'an editor'}` };
     const reviewed = k === 'analyzing' || k === 'review' ? { state: 'current', text: 'Waiting for a reviewer' }
       : k === 'changes' ? { state: 'issue', text: `Changes requested${by(ev('changes'))}`, at: ev('changes')?.at }
         : k === 'rejected' ? { state: 'issue', text: `Declined${by(ev('rejected'))}`, at: ev('rejected')?.at }
           : ev('approved') ? { state: 'done', text: `Approved${by(ev('approved'))}`, at: ev('approved').at }
             : { state: 'skipped', text: src ? `Not needed: ${src.name} publishes automatically` : 'Not needed: added by an editor of the collection' };
-    const who = kb ? X.whoCanSee(kb).label : '';
-    const PUB = {
-      queued: { state: 'issue', text: 'Waiting to publish' }, publishing: { state: 'current', busy: true, text: 'Making it searchable…' },
-      published: { state: 'done', text: `Searchable · ${who}` }, stored: { state: 'done', text: 'Stored · this file type can’t be searched' },
-      failed: { state: 'issue', text: 'Couldn’t publish' }, update: { state: 'issue', text: 'Changed at the source · answers use the previous version' },
-      unpublished: { state: 'issue', text: 'Unpublished · out of search and answers' }, merged: { state: 'done', text: 'Published as a new version' },
-      rejected: { state: 'skipped', text: 'Won’t be published' },
-    };
-    const published = PUB[k] || { state: 'todo', text: `After approval · ${who} will see it` };
-    return [{ ...received }, { label: 'Classified', ...classified }, { label: 'Reviewed', ...reviewed }, { label: 'Published', ...published }];
+    const who = kb ? X.whoCanSee(kb, docFolder(d)).label : '';
+    const published = st === 'published' ? { state: 'done', text: who }
+      : st === 'merged' ? { state: 'done', text: 'Published as a new version of another document' }
+        : st === 'unpublished' ? { state: 'issue', text: 'Unpublished · readers don’t see it', action: X.res.canEditRes(d) || canReviewKb(kb) ? btn('Publish', { v: 'secondary', size: 'sm', icon: 'eye', act: 'cur-op', data: { id: d.id, op: 'republish' } }) : '' }
+          : st === 'rejected' ? { state: 'skipped', text: 'Won’t be published' } : { state: 'todo', text: `After approval · ${who} will see it` };
+    // Processed: read → classified → indexed, in one line, with what the pipeline chose.
+    const v = res(d).version, p = processingOf(d), topics = res(d).topics;
+    const pct = topics.length && topicsByPipeline(d) ? Math.round(topicConfidence(d, topics[0]) * 100) : null;
+    const what = topics.length ? `${kindMeta(res(d).kind).label} · ${topics.map(topicName).join(', ')}${pct != null ? ` (${pct}%)` : ''}` : 'no topic found';
+    const procBtn = canProcess(d) && canReviewKb(kb) ? btn(p === 'pending' ? 'Process' : 'Process again', { v: 'secondary', size: 'sm', icon: 'play', act: 'cur-op', data: { id: d.id, op: p === 'pending' ? 'process' : 'retry' } }) : '';
+    const processed = open || st === 'rejected' || st === 'merged' ? { state: 'todo', text: open ? 'After approval, unless the reviewer processes it later' : 'Not processed' }
+      : d.reclassifying ? { state: 'current', busy: true, text: 'Classifying again with the changed topics…' }
+        : { pending: { state: 'todo', text: 'Not processed yet: search and the assistant can’t use it', action: procBtn },
+          processing: { state: 'current', busy: true, text: 'Reading, classifying and indexing…' },
+          ready: { state: 'done', text: `v${v} · ${what}${d.classCtx?.topics?.length ? ` · among ${plural(d.classCtx.topics.length, 'topic')} chosen for its run` : ''}${d.classCtx?.note ? ' · with context for the AI' : ''}`, at: d.processedAt },
+          failed: { state: 'issue', text: d.error || 'Processing stopped partway', action: procBtn },
+          outdated: { state: 'issue', text: `Changed at the source · v${v} still answers until it’s processed again`, action: procBtn },
+          unsupported: { state: 'skipped', text: 'This file type can’t be processed' } }[p];
+    const searchable = inSearch(d) ? { state: 'done', text: `In search and answers for ${who}` }
+      : k === 'update' ? { state: 'done', text: `Answers use v${v} until the update is processed` }
+        : { state: 'todo', text: st === 'published' ? 'Once it’s processed' : st === 'unpublished' && p === 'ready' ? 'Once it’s published' : 'Once it’s published and processed' };
+    return [['Received', received], ['Reviewed', reviewed], ['Published', published], ['Processed', processed], ['Searchable', searchable]].map(([label, s]) => ({ label, ...s }));
   }
   /** current = waiting on someone (clock) or, when busy, work in progress (spinning loader). */
   const STEP_ICON = { done: ['check', 'success'], current: ['clock', 'accent'], issue: ['alert', 'warning'], skipped: ['minus', ''], todo: ['circle-dashed', ''] };
@@ -1019,7 +1152,7 @@
     // The chip names the state; one note says why and what fixes it (never a second title repeating the chip).
     const fixHint = main === 'source' ? ' Remove the password at the source, then sync again.' : main === 'replace' ? ' Replace the file with a copy without a password.' : '';
     const saysFix = /remove the password|copy without|sync again|try again/i.test(d.error || '');
-    const note = k === 'failed' ? alertBox('danger', '', esc((d.error || 'Publishing stopped partway. Try again.') + (isLocked(d) && !saysFix ? fixHint : '')))
+    const note = k === 'failed' ? alertBox('danger', '', esc((d.error || 'Processing stopped partway. Try again.') + (isLocked(d) && !saysFix ? fixHint : '')))
       : k === 'merged' && d.mergedInto ? alertBox('success', '', esc(`It replaced the earlier version of “${docById(d.mergedInto)?.name || 'a document'}”.`))
         : ['changes', 'rejected', 'unpublished'].includes(k) && last?.text ? `<blockquote class="cur-tl__text">“${esc(last.text)}” — ${esc(actorName(last.by))}</blockquote>` : '';
     const published = stageOf(d) === 'published';
@@ -1028,12 +1161,12 @@
       <div class="drawer__section"><h3 class="drawer__section-title">Progress</h3>${stepper(d)}</div>
       <div class="drawer__section">${disclosure({ path: 'curDocHistory', title: 'History', icon: 'history', summary: events ? plural(events, 'event') : '', body: timeline(d) })}</div>
       <div class="drawer__section"><h3 class="drawer__section-title">Details</h3>${published ? X.res.details(d) : kv([
-        ['Collection', `<a class="link" href="#${canEditKb(kb) ? kbManageHref(kb) : kbHref(kb)}">${esc(kb.name)}</a>`],
+        ['Collection', `<span class="stack gap-2"><a class="link" href="#${canEditKb(kb) ? kbContentsHref(kb, docFolder(d) || '') : kbHref(kb)}">${esc(kb.name)}</a>${docFolder(d) ? `<span class="t-xs muted" translate="no">${esc(folderPath(docFolder(d)).map(f => f.name).join(' › '))}</span>` : ''}</span>`],
         ['Contributor', esc(contributorName(d))],
         ['Type', esc(kindMeta(res(d).kind).label)],
         ['Size', `${esc(fmtSize(d.size))} · ${plural(d.pages || 1, 'page')}`],
         ['Version', `v${res(d).version}`],
-        ['Who could see it', `<span class="row gap-6">${ic(X.whoCanSee(kb).icon, 'i-sm muted')}${esc(X.whoCanSee(kb).label)}</span>`],
+        ['Who could see it', `<span class="row gap-6">${ic(X.whoCanSee(kb, docFolder(d)).icon, 'i-sm muted')}${esc(X.whoCanSee(kb, docFolder(d)).label)}</span>`],
       ])}</div>`;
     return {
       title: d.name, lead: fileIcon(d.type, 'lg'), desc: esc(kb.name), size: 'lg', body,

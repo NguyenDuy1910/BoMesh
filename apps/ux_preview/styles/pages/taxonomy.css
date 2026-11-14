@@ -1,5 +1,6 @@
-/* Knowledge Studio → Taxonomy (features/masterdata.js): the domain → topic tree, the topic detail and its
-   classification signals. Prefix: tx-. Tokens only. Shared pieces (.md-code, .md-props, import dialog) live in studio.css. */
+/* Knowledge Studio → Topics (features/masterdata.js): the domain → topic tree, the topic detail and its classification
+   signals, keywords from corrections (shown in Suggestions), the auto-tag threshold and the prompt drawer.
+   Prefixes: tx-, md-learn, md-prompt. Tokens only. Shared pieces (.md-code, .md-props, import dialog) live in studio.css. */
 
 .tx { display: flex; flex-direction: column; gap: 12px; }
 
@@ -12,6 +13,31 @@
 .tx-sum__warn:hover { text-decoration-style: solid; }
 .tx-sum__warn[aria-pressed="true"] { background: var(--warning-soft); text-decoration: none; }
 .tx-sum__warn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+/* How sure the pipeline must be to tag by itself. */
+.tx-sum__thr { display: inline-flex; align-items: center; gap: 6px; flex: none; font-size: 12px; color: var(--muted); white-space: nowrap; }
+/* Savebar: what saving re-checks. */
+.savebar__hint { color: var(--muted); font-weight: 400; }
+
+/* Keywords from corrections (Topics → Suggestions): one card per topic reviewers moved documents to */
+.md-learns { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; border-radius: var(--radius-2xl); background: var(--surface); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); }
+.md-learn { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; min-width: 0; }
+.md-learn + .md-learn { border-top: 1px solid var(--separator); }
+.md-learn__title { font-size: 14px; line-height: 20px; overflow-wrap: anywhere; }
+.md-learn__docs { min-width: 0; font-size: 13px; line-height: 20px; color: var(--muted); overflow-wrap: anywhere; }
+.md-learn__row { display: flex; flex-direction: column; gap: 6px; }
+.md-learn__chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.md-learn__kw { cursor: pointer; }
+.md-learn__kw:hover { filter: brightness(.97); }
+.md-learn__kw:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.md-learn__note, .md-learn__why { display: flex; gap: 6px; margin: 0; font-size: 13px; line-height: 19px; color: var(--muted); }
+.md-learn__why > .i { flex: none; margin-top: 2px; }
+.md-learn__acts { display: flex; flex-wrap: wrap; gap: 4px; margin-left: -8px; }
+
+/* The classification prompt (drawer) */
+.md-prompt__code { margin: 0; max-height: 420px; padding: 12px 14px; overflow: auto; border-radius: var(--radius-lg); background: var(--surface-secondary); font-family: var(--font-mono); font-size: 12px; line-height: 18px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--foreground); }
+.md-prompt__code:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.md-prompt__rules { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: 13px; line-height: 20px; }
+.md-prompt__rules li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 
 /* Two panes: tree | detail */
 .tx-panes { display: grid; grid-template-columns: 272px minmax(0, 1fr); gap: 20px; align-items: start; }

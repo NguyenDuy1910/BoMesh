@@ -10,7 +10,7 @@ import {
   Ellipsis,
   Files,
   Folder,
-  House,
+  Star,
   Library,
   Link,
   Link2,
@@ -192,8 +192,8 @@ export function ResourceMenu({ resource: r, size = "sm", context, extra = [], q 
     !r.isPersonal && r.source.isUpload && perms.can("items.move") && { id: "move", label: "Move…", icon: Folder, run: () => openMoveItems([r.name], r.item.parentItem) },
     canFeature && published && featured.isSuccess && {
       id: "feature",
-      label: featured.ids.has(r.id) ? "Remove from Home" : "Feature on Home",
-      icon: House,
+      label: featured.ids.has(r.id) ? "Remove “Read first”" : "Mark as read first",
+      icon: Star,
       run: () => void ops.setFeatured(r, !featured.ids.has(r.id)),
     },
     can("contributions.review") && !r.isPersonal && perms.can("contributions.review") && {

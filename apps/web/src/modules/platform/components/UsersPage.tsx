@@ -222,7 +222,7 @@ export function UsersPage() {
   const filtered = Boolean(q || role || status);
 
   return (
-    <Page>
+    <Page width="wide">
       <PageHeader title="Users" chips={<PreviewChip tooltip={PREVIEW_TIP} />} />
       <Gate
         query={users}

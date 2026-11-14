@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMax slice">
+  <!-- Sample Home map background for Trường Đại học UTE (prototype seed): a campus skyline in the university's blue. -->
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#cfe0f5"/>
+      <stop offset="0.6" stop-color="#eef4fb"/>
+      <stop offset="1" stop-color="#f7f9fc"/>
+    </linearGradient>
+    <linearGradient id="far" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9dbbe0"/>
+      <stop offset="1" stop-color="#b9cfea"/>
+    </linearGradient>
+    <linearGradient id="near" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2f6fb5"/>
+      <stop offset="1" stop-color="#1f5fad"/>
+    </linearGradient>
+    <pattern id="win" width="28" height="34" patternUnits="userSpaceOnUse">
+      <rect x="6" y="8" width="14" height="16" rx="2" fill="#dbe8f7" opacity="0.55"/>
+    </pattern>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#sky)"/>
+  <circle cx="1500" cy="250" r="120" fill="#ffffff" opacity="0.7"/>
+  <g fill="#ffffff" opacity="0.65">
+    <ellipse cx="420" cy="210" rx="160" ry="34"/><ellipse cx="520" cy="190" rx="110" ry="30"/>
+    <ellipse cx="1180" cy="150" rx="140" ry="28"/><ellipse cx="1260" cy="134" rx="90" ry="24"/>
+  </g>
+  <!-- far skyline -->
+  <path fill="url(#far)" d="M0 760 L0 640 L120 640 L120 590 L210 590 L210 660 L330 660 L330 560 L380 540 L430 560 L430 670 L560 670 L560 600 L700 600 L700 680 L820 680 L820 520 L860 500 L900 520 L900 690 L1040 690 L1040 610 L1180 610 L1180 660 L1300 660 L1300 570 L1420 570 L1420 650 L1560 650 L1560 590 L1680 590 L1680 670 L1800 670 L1800 620 L1920 620 L1920 760 Z"/>
+  <!-- main building with clock tower -->
+  <g>
+    <rect x="760" y="560" width="400" height="300" fill="url(#near)"/>
+    <rect x="760" y="560" width="400" height="300" fill="url(#win)"/>
+    <rect x="915" y="430" width="90" height="140" fill="#1f5fad"/>
+    <path d="M905 432 L960 370 L1015 432 Z" fill="#174c8c"/>
+    <circle cx="960" cy="480" r="24" fill="#eef4fb"/>
+    <path d="M960 466 V480 L970 488" stroke="#1f5fad" stroke-width="4" fill="none" stroke-linecap="round"/>
+    <rect x="910" y="770" width="100" height="90" rx="50" fill="#174c8c"/>
+  </g>
+  <!-- side blocks -->
+  <rect x="430" y="640" width="300" height="220" fill="#2a68b0"/>
+  <rect x="430" y="640" width="300" height="220" fill="url(#win)"/>
+  <rect x="1190" y="620" width="320" height="240" fill="#2a68b0"/>
+  <rect x="1190" y="620" width="320" height="240" fill="url(#win)"/>
+  <rect x="160" y="700" width="240" height="160" fill="#3a78be"/>
+  <rect x="160" y="700" width="240" height="160" fill="url(#win)"/>
+  <rect x="1540" y="690" width="260" height="170" fill="#3a78be"/>
+  <rect x="1540" y="690" width="260" height="170" fill="url(#win)"/>
+  <!-- trees -->
+  <g fill="#3f8f6b">
+    <circle cx="120" cy="830" r="46"/><circle cx="410" cy="840" r="38"/><circle cx="745" cy="836" r="34"/>
+    <circle cx="1175" cy="836" r="34"/><circle cx="1525" cy="838" r="40"/><circle cx="1840" cy="826" r="50"/>
+  </g>
+  <!-- ground -->
+  <rect y="856" width="1920" height="224" fill="#e6edf6"/>
+  <path d="M0 900 C480 880 1440 920 1920 896 L1920 1080 L0 1080 Z" fill="#dde6f2"/>
+</svg>

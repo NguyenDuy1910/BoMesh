@@ -200,8 +200,9 @@ seedWorkspace('ws-finx', () => {
       } },
   ];
 
-  /* What the archive's first sync held back, decided in bulk in Knowledge Studio → Review (one batch per reason; the
-     documents already in kb-fx-ops stay unpublished until decided). n counts documents; sample shows five of them. */
+  /* What the archive's first sync held back, decided in bulk in Knowledge Studio → Documents → Review (one batch per
+     reason; the documents are already indexed in kb-fx-ops and stay unpublished until decided). n counts documents;
+     sample shows five of them. */
   D.reviewBatches = [
     { id: 'rb-fx-dup', run: 'run-fx-419', source: 'src-fx-archive', kb: 'kb-fx-ops', reason: 'duplicate', n: 2140, status: 'open', at: P(0, 2),
       note: 'Older copies of procedures that are already published (same title, ≥ 90% the same text).',
@@ -214,7 +215,7 @@ seedWorkspace('ws-finx', () => {
       sample: ['Payment Cut-off Times & Settlement Windows (2025).pdf', 'Dispute Handling Procedure — rev 4.docx', 'Daily Reconciliation — 2025 update.docx', 'QR settlement procedure — v3.pdf', 'Card limit changes — 2025.docx'] },
   ];
   /* Published from the archive, but filed with low confidence or not at all: confirmed in bulk in Knowledge Studio →
-     Quality → Topics to confirm. They are already readable; this is about where people browse them. */
+     Topics → Suggestions. They are already readable; this is about where people browse them. */
   D.classGroups = [
     { id: 'cg-fx-cards', run: 'run-fx-419', kb: 'kb-fx-ops', topic: 't-cards', n: 940, conf: [0.58, 0.79], keywords: ['chargeback', 'dispute'], status: 'open', sample: ['Branch guide — handling card complaints.pdf', 'Visa dispute timelines 2022.docx', 'Refund vs chargeback FAQ.docx', 'Card scheme fee notes.xlsx', 'Merchant dispute escalation.pdf'] },
     { id: 'cg-fx-recon', run: 'run-fx-419', kb: 'kb-fx-ops', topic: 't-recon', n: 520, conf: [0.55, 0.77], keywords: ['matching', 'break'], status: 'open', sample: ['End-of-day matching — branches.pdf', 'Suspense account breaks 2021.xlsx', 'GL vs core matching notes.docx', 'Nostro matching guide.pdf', 'Breaks ageing report template.xlsx'] },

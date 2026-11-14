@@ -24,16 +24,20 @@ const WORKFLOWS = {
   'draft': { label: 'Draft a document', desc: 'A first draft grounded in your sources — proposals, decision records, announcements.', icon: 'pencil', kind: 'draft', spaceTypes: null, audience: 'any' },
 };
 
+/** levels: the knowledge map's level vocabulary (Home). The first four name depths 1–4 (root collection = 1);
+    any entry can be picked by a collection or folder through its `level`. */
 const TEMPLATES = {
   enterprise: {
     label: 'Enterprise', desc: 'Company knowledge with governed sources and access.',
     modules: { spaces: false, work: false, requests: false },
     spaceTypes: ['team', 'project'], workflows: ['review', 'draft'],
+    levels: ['Area', 'Section', 'Subsection', 'Folder'],
   },
   campus: {
     label: 'Campus', desc: 'Courses, research groups and offices: learning, research and student services in one workspace.',
     modules: { spaces: true, work: true, requests: true },
     spaceTypes: ['course', 'research', 'office'], workflows: ['study-guide', 'practice-quiz', 'quiz', 'review', 'draft'],
+    levels: ['Faculty', 'Academic department', 'Program group', 'Major', 'Administrative office', 'Forms'],
   },
 };
 /** Optional modules. Home, Knowledge, Inbox and Conversations are core: every workspace has them. */
@@ -45,6 +49,8 @@ const MODULES = {
 
 const wsTemplateId = (ws = curWs()) => (TEMPLATES[ws?.template] ? ws.template : 'enterprise');
 const wsTemplate = (ws = curWs()) => TEMPLATES[wsTemplateId(ws)];
+/** The knowledge map's level labels: the workspace's own (Settings → Workspace setup) or its template's. A copy. */
+const mapLevels = (ws = curWs()) => [...(ws?.mapLevels || wsTemplate(ws).levels)];
 /** Work kinds (artifact types) register their behaviour here — see features/work*.js:
     WORK_KINDS[kind] = { label, icon, noun,
       options(f, ctx) → HTML of kind-specific options in the "new work" flow (f = ui('workNew')),
@@ -88,7 +94,11 @@ function workflowsFor(sp) {
 const workspacesForMe = () => D.workspaces.filter(w => me().workspaces?.includes(w.id));
 const personasForWs = (wsId = S.ws) => Object.keys(PERSONAS).filter(k => PERSONAS[k].workspaces?.includes(wsId)).sort((a, b) => (a === 'operator') - (b === 'operator'));
 /** Equivalent demo persona when the prototype jumps between workspaces. */
-const PERSONA_MAP = { 'ws-finx': { member: 'engineer', admin: 'wsadmin' }, 'ws-northwind': { engineer: 'member', lead: 'member', analyst: 'member', wsadmin: 'admin' } };
+const PERSONA_MAP = {
+  'ws-finx': { member: 'engineer', admin: 'wsadmin', student: 'engineer', lecturer: 'lead', campusadmin: 'wsadmin' },
+  'ws-northwind': { engineer: 'member', lead: 'member', analyst: 'member', wsadmin: 'admin', student: 'member', lecturer: 'member', campusadmin: 'admin' },
+  'ws-campus': { member: 'student', admin: 'campusadmin', engineer: 'student', lead: 'lecturer', analyst: 'lecturer', wsadmin: 'campusadmin' },
+};
 /** Open a workspace. In the prototype, switching to a workspace the persona isn't in swaps to the matching persona there. */
 function enterWorkspace(id, { quiet } = {}) {
   const w = D.workspaces.find(x => x.id === id); if (!w) return;

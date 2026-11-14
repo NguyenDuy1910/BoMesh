@@ -338,14 +338,14 @@
     const track = X.ctb?.href(doc.id) || '/contributions';
     crumbs(mine || !reviewer
       ? [{ label: 'Knowledge', to: '/knowledge' }, { label: 'My contributions', to: '/contributions' }, { label: docTitle(doc) }]
-      : [{ label: 'Review', to: '/studio?tab=review' }, { label: docTitle(doc) }]);
+      : [{ label: 'Documents', to: docsHref('review') }, { label: docTitle(doc) }]);
     const preview = !['zip', 'png', 'jpg', 'jpeg'].includes(doc.type);
     const m = preview ? docModel(doc) : null;
     const open = railOpen(u), k = kindMeta(res(doc).kind);
     const back = backBtn(null);
     const meta = [esc(k.label), esc(kb.name), esc(mine ? 'Contributed by you' : `Contributed by ${contributorName(doc)}`), sub.at && `<span>Submitted ${esc(rel(sub.at).replace(/^(Just now|Yesterday)$/, s => s.toLowerCase()))}</span>`].filter(Boolean).join(dot);
     // One primary: Review (reviewers) or Revise (the contributor, when changes were asked for — it opens the same place as Track).
-    const main = reviewer && st === 'review' ? btn('Review', { v: 'primary', icon: 'check-check', href: `/studio?tab=review&sel=${doc.id}` })
+    const main = reviewer && st === 'review' ? btn('Review', { v: 'primary', icon: 'check-check', href: docsHref('review', { sel: doc.id }) })
       : mine && st === 'changes' ? btn('Revise', { v: 'primary', icon: 'pencil', href: track })
         : '';
     const trackBtn = mine && !(st === 'changes') ? btn('Track', { v: main ? 'secondary' : 'primary', icon: 'history', href: track }) : '';

@@ -227,19 +227,20 @@
 
   /** Metadata list (About): what it is, where it lives, where it came from, who owns it, who can see it. */
   function details(d) {
-    const r = res(d), t = trustOf(d), who = X.whoCanSee ? X.whoCanSee(r.kb) : { icon: 'lock', label: '' };
+    const r = res(d), t = trustOf(d), who = X.whoCanSee && r.kb ? X.whoCanSee(r.kb, docFolder(d)) : { icon: 'lock', label: '' };
+    const path = folderPath(docFolder(d)).map(f => f.name);
     const spaces = r.contexts.map(spaceById).filter(Boolean);
     return kv([
       ['Type', `<span class="row gap-6">${ic(kindMeta(r.kind).icon, 'i-sm muted')}${esc(kindMeta(r.kind).label)}</span>`],
       ['Topics', r.topics.length ? `<span class="res-topics">${r.topics.map(id => `<a class="res-topic" href="#${topicHref(id)}">${esc(topicName(id))}</a>`).join('')}</span>` : '<span class="muted">None yet</span>'],
       hasModule('spaces') && ['Spaces', spaces.length ? spaces.map(s => `<a class="link" href="#/space/${s.id}">${esc(s.code ? `${s.name} · ${s.code}` : s.name)}</a>`).join(', ') : '<span class="muted">Not linked</span>'],
       ['Owner', esc(r.owner || 'No owner')],
-      ['Collection', r.kb ? `<a class="link" href="#${kbHref(r.kb)}">${esc(r.kb.name)}</a>` : '—'],
+      ['Collection', r.kb ? `<span class="stack gap-2"><a class="link" href="#${kbHref(r.kb)}">${esc(r.kb.name)}</a>${path.length ? `<span class="t-xs muted" translate="no">${esc(path.join(' › '))}</span>` : ''}</span>` : '—'],
       ['Source', `<span class="stack gap-2"><span class="row gap-6">${appIcon(r.source.app, 'sm')}${esc(r.source.name)}</span><span class="t-xs muted res-path">${esc(r.source.path)}</span></span>`],
       ['Trust', `<span class="stack gap-2">${trustChip(d) || esc(t.label)}<span class="t-xs muted">${esc(t.note || t.desc)}</span></span>`],
       ['Version', `v${r.version} · ${esc(fmtDate(d.updated))}`],
       ['Language', esc(LANGS[r.lang] || r.lang)],
-      ['Who can see it', `<span class="row gap-6">${ic(who.icon, 'i-sm muted')}${esc(who.label)}</span>`],
+      ['Who can see it', `<span class="stack gap-2"><span class="row gap-6">${ic(who.icon, 'i-sm muted')}${esc(who.label)}</span>${who.via ? `<span class="t-xs muted">${esc(`Set on the folder ${who.via.name}, not the collection`)}</span>` : ''}</span>`],
     ]);
   }
 
@@ -300,8 +301,8 @@
       edit && !personal && { label: trustOf(d).state === 'verified' ? 'Renew verification' : 'Mark as verified', icon: 'shield-check', run: () => A['res-verify']({ dataset: { id: d.id } }) },
       // A new file only for uploads: synced documents are updated at their source (Publish update).
       canContribute() && !personal && (edit || isMine(d)) && res(d).source.key === 'upload' && { label: 'Submit a new version…', icon: 'upload', run: () => A['contribute']?.({ dataset: { versionOf: d.id } }) },
-      isAdmin() && isPublishedStage(d) && !personal && { label: isFeatured(d.id) ? 'Remove from Home' : 'Feature on Home', icon: 'home', run: () => { const on = toggleFeatured(d.id); refresh(); toast(on ? 'Featured on Home for everyone who can read it' : 'Removed from Home', { action: { label: 'Undo', run: () => { toggleFeatured(d.id); refresh(); } } }); } },
-      canReviewKb(kb) && can('knowledge.manage') && { label: 'Manage in Knowledge Studio', icon: 'library', run: () => go(studioHref('documents', { q: docTitle(d) })) },
+      isAdmin() && isPublishedStage(d) && !personal && { label: isFeatured(d.id) ? 'Remove “Read first”' : 'Mark as read first', icon: 'star', run: () => { const on = toggleFeatured(d.id); refresh(); toast(on ? 'Marked as read first. It leads its folder on Home.' : 'No longer marked as read first', { action: { label: 'Undo', run: () => { toggleFeatured(d.id); refresh(); } } }); } },
+      canReviewKb(kb) && can('knowledge.manage') && { label: 'Open in Documents', icon: 'library', run: () => go(docsHref('all', { q: docTitle(d) })) },
     ].filter(Boolean);
     const archive = edit ? [{ sep: true }, { label: 'Archive', icon: 'archive', danger: true, run: () => X.archiveDocs?.([d]) }] : [];
     if (!manage.length) return [...head, ...archive];
@@ -460,13 +461,15 @@
     const f = ui('resEdit'), d = docById(f.id); if (f.busy || !d) return;
     f.touched = true;
     if (!f.name.trim()) { refreshLayer(); $('#rese-name')?.focus(); return; }
-    const keys = ['name', 'kind', 'topics', 'lang', 'summary', 'owner'], prev = Object.fromEntries(keys.map(k => [k, Array.isArray(d[k]) ? [...d[k]] : d[k]]));
+    const keys = ['name', 'kind', 'topics', 'lang', 'summary', 'owner', 'classifiedBy'], prev = Object.fromEntries(keys.map(k => [k, Array.isArray(d[k]) ? [...d[k]] : d[k]]));
     f.busy = true; S.modal.props.guard = true; refreshLayer(); await sleep(400);
-    const ext = d.name.slice(docTitle(d).length);
-    Object.assign(d, { name: f.name.trim() + ext, kind: f.kind, topics: [...f.topics], lang: f.lang, summary: f.summary.trim() || undefined, owner: f.owner.trim() || undefined });
+    const ext = d.name.slice(docTitle(d).length), before = res(d).topics;
+    // A person changing topics the pipeline chose is a correction the topics can learn from (Topics → Suggestions).
+    const retagged = String(before) !== String(f.topics), c = retagged && topicsByPipeline(d) ? recordCorrection(d, before, f.topics) : null;
+    Object.assign(d, { name: f.name.trim() + ext, kind: f.kind, topics: [...f.topics], lang: f.lang, summary: f.summary.trim() || undefined, owner: f.owner.trim() || undefined }, retagged ? { classifiedBy: 'person' } : {});
     if (!d.summary) delete d.summary; if (!d.owner) delete d.owner;
     audit('Edited resource details', d.name); closeModal(); refresh();
-    toast('Details saved', { action: { label: 'Undo', run: () => { keys.forEach(k => { if (prev[k] === undefined) delete d[k]; else d[k] = prev[k]; }); refresh(); } } });
+    toast('Details saved', { action: { label: 'Undo', run: () => { keys.forEach(k => { if (prev[k] === undefined) delete d[k]; else d[k] = prev[k]; }); if (c) D.classCorrections = D.classCorrections.filter(x => x !== c); refresh(); } } });
   };
 
   /* ── Link to spaces (space staff / admins) ── */
