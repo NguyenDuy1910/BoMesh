@@ -2,20 +2,20 @@
 
 import { Button } from "@heroui/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, Building2, Copy, GraduationCap, Pause, Play } from "lucide-react";
+import { Archive, ArrowRight, Building2, Copy, GraduationCap, Pause, Play, Undo2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import { useShellWorkspaces } from "@/components/shell/WorkspaceMenu";
-import { Callout, confirm, EmptyState, KeyValue, List, ListItem, SkeletonRows, StatusChip, toast, UserAvatar, WorkspaceMark } from "@/components/ui";
+import { Callout, EmptyState, KeyValue, List, ListItem, SkeletonRows, StatusChip, toast, UserAvatar, WorkspaceMark } from "@/components/ui";
 import { errorMessage, resourceId } from "@/lib/api/client";
-import { fmtDate, fmtNum } from "@/lib/format";
+import { fmtDate, fmtNum, rel } from "@/lib/format";
 import { rememberWorkspace } from "@/lib/workspace";
 import { markWorkspaceOpened } from "@/modules/auth/api";
 
-import { activateWorkspace, listWorkspaceAdmins, suspendWorkspace, type Workspace } from "../api";
+import { activateWorkspace, archiveWorkspace, listWorkspaceAdmins, suspendWorkspace, type Workspace } from "../api";
 import { lastSegment, TEMPLATES, workspaceStatus } from "../model";
 import { pk, useInvalidatePlatform, useIsPlatformAdmin, usePlatformWorkspaces, useUsage } from "../queries";
-import { PlatformDrawer, workspaceUrl } from "./shared";
+import { copyText, MoreMenu, PlatformDrawer, workspaceUrl } from "./shared";
 
 /** Template chip (preview `tplChip`). */
 export function TemplateChip({ workspace }: { workspace: Workspace }) {
@@ -23,14 +23,17 @@ export function TemplateChip({ workspace }: { workspace: Workspace }) {
   return <StatusChip label={t.label} icon={workspace.template === "CAMPUS" ? GraduationCap : Building2} tooltip={t.description} size="sm" />;
 }
 
-/** Workspace status chip: preview `status('ws', …)`; ARCHIVED has no preview entry and reads "Archived". */
+/** Workspace status chip: preview `status('ws', …)` plus "Archived". */
 export function WorkspaceStatusChip({ workspace }: { workspace: Workspace }) {
   const status = workspaceStatus(workspace.state);
   if (status === "archived") return <StatusChip label="Archived" tone="default" />;
   return <StatusChip kind="ws" value={status} />;
 }
 
-/** Open, copy the address of, suspend or reactivate a workspace (preview `openWs` / `suspendWs`). */
+/**
+ * Open, copy the address of, suspend, reactivate or restore a workspace (preview `openWs` / `suspendWs` /
+ * `restoreWs`). Suspending deletes nothing and restoring is reversible: both apply at once with Undo.
+ */
 export function useWorkspaceActions() {
   const router = useRouter();
   const client = useQueryClient();
@@ -53,39 +56,40 @@ export function useWorkspaceActions() {
     });
   };
 
-  const copyUrl = async (w: Workspace) => {
-    try {
-      await navigator.clipboard.writeText(`${window.location.protocol}//${workspaceUrl(w)}`);
-      toast("Copied workspace URL");
-    } catch {
-      toast("Couldn’t copy. Select the address and copy it instead.", { tone: "danger" });
-    }
-  };
+  const copyUrl = (w: Workspace) => void copyText(`${window.location.protocol}//${workspaceUrl(w)}`, "Copied workspace URL");
 
-  const toggleSuspend = async (w: Workspace) => {
-    const suspended = w.state === "SUSPENDED" || w.state === "ARCHIVED";
-    const ok = suspended
-      ? await confirm({ title: `Reactivate ${w.displayName}?`, description: "Members can sign in again right away.", confirmLabel: "Reactivate", tone: "accent" })
-      : await confirm({
-          title: `Suspend ${w.displayName}?`,
-          description: `Members can’t sign in while it’s suspended. Nothing is deleted.${isMember(w) ? " You’ll lose access too." : ""}`,
-          confirmLabel: "Suspend workspace",
-          tone: "danger",
-        });
-    if (!ok) return;
+  // The shell's own workspace list follows too (switcher, and "Open workspace" needs it for membership).
+  const refresh = () => invalidate(pk.workspaces, ["shell", "my-workspaces"]);
+
+  const run = async (work: () => Promise<Workspace>, message?: string, undo?: (updated: Workspace) => Promise<unknown>) => {
     try {
-      await (suspended ? activateWorkspace(w) : suspendWorkspace(w));
-      await invalidate(pk.workspaces);
-      toast(suspended ? `Reactivated ${w.displayName}` : `Suspended ${w.displayName}`);
+      const updated = await work();
+      await refresh();
+      if (message) {
+        toast(message, undo ? { undo: () => void undo(updated).then(refresh).catch((error: unknown) => toast(errorMessage(error), { tone: "danger" })) } : {});
+      }
     } catch (error) {
       toast(errorMessage(error), { tone: "danger" });
     }
   };
 
-  return { open, copyUrl, toggleSuspend, isMember };
+  /** Suspend an active workspace or reactivate a suspended one. */
+  const toggleSuspend = (w: Workspace) => {
+    const on = w.state !== "SUSPENDED";
+    return run(
+      () => (on ? suspendWorkspace(w) : activateWorkspace(w)),
+      on ? `Suspended ${w.displayName}. Members can’t sign in.` : `Reactivated ${w.displayName}`,
+      (updated) => (on ? activateWorkspace(updated) : suspendWorkspace(updated)),
+    );
+  };
+
+  /** Restore an archived workspace (`:activate` also unarchives); Undo archives it again. */
+  const restore = (w: Workspace) => run(() => activateWorkspace(w), `Restored ${w.displayName}`, (updated) => archiveWorkspace(updated));
+
+  return { open, copyUrl, toggleSuspend, restore, isMember };
 }
 
-/** Preview `DR['pf-ws']`: status, usage, admins; suspend or reactivate; copy URL; open. */
+/** Preview `DR['pf-ws']`: status, questions, admins; one way forward per status in the footer; rare actions in ⋯. */
 export function WorkspaceDrawer({ workspaceId, onClose }: { workspaceId: string | null; onClose: () => void }) {
   const workspaces = usePlatformWorkspaces();
   const isAdmin = useIsPlatformAdmin();
@@ -110,11 +114,28 @@ export function WorkspaceDrawer({ workspaceId, onClose }: { workspaceId: string 
     );
   }
 
-  const usageOf = (rows: typeof month.data) => rows?.find((u) => u.workspace === w.name);
-  const m = usageOf(month.data);
-  const wk = usageOf(week.data);
-  const off = w.state === "SUSPENDED" || w.state === "ARCHIVED";
-  const num = (v: string | undefined, loaded: boolean) => (loaded ? <span className="num">{fmtNum(Number(v ?? 0))}</span> : <span className="muted">—</span>);
+  const status = workspaceStatus(w.state);
+  const off = status === "suspended" || status === "archived";
+  const questions = (rows: typeof month.data) => Number(rows?.find((u) => u.workspace === w.name)?.questionCount ?? 0);
+
+  // One way forward per status: restore an archived one, reactivate a suspended one, otherwise open it (members only).
+  const footer =
+    status === "archived" && isAdmin ? (
+      <Button variant="primary" onPress={() => void actions.restore(w)}>
+        <Undo2 className="i" aria-hidden />
+        Restore workspace
+      </Button>
+    ) : status === "suspended" && isAdmin ? (
+      <Button variant="primary" onPress={() => void actions.toggleSuspend(w)}>
+        <Play className="i" aria-hidden />
+        Reactivate
+      </Button>
+    ) : !off && actions.isMember(w) ? (
+      <Button variant="primary" onPress={() => actions.open(w)}>
+        Open workspace
+        <ArrowRight className="i" aria-hidden />
+      </Button>
+    ) : null;
 
   return (
     <PlatformDrawer
@@ -123,37 +144,24 @@ export function WorkspaceDrawer({ workspaceId, onClose }: { workspaceId: string 
       lead={<WorkspaceMark name={w.displayName ?? ""} size={40} />}
       title={<span translate="no">{w.displayName}</span>}
       description={<span className="mono">{workspaceUrl(w)}</span>}
-      footerStart={
-        isAdmin && w.state !== "CREATING" ? (
-          off ? (
-            <Button variant="tertiary" onPress={() => void actions.toggleSuspend(w)}>
-              <Play className="i" aria-hidden />
-              Reactivate
-            </Button>
-          ) : (
-            <Button variant="danger-soft" onPress={() => void actions.toggleSuspend(w)}>
-              <Pause className="i" aria-hidden />
-              Suspend
-            </Button>
-          )
-        ) : null
+      headActions={
+        <MoreMenu
+          items={[
+            { id: "copy", label: "Copy URL", icon: Copy, onAction: () => actions.copyUrl(w) },
+            ...(isAdmin && w.state === "ACTIVE" ? [{ id: "suspend", label: "Suspend workspace", icon: Pause, danger: true, separator: true, onAction: () => void actions.toggleSuspend(w) }] : []),
+          ]}
+        />
       }
-      footer={
-        <>
-          <Button variant="tertiary" onPress={() => void actions.copyUrl(w)}>
-            <Copy className="i" aria-hidden />
-            Copy URL
-          </Button>
-          <Button variant="primary" onPress={() => actions.open(w)}>
-            Open workspace
-            <ArrowRight className="i" aria-hidden />
-          </Button>
-        </>
-      }
+      footer={footer}
     >
-      {w.state === "ARCHIVED" ? (
+      {status === "archived" ? (
         <div className="drawer__section">
-          <Callout tone="warning" title="Archived" description="This workspace is read-only. Reactivate it to make changes." />
+          <Callout
+            tone="default"
+            icon={Archive}
+            title="Archived"
+            description={`Archived ${rel(w.updateTime).toLowerCase()}. Members can’t open it until it’s restored.`}
+          />
         </div>
       ) : null}
       <div className="drawer__section">
@@ -163,19 +171,20 @@ export function WorkspaceDrawer({ workspaceId, onClose }: { workspaceId: string 
             ["Template", <TemplateChip key="t" workspace={w} />],
             ["Created", fmtDate(w.createTime)],
             ["Members", <span key="m" className="num">{fmtNum(w.memberCount ?? 0)}</span>],
-            ["Active people", <span key="a">{num(m?.activeMemberCount, Boolean(month.data))}<span className="muted"> · 30 days</span></span>],
-            ["Documents", <span key="d">{num(m?.processedDocumentCount, Boolean(month.data))}<span className="muted"> processed · 30 days</span></span>],
-            ["Indexing", w.ingestionState === "PAUSED" ? "Paused" : "Running"],
           ]}
         />
       </div>
       <div className="drawer__section">
         <div className="pf-sec-head">
           <h3 className="drawer__section-title">Questions, last 30 days</h3>
-          <span className="t-xs muted num">{month.data ? fmtNum(Number(m?.questionCount ?? 0)) : ""}</span>
+          <span className="t-xs muted num">{month.data ? fmtNum(questions(month.data)) : ""}</span>
         </div>
         <p className="t-sm muted">
-          {off ? "No questions while suspended." : week.data ? `${fmtNum(Number(wk?.questionCount ?? 0))} in the last 7 days.` : "—"}
+          {off
+            ? `No questions while ${status === "archived" ? "archived" : "suspended"}.`
+            : week.data
+              ? `${fmtNum(questions(week.data))} in the last 7 days.`
+              : "—"}
         </p>
       </div>
       <div className="drawer__section">

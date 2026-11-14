@@ -180,36 +180,6 @@ export function isSpreadsheetType(contentType: string): boolean {
   return SPREADSHEET_TYPES[contentType.split(";", 1)[0]?.trim().toLowerCase() ?? ""] === true;
 }
 
-export interface OutlineEntry {
-  id: string;
-  title: string;
-  /** 1 for a top-level heading, 2 for the one under it. */
-  level: 1 | 2;
-}
-
-/** At most this many outline entries; a longer outline stops being a map. */
-const OUTLINE_LIMIT = 80;
-
-/**
- * The document's headings for "On this page": the top two levels present.
- * A document whose headings all sit at level 3 still gets an outline.
- */
-export function renditionOutline(rendition: DocumentRendition): OutlineEntry[] {
-  const headings = rendition.blocks.filter(
-    (block): block is HeadingBlock => block.kind === "heading" && block.text.trim().length > 0,
-  );
-  if (!headings.length) return [];
-  const top = Math.min(...headings.map((heading) => heading.level));
-  return headings
-    .filter((heading) => heading.level <= top + 1)
-    .slice(0, OUTLINE_LIMIT)
-    .map((heading) => ({
-      id: heading.id,
-      title: heading.text.trim().replaceAll(/\s+/g, " "),
-      level: heading.level === top ? 1 : 2,
-    }));
-}
-
 export interface RenditionPage {
   /** Source page (sheet for a spreadsheet); null when the parse had none. */
   page: number | null;
@@ -236,41 +206,4 @@ export function renditionPages(rendition: DocumentRendition): RenditionPage[] {
     }
   }
   return pages;
-}
-
-/** One reader element (`ItemContent.elements`). */
-export interface ContentElement {
-  elementId?: string;
-  kind?: "HEADING" | "PARAGRAPH" | "LIST" | "TABLE" | "IMAGE" | "CODE";
-  text?: string;
-  level?: number;
-  pageNumber?: number;
-}
-
-/**
- * A revision without a stored rendition, read from its reader elements: the
- * indexed text under its headings, not the file's layout.
- */
-export function elementsRendition(elements: readonly ContentElement[]): DocumentRendition {
-  const blocks: RenditionBlock[] = [];
-  elements.forEach((element, index) => {
-    const text = element.text ?? "";
-    if (!text.trim()) return;
-    const id = element.elementId || `element-${index}`;
-    const page = element.pageNumber ?? null;
-    switch (element.kind) {
-      case "HEADING":
-        blocks.push({ id, kind: "heading", level: Math.min(4, Math.max(1, element.level ?? 1)), text, page });
-        break;
-      case "CODE":
-        blocks.push({ id, kind: "code", text, language: null, page });
-        break;
-      case "IMAGE":
-        blocks.push({ id, kind: "image", text, page });
-        break;
-      default:
-        blocks.push({ id, kind: "paragraph", text, page });
-    }
-  });
-  return { schema: 1, truncated: false, blocks };
 }

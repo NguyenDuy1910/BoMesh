@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { citedBlocks, citedRows, documentMarks, locate, renditionText, searchNeedles } from "../src/modules/knowledge/reader/marks.ts";
-import { elementsRendition, loadRendition, renditionOutline, renditionPages } from "../src/modules/knowledge/reader/rendition.ts";
+import { loadRendition, renditionPages } from "../src/modules/knowledge/reader/rendition.ts";
 import type { DocumentRendition, TableBlock } from "../src/modules/knowledge/reader/rendition.ts";
 
 const rendition: DocumentRendition = {
@@ -105,24 +105,6 @@ test("locate ignores case, accents and spacing", () => {
   assert.equal(locate("Travel", "Meals"), null);
 });
 
-test("the outline keeps the top two heading levels present", () => {
-  const outline = renditionOutline({
-    schema: 1,
-    truncated: false,
-    blocks: [
-      { id: "h1", kind: "heading", level: 2, text: "Leave", page: 1 },
-      { id: "h2", kind: "heading", level: 3, text: "Annual   leave", page: 1 },
-      { id: "h3", kind: "heading", level: 4, text: "Carry-over", page: 2 },
-      { id: "h4", kind: "heading", level: 3, text: " ", page: 2 },
-    ],
-  });
-
-  assert.deepEqual(outline, [
-    { id: "h1", title: "Leave", level: 1 },
-    { id: "h2", title: "Annual leave", level: 2 },
-  ]);
-});
-
 test("blocks are grouped by page; unnumbered blocks stay with their neighbours", () => {
   const pages = renditionPages({
     schema: 1,
@@ -138,25 +120,6 @@ test("blocks are grouped by page; unnumbered blocks stay with their neighbours",
   assert.deepEqual(pages.map((page) => [page.page, page.blocks.map((block) => block.id)]), [[1, ["a", "b", "c"]], [3, ["d"]]]);
   assert.deepEqual(renditionPages({ schema: 1, truncated: false, blocks: [{ id: "x", kind: "paragraph", text: "x", page: null }] })
     .map((page) => page.page), [null]);
-});
-
-test("a revision without a rendition reads from its reader elements", () => {
-  const document = elementsRendition([
-    { elementId: "e1", kind: "HEADING", level: 2, text: "Leave", pageNumber: 1 },
-    { elementId: "e2", kind: "PARAGRAPH", text: "Ten days a year.", pageNumber: 1 },
-    { elementId: "e3", kind: "CODE", text: "x = 1", pageNumber: 2 },
-    { elementId: "e4", kind: "PARAGRAPH", text: "  ", pageNumber: 2 },
-    { kind: "LIST", text: "Unused days expire." },
-  ]);
-
-  assert.deepEqual(document.blocks.map((block) => [block.id, block.kind, block.page]), [
-    ["e1", "heading", 1],
-    ["e2", "paragraph", 1],
-    ["e3", "code", 2],
-    ["element-4", "paragraph", null],
-  ]);
-  // Element ids stay block ids, so passages mark the indexed text too.
-  assert.equal(documentMarks(document, { passages: [{ elementIds: ["e2"], text: "Ten days" }] }).blocks.get("e2")?.text?.[0]?.end, 8);
 });
 
 test("concurrent reads of one document version share one download", async (context) => {

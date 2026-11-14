@@ -5,8 +5,7 @@ import { AlertCircle, ArrowLeft, Check, Layers, Sparkles } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { PageChrome } from "@/components/shell/page-chrome";
-import { Callout, EmptyState, Page, PageHeader, SkeletonRows, toast } from "@/components/ui";
+import { EmptyState, Page, PageHeader, SkeletonRows, toast } from "@/components/ui";
 import { errorMessage, resourceId } from "@/lib/api/client";
 import { plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
@@ -14,7 +13,7 @@ import { useMySpaces } from "@/modules/spaces";
 
 import { useStartWork } from "../actions";
 import { isSpaceStaff, runsWithoutSpace, spaceFits, workflowOf, workflowsFor, type WorkflowId } from "../kinds";
-import { criteriaOf, defaultTitle, generationInstructions, optionOf, withDraftDefaults, type Recipe, type WorkOptions } from "../model";
+import { criteriaFor, criteriaOf, defaultTitle, generationInstructions, MAX_REVIEW_SOURCES, optionOf, withDraftDefaults, type Recipe, type WorkOptions } from "../model";
 import { isUsableDoc, useMaterialDocs, usePassedDocs, withPassedDocs } from "../queries";
 import { MaterialsPicker } from "./MaterialsPicker";
 import { NewWorkOptions } from "./NewWorkOptions";
@@ -65,7 +64,14 @@ export function NewWorkPage() {
   const opts = wf?.kind === "DRAFT" ? withDraftDefaults(chosen, space?.spaceType, picked.map((d) => d.displayName ?? "")) : chosen;
   /** On a space change, the selection keeps only the passed documents (they belong to no space). */
   const keepPassed = (prev: Set<string>) => new Set([...prev].filter((n) => passedIds.includes(resourceId(n))));
-  const sources = workflow === "EVIDENCE_REVIEW" ? picked.slice(0, opts.maxPapers ?? 6) : picked;
+  /* Every picked document becomes a source: a review's limit is said before generating, nothing is dropped silently. */
+  const sources = picked;
+  const max = workflow === "EVIDENCE_REVIEW" ? MAX_REVIEW_SOURCES : 0;
+  const criteria = opts.criteria ?? criteriaFor(space?.spaceType);
+  const docsError = () => {
+    if (!picked.length) return "Pick at least one document.";
+    return max && picked.length > max ? `Pick up to ${max} sources to compare. You picked ${picked.length}.` : "";
+  };
 
   const titleFor = (o: WorkOptions = opts) =>
     wf ? defaultTitle(wf.kind, { spaceName: space?.displayName, docNames: picked.map((d) => d.displayName ?? ""), options: o, staffQuiz }) : "";
@@ -89,14 +95,15 @@ export function NewWorkPage() {
       setTitle(titleParam);
       setTitleTouched(true);
     }
+    // A document's "New work…" passes only `docs`: they stay listed and preselected whichever type is picked next.
+    const docIds = (params.get("docs") ?? "").split(",").filter(Boolean);
+    setPassedIds(docIds);
+    prefill.current = { toOptions: !!docIds.length && !!params.get("space") };
     if (!flows.some((f) => f.id === want)) return;
     const id = want as WorkflowId;
     setWorkflow(id);
     setSpaceId(spaceForFlow(id, params.get("space") ?? undefined));
     setStep(2);
-    const docIds = (params.get("docs") ?? "").split(",").filter(Boolean);
-    setPassedIds(docIds);
-    prefill.current = { toOptions: !!docIds.length && !!params.get("space") };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- one-time prefill
   }, [mySpacesQuery.isPending, spacesOn]);
 
@@ -137,8 +144,9 @@ export function NewWorkPage() {
     setTitleErr("");
   };
   const next = () => {
-    if (!picked.length) {
-      setErr("Pick at least one document.");
+    const e = docsError();
+    if (e) {
+      setErr(e);
       return;
     }
     goStep(3);
@@ -154,12 +162,13 @@ export function NewWorkPage() {
       setTitleErr("Give it a title.");
       return;
     }
-    if (!sources.length) {
+    const e = docsError();
+    if (e) {
       goStep(2);
-      setErr("Pick at least one document.");
+      setErr(e);
       return;
     }
-    if (wf.kind === "EVIDENCE_REVIEW" && opts.criteria?.length === 0) {
+    if (wf.kind === "EVIDENCE_REVIEW" && !criteria.length) {
       toast("Pick at least one criterion to compare.", { tone: "danger" });
       return;
     }
@@ -170,7 +179,7 @@ export function NewWorkPage() {
       space: space?.name,
       sources: sources.map((d) => d.name ?? ""),
       instructions: generationInstructions(wf.kind, opts, { staffQuiz }),
-      ...(wf.kind === "EVIDENCE_REVIEW" ? { options: sources.map(optionOf), criteria: criteriaOf(opts.criteria ?? ["Method", "Dataset", "Result", "Limitations"]) } : {}),
+      ...(wf.kind === "EVIDENCE_REVIEW" ? { options: sources.map(optionOf), criteria: criteriaOf(criteria) } : {}),
     };
     setBusy(true);
     try {
@@ -181,12 +190,11 @@ export function NewWorkPage() {
     }
   };
 
-  const crumbs = <PageChrome crumbs={[{ label: "Work", href: "/work" }, { label: "New" }]} />;
+  const crumbs = [{ label: "Work", href: "/work" }, { label: "New" }];
   if (spacesOn && mySpacesQuery.isPending)
     return (
-      <Page narrow className="work-new">
-        {crumbs}
-        <PageHeader title="New work" />
+      <Page width="narrow" className="work-new">
+        <PageHeader title="New work" crumbs={crumbs} />
         <SkeletonRows rows={4} />
       </Page>
     );
@@ -277,6 +285,7 @@ export function NewWorkPage() {
               q={q}
               onQ={setQ}
               spaceName={space?.displayName}
+              max={max || undefined}
             />
           )}
           {err ? (
@@ -305,7 +314,8 @@ export function NewWorkPage() {
         <div className="work-new__picked">
           <span className="t-sm">
             {plural(sources.length, "document")}
-            {space ? (
+            {/* Passed documents may come from elsewhere (My files): name the space only when every source is its own. */}
+            {space && sources.every((d) => materials.data?.some((g) => g.docs.some((x) => x.name === d.name))) ? (
               <>
                 {" from "}
                 <span translate="no">{space.displayName}</span>
@@ -321,6 +331,7 @@ export function NewWorkPage() {
             kind={wf.kind}
             opts={opts}
             staffQuiz={staffQuiz}
+            spaceType={space?.spaceType}
             onChange={(patch) => {
               const o = { ...opts, ...patch };
               setOpts(o);
@@ -348,11 +359,6 @@ export function NewWorkPage() {
           />
           <FieldError>{titleErr}</FieldError>
         </TextField>
-        {workflow === "EVIDENCE_REVIEW" && picked.length > sources.length ? (
-          <div className="mt-16">
-            <Callout description={`Only the first ${plural(sources.length, "document")} are compared. Raise “Sources at most” or pick fewer.`} />
-          </div>
-        ) : null}
       </>
     );
     foot = (
@@ -368,45 +374,44 @@ export function NewWorkPage() {
     );
   }
 
+  /* Without a workflow the stepper stays on its first step. */
+  const at = wf ? step : 1;
   const steps: [string, string][] = [
     ["Type", wf?.label ?? ""],
-    ["Materials", step > 2 ? plural(sources.length, "document") : ""],
+    ["Materials", at > 2 ? plural(sources.length, "document") : ""],
     ["Options", ""],
   ];
 
   return (
-    <Page narrow className="work-new">
-      {crumbs}
-      <PageHeader title={wf ? wf.label : "New work"} />
-      {wf ? (
-        <ol className="work-steps" aria-label="Steps">
-          {steps.map(([label, meta], i) => {
-            const s = i + 1;
-            const state = s < step ? "is-done" : s === step ? "is-current" : "";
-            const inner = (
-              <>
-                <span className="work-steps__dot">{s < step ? <Check className="i" aria-hidden /> : s}</span>
-                <span className="work-steps__text">
-                  <span className="work-steps__label">{label}</span>
-                  {meta ? <span className="work-steps__meta truncate">{meta}</span> : null}
-                </span>
-              </>
-            );
-            return [
-              i ? <li key={`l${s}`} className="work-steps__line" aria-hidden="true" /> : null,
-              <li key={s} className={`work-steps__item ${state}`} aria-current={s === step ? "step" : undefined}>
-                {s < step ? (
-                  <button type="button" className="work-steps__btn" onClick={() => goStep(s)}>
-                    {inner}
-                  </button>
-                ) : (
-                  <span className="work-steps__btn">{inner}</span>
-                )}
-              </li>,
-            ];
-          })}
-        </ol>
-      ) : null}
+    <Page width="narrow" className="work-new">
+      <PageHeader title={wf ? wf.label : "New work"} crumbs={crumbs} />
+      <ol className="work-steps" aria-label="Steps">
+        {steps.map(([label, meta], i) => {
+          const s = i + 1;
+          const state = s < at ? "is-done" : s === at ? "is-current" : "";
+          const inner = (
+            <>
+              <span className="work-steps__dot">{s < at ? <Check className="i" aria-hidden /> : s}</span>
+              <span className="work-steps__text">
+                <span className="work-steps__label">{label}</span>
+                {meta ? <span className="work-steps__meta truncate">{meta}</span> : null}
+              </span>
+            </>
+          );
+          return [
+            i ? <li key={`l${s}`} className="work-steps__line" aria-hidden="true" /> : null,
+            <li key={s} className={`work-steps__item ${state}`} aria-current={s === at ? "step" : undefined}>
+              {s < at ? (
+                <button type="button" className="work-steps__btn" onClick={() => goStep(s)}>
+                  {inner}
+                </button>
+              ) : (
+                <span className="work-steps__btn">{inner}</span>
+              )}
+            </li>,
+          ];
+        })}
+      </ol>
       <div className="card card--lg work-new__card">
         {body}
         {foot}

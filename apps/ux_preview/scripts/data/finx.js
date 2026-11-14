@@ -73,7 +73,7 @@ seedWorkspace('ws-finx', () => {
   D.roles = [
     { id: 'r-admin', name: 'Workspace admin', system: true, desc: 'Full control of this workspace.', perms: ALL_TENANT },
     { id: 'r-member', name: 'Member', system: true, desc: 'Ask questions, browse the knowledge they can access, contribute documents for review and send requests.', perms: ['tenant.read', 'knowledge.read', 'knowledge.contribute'] },
-    { id: 'r-km', name: 'Knowledge owner', system: false, desc: 'Owns knowledge bases, reviews what is submitted to them and keeps their sources healthy.', perms: KM_PERMS },
+    { id: 'r-km', name: 'Knowledge owner', system: false, desc: 'Owns collections, reviews what is submitted to them and keeps their sources healthy.', perms: KM_PERMS },
     { id: 'r-auditor', name: 'Auditor', system: false, desc: 'Reviews activity and sign-ins for audits. Cannot change anything.', perms: ['tenant.read', 'knowledge.read', 'audit.read'] },
   ];
   D.groups = [
@@ -177,6 +177,9 @@ seedWorkspace('ws-finx', () => {
     { id: 'src-fx-sec', name: 'GRC policies', app: 'sharepoint', account: 'acc-fx-sp', kb: 'kb-fx-sec', status: 'healthy', scope: ['Risk & Compliance / Published policies', 'Risk & Compliance / Controls'], schedule: sched('daily', '02:30'), last: last(0, 20, 2, 1), next: T(0, 4), created: P(190), owner: 'Võ Thị Lan' },
     { id: 'src-fx-prod', name: 'Product shared drive', app: 'gdrive', account: 'acc-fx-gd', kb: 'kb-fx-prod', status: 'healthy', scope: ['Shared drives / Product / Published'], schedule: sched('weekly', '04:00'), last: last(3, 4, 2, 1), next: T(4), created: P(150), owner: 'Đỗ Phương Thảo' },
     { id: 'src-fx-pol', name: 'People policies', app: 'sharepoint', account: 'acc-fx-sp', kb: 'kb-fx-pol', status: 'healthy', scope: ['People & Culture / Policies'], schedule: sched('weekly', '05:00'), last: last(5, 5, 0, 1), next: T(2), created: P(170), owner: 'Mai Khánh An' },
+    // Knowledge Studio at scale: a first sync (backfill) of ~100k files from the operations archive, under the
+    // "Review only what's uncertain" policy. See docs/KNOWLEDGE_STUDIO.md (100k walkthrough).
+    { id: 'src-fx-archive', name: 'Operations archive', app: 'sharepoint', account: 'acc-fx-sp', kb: 'kb-fx-ops', status: 'syncing', scope: ['Banking Operations / Archive 2016–2025', 'Banking Operations / Branch circulars'], filters: { types: ['pdf', 'docx', 'xlsx', 'pptx', 'msg'], exclude: ['Scans to sort', 'Personal'], since: '2018-01-01' }, schedule: sched('daily', '03:30'), progress: { done: 61420, total: 96410 }, last: null, next: null, created: P(0, 9), owner: 'Võ Thị Lan', runId: 'run-fx-419' },
   ];
   D.runs = [
     { id: 'run-fx-418', source: 'src-fx-pay', kb: 'kb-fx-pay', trigger: 'Scheduled', status: 'completed', started: P(0, 1), dur: 38e3, counts: { total: 3, ok: 3, failed: 0, skipped: 0 }, by: 'Schedule' },
@@ -185,9 +188,44 @@ seedWorkspace('ws-finx', () => {
     { id: 'run-fx-415', source: 'src-fx-ops', kb: 'kb-fx-ops', trigger: 'Scheduled', status: 'partial', started: P(0, 22), dur: 141e3, counts: { total: 3, ok: 2, failed: 1, skipped: 0 }, by: 'Schedule', failures: ['fx-ops-scan'] },
     { id: 'run-fx-414', source: 'src-fx-data', kb: 'kb-fx-data', trigger: 'Manual', status: 'completed', started: P(1, 2), dur: 77e3, counts: { total: 3, ok: 3, failed: 0, skipped: 0 }, by: 'Phạm Quốc Bảo' },
     { id: 'run-fx-413', source: 'src-fx-prod', kb: 'kb-fx-prod', trigger: 'Scheduled', status: 'completed', started: P(3, 4), dur: 305e3, counts: { total: 3, ok: 3, failed: 0, skipped: 0 }, by: 'Schedule' },
+    /* The archive's first sync. `backfill` holds the pipeline at scale (never simulated file by file):
+       found → filtered out → read → classified → published | held for review; failed by error class.
+       Classified = published + review. Of published: confident topics, topics to confirm (classGroups), no topic. */
+    { id: 'run-fx-419', source: 'src-fx-archive', kb: 'kb-fx-ops', trigger: 'First sync', status: 'running', started: P(0, 9), counts: { total: 96410, ok: 61420, failed: 410, skipped: 0 }, by: 'Võ Thị Lan',
+      backfill: {
+        found: 100240, filtered: 3830, filteredBy: [['Images and videos', 2900], ['Not changed since 2018', 930]],
+        read: 61830, classified: 61420, published: 58470, review: 2950, failed: 410, rate: 118,
+        topics: { confident: 52800, confirm: 1860, none: 3810 },
+        issues: [['password', 'Password-protected', 120, 'Remove the password at the source, then sync again.'], ['scanned', 'Scanned pages without text', 210, 'Text recognition (OCR) is off in the platform policy.'], ['large', 'Larger than 100 MB', 80, 'Split the file at the source, or ask for a higher limit.']],
+      } },
   ];
 
-  /* Access requests (to knowledge bases) */
+  /* What the archive's first sync held back, decided in bulk in Knowledge Studio → Documents → Review (one batch per
+     reason; the documents are already indexed in kb-fx-ops and stay unpublished until decided). n counts documents;
+     sample shows five of them. */
+  D.reviewBatches = [
+    { id: 'rb-fx-dup', run: 'run-fx-419', source: 'src-fx-archive', kb: 'kb-fx-ops', reason: 'duplicate', n: 2140, status: 'open', at: P(0, 2),
+      note: 'Older copies of procedures that are already published (same title, ≥ 90% the same text).',
+      sample: ['Payment Cut-off Times — 2019 copy.pdf', 'Chargeback handling (old).docx', 'Daily reconciliation steps v2.docx', 'NAPAS settlement windows 2018.pdf', 'Dispute evidence checklist — copy.xlsx'] },
+    { id: 'rb-fx-pii', run: 'run-fx-419', source: 'src-fx-archive', kb: 'kb-fx-ops', reason: 'personal', n: 610, status: 'open', at: P(0, 3),
+      note: 'Customer names, account or card numbers found in the text.',
+      sample: ['Complaint log — Branch 12 — 2021.xlsx', 'Card dispute — customer letters Q3.msg', 'KYC exceptions list 2020.xlsx', 'Chargeback cases — March.xlsx', 'Branch cash count — staff names.pdf'] },
+    { id: 'rb-fx-ver', run: 'run-fx-419', source: 'src-fx-archive', kb: 'kb-fx-ops', reason: 'version', n: 200, status: 'open', at: P(0, 4),
+      note: 'Newer than a published document with the same name: they could replace it.',
+      sample: ['Payment Cut-off Times & Settlement Windows (2025).pdf', 'Dispute Handling Procedure — rev 4.docx', 'Daily Reconciliation — 2025 update.docx', 'QR settlement procedure — v3.pdf', 'Card limit changes — 2025.docx'] },
+  ];
+  /* Published from the archive, but filed with low confidence or not at all: confirmed in bulk in Knowledge Studio →
+     Topics → Suggestions. They are already readable; this is about where people browse them. */
+  D.classGroups = [
+    { id: 'cg-fx-cards', run: 'run-fx-419', kb: 'kb-fx-ops', topic: 't-cards', n: 940, conf: [0.58, 0.79], keywords: ['chargeback', 'dispute'], status: 'open', sample: ['Branch guide — handling card complaints.pdf', 'Visa dispute timelines 2022.docx', 'Refund vs chargeback FAQ.docx', 'Card scheme fee notes.xlsx', 'Merchant dispute escalation.pdf'] },
+    { id: 'cg-fx-recon', run: 'run-fx-419', kb: 'kb-fx-ops', topic: 't-recon', n: 520, conf: [0.55, 0.77], keywords: ['matching', 'break'], status: 'open', sample: ['End-of-day matching — branches.pdf', 'Suspense account breaks 2021.xlsx', 'GL vs core matching notes.docx', 'Nostro matching guide.pdf', 'Breaks ageing report template.xlsx'] },
+    { id: 'cg-fx-pay', run: 'run-fx-419', kb: 'kb-fx-ops', topic: 't-payments', n: 400, conf: [0.52, 0.74], keywords: ['settlement', 'cut-off'], status: 'open', sample: ['Holiday settlement calendar 2023.xlsx', 'Interbank transfer limits memo.pdf', 'Same-day settlement pilot.docx', 'Batch file formats.pdf', 'Cut-off exceptions — Tet.docx'] },
+    { id: 'cg-fx-none', run: 'run-fx-419', kb: 'kb-fx-ops', topic: null, n: 3810, status: 'open',
+      proposals: [['Merchant onboarding', 1240, ['merchant onboarding', 'mid', 'merchant agreement']], ['Branch operations', 980, ['branch', 'cash count', 'teller']]],
+      sample: ['Merchant onboarding checklist 2020.pdf', 'Teller shift handover.docx', 'Branch opening hours — Tet.pdf', 'MID request form.xlsx', 'Cash count procedure — branches.pdf'] },
+  ];
+
+  /* Access requests (to collections) */
   D.requests = [
     { id: 'req-fx-1', user: 'u-fx-tuan', kb: 'kb-fx-pay', role: 'viewer', note: 'Building the settlement fact table and need the NAPAS settlement file format.', at: P(0, 4), status: 'pending' },
     { id: 'req-fx-2', user: 'u-fx-huy', kb: 'kb-fx-eng', role: 'editor', note: 'I own the MSK evaluation and want to keep the ADR drafts for CBM up to date.', at: P(1, 3), status: 'pending' },

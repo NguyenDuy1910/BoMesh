@@ -112,13 +112,17 @@ class ConversationRecord:
     scope_collections: tuple[str, ...]
     scope_spaces: tuple[str, ...]
     last_message_at: datetime | None
+    last_answer_snippet: str | None
     created_at: datetime
     updated_at: datetime
     deleted_at: datetime | None
 
     @classmethod
-    def of(cls, row: Conversation, space_names: Mapping[UUID, str]) -> ConversationRecord:
-        """``space_names`` maps every ``row.scope_space_ids`` entry to its space name."""
+    def of(
+        cls, row: Conversation, space_names: Mapping[UUID, str], snippets: Mapping[UUID, str]
+    ) -> ConversationRecord:
+        """``space_names`` maps every ``row.scope_space_ids`` entry to its space name;
+        ``snippets`` maps conversation IDs to their latest completed answer's opening text."""
         return cls(
             workspace_id=row.tenant_id,
             code=row.code,
@@ -132,6 +136,7 @@ class ConversationRecord:
                 space_names[value] for value in row.scope_space_ids if value in space_names
             ),
             last_message_at=row.last_message_at,
+            last_answer_snippet=snippets.get(row.id),
             created_at=row.created_at,
             updated_at=row.updated_at,
             deleted_at=row.deleted_at,

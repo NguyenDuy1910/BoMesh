@@ -1,9 +1,9 @@
 "use client";
 
-import { Button, Input, Spinner, Tooltip } from "@heroui/react";
+import { Button, Spinner } from "@heroui/react";
 import { useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { ArrowUp, ChevronRight, GitCompare, History, Maximize2, Pencil, X } from "lucide-react";
+import { ChevronRight, GitCompare, History, Maximize2, Pencil, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { errorMessage } from "@/lib/api/client";
@@ -16,7 +16,7 @@ import { columnLetter } from "../sheet";
 import { fileNameOf, fileViewOf, isEditableView, isSheetView, revisionNumber, toDelimited, type Version } from "../model";
 import { listenPanel, setLeaveGuard, type PanelTab } from "../panel-bus";
 import { artifactKeys, useArtifact, useVersions } from "../queries";
-import { askForChanges, useRevising } from "../revise";
+import { useRevising } from "../revise";
 import { DownloadMenu, FileMoreMenu, VersionMenu } from "./ArtifactMenus";
 import { DocEditor, MarkdownPage, PlainPage, RenditionDiff, RenditionPage, TextDiff, type DocEditorHandle } from "./DocView";
 import { PublishDialog, RenameDialog } from "./FileDialogs";
@@ -35,8 +35,9 @@ let widePanel = false;
 
 /**
  * The file workspace panel (preview `X.chatFiles.panel`): Preview · Changes ·
- * History of an artifact, edit in place, ask for changes, restore, download,
- * rename and save to knowledge. Every change makes a new version.
+ * History of an artifact, edit in place, restore, download, rename and save to
+ * knowledge. Changes are asked for in the thread composer (`askForChanges`).
+ * Every change makes a new version.
  */
 export function FilePanel({ artifact: artifactRef, onClose }: FilePanelProps) {
   const { id: ws, member } = useWorkspace();
@@ -81,7 +82,6 @@ function LoadedPanel({ ws, artifact, isOwner, onClose }: { ws: string; artifact:
   const [editing, setEditing] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [askText, setAskText] = useState("");
   const [dialog, setDialog] = useState<"rename" | "publish" | null>(null);
   const editor = useRef<DocEditorHandle | null>(null);
 
@@ -202,20 +202,6 @@ function LoadedPanel({ ws, artifact, isOwner, onClose }: { ws: string; artifact:
     }
   };
 
-  const ask = (text: string) => {
-    const instructions = text.trim();
-    if (!instructions) {
-      document.getElementById("wk-ask-in")?.focus();
-      return;
-    }
-    if (busy) {
-      toast("Wait for the current change to finish.", { tone: "accent" });
-      return;
-    }
-    setAskText("");
-    void askForChanges(qc, { workspace: ws, artifact: name, title, etag: artifact.etag, instructions, nextVersion: latestN + 1 });
-  };
-
   const showInConversation = () => {
     const card = document.querySelector(`[data-artifact="${CSS.escape(name)}"]`);
     (card?.closest(".chat-msg") ?? card)?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -291,7 +277,6 @@ function LoadedPanel({ ws, artifact, isOwner, onClose }: { ws: string; artifact:
 
   const canEdit = isOwner && !sheet && isEditableView(view) && tab === "preview" && !editing && isLatest && current?.text !== undefined;
   const oldVersion = current && !isLatest && tab !== "history";
-  const quick = sheet ? ["Sort by largest amount", "Add a total row", "Add a status column"] : ["Make it shorter", "More formal tone", "Add an at-a-glance table"];
 
   return (
     <aside className={clsx("split__panel split__panel--wide wk-panel", full && "wk-panel--full")} aria-label={title}>
@@ -383,50 +368,19 @@ function LoadedPanel({ ws, artifact, isOwner, onClose }: { ws: string; artifact:
       {editing ? (
         <div className="panel__footer wk-edit-foot">
           <span className="grow t-xs muted">{dirty ? "Unsaved changes" : "No changes yet"}</span>
-          <Button size="sm" variant="tertiary" onPress={() => void leaveEdit()}>
+          <Button size="sm" variant="ghost" onPress={() => void leaveEdit()}>
             Cancel
           </Button>
           <Button size="sm" variant="primary" isDisabled={!dirty} isPending={saving} onPress={saveEdit}>
             Save as version {latestN + 1}
           </Button>
         </div>
-      ) : !isOwner ? null : busy ? (
-        <div className="panel__footer wk-ask">
-          <div className="row gap-8 t-sm muted">
-            <Spinner size="sm" />
-            <span>Working on version {(revising || latestN + 1)}… you can keep reviewing.</span>
-          </div>
+      ) : isOwner && busy ? (
+        <div className="panel__footer wk-status" role="status">
+          <Spinner size="sm" />
+          <span>Working on version {revising || latestN + 1}… you can keep reviewing.</span>
         </div>
-      ) : (
-        <div className="panel__footer wk-ask">
-          <div className="wk-ask__row">
-            <Input
-              id="wk-ask-in"
-              fullWidth
-              value={askText}
-              placeholder="Ask for changes…"
-              aria-label={`Ask for changes to ${title}`}
-              onChange={(e) => setAskText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") ask(askText);
-              }}
-            />
-            <Tooltip>
-              <Button isIconOnly variant="primary" aria-label="Ask for changes" onPress={() => ask(askText)}>
-                <ArrowUp aria-hidden />
-              </Button>
-              <Tooltip.Content>Ask for changes</Tooltip.Content>
-            </Tooltip>
-          </div>
-          <div className="wk-quick">
-            {quick.map((q) => (
-              <button key={q} type="button" className="chip chip--default chip--outline wk-quick__item" onClick={() => ask(q)}>
-                {q}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      ) : null}
 
       {dialog === "rename" ? <RenameDialog artifact={artifact} isOpen onClose={() => setDialog(null)} /> : null}
       {dialog === "publish" ? <PublishDialog artifact={artifact} version={latestN} isOpen onClose={() => setDialog(null)} /> : null}

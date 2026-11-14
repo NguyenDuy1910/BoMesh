@@ -1,14 +1,17 @@
 "use client";
 
-import { Button, FieldError, Input, Label, ListBox, Select, TextField } from "@heroui/react";
+import { Button, Description, FieldError, Input, Label, ListBox, Select, TextField } from "@heroui/react";
 import { useQueryClient } from "@tanstack/react-query";
+import { BookOpen, Lock, Pencil, Users } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { errorMessage, resourceId } from "@/lib/api/client";
 import { useWorkspace } from "@/lib/workspace";
-import { toast } from "@/components/ui";
+import { FileIcon, toast } from "@/components/ui";
 import { updateItem } from "@/modules/knowledge/api";
+import { isEditor } from "@/modules/knowledge/bases/model";
+import { catalogHref } from "@/modules/knowledge/model";
 import { KnowledgeModal } from "@/modules/knowledge/components/KnowledgeModal";
 import { invalidateKnowledge } from "@/modules/knowledge/queries";
 
@@ -60,10 +63,11 @@ export function RenameDialog({ artifact, isOpen, onClose }: { artifact: Artifact
       isOpen={isOpen}
       onClose={onClose}
       size="sm"
+      icon={Pencil}
       title="Rename file"
       footer={
         <>
-          <Button variant="tertiary" onPress={onClose}>
+          <Button variant="ghost" onPress={onClose}>
             Cancel
           </Button>
           <Button variant="primary" isPending={busy} onPress={() => void save()}>
@@ -96,7 +100,7 @@ export function RenameDialog({ artifact, isOpen, onClose }: { artifact: Artifact
 
 /**
  * Save to knowledge (preview `wk-publish`): the current version becomes a new
- * published document in a knowledge base the caller can add to.
+ * published document in a collection the caller can add to.
  */
 export function PublishDialog({ artifact, version, isOpen, onClose }: { artifact: Artifact; version: number; isOpen: boolean; onClose: () => void }) {
   const { id } = useWorkspace();
@@ -110,11 +114,12 @@ export function PublishDialog({ artifact, version, isOpen, onClose }: { artifact
   const [busy, setBusy] = useState(false);
   const target = list.find((t) => t.item.name === picked) ?? list[0];
 
+  const WhoIcon = target?.personal ? Lock : Users;
   const who = !target
     ? ""
     : target.personal
       ? "Only you can find it."
-      : `People with access to ${target.item.displayName ?? "this knowledge base"} can find and cite it.`;
+      : `People with access to ${target.item.displayName ?? "this collection"} can find and cite it.`;
 
   const save = async () => {
     const name = docName.trim();
@@ -131,9 +136,13 @@ export function PublishDialog({ artifact, version, isOpen, onClose }: { artifact
       invalidateKnowledge(qc, id);
       onClose();
       const kb = target.item.displayName ?? "knowledge";
-      toast(`Saved to ${target.personal ? "My files" : kb}`, {
-        action: { label: "Open", onPress: () => router.push(target.personal ? "/knowledge/library" : `/knowledge/${resourceId(target.item.name)}`) },
-      });
+      /* Editors manage the collection in Studio; everyone else meets it as a Browse filter. */
+      const href = target.personal
+        ? "/knowledge/library?tab=files"
+        : isEditor(target.item)
+          ? `/studio/collections/${resourceId(target.item.name)}`
+          : catalogHref({ filters: { kb: [resourceId(target.item.name)] } });
+      toast(`Saved to ${target.personal ? "My files" : kb}`, { action: { label: "Open", onPress: () => router.push(href) } });
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -146,26 +155,33 @@ export function PublishDialog({ artifact, version, isOpen, onClose }: { artifact
       isOpen={isOpen}
       onClose={onClose}
       guard={busy}
+      icon={BookOpen}
       title="Save to knowledge"
-      description={
-        <span translate="no">
-          {artifact.displayName} · version {version}
-        </span>
-      }
+      description="Turn this file into a document people can find, read and ask about."
       footer={
         <>
-          <Button variant="tertiary" onPress={onClose} isDisabled={busy}>
+          <Button variant="ghost" onPress={onClose} isDisabled={busy}>
             Cancel
           </Button>
           <Button variant="primary" isPending={busy} isDisabled={!target} onPress={() => void save()}>
-            Save
+            <BookOpen aria-hidden />
+            Save to knowledge
           </Button>
         </>
       }
     >
+      <div className="chat-ctx">
+        <FileIcon name={fileNameOf(artifact)} />
+        <div className="grow">
+          <div className="chat-ctx__title truncate" translate="no">
+            {artifact.displayName}
+          </div>
+          <div className="t-xs muted truncate">Version {version}</div>
+        </div>
+      </div>
       <div className="stack gap-16">
         <Select value={target?.item.name ?? null} onChange={(v) => setPicked(String(v))} isDisabled={targets.isPending || !list.length}>
-          <Label>Knowledge base</Label>
+          <Label>Collection</Label>
           <Select.Trigger>
             <Select.Value />
             <Select.Indicator />
@@ -180,6 +196,14 @@ export function PublishDialog({ artifact, version, isOpen, onClose }: { artifact
               ))}
             </ListBox>
           </Select.Popover>
+          {targets.isError ? (
+            <Description>{errorMessage(targets.error)}</Description>
+          ) : who ? (
+            <Description className="wk-pub__who">
+              <WhoIcon className="i i-xs" aria-hidden />
+              <span>{who}</span>
+            </Description>
+          ) : null}
         </Select>
         <TextField
           value={docName}
@@ -194,7 +218,6 @@ export function PublishDialog({ artifact, version, isOpen, onClose }: { artifact
           <FieldError>{error}</FieldError>
         </TextField>
       </div>
-      <p className="t-sm muted mt-16">{targets.isError ? errorMessage(targets.error) : who}</p>
     </KnowledgeModal>
   );
 }

@@ -1,32 +1,36 @@
 "use client";
 
 import { Button, Chip, Input, Spinner, TextField } from "@heroui/react";
-import { ArrowUp, Check, ChevronDown, List as ListIcon, Pencil, Quote, Send, Sparkles, TriangleAlert, Undo2 } from "lucide-react";
+import { ArrowUp, Check, Clock, List as ListIcon, Pencil, Quote, Send, Sparkles, TriangleAlert, Undo2, X } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { Callout, EmptyState, ErrorState, Segmented, SkeletonRows, Tip, toast } from "@/components/ui";
+import { Callout, EmptyState, ErrorState, IconButton, Segmented, SkeletonRows, Tip, toast } from "@/components/ui";
 import { errorMessage, resourceId } from "@/lib/api/client";
 import { plural, rel } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
+import { useMemberNames } from "@/modules/knowledge/queries";
 import { rollbackRevision } from "@/modules/artifacts/api";
 import { htmlToMarkdown } from "@/modules/artifacts/html-markdown";
 import { useVersions } from "@/modules/artifacts/queries";
 
-import { draftQuickAsks, draftTypeLabel, recipeDraftType, wordCount, type Artifact } from "../model";
+import { draftQuickAsks, draftTypeLabel, recipeDraftType, sourceLine, wordCount, type Artifact } from "../model";
 import { useArtifactText, useDocs } from "../queries";
 import type { WorkViewProps } from "./WorkItemPage";
 
 type SaveState = "saved" | "saving" | "error";
 
-/** Mark ready for review / Back to draft (preview `drActions`). Ready = shared with the space's staff. */
+/**
+ * Review loop (preview `drActions`) on the API: a draft shared with its space is in review with the space's
+ * staff; Back to draft makes it private and editable again.
+ */
 export function DraftActions({ artifact: a, canEdit, space, actions, flush }: WorkViewProps) {
   if (!canEdit || !space) return null;
   if (a.audience === "SPACE")
     return (
-      <Button variant="tertiary" onPress={() => void actions.setAudience("PRIVATE", "Back to draft", { undo: false })}>
+      <Button variant="secondary" onPress={() => void actions.setAudience("PRIVATE", "Back to draft. You can edit it again")}>
         <Pencil className="i" aria-hidden />
         Back to draft
       </Button>
@@ -40,18 +44,36 @@ export function DraftActions({ artifact: a, canEdit, space, actions, flush }: Wo
       }}
     >
       <Send className="i" aria-hidden />
-      Mark ready for review
+      Send for review
     </Button>
   );
 }
 
+/** Where the draft stands in review (preview `reviewNote`). */
+function ReviewNote({ artifact: a, canEdit, space }: Pick<WorkViewProps, "artifact" | "canEdit" | "space">) {
+  const owners = useMemberNames([a.owner]);
+  if (a.audience !== "SPACE" || !space) return null;
+  if (canEdit)
+    return (
+      <Callout
+        tone="accent"
+        icon={Clock}
+        title={`${space.displayName} is reviewing it`}
+        description={`Sent ${rel(a.updateTime).toLowerCase()}. Editing is paused until you move it back to draft.`}
+      />
+    );
+  return <Callout tone="accent" icon={Send} title={`${owners.get(a.owner ?? "") || "Someone"} asked you to review this`} description="The text stays as they wrote it." />;
+}
+
 /** Grounded document draft: editor with autosave, Ask for changes, sources and versions (preview `drRender`). */
-export function DraftView({ artifact: a, canEdit, space, actions, flush }: WorkViewProps) {
+export function DraftView({ artifact: a, canEdit: isOwner, space, actions, flush, panel, setPanel }: WorkViewProps) {
   const text = useArtifactText(a);
   const type = useMemo(() => recipeDraftType(a.name), [a.name]);
   const busy = a.state === "GENERATING";
-  const [rail, setRail] = useState(false);
-  const [tab, setTab] = useState<"sources" | "versions">("sources");
+  /* The body is read-only while the draft is in review (shared with its space). */
+  const canEdit = isOwner && !(a.audience === "SPACE" && space);
+  /* Content first: the sources and versions rail opens on demand (header source link, ⋯ Version history). */
+  const rail = panel?.kind === "rail" ? panel.tab : null;
   const [ask, setAsk] = useState("");
   const [hint, setHint] = useState("");
   const [asking, setAsking] = useState(false);
@@ -162,11 +184,9 @@ export function DraftView({ artifact: a, canEdit, space, actions, flush }: WorkV
   }
 
   return (
-    <div className="dr">
+    <div className={`dr${rail ? " has-rail" : ""}`}>
       <div className="dr-main">
-        {a.audience === "SPACE" && space ? (
-          <Callout tone="accent" icon={Send} title="Ready for review" description={`Shared with ${space.displayName} ${rel(a.updateTime)}.`} />
-        ) : null}
+        <ReviewNote artifact={a} canEdit={isOwner} space={space} />
         <div className="dr-paper">
           {canEdit ? (
             <div className="dr-toolbar" role="toolbar" aria-label="Formatting" onMouseDown={(e) => e.target instanceof Element && e.target.closest(".dr-tool") && e.preventDefault()}>
@@ -265,39 +285,37 @@ export function DraftView({ artifact: a, canEdit, space, actions, flush }: WorkV
           </div>
         ) : null}
       </div>
-      <aside className={`dr-rail${rail ? " is-open" : ""}`} aria-label="Sources and versions">
+      {rail ? (
         <DraftRail
           artifact={a}
           canEdit={canEdit}
-          tab={tab}
-          setTab={setTab}
-          rail={rail}
-          setRail={setRail}
+          tab={rail}
+          setTab={(tab) => setPanel({ kind: "rail", tab })}
+          onClose={() => setPanel(null)}
           beforeRestore={save}
           onRestored={(next) => {
             setSaveState("saved");
             actions.refresh(next);
           }}
         />
-      </aside>
+      ) : null}
     </div>
   );
 }
 
+/** Sources and versions rail (preview `dr-rail`): opened on demand, closed with its X. */
 function DraftRail({
   artifact: a,
   canEdit,
   tab,
   setTab,
-  rail,
-  setRail,
+  onClose,
   beforeRestore,
   onRestored,
 }: Pick<WorkViewProps, "artifact" | "canEdit"> & {
   tab: "sources" | "versions";
   setTab: (t: "sources" | "versions") => void;
-  rail: boolean;
-  setRail: (v: boolean) => void;
+  onClose: () => void;
   /** Saves pending typing first, so it can't land on top of the restored text. */
   beforeRestore: () => Promise<void>;
   onRestored: (next: Artifact) => void;
@@ -321,27 +339,22 @@ function DraftRail({
     }
   };
   return (
-    <>
-      <button type="button" className="dr-rail__toggle" aria-expanded={rail} onClick={() => setRail(!rail)}>
-        <Quote className="i i-sm" aria-hidden />
-        <span className="grow">Sources and versions</span>
-        <span className="t-xs muted">
-          {sources.length} · {versions.length}
-        </span>
-        <ChevronDown className="i dr-rail__chev" aria-hidden />
-      </button>
-      <div className="dr-rail__body">
+    <aside className="dr-rail" aria-label="Sources and versions">
+      <div className="dr-rail__head">
         <Segmented
-          label="Rail"
+          label="Sources and versions"
           full
           value={tab}
           onChange={setTab}
           options={[
-            { value: "sources", label: `Sources ${sources.length}` },
-            { value: "versions", label: isPending ? "Versions" : `Versions ${versions.length}` },
+            { value: "sources", label: "Sources" },
+            { value: "versions", label: "Versions" },
           ]}
         />
-        <div className="dr-rail__list">
+        <IconButton icon={X} tip="Close panel" size="sm" onPress={onClose} />
+      </div>
+      <div className="t-xs muted dr-rail__meta">{tab === "versions" ? (isPending ? "…" : plural(versions.length, "version")) : sourceLine(a)}</div>
+      <div className="dr-rail__list">
           {tab === "sources" ? (
             sources.length ? (
               sources.map((s, i) => {
@@ -393,8 +406,7 @@ function DraftRail({
           ) : (
             <EmptyState icon={Undo2} title="No versions yet" description="Each revision you ask for is saved here." compact />
           )}
-        </div>
       </div>
-    </>
+    </aside>
   );
 }

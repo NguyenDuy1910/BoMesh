@@ -1,9 +1,9 @@
 /* Document preview — one quick-reading overlay for every place a document is referenced: Browse cards and rows,
-   search results, My library and collection lists, Related, spaces' materials, chat citations, work and request
+   search results, My library and reading lists, Related, spaces' materials, chat citations, work and request
    citations. Preview first, open full later: the document's own pages (native format) scroll inside a centered
    dialog (a near-full-screen sheet on phones) over the page the person came from; the cited passage or the
    matching words are highlighted and scrolled into view. One primary action — Open full document — and one
-   optional secondary — Ask about this document. Editing, sharing, collections and versions live in the Reader.
+   optional secondary — Ask about this document. Editing, sharing, reading lists and versions live in the Reader.
 
    X.preview.open({ id, q?, page?, quote?, from?, cites?: [{ doc, page, quote, n }], i? })
    A['doc-preview'] reads data-id / data-q / data-page / data-quote from the clicked element. Prefix: pv-. */

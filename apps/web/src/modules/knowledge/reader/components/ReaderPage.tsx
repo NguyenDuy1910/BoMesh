@@ -1,8 +1,8 @@
 "use client";
 
-import { Button, Dropdown, Header, Input, Label, TextField } from "@heroui/react";
+import { Button, Input, TextField } from "@heroui/react";
 import clsx from "clsx";
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, History, List as ListIcon, ListPlus, Quote, Search, Send, ShieldCheck, Sparkles, X, Zap, RotateCcw } from "lucide-react";
+import { ChevronDown, ChevronUp, History, Info, Quote, RotateCcw, Search, Send, ShieldCheck, Sparkles, X } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -21,26 +21,32 @@ import type { AnswerSource } from "@/modules/chat/turn";
 import { indexStatusOf, type Resource } from "../../model";
 import { useDocumentOperations } from "../../operations";
 import { useItemPermissions, useKnowledgeModel, useMember, useRecordRecent } from "../../queries";
-import { openAddToCollection } from "../../components/dialogs";
-import { ResourceMenu, SaveButton, useUseInEntries } from "../../components/ResourceActions";
+import { DemoChip } from "../../components/KnowledgeHeader";
+import { ResourceMenu, SaveButton, type MenuEntry } from "../../components/ResourceActions";
 import { TrustChip, useTrust } from "../../components/TrustChip";
+import { docFormat, PAGED_FORMATS } from "../format";
 import { documentMarks, renditionText, searchNeedles, NO_MARKS } from "../marks";
-import { explainPassagePrompt, parseReaderQuery, readerHref, revisionNumber } from "../links";
-import { isSpreadsheetType, RenditionLoadError, renditionOutline } from "../rendition";
+import { explainPassagePrompt, parseOrigin, parseReaderQuery, readerHref, revisionNumber } from "../links";
+import { RenditionLoadError } from "../rendition";
 import { useCanProcess, useConversationCitations, usePassages, useProcessDocument, useReaderContent, useReaderItem, useRevisions, useSubmission } from "../queries";
 import { AboutPane } from "./AboutPane";
 import { AskPane, type AskTurn } from "./AskPane";
-import { NotReady, NothingToShow, PanelToggle, RAIL_MIN, Rail, RailSkeleton, ReaderHead, SkeletonPage, Unavailable, Updated, useWidth, DownloadButton } from "./ReaderParts";
+import { DocumentViewer } from "./DocumentViewer";
+import { Meta, NotReady, NothingToShow, RAIL_MIN, Rail, RailSkeleton, ReaderHead, SkeletonPage, Unavailable, Updated, useCollapsingHead, useWidth } from "./ReaderParts";
 import { RelatedPane } from "./RelatedPane";
-import { RenditionView } from "./RenditionView";
+import { renditionPageCount, RenditionView } from "./RenditionView";
+import { PageImageView } from "./PageImageView";
 import { SelectionToolbar } from "./SelectionToolbar";
 import { SubmissionView } from "./SubmissionView";
+import { useOriginCrumbs } from "./useOriginCrumbs";
 import { useRendition } from "./useRendition";
 
 /**
- * The Reader (`/doc/[id]`, preview `P.docViewer`): header with trust and actions, outline,
- * the page canvas with cited-passage and search highlights, and a rail (Ask · About · Related).
- * Deep links: `?q=&page=&passage=&from=&v=` (document_viewer.md).
+ * The Reader (`/doc/[id]`, preview `P.docViewer`): content first. The top row carries the trail
+ * (back to where it was opened from) and Ask · Save · ⋯; the head below is the document's identity
+ * and the find-in-document bar; the page canvas renders the file natively with cited-passage and
+ * search highlights; the side panel (Ask · About · Related) opens on demand.
+ * Deep links: `?q=&page=&passage=&from=&v=&ask=1` (document_viewer.md).
  */
 export function ReaderPage({ itemId }: { itemId: string }) {
   const item = useReaderItem(itemId);
@@ -54,6 +60,7 @@ export function ReaderPage({ itemId }: { itemId: string }) {
   if (item.isError) {
     const e = item.error;
     if (e instanceof ApiError && (e.status === 403 || e.status === 404)) {
+      // The API answers 403 alike whether or not the document exists, and names no collection to ask.
       return e.status === 403 ? <Unavailable locked description="It may have been removed, or it isn’t shared with you." /> : <Unavailable />;
     }
     return (
@@ -65,16 +72,15 @@ export function ReaderPage({ itemId }: { itemId: string }) {
   if (!resource || resource.item.itemType !== "DOCUMENT" || resource.deleted) return <Unavailable />;
   if (submission.data || !published) {
     if (submission.isPending && published) return <ReaderSkeleton />;
-    return <SubmissionView resource={resource} contribution={submission.data ?? null} />;
+    return <SubmissionView key={resource.id} resource={resource} contribution={submission.data ?? null} />;
   }
-  return <Reader resource={resource} />;
+  return <Reader key={resource.id} resource={resource} />;
 }
 
 function ReaderSkeleton() {
   return (
     <div className="rdr">
       <header className="rdr-head">
-        <span className="skeleton skeleton--line" style={{ width: 60 }} />
         <div className="rdr-head__row">
           <span className="skeleton" style={{ width: 40, height: 40, borderRadius: 10 }} />
           <div className="rdr-head__main stack gap-6">
@@ -107,10 +113,12 @@ function Reader({ resource: r }: { resource: Resource }) {
   const process = useProcessDocument();
   const trust = useTrust(r);
   const record = useRecordRecent();
-  const useIn = useUseInEntries(r);
   const doc = r.item.document;
   const readable = r.readable;
   const owner = useMember(r.owner).data?.displayName;
+  const crumbs = useOriginCrumbs(query.from, r);
+  const origin = parseOrigin(query.from);
+  const conversationFrom = origin?.kind === "conversation" ? origin.id : "";
 
   // Record the view once per document (UpdateRecentItem with allowMissing).
   const recorded = useRef("");
@@ -122,7 +130,7 @@ function Reader({ resource: r }: { resource: Resource }) {
 
   /* ── URL state ── */
   const setQuery = useCallback(
-    (patch: Partial<Record<"q" | "page" | "from" | "v", string>> & { passage?: string[] }) => {
+    (patch: Partial<Record<"q" | "page" | "from" | "v" | "ask", string>> & { passage?: string[] }) => {
       const next = new URLSearchParams(params);
       for (const [k, v] of Object.entries(patch)) {
         if (k === "passage") continue;
@@ -142,24 +150,33 @@ function Reader({ resource: r }: { resource: Resource }) {
   /* ── Which revision to read ── */
   const current = revisionNumber(doc?.revision) ?? 1;
   const indexed = revisionNumber(doc?.indexedRevision);
-  const fromCitations = useConversationCitations(query.from, r.id);
+  const fromCitations = useConversationCitations(conversationFrom, r.id);
   const passageIds = useMemo(
     () => [...new Set([...query.passages, ...(query.passages.length ? [] : (fromCitations.data ?? []).map((c) => resourceId(c.passage)))])],
     [query.passages, fromCitations.data],
   );
-  const viewing = query.v && query.v !== current ? query.v : passageIds.length && indexed && indexed !== current ? indexed : current;
+  const older = !!query.v && query.v !== current;
+  const viewing = older ? query.v! : passageIds.length && indexed && indexed !== current ? indexed : current;
   const revisions = useRevisions(r.id);
-  const olderVersion = query.v && query.v !== current ? revisions.data?.find((v) => revisionNumber(v.name) === query.v) : undefined;
+  const olderVersion = older ? revisions.data?.find((v) => revisionNumber(v.name) === query.v) : undefined;
+  // Ask and Save work on the current version only.
+  const askable = readable && !older;
 
   const content = useReaderContent(r.id, viewing === current ? undefined : String(viewing), { enabled: readable });
   const passages = usePassages(r.id, passageIds);
 
-  /* ── Rendition ── */
-  const rendition = useRendition(r.id, content.data);
+  // Page images of the viewed revision, in page order: the document's own pages.
+  const pageImages = useMemo(
+    () => [...(content.data?.pageAssets ?? [])].filter((p) => p.imageUri).sort((a, b) => (a.pageNumber ?? 0) - (b.pageNumber ?? 0)),
+    [content.data],
+  );
+
+  /* ── Rendition: only downloaded when it is what the canvas shows (no page images) ── */
+  const rendition = useRendition(r.id, content.data, { enabled: !pageImages.length });
   const rd = rendition.doc;
 
   /* ── Highlights ── */
-  const cited = !!(query.page || query.from || query.q.length >= 40);
+  const cited = !!(query.page || conversationFrom || query.q.length >= 40);
   const text = useMemo(() => (rd ? renditionText(rd) : ""), [rd]);
   const needles = useMemo(() => (rd ? searchNeedles(query.q, text, cited) : []), [rd, query.q, text, cited]);
   const resolved = useMemo(() => passages.data.filter((p): p is NonNullable<typeof p> => !!p), [passages.data]);
@@ -182,52 +199,40 @@ function Reader({ resource: r }: { resource: Resource }) {
   const firstScroll = useRef(true);
   useEffect(() => {
     const sc = scrollRef.current;
-    if (!sc || !rd) return;
+    if (!sc || (!rd && !pageImages.length)) return;
     const mark = focusHit >= 0 ? sc.querySelector<HTMLElement>(`mark.evidence[data-hit="${focusHit}"]`) : null;
     const target = mark ?? (query.page ? sc.querySelector<HTMLElement>(`.doc-page[data-page="${query.page}"]`) : null);
     if (!target) return;
     const top = sc.scrollTop + target.getBoundingClientRect().top - sc.getBoundingClientRect().top - (mark ? sc.clientHeight / 3 : 24);
     sc.scrollTo({ top, behavior: firstScroll.current ? "auto" : "smooth" });
     firstScroll.current = false;
-  }, [focusHit, rd, query.page, marks]);
+  }, [focusHit, rd, pageImages.length, query.page, marks]);
 
-  /* ── Layout ── */
+  /* ── Layout: content first, the side panel opens on demand ── */
   const rootRef = useRef<HTMLDivElement>(null);
+  const headRef = useRef<HTMLElement>(null);
   const width = useWidth(rootRef);
-  const [railPref, setRailPref] = useState<boolean | null>(null);
   const narrow = width > 0 && width < RAIL_MIN;
-  const open = railPref ?? (width === 0 || width >= RAIL_MIN);
+  const collapsed = useCollapsingHead(scrollRef, headRef, r.id);
+  const [open, setOpen] = useState(query.ask && askable);
   const [tab, setTab] = useState<Tab>("ask");
-  const activeTab: Tab = !readable && tab === "ask" ? "about" : tab;
-  const [outlineOpen, setOutlineOpen] = useState(true);
-  const sheet = isSpreadsheetType(r.mime);
-  const outline = useMemo(() => (rd ? renditionOutline(rd).filter((o) => o.id !== (rd.blocks[0]?.kind === "heading" ? rd.blocks[0].id : "")) : []), [rd]);
-  const hasOutline = readable && !sheet && outline.length > 1;
-  const pageCount = Math.max(content.data?.pageAssets?.length ?? 0, ...(rd?.blocks.map((b) => b.page ?? 0) ?? [0]));
-  const [activeHeading, setActiveHeading] = useState("");
+  const activeTab: Tab = !askable && tab === "ask" ? "about" : tab;
+  const format = docFormat({ ext: r.ext, mime: r.mime });
+  const assetPages = content.data?.pageAssets?.length ?? 0;
+  // Which page to open on: `?page=`, else the first cited passage's page.
+  const citedPage = Number(query.page) || resolved.find((p) => p.boundingBoxes?.[0]?.pageNumber)?.boundingBoxes?.[0]?.pageNumber || 0;
+  const focusComposer = () => requestAnimationFrame(() => document.getElementById("rdr-ask-q")?.focus());
 
-  const jump = (id: string) => {
-    const sc = scrollRef.current;
-    const h = sc?.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(id)}"]`);
-    if (!sc || !h) return;
-    sc.scrollTo({ top: sc.scrollTop + h.getBoundingClientRect().top - sc.getBoundingClientRect().top - 24, behavior: "smooth" });
-  };
+  // ?ask=1 ("Ask about this document" from anywhere): opens the Ask panel once, then leaves the address.
   useEffect(() => {
-    const sc = scrollRef.current;
-    if (!sc || !hasOutline) return;
-    const track = () => {
-      const top = sc.getBoundingClientRect().top + sc.clientHeight / 3;
-      let on = outline[0]?.id ?? "";
-      for (const o of outline) {
-        const h = sc.querySelector(`[data-block-id="${CSS.escape(o.id)}"]`);
-        if (h && h.getBoundingClientRect().top <= top) on = o.id;
-      }
-      setActiveHeading(on);
-    };
-    track();
-    sc.addEventListener("scroll", track, { passive: true });
-    return () => sc.removeEventListener("scroll", track);
-  }, [hasOutline, outline, rd]);
+    if (!query.ask) return;
+    if (askable) {
+      setOpen(true);
+      setTab("ask");
+      focusComposer();
+    }
+    setQuery({ ask: "" });
+  }, [query.ask, askable, setQuery]);
 
   /* ── Ask (in place, through the conversation API) ── */
   const [thread, setThread] = useState<AskTurn[]>([]);
@@ -240,11 +245,11 @@ function Reader({ resource: r }: { resource: Resource }) {
   const update = (id: number, patch: Partial<AskTurn>) => setThread((list) => list.map((t) => (t.id === id ? { ...t, ...patch } : t)));
   const ask = async (q: string) => {
     const question = q.trim();
-    if (!question || asking || !readable) return;
+    if (!question || asking || !askable) return;
     const id = ++seq.current;
     setThread((list) => [...list, { id, q: question }]);
     setDraft("");
-    setRailPref(true);
+    setOpen(true);
     setTab("ask");
     stick();
     try {
@@ -270,148 +275,115 @@ function Reader({ resource: r }: { resource: Resource }) {
     if (conversation.current) router.push(`/chat/${conversation.current}`);
     else router.push(`/chat?${new URLSearchParams({ q: last?.q ?? "", doc: r.id, ...(r.base && !r.isPersonal ? { scope: r.base.id } : {}) })}`);
   };
+  // A citation in the panel: highlight that passage in the page (closes the overlay panel on narrow screens).
   const showPassages = (ids: string[]) => {
-    if (narrow) setRailPref(false);
+    if (narrow) setOpen(false);
     setQuery({ q: "", page: "", passage: ids });
   };
   const openSource = (s: AnswerSource) => router.push(readerHref({ item: s.item, passages: s.passages.map((p) => p.passage), from: conversation.current ?? undefined }));
+  const openPane = (t: Tab) => {
+    setOpen(true);
+    setTab(t);
+    requestAnimationFrame(() => railBody.current && (railBody.current.scrollTop = t === "ask" ? railBody.current.scrollHeight : 0));
+  };
 
-  // Escape closes the overlay rail on narrow screens (the selection toolbar handles its own).
+  // Escape closes the overlay panel on narrow screens (the selection toolbar handles its own).
   useEffect(() => {
     if (!narrow || !open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !document.querySelector(".doc-sel")) setRailPref(false);
+      if (e.key === "Escape" && !document.querySelector(".doc-sel")) setOpen(false);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [narrow, open]);
 
-  /* ── Header ── */
+  /* ── Header: type · by owner · updated; trust; Ask · Save · ⋯ ── */
   const status = indexStatusOf(r);
   const meta = [
-    r.kindMeta.label,
-    r.base?.displayName && <span translate="no">{r.base.displayName}</span>,
-    owner && <span translate="no">{owner}</span>,
-    <Updated key="u" at={r.updated} />,
-    `v${current}`,
-    readable && !sheet && pageCount > 0 && plural(pageCount, "page"),
+    r.typeLabel,
+    owner && <span key="o">{`by ${owner}`}</span>,
+    older ? <span key="v">{`Version ${query.v}${olderVersion ? ` · ${fmtDate(olderVersion.createTime)}` : ""}`}</span> : <Updated key="u" at={r.updated} />,
   ];
+  const chips = (
+    <>
+      {older ? (
+        <StatusChip label="Older version" tone="default" icon={History} size="sm" tooltip={`Current: v${current}, ${fmtDate(r.updated)}`} />
+      ) : (
+        <TrustChip resource={r} />
+      )}
+      {status ? <StatusChip kind="doc" value={status} size="sm" /> : null}
+      <DemoChip />
+    </>
+  );
+  const pressed = open && activeTab === "ask";
+  const panels: MenuEntry[] = [{ id: "about", label: "About this document", icon: Info, run: () => openPane("about") }];
   const actions = (
     <>
-      {readable ? (
+      {askable ? (
         <Button
           variant="primary"
           className="rdr-ask-btn"
+          aria-pressed={pressed}
+          aria-label="Ask about this document"
           onPress={() => {
-            setRailPref(true);
-            setTab("ask");
-            requestAnimationFrame(() => document.getElementById("rdr-ask-q")?.focus());
+            if (pressed) return setOpen(false);
+            openPane("ask");
+            focusComposer();
           }}
         >
           <Sparkles className="i" aria-hidden />
-          Ask
+          <span>Ask</span>
         </Button>
       ) : null}
-      <span className="rdr-wrap rdr-wide">
-        <SaveButton resource={r} size="md" label />
-      </span>
-      <Tip content="Add to collection">
-        <Button variant="secondary" className="rdr-wide rdr-squeeze" onPress={() => openAddToCollection(r.name)}>
-          <ListPlus className="i" aria-hidden />
-          <span>Add to collection</span>
-        </Button>
-      </Tip>
-      {readable && useIn.length ? (
-        <Dropdown>
-          <Button variant="secondary" className="rdr-wide rdr-squeeze" aria-label="Use in a workflow">
-            <Zap className="i" aria-hidden />
-            <span>Use in…</span>
-            <ChevronDown className="i" aria-hidden />
-          </Button>
-          <Dropdown.Popover placement="bottom end">
-            <Dropdown.Menu aria-label="Use in" onAction={(key) => useIn.find((e) => e.id === key)?.run()}>
-              <Dropdown.Section>
-                <Header>Use in</Header>
-                {useIn.map((e) => (
-                  <Dropdown.Item key={e.id} id={e.id} textValue={e.label}>
-                    <e.icon className="i" aria-hidden />
-                    <Label>{e.label}</Label>
-                  </Dropdown.Item>
-                ))}
-              </Dropdown.Section>
-            </Dropdown.Menu>
-          </Dropdown.Popover>
-        </Dropdown>
-      ) : null}
-      <DownloadButton onPress={() => void ops.download(r)} />
-      {hasOutline ? (
-        <Dropdown>
-          <Button isIconOnly variant="ghost" className="button--muted rdr-outline-btn" aria-label="Outline">
-            <ListIcon aria-hidden />
-          </Button>
-          <Dropdown.Popover placement="bottom end">
-            <Dropdown.Menu aria-label="On this page" onAction={(key) => jump(String(key))}>
-              <Dropdown.Section>
-                <Header>On this page</Header>
-                {outline.map((o) => (
-                  <Dropdown.Item key={o.id} id={o.id} textValue={o.title}>
-                    <ChevronRight className="i" aria-hidden />
-                    <Label translate="no">{o.title}</Label>
-                  </Dropdown.Item>
-                ))}
-              </Dropdown.Section>
-            </Dropdown.Menu>
-          </Dropdown.Popover>
-        </Dropdown>
-      ) : null}
-      <PanelToggle open={open} onToggle={() => setRailPref(!open)} />
-      <ResourceMenu resource={r} size="md" hideOpen q={query.q} />
+      {older ? null : <SaveButton resource={r} size="md" label />}
+      <ResourceMenu resource={r} size="md" context="reader" extra={panels} />
     </>
   );
 
   const firstCite = passageIds.length > 0 || cited;
-  const hits = highlighting && rd ? (
-    <div className="rdr-hits" role="status">
-      {firstCite ? <Quote className="i i-sm" aria-hidden /> : <Search className="i i-sm" aria-hidden />}
-      <span className="grow truncate">
-        {marks.total ? (
-          firstCite ? (
+  const hits =
+    highlighting && rd ? (
+      <div className="rdr-hits" role="status">
+        {firstCite ? <Quote className="i i-sm" aria-hidden /> : <Search className="i i-sm" aria-hidden />}
+        <span className="grow truncate">
+          {marks.total ? (
+            firstCite ? (
+              <>
+                Cited passage
+                {marks.total > 1 ? (
+                  <>
+                    {" "}
+                    <span className="num">{focusHit + 1}</span> of <span className="num">{marks.total}</span>
+                  </>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <span className="num">{focusHit + 1}</span> of <span className="num">{marks.total}</span> for “<span translate="no">{query.q}</span>”
+              </>
+            )
+          ) : passages.isPending ? (
+            "Finding the cited passage…"
+          ) : query.q ? (
             <>
-              Cited passage
-              {marks.total > 1 ? (
-                <>
-                  {" "}
-                  <span className="num">{focusHit + 1}</span> of <span className="num">{marks.total}</span>
-                </>
-              ) : null}
+              No matches for “<span translate="no">{query.q}</span>”
             </>
           ) : (
-            <>
-              <span className="num">{focusHit + 1}</span> of <span className="num">{marks.total}</span> for “<span translate="no">{query.q}</span>”
-            </>
-          )
-        ) : passages.isPending ? (
-          "Finding the cited passage…"
-        ) : query.q ? (
+            "The cited passage isn’t in this version of the document."
+          )}
+          {marks.total && unresolved > 0 ? ` · ${plural(unresolved, "passage")} no longer found` : ""}
+        </span>
+        {marks.total > 1 ? (
           <>
-            No matches for “<span translate="no">{query.q}</span>”
+            <IconButton icon={ChevronUp} tip="Previous" size="sm" onPress={() => setHit((h) => h - 1)} />
+            <IconButton icon={ChevronDown} tip="Next" size="sm" onPress={() => setHit((h) => h + 1)} />
           </>
-        ) : (
-          "The cited passage isn’t in this version of the document."
-        )}
-        {marks.total && unresolved > 0 ? ` · ${plural(unresolved, "passage")} no longer found` : ""}
-      </span>
-      {marks.total > 1 ? (
-        <>
-          <IconButton icon={ChevronUp} tip="Previous" size="sm" onPress={() => setHit((h) => h - 1)} />
-          <IconButton icon={ChevronDown} tip="Next" size="sm" onPress={() => setHit((h) => h + 1)} />
-        </>
-      ) : null}
-      <IconButton icon={X} tip="Clear highlights" size="sm" onPress={() => setQuery({ q: "", page: "", from: "", passage: [] })} />
-    </div>
-  ) : null;
+        ) : null}
+        <IconButton icon={X} tip="Clear highlights" size="sm" onPress={() => setQuery({ q: "", page: "", passage: [] })} />
+      </div>
+    ) : null;
 
-  /* ── Banners ── */
+  /* ── Banners: only when they change what the reader should do ── */
   const outdated = doc?.indexingState === "OUTDATED";
   const canVerify = perms.can("items.verify") && !r.isPersonal;
   const trustBanner =
@@ -419,12 +391,12 @@ function Reader({ resource: r }: { resource: Resource }) {
       <Callout
         tone="warning"
         title={outdated ? "Changed at the source" : "Review due"}
-        description={`${trust.note}${canEdit ? "" : " Check with the owner before relying on it."}`}
+        description={`${trust.note}${canEdit ? "" : ` Check with ${owner || "the owner"} before relying on it.`}`}
         actions={
           canEdit ? (
             <>
               {canVerify ? (
-                <Button size="sm" variant="secondary" onPress={() => void ops.verify(r)}>
+                <Button size="sm" variant="tertiary" onPress={() => void ops.verify(r)}>
                   <ShieldCheck className="i" aria-hidden />
                   Mark as verified
                 </Button>
@@ -440,22 +412,21 @@ function Reader({ resource: r }: { resource: Resource }) {
         }
       />
     ) : null;
-  const verBanner =
-    query.v && query.v !== current ? (
-      <Callout
-        tone="accent"
-        icon={History}
-        title={`You’re viewing version ${query.v}${olderVersion ? ` from ${fmtDate(olderVersion.createTime)}` : ""}`}
-        description={olderVersion?.changeSummary ? <span translate="no">{olderVersion.changeSummary}</span> : undefined}
-        actions={
-          <Button size="sm" variant="secondary" onPress={() => setQuery({ v: "" })}>
-            View current
-          </Button>
-        }
-      />
-    ) : null;
+  const verBanner = older ? (
+    <Callout
+      tone="accent"
+      icon={History}
+      title={`You’re viewing version ${query.v}${olderVersion ? ` from ${fmtDate(olderVersion.createTime)}` : ""}`}
+      description={[olderVersion?.changeSummary, "Ask and Save work on the current version."].filter(Boolean).join(" · ")}
+      actions={
+        <Button size="sm" variant="tertiary" onPress={() => setQuery({ v: "" })}>
+          View current
+        </Button>
+      }
+    />
+  ) : null;
 
-  /* ── Canvas ── */
+  /* ── Canvas: the document in its native format ── */
   const notRendered = content.error instanceof ApiError && content.error.code === "FAILED_PRECONDITION";
   let canvas: React.ReactNode;
   if (!readable) {
@@ -490,14 +461,25 @@ function Reader({ resource: r }: { resource: Resource }) {
         }}
       />
     );
+  } else if (pageImages.length) {
+    // The document as it is (document_viewer.md: PDFs keep page images); the rendition isn't downloaded.
+    canvas = (
+      <DocumentViewer key={viewing} format={PAGED_FORMATS[format] ? format : "pdf"} count={Math.max(assetPages, pageImages.at(-1)?.pageNumber ?? 0)} scrollRef={scrollRef}>
+        <PageImageView pages={pageImages} focusPage={citedPage} />
+      </DocumentViewer>
+    );
   } else if (!rd?.blocks.length) {
     canvas = <NothingToShow />;
   } else {
-    canvas = <RenditionView rendition={rd} marks={marks} focusHit={focusHit} sheet={sheet} pageCount={pageCount} />;
+    canvas = (
+      <DocumentViewer key={viewing} format={format} count={renditionPageCount(rd, format, assetPages)} scrollRef={scrollRef}>
+        <RenditionView rendition={rd} marks={marks} focusHit={focusHit} format={format} pageCount={assetPages} runningHead={[r.title, workspace.displayName ?? ""]} />
+      </DocumentViewer>
+    );
   }
 
-  /* ── Rail ── */
-  const tabs = [...(readable ? [{ id: "ask", label: "Ask" }] : []), { id: "about", label: "About" }, { id: "related", label: "Related" }];
+  /* ── Side panel: closed by default; Tabs Ask · About · Related ── */
+  const tabs = [...(askable ? [{ id: "ask", label: "Ask" }] : []), { id: "about", label: "About" }, { id: "related", label: "Related" }];
   const pane =
     activeTab === "ask" ? (
       <AskPane
@@ -525,75 +507,33 @@ function Reader({ resource: r }: { resource: Resource }) {
       <AboutPane resource={r} canEdit={canEdit} revisions={revisions.data} viewing={viewing} current={current} onView={(v) => setQuery({ v: v ? String(v) : "" })} />
     );
   const composer =
-    activeTab === "ask" && readable ? (
+    activeTab === "ask" && askable ? (
       <form
         className="rdr-composer"
         onSubmit={(e) => {
           e.preventDefault();
           void ask(draft);
+          focusComposer();
         }}
       >
         <TextField aria-label="Ask about this document" value={draft} onChange={setDraft} className="rdr-composer__field">
           <Input id="rdr-ask-q" placeholder="Ask about this document" autoComplete="off" />
         </TextField>
         <Tip content="Ask">
-          <Button type="submit" isIconOnly variant="primary" aria-label="Ask" isDisabled={asking || !draft.trim()}>
+          <Button type="submit" isIconOnly variant="primary" aria-label="Ask" isPending={asking} isDisabled={asking || !draft.trim()}>
             <Send aria-hidden />
           </Button>
         </Tip>
       </form>
     ) : null;
 
-  const crumbs = [
-    { label: "Knowledge", href: "/knowledge" },
-    ...(r.base ? [{ label: r.base.displayName || "Knowledge base", href: r.isPersonal ? "/knowledge/library?tab=files" : `/knowledge/${r.base.id}` }] : []),
-    { label: r.title },
-  ];
-
   return (
-    <div className="rdr" ref={rootRef}>
-      <PageChrome crumbs={crumbs} />
-      <ReaderHead
-        resource={r}
-        conversation={query.from || undefined}
-        chips={
-          <>
-            <TrustChip resource={r} />
-            {status ? <StatusChip kind="doc" value={status} size="sm" /> : null}
-            {workspace.demo ? <StatusChip label="Demo data" tone="default" dot={false} size="sm" tooltip="This workspace holds fictional demo content." /> : null}
-          </>
-        }
-        meta={meta}
-        actions={actions}
-      >
+    <div className={clsx("rdr", collapsed && "is-collapsed")} ref={rootRef}>
+      <PageChrome hero title={r.title} extra={chips} meta={<Meta parts={meta} className="row gap-6" />} actions={actions} crumbs={crumbs} />
+      <ReaderHead resource={r} chips={chips} meta={meta} headRef={headRef}>
         {hits}
       </ReaderHead>
       <div className={clsx("rdr-body", open && "has-rail")}>
-        {hasOutline ? (
-          outlineOpen ? (
-            <nav className="rdr-outline" aria-label="Outline">
-              <div className="rdr-outline__head">
-                <span className="t-label">On this page</span>
-                <IconButton icon={ChevronLeft} tip="Hide outline" size="sm" onPress={() => setOutlineOpen(false)} />
-              </div>
-              {outline.map((o, i) => (
-                <button
-                  key={o.id}
-                  type="button"
-                  className={clsx("rdr-outline__link", (activeHeading ? activeHeading === o.id : !i) && "is-on")}
-                  onClick={() => jump(o.id)}
-                  translate="no"
-                >
-                  {o.title}
-                </button>
-              ))}
-            </nav>
-          ) : (
-            <nav className="rdr-outline rdr-outline--closed" aria-label="Outline">
-              <IconButton icon={ListIcon} tip="Show outline" size="sm" onPress={() => setOutlineOpen(true)} />
-            </nav>
-          )
-        ) : null}
         <div className="rdr-canvas" id="rdr-scroll" ref={scrollRef}>
           {verBanner || trustBanner ? (
             <div className="rdr-banners">
@@ -604,12 +544,12 @@ function Reader({ resource: r }: { resource: Resource }) {
           {canvas}
         </div>
         {open ? (
-          <Rail tabs={tabs} tab={activeTab} onTab={(t) => setTab(t as Tab)} onClose={() => setRailPref(false)} bodyRef={railBody} composer={composer}>
+          <Rail tabs={tabs} tab={activeTab} onTab={(t) => openPane(t as Tab)} onClose={() => setOpen(false)} bodyRef={railBody} composer={composer}>
             {pane}
           </Rail>
         ) : null}
       </div>
-      {readable ? <SelectionToolbar root={rootRef} onAsk={(t) => void ask(explainPassagePrompt(t))} /> : null}
+      {readable ? <SelectionToolbar root={rootRef} onAsk={askable ? (t) => void ask(explainPassagePrompt(t)) : undefined} /> : null}
     </div>
   );
 }

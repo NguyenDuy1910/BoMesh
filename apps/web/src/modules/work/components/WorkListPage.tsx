@@ -4,24 +4,9 @@ import { Users } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 
-import { PageChrome } from "@/components/shell/page-chrome";
-import {
-  ClearFilters,
-  DataTable,
-  EmptyState,
-  ErrorState,
-  FilterButton,
-  NoMatches,
-  Page,
-  PageHeader,
-  SearchInput,
-  SectionTabs,
-  SkeletonRows,
-  UserAvatar,
-  type DataTableColumn,
-} from "@/components/ui";
+import { ClearFilters, EmptyState, ErrorState, FilterButton, List, NoMatches, Page, PageHeader, SearchInput, SectionTabs, SkeletonRows } from "@/components/ui";
 import { resourceId } from "@/lib/api/client";
-import { plural, rel } from "@/lib/format";
+import { plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { useMemberNames } from "@/modules/knowledge/queries";
 import { useSpaces } from "@/modules/spaces";
@@ -29,10 +14,13 @@ import { useSpaces } from "@/modules/spaces";
 import { isSpaceStaff, kindMeta, workflowsFor } from "../kinds";
 import { isOwnerOf, workSummary, type Artifact } from "../model";
 import { useWorkList } from "../queries";
-import { SpaceTag, WorkStatusChip, WorkTile } from "./parts";
 import { FirstRun, NewWorkMenu } from "./WorkFlows";
+import { WorkItemRow } from "./WorkItemRow";
 
-/** `/work` — my AI-made work (preview `P.work`). */
+/** List tools (search, filters) appear from this many items, or while one is in use (preview `needsTools`). */
+const TOOLS_MIN = 7;
+
+/** `/work` — my AI-made work (preview `P.work`): Mine · Shared with me are views of one list. */
 export function WorkListPage() {
   const router = useRouter();
   const pathname = usePathname();
@@ -42,8 +30,9 @@ export function WorkListPage() {
   const spaces = useMemo(() => spacesQuery.data ?? [], [spacesQuery.data]);
   const list = useWorkList();
   const flows = workflowsFor(settings, null, { mySpaces: spaces.filter((s) => s.callerRole), spacesOn: hasModule("spaces") });
+  // Space workflows (quiz, review) depend on my spaces: until they load, "New" would flash as the lone Draft button.
+  const flowsReady = !hasModule("spaces") || !spacesQuery.isPending;
 
-  const tab = params.get("tab") === "shared" ? "shared" : "mine";
   /** Typed text lives in state (the URL only mirrors it): binding the input to the URL dropped keystrokes. */
   const [q, setQ] = useState(() => params.get("q") ?? "");
   const kind = params.get("kind") ?? "";
@@ -58,9 +47,14 @@ export function WorkListPage() {
     router.replace(s ? `${pathname}?${s}` : pathname, { scroll: false });
   };
 
-  const all = useMemo(() => list.data ?? [], [list.data]);
-  const mine = all.filter((a) => isOwnerOf(a, member.name ?? ""));
-  const shared = all.filter((a) => !isOwnerOf(a, member.name ?? ""));
+  /* Newest first: the order people come back to work in. */
+  const all = useMemo(() => [...(list.data ?? [])].sort((a, b) => (b.updateTime ?? "").localeCompare(a.updateTime ?? "")), [list.data]);
+  const me = member.name ?? "";
+  const mine = all.filter((a) => isOwnerOf(a, me));
+  const shared = all.filter((a) => !isOwnerOf(a, me));
+  /* "Shared with me" only earns a tab once something has been shared. */
+  const showTabs = shared.length > 0 || params.get("tab") === "shared";
+  const tab = showTabs && params.get("tab") === "shared" ? "shared" : "mine";
   const src = tab === "mine" ? mine : shared;
   const spaceOf = (a: Artifact) => (a.space ? spaces.find((s) => s.name === a.space) : undefined);
   const owners = useMemberNames(shared.map((a) => a.owner));
@@ -74,7 +68,8 @@ export function WorkListPage() {
       (!kind || a.kind === kind) &&
       (!space || resourceId(a.space) === space),
   );
-  const filtered = !!(q || kind || space);
+  const filtering = !!(q || kind || space);
+  const tools = src.length >= TOOLS_MIN || filtering;
   const search = (v: string) => {
     setQ(v);
     setParam({ q: v });
@@ -84,56 +79,19 @@ export function WorkListPage() {
     setParam({ q: "", kind: "", space: "" });
   };
 
-  const columns: DataTableColumn<Artifact>[] = [
-    {
-      id: "title",
-      header: "Name",
-      primary: true,
-      sortValue: (a) => (a.displayName ?? "").toLowerCase(),
-      cell: (a) => (
-        <div className="work-name">
-          <WorkTile kind={a.kind} size="sm" />
-          <div className="work-name__text">
-            <span className="medium truncate" translate="no">
-              {a.displayName}
-            </span>
-            <span className="t-xs muted truncate">{workSummary(a)}</span>
-          </div>
-        </div>
-      ),
-    },
-    {
-      id: "space",
-      header: "Space",
-      cell: (a) => {
-        const sp = spaceOf(a);
-        return sp ? <SpaceTag space={sp} /> : <span className="muted">—</span>;
-      },
-    },
-    { id: "status", header: "Status", cell: (a) => <WorkStatusChip artifact={a} staffQuiz={isSpaceStaff(spaceOf(a))} /> },
-    { id: "updated", header: "Updated", sortValue: (a) => a.updateTime ?? "", cell: (a) => <span className="t-sm muted num">{rel(a.updateTime)}</span> },
-    ...(tab === "shared"
-      ? [
-          {
-            id: "owner",
-            header: "Owner",
-            hideOnMobile: true,
-            cell: (a: Artifact) => {
-              const name = owners.get(a.owner ?? "") ?? "";
-              return (
-                <div className="work-owner">
-                  <UserAvatar name={name} size="xs" />
-                  <span className="t-sm truncate">{name}</span>
-                </div>
-              );
-            },
-          } satisfies DataTableColumn<Artifact>,
-        ]
-      : []),
-  ];
+  const toolbar = tools ? (
+    <div className="toolbar">
+      <SearchInput value={q} onChange={search} placeholder="Search work" label="Search work" />
+      {kindOpts.length > 1 ? <FilterButton label="Type" options={kindOpts} value={kind} onChange={(v) => setParam({ kind: v })} /> : null}
+      {spaceOpts.length > 1 && hasModule("spaces") ? <FilterButton label="Space" options={spaceOpts} value={space} onChange={(v) => setParam({ space: v })} /> : null}
+      <ClearFilters isActive={!!(kind || space)} onClear={() => setParam({ kind: "", space: "" })} />
+      {/* The tab (or the list itself) already shows how many there are; a count only helps while filtering. */}
+      {filtering ? <span className="toolbar__end t-sm muted num">{plural(rows.length, "item")}</span> : null}
+    </div>
+  ) : null;
 
   let body: React.ReactNode;
-  if (list.isPending) body = <SkeletonRows rows={5} />;
+  if (list.isPending || (!src.length && !flowsReady)) body = <SkeletonRows rows={5} />;
   else if (list.isError) body = <ErrorState error={list.error} onRetry={() => void list.refetch()} />;
   else if (!src.length)
     body =
@@ -145,42 +103,42 @@ export function WorkListPage() {
   else
     body = (
       <>
-        <div className="toolbar">
-          <SearchInput value={q} onChange={search} placeholder="Search work" label="Search work" />
-          {kindOpts.length > 1 ? <FilterButton label="Type" options={kindOpts} value={kind} onChange={(v) => setParam({ kind: v })} /> : null}
-          {spaceOpts.length > 1 && hasModule("spaces") ? <FilterButton label="Space" options={spaceOpts} value={space} onChange={(v) => setParam({ space: v })} /> : null}
-          <ClearFilters isActive={!!(kind || space)} onClear={() => setParam({ kind: "", space: "" })} />
-          <span className="toolbar__end t-sm muted num">{plural(rows.length, "item")}</span>
-        </div>
+        {toolbar}
         {rows.length ? (
-          <DataTable
-            label="Work"
-            rows={rows}
-            columns={columns}
-            getRowId={(a) => a.name ?? ""}
-            defaultSort={{ column: "updated", direction: "descending" }}
-            rowHref={(a) => `/work/${resourceId(a.name)}`}
-          />
+          <List className="work-list">
+            {rows.map((a) => {
+              const sp = spaceOf(a);
+              return (
+                <WorkItemRow
+                  key={a.name}
+                  artifact={a}
+                  spaceName={sp?.displayName}
+                  ownerName={tab === "shared" ? owners.get(a.owner ?? "") || undefined : undefined}
+                  staffQuiz={isSpaceStaff(sp)}
+                />
+              );
+            })}
+          </List>
         ) : (
-          <NoMatches what="work" onClear={filtered ? clear : undefined} />
+          <NoMatches what="work" onClear={clear} />
         )}
       </>
     );
 
   return (
-    <Page>
-      <PageChrome crumbs={[{ label: "Work" }]} />
-      <PageHeader title="Work" actions={flows.length ? <NewWorkMenu flows={flows} /> : null} />
-      <div className="page-tabs">
-        <SectionTabs
-          items={[
-            { id: "mine", label: "Mine", count: mine.length || null },
-            { id: "shared", label: "Shared with me", count: shared.length || null },
-          ]}
-          active={tab}
-          base="/work"
-        />
-      </div>
+    <Page width="wide">
+      <PageHeader title="Work" actions={flowsReady && flows.length ? <NewWorkMenu flows={flows} /> : null}>
+        {showTabs ? (
+          <SectionTabs
+            items={[
+              { id: "mine", label: "Mine", count: mine.length || null },
+              { id: "shared", label: "Shared with me", count: shared.length || null },
+            ]}
+            active={tab}
+            base="/work"
+          />
+        ) : null}
+      </PageHeader>
       {body}
     </Page>
   );

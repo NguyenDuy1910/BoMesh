@@ -78,6 +78,11 @@ export function activateWorkspace(w: Workspace): Promise<Workspace> {
   return call(api.POST("/api/v1/workspaces/{workspace}:activate", { params: { path: { workspace: lastSegment(w.name) } }, body: {} }));
 }
 
+/** Archives a workspace; `confirmationCode` must equal its web address (`code`). `:activate` restores it. */
+export function archiveWorkspace(w: Workspace): Promise<Workspace> {
+  return call(api.POST("/api/v1/workspaces/{workspace}:archive", { params: { path: { workspace: lastSegment(w.name) } }, body: { confirmationCode: w.code } }));
+}
+
 export function pauseIngestion(w: Workspace): Promise<Workspace> {
   return call(api.POST("/api/v1/workspaces/{workspace}:pauseIngestion", { params: { path: { workspace: lastSegment(w.name) } }, body: {} }));
 }

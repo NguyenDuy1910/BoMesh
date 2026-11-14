@@ -1,10 +1,7 @@
 "use client";
 
 import { Button, Dropdown, Header, Label, type Selection } from "@heroui/react";
-import { ArrowUpDown, X } from "lucide-react";
-import type { ReactNode } from "react";
-
-import { IconButton } from "@/components/ui/IconButton";
+import { ArrowUpDown } from "lucide-react";
 
 /** Sort dropdown (preview ghost "sort" button + `MENUS[…-sort]` with a "Sort by" section). */
 export function SortMenu<V extends string>({ value, options, onChange }: { value: V; options: Readonly<Record<V, string>>; onChange: (value: V) => void }) {
@@ -36,17 +33,11 @@ export function SortMenu<V extends string>({ value, options, onChange }: { value
   );
 }
 
-/** Floating bar for the selected rows (preview `bulkBar`). */
-export function BulkBar({ count, onClear, children }: { count: number; onClear: () => void; children: ReactNode }) {
-  if (!count) return null;
-  return (
-    <div className="bulk-bar" role="toolbar" aria-label="Bulk actions">
-      <span className="bulk-bar__count">{count} selected</span>
-      {children}
-      <IconButton icon={X} tip="Clear selection" size="sm" onPress={onClear} className="button--ghost" />
-    </div>
-  );
-}
+/** Search, sort, filters and bulk selection appear once a list holds this many items (preview core `TOOLS_MIN`). */
+export const TOOLS_MIN = 7;
+
+/** A list's tools show when it is long enough to need them, or while one is in use (preview `longOr`). */
+export const needsTools = (count: number, inUse: unknown) => count >= TOOLS_MIN || !!inUse;
 
 /** How long an Undo toast stays (Kit toast default with an action). */
 export const UNDO_WINDOW_MS = 6500;

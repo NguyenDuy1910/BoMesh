@@ -26,6 +26,7 @@ from sources_support import (
     disable_connector,
     end_sync,
     item_ref,
+    make_connection,
     pause_ingestion,
     reason,
     set_connection_status,
@@ -392,6 +393,35 @@ async def test_list_sources_pages_filters_and_orders(
     assert by_connection.json()["totalSize"] == 3
     assert (bad_filter.status_code, status(bad_filter)) == (400, "INVALID_ARGUMENT")
     assert member.status_code == 403
+
+
+async def test_attention_badge_total_size_counts_every_match(
+    scene: Scene, sessions: Sessions, fakes: Fakes
+) -> None:
+    """The shell badge: ``pageSize=1`` + a state filter; ``totalSize`` counts all matches."""
+    other = await make_connection(sessions, scene.workspace, "other-drive")
+    for code in ("fine", "failed-a", "failed-b", "paused", "running"):
+        await create_source(scene.as_admin, scene, code)
+    await create_source(scene.as_admin, scene, "reauth", connection=other)
+    for code, failed in (("fine", False), ("failed-a", True), ("failed-b", True), ("paused", False)):
+        source = await source_row(sessions, scene.workspace, code)
+        await end_sync(sessions, fakes.workflows, source.id, failed=failed)
+    paused = await scene.as_admin.post(source_url(scene.workspace, "paused", "pause"), json={})
+    assert paused.status_code == 200, paused.text
+    async with sessions.begin() as session:  # PAUSED wins over a failed latest sync
+        await session.execute(
+            update(IngestionSync)
+            .where(IngestionSync.ingestion_source_id == source.id)
+            .values(status="failed")
+        )
+    await set_connection_status(sessions, other, "reauthorization_required")
+    badge = {"pageSize": 1, "filter": 'state = "FAILED" OR state = "REAUTHORIZATION_REQUIRED"'}
+
+    response = await scene.as_admin.get(sources_url(scene.workspace), params=badge)
+
+    assert response.status_code == 200, response.text
+    assert (len(response.json()["sources"]), response.json()["totalSize"]) == (1, 3)
+    assert "nextPageToken" in response.json()
 
 
 # -- UpdateSource -------------------------------------------------------------------

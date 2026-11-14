@@ -6,24 +6,43 @@ import NextLink from "next/link";
 import { useRouter } from "next/navigation";
 
 import { EmptyState, Gate, List, SkeletonRows } from "@/components/ui";
-import { plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
-import { WorkItemRow } from "@/modules/work";
-import { newWorkHref, workflowsFor } from "@/modules/work/kinds";
+import { WorkItemRow, isSpaceStaff, newWorkHref, workflowsFor, type Workflow } from "@/modules/work";
 
 import { useSpaceArtifacts } from "../queries";
 import type { SpaceView } from "./context";
 import { Menu } from "./Menu";
 
-/** Work (preview `workTab`): reviews, drafts, guides and quizzes made in this space. */
+/** Work (preview `workTab`): the same work row as /work, without the space's name. */
 export function WorkTab({ view }: { view: SpaceView }) {
   const { settings } = useWorkspace();
   const router = useRouter();
   const works = useSpaceArtifacts(view.sid);
   const wf = workflowsFor(settings, view.space);
-  const FirstIcon = wf[0]?.icon;
   const rows = (works.data ?? []).filter((a) => a.kind !== "FILE" && a.state !== "DELETED");
+  const start = (w: Workflow) => newWorkHref({ workflow: w.id, space: view.sid });
+  const menu = (flows: readonly Workflow[], label: string, variant: "tertiary" | "ghost") => (
+    <Menu label={label} nodes={flows.map((w) => ({ id: w.id, label: w.label, icon: w.icon, run: () => router.push(start(w)) }))}>
+      <Button variant={variant}>
+        {label === "New" ? <Plus aria-hidden /> : null}
+        {label}
+        <ChevronDown aria-hidden />
+      </Button>
+    </Menu>
+  );
 
+  // The first two workflows as buttons (the first primary unless the header has New), the rest under More.
+  const starts = (
+    <>
+      {wf.slice(0, 2).map((w, i) => (
+        <NextLink key={w.id} href={start(w)} className={buttonVariants({ variant: i || view.newInHeader ? "tertiary" : "primary" })}>
+          <w.icon aria-hidden />
+          {w.label}
+        </NextLink>
+      ))}
+      {wf.length > 2 ? menu(wf.slice(2), "More", "ghost") : null}
+    </>
+  );
   const empty = (
     <EmptyState
       icon={Sparkles}
@@ -31,42 +50,35 @@ export function WorkTab({ view }: { view: SpaceView }) {
       title="No work here yet"
       description={
         view.staff
-          ? "Quizzes, guides, reviews and drafts made in this space show up here. Drafts stay private until you publish them."
+          ? "What you make from this space’s materials shows up here. Drafts stay private until you share or send them for review."
           : "Things you make here, and work the team shares, show up here."
       }
-      actions={
-        wf[0] ? (
-          <NextLink href={newWorkHref({ workflow: wf[0].id, space: view.sid })} className={buttonVariants({ variant: "primary" })}>
-            {FirstIcon ? <FirstIcon aria-hidden /> : null}
-            {wf[0].label}
-          </NextLink>
-        ) : null
-      }
+      actions={wf.length ? starts : null}
     />
+  );
+
+  // Where the header has no New (members, office staff), work starts here (preview `newWork(sp, 'tertiary')`).
+  const only = wf.length === 1 ? wf[0] : null;
+  const newBtn = only ? (
+    <NextLink href={start(only)} className={buttonVariants({ variant: "tertiary" })}>
+      <only.icon aria-hidden />
+      {only.label}
+    </NextLink>
+  ) : (
+    menu(wf, "New", "tertiary")
   );
 
   return (
     <>
-      {rows.length ? (
+      {!view.newInHeader && wf.length && rows.length ? (
         <div className="toolbar">
-          <span className="t-sm muted">{plural(rows.length, "item")}</span>
-          <div className="toolbar__end">
-            {wf.length ? (
-              <Menu label="New work" nodes={wf.map((w) => ({ id: w.id, label: w.label, icon: w.icon, run: () => router.push(newWorkHref({ workflow: w.id, space: view.sid })) }))}>
-                <Button variant="tertiary">
-                  <Plus aria-hidden />
-                  New
-                  <ChevronDown aria-hidden />
-                </Button>
-              </Menu>
-            ) : null}
-          </div>
+          <div className="toolbar__end">{newBtn}</div>
         </div>
       ) : null}
       <Gate query={works} skeleton={<SkeletonRows rows={4} />} isEmpty={!rows.length} empty={empty}>
-        <List>
+        <List className="work-list">
           {rows.map((a) => (
-            <WorkItemRow key={a.name} artifact={a} from="space" />
+            <WorkItemRow key={a.name} artifact={a} from="space" staffQuiz={isSpaceStaff(view.space)} />
           ))}
         </List>
       </Gate>

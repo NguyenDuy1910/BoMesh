@@ -1500,7 +1500,7 @@ export interface paths {
         };
         /**
          * List items.
-         * @description Returns only visible items (visibility rule; never the reviewer exception). `showDeleted=true` adds DELETED items only for holders of `items.undelete` (resolved through the deleted cohort's ancestors; the published rule still applies). AIP-160 `filter` over `parentItem` (`parentItem=""` = roots), `ancestors:` (subtree; canonical tree only, item links never match), `itemType`, `displayName`, `document.mimeType`, `document.documentType`, `document.purpose`, `document.topics`, `document.owner`, `document.publicationState`, `document.contentState`, `document.indexingState`, `document.origin.source`, `document.verification.state`, `document.qualityIssues`, `updateTime`. The `document.qualityIssues` filter is for editors only; others get INVALID_ARGUMENT. A filter naming an item, topic, source or member the caller cannot read → PERMISSION_DENIED (403). `orderBy`: `displayName`, `updateTime`, `createTime`, `itemType`. `showLocked=true` adds discoverable roots as LOCKED; LOCKED items never carry counts and sort last by `displayName`.
+         * @description Returns only visible items (visibility rule; never the reviewer exception). `showDeleted=true` adds DELETED items only for holders of `items.undelete` (resolved through the deleted cohort's ancestors; the published rule still applies). AIP-160 `filter` over `name` (batch read by name: `name = "workspaces/w/items/a" OR name = "workspaces/w/items/b"`; names the caller cannot read, or that do not exist, are simply absent instead of PERMISSION_DENIED; another workspace's name → INVALID_ARGUMENT), `parentItem` (`parentItem=""` = roots), `ancestors:` (subtree; canonical tree only, item links never match), `itemType`, `displayName`, `document.mimeType`, `document.documentType`, `document.purpose`, `document.topics:` (hierarchical: a DOMAIN also matches documents tagged with any topic under it), `document.owner`, `document.publicationState`, `document.contentState`, `document.indexingState`, `document.origin.source`, `document.verification.state`, `document.qualityIssues`, `updateTime`. The `document.qualityIssues` filter is for editors only; others get INVALID_ARGUMENT. A filter naming an item, topic, source or member the caller cannot read → PERMISSION_DENIED (403). `orderBy`: `displayName`, `updateTime`, `createTime`, `itemType`. `showLocked=true` adds discoverable roots as LOCKED; LOCKED items never carry counts and sort last by `displayName`.
          */
         get: operations["ListItems"];
         put?: never;
@@ -1552,7 +1552,7 @@ export interface paths {
         };
         /**
          * Get the reader representation of a document.
-         * @description Elements, signed page assets and rendition of the current or given `revision` (the response's `revision` names it). A COLLECTION → INVALID_ARGUMENT; a DELETED item → NOT_FOUND; a `revision` with no stored preview → FAILED_PRECONDITION reason REVISION_NOT_RENDERED; not yet rendered at all → FAILED_PRECONDITION. The reviewer exception applies.
+         * @description Signed page assets and rendition of the current or given `revision` (the response's `revision` names it); never reads the search index. A COLLECTION → INVALID_ARGUMENT; a DELETED item → NOT_FOUND; a `revision` with no stored preview → FAILED_PRECONDITION reason REVISION_NOT_RENDERED; not yet rendered at all → FAILED_PRECONDITION. The reviewer exception applies.
          */
         get: operations["GetItemContent"];
         put?: never;
@@ -1922,7 +1922,7 @@ export interface paths {
         put?: never;
         /**
          * Search documents.
-         * @description The one catalog and retrieval search (Browse, ⌘K, /search, Related via `relatedItem`, assistant passage retrieval). Returns DOCUMENT items only. The filter applies the visibility rule (never the reviewer exception), so editors also find UNPUBLISHED documents in collections where they hold `items.update`; every hit is re-authorized in PostgreSQL. Facet counts are disjunctive and permission-filtered; `ancestors` facet values are truncated like `Item.ancestors`. `relatedItem` the caller cannot see → PERMISSION_DENIED (403), whether or not it exists; same for unreadable resources named in `filter`. Bad filter → INVALID_ARGUMENT. `ancestors:` follows the canonical tree only; item links never extend it.
+         * @description The one catalog and retrieval search (Browse, ⌘K, /search, Related via `relatedItem`, assistant passage retrieval). Returns DOCUMENT items only. The filter applies the visibility rule (never the reviewer exception), so editors also find UNPUBLISHED documents in collections where they hold `items.update`; every hit is re-authorized in PostgreSQL. Facet counts are disjunctive and permission-filtered; `ancestors` facet values are truncated like `Item.ancestors`. `relatedItem` the caller cannot see → PERMISSION_DENIED (403), whether or not it exists; same for unreadable resources named in `filter`, except `name` restrictions (unreadable or missing names are simply absent, as in ListItems). Bad filter → INVALID_ARGUMENT. `ancestors:` follows the canonical tree only; item links never extend it.
          */
         post: operations["SearchItems"];
         delete?: never;
@@ -5253,15 +5253,33 @@ export interface components {
             etag?: string;
         };
         SearchItemsFacetSpec: {
-            /** @description Facet field: `ancestors`, `document.documentType`, `document.topics`, `document.owner`, `document.origin.source`, `document.mimeType`, `document.languageCode`, `document.verification.state`. `ancestors` values use the same truncation as `Item.ancestors`: Truncation: only collections the caller can read, plus discoverable roots as LOCKED. */
+            /** @description Facet field: `ancestors`, `document.documentType`, `document.topics`, `document.owner`, `document.origin.source`, `document.mimeType`, `document.languageCode`, `document.verification.state`, `updateTime` (interval facet: needs `intervals`). `ancestors` values use the same truncation as `Item.ancestors`: Truncation: only collections the caller can read, plus discoverable roots as LOCKED. `document.topics` is hierarchical like its filter: a DOMAIN counts the documents tagged with it or with any topic under it (each document once). */
             field: string;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Max values (default 10); ignored for interval facets.
+             */
             limit?: number;
+            /** @description Interval facet buckets (Vertex AI Search `FacetKey.intervals`); required for `updateTime` and refused (INVALID_ARGUMENT) for other fields. Every interval returns one value, in request order, with its bounds in `interval` and its count (0 included); intervals may overlap. */
+            intervals?: components["schemas"]["SearchItemsInterval"][];
             /**
              * @description Disjunctive: the facet's own filter clause is ignored when counting it.
              * @default true
              */
             excludedFromFilter: boolean;
+        };
+        /** @description A range of field values (RFC 3339 timestamps for `updateTime`). */
+        SearchItemsInterval: {
+            /**
+             * Format: date-time
+             * @description Inclusive lower bound; unset = unbounded.
+             */
+            minimum?: string;
+            /**
+             * Format: date-time
+             * @description Inclusive upper bound; unset = unbounded. At least one bound is required, and `minimum` must not be after `maximum`.
+             */
+            maximum?: string;
         };
         SearchItemsContentSearchSpec: {
             /** @description Return highlighted snippets. */
@@ -5301,7 +5319,10 @@ export interface components {
             score?: number;
         };
         SearchItemsFacetValue: {
+            /** @description The field value (a resource name for references); unset for interval facets. */
             value?: string;
+            /** @description The requested interval, for interval facets (instead of `value`). */
+            interval?: components["schemas"]["SearchItemsInterval"];
             displayName?: string;
             /**
              * Format: int32
@@ -5349,19 +5370,6 @@ export interface components {
             /** @description Optional; must match the current etag, else ABORTED (409). */
             etag?: string;
         };
-        ItemContentElement: {
-            /** @description Stable element ID of the parse; citation spans and the rendition blocks use the same value, so a citation highlights exactly the element it quotes (document_viewer.md). */
-            readonly elementId?: string;
-            /** @enum {string} */
-            kind?: "HEADING" | "PARAGRAPH" | "LIST" | "TABLE" | "IMAGE" | "CODE";
-            text?: string;
-            /** Format: int32 */
-            level?: number;
-            /** Format: int32 */
-            pageNumber?: number;
-            /** @description Passage name the element belongs to. */
-            passage?: string;
-        };
         ItemPageAsset: {
             /** Format: int32 */
             pageNumber?: number;
@@ -5372,13 +5380,12 @@ export interface components {
             /** Format: int32 */
             heightPixels?: number;
         };
-        /** @description Reader representation of a document (singleton, output only). */
+        /** @description Reader representation of a document (singleton, output only). Read from PostgreSQL and object storage only, never from the search index (document_viewer.md); the document's text is its `rendition`. */
         ItemContent: {
             /** @description `workspaces/{workspace}/items/{item}/content`. */
             readonly name?: string;
             /** @description Revision name rendered (`workspaces/{workspace}/items/{item}/revisions/{revision}`). */
             readonly revision?: string;
-            readonly elements?: components["schemas"]["ItemContentElement"][];
             readonly pageAssets?: components["schemas"]["ItemPageAsset"][];
             rendition?: components["schemas"]["ItemRendition"];
         };
@@ -5418,7 +5425,7 @@ export interface components {
             /** Format: int32 */
             readonly pageNumber?: number;
             readonly boundingBoxes?: components["schemas"]["ItemPassageBoundingBox"][];
-            /** @description `ItemContentElement.elementId` values the passage spans; the viewer highlights these blocks. Page geometry for highlights lives on the passage (`boundingBoxes`), not on `ItemContent`. */
+            /** @description Element IDs of the parse the passage spans: the same values as the rendition's block ids, so the viewer highlights these blocks. Page geometry for highlights lives on the passage (`boundingBoxes`), not on `ItemContent`. */
             readonly elementIds?: string[];
             /** @description Signed page image. */
             readonly pageAssetUri?: string;
@@ -6090,6 +6097,8 @@ export interface components {
             scope?: components["schemas"]["ConversationScope"];
             /** Format: date-time */
             readonly lastMessageTime?: string;
+            /** @description The first 300 characters of the text of the latest COMPLETED assistant message (raw markdown), for list previews without a ListMessages call per conversation; omitted when the conversation has no completed answer. */
+            readonly lastAnswerSnippet?: string;
             /** Format: date-time */
             readonly createTime?: string;
             /** Format: date-time */

@@ -182,6 +182,32 @@ async def test_get_is_for_the_contributor_and_reviewers_only(scene: Scene) -> No
     assert missing.status_code == 404
 
 
+async def test_review_badge_total_size_counts_every_visible_match(scene: Scene) -> None:
+    """The shell badge: ``pageSize=1&filter=state = "IN_REVIEW"``; ``totalSize`` counts all."""
+    for state in ("in_review", "in_review", "in_review", "approved", "changes_requested"):
+        await scene.world.make_contribution(
+            await scene.candidate(), contributor=scene.member, target=scene.kb, state=state
+        )
+    elsewhere = await scene.world.make_collection(scene.ws, title="Elsewhere")
+    other_personal = await scene.world.make_collection(scene.ws, personal_for=scene.outsider)
+    for _ in range(2):
+        await scene.world.make_contribution(
+            await scene.candidate(owner=scene.outsider, personal=other_personal),
+            contributor=scene.outsider,
+            target=elsewhere,
+        )
+    badge = {"pageSize": 1, "filter": 'state = "IN_REVIEW"'}
+
+    async def count(user: Any) -> tuple[int, int]:
+        body = (await (await scene.as_(user)).get(scene.url("contributions"), params=badge)).json()
+        return len(body["contributions"]), body["totalSize"]
+
+    assert await count(scene.reviewer) == (1, 3)
+    assert await count(scene.member) == (1, 3)
+    assert await count(scene.outsider) == (1, 2)
+    assert await count(scene.admin) == (1, 5)
+
+
 async def test_list_filters_orders_and_pages(scene: Scene) -> None:
     first = await scene.submit(await scene.candidate())
     second = await scene.submit(await scene.candidate())

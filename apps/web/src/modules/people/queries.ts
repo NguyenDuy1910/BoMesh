@@ -40,7 +40,7 @@ export const peopleKeys = {
 export function invalidatePeople(qc: QueryClient, ws: string): Promise<unknown> {
   return Promise.all([
     qc.invalidateQueries({ queryKey: peopleKeys.all(ws) }),
-    qc.invalidateQueries({ queryKey: [ws, "shell-badge", "people"] }),
+    qc.invalidateQueries({ queryKey: [ws, "shell-badge", "access"] }),
     qc.invalidateQueries({ queryKey: [ws, "members"] }),
   ]);
 }

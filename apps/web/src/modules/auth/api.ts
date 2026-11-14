@@ -1,10 +1,11 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, type QueryClient } from "@tanstack/react-query";
 
 import { api, ApiError, call, resourceId, type Schema } from "@/lib/api/client";
-import { clearSession, getSession, storeSession, type StoredSession } from "@/lib/session";
+import { clearSession, clientExpireTime, getSession, storeSession, type StoredSession } from "@/lib/session";
 import { listMyWorkspaces, rememberWorkspace, resolveWorkspace } from "@/lib/workspace";
+import { safeNext } from "@/modules/auth/next";
 
 /**
  * Identity calls for the signed-out pages (backend/docs_design/auth_contract.md):
@@ -15,33 +16,30 @@ type Credential = Schema<"SessionCredential">;
 
 async function createSession(credential: Credential): Promise<StoredSession> {
   const session = await call(api.POST("/api/v1/sessions", { body: { credential } }));
+  const created = Date.now();
   if (!session.accessToken || !session.name) throw new ApiError("Sign-in could not be completed.", 500, "INTERNAL");
-  // The token is needed to read users/me; store it first, then complete the session.
-  const provisional: StoredSession = {
+  // Read users/me with the new token before storing anything: the app (and other tabs) only ever see a complete
+  // session, so an expired page can tell at once whether the same person signed in again.
+  const user = await call(
+    api.GET("/api/v1/users/{user}", {
+      params: { path: { user: "me" } },
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+    }),
+  );
+  const stored: StoredSession = {
     name: session.name,
     accessToken: session.accessToken,
-    expireTime: session.expireTime,
-    user: { name: session.user ?? "", email: "" },
+    expireTime: clientExpireTime(session, created),
+    user: {
+      name: user.name ?? session.user ?? "",
+      email: user.email,
+      username: user.username,
+      displayName: user.displayName,
+      platformRole: user.platformRole,
+    },
   };
-  storeSession(provisional);
-  try {
-    const user = await call(api.GET("/api/v1/users/{user}", { params: { path: { user: "me" } } }));
-    const stored: StoredSession = {
-      ...provisional,
-      user: {
-        name: user.name ?? provisional.user.name,
-        email: user.email,
-        username: user.username,
-        displayName: user.displayName,
-        platformRole: user.platformRole,
-      },
-    };
-    storeSession(stored);
-    return stored;
-  } catch (error) {
-    clearSession();
-    throw error;
-  }
+  storeSession(stored);
+  return stored;
 }
 
 /** Email when it contains `@`, otherwise username. */
@@ -139,16 +137,10 @@ export async function openWorkspace(workspaceId: string, next?: string | null): 
   return safeNext(next) ?? "/home";
 }
 
-/** Only same-origin absolute paths are followed after sign-in. */
-export function safeNext(next?: string | null): string | null {
-  if (!next || !next.startsWith("/") || next.startsWith("//") || next.startsWith("/\\")) return null;
-  return next;
-}
-
 /** After sign-in: the resolved workspace opens directly, otherwise the chooser. */
-export async function routeAfterSignIn(next?: string | null): Promise<string> {
+export async function routeAfterSignIn(queryClient: QueryClient, next?: string | null): Promise<string> {
   const workspaces = await listMyWorkspaces();
-  const chosen = await resolveWorkspace(workspaces);
+  const chosen = await resolveWorkspace(workspaces, queryClient);
   if (chosen) return openWorkspace(chosen, next);
   const target = safeNext(next);
   return target ? `/workspaces?next=${encodeURIComponent(target)}` : "/workspaces";

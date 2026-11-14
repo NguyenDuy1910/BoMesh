@@ -1,7 +1,7 @@
-/* Inbox (/inbox) — notifications for every persona. Items are derived from
-   live data (sources, access requests, documents, spaces, events, work and
-   requests, depending on the workspace's modules) plus a few fixed events.
-   Ids are stable so read/dismissed state (S.inbox, persisted) sticks. */
+/* Inbox — notifications for every persona, in a popover on the top-row bell (PO.inbox; a bottom sheet on phones), so reading
+   them never leaves the page you're on. Items are derived from live data (sources, access requests, documents, spaces, events,
+   work and requests, depending on the workspace's modules) plus a few fixed events. Ids are stable so read/dismissed state
+   (S.inbox, persisted) sticks. */
 (() => {
   'use strict';
 
@@ -15,10 +15,10 @@
   /** Spaces whose queue the caller works (course teams, office staff). */
   const queueSpaces = () => (D.spaces || []).filter(sp => !sp.archived && isSpaceStaff(sp));
 
-  /* ── Access requests to a knowledge base (admins: all; owners: their bases) ── */
+  /* ── Access requests to a collection (admins: all; owners: their bases) ── */
   function accessItem(r) {
     const kb = kbById(r.kb);
-    return { id: 'req-' + r.id, icon: 'user-plus', tone: 'warn', title: `${actorName(r.user)} requested ${r.role === 'editor' ? 'edit' : 'view'} access to ${kb?.name || 'a knowledge base'}`, body: r.note ? `“${r.note}”` : 'No message.', at: r.at, to: isAdmin() ? '/people?tab=requests' : kbManageHref({ id: r.kb }, 'access'), kind: 'request', req: r.id };
+    return { id: 'req-' + r.id, icon: 'user-plus', tone: 'warn', title: `${actorName(r.user)} requested ${r.role === 'editor' ? 'edit' : 'view'} access to ${kb?.name || 'a collection'}`, body: r.note ? `“${r.note}”` : 'No message.', at: r.at, to: isAdmin() ? '/people?tab=requests' : kbManageHref({ id: r.kb }, 'access'), kind: 'request', req: r.id };
   }
 
   /* ── Spaces: announcements from the last 7 days ── */
@@ -117,19 +117,19 @@
     if (isAdmin()) {
       attentionSources().forEach(s => {
         const reconnect = s.status === 'reconnect' || accById(s.account)?.status === 'expired';
-        out.push({ id: 'src-' + s.id, icon: 'alert-circle', tone: 'err', title: `${s.name} stopped syncing`, body: s.last?.error || 'Open the source to see what happened.', at: s.last?.at || NOW, to: '/sources', src: s.id, kind: reconnect ? 'reconnect' : 'source', acc: s.account });
+        out.push({ id: 'src-' + s.id, icon: 'alert-circle', tone: 'err', title: `${s.name} stopped syncing`, body: s.last?.error || 'Open the source to see what happened.', at: s.last?.at || NOW, to: studioHref('sources'), src: s.id, kind: reconnect ? 'reconnect' : 'source', acc: s.account });
       });
       pendingRequests().forEach(r => out.push(accessItem(r)));
       D.kbs.filter(k => !k.archived && !k.personal).forEach(kb => {
         const failed = docsIn(kb.id).filter(d => d.status === 'failed');
-        if (failed.length) out.push({ id: 'docs-' + kb.id, icon: 'file-text', tone: 'warn', title: `${plural(failed.length, 'document')} in ${kb.name} couldn’t be published`, body: failed.map(d => d.name).join(', '), at: Math.max(...failed.map(d => d.updated)), to: '/documents?tab=all&life=attention', needs: true });
+        if (failed.length) out.push({ id: 'docs-' + kb.id, icon: 'file-text', tone: 'warn', title: `${plural(failed.length, 'document')} in ${kb.name} couldn’t be published`, body: failed.map(d => d.name).join(', '), at: Math.max(...failed.map(d => d.updated)), to: docsHref('issues', { kb: kb.id }), needs: true });
       });
       const gaps = D.gaps.filter(g => !g.dismissed);
       out.push({ id: 'a4', icon: 'sparkles', tone: 'info', title: `Weekly summary: ${fmtNum(D.usage.questions7)} questions, ${plural(gaps.length, 'knowledge gap')}`, body: gaps.length ? `Most asked without a good answer: “${[...gaps].sort((a, b) => b.n - a.n)[0].q}”` : 'Questions people asked and where knowledge fell short.', at: ago(2 * DAY), to: '/overview' });
       if (kbById('kb-eng')) out.push({ id: 'a5', icon: 'users', tone: 'neu', title: 'Tuan Le shared Engineering Runbooks with Engineering', body: 'Engineering · 41 people', at: ago(5 * HOUR), to: kbManageHref(kbById('kb-eng'), 'access') });
     } else {
       D.requests.filter(r => r.user === me().id).forEach(r => {
-        const kb = kbById(r.kb)?.name || 'a knowledge base';
+        const kb = kbById(r.kb)?.name || 'a collection';
         const t = r.status === 'approved' ? { icon: 'check-circle', tone: 'ok', title: `You can now ${r.role === 'editor' ? 'edit' : 'view'} ${kb}`, body: 'Your access request was approved.' }
           : r.status === 'denied' ? { icon: 'x-circle', tone: 'neu', title: `Your request for ${kb} was declined`, body: 'Ask the owner if you still need it.' }
             : { icon: 'clock', tone: 'neu', title: `Your request for ${kb} is waiting for an owner`, body: 'You’ll hear back here when they decide.' };
@@ -164,17 +164,19 @@
 
   /** Only in-place decisions get buttons (Approve, Deny, Reconnect); every other row opens by clicking it, with a quiet chevron. */
   function inlineAction(i) {
-    if (i.kind === 'request') return btn('Deny', { v: 'ghost', size: 'sm', act: 'inbox-deny', data: { id: i.id, req: i.req } }) + btn('Approve', { v: 'secondary', size: 'sm', act: 'inbox-approve', data: { id: i.id, req: i.req } });
+    if (i.kind === 'request') return btn('Approve', { v: 'secondary', size: 'sm', act: 'inbox-approve', data: { id: i.id, req: i.req } }) + btn('Deny', { v: 'ghost', size: 'sm', act: 'inbox-deny', data: { id: i.id, req: i.req } });
     if (i.kind === 'reconnect') return btn('Reconnect', { v: 'secondary', size: 'sm', act: 'inbox-reconnect', data: { id: i.id, acc: i.acc } });
     return '';
   }
+  /** A notification row: the title (up to two lines), one body line, the time, and — for in-place decisions — the buttons under
+      the text, so the title keeps the popover's width. */
   function row(i) {
     const decide = inlineAction(i);
     return item({
-      lead: itemIcon(i.icon || 'bell', TONE[i.tone] ?? ''),
+      lead: itemIcon(i.icon || 'bell', TONE[i.tone] ?? '', 'sm'),
       title: esc(i.title),
-      desc: `<span class="truncate inbox-line">${esc(i.body || '')}</span><span class="inbox-time">${esc(i.when || rel(i.at))}</span>`,
-      trail: `${decide}<span class="reveal-on-hover">${iconBtn('x', 'Dismiss', { size: 'sm', act: 'inbox-dismiss', data: { id: i.id } })}</span>${decide ? '' : ic('chevron-right', 'inbox-go')}`,
+      desc: `<span class="truncate inbox-line">${esc(i.body || '')}</span><span class="inbox-time">${esc(i.when || rel(i.at))}</span>${decide ? `<span class="inbox-decide">${decide}</span>` : ''}`,
+      trail: `<span class="reveal-on-hover">${iconBtn('x', 'Dismiss', { size: 'sm', act: 'inbox-dismiss', data: { id: i.id } })}</span>`,
       act: 'inbox-open', data: { id: i.id }, unread: isUnread(i), cls: 'inbox-item', lines: 2,
     });
   }
@@ -183,41 +185,40 @@
     return `Updates about ${what.length > 1 ? what.slice(0, -1).join(', ') + ' and ' + what.at(-1) : what[0]} show up here.`;
   }
 
-  P.inbox = () => {
-    const all = items(), unread = all.filter(isUnread).length, live = S.pageState === 'live' && !S.navLoading;
-    // Header tools only when the list is really there (not while loading, empty or failed).
-    const head = pageHeader({ title: 'Inbox', actions: live && unread ? btn('Mark all read', { v: 'ghost', icon: 'check-check', act: 'inbox-readall' }) : '' });
-    const caughtUp = () => emptyState({ icon: 'check-circle', tone: 'success', title: 'You’re all caught up', desc: esc(caughtUpText()), boxed: true });
-    const body = gate({
-      loading: () => skelRows(5),
-      empty: caughtUp,
-      ok: () => {
-        if (!all.length) return caughtUp();
-        // Needs you first, soonest due (or longest waiting) on top; everything else is for your information, newest first.
-        const needs = all.filter(needsYou).sort((a, b) => (a.due == null) - (b.due == null) || (a.due ?? a.at) - (b.due ?? b.at)), updates = all.filter(i => !needsYou(i));
-        if (!needs.length) return list(updates.map(row), 'inbox-list');
-        return section('Needs you', list(needs.map(row), 'inbox-list'), { id: 'inbox-needs' }) + (updates.length ? section('Updates', list(updates.map(row), 'inbox-list'), { id: 'inbox-updates' }) : '');
-      },
-    });
-    const foot = live ? `<div class="inbox-foot">${linkBtn('Notification settings', { act: 'inbox-prefs', icon: 'settings' })}</div>` : '';
-    return `<div class="page page--narrow">${head}${body}${foot}</div>`;
+  /** The bell's popover: Needs you (soonest due, or longest waiting, first), then Updates (newest first). Mark all read and
+      Notification settings sit in its footer. Opening a row goes to its object and closes the popover. */
+  PO.inbox = () => {
+    const all = items(), unread = all.filter(isUnread).length;
+    const needs = all.filter(needsYou).sort((a, b) => (a.due == null) - (b.due == null) || (a.due ?? a.at) - (b.due ?? b.at)), updates = all.filter(i => !needsYou(i));
+    const group = (label, rows) => `<section class="inbox-pop__group" aria-label="${esc(label)}"><h3 class="inbox-pop__label">${esc(label)}</h3>${list(rows.map(row), 'inbox-list')}</section>`;
+    const body = !all.length ? emptyState({ icon: 'check-circle', tone: 'success', title: 'You’re all caught up', desc: esc(caughtUpText()), compact: true })
+      : !needs.length ? list(updates.map(row), 'inbox-list')
+        : group('Needs you', needs) + (updates.length ? group('Updates', updates) : '');
+    const foot = `<span class="grow">${linkBtn('Notification settings', { act: 'inbox-prefs', icon: 'settings' })}</span>${unread ? btn('Mark all read', { v: 'ghost', size: 'sm', icon: 'check-check', act: 'inbox-readall' }) : ''}`;
+    return { title: 'Inbox', width: 400, body: `<div class="inbox-pop">${body}</div>`, foot };
   };
+  /** Opens the bell's popover from elsewhere (⌘K, Home). */
+  A['inbox-show'] = () => { const b = $('#topbar-inbox'); if (b) openPopover(b); };
 
   const markRead = id => S.inbox.read.add(id);
   const find = id => items().find(i => i.id === id);
-  A['inbox-readall'] = () => { items().forEach(i => markRead(i.id)); refresh(); toast('Marked all as read'); };
+  /** After an in-place action the pressed control is gone (the row was decided or dismissed, Mark all read hid itself):
+      keep keyboard focus in the popover instead of dropping it to the page. */
+  const stayIn = () => { const p = $('#popover'); if (p && !p.contains(document.activeElement)) p.focus({ preventScroll: true }); };
+  A['inbox-readall'] = () => { items().forEach(i => markRead(i.id)); refresh(); stayIn(); toast('Marked all as read'); };
   A['inbox-open'] = el => {
     const i = find(el.dataset.id); markRead(el.dataset.id);
     if (!i) return refresh();
+    closePopover(false);
     if (i.src && A['src-open']) goThen(i.to, () => A['src-open']({ dataset: { id: i.src } }));
     else go(i.to);
   };
   A['inbox-dismiss'] = el => {
-    const id = el.dataset.id; S.inbox.dismissed.add(id); refresh();
+    const id = el.dataset.id; S.inbox.dismissed.add(id); refresh(); stayIn();
     toast('Notification dismissed', { action: { label: 'Undo', run: () => { S.inbox.dismissed.delete(id); refresh(); } } });
   };
-  A['inbox-approve'] = el => { markRead(el.dataset.id); if (A['req-approve']) A['req-approve']({ dataset: { id: el.dataset.req } }); else go('/people?tab=requests'); };
-  A['inbox-deny'] = el => { markRead(el.dataset.id); if (A['req-deny']) A['req-deny']({ dataset: { id: el.dataset.req } }); else go('/people?tab=requests'); };
-  A['inbox-reconnect'] = el => { markRead(el.dataset.id); if (A['acc-reconnect']) A['acc-reconnect']({ dataset: { id: el.dataset.acc } }); else go('/connections'); };
-  A['inbox-prefs'] = () => openPrefs('notif');
+  A['inbox-approve'] = el => { markRead(el.dataset.id); if (A['req-approve']) { A['req-approve']({ dataset: { id: el.dataset.req } }); stayIn(); } else go('/people?tab=requests'); };
+  A['inbox-deny'] = el => { markRead(el.dataset.id); if (A['req-deny']) { A['req-deny']({ dataset: { id: el.dataset.req } }); stayIn(); } else go('/people?tab=requests'); };
+  A['inbox-reconnect'] = el => { markRead(el.dataset.id); closePopover(true); if (A['acc-reconnect']) A['acc-reconnect']({ dataset: { id: el.dataset.acc } }); else go(studioHref('sources')); };
+  A['inbox-prefs'] = () => { closePopover(true); openPrefs('notif'); };
 })();

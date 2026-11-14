@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import timedelta
 from typing import Any
 from uuid import UUID
@@ -449,8 +450,7 @@ class KnowledgeItemService:
                 locked = await _discoverable_root(session, ctx, workspace_id, item_id)
                 if locked is None:
                     raise error from None
-                projector = await Projector.open(session, ctx, workspace_id, self._deps)
-                return await projector.locked(locked)
+                return Projector.locked(locked)
             return await self._record(session, ctx, workspace_id, item, full=full)
 
     async def media_url(self, ctx: RequestContext, workspace_id: UUID, item_id: UUID) -> str:
@@ -497,31 +497,33 @@ class KnowledgeItemService:
                 _locked_roots(workspace_id, visibility.readable) if show_locked else false()
             )
             scope = and_(query.where, or_(visible, locked))
-            is_locked = case((visible, 1), else_=0)
+            readable = case((visible, 1), else_=0)
             statement = (
-                select(Item)
+                select(Item, readable)
                 .where(scope)
                 .order_by(
-                    is_locked.desc(),
+                    readable.desc(),
                     case((visible, literal("")), else_=Item.title),
                     *query.order_by,
                 )
                 .offset(query.offset)
                 .limit(query.limit)
             )
-            rows = list(await session.scalars(statement))
+            rows = (await session.execute(statement)).all()
             total = await session.scalar(select(func.count()).select_from(select(Item.id).where(scope).subquery()))
-            readable_ids = set(
-                await session.scalars(
-                    select(Item.id).where(Item.id.in_([row.id for row in rows]), visible)
-                )
+            # Counts and ancestors use the live visibility, whatever showDeleted is.
+            projector = Projector(
+                session,
+                ctx,
+                workspace_id,
+                self._deps,
+                visibility=replace(visibility, restorable=frozenset(), restorable_editable=frozenset()),
             )
-            projector = await Projector.open(session, ctx, workspace_id, self._deps)
+            projected = iter(
+                await projector.project_many([row for row, shown in rows if shown], full=full)
+            )
             records = [
-                await projector.project(row, full=full)
-                if row.id in readable_ids
-                else await projector.locked(row)
-                for row in rows
+                next(projected) if shown else Projector.locked(row) for row, shown in rows
             ]
         return ItemPage(items=records, total_size=int(total or 0))
 
@@ -1006,8 +1008,7 @@ class KnowledgeItemService:
         *,
         full: bool = False,
     ) -> ItemRecord:
-        projector = await Projector.open(session, ctx, workspace_id, self._deps)
-        return await projector.project(item, full=full)
+        return await Projector(session, ctx, workspace_id, self._deps).project(item, full=full)
 
     async def _reload(self, ctx: RequestContext, workspace_id: UUID, item_id: UUID) -> ItemRecord:
         """The item after a write the caller was authorized for."""

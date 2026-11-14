@@ -1,10 +1,19 @@
-/* Inbox (features/inbox.js): "Needs you" then "Updates". Rows come from item(); this file only sets the message
-   layout (one body line + time), quiet read rows and the trailing chevron. Dismiss uses .reveal-on-hover. Prefix: inbox-. */
+/* Inbox (features/inbox.js): the bell's popover (a bottom sheet on phones) — "Needs you" then "Updates". Rows come from item();
+   this file sets the edge-to-edge rows, the group labels, the message layout (one body line + time) and quiet read rows.
+   Dismiss uses .reveal-on-hover. Prefix: inbox-. */
+.popover:has(> .popover__body > .inbox-pop):not(.popover--sheet) { max-height: min(600px, calc(100% - 72px)); }
+.popover__body:has(> .inbox-pop) { padding: 0 0 4px; }
+.inbox-pop .list { background: transparent; box-shadow: none; border-radius: 0; overflow: visible; }
+.inbox-pop .item { padding: 10px 16px; gap: 10px; align-items: flex-start; }
+.inbox-pop .item__lead { margin-top: 2px; }
+.inbox-pop .item__trail { align-self: flex-start; }
+.inbox-pop .item__title .truncate { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.inbox-decide { display: flex; gap: 8px; margin-top: 8px; }
+.inbox-pop .empty-state { padding: var(--space-6) var(--space-4); }
+.inbox-pop__group + .inbox-pop__group { margin-top: 4px; border-top: 1px solid var(--separator); }
+.inbox-pop__label { padding: 10px 16px 2px; font-size: var(--text-xs); line-height: var(--leading-xs); font-weight: var(--weight-medium); color: var(--muted); }
 .inbox-line { display: block; }
 .inbox-time { display: block; margin-top: 2px; font-size: var(--text-xs); line-height: var(--leading-xs); color: var(--muted); }
 .inbox-item:not(.item--unread) .item__title { font-weight: var(--weight-regular); }
-.inbox-go { color: var(--muted); flex: none; }
-.inbox-foot { display: flex; justify-content: center; margin-top: var(--space-4); }
-@container app (max-width: 679px) {
-  .inbox-go { display: none; }
-}
+.popover--sheet .inbox-pop .item { padding: 12px 20px; }
+.popover--sheet .inbox-pop__label { padding: 12px 20px 2px; }

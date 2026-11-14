@@ -132,11 +132,22 @@ cd backend
 uv run python main.py
 ```
 
-In another:
+In another, either the development server (HMR, unminified; for editing only):
 
 ```bash
-bun run web
+bun run web          # or: make web-dev
 ```
+
+or the optimized production build, which anything shared, demoed or
+measured must use (development-mode numbers are not performance numbers):
+
+```bash
+bun run web:prod     # or: make web-prod  (next build && next start)
+```
+
+Deployments set `BOMESH_WEB_ORIGINS` (comma-separated, e.g.
+`https://app.example.com`) on the API: it becomes the CORS allowlist and lets
+those origins read API Resource Timing and `Server-Timing`.
 
 Open:
 

@@ -2,7 +2,7 @@
    archive, download) and the rendition model — the readable text of a
    resource, split into pages, outline and passages — used by the reader
    (reader.js), the review preview (curation.js), search snippets and answers.
-   The document inventory itself lives in Manage → Documents (curation.js).
+   The document inventory itself lives in Knowledge Studio → Documents (curation.js).
    Exports: X.whoCanSee, X.downloadDocument, X.processDocs, X.archiveDocs,
    X.docFix, X.docModel, X.docText. */
 (() => {
@@ -18,18 +18,22 @@
     return src ? src.name : `Uploaded by ${byYou(d) ? 'you' : d.addedBy}`;
   }
   function shareName(s) { return s.kind === 'group' ? (groupById(s.id)?.name || 'Group') : (memberById(s.id)?.name || 'Someone'); }
-  function whoCanSee(kb) {
-    if (kb.personal) return { icon: 'user', label: 'Only you', detail: '' };
-    if (kb.general === 'workspace') return { icon: 'globe', label: `Everyone in ${curWs().name}`, detail: '' };
+  /** Who reads what's in a collection, or in one of its folders: the nearest folder with its own access decides, else the
+      collection. { icon, label, detail (names), via (the folder that decides, or null) }. */
+  function whoCanSee(kb, folder) {
+    if (kb.personal) return { icon: 'user', label: 'Only you', detail: '', via: null };
+    const own = accessFolder(folder);
+    if (own) return { icon: 'lock', label: `Only people added to ${own.name}`, detail: own.own.shares.map(shareName).join(', '), via: own };
+    if (kb.general === 'workspace') return { icon: 'globe', label: `Everyone in ${curWs().name}`, detail: '', via: null };
     const names = (kb.shares || []).filter(s => kb.general !== 'private' || s.role === 'owner').map(shareName);
-    return { icon: 'lock', label: kb.general === 'private' ? 'Only owners' : 'Only people with access', detail: names.join(', ') };
+    return { icon: 'lock', label: kb.general === 'private' ? 'Only owners' : 'Only people with access', detail: names.join(', '), via: null };
   }
   X.whoCanSee = whoCanSee;
 
   /* ── Download (browser-native local copy) ── */
   function downloadDocument(doc) {
     const kb = kbById(doc.kb);
-    const rows = [['Document', doc.name], ['Knowledge base', kb?.name || doc.kb], ['Status', lifecycleOf(doc).label], ['Type', String(doc.type || '').toUpperCase()], ['Pages', doc.pages || '—'], ['Updated', fmtDateTime(doc.updated)], ['Source', docSub(doc)]];
+    const rows = [['Document', doc.name], ['Collection', kb?.name || doc.kb], ['Status', lifecycleOf(doc).label], ['Type', String(doc.type || '').toUpperCase()], ['Pages', doc.pages || '—'], ['Updated', fmtDateTime(doc.updated)], ['Source', docSub(doc)]];
     const msg = `Downloaded ${doc.name}`;
     if (doc.type === 'pdf') return savePdf(withExt(doc.name, '.pdf'), doc.name, rows.map(([k, v]) => `${k}: ${v}`), msg);
     if (['xlsx', 'xls', 'csv'].includes(doc.type)) return saveCsv(withExt(doc.name, '.csv'), [['Field', 'Value'], ...rows], msg);
@@ -38,38 +42,90 @@
   }
   X.downloadDocument = downloadDocument;
 
-  /* ── Processing (simulated): Waiting → Processing → Ready | Failed ── */
+  /* ── Processing (simulated): Not processed → Processing → Processed | Failed. Publication is separate. ── */
   const stillLocked = d => /password/i.test(d.error || '');
+  const own = d => !!kbById(d.kb)?.personal;
+  /** One document read, classified and indexed: the pipeline applies the topics it's sure of when nobody chose any,
+      within the run's classification context (`ctx`) when it has one. */
+  function finishOne(d, ctx = null) {
+    delete d.fresh;
+    if (d.archived || d.status !== 'processing') return null;
+    if (stillLocked(d)) { d.status = 'failed'; return false; }
+    d.status = 'ready'; d.error = ''; d.processedAt = Date.now();
+    if (!own(d)) autoClassify(d, ctx);
+    return true;
+  }
+  const processable = d => d && !d.archived && (isPublishedStage(d) || stageOf(d) === 'unpublished') && !UNPROCESSABLE.includes(d.type) && d.status !== 'processing';
+  /** A few documents at once (a row's fix, an approval, My files): one toast when they're done. */
   function processDocs(docs, { msg, quiet } = {}) {
-    // Publishing = processing. Submissions are processed only after a reviewer approves them (core/lifecycle.js).
-    docs = docs.filter(d => d && !d.archived && isPublishedStage(d) && d.status !== 'unsupported' && d.status !== 'processing');
+    docs = docs.filter(processable);
     if (!docs.length) return 0;
     docs.forEach(d => { d.status = 'processing'; });
-    const own = d => !!kbById(d.kb)?.personal;
-    audit(docs.every(own) ? (docs.length === 1 ? 'Prepared a private file' : `Prepared ${plural(docs.length, 'private file')}`) : docs.length === 1 ? 'Published a document' : `Published ${plural(docs.length, 'document')}`, kbById(docs[0].kb)?.name || docs[0].name);
+    audit(docs.every(own) ? (docs.length === 1 ? 'Prepared a private file' : `Prepared ${plural(docs.length, 'private file')}`) : docs.length === 1 ? 'Processed a document' : `Processed ${plural(docs.length, 'document')}`, kbById(docs[0].kb)?.name || docs[0].name);
     refresh();
     if (msg && !quiet) toast(msg, { tone: 'accent' });
     setTimeout(() => {
       const ok = [], bad = [];
-      docs.forEach(d => {
-        delete d.fresh;
-        if (d.archived || d.status !== 'processing') return;
-        if (stillLocked(d)) { d.status = 'failed'; bad.push(d); }
-        else { d.status = 'ready'; d.error = ''; d.updated = Date.now(); ok.push(d); }
-      });
+      docs.forEach(d => { const r = finishOne(d); if (r) ok.push(d); else if (r === false) bad.push(d); });
       refresh();
-      // Private files (My files) are never published: they're "ready" for their owner.
+      // Private files (My files) are "ready" for their owner; shared documents are "processed".
       const okOwn = ok.filter(own), okPub = ok.filter(d => !own(d));
       const done = (list, verb) => list.length && toast(list.length === 1 ? `${list[0].name} is ${verb}` : `${plural(list.length, list === okOwn ? 'file' : 'document')} are ${verb}`, { action: list.length === 1 ? { label: 'Open', run: () => go('/doc/' + list[0].id) } : undefined });
-      done(okPub, 'published'); done(okOwn, 'ready');
-      bad.forEach(d => toast(own(d) ? `Couldn’t prepare ${d.name}` : `Couldn’t publish ${d.name}`, { tone: 'danger', action: { label: own(d) ? 'Open' : 'Review', run: () => go(!own(d) && can('knowledge.manage') && canReviewKb(kbById(d.kb)) ? '/documents?tab=all&life=attention' : '/doc/' + d.id) } }));
+      done(okPub, 'processed'); done(okOwn, 'ready');
+      bad.forEach(d => toast(own(d) ? `Couldn’t prepare ${d.name}` : `Couldn’t process ${d.name}`, { tone: 'danger', action: { label: own(d) ? 'Open' : 'See issue', run: () => go(!own(d) && can('knowledge.manage') && canReviewKb(kbById(d.kb)) ? docsHref('issues') : '/doc/' + d.id) } }));
     }, 2600);
     return docs.length;
   }
   X.processDocs = processDocs;
+  /** Many documents at once (Documents → Process): one processing run (an ingestion run over the selection) that works
+      through them in chunks, so the page shows how far it is. Processing never publishes. `context`: what the classify
+      step works with — { topics: [ids] (empty = all topics), note } or null. */
+  function processRun(docs, { context = null } = {}) {
+    docs = docs.filter(processable);
+    if (!docs.length) return null;
+    const run = { id: uid('pr'), kind: 'process', status: 'running', started: Date.now(), by: me().name, ids: docs.map(d => d.id), done: 0, failed: 0, total: docs.length, context };
+    (D.runs ??= []).unshift(run);
+    docs.forEach(d => { d.status = 'processing'; });
+    audit(`Started processing ${plural(docs.length, 'document')}`, kbById(docs[0].kb)?.name || '');
+    drive(run);
+    refresh();
+    return run;
+  }
+  const DRIVEN = new Set();
+  /** Work through a run's documents still processing, a tenth of the run every tick. */
+  function drive(run) {
+    if (DRIVEN.has(run.id)) return;
+    DRIVEN.add(run.id);
+    const step = Math.max(1, Math.ceil(run.total / 10)), mine = new Set(run.ids);
+    const timer = setInterval(() => {
+      if (run.status !== 'running' || !D.runs?.includes(run)) { clearInterval(timer); DRIVEN.delete(run.id); return; }
+      const left = D.docs.filter(d => mine.has(d.id) && d.status === 'processing');
+      left.slice(0, step).forEach(d => {
+        const r = finishOne(d, run.context);
+        if (r) run.done++;
+        else if (r === false) run.failed++;
+      });
+      if (left.length <= step) {
+        clearInterval(timer); DRIVEN.delete(run.id); run.status = 'completed'; run.dur = Date.now() - run.started;
+        audit(`Processed ${plural(run.done, 'document')}${run.failed ? ` · ${run.failed} failed` : ''}`, '');
+        toast(run.failed ? `Processed ${plural(run.done, 'document')} · ${run.failed} failed` : `Processed ${plural(run.done, 'document')}`, { tone: run.failed ? 'accent' : 'success', action: run.failed ? { label: 'See issues', run: () => go(docsHref('issues')) } : undefined });
+      }
+      refresh();
+    }, 450);
+  }
+  X.processRun = processRun;
+  /** A run still in flight after a reload or a workspace switch picks up where it was. */
+  X.resumeProcessRun = () => { const run = activeProcessRun(); if (run) drive(run); return run; };
+  /** Stop a processing run: what's done stays processed, the rest goes back to Not processed. */
+  X.stopProcessRun = run => {
+    if (!run || run.status !== 'running') return;
+    run.status = 'cancelled'; run.dur = Date.now() - run.started;
+    run.ids.map(docById).filter(d => d?.status === 'processing').forEach(d => { d.status = 'pending'; });
+    audit('Stopped processing', `${run.done} of ${run.total}`); refresh();
+  };
   A['doc-process'] = el => {
     const d = docById(el.dataset.id); if (!d) return;
-    processDocs([d], { msg: `${d.status === 'pending' ? 'Publishing' : 'Republishing'} ${d.name}` });
+    processDocs([d], { msg: `Processing ${d.name}` });
   };
   /** Fix for a locked file: pick a new version with the real file picker, then process it. */
   A['doc-replace'] = el => {
@@ -98,46 +154,86 @@
         onDone?.(); refresh();
         const kbName = kbById(docs[0].kb)?.name;
         audit(one ? 'Archived document' : `Archived ${plural(docs.length, 'document')}`, one ? docs[0].name : kbName);
-        toast(one ? `Archived “${docs[0].name}”` : `Archived ${plural(docs.length, 'document')}`, { action: { label: 'Undo', run: () => { docs.forEach(d => (d.archived = false)); refresh(); toast(one ? `Restored “${docs[0].name}”` : `Restored ${plural(docs.length, 'document')}`); } } });
+        toast(one ? `Archived “${docs[0].name}”` : `Archived ${plural(docs.length, 'document')}`, { action: { label: 'Undo', run: () => { docs.forEach(d => (d.archived = false)); refresh(); } } });
       },
     });
   }
   X.archiveDocs = archiveDocs;
 
-  const moveTargets = from => visibleKbs().filter(k => k.id !== from && !k.personal && canEditKb(k));
+  /* ── Move: one destination tree (collection › folders) for documents and folders ──
+     A destination is "kbId|folderId" (no folder = the collection's top level). What moves takes the destination's access,
+     so the dialog names who will see it and says when that changes. */
+  const destKey = (kb, folder) => `${kb}|${folder || ''}`;
+  const destOf = key => { const [kb, folder] = String(key || '').split('|'); return { kb: kbById(kb), folder: folderById(folder) }; };
+  const destLabel = ({ kb, folder }) => [kb?.name, ...folderPath(folder?.id).map(f => f.name)].filter(Boolean).join(' › ');
+  /** Destinations: collections the caller edits (only `kb` when given) and the folders inside them they can read, minus `exclude` ids. */
+  function destinations({ kb, exclude = [] } = {}) {
+    const out = [];
+    const walk = (k, parent, depth) => foldersIn(k.id, parent).filter(f => !exclude.includes(f.id) && canReadFolder(f.id)).forEach(f => { out.push({ key: destKey(k.id, f.id), kb: k, folder: f, depth }); walk(k, f.id, depth + 1); });
+    visibleKbs().filter(k => !k.personal && canEditKb(k) && (!kb || k.id === kb)).forEach(k => { out.push({ key: destKey(k.id), kb: k, folder: null, depth: 0 }); walk(k, null, 1); });
+    return out;
+  }
+  /** The picker: a filterable tree of destinations, the current place marked, and who will see what moves. The current
+      collection comes first with its folders open; another collection's folders open once it's chosen (or when searching). */
+  function destPicker({ dests, current, f, noun, act }) {
+    const q = fold(f.q || '').trim(), hereKb = destOf(current).kb?.id, chosenKb = destOf(f.to).kb?.id;
+    const order = [...new Set([hereKb, ...dests.map(x => x.kb.id)].filter(Boolean))];
+    const sorted = [...dests].sort((a, b) => order.indexOf(a.kb.id) - order.indexOf(b.kb.id));
+    const shown = q ? sorted.filter(x => fold(destLabel(x)).includes(q)) : sorted.filter(x => !x.folder || x.kb.id === hereKb || x.kb.id === chosenKb);
+    const opt = x => {
+      const here = x.key === current, name = q ? destLabel(x) : (x.folder ? x.folder.name : x.kb.name);
+      const lead = x.folder ? `<span class="mv-opt__icon" aria-hidden="true">${ic(accessFolder(x.folder.id) === x.folder ? 'lock' : 'folder', 'i-sm')}</span>` : X.kbMark ? X.kbMark(x.kb, 22) : '';
+      return `<label class="${cx('radio mv-opt', here && 'is-here')}" style="--depth:${q ? 0 : x.depth}"><input type="radio" name="mv-to" value="${esc(x.key)}" ${f.to === x.key ? 'checked' : ''} ${here ? 'disabled' : ''} data-change="${act}" data-value="${esc(x.key)}"><span class="radio__control" aria-hidden="true"></span>${lead}<span class="grow"><span class="radio__label mv-opt__name truncate" translate="no">${esc(name)}</span></span>${here ? `<span class="mv-opt__here">${esc('Current')}</span>` : ''}</label>`;
+    };
+    const err = f.tried && !f.to ? 'Choose where to move it.' : '';
+    const to = f.to ? destOf(f.to) : null, before = destOf(current);
+    const who = to?.kb ? whoCanSee(to.kb, to.folder?.id) : null, was = before.kb ? whoCanSee(before.kb, before.folder?.id) : null;
+    const changes = who && was && who.label !== was.label;
+    // Whole sentences per subject (it · them · a folder's contents), so each one translates as a unit.
+    const SAY = {
+      it: { change: 'Who can see it changes: {0}', same: 'Who can see it stays the same: {0}' },
+      them: { change: 'Who can see them changes: {0}', same: 'Who can see them stays the same: {0}' },
+      folder: { change: 'Who can see what’s in it changes: {0}', same: 'Who can see what’s in it stays the same: {0}' },
+    }[noun];
+    const effect = err ? `<div class="field-error" id="mv-err" role="alert">${ic('alert-circle')}<span>${esc(err)}</span></div>`
+      : who ? `<div class="${cx('mv-who', changes && 'mv-who--change')}">${ic(changes ? 'alert' : who.icon, 'i-sm')}<span>${esc((changes ? SAY.change : SAY.same).replace('{0}', who.label))}${who.detail ? `<span class="muted"> · ${esc(who.detail)}</span>` : ''}</span></div>`
+        : `<div class="description">${esc('What moves takes the access of where it goes.')}</div>`;
+    const search = dests.length > 8 ? searchField({ id: 'mv-q', act: 'mv-q', value: f.q || '', placeholder: 'Find a collection or folder', label: 'Find a destination', size: 'md', full: true, autofocus: true }) : '';
+    return `<div class="field">${search}<div class="option-list mv-list" role="radiogroup" aria-label="Move to" ${err ? 'aria-invalid="true" aria-describedby="mv-err"' : ''}>${shown.map(opt).join('') || `<p class="mv-none">${esc(`Nothing called “${f.q.trim()}”.`)}</p>`}</div>${effect}</div>`;
+  }
+  A['mv-q'] = el => { S.ui.docMove.q = el.value; refreshLayer(); };
+  X.move = { destinations, destPicker, destOf, destKey, destLabel };
+
   A['doc-move'] = el => {
     const ids = (el.dataset.ids || el.dataset.id || '').split(',').filter(Boolean); if (!ids.length) return;
-    const from = docById(ids[0])?.kb, targets = moveTargets(from);
-    // One possible destination is the obvious choice; with several, the caller picks on purpose.
-    setPath('docMove', { to: targets.length === 1 ? targets[0].id : '', tried: false });
-    openModal('doc-move', { ids, from });
+    const first = docById(ids[0]); if (!first) return;
+    // Several documents from different places have no single "current" place.
+    const same = ids.every(id => { const d = docById(id); return d && d.kb === first.kb && (d.folder || '') === (first.folder || ''); });
+    setPath('docMove', { to: '', q: '', tried: false });
+    openModal('doc-move', { ids, from: same ? destKey(first.kb, first.folder) : '' });
   };
   M['doc-move'] = ({ ids, from }) => {
-    const targets = moveTargets(from), f = ui('docMove'), n = ids.length, src = kbById(from);
+    const f = ui('docMove'), n = ids.length, dests = destinations(), noun = n === 1 ? 'it' : 'them';
     const title = n === 1 ? 'Move document' : `Move ${plural(n, 'document')}`;
-    if (!targets.length) return { title, icon: 'folder', size: 'sm', body: emptyState({ icon: 'folder', title: 'Nowhere to move it', desc: 'There’s no other knowledge base you can edit.', compact: true }), foot: btn('Close', { v: 'primary', act: 'close-modal' }) };
-    const err = f.tried && !f.to ? 'Choose a knowledge base.' : '';
-    const opt = k => {
-      const w = X.whoCanSee(k);
-      return `<label class="radio mv-opt"><input type="radio" name="doc-move-to" value="${esc(k.id)}" ${f.to === k.id ? 'checked' : ''} data-change="doc-move-pick" data-value="${esc(k.id)}"><span class="radio__control" aria-hidden="true"></span>${X.kbMark ? X.kbMark(k, 24) : ''}<span class="grow"><span class="radio__label mv-opt__name">${esc(k.name)}</span><span class="radio__desc mv-opt__who">${ic(w.icon, 'i-xs')}<span class="truncate">${esc(w.label)}</span></span></span></label>`;
-    };
+    if (dests.filter(x => x.key !== from).length === 0) return { title, icon: 'folder', size: 'sm', body: emptyState({ icon: 'folder', title: 'Nowhere to move it', desc: 'There’s no other collection or folder you can edit.', compact: true }), foot: btn('Close', { v: 'primary', act: 'close-modal' }) };
     return {
       title, icon: 'folder', size: 'md',
-      desc: n === 1 ? `“${esc(docById(ids[0])?.name || '')}” · from ${esc(src?.name || '')}` : `From ${esc(src?.name || '')}`,
-      body: `<div class="field"><span class="label" id="doc-move-label">Move to</span><div class="option-list mv-list" role="radiogroup" aria-labelledby="doc-move-label" ${err ? 'aria-invalid="true" aria-describedby="doc-move-err"' : ''}>${targets.map(opt).join('')}</div>${err ? `<div class="field-error" id="doc-move-err" role="alert">${ic('alert-circle')}<span>${esc(err)}</span></div>` : `<div class="description">Who can see ${n === 1 ? 'it' : 'them'} follows the new knowledge base.</div>`}</div>`,
+      desc: n === 1 ? `“${esc(docById(ids[0])?.name || '')}”${from ? ` · in ${esc(destLabel(destOf(from)))}` : ''}` : from ? `From ${esc(destLabel(destOf(from)))}` : '',
+      body: destPicker({ dests, current: from, f, noun, act: 'doc-move-pick' }),
       footStart: 'You can undo right after.',
       foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn('Move', { v: 'primary', icon: 'folder', act: 'doc-move-go' }),
     };
   };
-  A['doc-move-pick'] = el => { const f = ui('docMove'); f.to = el.dataset.value; refreshLayer(); };
+  A['doc-move-pick'] = el => { ui('docMove').to = el.dataset.value; refreshLayer(); };
   A['doc-move-go'] = () => {
-    const { ids, from } = S.modal.props, f = ui('docMove'), target = kbById(f.to);
-    if (!target) { f.tried = true; refreshLayer(); $('#layer .mv-list input')?.focus(); return; }
-    const docs = ids.map(docById).filter(Boolean);
-    docs.forEach(d => (d.kb = target.id)); target.updated = Date.now();
+    const { ids } = S.modal.props, f = ui('docMove'), to = destOf(f.to);
+    if (!to.kb) { f.tried = true; refreshLayer(); $('#layer .mv-list input:not(:disabled)')?.focus(); return; }
+    const docs = ids.map(docById).filter(Boolean), was = docs.map(d => [d, d.kb, d.folder]);
+    docs.forEach(d => { d.kb = to.kb.id; d.folder = to.folder?.id; }); to.kb.updated = Date.now();
     closeModal(); S.drawer = null; refresh();
-    audit(`Moved ${plural(docs.length, 'document')}`, target.name);
-    toast(`Moved ${plural(docs.length, 'document')} to ${target.name}`, { action: { label: 'Undo', run: () => { docs.forEach(d => (d.kb = from)); refresh(); toast(`Moved ${plural(docs.length, 'document')} back`); } } });
+    const where = destLabel(to);
+    audit(`Moved ${plural(docs.length, 'document')}`, where);
+    toast(`Moved ${plural(docs.length, 'document')} to ${where}`, { action: { label: 'Undo', run: () => { was.forEach(([d, kb, folder]) => { d.kb = kb; d.folder = folder; }); refresh(); } } });
   };
 
   /** The fix an editor can apply to a file that isn't readable (or changed at the source); '' when none. */
@@ -577,7 +673,7 @@
     'kb-eng': n => [['When to use this', [`Use ${n} when you are on call and something needs attention.`]], ['Steps', null, ['Acknowledge the page within five minutes.', 'Check the dashboards linked in the alert.', 'Post status in #incidents every 30 minutes.']], ['Escalation', ['If you can’t mitigate within 30 minutes, page the secondary on-call engineer.']]],
     default: n => [['Notes', [`Working notes for ${n}.`]], ['Key points', null, ['Confirm goals and owners for the next quarter.', 'Agree on the timeline and the next check-in.', 'Share a short summary with the team afterwards.']], ['Next steps', ['Follow up within a week with the open questions.']]],
   };
-  /** Finx knowledge bases: used only for resources whose kind has no generator below. */
+  /** Finx collections: used only for resources whose kind has no generator below. */
   const FALLBACK = {
     'kb-fx-eng': n => [['Context', [`${n} records how Platform Engineering builds and runs Finx services.`]], ['Guidance', null, ['Follow the Engineering Handbook unless this page says otherwise.', 'Link the ADR or ticket that motivated a change.', 'Ask in #eng-platform when something is unclear.']], ['Owner', ['Platform Engineering reviews this page every six months.']]],
     'kb-fx-pay': n => [['Context', [`${n} belongs to the Payments Platform team (gateway, card authorization, NAPAS 247 and QR).`]], ['Guidance', null, ['Payment APIs follow ADR-031: every POST carries an Idempotency-Key.', 'Changes to payment flows need a Payments Platform reviewer.', 'Incidents follow the Incident Response Plan.']], ['On call', ['Page the Payments Platform on-call for anything customer-facing.']]],

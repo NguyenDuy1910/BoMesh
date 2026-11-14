@@ -1,9 +1,9 @@
 "use client";
 
-import { Button, Description, Input, Label, Modal, TextField } from "@heroui/react";
+import { Button, Description, FieldError, Input, Label, Modal, TextField } from "@heroui/react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Palette } from "lucide-react";
-import { useState } from "react";
+import { Palette, Settings } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 import { SkeletonRows } from "@/components/ui/SkeletonRows";
 import { SwitchRow } from "@/components/ui/SwitchRow";
@@ -43,13 +43,20 @@ function AppearanceRow() {
   );
 }
 
-/** Mounted once the account preferences have loaded, so the switches start from the saved values. */
+/**
+ * Mounted once the account preferences have loaded, so the switches start from the saved values. Everything applies
+ * immediately (preview `M.prefs`): each switch saves at once with an Undo toast, the display name commits on Enter or
+ * when the field loses focus, and the footer is a single Done. An uncommitted name draft is dropped on close.
+ */
 function PreferencesForm({ prefs }: { prefs: Schema<"UserPreferences"> | undefined }) {
   const session = useSession();
   const queryClient = useQueryClient();
   const ws = useOptionalWorkspace();
+  const { prefsFocus } = useShellOverlays();
   const admin = ws?.can("workspaces.updateSettings") ?? false;
-  const [name, setName] = useState(session?.user.displayName ?? "");
+  const saved = session?.user.displayName ?? "";
+  const [name, setName] = useState(saved);
+  const [error, setError] = useState("");
   const [steps, setSteps] = useState(prefs?.showWorkSteps !== false);
   const [notif, setNotif] = useState<Notifications>({
     sourceFailures: true,
@@ -58,38 +65,65 @@ function PreferencesForm({ prefs }: { prefs: Schema<"UserPreferences"> | undefin
     weeklySummary: true,
     ...prefs?.emailNotifications,
   });
-  const [saving, setSaving] = useState(false);
-  const [invalid, setInvalid] = useState(false);
+  const notifHead = useRef<HTMLHeadingElement>(null);
 
-  const toggle = (key: keyof Notifications) => (on: boolean) => setNotif((n) => ({ ...n, [key]: on }));
+  useEffect(() => {
+    if (prefsFocus === "notifications") requestAnimationFrame(() => notifHead.current?.scrollIntoView({ block: "start", behavior: "smooth" }));
+  }, [prefsFocus]);
 
-  const save = async () => {
+  const saveName = async (displayName: string) => {
+    const user = await call(
+      api.PATCH("/api/v1/users/{user}", {
+        params: { path: { user: "me" }, query: { updateMask: "displayName" } },
+        // `email` is required by the schema; the mask limits the update to the display name.
+        body: { email: session?.user.email ?? "", displayName },
+      }),
+    );
+    updateSessionUser({ displayName: user.displayName ?? displayName });
+  };
+
+  const commitName = () => {
     const displayName = name.trim();
     if (!displayName) {
-      setInvalid(true);
-      toast("Enter a display name.", { tone: "danger" });
+      setError("Enter a display name.");
       return;
     }
-    setSaving(true);
-    try {
-      if (displayName !== session?.user.displayName) {
-        const user = await call(
-          api.PATCH("/api/v1/users/{user}", {
-            params: { path: { user: "me" }, query: { updateMask: "displayName" } },
-            // `email` is required by the schema; the mask limits the update to the display name.
-            body: { email: session?.user.email ?? "", displayName },
-          }),
-        );
-        updateSessionUser({ displayName: user.displayName ?? displayName });
-      }
-      await updateMyPreferences(queryClient, { showWorkSteps: steps, emailNotifications: notif }, "showWorkSteps,emailNotifications");
-      closeOverlay();
-      toast("Preferences saved");
-    } catch (e) {
-      toast(errorMessage(e), { tone: "danger" });
-    } finally {
-      setSaving(false);
-    }
+    setError("");
+    if (displayName === saved) return;
+    const before = saved;
+    saveName(displayName).then(
+      () => toast("Display name updated", { undo: () => void saveName(before).then(() => setName(before), (e: unknown) => toast(errorMessage(e), { tone: "danger" })) }),
+      (e: unknown) => toast(errorMessage(e), { tone: "danger" }),
+    );
+  };
+
+  const flipSteps = (on: boolean) => {
+    const save = (v: boolean) => {
+      setSteps(v);
+      return updateMyPreferences(queryClient, { showWorkSteps: v }, "showWorkSteps");
+    };
+    save(on).then(
+      () => toast(on ? "Answer steps shown" : "Answer steps hidden", { undo: () => void save(!on).catch((e: unknown) => toast(errorMessage(e), { tone: "danger" })) }),
+      (e: unknown) => {
+        setSteps(!on);
+        toast(errorMessage(e), { tone: "danger" });
+      },
+    );
+  };
+
+  const toggle = (key: keyof Notifications) => (on: boolean) => {
+    const save = (v: boolean) => {
+      const next = { ...notif, [key]: v };
+      setNotif(next);
+      return updateMyPreferences(queryClient, { emailNotifications: next }, "emailNotifications");
+    };
+    save(on).then(
+      () => toast(on ? "Email notification turned on" : "Email notification turned off", { undo: () => void save(!on).catch((e: unknown) => toast(errorMessage(e), { tone: "danger" })) }),
+      (e: unknown) => {
+        setNotif((n) => ({ ...n, [key]: !on }));
+        toast(errorMessage(e), { tone: "danger" });
+      },
+    );
   };
 
   return (
@@ -101,13 +135,20 @@ function PreferencesForm({ prefs }: { prefs: Schema<"UserPreferences"> | undefin
             value={name}
             onChange={(v) => {
               setName(v);
-              setInvalid(false);
+              if (error && v.trim()) setError("");
             }}
-            isInvalid={invalid}
-            autoFocus
+            onBlur={commitName}
+            onKeyDown={(e) => {
+              // React Aria stops keyboard propagation by default; let Esc reach the dialog so it closes from here too.
+              if (e.key === "Enter") commitName();
+              else e.continuePropagation();
+            }}
+            isInvalid={Boolean(error)}
+            autoFocus={!prefsFocus}
           >
             <Label>Display name</Label>
-            <Input />
+            <Input autoComplete="name" />
+            {error ? <FieldError>{error}</FieldError> : <Description>Press Enter to save.</Description>}
           </TextField>
           <TextField fullWidth value={session?.user.email ?? ""} isReadOnly>
             <Label>Email</Label>
@@ -118,14 +159,11 @@ function PreferencesForm({ prefs }: { prefs: Schema<"UserPreferences"> | undefin
           <LanguageField />
         </div>
         <div className="mt-16">
-          <SwitchRow
-            title="Show how answers were found"
-            description="Show the searches and analysis steps above each answer."
-            isSelected={steps}
-            onChange={setSteps}
-          />
+          <SwitchRow title="Show how answers were found" description="Show the searches and analysis steps above each answer." isSelected={steps} onChange={flipSteps} />
         </div>
-        <h3 className="t-subheading mt-16">Email notifications</h3>
+        <h3 className="t-subheading mt-16" id="pref-notif" ref={notifHead}>
+          Email notifications
+        </h3>
         {admin && (
           <>
             <SwitchRow
@@ -136,7 +174,7 @@ function PreferencesForm({ prefs }: { prefs: Schema<"UserPreferences"> | undefin
             />
             <SwitchRow
               title="Someone requests access"
-              description="For knowledge bases you own."
+              description="For collections you own."
               isSelected={notif.accessRequests !== false}
               onChange={toggle("accessRequests")}
             />
@@ -156,11 +194,8 @@ function PreferencesForm({ prefs }: { prefs: Schema<"UserPreferences"> | undefin
         />
       </Modal.Body>
       <Modal.Footer>
-        <Button slot="close" variant="tertiary">
-          Cancel
-        </Button>
-        <Button variant="primary" isPending={saving} onPress={() => void save()}>
-          Save
+        <Button slot="close" variant="primary">
+          Done
         </Button>
       </Modal.Footer>
     </>
@@ -178,7 +213,13 @@ export function PreferencesDialog() {
         <Modal.Dialog>
           <Modal.CloseTrigger aria-label="Close" />
           <Modal.Header>
-            <Modal.Heading>Preferences</Modal.Heading>
+            <Modal.Icon aria-hidden>
+              <Settings className="i" />
+            </Modal.Icon>
+            <div className="grow min-w-0">
+              <Modal.Heading>Preferences</Modal.Heading>
+              <p className="modal__description">Changes apply right away and are saved for you.</p>
+            </div>
           </Modal.Header>
           {open === "preferences" &&
             (ready ? (

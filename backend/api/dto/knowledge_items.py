@@ -396,15 +396,6 @@ def revision_message(record: RevisionRecord) -> ItemRevisionMessage:
 # -- Content and passages ------------------------------------------------------------
 
 
-class ItemContentElement(ProtoMessage):
-    element_id: str | None = None
-    kind: Literal["HEADING", "PARAGRAPH", "LIST", "TABLE", "IMAGE", "CODE"] | None = None
-    text: str | None = None
-    level: int | None = None
-    page_number: int | None = None
-    passage: str | None = None
-
-
 class ItemPageAsset(ProtoMessage):
     page_number: int | None = None
     image_uri: str | None = None
@@ -423,7 +414,6 @@ class ItemRendition(ProtoMessage):
 class ItemContent(ProtoMessage):
     name: str | None = None
     revision: str | None = None
-    elements: list[ItemContentElement] | None = None
     page_assets: list[ItemPageAsset] | None = None
     rendition: ItemRendition | None = None
 
@@ -434,17 +424,6 @@ def content_message(record: ContentRecord) -> ItemContent:
     return ItemContent(
         name=f"{item_name(ws, item_id)}/content",
         revision=revision_name(ws, item_id, record.revision),
-        elements=[
-            ItemContentElement(
-                element_id=element.element_id,
-                kind=element.kind,  # type: ignore[arg-type]
-                text=element.text,
-                level=element.level,
-                page_number=element.page_number,
-                passage=passage_name(ws, item_id, element.chunk_id) if element.chunk_id else None,
-            )
-            for element in record.elements
-        ],
         page_assets=[page_asset_message(asset) for asset in record.page_assets],
         rendition=rendition_message(rendition) if rendition is not None else None,
     )
@@ -600,9 +579,15 @@ def policy_message(record: PolicyRecord) -> PolicyMessage:
 # -- Search ------------------------------------------------------------------------
 
 
+class SearchItemsInterval(ProtoMessage):
+    minimum: Timestamp | None = None
+    maximum: Timestamp | None = None
+
+
 class SearchItemsFacetSpec(ProtoMessage):
     field: str
     limit: int | None = None
+    intervals: list[SearchItemsInterval] | None = None
     excluded_from_filter: bool = True
 
 
@@ -638,6 +623,7 @@ class SearchItemsResult(ProtoMessage):
 
 class SearchItemsFacetValue(ProtoMessage):
     value: str | None = None
+    interval: SearchItemsInterval | None = None
     display_name: str | None = None
     document_count: int | None = None
 
@@ -681,7 +667,14 @@ def search_response(
                 field=facet.field,
                 values=[
                     SearchItemsFacetValue(
-                        value=facet_value_name(workspace_id, facet.field, value.value),
+                        value=facet_value_name(workspace_id, facet.field, value.value)
+                        if value.value is not None
+                        else None,
+                        interval=SearchItemsInterval(
+                            minimum=value.interval.minimum, maximum=value.interval.maximum
+                        )
+                        if value.interval is not None
+                        else None,
                         display_name=value.display_name,
                         document_count=value.document_count,
                     )
@@ -712,6 +705,8 @@ def facet_value_name(workspace_id: UUID, field: str, value: str) -> str:
 
 # -- Filters and orderings ---------------------------------------------------------
 
+#: Filter fields naming items the caller must be able to read (``name`` is not one:
+#: a batch read by name simply omits unreadable or missing items).
 REFERENCE_FIELDS = ("parentItem", "ancestors")
 
 
@@ -723,6 +718,7 @@ def item_filters(workspace_id: UUID, processing_version: str) -> FilterSchema:
 
     return FilterSchema(
         {
+            "name": resource_name(Item.id, item_reference),
             "parentItem": resource_name(Item.parent_item_id, item_reference),
             "ancestors": repeated(
                 resource_name(Item.id, item_reference), has=queries.has_ancestor
@@ -778,6 +774,7 @@ FACET_FILTER_FIELDS = {
     "document.mimeType": "document.mimeType",
     "document.languageCode": "document.languageCode",
     "document.verification.state": "document.verification.state",
+    "updateTime": "updateTime",
 }
 
 
@@ -831,6 +828,7 @@ __all__ = [
     "MergeItemRequest",
     "MoveItemRequest",
     "PolicyMessage",
+    "SearchItemsFacetSpec",
     "SearchItemsRequest",
     "SearchItemsResponse",
     "SetIamPolicyRequest",

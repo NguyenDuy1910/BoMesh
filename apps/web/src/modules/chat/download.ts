@@ -102,3 +102,20 @@ export async function copyText(value: string, success = "Copied"): Promise<boole
     return false;
   }
 }
+
+/**
+ * One Copy for an answer (preview `chat-copy`): the answer as formatted text, with Markdown as the plain-text flavour,
+ * so it pastes well in documents and in chat tools. Falls back to Markdown only.
+ */
+export async function copyRich(markdown: string, html: string | null): Promise<boolean> {
+  if (!html || typeof ClipboardItem === "undefined") return copyText(markdown);
+  try {
+    await navigator.clipboard.write([
+      new ClipboardItem({ "text/plain": new Blob([markdown], { type: "text/plain" }), "text/html": new Blob([html], { type: "text/html" }) }),
+    ]);
+    toast("Copied");
+    return true;
+  } catch {
+    return copyText(markdown);
+  }
+}

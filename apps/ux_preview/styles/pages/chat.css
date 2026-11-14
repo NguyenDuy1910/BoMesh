@@ -1,14 +1,15 @@
 /*
- * Chat: new chat page, threads, scope picker, citation panel, share, product tour (chat-*),
+ * Chat: AI Chat (composer + conversation list), threads, scope picker, citation panel, share, product tour (chat-*),
  * file work: artifacts, file panel, attachments (wk-*), conversations (conv-*).
  * Built on HeroUI tokens and components; colors come from tokens only.
  * Direction: calm and soft — one surface per region, quiet chrome, 4 px spacing scale.
  */
 
-/* ───── New chat (/chat) ───── */
-.chat-home { position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; align-items: center; padding: 48px 24px 72px; }
-.chat-home__inner { width: 100%; max-width: 720px; margin: auto 0; display: flex; flex-direction: column; gap: 16px; }
-.chat-home__title { font-size: 26px; line-height: 34px; font-weight: 600; letter-spacing: -0.015em; text-align: center; margin-bottom: 12px; }
+/* ───── AI Chat (/chat): start a conversation above, pick one up below ───── */
+.chat-home { position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; align-items: center; padding: var(--space-10) var(--space-6) var(--space-14); }
+.chat-home__inner { width: 100%; max-width: var(--layout-conversation); display: flex; flex-direction: column; gap: var(--space-10); }
+.chat-home__start { display: flex; flex-direction: column; gap: var(--space-3); }
+.chat-home__title { font-size: var(--text-2xl); line-height: var(--leading-2xl); font-weight: var(--weight-semibold); letter-spacing: -0.015em; margin-bottom: var(--space-1); }
 
 /* One suggestion area: starter questions, or the space's workflows when a space is chosen */
 .chat-starters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
@@ -59,9 +60,9 @@
 .chat-split { flex: 1 1 auto; height: auto; min-height: 0; position: relative; }
 .chat-main { position: relative; }
 .chat-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
-.chat-thread { max-width: 760px; margin: 0 auto; padding: 32px 24px 24px; display: flex; flex-direction: column; gap: 32px; }
+.chat-thread { max-width: var(--layout-conversation); margin: 0 auto; padding: 32px 24px 24px; display: flex; flex-direction: column; gap: 32px; }
 .chat-dock { flex: none; padding: 0 24px 16px; }
-.chat-dock__inner { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 8px; }
+.chat-dock__inner { max-width: var(--layout-conversation); margin: 0 auto; display: flex; flex-direction: column; gap: 8px; }
 
 .chat-msg { min-width: 0; }
 .chat-msg--user { display: flex; justify-content: flex-end; }
@@ -291,12 +292,16 @@ a.wk-chip:hover { background: var(--default); }
 .wk-edit-state { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; line-height: 16px; color: var(--muted); }
 .wk-edit-state.is-err { color: var(--danger-soft-foreground); }
 
-/* ───── Conversations ───── */
-.conv-title-cell { max-width: 0; width: 40%; }
-.conv-preview { max-width: 0; width: 45%; }
-.conv-preview .truncate { display: block; }
-.conv-updated { white-space: nowrap; }
-.conv-sub { display: none; }
+/* ───── Conversations (the list under AI Chat's composer) ───── */
+.conv-sec { display: flex; flex-direction: column; gap: var(--space-3); }
+.conv-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); min-height: var(--control-sm); }
+.conv-head__title { font-size: var(--text-lg); line-height: var(--leading-lg); font-weight: var(--weight-semibold); }
+.conv-head__count { font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--muted); }
+.conv-tools { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.conv-row .item__body { flex: 1 1 0; min-width: 0; }
+.conv-row .item__title .chip { flex: none; max-width: 45%; overflow: hidden; }
+.conv-row .item__meta { white-space: nowrap; }
+.conv-row .item__desc { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ───── Responsive ───── */
 @container app (max-width: 1023px) {
@@ -304,16 +309,13 @@ a.wk-chip:hover { background: var(--default); }
   .chat-starters { grid-template-columns: minmax(0, 1fr); }
   .chat-starter { padding: 10px 14px; }
 }
-@container app (max-width: 760px) {
-  .conv-title-cell { max-width: none; width: auto; }
-  .conv-title-cell > .row { flex-wrap: wrap; row-gap: 4px; }
-  .conv-title-cell .chip { max-width: 100%; }
-  .conv-sub { display: block; }
-  .table--stack .conv-updated { flex-basis: 100%; }
-}
 @container app (max-width: 679px) {
-  .chat-home { padding: 24px 16px 72px; }
-  .chat-home__title { font-size: 22px; line-height: 30px; margin-bottom: 4px; }
+  .chat-home { padding: var(--space-6) var(--space-4) var(--space-14); }
+  .chat-home__inner { gap: var(--space-8); }
+  .chat-home__title { font-size: var(--text-xl); line-height: var(--leading-xl); }
+  .conv-tools { flex: 1 1 100%; flex-wrap: wrap; }
+  .conv-tools .search-field { flex: 1 1 100%; max-width: none; }
+  .conv-row .item__title .chip { display: none; }
   .chat-starter { min-height: 44px; }
   .chat-starter__prompt { -webkit-line-clamp: 1; }
   .chat-thread { padding: 20px 16px 16px; gap: 24px; }

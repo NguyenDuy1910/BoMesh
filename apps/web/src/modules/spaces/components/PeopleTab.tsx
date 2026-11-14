@@ -1,13 +1,13 @@
 "use client";
 
-import { Button, Checkbox, Label, ListBox, Select } from "@heroui/react";
+import { Button, Checkbox } from "@heroui/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, UserPlus, X } from "lucide-react";
+import { ChevronDown, CircleAlert, UserPlus, X } from "lucide-react";
 import { useState } from "react";
 
-import { Gate, List, ListItem, NoMatches, SearchInput, Section, SkeletonRows, StatusChip, UserAvatar, toast } from "@/components/ui";
+import { Gate, List, ListItem, NoMatches, SearchInput, Section, Segmented, SkeletonRows, StatusChip, UserAvatar, toast } from "@/components/ui";
 import { errorMessage, resourceId } from "@/lib/api/client";
-import { fmtNum, plural, rel } from "@/lib/format";
+import { plural, rel } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { KnowledgeModal } from "@/modules/knowledge/components/KnowledgeModal";
 import { useMemberNames } from "@/modules/knowledge/queries";
@@ -25,7 +25,7 @@ import {
 } from "../api";
 import { invalidateSpaces, useJoinRequests, useSpaceMembers } from "../queries";
 import { LEAD, MEMBER, defaultRole, isStaffRole, roleLabel, topRole, type SpaceRole } from "../types";
-import type { SpaceView } from "./context";
+import { TOOLS_MIN, type SpaceView } from "./context";
 import { Menu } from "./Menu";
 
 function useWorkspaceMembers(enabled = true) {
@@ -117,9 +117,9 @@ export function PeopleTab({ view }: { view: SpaceView }) {
     }
   }
 
-  const total = space.memberCount ?? all.length;
-  const shownNote =
-    total > all.length ? `Showing ${fmtNum(all.length)} of ${plural(total, type.key === "course" ? "enrolled member" : "member")}` : plural(all.length, "member");
+  // Search appears for the space's real size (not just who's loaded), so anyone in it can be found.
+  const search = Math.max(space.memberCount ?? 0, all.length) >= TOOLS_MIN || q;
+  const canAdd = can("spaceMembers.create");
 
   return (
     <>
@@ -129,18 +129,19 @@ export function PeopleTab({ view }: { view: SpaceView }) {
           <div className="mt-32" />
         </>
       ) : null}
-      <div className="toolbar">
-        <SearchInput value={q} onChange={setQ} placeholder="Search people" />
-        <div className="toolbar__end">
-          <span className="t-sm muted hide-sm">{shownNote}</span>
-          {can("spaceMembers.create") ? (
-            <Button variant="tertiary" onPress={() => setAdding(true)}>
-              <UserPlus aria-hidden />
-              Add people
-            </Button>
-          ) : null}
+      {search || canAdd ? (
+        <div className="toolbar">
+          {search ? <SearchInput value={q} onChange={setQ} placeholder="Search people" /> : null}
+          <div className="toolbar__end">
+            {canAdd ? (
+              <Button variant="tertiary" onPress={() => setAdding(true)}>
+                <UserPlus aria-hidden />
+                Add people
+              </Button>
+            ) : null}
+          </div>
         </div>
-      </div>
+      ) : null}
       <Gate query={members} skeleton={<SkeletonRows rows={5} />} isEmpty={!rows.length} empty={<NoMatches what="people" onClear={() => setQ("")} />}>
         <List>
           {rows.map((m) => {
@@ -256,6 +257,7 @@ function AddPeopleDialog({ view, existing, onClose }: { view: SpaceView; existin
   const [sel, setSel] = useState<string[]>([]);
   const [role, setRole] = useState<SpaceRole>(defaultRole(type));
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
   const needle = q.trim().toLowerCase();
   const cands = (people.data ?? []).filter(
     (p) =>
@@ -265,7 +267,10 @@ function AddPeopleDialog({ view, existing, onClose }: { view: SpaceView; existin
   );
 
   async function add() {
-    if (!sel.length) return;
+    if (!sel.length) {
+      setErr("Select at least one person.");
+      return;
+    }
     setBusy(true);
     try {
       await Promise.all(sel.map((m) => createSpaceMember(ws, sid, m)));
@@ -292,73 +297,76 @@ function AddPeopleDialog({ view, existing, onClose }: { view: SpaceView; existin
       isOpen
       onClose={onClose}
       guard={busy}
+      icon={UserPlus}
       title={
         <>
           Add people to <span translate="no">{space.displayName}</span>
         </>
       }
-      footerStart={sel.length ? <span className="t-sm muted">{plural(sel.length, "person", "people")} selected</span> : undefined}
+      description="They can open the space, its materials and its work right away."
+      footerStart={<span>{sel.length ? `${plural(sel.length, "person", "people")} selected` : "You can change roles later."}</span>}
       footer={
         <>
-          <Button variant="tertiary" onPress={onClose} isDisabled={busy}>
+          <Button variant="ghost" onPress={onClose} isDisabled={busy}>
             Cancel
           </Button>
-          <Button variant="primary" onPress={() => void add()} isPending={busy} isDisabled={!sel.length}>
-            Add
+          <Button variant="primary" onPress={() => void add()} isPending={busy}>
+            <UserPlus aria-hidden />
+            {sel.length ? `Add ${plural(sel.length, "person", "people")}` : "Add people"}
           </Button>
         </>
       }
     >
-      <div className="field">
-        <span className="label">Find people</span>
-        <SearchInput value={q} onChange={setQ} placeholder="Name or email" fullWidth autoFocus className="sp-add-q" />
-      </div>
-      <div className="sp-picks" role="group" aria-label="People">
-        {people.isPending ? (
+      <SearchInput value={q} onChange={setQ} placeholder="Search by name or email" fullWidth autoFocus />
+      {people.isPending ? (
+        <div className="mt-12">
           <SkeletonRows rows={3} />
-        ) : cands.length ? (
-          cands.map((p) => {
+        </div>
+      ) : cands.length ? (
+        <div className="option-list sp-options mt-12" role="group" aria-label="People">
+          {cands.map((p) => {
             const pid = resourceId(p.name);
             return (
-              <div key={p.name} className="sp-pick">
-                <Checkbox isSelected={sel.includes(pid)} onChange={(on) => setSel(on ? [...sel, pid] : sel.filter((x) => x !== pid))} className="checkbox">
-                  <Checkbox.Content className="checkbox__label">
-                    <Checkbox.Control>
-                      <Checkbox.Indicator />
-                    </Checkbox.Control>
+              <Checkbox
+                key={p.name}
+                className="checkbox"
+                isSelected={sel.includes(pid)}
+                onChange={(on) => {
+                  setErr("");
+                  setSel(on ? [...sel, pid] : sel.filter((x) => x !== pid));
+                }}
+              >
+                <Checkbox.Content className="checkbox__label">
+                  <Checkbox.Control>
+                    <Checkbox.Indicator />
+                  </Checkbox.Control>
+                  <span className="sp-opt">
                     <UserAvatar name={p.displayName ?? p.email ?? ""} size="sm" />
-                    <span className="stack sp-pick__text">
-                      <span className="medium truncate" translate="no">
+                    <span className="sp-opt__text">
+                      <span className="sp-opt__title truncate" translate="no">
                         {p.displayName}
                       </span>
-                      <span className="t-xs muted truncate">{p.email}</span>
+                      <span className="sp-opt__meta truncate">{p.email}</span>
                     </span>
-                  </Checkbox.Content>
-                </Checkbox>
-              </div>
+                  </span>
+                </Checkbox.Content>
+              </Checkbox>
             );
-          })
-        ) : (
-          <p className="t-sm muted sp-picks__empty">{needle ? "No one matches. Try another name." : "Everyone in the workspace is already here."}</p>
-        )}
+          })}
+        </div>
+      ) : (
+        <p className="t-sm muted sp-options__empty">{needle ? "No one matches. Try another name." : "Everyone in the workspace is already here."}</p>
+      )}
+      {err ? (
+        <div className="field-error mt-8" role="alert">
+          <CircleAlert className="i" aria-hidden />
+          <span>{err}</span>
+        </div>
+      ) : null}
+      <div className="field sp-role-field mt-16">
+        <span className="label">Add as</span>
+        <Segmented label="Add as" value={role} onChange={setRole} options={type.roles.map(([value, label]) => ({ value, label }))} />
       </div>
-      <Select value={role} onChange={(v) => setRole(v as SpaceRole)}>
-        <Label>Role</Label>
-        <Select.Trigger>
-          <Select.Value />
-          <Select.Indicator />
-        </Select.Trigger>
-        <Select.Popover>
-          <ListBox>
-            {type.roles.map(([key, l]) => (
-              <ListBox.Item key={key} id={key} textValue={l}>
-                {l}
-                <ListBox.ItemIndicator />
-              </ListBox.Item>
-            ))}
-          </ListBox>
-        </Select.Popover>
-      </Select>
     </KnowledgeModal>
   );
 }

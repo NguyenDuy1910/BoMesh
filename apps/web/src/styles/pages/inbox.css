@@ -1,0 +1,31 @@
+/* Inbox (modules/inbox InboxBell, preview features/inbox.js): the bell's popover (a bottom sheet on phones) — "Needs you"
+   then "Updates". Rows are ListItems; this file sets the edge-to-edge rows, the group labels, the message layout (one body
+   line + time) and quiet read rows. Dismiss uses .reveal-on-hover. Prefix: inbox-.
+   The anchored panel is the preview's `.popover` anatomy under `.shell-popover` (HeroUI ships its own `.popover`). */
+.shell-popover { position: fixed; z-index: var(--z-popover); display: flex; flex-direction: column; max-height: min(600px, calc(100dvh - 72px)); border-radius: var(--radius-2xl); background: var(--overlay); color: var(--overlay-foreground); box-shadow: var(--overlay-shadow); animation: menuin 140ms var(--ease-out); overflow: hidden; }
+.shell-popover:focus { outline: none; }
+@keyframes menuin { from { opacity: 0; transform: translateY(-4px) scale(0.98); } }
+.shell-popover .popover__header { display: flex; align-items: center; gap: 8px; padding: 12px 12px 4px 16px; }
+.shell-popover .popover__title { flex: 1 1 auto; min-width: 0; font-size: 14px; line-height: 20px; font-weight: 600; }
+.shell-popover .popover__body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 0 4px; }
+.shell-popover .popover__footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--separator); }
+.shell-popover--sheet { inset: auto 0 0 0; width: 100%; max-width: none; max-height: min(80dvh, calc(100dvh - 48px)); border-radius: var(--radius-3xl) var(--radius-3xl) 0 0; animation: sheetup var(--dur-slow) var(--ease-out-fluid); }
+.shell-popover--sheet .popover__header { padding: 16px 20px 4px; }
+.shell-popover--sheet .popover__footer { padding: 12px 20px calc(12px + env(safe-area-inset-bottom)); }
+.shell-popover-backdrop { position: fixed; inset: 0; z-index: calc(var(--z-popover) - 1); background: var(--backdrop); animation: fade var(--dur); }
+
+.inbox-pop .list { background: transparent; box-shadow: none; border-radius: 0; overflow: visible; }
+.inbox-pop .item { padding: 10px 16px; gap: 10px; align-items: flex-start; }
+.inbox-pop .item__lead { margin-top: 2px; }
+.inbox-pop .item__trail { align-self: flex-start; }
+.inbox-pop .item__title .truncate { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.inbox-decide { display: flex; gap: 8px; margin-top: 8px; }
+.inbox-pop .empty-state { padding: var(--space-6) var(--space-4); }
+.inbox-pop .skeleton-rows__body { margin: 8px 16px; }
+.inbox-pop__group + .inbox-pop__group { margin-top: 4px; border-top: 1px solid var(--separator); }
+.inbox-pop__label { padding: 10px 16px 2px; font-size: var(--text-xs); line-height: var(--leading-xs); font-weight: var(--weight-medium); color: var(--muted); }
+.inbox-line { display: block; }
+.inbox-time { display: block; margin-top: 2px; font-size: var(--text-xs); line-height: var(--leading-xs); color: var(--muted); }
+.inbox-item:not(.item--unread) .item__title { font-weight: var(--weight-regular); }
+.shell-popover--sheet .inbox-pop .item { padding: 12px 20px; }
+.shell-popover--sheet .inbox-pop__label { padding: 12px 20px 2px; }

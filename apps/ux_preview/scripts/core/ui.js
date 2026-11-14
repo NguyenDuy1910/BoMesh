@@ -30,7 +30,7 @@ function badge(n, { tone = 'default', label = '', dot = false, cls = '' } = {}) 
   return dot ? `<span class="${cx('badge-dot', 'badge-dot--' + tone, cls)}" role="img" aria-label="${esc(aria)}"></span>`
     : `<span class="${cx('badge', tone !== 'default' && 'badge--' + tone, cls)}" aria-label="${esc(aria)}">${n > 99 ? '99+' : fmtNum(n)}</span>`;
 }
-/** Does typed text read like a question? Then Ask AI ranks first; otherwise Search documents does (Home box, ⌘K). */
+/** Does typed text read like a question? Then Ask AI ranks first; otherwise Search documents does (⌘K). */
 const QUESTION_RE = /^(how|what|when|where|why|who|whom|whose|which|can|could|would|do|does|did|is|are|was|were|should|tell me|explain|summari[sz]e|compare|show me|help me|làm sao|làm thế nào|tại sao|vì sao|khi nào|bao giờ|ở đâu|ai|cái gì|thế nào|như thế nào|có nên|giải thích|tóm tắt|so sánh)(\s|$)/i;
 const isQuestion = q => { const s = String(q || '').trim(); return !!s && (/[?？]$/.test(s) || QUESTION_RE.test(s) || /\s(không|chưa|gì|nào|sao)$/i.test(s)); };
 
@@ -43,7 +43,7 @@ function chip(label, o = {}) {
 }
 /* Status vocabulary — one place, plain language. Healthy steady states are quiet (tertiary). */
 const STATUS = {
-  doc: { ready: ['success', 'Ready', 'tertiary'], processing: ['accent', 'Processing', 'soft', 1], pending: ['default', 'Waiting'], failed: ['danger', 'Failed'], outdated: ['warning', 'Needs update'], unsupported: ['default', 'Not searchable'] },
+  doc: { ready: ['success', 'Processed', 'tertiary'], processing: ['accent', 'Processing', 'soft', 1], pending: ['default', 'Not processed'], failed: ['danger', 'Processing failed'], outdated: ['warning', 'Outdated'], unsupported: ['default', 'Not supported'] },
   source: { healthy: ['success', 'Up to date', 'tertiary'], syncing: ['accent', 'Syncing', 'soft', 1], failed: ['danger', 'Sync failed'], reconnect: ['danger', 'Reconnect needed'], paused: ['default', 'Paused'] },
   account: { connected: ['success', 'Connected', 'tertiary'], expired: ['danger', 'Reconnect needed'], error: ['warning', 'Can’t reach'], disabled: ['default', 'Disabled'] },
   run: { queued: ['accent', 'Queued', 'soft', 1], running: ['accent', 'In progress', 'soft', 1], completed: ['success', 'Completed', 'tertiary'], partial: ['warning', 'Completed with issues'], failed: ['danger', 'Failed'], cancelled: ['default', 'Cancelled'] },
@@ -85,13 +85,40 @@ function appIcon(key, size = '') { const px = size === 'lg' ? 24 : size === 'sm'
 const kbd = k => `<kbd class="kbd">${esc(k)}</kbd>`;
 const itemIcon = (icon, tone = '', size = '') => `<span class="item-icon ${tone ? 'item-icon--' + tone : ''} ${size ? 'item-icon--' + size : ''}" aria-hidden="true">${ic(icon)}</span>`;
 
-/* ── Layout ── */
-/** Page header: title, one-line description, primary actions on the right. */
-function pageHeader({ title, desc = '', actions = '', extra = '', lead = '' }) {
-  return `<header class="page-header">${lead ? `<div class="page-header__lead">${lead}</div>` : ''}<div class="page-header__body"><div class="page-header__title-row"><h1 class="page-header__title">${esc(title)}</h1>${extra}</div>${desc ? `<p class="page-header__description">${desc}</p>` : ''}</div>${actions ? `<div class="page-header__actions">${actions}</div>` : ''}</header>`;
+/* ── Layout: AppShell (core/shell.js) = sidebar + main; main = CompactHeader (one top row, shell-owned) + the scrolling page.
+   A page never draws its own header row: it declares its title, chip, meta and actions with pageHeader(), its parents with
+   crumbs(), and its section tabs with contextBar(); the shell renders the one top row from them. ── */
+/** Declare the page's header. Two shapes:
+    - Index pages (no `lead`): nothing renders in the page. The title (H1), its chip (`extra`), a short status line (`meta`;
+      `desc` is accepted as the same) and the page's actions sit in the top row, so content starts right under it.
+    - Entity pages (`lead`: a space, collection, reading list, request…): a compact identity block opens the page (mark, H1,
+      `desc` as its meta lines); the top row keeps the parent trail and the actions, and shows the title once the block
+    scrolls away. `heading` replaces the hero's plain H1 when the title is interactive (e.g. rename). `inPage: true` is for
+    surfaces that draw their own identity block with the H1 (the reader): the top row treats it as a hero but nothing is
+    rendered. Returns the HTML to place first in the page ('' for index pages). */
+function pageHeader({ title, desc = '', meta = '', actions = '', extra = '', lead = '', heading = '', inPage = false }) {
+  S.head = { title, extra, actions, meta: lead || inPage ? '' : meta || desc, hero: !!lead || inPage };
+  if (!lead) return '';
+  return `<header class="page-hero" id="page-hero"><div class="page-hero__lead">${lead}</div><div class="page-hero__body"><div class="page-hero__title-row">${heading || `<h1 class="page-hero__title">${esc(title)}</h1>`}${extra}</div>${desc ? `<div class="page-hero__meta">${desc}</div>` : ''}</div></header>`;
 }
-/** Breadcrumbs shown in the topbar. Call from a page renderer: crumbs([{label, to}, …]). */
+/** Parents of the current page for the top row: crumbs([{label, to}, …, {label: current}]). The last item is the current page;
+    the top row shows the parents as a quiet trail (only the nearest one, as a Back button, on phones). */
 function crumbs(list) { S.crumbs = list; return ''; }
+/** ContextualToolbar: views of ONE thing (an entity's tabs — a space, a collection — or the views of one list, like Work's
+    Mine · Shared) in one row that sticks under the top row. An area's sections are never tabs: they are sidebar sub-rows
+    (pageSections). The only sticky row a page adds; filters and search stay in the content. */
+function contextBar(nav, tools = '') {
+  return `<div class="ctx-bar">${nav}${tools ? `<div class="ctx-bar__tools">${tools}</div>` : ''}</div>`;
+}
+/** An area's sections as sidebar sub-rows of its row (shell navItem `children`): defs [{ id, label, title?, count?, tone? }] for
+    the page at `path`, addressed by ?tab=. The current one is the page's ?tab= (or `fallback`). `section(query)` resolves the
+    page's section; `title` is what the top row shows for it (default: its label). */
+function pageSections(path, defs, fallback = defs[0]?.id) {
+  const of = query => (defs.some(d => d.id === query?.tab) ? query.tab : fallback);
+  const nav = () => { const cur = S.cur, here = cur?.path === path ? of(cur.query) : ''; return defs.map(d => ({ ...d, to: `${path}?tab=${d.id}`, current: d.id === here })); };
+  const title = query => { const d = defs.find(x => x.id === of(query)); return d?.title || d?.label || ''; };
+  return { nav, section: of, title };
+}
 function section(title, body, { desc = '', actions = '', id = '' } = {}) {
   return `<section class="section" ${id ? `id="${id}"` : ''}><div class="section__header"><div class="grow"><h2 class="section__title">${esc(title)}</h2>${desc ? `<p class="section__description">${desc}</p>` : ''}</div>${actions ? `<div class="row gap-8">${actions}</div>` : ''}</div>${body}</section>`;
 }
@@ -171,6 +198,21 @@ function textarea({ id, bind, value = '', placeholder = '', rows = 4, attrs = ''
 function select({ id, bind, value, options, attrs = '', cls = '', change, size, label }) {
   return `<select class="${cx('select', size && 'select--' + size, cls)}" id="${id}" ${bind ? `data-bind="${bind}"` : ''} ${change ? `data-change="${change}"` : ''} ${label ? `aria-label="${esc(label)}"` : ''} ${attrs}>${options.map(o => { const [v, l] = Array.isArray(o) ? o : [o.value, o.label]; return `<option value="${esc(v)}" ${String(v) === String(value) ? 'selected' : ''}>${esc(l)}</option>`; }).join('')}</select>`;
 }
+/** Slider (HeroUI Slider visuals): a label with its value, a track whose filled part shows the value, optional end labels.
+    `input` fires while dragging (keep it light: update in place with setSlider), `change` once released. */
+function slider({ id, value, min = 0, max = 100, step = 1, input, change, label, valueText = '', ends }) {
+  const fill = ((value - min) / (max - min)) * 100;
+  return `<div class="slider"><div class="slider__head"><label class="slider__label" for="${id}">${esc(label)}</label><output class="slider__value num" for="${id}" id="${id}-val">${esc(valueText)}</output></div>`
+    + `<input type="range" class="slider__input" id="${id}" min="${min}" max="${max}" step="${step}" value="${value}" style="--fill:${fill}%" aria-valuetext="${esc(valueText)}" ${input ? `data-input="${input}"` : ''} ${change ? `data-change="${change}"` : ''}>`
+    + `${ends ? `<div class="slider__ends" aria-hidden="true"><span>${esc(ends[0])}</span><span>${esc(ends[1])}</span></div>` : ''}</div>`;
+}
+/** Move a slider's fill and value text in place (while dragging). */
+function setSlider(el, valueText) {
+  const min = +el.min || 0, max = +el.max || 100;
+  el.style.setProperty('--fill', `${((+el.value - min) / (max - min)) * 100}%`);
+  el.setAttribute('aria-valuetext', valueText);
+  const out = document.getElementById(`${el.id}-val`); if (out) out.textContent = valueText;
+}
 function switchCtl({ id, on, act, data, disabled, label }) {
   return `<button type="button" role="switch" class="switch" ${id ? `id="${id}"` : ''} aria-checked="${!!on}" ${label ? `aria-label="${esc(label)}"` : ''} ${act ? `data-act="${act}"` : ''} ${dataAttrs(data)} ${disabled ? 'disabled' : ''}></button>`;
 }
@@ -205,11 +247,13 @@ function swatchPicker({ value, options, act, label = '', labelled = false }) {
 }
 /** Page-section tabs as links (deep-linkable `base?tab=id`, aria-current). variant: primary (pill) | secondary (underline).
     With `act` they are an in-content filter instead: toggle buttons (aria-pressed), not ARIA tabs without panels.
+    `{ sep: true }` draws a quiet divider between groups of tabs (e.g. daily work | setup); `tone` colours an alert count.
     Narrow containers scroll the tabs with an edge fade (syncOverflow in app.js); the current tab is kept in view. */
 function tabs(items, active, base, { variant = 'secondary', act, label = 'Sections' } = {}) {
   return `<nav class="tabs ${variant === 'secondary' ? 'tabs--secondary' : ''}" aria-label="${esc(label)}" data-overflow><div class="tabs__list" ${act ? 'role="group"' : ''}>${items.map(t => {
+    if (t.sep) return '<span class="tabs__sep" aria-hidden="true"></span>';
     const sel = t.id === active;
-    const inner = `${t.icon ? ic(t.icon, 'i-sm') : ''}${esc(t.label)}${t.count != null && t.count !== '' ? (t.alert ? badge(+t.count || 0, { tone: 'accent' }) : `<span class="tabs__count">${fmtNum(t.count)}</span>`) : ''}`;
+    const inner = `${t.icon ? ic(t.icon, 'i-sm') : ''}${esc(t.label)}${t.count != null && t.count !== '' ? (t.alert ? badge(+t.count || 0, { tone: t.tone || 'accent' }) : `<span class="tabs__count">${fmtNum(t.count)}</span>`) : ''}`;
     return act ? `<button type="button" class="tabs__tab" aria-pressed="${sel}" data-act="${act}" data-value="${t.id}">${inner}</button>`
       : `<a class="tabs__tab" href="#${base}?tab=${t.id}" ${sel ? 'aria-current="page"' : ''}>${inner}</a>`;
   }).join('')}</div></nav>`;

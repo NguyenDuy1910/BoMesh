@@ -3,10 +3,12 @@
 import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 
-import { resourceId, type Schema } from "@/lib/api/client";
+import { ApiError, resourceId, type Schema } from "@/lib/api/client";
 import { useWorkspace } from "@/lib/workspace";
+import { spacesListQuery } from "@/modules/spaces/queries";
 
 import {
+  batchGetItems,
   clearRecentItems,
   createReadingList,
   createReadingListEntry,
@@ -29,7 +31,6 @@ import {
   listItems,
   listMaterials,
   listMyContributions,
-  listSpaces,
   testSpacePermissions,
   listReadingListEntries,
   listReadingLists,
@@ -45,6 +46,7 @@ import {
   updateReadingListEntry,
   updateSavedSearch,
   type Item,
+  type ItemView,
   type ItemPermission,
   type ListItemsOptions,
   type ReadingList,
@@ -54,15 +56,17 @@ import {
 } from "./api";
 import { glanceOf, toResource, topicNames, type Glance, type ModelContext, type Resource } from "./model";
 import type { Contribution } from "./api";
+import { useRendition } from "./reader/components/useRendition";
 
 /** Query keys. Every key starts with the workspace ID; mutations invalidate by prefix. */
 export const knowledgeKeys = {
   items: (ws: string) => [ws, "items"] as const,
   item: (ws: string, id: string) => [ws, "items", "one", id] as const,
+  byName: (ws: string, view: ItemView, ids: readonly string[]) => [ws, "items", "byName", view, ids] as const,
   itemPermissions: (ws: string, id: string) => [ws, "items", "permissions", id] as const,
   list: (ws: string, options: ListItemsOptions) => [ws, "items", "list", options] as const,
   search: (ws: string, request: SearchItemsRequest) => [ws, "items", "search", request] as const,
-  bases: (ws: string, showLocked: boolean) => [ws, "items", "bases", showLocked] as const,
+  bases: (ws: string) => [ws, "items", "bases"] as const,
   library: (ws: string) => [ws, "library"] as const,
   saved: (ws: string) => [ws, "library", "saved"] as const,
   recent: (ws: string) => [ws, "library", "recent"] as const,
@@ -95,10 +99,22 @@ export function useTopics() {
   return useQuery({ queryKey: knowledgeKeys.topics(id), queryFn: () => listTopics(id), staleTime: 5 * 60_000 });
 }
 
-/** Root collections ("knowledge bases"); `showLocked` adds discoverable ones the caller can't read (LOCKED). */
-export function useKnowledgeBases({ showLocked = false }: { showLocked?: boolean } = {}) {
+/** Readable roots: the shared `showLocked` list without the LOCKED ones (the same set and order ListItems returns without `showLocked`). */
+const readableBases = (bases: Item[]) => bases.filter((b) => b.access !== "LOCKED");
+
+/**
+ * Root collections (access boundaries); `showLocked` adds discoverable ones the caller can't read (LOCKED).
+ * Both variants share one request (`showLocked=true`), so a page never lists the roots twice.
+ */
+export function useKnowledgeBases({ showLocked = false, enabled = true }: { showLocked?: boolean; enabled?: boolean } = {}) {
   const { id } = useWorkspace();
-  return useQuery({ queryKey: knowledgeKeys.bases(id, showLocked), queryFn: () => listRootCollections(id, { showLocked }), staleTime: 60_000 });
+  return useQuery({
+    queryKey: knowledgeKeys.bases(id),
+    queryFn: () => listRootCollections(id, { showLocked: true }),
+    select: showLocked ? undefined : readableBases,
+    enabled,
+    staleTime: 60_000,
+  });
 }
 
 /** Bases a member may contribute to: readable STANDARD roots that accept contributions. */
@@ -112,25 +128,48 @@ export function useContributionTargets() {
 }
 
 /**
+ * Display names of personal collections: the caller's is "My files"; other members' (readable by
+ * admins) are named after their owner, so two "My files" never look like one collection.
+ */
+export function usePersonalCollectionNames(): ReadonlyMap<string, string> {
+  const { member } = useWorkspace();
+  const bases = useKnowledgeBases();
+  const others = (bases.data ?? []).filter((b) => b.collection?.kind === "PERSONAL" && b.name !== member.personalCollection);
+  const owners = useMemberNames(others.map((b) => b.collection?.owner ?? b.creator));
+  return useMemo(() => {
+    const out = new Map<string, string>();
+    for (const b of others) {
+      const owner = owners.get(b.collection?.owner ?? b.creator ?? "");
+      if (b.name) out.set(b.name, owner ? `${owner}’s files` : "Personal files");
+    }
+    if (member.personalCollection) out.set(member.personalCollection, "My files");
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `bases.data` and `owners` capture `others`
+  }, [bases.data, owners, member.personalCollection]);
+}
+
+/**
  * The resource model for this workspace: `toResource(item)` with document-type labels,
- * topic and base names and the caller's "My files" resolved.
+ * topic and base names and personal collections ("My files", others' files) resolved.
  */
 export function useKnowledgeModel(extraCollections?: ReadonlyMap<string, string>) {
   const { id, member, settings } = useWorkspace();
   const topics = useTopics();
   const bases = useKnowledgeBases();
+  const personal = usePersonalCollectionNames();
   const ctx = useMemo<ModelContext>(() => {
     const collectionNames = new Map<string, string>(extraCollections ?? []);
     for (const b of bases.data ?? []) if (b.name) collectionNames.set(b.name, b.displayName ?? "");
-    if (member.personalCollection) collectionNames.set(member.personalCollection, "My files");
+    for (const [name, label] of personal) collectionNames.set(name, label);
     return {
       workspaceId: id,
       personalCollection: member.personalCollection,
+      personalCollections: new Set(personal.keys()),
       documentTypes: new Map((settings?.documentTypes ?? []).map((t) => [t.key ?? "", t.displayName ?? t.key ?? ""])),
       topicNames: topicNames(topics.data ?? []),
       collectionNames,
     };
-  }, [id, member.personalCollection, settings?.documentTypes, topics.data, bases.data, extraCollections]);
+  }, [id, member.personalCollection, settings?.documentTypes, topics.data, bases.data, extraCollections, personal]);
   const map = useCallback((item: Item, extra?: { contribution?: Contribution | null; verifierName?: string }): Resource => toResource(item, ctx, extra), [ctx]);
   return { ctx, toResource: map, topics: topics.data ?? [], bases: bases.data ?? [] };
 }
@@ -143,7 +182,60 @@ export function useItem(item: string | undefined | null) {
   return useQuery({ queryKey: knowledgeKeys.item(id, itemId), queryFn: () => getItem(id, itemId), enabled: !!itemId });
 }
 
-/** Reader content of a document (elements, page images). Only requested for readable documents. */
+export interface ItemsByName {
+  /** Item name → item, for the ones that loaded. */
+  items: ReadonlyMap<string, Item>;
+  isPending: boolean;
+  isError: boolean;
+  error: unknown;
+  refetch: () => void;
+}
+
+/**
+ * Items for many names at once (saved, recent, Home cards, contribution candidates) in one
+ * ListItems batch read per 35 names, never one GetItem per row. Items the caller can't read are
+ * simply missing from the map. FULL reads seed the `useItem` cache so detail views open
+ * instantly. `reviewerReads`: the names may be contribution candidates the caller reads only
+ * through the reviewer exception, which applies to GetItem alone; those missing from the batch
+ * are then read one by one.
+ */
+export function useItemsByName(
+  names: readonly (string | undefined | null)[],
+  { view = "FULL", reviewerReads = false, enabled = true }: { view?: ItemView; reviewerReads?: boolean; enabled?: boolean } = {},
+): ItemsByName {
+  const { id } = useWorkspace();
+  const qc = useQueryClient();
+  const ids = [...new Set(names.map((n) => resourceId(n)).filter(Boolean))].sort();
+  const query = useQuery({
+    queryKey: knowledgeKeys.byName(id, view, ids),
+    enabled: enabled && ids.length > 0,
+    staleTime: 30_000,
+    queryFn: async () => {
+      const items = await batchGetItems(id, ids, { view });
+      if (reviewerReads) {
+        const found = new Set(items.map((i) => resourceId(i.name)));
+        const read = await Promise.all(
+          ids
+            .filter((i) => !found.has(i))
+            .map((i) => getItem(id, i, view).catch((e: unknown) => (e instanceof ApiError && (e.status === 403 || e.status === 404) ? null : Promise.reject(e)))),
+        );
+        items.push(...read.filter((i): i is Item => !!i));
+      }
+      if (view === "FULL") for (const item of items) qc.setQueryData(knowledgeKeys.item(id, resourceId(item.name)), item);
+      return items;
+    },
+  });
+  const items = useMemo(() => new Map((query.data ?? []).filter((i) => !!i.name).map((i) => [i.name ?? "", i])), [query.data]);
+  return {
+    items,
+    isPending: query.isPending && query.fetchStatus !== "idle",
+    isError: query.isError,
+    error: query.error,
+    refetch: () => void query.refetch(),
+  };
+}
+
+/** Reader content of a document (page images, rendition URL). Only requested for readable documents. */
 export function useItemContent(item: string | undefined | null, { enabled = true }: { enabled?: boolean } = {}) {
   const { id } = useWorkspace();
   const itemId = resourceId(item);
@@ -159,7 +251,11 @@ export function useItemContent(item: string | undefined | null, { enabled = true
 /** What a card preview shows for a resource (sections, first page image, length); `null` while loading or without content. */
 export function useGlance(resource: Resource, { enabled = true }: { enabled?: boolean } = {}): Glance | null {
   const content = useItemContent(resource.name, { enabled: enabled && resource.readable });
-  return useMemo(() => (content.data ? glanceOf(content.data, resource.format) : null), [content.data, resource.format]);
+  const rendition = useRendition(resource.id, content.data);
+  return useMemo(
+    () => (content.data ? glanceOf(rendition.doc, content.data.pageAssets, resource.format) : null),
+    [content.data, rendition.doc, resource.format],
+  );
 }
 
 export function useListItems(options: ListItemsOptions, { enabled = true }: { enabled?: boolean } = {}) {
@@ -295,7 +391,7 @@ export function useSavedSearchMutations() {
   };
 }
 
-/* ═══════════════ Reading lists ("Collections") ═══════════════ */
+/* ═══════════════ Reading lists ═══════════════ */
 
 /** Visible reading lists (AIP-160 `filter`: `audience`, `space`, `owner`, `type`), newest first. */
 export function useReadingLists(filter = "") {
@@ -395,22 +491,23 @@ export interface ItemSpace {
   material?: string;
   /** The caller may pin/unpin materials here (`materials.create` + `.delete`). */
   manageable: boolean;
-  /** The item's knowledge base belongs to this space (`collection.space`); not removable here. */
+  /** The item's collection belongs to this space (`collection.space`); not removable here. */
   viaBase: boolean;
 }
 
 /**
- * Spaces related to an item: where it's pinned as a material, the space of its knowledge base, and
+ * Spaces related to an item: where it's pinned as a material, the space of its collection, and
  * every space whose materials the caller manages. Spaces module only (empty otherwise).
  */
 export function useItemSpaces(item: string | undefined | null, { baseSpace, enabled = true }: { baseSpace?: string; enabled?: boolean } = {}) {
   const { id, hasModule } = useWorkspace();
+  const qc = useQueryClient();
   const itemId = resourceId(item);
   return useQuery({
     queryKey: [id, "spaces", "forItem", itemId, baseSpace ?? ""],
     enabled: enabled && !!itemId && hasModule("spaces"),
     queryFn: async (): Promise<ItemSpace[]> => {
-      const spaces = (await listSpaces(id)).filter((s) => s.state !== "DELETED");
+      const spaces = (await qc.fetchQuery(spacesListQuery(id))).filter((s) => s.state !== "DELETED");
       return Promise.all(
         spaces.map(async (space) => {
           const [granted, materials] = await Promise.all([

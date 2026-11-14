@@ -115,7 +115,7 @@
       readyTimers.delete(w.id);
       if (w.status !== 'new') return;
       w.status = 'active'; delete w.readyAt; persist(); refresh();
-      toast(`${w.name} is ready`, { action: { label: 'View', run: () => goThen('/p/workspaces', () => A['pws-open']({ dataset: { id: w.id } })) } });
+      toast(`${w.name} is ready`, { action: { label: 'Open', run: () => goThen('/p/workspaces', () => A['pws-open']({ dataset: { id: w.id } })) } });
     }, Math.max(0, w.readyAt - Date.now()));
   }
   const TEMPLATE_OPTS = () => Object.entries(TEMPLATES).map(([id, t]) => [id, t.label]);
@@ -162,7 +162,7 @@
       });
     };
     const live = S.pageState === 'live' && !S.navLoading;
-    return `<div class="page">${pageHeader({ title: 'Workspaces', desc: live && all.length ? wsSummary(all) : 'Every customer and team on this deployment.', extra: PREVIEW, actions: btn('Create workspace', { v: 'primary', icon: 'plus', act: 'pws-create' }) })}
+    return `<div class="page page--wide">${pageHeader({ title: 'Workspaces', meta: live && all.length ? wsSummary(all) : '', extra: PREVIEW, actions: btn('Create workspace', { v: 'primary', icon: 'plus', act: 'pws-create' }) })}
       ${gate({ ok: () => toolbar + tbl(), loading: () => skelRows(7), empty: () => emptyState({ icon: 'building', title: 'No workspaces yet', desc: 'Create one for each customer or team. Its first admin sets up the rest.', actions: btn('Create workspace', { icon: 'plus', act: 'pws-create' }), boxed: true }) })}</div>`;
   };
   AFTER.pWorkspaces = () => { if (newId) $('tr.table__row--new')?.scrollIntoView({ block: 'nearest' }); };
@@ -380,7 +380,7 @@
         foot: `<div class="table-foot"><span class="num">${plural(rows.length, 'account')}</span></div>`,
       });
     };
-    return `<div class="page">${pageHeader({ title: 'Users', desc: 'Everyone with a BoMesh account, across all workspaces.', extra: PREVIEW })}
+    return `<div class="page page--wide">${pageHeader({ title: 'Users', extra: PREVIEW })}
       ${gate({ ok: () => toolbar + tbl(), loading: () => skelRows(8), empty: () => emptyState({ icon: 'users', title: 'No accounts yet', desc: 'People appear here once they sign up or are invited to a workspace.', boxed: true }) })}</div>`;
   };
   A['pu-open'] = el => { if (userById(el.dataset.id)) openDrawer('pf-user', { id: el.dataset.id }); };
@@ -421,7 +421,7 @@
       return section('Available to workspaces', `<div class="grid cols-3">${avail.map(availableCard).join('')}</div>`, { desc: 'Workspace admins can connect these as sources. Open one to turn it on or off.' })
         + (asked.length ? section('Requested', `<div class="grid cols-3">${asked.map(requestedCard).join('')}</div>`, { desc: 'Not on this deployment yet. Open one to see who asked.' }) : '');
     };
-    return `<div class="page">${pageHeader({ title: 'Connectors', desc: 'Apps that workspaces can connect.', extra: PREVIEW })}
+    return `<div class="page">${pageHeader({ title: 'Connectors', extra: PREVIEW })}
       ${gate({ ok, loading: () => skelCards(6), empty: () => emptyState({ icon: 'plug', title: 'No connectors installed', desc: 'Connectors appear once they’re part of this deployment.', boxed: true }) })}</div>`;
   };
   /** On/off is reversible (documents stay searchable): at once, with Undo. */
@@ -482,7 +482,7 @@
   const signed = d => `${d >= 0 ? '+' : '−'}${Math.abs(d)}%`;
   P.pUsage = () => {
     const u = ui('pfus', { win: '30' }); const n = +u.win;
-    const header = pageHeader({ title: 'Usage', desc: 'Questions, active people and processed documents across workspaces.', extra: PREVIEW, actions: btn('Export CSV', { icon: 'download', act: 'pf-usage-export' }) });
+    const header = pageHeader({ title: 'Usage', extra: PREVIEW, actions: btn('Export CSV', { icon: 'download', act: 'pf-usage-export' }) });
     const ok = () => {
       const rows = usageRows(n);
       const tot = k => rows.reduce((a, r) => a + r[k], 0);
@@ -534,7 +534,7 @@
     const tools = X.auditLog.toolbar({ uiKey: 'pfa', placeholder: 'Search events', filters, count: live ? plural(rows.length, 'event') : '' });
     const tbl = () => rows.length ? X.auditLog.table({ rows, uiKey: 'pfa', label: 'Audit events', who: pWho, where: e => wsCell(e.ws), open: 'pf-ev-open' })
       : emptyState({ icon: 'search', boxed: true, compact: true, title: 'No events match', desc: 'Try a longer time window or clear the filters.', actions: btn('Reset filters', { act: 'pf-audit-reset' }) });
-    return `<div class="page">${pageHeader({ title: 'Audit log', desc: 'Changes to workspaces, accounts, connectors and indexing. What happens inside a workspace stays in its own Activity.', extra: PREVIEW, actions: X.auditLog.exportActions('pf-audit-export', live) })}
+    return `<div class="page page--wide">${pageHeader({ title: 'Audit log', extra: PREVIEW, actions: X.auditLog.exportActions('pf-audit-export', live) })}
       ${gate({ ok: () => tools + tbl(), loading: () => skelRows(8), empty: () => emptyState({ icon: 'activity', title: 'No events recorded yet', desc: 'Changes to workspaces, accounts, connectors and indexing appear here.', boxed: true }) })}</div>`;
   };
   A['pf-audit-reset'] = () => { X.auditLog.reset('pfa', AUD_FIELDS); refresh(); };
@@ -602,7 +602,7 @@
     })), 'pf-models');
     const incidents = () => `<section class="section" aria-label="Recent incidents">${disclosure({ path: 'pfh.inc', icon: 'check-circle', title: 'Recent incidents', summary: esc(`${plural(INCIDENTS.length, 'incident')} resolved in the last 30 days`),
       body: list(INCIDENTS.map(x => item({ lead: itemIcon('check-circle', 'success', 'sm'), title: esc(x.title), desc: esc(x.impact), meta: `${esc(fmtDate(x.at))} · ${esc(fmtDur(x.dur))}` }))) })}</section>`;
-    return `<div class="page">${pageHeader({ title: 'System health', desc: `Updated ${esc(rel(u.updated).toLowerCase())}`, extra: PREVIEW, actions: btn('Refresh', { icon: 'refresh', act: 'pf-health-refresh', loading: u.busy, disabled: u.busy }) })}
+    return `<div class="page">${pageHeader({ title: 'System health', meta: `Updated ${esc(rel(u.updated).toLowerCase())}`, extra: PREVIEW, actions: btn('Refresh', { icon: 'refresh', act: 'pf-health-refresh', loading: u.busy, disabled: u.busy }) })}
       ${gate({
         ok: () => `<div class="pf-banner">${banner()}</div>${section('Services', services())}${section('AI capabilities', models(), { desc: 'Models are set in the deployment configuration and change on restart.' })}${incidents()}`,
         loading: () => skelRows(7),

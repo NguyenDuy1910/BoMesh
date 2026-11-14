@@ -20,13 +20,13 @@ export function HistoryTab({
   syncs,
   sources,
   connections,
-  bases,
+  collections,
   onOpen,
 }: {
   syncs: UseQueryResult<Sync[]>;
   sources: readonly Source[];
   connections: ReadonlyMap<string, Connection>;
-  bases: ReadonlyMap<string, Item>;
+  collections: ReadonlyMap<string, Item>;
   onOpen: (sync: Sync) => void;
 }) {
   const { params, set } = useParamState();
@@ -51,7 +51,7 @@ export function HistoryTab({
                   {source ? sourceName(source) : "Removed source"}
                 </span>
                 <span className="cell-sub truncate" translate="no">
-                  {source ? (bases.get(source.targetCollection)?.displayName ?? "") : ""}
+                  {source ? (collections.get(source.targetCollection)?.displayName ?? "") : ""}
                 </span>
               </div>
             </div>
@@ -81,14 +81,14 @@ export function HistoryTab({
         cell: (sync) => {
           if (sync.state === "RUNNING") {
             const t = syncTotals(sync);
-            return <SyncProgress value={null} label={`${t.added + t.updated} so far`} />;
+            return <SyncProgress label={`${t.added + t.updated} so far`} />;
           }
           return <span className={sync.failedCount ? "text-warning" : undefined}>{syncDeltaText(sync)}</span>;
         },
       },
       { id: "status", header: "Status", cell: (sync) => <StatusChip kind="run" value={syncStatus(sync)} /> },
     ],
-    [byId, connections, bases],
+    [byId, connections, collections],
   );
 
   const none = <EmptyState icon={History} title="No syncs yet" description="Syncs appear here once a source runs." boxed />;
@@ -101,13 +101,19 @@ export function HistoryTab({
           return { value: id, label: source ? sourceName(source) : "Removed source" };
         });
         const rows = all.filter((s) => (!sourceFilter || resourceId(sourceOfSync(s)) === sourceFilter) && (!status || syncStatus(s) === status));
+        // Filters only once there are enough syncs to need them (or one is in use).
+        const tools = all.length >= 7 || !!(sourceFilter || status);
         return (
           <>
-            <div className="toolbar">
-              <FilterButton label="Source" options={sourceOptions} value={sourceFilter} onChange={(v) => set({ source: v || null, page: null })} />
-              <FilterButton label="Status" options={RUN_STATUS_OPTIONS} value={status} onChange={(v) => set({ status: v || null, page: null })} />
-              <ClearFilters isActive={!!(sourceFilter || status)} onClear={() => set({ source: null, status: null, page: null })} />
-            </div>
+            {tools ? (
+              <div className="toolbar">
+                {sourceOptions.length > 1 || sourceFilter ? (
+                  <FilterButton label="Source" options={sourceOptions} value={sourceFilter} onChange={(v) => set({ source: v || null, page: null })} />
+                ) : null}
+                <FilterButton label="Status" options={RUN_STATUS_OPTIONS} value={status} onChange={(v) => set({ status: v || null, page: null })} />
+                <ClearFilters isActive={!!(sourceFilter || status)} onClear={() => set({ source: null, status: null, page: null })} />
+              </div>
+            ) : null}
             {rows.length ? (
               <DataTable
                 label="Sync history"

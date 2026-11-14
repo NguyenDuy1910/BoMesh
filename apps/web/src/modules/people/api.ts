@@ -82,10 +82,11 @@ export function listGroups(workspace: string): Promise<Group[]> {
   );
 }
 
-export function createGroup(workspace: string, group: { displayName: string; description: string }): Promise<Group> {
+/** `groupId` recreates a deleted group under its old ID (Undo), so grants naming `group:{id}` apply again. */
+export function createGroup(workspace: string, group: { displayName: string; description: string }, groupId?: string): Promise<Group> {
   return call(
     api.POST("/api/v1/workspaces/{workspace}/groups", {
-      params: { path: ws(workspace), query: { requestId: requestId() } },
+      params: { path: ws(workspace), query: { requestId: requestId(), groupId } },
       body: group,
     }),
   );
@@ -121,6 +122,15 @@ export async function removeFromGroup(workspace: string, group: string, member: 
       params: { path: { ...ws(workspace), group: resourceId(group), membership: resourceId(member) } },
     }),
   );
+}
+
+/** A collection's own IAM policy (`items.getIamPolicy`): read before deleting a group so Undo can restore its grants. */
+export function getItemPolicy(workspace: string, item: string): Promise<Policy> {
+  return call(api.POST("/api/v1/workspaces/{workspace}/items/{item}:getIamPolicy", { params: { path: { ...ws(workspace), item: resourceId(item) } }, body: {} }));
+}
+
+export function setItemPolicy(workspace: string, item: string, policy: Policy): Promise<Policy> {
+  return call(api.POST("/api/v1/workspaces/{workspace}/items/{item}:setIamPolicy", { params: { path: { ...ws(workspace), item: resourceId(item) } }, body: { policy } }));
 }
 
 /* ── Roles and permissions ── */

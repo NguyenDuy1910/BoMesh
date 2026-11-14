@@ -1,7 +1,11 @@
 "use client";
 
-import { AlertDialog, Button, Input, Label, TextField } from "@heroui/react";
-import { useState, useSyncExternalStore, type ReactNode } from "react";
+import dynamic from "next/dynamic";
+import { useSyncExternalStore, type ReactNode } from "react";
+
+import { useOpened } from "@/lib/lazy";
+
+const ConfirmDialog = dynamic(() => import("./ConfirmDialog").then((m) => m.ConfirmDialog), { ssr: false });
 
 export interface ConfirmOptions {
   title: string;
@@ -16,16 +20,16 @@ export interface ConfirmOptions {
   typed?: string;
 }
 
-interface Pending extends ConfirmOptions {
+export interface PendingConfirm extends ConfirmOptions {
   id: number;
   resolve: (ok: boolean) => void;
 }
 
-let current: Pending | null = null;
+let current: PendingConfirm | null = null;
 let seq = 0;
 const listeners = new Set<() => void>();
 
-function setCurrent(next: Pending | null) {
+function setCurrent(next: PendingConfirm | null) {
   current = next;
   for (const listener of listeners) listener();
 }
@@ -55,51 +59,13 @@ const subscribe = (listener: () => void) => {
   return () => void listeners.delete(listener);
 };
 
-/** Confirmation dialog host (HeroUI AlertDialog); mount once in the root providers. */
+/** Confirmation dialog host; mount once in the root providers. The dialog loads on the first `confirm()`. */
 export function ConfirmHost() {
   const pending = useSyncExternalStore(
     subscribe,
     () => current,
     () => null,
   );
-  return (
-    <AlertDialog.Backdrop isOpen={pending !== null} onOpenChange={(open) => (open ? undefined : settle(false))} isKeyboardDismissDisabled={false}>
-      <AlertDialog.Container size="sm" placement="auto">
-        <AlertDialog.Dialog className="confirm-dialog">{pending ? <ConfirmBody key={pending.id} pending={pending} /> : null}</AlertDialog.Dialog>
-      </AlertDialog.Container>
-    </AlertDialog.Backdrop>
-  );
-}
-
-function ConfirmBody({ pending }: { pending: Pending }) {
-  const [text, setText] = useState("");
-  const blocked = pending.typed !== undefined && text !== pending.typed;
-  const danger = (pending.tone ?? "danger") === "danger";
-  return (
-    <>
-      <AlertDialog.CloseTrigger aria-label="Close" />
-      <AlertDialog.Header>
-        <AlertDialog.Heading>{pending.title}</AlertDialog.Heading>
-      </AlertDialog.Header>
-      {pending.description || pending.typed ? (
-        <AlertDialog.Body>
-          {pending.description ? <p className="muted">{pending.description}</p> : null}
-          {pending.typed ? (
-            <TextField className="mt-16" value={text} onChange={setText} autoFocus>
-              <Label>{`Type ${pending.typed} to confirm`}</Label>
-              <Input className="mono" autoComplete="off" spellCheck={false} />
-            </TextField>
-          ) : null}
-        </AlertDialog.Body>
-      ) : null}
-      <AlertDialog.Footer>
-        <Button variant="tertiary" onPress={() => settle(false)}>
-          {pending.cancelLabel ?? "Cancel"}
-        </Button>
-        <Button variant={danger ? "danger" : "primary"} isDisabled={blocked} onPress={() => settle(true)} autoFocus={!pending.typed}>
-          {pending.confirmLabel ?? "Confirm"}
-        </Button>
-      </AlertDialog.Footer>
-    </>
-  );
+  const opened = useOpened(pending !== null);
+  return opened ? <ConfirmDialog pending={pending} onSettle={settle} /> : null;
 }

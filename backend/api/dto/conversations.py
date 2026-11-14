@@ -45,6 +45,7 @@ class ConversationMessage(ProtoMessage):
     pinned: bool | None = None
     scope: ConversationScopeMessage | None = None
     last_message_time: Timestamp | None = None
+    last_answer_snippet: str | None = None
     create_time: Timestamp | None = None
     update_time: Timestamp | None = None
     delete_time: Timestamp | None = None
@@ -77,6 +78,7 @@ def conversation_message(record: ConversationRecord) -> ConversationMessage:
             collections=list(record.scope_collections), spaces=list(record.scope_spaces)
         ),
         last_message_time=record.last_message_at,
+        last_answer_snippet=record.last_answer_snippet,
         create_time=record.created_at,
         update_time=record.updated_at,
         delete_time=record.deleted_at,

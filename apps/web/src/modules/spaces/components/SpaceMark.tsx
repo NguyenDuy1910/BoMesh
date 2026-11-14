@@ -7,7 +7,7 @@ import { useOptionalWorkspace } from "@/lib/workspace";
 
 import { spaceType, type Space } from "../types";
 
-/** Space colours are data, like knowledge base marks (preview `COLORS`); the API has no colour, so one is picked from the space ID. */
+/** Space colours are data, like collection marks (preview `COLORS`); the API has no colour, so one is picked from the space ID. */
 const COLORS = ["#2F6FB5", "#0E7C66", "#4E6B2E", "#B4467A", "#6B4FBF", "#C2620F", "#1F7A8C", "#A23B3B"];
 
 /** A space's colour (SpaceMark tile, sidebar and work-tag dots). */

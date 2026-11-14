@@ -154,7 +154,7 @@ export const PERMISSION_GROUPS: readonly PermissionGroup[] = [
     ],
   },
   {
-    group: "People & access",
+    group: "People",
     items: [
       {
         id: "user.manage",
@@ -189,7 +189,7 @@ export const PERMISSION_GROUPS: readonly PermissionGroup[] = [
       { id: "knowledge.contribute", title: "Contribute documents for review", permissions: crud("contributions", ["create", "get", "list", "withdraw", "resubmit", "delete"]) },
       {
         id: "knowledge.manage",
-        title: "Create knowledge bases; review and publish what is submitted to bases they own",
+        title: "Create collections; review and publish what is submitted to collections they own",
         permissions: [
           ...crud("items", ["create", "update", "move", "publish", "verify", "delete", "undelete", "get", "getIamPolicy", "setIamPolicy"]),
           ...crud("itemLinks", ["create", "delete", "get", "list"]),
@@ -303,8 +303,6 @@ export function joinNames(names: readonly string[]): string {
   return names.length <= 2 ? names.join(" and ") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
-export const firstName = (name: string | undefined) => String(name || "").split(" ")[0];
-
 /** Group name validation (create and rename). */
 export function groupNameError(name: string, others: readonly string[]): string {
   const n = name.trim();
@@ -321,12 +319,25 @@ export function roleNameError(name: string, others: readonly string[]): string {
   return "";
 }
 
-/** Plain words for a collection role on a knowledge base. */
-export const CAN: Record<string, string> = {
-  "roles/collectionOwner": "Can manage",
-  "roles/collectionEditor": "Can edit",
-  "roles/collectionViewer": "Can view",
+/** Collection role words, one map product-wide (preview `KB_ROLES`): Viewer · Editor · Owner. */
+export const ACCESS_LABEL: Readonly<Record<string, string>> = {
+  "roles/collectionOwner": "Owner",
+  "roles/collectionEditor": "Editor",
+  "roles/collectionViewer": "Viewer",
 };
+
+/** List tools (search, filters, bulk) appear from 7 rows, or while a filter is set (preview core `needsTools`). */
+export const needsTools = (rows: number, filtered: boolean) => rows >= 7 || filtered;
+
+/** Roles `principal` holds in `policy` (a collection's own grants). */
+export const rolesOf = (policy: PolicyLike, principal: string): string[] => (policy.bindings ?? []).filter((b) => b.members.includes(principal)).map((b) => b.role);
+
+/** `policy` with `principal` added to each of `roles` (Undo of a group delete restores its collection grants). */
+export function withGrants(policy: PolicyLike, principal: string, roles: readonly string[]): PolicyLike {
+  const bindings = (policy.bindings ?? []).map((b) => (roles.includes(b.role) && !b.members.includes(principal) ? { ...b, members: [...b.members, principal] } : b));
+  for (const role of roles) if (!bindings.some((b) => b.role === role)) bindings.push({ role, members: [principal] });
+  return { ...policy, bindings };
+}
 /** Most capable collection role among `roles`, or null. */
 export function topCollectionRole(roles: readonly string[] | undefined): string | null {
   return ["roles/collectionOwner", "roles/collectionEditor", "roles/collectionViewer"].find((r) => roles?.includes(r)) ?? null;

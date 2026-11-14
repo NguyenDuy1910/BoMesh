@@ -7,19 +7,28 @@
 .auth--single .auth__form-inner.au-ws { max-width: 520px; }
 
 .au-google svg { flex: none; }
+/* Web: the Google Identity Services button host keeps its height while it loads */
+.au-google { min-height: 40px; }
 .au-or { display: flex; align-items: center; gap: 12px; margin: 20px 0; color: var(--muted); font-size: 12px; }
 .au-or::before, .au-or::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--separator); }
 
 .au-pw > .input { padding-left: 12px; }
+/* Web: HeroUI InputGroup suffix around the show/hide button */
 .au-pw .input-group__suffix { padding: 0 4px 0 0; }
 .au-forgot { margin: 8px 0 20px; font-size: 13px; }
 .au-form-error { margin-bottom: 16px; }
 .au-foot { margin-top: 24px; text-align: center; font-size: 13px; color: var(--muted); }
-.au-foot--start { text-align: left; }
 .au-foot .link-button { font-size: 13px; }
-.au-google { min-height: 40px; }
-/* Auth forms space their children with a flex gap; don't stack .field + .field margins on it. */
-.au-page form.gap-16 > .field + .field { margin-top: 0; }
+/* Why the person is on Sign in (?reason=expired); replaces the welcome line. */
+.au-notice { margin: -8px 0 24px; }
+/* Session expired: the sign-in form inside a small dialog over the page that stays open. */
+.au-reauth .au-or { margin: 16px 0; }
+.au-reauth .au-form-error { margin: 16px 0 0; }
+.au-reauth > .button--primary, .au-reauth form > .button--primary { margin-top: 20px; }
+/* Web: the dialog's leading icon (HeroUI Modal.Icon) */
+.au-reauth__icon { background: var(--accent-soft); color: var(--accent-soft-foreground); border-radius: var(--radius-xl); }
+.au-reauth__icon .i { width: 20px; height: 20px; }
+.au-reauth .au-foot { margin-top: 16px; }
 
 /* Password strength */
 .au-strength { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
@@ -43,18 +52,31 @@
 .au-proof__caption { font-size: 15px; line-height: 22px; color: var(--muted); text-align: center; text-wrap: balance; }
 
 /* Workspace chooser */
-.au-chev { color: var(--muted); }
+.au-chev { color: var(--muted); transition: transform var(--dur-fast) var(--ease-out), color var(--dur-fast); }
+@media (hover: hover) { .item[data-act]:hover .au-chev, .item--action:hover .au-chev { color: var(--foreground); transform: translateX(2px); } }
 .au-console-mark { background: var(--foreground); color: var(--background); }
+.au-who { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; }
+.au-who__email { color: var(--foreground); overflow-wrap: anywhere; }
+.au-who .link-button { font-size: inherit; }
+.au-group { margin-top: 24px; }
+.au-group__label { margin: 0 0 8px 4px; }
+/* An archived workspace: listed so people know where it went, but not enterable */
+.au-ws-off .item__title { color: var(--muted); }
 
 @container app (max-width: 679px) {
   .au-brand { margin-bottom: 24px; }
   .au-title { margin-bottom: 20px; }
+  .au-ws .item__meta { display: none; }   /* names first; “last opened” is a nice-to-have on phones */
 }
 
 /* Interface-language picker on pages without the app shell. */
 .au-brand { align-items: center; gap: 12px; }
 .lang-picker { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
 .lang-picker .select { width: auto; min-width: 128px; }
+
+/* Web: auth forms space their children with a flex gap; don't stack .field + .field margins on it. */
+.au-page form.gap-16 > .field + .field { margin-top: 0; }
+/* Web: HeroUI Select trigger inside the language picker */
 .lang-picker .select__trigger { min-height: 32px; height: 32px; padding: 0 32px 0 12px; align-items: center; font-size: 13px; }
 .lang-picker .select__value { font-size: 13px; }
 .lang-picker .select__indicator { inset-inline-end: 10px; width: 16px; height: 16px; rotate: none; }

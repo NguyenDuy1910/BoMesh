@@ -2,19 +2,19 @@
 
 import { Button, Description, FieldError, Label, TextArea, TextField } from "@heroui/react";
 import { useQueryClient } from "@tanstack/react-query";
-import { CircleCheck, Pencil, Upload, X } from "lucide-react";
+import { Check, MessageSquarePlus, Pencil, Upload, X } from "lucide-react";
 import { useRef, useState } from "react";
 
-import { EmptyState, ErrorState, IconButton, List, ListItem, SkeletonRows, toast } from "@/components/ui";
+import { IconButton, List, ListItem, Section, Tip, toast } from "@/components/ui";
 import { errorMessage } from "@/lib/api/client";
 import { useWorkspace } from "@/lib/workspace";
 import { deleteItem, uploadDocument } from "@/modules/knowledge/api";
-import { openContribute } from "@/modules/knowledge/components/Contribute";
-import { KnowledgeModal } from "@/modules/knowledge/components/KnowledgeModal";
-import { useItemPermissions, useKnowledgeModel } from "@/modules/knowledge/queries";
+import { openContribute } from "@/modules/knowledge/components/contribute-store";
+import { useItemPermissions, useKnowledgeBases } from "@/modules/knowledge/queries";
 import { createIngestionRun } from "@/modules/curation/api";
-import { PanelCard } from "@/modules/curation/components/parts";
 import { useInvalidateCuration } from "@/modules/curation/queries";
+import { Dialog } from "@/modules/people/components/Dialog";
+import { MoreMenu } from "@/modules/people/components/MoreMenu";
 
 import { dismissGap, reopenGap, type KnowledgeGap } from "../api";
 import { overviewKeys, useGaps } from "../queries";
@@ -29,21 +29,25 @@ const WHY: Readonly<Record<string, string>> = {
 /** The FAQ document an answer becomes. */
 const faqName = (q: string) => `FAQ — ${q.trim().replace(/[?？.\s]+$/, "").slice(0, 70)}.md`;
 
-/** Knowledge gaps (preview `gapsCard`): the most asked questions knowledge couldn't answer well. */
+/**
+ * Knowledge gaps (preview `gapsSection`): frequent questions knowledge couldn't answer well, one fix each
+ * (Answer it), the rest in ⋯. Hidden when there are none.
+ */
 export function KnowledgeGaps() {
   const { id: ws } = useWorkspace();
   const qc = useQueryClient();
   const gaps = useGaps();
+  const bases = useKnowledgeBases({ showLocked: true });
   const [answering, setAnswering] = useState<KnowledgeGap | null>(null);
   const refresh = () => void qc.invalidateQueries({ queryKey: overviewKeys.gaps(ws) });
+  const baseName = new Map((bases.data ?? []).map((b) => [b.name ?? "", b.displayName ?? ""]));
 
   const dismiss = async (g: KnowledgeGap) => {
     try {
       await dismissGap(ws, g.name ?? "");
       refresh();
       toast("Gap dismissed", {
-        undo: () =>
-          void reopenGap(ws, g.name ?? "").then(refresh, (error: unknown) => toast(errorMessage(error), { tone: "danger" })),
+        undo: () => void reopenGap(ws, g.name ?? "").then(refresh, (error: unknown) => toast(errorMessage(error), { tone: "danger" })),
       });
     } catch (error) {
       toast(errorMessage(error), { tone: "danger" });
@@ -51,80 +55,71 @@ export function KnowledgeGaps() {
   };
 
   const top = [...(gaps.data ?? [])].sort((a, b) => (b.askCount ?? 0) - (a.askCount ?? 0)).slice(0, 4);
+  if (!top.length) return null;
   return (
-    <PanelCard title="Knowledge gaps" description="Frequent questions knowledge couldn’t answer well.">
-      {gaps.isPending ? (
-        <SkeletonRows rows={3} />
-      ) : gaps.isError ? (
-        <ErrorState error={gaps.error} onRetry={() => void gaps.refetch()} boxed={false} />
-      ) : top.length ? (
-        <List plain className="ov-gaps">
-          {top.map((g) => (
-            <GapRow key={g.name} gap={g} onDismiss={() => void dismiss(g)} onAnswer={() => setAnswering(g)} />
-          ))}
-        </List>
-      ) : (
-        <EmptyState icon={CircleCheck} tone="success" compact title="No gaps this week" description="Frequent questions found good answers." />
-      )}
-      <AnswerGapDialog gap={answering} onClose={() => setAnswering(null)} />
-    </PanelCard>
+    <Section title="Knowledge gaps">
+      <List className="ov-attn ov-gaps">
+        {top.map((g) => (
+          <GapRow key={g.name} gap={g} base={baseName.get(g.suggestedCollection ?? "") ?? ""} onDismiss={() => void dismiss(g)} onAnswer={() => setAnswering(g)} />
+        ))}
+      </List>
+      {answering ? <AnswerForm key={answering.name} gap={answering} base={baseName.get(answering.suggestedCollection ?? "") || "the collection"} onClose={() => setAnswering(null)} /> : null}
+    </Section>
   );
 }
 
-function GapRow({ gap: g, onDismiss, onAnswer }: { gap: KnowledgeGap; onDismiss: () => void; onAnswer: () => void }) {
-  const { ctx } = useKnowledgeModel();
-  const kb = g.suggestedCollection ? (ctx.collectionNames?.get(g.suggestedCollection) ?? "") : "";
+function GapRow({ gap: g, base, onDismiss, onAnswer }: { gap: KnowledgeGap; base: string; onDismiss: () => void; onAnswer: () => void }) {
   const perms = useItemPermissions(g.suggestedCollection);
-  const edit = !!g.suggestedCollection && perms.can("items.create");
-  const why = WHY[g.reason ?? ""] ?? "";
+  const edit = Boolean(g.suggestedCollection) && perms.can("items.create");
   return (
     <ListItem
       lead={
-        <span className="ov-gap-n" title="Times asked">
-          {g.askCount ?? 0}×
-        </span>
+        <Tip content="Times asked">
+          <span className="ov-gap-n">{g.askCount ?? 0}×</span>
+        </Tip>
       }
       title={<span translate="no">“{g.question}”</span>}
       description={
-        <>
-          <span className="ov-line">{[kb, why].filter(Boolean).join(" · ")}</span>
-          <span className="ov-gap-actions">
-            {edit ? (
-              <Button variant="secondary" size="sm" onPress={onAnswer}>
-                <Pencil className="i" aria-hidden />
-                Answer it
-              </Button>
-            ) : null}
-            <Button variant="ghost" size="sm" onPress={() => openContribute(g.suggestedCollection ? { collection: g.suggestedCollection } : {})}>
-              <Upload className="i" aria-hidden />
-              Add documents
-            </Button>
-          </span>
-        </>
+        <span className="ov-line">
+          {base ? <span translate="no">{base}</span> : null}
+          {base && WHY[g.reason ?? ""] ? " · " : null}
+          {WHY[g.reason ?? ""]}
+        </span>
       }
-      actions={<IconButton icon={X} tip="Dismiss" size="sm" onPress={onDismiss} />}
+      actions={
+        edit ? (
+          <>
+            <Button variant="secondary" size="sm" onPress={onAnswer}>
+              <Pencil className="i" aria-hidden />
+              Answer it
+            </Button>
+            <MoreMenu
+              actions={[
+                { id: "contribute", label: "Contribute", icon: Upload, onAction: () => openContribute({ collection: g.suggestedCollection }) },
+                { id: "dismiss", label: "Dismiss", icon: X, sep: true, onAction: onDismiss },
+              ]}
+            />
+          </>
+        ) : (
+          <IconButton icon={X} tip="Dismiss" size="sm" onPress={onDismiss} />
+        )
+      }
     />
   );
 }
 
 /**
- * Answer a gap (preview `M['ov-gap-answer']`): the answer becomes a FAQ document in the suggested
- * knowledge base and is published for the assistant to cite; the gap leaves the list.
+ * Answer a gap (preview `M['ov-gap-answer']`): the answer becomes a FAQ document in the suggested collection and is
+ * published for the assistant to cite; the gap leaves the list. Undo removes the document and reopens the gap.
  */
-function AnswerGapDialog({ gap, onClose }: { gap: KnowledgeGap | null; onClose: () => void }) {
-  return gap ? <AnswerForm key={gap.name} gap={gap} onClose={onClose} /> : null;
-}
-
-function AnswerForm({ gap: g, onClose }: { gap: KnowledgeGap; onClose: () => void }) {
+function AnswerForm({ gap: g, base, onClose }: { gap: KnowledgeGap; base: string; onClose: () => void }) {
   const { id: ws } = useWorkspace();
   const qc = useQueryClient();
   const invalidate = useInvalidateCuration();
-  const { ctx } = useKnowledgeModel();
   const [text, setText] = useState("");
   const [tried, setTried] = useState(false);
   const [busy, setBusy] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
-  const kb = ctx.collectionNames?.get(g.suggestedCollection ?? "") ?? "the knowledge base";
   const name = faqName(g.question ?? "");
   const error = tried && !text.trim() ? "Write the answer people should get." : "";
 
@@ -137,10 +132,9 @@ function AnswerForm({ gap: g, onClose }: { gap: KnowledgeGap; onClose: () => voi
     }
     setBusy(true);
     try {
-      const body = `# ${(g.question ?? "").trim()}\n\n${answer}\n`;
       const doc = await uploadDocument(ws, {
         parentItem: g.suggestedCollection ?? "",
-        file: new File([body], name, { type: "text/markdown" }),
+        file: new File([`# ${(g.question ?? "").trim()}\n\n${answer}\n`], name, { type: "text/markdown" }),
         displayName: name.replace(/\.md$/, ""),
         document: { documentType: "faq" },
       });
@@ -149,13 +143,12 @@ function AnswerForm({ gap: g, onClose }: { gap: KnowledgeGap; onClose: () => voi
       void qc.invalidateQueries({ queryKey: overviewKeys.gaps(ws) });
       invalidate();
       onClose();
-      toast(`Saved to ${kb}. People get this answer now.`, {
+      toast(`Saved to ${base}. People get this answer now.`, {
         undo: () =>
           void Promise.all([deleteItem(ws, doc.name ?? ""), reopenGap(ws, g.name ?? "")]).then(
             () => {
               void qc.invalidateQueries({ queryKey: overviewKeys.gaps(ws) });
               invalidate();
-              toast("Answer removed", { tone: "accent" });
             },
             (e: unknown) => toast(errorMessage(e), { tone: "danger" }),
           ),
@@ -168,18 +161,21 @@ function AnswerForm({ gap: g, onClose }: { gap: KnowledgeGap; onClose: () => voi
   };
 
   return (
-    <KnowledgeModal
+    <Dialog
       isOpen
       onClose={onClose}
       guard={busy}
       size="md"
+      icon={MessageSquarePlus}
       title="Answer a frequent question"
+      description="Your answer becomes a short FAQ the assistant cites from now on."
       footer={
         <>
-          <Button variant="tertiary" onPress={onClose} isDisabled={busy}>
+          <Button variant="ghost" onPress={onClose} isDisabled={busy}>
             Cancel
           </Button>
           <Button variant="primary" onPress={() => void save()} isPending={busy}>
+            <Check className="i" aria-hidden />
             Save answer
           </Button>
         </>
@@ -187,19 +183,20 @@ function AnswerForm({ gap: g, onClose }: { gap: KnowledgeGap; onClose: () => voi
     >
       <div className="ov-gap-q">
         <span className="ov-gap-n">{g.askCount ?? 0}×</span>
-        <span translate="no">“{g.question}”</span>
+        <span className="stack gap-2">
+          <span translate="no">“{g.question}”</span>
+          {WHY[g.reason ?? ""] ? (
+            <span className="t-sm muted" style={{ fontWeight: 400 }}>
+              {WHY[g.reason ?? ""]}
+            </span>
+          ) : null}
+        </span>
       </div>
-      <TextField value={text} onChange={setText} isRequired isInvalid={!!error} isDisabled={busy}>
+      <TextField value={text} onChange={setText} isRequired isInvalid={Boolean(error)} isDisabled={busy}>
         <Label>Answer</Label>
         <TextArea ref={ref} rows={6} autoFocus placeholder="A short, direct answer. Name the rule or office it comes from." />
-        {error ? (
-          <FieldError>{error}</FieldError>
-        ) : (
-          <Description>
-            Saved to {kb} as <span className="medium">{name}</span>. The assistant cites it from now on.
-          </Description>
-        )}
+        {error ? <FieldError>{error}</FieldError> : <Description>Saved to {base} as an FAQ document.</Description>}
       </TextField>
-    </KnowledgeModal>
+    </Dialog>
   );
 }

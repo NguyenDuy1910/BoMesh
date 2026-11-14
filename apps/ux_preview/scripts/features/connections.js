@@ -1,16 +1,15 @@
 (() => {
   'use strict';
-  /* Connections: the app accounts BoMesh signs in with. Reconnect, test,
-     connect and disconnect accounts; sources that depend on an account
-     resume or pause through the sync engine (X.src, features/sources.js).
+  /* Accounts: the app sign-ins sources read with — Knowledge Studio → Sources → Accounts (formerly its own
+     Connections page). An account is a source's credential, not a destination: it is created inside the
+     connect-source wizard, fixed from the Sources alert when it expires, and listed here to test, reconnect or
+     disconnect. Sources that depend on an account resume or pause through the sync engine (X.src, sources.js).
      Secrets (tokens) are never stored or shown. */
 
   const appName = key => APPS[key]?.name || 'App';
   const provider = app => APPS[app]?.provider || (app === 'gdrive' ? 'Google' : 'Atlassian');
   const usedBy = acc => D.sources.filter(s => s.account === acc.id);
-  /** Sources an expired account actually stops (paused ones aren't syncing anyway). The same rule as Sources and Overview. */
-  const blockedBy = acc => usedBy(acc).filter(s => s.status === 'reconnect');
-  /** Nav badge: accounts that need signing in again. An expired account is counted here only (Sources links to it). */
+  /** Accounts that need signing in again: counted once, on the Studio's Sources tab, beside failed syncs. */
   X.accBadge = () => (can('source.manage') ? D.accounts.filter(a => a.status === 'expired' || a.status === 'error').length : 0);
   const audit = (action, target) => X.src?.audit(action, target);
   const signInFailed = () => S.pageState === 'error';
@@ -70,30 +69,23 @@
   /* Transient flags never survive a reload. */
   window.addEventListener('load', () => D.accounts.forEach(a => delete a.checking));
 
-  /* ═══════════════ Page ═══════════════ */
-  P.connections = () => {
+  /* ═══════════════ Sources → Accounts ═══════════════ */
+  /** The list only: problems (an expired account) are announced once, above the Sources views, with Reconnect. */
+  function accountsView() {
     X.src?.boot();
-    const live = S.pageState === 'live' && !S.navLoading;
-    const empty = !S.navLoading && (S.pageState === 'empty' || (S.pageState === 'live' && !D.accounts.length));
-    const expired = live ? D.accounts.filter(a => a.status === 'expired') : [];
-    const actions = empty ? '' : btn('Connect account', { v: 'primary', icon: 'plus', act: 'acc-connect' });
-    // One alert per expired account, naming what it stops and the fix.
-    const alerts = expired.map(a => {
-      const used = blockedBy(a), who = used.length === 1 ? used[0].name : used.length ? `${used[0].name} and ${plural(used.length - 1, 'other source')}` : '';
-      return alertBox('danger', `${a.label} access expired`, who ? `${esc(who)} can’t sync until you sign in again as ${esc(a.user)}. Synced documents stay searchable.` : `Sign in again as ${esc(a.user)}.`, btn('Reconnect', { v: 'secondary', size: 'sm', icon: 'log-in', act: 'acc-reconnect', data: { id: a.id } }));
-    });
-    const none = () => emptyState({ icon: 'key', title: 'No accounts connected', desc: 'Connect Google Drive or Confluence so sources can sync.', actions: btn('Connect account', { v: 'primary', icon: 'plus', act: 'acc-connect' }), boxed: true });
-    const body = gate({
+    const none = () => emptyState({ icon: 'key', title: 'No accounts yet', desc: 'An account is added the first time you add a source: sign in once, then pick what to sync.', actions: btn('Add source', { v: 'primary', icon: 'plus', act: 'src-connect' }), boxed: true });
+    return gate({
       loading: () => skelRows(3),
       empty: none,
       ok: () => {
         if (!D.accounts.length) return none();
         const head = th('Account') + th('Status') + th('Used by') + th('Last checked') + th('<span class="sr-only">Actions</span>', 'table__column--actions');
-        return table({ label: 'Connected accounts', head, rows: D.accounts.map(accRow) });
+        const bar = `<div class="toolbar"><div class="toolbar__end">${btn('Connect account', { v: 'ghost', size: 'sm', icon: 'plus', act: 'acc-connect' })}</div></div>`;
+        return bar + table({ label: 'Connected accounts', head, rows: D.accounts.map(accRow) });
       },
     });
-    return `<div class="page">${pageHeader({ title: 'Connections', desc: 'Accounts BoMesh uses to read your apps.', actions })}${alerts.length ? `<div class="stack gap-8 mb-16">${alerts.join('')}</div>` : ''}${body}</div>`;
-  };
+  }
+  X.acc.view = accountsView;
   function accRow(a) {
     const used = usedBy(a);
     const st = a.checking ? `<span class="row gap-6 t-sm muted">${spinner('sm')}Checking…</span>` : status('account', a.status);
@@ -113,12 +105,12 @@
     const test = { label: 'Test connection', icon: 'refresh', disabled: a.checking, run: () => A['acc-test']({ dataset: { id: a.id } }) };
     return [
       ...(expired ? [reconnect, test] : [test, reconnect]),
-      { label: 'Connect a source', icon: 'plug', disabled: a.status !== 'connected', run: () => X.src.openWizard({ app: a.app, acc: a.id }) },
+      { label: 'Add source with this account', icon: 'plug', disabled: a.status !== 'connected', run: () => X.src.openWizard({ app: a.app, acc: a.id }) },
       { sep: true },
       { label: 'Disconnect', icon: 'trash', danger: true, run: () => A['acc-disconnect']({ dataset: { id: a.id } }) },
     ];
   };
-  A['acc-sources'] = el => { const a = accById(el.dataset.id); if (!a) return; Object.assign(ui('srcList', {}), { q: a.label, status: '', page: 1 }); go('/sources'); };
+  A['acc-sources'] = el => { const a = accById(el.dataset.id); if (!a) return; Object.assign(ui('srcList', {}), { q: a.label, status: '', page: 1 }); go(studioHref('sources')); };
   A['acc-test'] = async el => {
     const a = accById(el.dataset.id); if (!a || a.checking) return;
     a.checking = true; refresh(); await sleep(1000);
@@ -173,7 +165,7 @@
     if (signInFailed()) { p.phase = 'error'; p.guard = false; refreshLayer(); return; }
     const acc = accById(p.id); closeModal(); if (!acc) return;
     const fixed = reconnect(acc);
-    toast(reconnectMsg(acc, fixed), fixed.length ? { action: { label: 'View', run: () => X.src.open(fixed[0].id) } } : {});
+    toast(reconnectMsg(acc, fixed), fixed.length ? { action: { label: 'Open', run: () => X.src.open(fixed[0].id) } } : {});
     refresh();
   };
   A['acc-rc-cancel'] = () => { const p = S.modal?.props; if (!p) return; p.t = null; p.phase = 'idle'; p.guard = false; refreshLayer(); };
@@ -228,7 +220,7 @@
     closeModal(); S.ui.accNew = null;
     const s = srcById(f.src);
     if (s) X.src.attach(s, acc);
-    else toast(`Connected ${acc.label}`, { action: { label: 'Connect source', run: () => X.src.openWizard({ app: acc.app, acc: acc.id }) } });
+    else toast(`Connected ${acc.label}`, { action: { label: 'Add source', run: () => X.src.openWizard({ app: acc.app, acc: acc.id }) } });
     refresh();
   };
 })();

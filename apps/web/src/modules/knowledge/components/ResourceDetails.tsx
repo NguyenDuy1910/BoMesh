@@ -14,11 +14,14 @@ import { useItem, useItemSpaces, useKnowledgeModel, useMember } from "../queries
 import { useSourceApp, SourceIcon } from "./SourceIcon";
 import { TrustChip, useTrust } from "./TrustChip";
 
-/** Who can read documents in a knowledge base (preview `X.whoCanSee`): from its IAM policy when the caller may read it. */
-export function useWhoCanSee(resource: Resource): { icon: LucideIcon; label: string } {
+/**
+ * Who can read the documents of a collection (preview `X.whoCanSee`): from its IAM policy when the caller
+ * may read it (owners), else a plain "People with access to …". `personal` = the caller's My files.
+ */
+export function useWhoCanSeeCollection(collection: { id: string; displayName?: string; personal?: boolean } | null | undefined): { icon: LucideIcon; label: string } {
   const { id, workspace } = useWorkspace();
-  const baseId = resource.base?.id ?? "";
-  const base = useItem(resource.isPersonal ? null : baseId);
+  const baseId = collection && !collection.personal ? collection.id : "";
+  const base = useItem(baseId || null);
   const canRead = base.data?.access === "OWNER";
   const policy = useQuery({
     queryKey: [id, "items", "policy", baseId],
@@ -27,11 +30,16 @@ export function useWhoCanSee(resource: Resource): { icon: LucideIcon; label: str
     retry: false,
     staleTime: 60_000,
   });
-  if (resource.isPersonal) return { icon: User, label: "Only you" };
-  const everyone = policy.data?.bindings?.some((b) => b.members.includes("workspaceMembers"));
-  if (everyone) return { icon: Globe, label: `Everyone in ${workspace.displayName}` };
+  if (collection?.personal) return { icon: User, label: "Only you" };
+  if (policy.data?.bindings?.some((b) => b.members.includes("workspaceMembers"))) return { icon: Globe, label: `Everyone in ${workspace.displayName}` };
   if (policy.data) return { icon: Lock, label: "Only people with access" };
-  return { icon: Lock, label: resource.base?.displayName ? `People with access to ${resource.base.displayName}` : "People with access" };
+  const name = collection?.displayName || base.data?.displayName;
+  return { icon: Lock, label: name ? `People with access to ${name}` : "People with access" };
+}
+
+/** Who can read a document: the audience of its collection. */
+export function useWhoCanSee(resource: Resource): { icon: LucideIcon; label: string } {
+  return useWhoCanSeeCollection(resource.base ? { id: resource.base.id, displayName: resource.base.displayName, personal: resource.isPersonal } : null);
 }
 
 export interface ResourceDetailsProps {
@@ -47,7 +55,10 @@ export function ResourceDetails({ resource: r }: ResourceDetailsProps) {
   const who = useWhoCanSee(r);
   const source = useSourceApp(r.source.isUpload ? undefined : r.source.key);
   const creator = useMember(r.source.isUpload ? r.item.creator : null);
-  const base = useItem(hasModule("spaces") && !r.isPersonal ? r.base?.id : null);
+  const base = useItem(r.isPersonal ? null : r.base?.id);
+  // Managers go to the collection's page in Knowledge Studio; readers browse what it holds.
+  const manages = base.data?.access === "OWNER" || base.data?.access === "EDITOR";
+  const collectionHref = r.isPersonal ? "/knowledge/library?tab=files" : manages ? `/studio/collections/${r.base?.id}` : catalogHref({ filters: { kb: [r.base?.id ?? ""] } });
   const spaces = useItemSpaces(r.name, { baseSpace: base.data?.collection?.space, enabled: hasModule("spaces") });
   const linked = (spaces.data ?? []).filter((s) => s.material || s.viaBase);
   const KindIcon = r.kindMeta.icon;
@@ -64,7 +75,7 @@ export function ResourceDetails({ resource: r }: ResourceDetailsProps) {
           "Type",
           <span key="t" className="row gap-6">
             <KindIcon className="i i-sm muted" aria-hidden />
-            {r.kindMeta.label}
+            {r.typeLabel}
           </span>,
         ],
         [
@@ -100,15 +111,11 @@ export function ResourceDetails({ resource: r }: ResourceDetailsProps) {
         ],
         ["Owner", owner.data?.displayName ?? (r.owner ? "—" : "No owner")],
         [
-          "Knowledge base",
+          "Collection",
           r.base ? (
-            r.isPersonal ? (
-              "My files"
-            ) : (
-              <NextLink className="link" href={`/knowledge/${r.base.id}`} translate="no">
-                {r.base.displayName || "Knowledge base"}
-              </NextLink>
-            )
+            <NextLink className="link" href={collectionHref} translate={r.base.personal ? undefined : "no"}>
+              {r.isPersonal ? "My files" : r.base.displayName || "Collection"}
+            </NextLink>
           ) : (
             "—"
           ),

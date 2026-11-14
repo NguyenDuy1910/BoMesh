@@ -40,6 +40,10 @@ import {
 import { fmtDate } from "@/lib/format";
 
 import type { Contribution, Item, ItemContent, SearchItemsFacet, SearchItemsRequest, SearchItemsResult, Topic } from "./api";
+import type { DocumentRendition } from "./reader/rendition";
+import { pickTypeLabel, readableTitle } from "./title";
+
+export { pickTypeLabel, readableTitle };
 
 /**
  * The knowledge resource model (preview `core/catalog.js` + `core/lifecycle.js`)
@@ -107,13 +111,17 @@ export type DocumentTypeLabels = ReadonlyMap<string, string>;
 
 export function kindMeta(kind: string, labels?: DocumentTypeLabels): KindMeta {
   const known = RESOURCE_KINDS[kind];
-  const label = labels?.get(kind) ?? known?.label ?? (kind ? kind[0].toUpperCase() + kind.slice(1).replace(/[_-]+/g, " ") : RESOURCE_KINDS.reference.label);
+  // Types named after a format ("pdf") read as the format ("PDF"), not a humanized key ("Pdf").
+  const label =
+    labels?.get(kind) ??
+    known?.label ??
+    (Object.hasOwn(FORMATS, kind) ? FORMATS[kind as FormatKey].label : kind ? kind[0].toUpperCase() + kind.slice(1).replace(/[_-]+/g, " ") : RESOURCE_KINDS.reference.label);
   return known ? { ...known, label } : { label, plural: label, icon: File, group: "Reference" };
 }
 
 /* ═══════════════ Formats (what the file is, not what it's for) ═══════════════ */
 
-export type FormatKey = "pdf" | "word" | "sheet" | "slides" | "text" | "image" | "archive" | "other";
+export type FormatKey = "pdf" | "word" | "sheet" | "slides" | "text" | "code" | "image" | "archive" | "other";
 
 export const FORMATS: Readonly<Record<FormatKey, { label: string; mimes: readonly string[] }>> = {
   pdf: { label: "PDF", mimes: ["application/pdf"] },
@@ -121,6 +129,7 @@ export const FORMATS: Readonly<Record<FormatKey, { label: string; mimes: readonl
   sheet: { label: "Spreadsheet", mimes: ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-excel", "text/csv", "text/tab-separated-values"] },
   slides: { label: "Slides", mimes: ["application/vnd.openxmlformats-officedocument.presentationml.presentation", "application/vnd.ms-powerpoint"] },
   text: { label: "Text", mimes: ["text/markdown", "text/plain", "text/html", "application/json", "text/x-rst", "application/xml", "application/yaml"] },
+  code: { label: "Code", mimes: ["text/x-python", "text/javascript", "application/javascript", "text/x-java-source", "text/x-c", "text/x-csrc", "text/x-sh", "application/sql", "text/x-sql"] },
   image: { label: "Image", mimes: ["image/png", "image/jpeg"] },
   archive: { label: "Archive", mimes: ["application/zip"] },
   other: { label: "Other", mimes: [] },
@@ -129,7 +138,9 @@ export const FORMATS: Readonly<Record<FormatKey, { label: string; mimes: readonl
 const EXT_FORMAT: Readonly<Record<string, FormatKey>> = {
   pdf: "pdf", doc: "word", docx: "word", xls: "sheet", xlsx: "sheet", csv: "sheet", tsv: "sheet", ppt: "slides", pptx: "slides",
   md: "text", markdown: "text", txt: "text", html: "text", htm: "text", json: "text", rst: "text", xml: "text", yaml: "text", yml: "text",
-  png: "image", jpg: "image", jpeg: "image", zip: "archive",
+  py: "code", js: "code", ts: "code", tsx: "code", jsx: "code", java: "code", c: "code", h: "code", cpp: "code", cs: "code", go: "code", rs: "code", rb: "code", php: "code", sh: "code", sql: "code",
+  png: "image", jpg: "image", jpeg: "image", gif: "image", webp: "image", svg: "image",
+  zip: "archive", tar: "archive", gz: "archive", rar: "archive", "7z": "archive",
 };
 
 export function formatOf(ext: string, mime?: string): FormatKey {
@@ -245,15 +256,15 @@ export interface LifecycleMeta {
 }
 
 export const LIFECYCLE: Readonly<Record<LifecycleKey, LifecycleMeta>> = {
-  analyzing: { tone: "accent", label: "Analyzing", icon: Sparkles, live: true, desc: "Reading the file and suggesting a type, topics and a knowledge base." },
+  analyzing: { tone: "accent", label: "Analyzing", icon: Sparkles, live: true, desc: "Reading the file and suggesting a type, topics and a collection." },
   review: { tone: "accent", label: "In review", icon: Clock, desc: "A reviewer will check it before it’s published." },
   changes: { tone: "warning", label: "Changes requested", icon: Pencil, desc: "A reviewer asked for changes before it can be published." },
-  rejected: { tone: "danger", label: "Not approved", icon: CircleX, desc: "It won’t be published." },
+  rejected: { tone: "danger", label: "Declined", icon: CircleX, desc: "A reviewer declined it. It won’t be published." },
   withdrawn: { tone: "default", label: "Withdrawn", icon: Archive, desc: "You withdrew it. Reviewers don’t see it anymore." },
   queued: { tone: "default", label: "Waiting to publish", icon: Clock, desc: "Approved. It becomes searchable once it’s published." },
   publishing: { tone: "accent", label: "Publishing", icon: LoaderCircle, live: true, desc: "It will be searchable in a few minutes." },
   published: { tone: "success", label: "Published", icon: CircleCheck, quiet: true, desc: "Searchable and available to the assistant." },
-  update: { tone: "warning", label: "Update available", icon: RefreshCw, desc: "The original changed. Answers use the previous version until it’s republished." },
+  update: { tone: "warning", label: "Update available", icon: RefreshCw, desc: "The original changed at its source. Answers use the previous version until you publish the update." },
   failed: { tone: "danger", label: "Couldn’t publish", icon: CircleAlert, desc: "It was approved but couldn’t be made searchable." },
   merged: { tone: "success", label: "Published as new version", icon: CircleCheck, quiet: true, desc: "It replaced the earlier version of the document." },
   stored: { tone: "default", label: "Stored, not searchable", icon: File, desc: "This file type can’t be searched. People can still download it." },
@@ -298,7 +309,7 @@ export const LIFE_GROUPS: ReadonlyArray<readonly [string, string, readonly Lifec
   ["attention", "Needs attention", ["failed", "queued", "update"]],
   ["publishing", "Publishing", ["publishing"]],
   ["published", "Published", ["published", "stored", "merged"]],
-  ["rejected", "Not approved", ["rejected"]],
+  ["rejected", "Declined", ["rejected"]],
   ["unpublished", "Unpublished", ["unpublished"]],
 ];
 
@@ -309,10 +320,12 @@ export interface ModelContext {
   workspaceId: string;
   /** The caller's PERSONAL collection name ("My files"). */
   personalCollection?: string;
+  /** Every personal collection the caller can see (theirs and, for admins, other members'). */
+  personalCollections?: ReadonlySet<string>;
   documentTypes?: DocumentTypeLabels;
   /** Topic name → display name. */
   topicNames?: ReadonlyMap<string, string>;
-  /** Collection name → display name (knowledge bases, `ancestors` facet values, item ancestors). */
+  /** Collection name → display name (root collections, `ancestors` facet values, item ancestors). */
   collectionNames?: ReadonlyMap<string, string>;
 }
 
@@ -340,10 +353,13 @@ export interface Resource {
   format: FormatKey;
   kind: string;
   kindMeta: KindMeta;
+  /** What to call it in one phrase: its purpose when set, else its format. For display only. */
+  typeLabel: string;
   /** Topic names (resource names). */
   topics: string[];
-  /** The knowledge base (root collection) or the parent collection when the root isn't known. */
-  base: { name: string; id: string; displayName: string } | null;
+  /** The collection (root collection) or the parent collection when the root isn't known. `personal`: a member's own
+   *  files, named by the UI (“My files”, “Lan’s files”), so the name is translated, unlike collection names. */
+  base: { name: string; id: string; displayName: string; personal: boolean } | null;
   isPersonal: boolean;
   /** Member resource name accountable for the content. */
   owner?: string;
@@ -359,16 +375,41 @@ export interface Resource {
   /** Caller can edit (from `access`; confirm with testIamPermissions for actions). */
   editable: boolean;
   deleted: boolean;
+  /** First page of the current revision, signed. Present without reading the document's content. */
   thumbnailUri?: string;
 }
 
-/** The knowledge base an item lives in: the root ancestor (FULL view) else the parent when known. */
+/** The collection an item lives in: the root ancestor (FULL view) else the parent when known. */
 function baseOf(item: Item, ctx: ModelContext): Resource["base"] {
   const root = item.ancestors?.[0];
   const name = root?.name || item.parentItem || "";
   if (!name) return null;
-  const displayName = root?.displayName || ctx.collectionNames?.get(name) || "";
-  return { name, id: lastSegment(name), displayName };
+  const displayName = ctx.collectionNames?.get(name) || root?.displayName || "";
+  const personal = name === ctx.personalCollection || !!ctx.personalCollections?.has(name);
+  return { name, id: lastSegment(name), displayName, personal };
+}
+
+/**
+ * What to call this document in one phrase: its purpose when someone set one ("Policy",
+ * "Lecture slides"), else its format ("Slides", "Spreadsheet", "PDF").
+ */
+function typeLabelOf(kind: string, documentType: string | undefined, format: FormatKey, kindLabel: string): string {
+  return pickTypeLabel(documentType, {
+    kindLabel,
+    formatLabel: FORMATS[format].label,
+    // `reference` is inferKind's catch-all: it says nothing the format doesn't say better.
+    kindIsSpecific: !!RESOURCE_KINDS[kind] && kind !== "reference",
+  });
+}
+
+/**
+ * What to call a document in one phrase, for callers that have only the raw facts (Home's read
+ * model, not a full `Resource`): its purpose when someone set one, else its format.
+ */
+export function typeLabelFor(documentType: string | undefined, fileName: string, mime: string | undefined, labels?: ReadonlyMap<string, string>): string {
+  const ext = (/\.([a-z0-9]{1,5})$/i.exec(fileName ?? "")?.[1] ?? "").toLowerCase();
+  const kind = documentType && documentType !== "markdown" ? documentType : inferKind(fileName ?? "", ext);
+  return typeLabelOf(kind, documentType, formatOf(ext, mime), kindMeta(kind, labels).label);
 }
 
 /** Everything the knowledge UI shows about a document. Cheap; call freely. */
@@ -376,12 +417,14 @@ export function toResource(item: Item, ctx: ModelContext, extra: { contribution?
   const doc = item.document;
   const fileName = doc?.fileName || item.displayName || "";
   const ext = (/\.([a-z0-9]{1,5})$/i.exec(fileName)?.[1] ?? "").toLowerCase();
-  const title = (item.displayName || fileName).replace(/\.[a-z0-9]{1,5}$/i, "");
+  const title = readableTitle((item.displayName || fileName).replace(/\.[a-z0-9]{1,5}$/i, ""));
   const kind = doc?.documentType && doc.documentType !== "markdown" ? doc.documentType : inferKind(title, ext);
   const base = baseOf(item, ctx);
   const isPersonal = !!ctx.personalCollection && (base?.name === ctx.personalCollection || item.parentItem === ctx.personalCollection);
   const origin = doc?.origin;
   const index = doc?.indexingState;
+  const fmt = formatOf(ext, doc?.mimeType);
+  const meta = kindMeta(kind, ctx.documentTypes);
   return {
     item,
     name: item.name ?? "",
@@ -390,9 +433,10 @@ export function toResource(item: Item, ctx: ModelContext, extra: { contribution?
     fileName,
     ext,
     mime: doc?.mimeType ?? "",
-    format: formatOf(ext, doc?.mimeType),
+    format: fmt,
     kind,
-    kindMeta: kindMeta(kind, ctx.documentTypes),
+    kindMeta: meta,
+    typeLabel: typeLabelOf(kind, doc?.documentType, fmt, meta.label),
     topics: doc?.topics ?? [],
     base: base && isPersonal ? { ...base, displayName: base.displayName || "My files" } : base,
     isPersonal,
@@ -434,8 +478,8 @@ export type FacetId = "topic" | "kind" | "owner" | "src" | "kb" | "trust" | "upd
 export interface FacetDef {
   id: FacetId;
   label: string;
-  /** SearchItems facet field; `null` when computed locally (Updated). */
-  field: string | null;
+  /** SearchItems facet field (`updateTime` is an interval facet over UPDATED_WINDOWS). */
+  field: string;
   single?: boolean;
 }
 
@@ -449,9 +493,9 @@ export const FACETS: readonly FacetDef[] = [
   { id: "kind", label: "Type", field: "document.documentType" },
   { id: "owner", label: "Owner", field: "document.owner" },
   { id: "src", label: "Source", field: "document.origin.source" },
-  { id: "kb", label: "Knowledge base", field: "ancestors" },
+  { id: "kb", label: "Collection", field: "ancestors" },
   { id: "trust", label: "Trust", field: "document.verification.state" },
-  { id: "upd", label: "Updated", field: null, single: true },
+  { id: "upd", label: "Updated", field: "updateTime", single: true },
   { id: "fmt", label: "Format", field: "document.mimeType" },
 ];
 
@@ -525,19 +569,12 @@ const TRUST_KEY: Readonly<Record<string, TrustState>> = { VERIFIED: "verified", 
 const lit = (v: string) => `"${v.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 
 /** The AIP-160 clause for one facet's selected values (OR within a facet). */
-function facetClause(id: FacetId, values: readonly string[], ws: string, topics?: readonly Topic[]): string {
+function facetClause(id: FacetId, values: readonly string[], ws: string): string {
   const any = (parts: string[]) => (parts.length > 1 ? `(${parts.join(" OR ")})` : parts[0] ?? "");
   switch (id) {
-    case "topic": {
-      // Selecting a domain matches everything under it (preview topicLineage).
-      const names = new Set<string>();
-      for (const v of values) {
-        const name = `workspaces/${ws}/topics/${v}`;
-        names.add(name);
-        for (const t of topics ?? []) if (t.parentTopic === name && t.name) names.add(t.name);
-      }
-      return any([...names].map((n) => `document.topics:${lit(n)}`));
-    }
+    case "topic":
+      // Hierarchical on the server: a domain also matches everything under it.
+      return any(values.map((v) => `document.topics:${lit(`workspaces/${ws}/topics/${v}`)}`));
     case "kind":
       return any(values.map((v) => `document.documentType = ${lit(v)}`));
     case "owner":
@@ -558,21 +595,26 @@ function facetClause(id: FacetId, values: readonly string[], ws: string, topics?
 }
 
 /** AIP-160 filter for the selected facets (AND across facets); `base` adds extra clauses (e.g. a subtree). */
-export function catalogFilter(p: CatalogParams, ws: string, { topics, base }: { topics?: readonly Topic[]; base?: string } = {}): string {
-  const clauses = FACETS.map((f) => (p.filters[f.id]?.length ? facetClause(f.id, p.filters[f.id]!, ws, topics) : "")).filter(Boolean);
+export function catalogFilter(p: CatalogParams, ws: string, { base }: { base?: string } = {}): string {
+  const clauses = FACETS.map((f) => (p.filters[f.id]?.length ? facetClause(f.id, p.filters[f.id]!, ws) : "")).filter(Boolean);
   if (base) clauses.unshift(base);
   return clauses.join(" AND ");
 }
 
 export const ORDER_BY: Readonly<Record<CatalogSort, string>> = { relevance: "", updated: "updateTime desc", title: "displayName" };
 
-/** SearchItems request for Browse (facets disjunctive, snippets + passages for previews). */
+/**
+ * SearchItems request for Browse (facets disjunctive, snippets + passages for previews). Updated is an
+ * interval facet: one `updateTime` interval per window, in UPDATED_WINDOWS order.
+ */
 export function catalogSearchRequest(
   p: CatalogParams,
   ws: string,
-  options: { topics?: readonly Topic[]; base?: string; pageSize?: number; pageToken?: string; facets?: boolean } = {},
+  options: { base?: string; pageSize?: number; pageToken?: string; facets?: boolean } = {},
 ): SearchItemsRequest {
   const sort = p.sort || (p.q ? "relevance" : "updated");
+  // Window starts are floored to the hour so requests built within the hour stay equal (cache keys).
+  const hour = Math.floor(Date.now() / 3_600_000) * 3_600_000;
   return {
     query: p.q || undefined,
     filter: catalogFilter(p, ws, options) || undefined,
@@ -580,7 +622,11 @@ export function catalogSearchRequest(
     facetSpecs:
       options.facets === false
         ? undefined
-        : FACETS.filter((f) => f.field).map((f) => ({ field: f.field!, limit: f.id === "topic" ? 100 : 30, excludedFromFilter: true })),
+        : FACETS.map((f) =>
+            f.id === "upd"
+              ? { field: f.field, intervals: UPDATED_WINDOWS.map(([, , days]) => ({ minimum: new Date(hour - days * 86_400_000).toISOString() })), excludedFromFilter: true }
+              : { field: f.field, limit: f.id === "topic" ? 100 : 30, excludedFromFilter: true },
+          ),
     contentSearchSpec: p.q ? { snippets: true, passages: 1 } : undefined,
     pageSize: options.pageSize ?? 30,
     pageToken: options.pageToken,
@@ -611,7 +657,7 @@ export function facetOptions(
       counts.set(value, { label: prev?.label || label, count: (prev?.count ?? 0) + count });
     };
     const api = facets?.find((f) => f.field === def.field);
-    for (const v of api?.values ?? []) {
+    for (const [i, v] of (api?.values ?? []).entries()) {
       const raw = v.value ?? "";
       const n = v.documentCount ?? 0;
       switch (def.id) {
@@ -636,6 +682,10 @@ export function facetOptions(
           add(key, FORMATS[key].label, n);
           break;
         }
+        case "upd":
+          // Interval values come back in request order: one per window.
+          if (UPDATED_WINDOWS[i]) add(UPDATED_WINDOWS[i][0], UPDATED_WINDOWS[i][1], n);
+          break;
       }
     }
     if (def.id === "upd") for (const [key, label] of UPDATED_WINDOWS) add(key, label, 0);
@@ -742,68 +792,50 @@ export interface Glance {
   /** First page image (sheets, slides) — a signed, short-lived URL. */
   pageImage?: string;
   count: number;
-  /** "6 pages", "4 slides", "Spreadsheet". */
-  extent: string;
   /** The opening paragraph (card "what it's for" when there is no summary). */
   opening: string;
 }
 
-const cellsOf = (line: string) =>
-  line
-    .replace(/^\s*\|/, "")
-    .replace(/\|\s*$/, "")
-    .split(/\s*\|\s*|\t/)
-    .map((c) => c.trim());
-
-/** Builds the glance of a document from its reader content; `null` without readable content. */
-export function glanceOf(content: ItemContent | undefined, format: FormatKey): Glance | null {
-  const elements = content?.elements ?? [];
-  if (!elements.length) return null;
+/** Builds the glance of a document from its stored rendition and page images; `null` without readable content. */
+export function glanceOf(rendition: DocumentRendition | undefined, pageAssets: ItemContent["pageAssets"], format: FormatKey): Glance | null {
+  const source = rendition?.blocks ?? [];
+  if (!source.length) return null;
   const blocks: GlanceBlock[] = [];
   const sections: GlanceSection[] = [];
   let heading = "";
   let pages = 1;
-  for (const el of elements) {
-    const page = el.pageNumber ?? 1;
+  const push = (b: GlanceBlock) => {
+    blocks.push(b);
+    let s = sections.find((x) => x.title === b.heading);
+    if (!s) sections.push((s = { title: b.heading, page: b.page, blocks: [] }));
+    s.blocks.push(b);
+  };
+  for (const block of source) {
+    const page = block.page ?? 1;
     pages = Math.max(pages, page);
-    const text = (el.text ?? "").trim();
-    if (!text) continue;
-    if (el.kind === "HEADING") {
-      heading = text;
-      continue;
-    }
-    const push = (b: GlanceBlock) => {
-      blocks.push(b);
-      let s = sections.find((x) => x.title === b.heading);
-      if (!s) sections.push((s = { title: b.heading, page: b.page, blocks: [] }));
-      s.blocks.push(b);
-    };
-    if (el.kind === "LIST") {
-      for (const line of text.split(/\n+/)) {
-        const item = line.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, "").trim();
-        if (item) push({ kind: "li", text: item, page, heading });
+    if (block.kind === "heading") {
+      if (block.text.trim()) heading = block.text.trim();
+    } else if (block.kind === "table") {
+      for (const row of block.rows) {
+        const cells = row.map((c) => c.trim());
+        push({ kind: "row", text: cells.map((c, i) => (block.columns[i] ? `${block.columns[i]}: ${c}` : c)).join(" · "), page, heading, cells: block.columns.length ? cells : undefined });
       }
-    } else if (el.kind === "TABLE") {
-      const rows = text.split(/\n+/).filter((l) => !/^\s*\|?\s*:?-{2,}/.test(l));
-      const head = rows[0] ? cellsOf(rows[0]) : [];
-      for (const line of rows.slice(1)) {
-        const cells = cellsOf(line);
-        push({ kind: "row", text: cells.map((c, i) => (head[i] ? `${head[i]}: ${c}` : c)).join(" · "), page, heading, cells: head.length ? cells : undefined });
-      }
-    } else if (el.kind === "PARAGRAPH" || el.kind === "CODE") {
-      push({ kind: "p", text, page, heading });
+    } else if (block.kind === "paragraph" || block.kind === "code") {
+      const text = block.text.trim();
+      const items = text.split(/\n+/).filter((line) => /^\s*(?:[-*•]|\d+[.)])\s+/.test(line));
+      if (items.length > 1) for (const line of items) push({ kind: "li", text: line.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, "").trim(), page, heading });
+      else if (text) push({ kind: "p", text, page, heading });
     }
   }
   const layout = format === "sheet" ? "sheet" : format === "slides" ? "slides" : "text";
-  const first = [...(content?.pageAssets ?? [])].sort((a, b) => (a.pageNumber ?? 0) - (b.pageNumber ?? 0))[0];
-  pages = Math.max(pages, content?.pageAssets?.length ?? 0);
+  const first = [...(pageAssets ?? [])].sort((a, b) => (a.pageNumber ?? 0) - (b.pageNumber ?? 0))[0];
+  pages = Math.max(pages, pageAssets?.length ?? 0);
   return {
     layout,
     sections,
     blocks,
     pageImage: first?.imageUri,
     count: pages,
-    extent: layout === "sheet" ? "Spreadsheet" : `${pages} ${layout === "slides" ? (pages === 1 ? "slide" : "slides") : pages === 1 ? "page" : "pages"}`,
     opening: blocks.find((b) => b.kind === "p")?.text ?? "",
   };
 }

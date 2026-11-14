@@ -23,7 +23,7 @@ from bomesh.services.kernel.context import RequestContext
 from bomesh.services.kernel.idempotency import Idempotency
 from bomesh.services.kernel.listing import ListQuery
 from bomesh.services.knowledge_items.names import parse_item
-from bomesh.services.knowledge_items.summary import ItemSummary
+from bomesh.services.knowledge_items.summary import ItemSummary, get_item_summaries
 from bomesh.services.library.access import LibraryGate, Owner, readable_item, unreadable
 from bomesh.services.library.records import ItemReference
 
@@ -209,18 +209,32 @@ async def readable_references(
     skip: int = 0,
     take: int | None = None,
 ) -> list[ItemReference]:
-    """``rows`` (entry ID, time) in order, keeping readable ones: ``take`` after ``skip``."""
+    """``rows`` (entry ID, time) in order, keeping readable ones: ``take`` after ``skip``.
+
+    Readability is checked a window at a time (``skip + take`` rows, all rows
+    without ``take``), so a page costs a constant number of queries.
+    """
     kept: list[ItemReference] = []
     seen = 0
-    for entry_id, moment in rows:
-        if take is not None and len(kept) >= take:
-            break
-        summary = await readable_item(session, ctx, owner.workspace_id, entry_id)
-        if summary is None:
-            continue
-        seen += 1
-        if seen > skip:
-            kept.append(_reference(owner, entry_id, summary, moment))
+    size = max(len(rows) if take is None else skip + take, 1)
+    for start in range(0, len(rows), size):
+        chunk = rows[start : start + size]
+        summaries = await get_item_summaries(
+            session,
+            ctx.authorizer,
+            ctx.principal,
+            owner.workspace_id,
+            (entry_id for entry_id, _ in chunk),
+        )
+        for entry_id, moment in chunk:
+            if take is not None and len(kept) >= take:
+                return kept
+            summary = summaries.get(entry_id)
+            if summary is None:
+                continue
+            seen += 1
+            if seen > skip:
+                kept.append(_reference(owner, entry_id, summary, moment))
     return kept
 
 

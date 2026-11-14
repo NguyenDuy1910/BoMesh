@@ -65,20 +65,39 @@ function descendants(tree: ContentTree, id: string): string[] {
   return out;
 }
 
-export function checkState(tree: ContentTree, selection: readonly string[], id: string): CheckState {
-  if (selection.includes(id) || ancestors(tree, id).some((a) => selection.includes(a))) return "all";
+/**
+ * Nodes that can't be picked: a folder another source already syncs (its target collection is fixed, so
+ * its documents are already in that collection). Selection works around them.
+ */
+export type Blocked = (id: string) => boolean;
+const NONE: Blocked = () => false;
+
+const covered = (tree: ContentTree, selection: readonly string[], id: string) => selection.includes(id) || ancestors(tree, id).some((a) => selection.includes(a));
+const hasBlocked = (tree: ContentTree, id: string, blocked: Blocked) => descendants(tree, id).some(blocked);
+
+/** What picking `id` selects: the node itself, or — when something under it is blocked — its pickable parts. */
+function cover(tree: ContentTree, id: string, blocked: Blocked): string[] {
+  if (blocked(id)) return [];
+  if (!hasBlocked(tree, id, blocked)) return [id];
+  return (tree.children[id] ?? []).flatMap((child) => cover(tree, child, blocked));
+}
+
+export function checkState(tree: ContentTree, selection: readonly string[], id: string, blocked: Blocked = NONE): CheckState {
+  if (covered(tree, selection, id)) return "all";
+  const parts = cover(tree, id, blocked);
+  if (parts.length && !parts.includes(id) && parts.every((p) => covered(tree, selection, p))) return "all";
   return descendants(tree, id).some((d) => selection.includes(d)) ? "some" : "none";
 }
 
-/** Replace fully selected sibling sets with their parent, bottom-up. */
-function normalize(tree: ContentTree, selection: readonly string[]): string[] {
+/** Replace fully selected sibling sets with their parent, bottom-up (never a parent holding a blocked node). */
+function normalize(tree: ContentTree, selection: readonly string[], blocked: Blocked): string[] {
   let out = [...selection];
   let changed = true;
   while (changed) {
     changed = false;
     for (const id of out) {
       const parent = tree.parent[id];
-      if (parent === undefined || parent === ROOT) continue;
+      if (parent === undefined || parent === ROOT || hasBlocked(tree, parent, blocked)) continue;
       const siblings = tree.children[parent] ?? [];
       if (siblings.length && siblings.every((s) => out.includes(s))) {
         out = [...out.filter((s) => !siblings.includes(s)), parent];
@@ -92,24 +111,36 @@ function normalize(tree: ContentTree, selection: readonly string[]): string[] {
 
 /**
  * Toggle `id`: a fully selected node clears (when an ancestor covers it, that
- * ancestor splits into the node's selected siblings); otherwise it is selected
- * and replaces any selected descendants.
+ * ancestor splits into the node's selected siblings); otherwise its pickable
+ * cover is selected and replaces any selected descendants.
  */
-export function toggleSelection(tree: ContentTree, selection: readonly string[], id: string): string[] {
-  if (checkState(tree, selection, id) !== "all") {
-    const inside = new Set(descendants(tree, id));
-    return normalize(tree, [...selection.filter((s) => !inside.has(s)), id]);
+export function toggleSelection(tree: ContentTree, selection: readonly string[], id: string, blocked: Blocked = NONE): string[] {
+  if (blocked(id)) return [...selection];
+  const inside = new Set(descendants(tree, id));
+  if (checkState(tree, selection, id, blocked) !== "all") {
+    return normalize(tree, [...selection.filter((s) => !inside.has(s)), ...cover(tree, id, blocked)], blocked);
   }
   if (selection.includes(id)) return selection.filter((s) => s !== id);
-  // Covered by an ancestor: keep everything under it except the path to `id`.
   const chain = [id, ...ancestors(tree, id)];
   const top = chain.findIndex((a) => selection.includes(a));
+  // Fully selected through its pickable parts: clear them.
+  if (top < 0) return selection.filter((s) => !inside.has(s));
+  // Covered by an ancestor: keep everything under it except the path to `id`.
   const out = selection.filter((s) => s !== chain[top]);
   for (let i = top; i > 0; i--) {
     const keep = chain[i - 1];
-    for (const sibling of tree.children[chain[i] ?? ""] ?? []) if (sibling !== keep) out.push(sibling);
+    for (const sibling of tree.children[chain[i] ?? ""] ?? []) if (sibling !== keep && !blocked(sibling)) out.push(sibling);
   }
   return out;
+}
+
+/** The claim on a node: its own, else the nearest ancestor's (e.g. the source that already syncs that folder). */
+export function claimOf<T>(tree: ContentTree, id: string, claims: ReadonlyMap<string, T>): T | undefined {
+  for (const at of [id, ...ancestors(tree, id)]) {
+    const claim = claims.get(at);
+    if (claim !== undefined) return claim;
+  }
+  return undefined;
 }
 
 /** "Shared drives / Sales Enablement". */

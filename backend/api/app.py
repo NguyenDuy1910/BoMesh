@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 
 from api.aip.errors import register_error_handlers
+from api.timing import ApiTimingMiddleware
 from api.v1 import (
     artifacts,
     collaboration,
@@ -64,13 +65,17 @@ def create_app(runtime: AppRuntime | None = None) -> FastAPI:
     )
     app.state.runtime = runtime
     register_error_handlers(app)
+    origins = runtime.config.server.web_origins
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # tighten per environment
+        # Unset = any origin (local development); deployments list their web origins.
+        allow_origins=list(origins) or ["*"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # Outermost, so its headers reach every response, CORS preflights included.
+    app.add_middleware(ApiTimingMiddleware, origins=origins)
     for router in ROUTERS:
         app.include_router(router, prefix=API_PREFIX)
     for router in UPLOAD_ROUTERS:

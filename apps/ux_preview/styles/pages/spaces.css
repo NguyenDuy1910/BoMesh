@@ -4,6 +4,12 @@
 /* ───── Space mark ───── */
 .sp-mark { --sp-mark: 36px; display: inline-grid; place-items: center; width: var(--sp-mark); height: var(--sp-mark); border-radius: calc(var(--sp-mark) * 0.28); flex: none; color: var(--white); }
 
+/* ───── Up next (X.upNextList: a space's Up next) ───── */
+.upnext .item { padding: 10px 12px 10px 14px; }
+.upnext-when { white-space: nowrap; }
+.upnext-when--soon { color: var(--warning-soft-foreground); font-weight: 500; }
+.upnext-when--danger { color: var(--danger); font-weight: 500; }
+
 /* ───── List cards ─────
    The name is the link, stretched over the whole card; the call to action sits above it (no nested controls). */
 .sp-card { position: relative; gap: 12px; min-height: 176px; }
@@ -83,7 +89,7 @@ a.sp-mat__name:hover { text-decoration: underline; text-underline-offset: 3px; }
 }
 @container app (max-width: 679px) {
   /* Content first: the space's name and actions lead; the colored tile and faces step back. */
-  .page-header:has(.sp-head__meta) .page-header__lead { display: none; }
+  .page-hero:has(.sp-head__meta) .page-hero__lead { display: none; }
   .sp-head__people { margin-top: 4px; }
   .sp-head__people .avatar-group { display: none; }
   .sp-card { min-height: 0; }

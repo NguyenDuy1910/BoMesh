@@ -1,84 +1,140 @@
-# Home — the intent-driven entry
+# Home — the Knowledge Atlas
 
-Home is where every person lands in every workspace (`/home`, first sidebar item). People don't open a workspace to look at what it contains; they open it to get an answer, find something, carry on, or catch up. Home makes the next of those obvious and leaves the rest to the pages that own it:
+Home is where every person lands in every workspace (`/home`, first sidebar item, the post-sign-in route). BoMesh is a platform: each workspace is an organisation with its own way of keeping documents. Home shows that whole structure on one canvas, the **Knowledge Atlas**: the workspace, every collection, every folder inside it and every document the person can read, drawn the way the organisation keeps them. A university reads Faculty › Academic department › Program group › Major › documents, with Administrative offices and their Forms beside them; a company reads Area › Section › Subsection › Folder. In a few seconds it answers:
 
-| Page | Owns |
-| --- | --- |
-| **Home** | One box to search documents or ask AI; what's waiting for you and what you were reading; what changed; a few documents; shortcuts into topics |
-| **Knowledge** | Browsing, filtering, previewing and reading documents ([KNOWLEDGE_HUB.md](KNOWLEDGE_HUB.md)) |
-| **Projects** (sidebar) | AI conversations organised by goal, plus *Recent* for conversations in no project ([PRODUCT_FLOW.md](PRODUCT_FLOW.md#1b-organise-ai-work-in-projects)) |
-| **Inbox** (topbar bell, ⌘K) | Notifications, requests and everything that asks for a decision |
+1. **What does this workspace know, and how is it organised?** One tinted territory per collection; fit the atlas to see them all, named large.
+2. **Where is the thing I need?** Open a branch, find a name, or go straight to a collection.
+3. **Which document should I open?** Documents follow one standard order in every group and show what helps choose: read first, verified, review due, new.
+
+| Page | Owns | Identity |
+| --- | --- | --- |
+| **Home** | The structure of the workspace's knowledge, and a path to every readable document in it | Map & orient |
+| **Knowledge** | Searching inside documents, filtering, previewing and reading ([KNOWLEDGE_HUB.md](KNOWLEDGE_HUB.md)) | Find & explore |
+| **AI Chat** | Asking, with grounded answers and citations | Ask & understand |
+| **Your work** (Recent · Projects · My contributions) | What you touched, organised and submitted | Pick up & track |
+| **Inbox** (top-row bell) · **Search** (sidebar search row, ⌘K) | What needs you · jump to anything | — |
+
+Admins mark documents *Read first* from a document's ⋯ menu; on the atlas they lead their group with a star. Home has no greeting, intent cards or feeds: what needs you is in the Inbox, what you touched is in Recent.
 
 ```text
-Home
-├── Good morning, Khoa
-├── [ Ask a question or find a document                 ⚲ All of Finx ▾ ]
-│     typing → Search documents for “…” · Ask AI “…” (question-like text puts Ask AI first) · matching documents · questions you asked before
-│     empty  → your recent questions · questions this workspace suggests
-│   Try asking: 3 suggested questions                                    ← first visit only
-├── Waiting for you    ≤ 3: changes requested · your review queue · a reply needed or something due soon
-├── Continue reading   the documents you opened last → Reader where you left off
-├── Worth knowing      ≤ 3 source-backed changes: “Batch cut-off moved from 16:00 to 15:30” — Payment Cut-off Times · Version 5
-├── Start here (new) / Recommended for you (returning)   ≤ 3 documents, each with its reason
-└── Explore by topic   domain shortcuts → Knowledge filtered to that domain · All knowledge →
+Home (page--canvas)
+├── [W] Trường Đại học UTE                       [🖼 Map background] (tenant.manage) [✎ Edit structure] (knowledge.manage, top row)
+│       117 documents you can read · 7 collections · 5 levels · 13 updated in the last 30 days
+└── Atlas (fills the rest of the page)
+    ┌ [⌕ Find in the map] 117 documents │ ☰ Hide documents · ⇕ Expand all · ⇳ Collapse all · Go to ▾ ┐            ┌ Inspector ┐
+    │                                                                                                              │ (selected)│
+    │  [WORKSPACE Trường Đại học UTE]                                                                              └───────────┘
+    │   │
+    │   ├─ lane 1 ─────────────────────────┬─ lane 2 ──────────────────────┬─ lane 3 ─────────
+    │   │ ░ Khoa CNTT territory ░░░░░░░░░░ │ ░ Khoa Điện – Điện tử ░░░░░░ │ ░ Khoa Cơ khí ░░░
+    │   │ [■ FACULTY Khoa CNTT 41 ⊖]─┬─[▤ 4 documents: 3 rows · +1 more]
+    │   │                            ├─[⧉ ACADEMIC DEPARTMENT Bộ môn HTTT 21 ⊖]─┬─ [PDF] Giới thiệu …
+    │   │                            │                                          └─ [≋ PROGRAM GROUP … 18 ③]   (folded)
+    │   │                            └─[▣ FORMS Biểu mẫu Khoa CNTT 3 ⊖]─── [DOCX] Đơn xin …
+    │   └─ ░ Phòng Đào tạo ░ …        ░ Phòng CTSV ░ …             ⋯ 🔒 Hồ sơ nhân sự (Restricted)
+    └ Faculty › Academic department › … › Document · Also: Forms · ★ ✓ New        [− 100% + │ ⤢ ↺] ┘
 ```
 
-Every block after the box appears only when it has something real to show. A new person sees the box with three suggested questions, *Worth knowing*, *Start here* and the topics; a returning reader sees what they were reading first.
+## The atlas
 
-## What was wrong
+The tree is the canonical Item hierarchy (`backend/docs_design/item_model.md` §4.1–4.3): the workspace, root **collections** (access boundaries), nested collections (**folders**) and **documents**. Every Item has exactly one canonical parent, so every document appears once, where it lives. Item links, reading lists and spaces are references and are not drawn.
 
-| Before | Problem | Now |
-| --- | --- | --- |
-| "Search or ask across 227 published documents in 7 knowledge bases", Search and Ask buttons, a scope select and four question chips | The first viewport described the system and asked people to choose between two buttons before typing | A short greeting and one box. Typing shows both actions, so nobody has to decide up front, plus the documents and earlier questions that already match |
-| Explore knowledge: six large topic cards with descriptions, counts and sub-topic chips, plus Knowledge bases and Collections tabs | The biggest block on Home duplicated Knowledge's taxonomy | One row of topic shortcuts that open Knowledge filtered to the domain. Shared collections live in Browse, your own in My library; a knowledge base is a Browse filter |
-| Featured knowledge: eight cards whose previews showed fragments ("Approvals p. 2", "Working hours p. 12") | Fragments without context had to be interpreted | *Worth knowing* states what changed, in the owner's own words, with its source; featured documents feed *Start here* and *Recommended*, shown as title, purpose and reason |
-| Recently published and Recommended for you, two columns of rows | Two near-identical lists of documents | One reading row of three documents, each with its reason |
-| Pick up where you left off came last: recent documents, conversations, contributions, a review line, Up next | The most useful thing for a returning person was at the bottom, and conversations repeated the sidebar | Continuity comes right after the box as two honestly titled rows: *Waiting for you* first, then *Continue reading*; conversations come back through the box |
+### Visual language
+- **Identity vs territory.** A node's icon and label say *what* it is (workspace = landmark, faculty = building, academic department = network, program group = layers, major = graduation cap, administrative office = briefcase, forms = clipboard, folder = folder; enterprise levels: area = library, section = layers, subsection = network). Its accent says *whose* it is: each root collection's colour (`kb.color`) tints its territory band, its connectors, its icon tiles and its root node. Colour never identifies a type.
+- **Organisational nodes** (240 × 60): icon tile, uppercase level label, a two-line name, the document count of the subtree, and a handle on the right edge (− to fold, the number of hidden groups to open). The root collection fills its icon with its colour.
+- **Documents** are lighter (264 × 38): type badge, title, marks (★ read first · ✓ verified · ⏱ review due · New = changed in 14 days). More than three in one place become a **cluster** card: *N documents*, the first three, *+N more* (all, in place; *Show fewer*). Search always draws every match one by one.
+- **Connectors** are rounded orthogonal lines in the territory's colour, 1.25 px at any zoom; the hovered node's path and the selected node's path are drawn solid; everything outside a selection dims (never hides).
+- **Territories** are faint tinted bands with a hairline in the collection's colour, its mark, description and *Open in Knowledge*. A collection you can see but not read is a dashed territory with a locked node (*Request access* in the inspector); nothing inside it is drawn.
+- **Canvas**: a soft off-white surface with a dot grid that pans and scales with the view, optionally over the workspace's [map background](#map-background). The chrome floats on a blurred surface.
 
-## Behaviour
+### Map background
+Each workspace can show its own image behind the atlas, e.g. a campus illustration for Trường Đại học UTE. It is identity, not content.
 
-### The box (intent A: an answer; intent B: a document)
+**What everyone sees**
+- The image is fixed behind the canvas (cover, centred). It never pans or zooms, so it never competes with the tree.
+- A wash in the HeroUI theme's colours sits over the image: the page background (`--background`), tinted 10 % with the theme accent (`--accent`). The image therefore always matches the theme: it darkens in the dark theme and takes the accent's hue when a workspace or person changes it in Appearance.
+- Photos are busy (leaves, windows, people), so lower strengths also blur and desaturate the image into a soft colour field. The place stays recognisable, but its detail never competes with nodes.
+- **Strength** is a single value from 0 to 100 (default 25). The admin sets it with a slider; one CSS variable (`--s`) drives everything, continuously:
 
-- One input with a combobox. Clicking into it, typing or pressing ↓ opens suggestions. It is autofocused only on wide screens with a fine pointer; on touch and phones it waits for a tap, so the keyboard doesn't cover the page.
-- **Typing** shows two clearly named actions first: *Search documents for "…"* (opens Knowledge with the query) and *Ask AI "…"* (starts a grounded conversation with sources). *Ask AI* ranks first only when the text reads like a question (`isQuestion`: ends with "?" or starts with how, what, when, why, who, can, do, is, explain…), *Search documents* otherwise. Enter runs the first option, so it is always visible what Enter will do; nothing is sent to the AI silently.
-- Below the actions: up to four matching documents (the Knowledge catalog search, same ranking and permissions, query words highlighted; opens the document preview at the match) and up to two earlier questions that match (opens that conversation).
-- **Empty box**: your three most recent questions (*Continue a conversation*) and the questions the workspace suggests for your audience (*Ask*).
-- ↑/↓ move, Enter picks, Escape closes; options keep focus in the input (ARIA combobox with `aria-activedescendant`).
-- **Scope** is a quiet menu inside the box (*All of Finx*, a readable knowledge base, or one of my spaces). It scopes both Ask and Search. On phones it becomes a labelled chip under the box ("In: All of Finx Workspace ▾").
-- **Suggested questions** under the box only on a first visit (no reading history, no conversations). Returning people get them in the empty-box suggestions instead.
+  | Strength | Wash | Blur | Saturation |
+  |---|---|---|---|
+  | 0 | 96 % | 8 px | 0.4 |
+  | 25 (default) | 87 % | 6 px | 0.55 |
+  | 100 | 60 % | 0 | 1 |
 
-### Waiting for you · Continue reading (intent C)
+- The dialog preview and the Settings thumbnail scale the blur to their size (`--blur-k`).
+- Checked with a real campus photo (3264 × 1836, trees in front of the main building) at 0, 25, 60 and 100, and with the teal accent: every node and connector stays readable.
+- Over an image the canvas stops looking like a whiteboard (`.atlas.has-bg`):
+  - the dot grid is not drawn;
+  - territories become a translucent tinted veil (about half opacity, slightly stronger hairline) instead of an opaque board;
+  - the image reads across the whole map.
+  - Nodes, clusters and connectors stay on top, unchanged.
+- Workspaces without an image keep the plain canvas.
 
-Two rows of compact cards, each with its own title. *Waiting for you* (at most three) holds what is waiting on you: one contribution with changes requested, your review queue (*9 documents to review* — the same count as the Manage → Documents badge), and a request that needs your reply or something due soon (Spaces/Requests). *Continue reading* lists the documents you opened last ("Opened 1 h ago") and opens them in the Reader, so you resume where you were rather than in a preview. Conversations aren't repeated: the sidebar's *Recent* and the box already offer them. Each row is absent when it has nothing.
+**Who changes it, and where**
+- Workspace admins (`tenant.manage`) change it from two places, both opening one dialog:
+  - the **Map background** icon button in Home's header, next to *Edit structure*;
+  - Settings → Workspace setup → **Map background** (thumbnail, file name, "Strength 25 %", who changed it and when).
+- **The dialog shows the result before saving.** Its preview draws the image under its wash, plus the workspace and its first collections as nodes, so the admin sees exactly what people will read. Dragging the strength slider updates the preview live, with no re-render.
+- **Adding an image:**
+  - Empty: a dashed drop zone with *Choose image*.
+  - Set: the file name and size, *Replace*, the **Strength** slider (HeroUI Slider: label and value "25 %", ends *Subtle* · *Vivid*, step 5) and *Remove* in the footer.
+  - Accepted: JPG, PNG, WebP or SVG, up to 10 MB.
+  - Photos are scaled to at most 1,920 px wide (JPEG, quality 0.75, about 400 KB) before they are stored.
+  - An image under 1,200 px wide gets a soft warning that it may look soft on large screens.
+  - Wrong type or size: an inline error; the current image stays.
+- **Saving** applies to everyone in that workspace only, with Undo, and writes an audit entry ("Changed the Home map background").
+- **Seed:** UTE ships with `assets/map-backgrounds/ute-campus.svg` (Subtle). The other demo workspaces have none.
 
-### Worth knowing (intent D)
+### Layout
+- A tidy left-to-right tree per territory (own layout code; a few hundred nodes lay out in about a millisecond, no graph library). A parent sits level with its first child, so every branch starts at its top and reads down; documents come first in a group, then folders. Uneven depths, documents at any level and long names are handled by fixed box sizes and per-subtree heights.
+- Territories fill **lanes** under the workspace node (1st, 2nd, … then back to the first), as many as make the atlas about as wide as the canvas; the workspace's bus runs along the top and down each lane's spine. The lane count is kept per workspace and canvas shape, so opening and folding never moves a territory to another lane.
+- **Folding**: folders from level 3 down start folded; *Expand all* opens everything, *Collapse all* folds every folder and fits the atlas. Folding a box keeps it exactly where it was on screen (the view shifts to compensate); nothing recentres.
+- **Order inside a group**: *Read first*, then overview-style titles (Overview, Introduction, Giới thiệu, Tổng quan…), then by document type in the workspace's standard order (handbook, guide, policy, procedure, form, template, calendar, syllabus, lecture, lab, assignment, exam, technical reference, playbook, contract, paper, thesis, dataset, protocol, report, spreadsheet, FAQ, announcement, reference, notes), then by name. Folders: curated order, then name.
+- **Levels**: each workspace names its levels once (Settings › Workspace setup › *Knowledge map levels*; Campus = Faculty, Academic department, Program group, Major, Administrative office, Forms; Enterprise = Area, Section, Subsection, Folder). The first four name depths 1–4; a collection or folder may carry any other label of the list. The legend shows the levels in use as a path, and *Also:* the other labels.
 
-Source-backed changes, never generated statements:
+### Semantic zoom
+Box sizes never change, so nothing moves when the level changes.
 
-- a document's new version with its owner's change note ("Standing production access removed; just-in-time access for up to 8 hours" — *Access Control Policy · Version 4*), or
-- a recent announcement with its summary.
+| Zoom | Shows |
+| --- | --- |
+| Far (< 55 %) | Structure: each territory's name large across its top, node icons, one-line titles scaled up to stay legible, counts; documents as slim tinted bars, clusters as their count |
+| Normal | Level labels, two-line names, counts, handles, clusters with three documents, marks |
+| Near (≥ 135 %) | Adds each document's type and age under its title |
 
-Only ready, published documents the person can read; changes older than 120 days and announcements older than 60 days drop off; a change disappears once you've opened the document after it. Ranked by your reading and saved topics, your spaces, verification and recency; three at most. The card's headline is the change itself, with the kind and date above and the source document and version below. It opens the document preview. Absent when nothing qualifies.
+## Interaction
 
-### Start here · Recommended for you
+| Do | Result |
+| --- | --- |
+| Drag the canvas · scroll · Shift + scroll | Pan (vertical / horizontal) |
+| ⌘/Ctrl + scroll · trackpad pinch · two-finger pinch | Zoom around the pointer (20–200 %) |
+| Keyboard on the canvas | Arrows pan (Shift: further), + / − zoom, 0 = 100 %, 1 = fit, Esc clears the selection |
+| Hover a node | Its path back to the workspace lights up |
+| Select a box | Highlight with its path and subtree; the rest dims; the **inspector** opens (level, name, path, counts, description, the first five documents here, Expand/Collapse, Focus, Open in Knowledge, and for its editors *Edit in Studio* → that collection's Contents on that folder). Select again, ×, Esc or a click on empty canvas closes it |
+| A box's handle | Fold / open that branch only |
+| A document (node, cluster row or inspector row) | The existing document preview (the Reader from there) |
+| *+N more* | The cluster shows all its documents in place |
+| Find in the map | Narrows to titles and folder names (word starts; marks typed are matched exactly — "đơn" finds *Đơn xin…* not *động*); Enter centres the first match; nothing found → *Search in Knowledge* |
+| Hide documents | Only the levels (an org chart of the workspace's knowledge) |
+| Go to ▾ | Fits that territory (opens it, clears the selection) |
+| Zoom bar | − · level (click = 100 %) · + · Fit · Reset (view, folding and lanes) |
 
-Three documents, each card showing title, what it's for (summary or opening paragraph) and why it's here; a card opens the document preview. New people get *Start here*: what admins featured (*Recommended by Finx Workspace*), topped up with often-opened verified documents. Returning people get *Recommended for you*: related to what they read (*Because you read ADR-031*), from their spaces, or featured. One per reason first, nothing they have opened, nothing already in *Worth knowing*. Admins edit featured documents in the *Featured documents* drawer (the section's sliders button or ⌘K "Edit featured documents"): rows open the document, × removes with Undo, *Add documents* opens a searchable picker. Documents can also be featured from their ⋯ menu.
-
-### Explore by topic
-
-The workspace's topic domains as small pills with their icon and colour. Each opens Knowledge filtered to that domain (`catalogHref`), where the pill row and sub-topics take over. *All knowledge* opens Knowledge.
+The view (pan and zoom) is kept per workspace; a first visit starts at 100 % (85 % on phones) at the top left.
 
 ## Trust and permissions
 
-Home draws only from the catalog pools: published, readable, shared documents (`catalogPool()` minus My files). Suggestions run the same catalog search as Knowledge. Restricted documents never appear as titles, counts, changes or recommendations. Contributions appear only to their contributor; the review card only to reviewers.
+The atlas draws only from the published, readable, shared pool (`sharedPool()`): the same visibility rule as every other listing (`item_model.md` §6). Personal collections are never drawn. A discoverable root the caller cannot read appears as a locked territory with Request access; its folders, counts and documents are never shown. Hidden roots do not appear. A folder with its own access (Knowledge Studio → a collection → Contents) is not drawn for people it doesn't name, exactly as if it weren't there. Counts, levels and the meta line come from what the caller can read, so two people may see different atlases of the same workspace. Folding and clusters only change what is drawn: search and Knowledge still find every document. The structure itself — folders, their descriptions and kinds — is edited in Contents, the same tree.
 
 ## States and responsiveness
 
-- **Loading**: greeting and box, then skeletons for continue cards and three cards.
-- **Empty workspace**: "Your workspace has no published knowledge yet" with *Contribute* and *Browse knowledge*.
-- **Error**: retry. Sections without data are left out rather than shown empty.
-- **≤ 1023 px**: continue cards two per row, card rows show two. **≤ 679 px**: one column, the greeting aligns left, the scope becomes a labelled chip under the box, suggested questions and topics scroll horizontally, keyboard hints hide. No horizontal overflow at 834 or 390 px.
+- **Loading**: the canvas with skeleton nodes. **Empty**: *Your workspace has no published knowledge yet* (Contribute when allowed, Browse knowledge). **Error**: Try again.
+- **Layout**: Home is a canvas page (`.page--canvas`, [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md) › PageLayout): the identity block, then the atlas fills the rest of the page; the page itself does not scroll.
+- **≤ 1023 px**: the legend keeps only the levels.
+- **≤ 679 px**: the atlas runs edge to edge; the toolbar spans the top (search, documents, expand, collapse); no legend; the inspector is a sheet over the bottom of the canvas; touch pans and pinches.
+- Reduced motion: no glide on fit, focus or zoom buttons; no transitions on nodes or connectors.
 
-## Roles and workspaces
+## API
 
-Everything is computed from the active workspace and persona: suggested questions follow the person's audience in the published assistant settings (`X.assistantStarters()`: group → role → Everyone), recommendations and *Worth knowing* follow reading history, saved topics and spaces, review cards follow review rights. Northwind (no Spaces) has no space reasons and no due items. The first-run product tour starts here (box, scope, first section, New chat, Search).
+Built from `ListItems filter=itemType=COLLECTION` (roots and folders, with `parentItem`, `documentCount`, `childCount`; locked roots come back LOCKED without counts) and the documents of each opened collection (`ListItems filter=parentItem=…`, `orderBy`). Not in the contract yet (recorded for `backend/docs_design`): the workspace's level vocabulary (`Workspace.settings` *knowledge map levels*), a collection's level label, a folder's curated `order`, and the **map background** — an image uploaded by a workspace admin (a stored object referenced from `Workspace.settings`, e.g. `mapBackground { image, strength: integer 0–100 }`, written with `workspaces.update` / `UpdateWorkspace` + `updateMask`, readable by every member). The wash colours come from the client's theme, never from the server.
+
+Loading: one `ListItems` read draws the whole structure, because box sizes come from the counts; each container's documents load only when its boxes come within a screen of the view (skeleton rows in place, so nothing moves when they arrive). Find in the map matches collection names on the client and documents through `SearchItems` (titles and content, permission-filtered; documents not yet indexed are not found).

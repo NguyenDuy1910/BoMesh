@@ -1,18 +1,19 @@
 "use client";
 
 import { Button } from "@heroui/react";
-import { Activity, Download } from "lucide-react";
+import { Activity, ArrowRight, Copy, Download, Info, Search, Zap } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { PageChrome } from "@/components/shell/page-chrome";
 import {
   ClearFilters,
   DataTable,
+  Disclosure,
   EmptyState,
   FilterButton,
   Gate,
+  IconButton,
   KeyValue,
-  NoMatches,
   Page,
   PageHeader,
   Pager,
@@ -24,16 +25,18 @@ import {
   StatusChip,
   toast,
   UserAvatar,
+  type DataTableSort,
 } from "@/components/ui";
 import { fmtDateTime, plural, rel } from "@/lib/format";
 
 import type { Connector, PlatformAuditEvent, User, Workspace, WorkspaceAuditEvent } from "../api";
-import { actionLabel, AUDIT_WINDOWS, CATEGORY_LABEL, lastSegment, toCsv, userName, workspaceIdOf } from "../model";
+import { actionLabel, AUDIT_WINDOWS, CATEGORY_LABEL, lastSegment, PLATFORM_WORKSPACE_ACTIONS, toCsv, userName, workspaceIdOf } from "../model";
 import { useAuditEvents, useConnectors, usePlatformUsers, usePlatformWorkspaces } from "../queries";
-import { PlatformDrawer, PREVIEW_TIP, saveFile, useUrlState, WsCell } from "./shared";
+import { copyText, PlatformDrawer, PREVIEW_TIP, saveFile, useUrlState, WsCell } from "./shared";
 import { WorkspaceDrawer } from "./WorkspaceDrawer";
 
 const PAGE = 15;
+const SYSTEM = "BoMesh";
 
 /** One row of the console's audit log: a platform event or a workspace event (metadata only). */
 interface AuditRow {
@@ -42,8 +45,11 @@ interface AuditRow {
   workspaceId: string;
   actor: string;
   action: string;
+  category: string;
   area: string;
   target: string;
+  /** Resource name the event is about (for the drawer's related object). */
+  targetName: string;
   outcome: "success" | "failure";
   ip: string;
 }
@@ -51,7 +57,7 @@ interface AuditRow {
 type Lookups = { users: Map<string, User>; workspaces: Map<string, Workspace>; connectors: Map<string, Connector> };
 
 function actorName(actor: string | undefined, users: Lookups["users"]): string {
-  if (!actor || actor === "system") return "BoMesh";
+  if (!actor || actor === "system") return SYSTEM;
   const u = users.get(actor);
   return u ? userName(u) : "Unknown person";
 }
@@ -81,42 +87,73 @@ function toRows(platform: readonly PlatformAuditEvent[], workspace: readonly Wor
     workspaceId,
     actor: actorName(e.actor, l.users),
     action: actionLabel(e.action),
+    category: e.category ?? "",
     area: e.category ? CATEGORY_LABEL[e.category] : "—",
-    target: e.target ? targetLabel(e.target, l) : workspaceId ? (e.category ? CATEGORY_LABEL[e.category] : "") : "",
+    // Workspace lifecycle events carry no target: the workspace itself is what changed (preview: its name under the action).
+    target: e.target ? targetLabel(e.target, l) : workspaceId ? (l.workspaces.get(`workspaces/${workspaceId}`)?.displayName ?? (e.category ? CATEGORY_LABEL[e.category] : "")) : "",
+    targetName: e.target ?? "",
     outcome: e.outcome === "FAILED" ? "failure" : "success",
     ip: e.ipAddress ?? "",
   });
-  return [...platform.map((e) => row(e, "")), ...workspace.map((e) => row(e, workspaceIdOf(e.name)))].sort((a, b) => Date.parse(b.at ?? "") - Date.parse(a.at ?? ""));
+  // Workspace-internal events stay in that workspace's Activity; the console shows the workspace's lifecycle only.
+  const lifecycle = workspace.filter((e) => PLATFORM_WORKSPACE_ACTIONS.includes(e.action ?? ""));
+  return [...platform.map((e) => row(e, workspaceIdOf(e.target))), ...lifecycle.map((e) => row(e, workspaceIdOf(e.name)))].sort(
+    (a, b) => Date.parse(b.at ?? "") - Date.parse(a.at ?? ""),
+  );
 }
 
-/** Preview `P.pAudit`: cross-workspace events with search, window, workspace and outcome filters, drawer, CSV export. */
+/** Preview `X.auditLog.whoAv`: the product itself ("BoMesh") gets a system mark instead of initials. */
+function ActorAvatar({ name, size = "sm" }: { name: string; size?: "xs" | "sm" | "lg" }) {
+  if (name !== SYSTEM) return <UserAvatar name={name} size={size} />;
+  return (
+    <span className={`avatar avatar--default avatar--${size} act-sys`} aria-hidden>
+      <Zap className="i i-xs" />
+    </span>
+  );
+}
+
+/** Preview `P.pAudit` (built like workspace Activity, plus a Workspace column): search, window, filters, drawer, CSV. */
 export function AuditPage() {
   const url = useUrlState();
+  const router = useRouter();
   const win = AUDIT_WINDOWS.some((w) => w.value === url.get("win")) ? url.get("win") : "30";
   const events = useAuditEvents(win);
   const users = usePlatformUsers();
   const workspaces = usePlatformWorkspaces();
   const connectors = useConnectors();
+  const [sort, setSort] = useState<DataTableSort | null>(null);
   const lookups: Lookups = {
     users: new Map((users.data ?? []).map((u) => [u.name ?? "", u])),
     workspaces: new Map((workspaces.data ?? []).map((w) => [w.name ?? "", w])),
     connectors: new Map((connectors.data ?? []).map((c) => [c.name ?? "", c])),
   };
   const wsById = new Map((workspaces.data ?? []).map((w) => [lastSegment(w.name), w]));
+  const wsName = (id: string) => (id ? (wsById.get(id)?.displayName ?? id) : "Platform");
 
   const q = url.get("q");
   const ws = url.get("ws");
+  const area = url.get("area");
   const outcome = url.get("outcome");
   const page = Math.max(1, Number(url.get("page")) || 1);
 
   const all = events.data ? toRows(events.data.platform, events.data.workspace, lookups) : [];
   const needle = q.trim().toLowerCase();
-  const rows = all.filter(
+  const filteredRows = all.filter(
     (e) =>
       (!ws || (ws === "platform" ? !e.workspaceId : e.workspaceId === ws)) &&
+      (!area || e.category === area) &&
       (!outcome || e.outcome === outcome) &&
-      (!needle || [e.actor, e.action, e.target, e.area, e.workspaceId ? wsById.get(e.workspaceId)?.displayName ?? "" : "Platform"].some((v) => v.toLowerCase().includes(needle))),
+      (!needle || [e.actor, e.action, e.target, e.area, wsName(e.workspaceId)].some((v) => v.toLowerCase().includes(needle))),
   );
+  // Newest first unless a column sort is set; sorted before paging so every page follows it.
+  const rows = sort
+    ? [...filteredRows].sort((a, b) => {
+        const d = sort.column === "actor" ? a.actor.localeCompare(b.actor) : Date.parse(a.at ?? "") - Date.parse(b.at ?? "");
+        return sort.direction === "ascending" ? d : -d;
+      })
+    : filteredRows;
+  const areas = [...new Set(all.map((e) => e.category).filter(Boolean))].map((c) => ({ value: c, label: CATEGORY_LABEL[c as keyof typeof CATEGORY_LABEL] }));
+  const reset = () => url.set({ q: null, ws: null, area: null, outcome: null, win: null, page: null });
 
   const exportCsv = () => {
     if (!rows.length) {
@@ -127,7 +164,7 @@ export function AuditPage() {
       "platform-audit.csv",
       toCsv([
         ["When", "Workspace", "Person", "Area", "Action", "Target", "Outcome", "IP address"],
-        ...rows.map((e) => [e.at ?? "", e.workspaceId ? wsById.get(e.workspaceId)?.displayName ?? e.workspaceId : "Platform", e.actor, e.area, e.action, e.target, e.outcome, e.ip]),
+        ...rows.map((e) => [e.at ?? "", wsName(e.workspaceId), e.actor, e.area, e.action, e.target, e.outcome, e.ip]),
       ]),
     );
     toast(`Saved ${plural(rows.length, "event")} to platform-audit.csv`);
@@ -140,14 +177,26 @@ export function AuditPage() {
   if (current && current.id !== shown?.id) setShown(current);
   const selected = current ?? (open ? undefined : shown);
 
+  /** The object an event is about, when the console can show it (preview `pRelated`). */
+  const related = (e: AuditRow): { label: string; run: () => void } | null => {
+    const user = lookups.users.get(e.targetName);
+    if (user) return { label: `View ${userName(user)}`, run: () => router.push(`/p/users?open=${lastSegment(user.name)}`) };
+    const connector = lookups.connectors.get(e.targetName);
+    if (connector) return { label: `Open ${connector.displayName}`, run: () => router.push(`/p/connectors?open=${lastSegment(connector.name)}`) };
+    const target = lookups.workspaces.get(e.targetName);
+    const id = target ? lastSegment(target.name) : e.workspaceId && wsById.has(e.workspaceId) ? e.workspaceId : "";
+    if (id) return { label: "View workspace", run: () => url.set({ open: null, workspace: id }) };
+    return null;
+  };
+  const to = selected ? related(selected) : null;
+
   return (
-    <Page>
-      <PageChrome crumbs={[{ label: "Audit log" }]} />
+    <Page width="wide">
       <PageHeader
         title="Audit log"
         chips={<PreviewChip tooltip={PREVIEW_TIP} />}
         actions={
-          <Button variant="tertiary" onPress={exportCsv}>
+          <Button variant="tertiary" isDisabled={!events.data} onPress={exportCsv}>
             <Download className="i" aria-hidden />
             Export CSV
           </Button>
@@ -157,16 +206,18 @@ export function AuditPage() {
         query={events}
         skeleton={<SkeletonRows rows={8} />}
         isEmpty={(d) => d.platform.length + d.workspace.length === 0 && win === "90"}
-        empty={<EmptyState icon={Activity} title="No events recorded yet" description="Changes to workspaces, people and connectors appear here." boxed />}
+        empty={<EmptyState icon={Activity} title="No events recorded yet" description="Changes to workspaces, accounts, connectors and indexing appear here." boxed />}
       >
-        <div className="toolbar">
+        <div className="toolbar act-toolbar">
           <SearchInput value={q} onChange={(v) => url.set({ q: v, page: null })} placeholder="Search events" />
+          <Segmented label="Time window" value={win} options={AUDIT_WINDOWS} onChange={(v) => url.set({ win: v === "30" ? null : v, page: null })} />
           <FilterButton
             label="Workspace"
             value={ws}
             onChange={(v) => url.set({ ws: v, page: null })}
             options={[{ value: "platform", label: "Platform" }, ...(workspaces.data ?? []).map((w) => ({ value: lastSegment(w.name), label: w.displayName ?? "" }))]}
           />
+          <FilterButton label="Area" value={area} onChange={(v) => url.set({ area: v, page: null })} options={areas} />
           <FilterButton
             label="Outcome"
             value={outcome}
@@ -176,10 +227,8 @@ export function AuditPage() {
               { value: "failure", label: "Failed" },
             ]}
           />
-          <ClearFilters isActive={Boolean(ws || outcome)} onClear={() => url.set({ ws: null, outcome: null, page: null })} />
-          <div className="toolbar__end">
-            <Segmented label="Time window" value={win} options={AUDIT_WINDOWS} onChange={(v) => url.set({ win: v === "30" ? null : v, page: null })} />
-          </div>
+          <ClearFilters isActive={Boolean(ws || area || outcome)} onClear={() => url.set({ ws: null, area: null, outcome: null, page: null })} />
+          <span className="toolbar__end t-sm muted num">{plural(rows.length, "event")}</span>
         </div>
         {rows.length ? (
           <DataTable
@@ -187,89 +236,111 @@ export function AuditPage() {
             rows={paginate(rows, page, PAGE)}
             getRowId={(e) => e.id}
             onRowAction={(e) => url.set({ open: e.id })}
+            sort={sort}
+            onSortChange={(s) => {
+              setSort(s);
+              url.set({ page: null });
+            }}
             columns={[
               {
-                id: "when",
-                header: "When",
-                className: "pf-nowrap",
+                id: "what",
+                header: "What happened",
+                primary: true,
                 cell: (e) => (
-                  <span className="muted num" title={fmtDateTime(e.at)}>
-                    {rel(e.at)}
+                  <span className="stack act-what">
+                    <span className="row gap-6">
+                      <span className="cell-title truncate">{e.action}</span>
+                      {e.outcome === "failure" ? <StatusChip kind="outcome" value="failure" size="sm" /> : null}
+                    </span>
+                    {e.target ? <span className="cell-sub truncate">{e.target}</span> : null}
                   </span>
                 ),
               },
               {
-                id: "person",
+                id: "actor",
                 header: "Person",
-                className: "hide-md",
-                hideOnMobile: true,
+                sortValue: (e) => e.actor,
                 cell: (e) => (
                   <span className="row gap-8">
-                    <UserAvatar name={e.actor} size="xs" />
+                    <ActorAvatar name={e.actor} />
                     <span className="truncate">{e.actor}</span>
                   </span>
                 ),
               },
+              { id: "ws", header: "Workspace", className: "hide-md", hideOnMobile: true, cell: (e) => <WsCell workspace={e.workspaceId ? wsById.get(e.workspaceId) : null} /> },
               {
-                id: "action",
-                header: "Action",
-                primary: true,
+                id: "at",
+                header: "When",
+                sortValue: (e) => Date.parse(e.at ?? ""),
                 cell: (e) => (
-                  <div className="stack">
-                    <span className="cell-title">{e.action}</span>
-                    {e.target ? <span className="cell-sub truncate pf-target">{e.target}</span> : null}
-                  </div>
+                  <span className="muted act-when" title={fmtDateTime(e.at)}>
+                    {rel(e.at)}
+                  </span>
                 ),
               },
-              { id: "ws", header: "Workspace", className: "hide-sm", hideOnMobile: true, cell: (e) => <WsCell workspace={e.workspaceId ? wsById.get(e.workspaceId) : null} /> },
-              { id: "outcome", header: "Outcome", cell: (e) => <StatusChip kind="outcome" value={e.outcome} /> },
             ]}
             footer={<Pager page={page} pageSize={PAGE} total={rows.length} onPageChange={(p) => url.set({ page: p > 1 ? String(p) : null })} />}
           />
         ) : (
-          <NoMatches what="events" onClear={() => url.set({ q: null, ws: null, outcome: null, page: null })} />
+          <EmptyState
+            icon={Search}
+            title="No events match"
+            description="Try a longer time window or clear the filters."
+            actions={
+              <Button variant="tertiary" onPress={reset}>
+                Reset filters
+              </Button>
+            }
+            boxed
+            compact
+          />
         )}
       </Gate>
       <PlatformDrawer
         isOpen={Boolean(open)}
         onClose={() => url.set({ open: null })}
+        lead={selected ? <ActorAvatar name={selected.actor} size="lg" /> : undefined}
         title={selected ? selected.action : events.isPending ? "Loading event" : "Event not found"}
-        description={selected ? fmtDateTime(selected.at) : undefined}
+        description={selected ? `${selected.actor} · ${rel(selected.at)}` : undefined}
         footer={
-          selected?.workspaceId && wsById.get(selected.workspaceId) ? (
-            <Button variant="tertiary" onPress={() => url.set({ open: null, workspace: selected.workspaceId })}>
-              View workspace
+          to ? (
+            <Button variant="primary" onPress={to.run}>
+              {to.label}
+              <ArrowRight className="i" aria-hidden />
             </Button>
-          ) : (
-            <Button variant="tertiary" onPress={() => url.set({ open: null })}>
-              Done
-            </Button>
-          )
+          ) : null
         }
       >
         {selected ? (
-          <KeyValue
-            pairs={[
-              ["Outcome", <StatusChip key="o" kind="outcome" value={selected.outcome} />],
-              [
-                "When",
-                <span key="w">
-                  {fmtDateTime(selected.at)} <span className="muted">· {rel(selected.at)}</span>
-                </span>,
-              ],
-              ["Workspace", <WsCell key="ws" workspace={selected.workspaceId ? wsById.get(selected.workspaceId) : null} />],
-              [
-                "Person",
-                <span key="p" className="row gap-8">
-                  <UserAvatar name={selected.actor} size="xs" />
-                  {selected.actor}
-                </span>,
-              ],
-              ["Area", selected.area],
-              selected.target ? ["Target", selected.target] : null,
-              selected.ip ? ["IP address", <span key="ip" className="mono">{selected.ip}</span>] : null,
-            ]}
-          />
+          <>
+            <section className="drawer__section">
+              <KeyValue
+                pairs={[
+                  selected.target ? ["Target", selected.target] : null,
+                  ["Area", selected.area],
+                  ["Workspace", <WsCell key="ws" workspace={selected.workspaceId ? wsById.get(selected.workspaceId) : null} />],
+                  ["Outcome", <StatusChip key="o" kind="outcome" value={selected.outcome} />],
+                  ["Time", fmtDateTime(selected.at)],
+                ]}
+              />
+            </section>
+            <section className="drawer__section">
+              <Disclosure icon={Info} title="Technical details">
+                <KeyValue
+                  pairs={[
+                    [
+                      "Event ID",
+                      <span key="id" className="row gap-4">
+                        <span className="mono t-sm">{lastSegment(selected.id)}</span>
+                        <IconButton icon={Copy} tip="Copy event ID" size="sm" className="act-copy" onPress={() => void copyText(lastSegment(selected.id), "Event ID copied")} />
+                      </span>,
+                    ],
+                    ["IP address", <span key="ip" className="mono t-sm">{selected.ip || "—"}</span>],
+                  ]}
+                />
+              </Disclosure>
+            </section>
+          </>
         ) : events.isPending ? (
           <SkeletonRows rows={4} />
         ) : null}

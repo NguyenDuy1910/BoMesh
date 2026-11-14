@@ -1,10 +1,10 @@
 (() => {
 'use strict';
-/* Chat: the home composer (/chat) and threads (/chat/:id) — permission-aware
+/* Chat: AI Chat (/chat: the composer above the conversation list) and threads (/chat/:id) — permission-aware
    canned answers that stream with work steps, inline citations, a citation
    side panel, feedback, retry/edit, share and the product tour.
    File work (artifacts, attachments, file panel) lives in chat-files.js and
-   plugs in through X.chatFiles; the conversation list is conversations.js. */
+   plugs in through X.chatFiles; the conversation list and its ⋯ menu are conversations.js. */
 
 let run = null;    // active stream: { conv, msg, stop }
 let stick = true;  // keep the thread pinned to the bottom while streaming
@@ -16,7 +16,7 @@ function findMsg(id) { for (const conv of D.convs) { const m = conv.messages.fin
 const canDoc = d => !!d && canReadKb(kbById(d.kb));
 const visCites = m => (m.citations || []).filter(c => canDoc(docById(c.doc)));
 const plain = t => String(t || '').replace(/\[([^\]]+)\]\(\/[^)\s]*\)/g, '$1').replace(/\*\*|\*/g, '').replace(/\s?\[\d+\]/g, '').replace(/^\|.*$/gm, '').replace(/\n{3,}/g, '\n\n').trim();
-/** The caller's personal knowledge base ("My files") in this workspace. */
+/** The caller's personal collection ("My files") in this workspace. */
 const mineKb = () => D.kbs.find(k => k.personal && (!k.owner || k.owner === me().id))?.id || 'kb-mine';
 const normFile = f => typeof f === 'string' ? { name: f, type: f.split('.').pop().toLowerCase(), kind: 'upload', doc: D.docs.find(d => d.kb === mineKb() && d.name === f)?.id } : f;
 /** Conversations are private to their owner when they have one (seeded shared demo threads don't). */
@@ -27,7 +27,7 @@ function makeTitle(q) {
   if (w.length > 6) t += '…';
   return t.charAt(0).toUpperCase() + t.slice(1);
 }
-/** Drop names of knowledge bases the caller can't read from step labels. */
+/** Drop names of collections the caller can't read from step labels. */
 function clean(s) {
   D.kbs.filter(k => !canReadKb(k)).forEach(k => { s = String(s).split(' and ' + k.name).join('').split(k.name + ' and ').join('').split(', ' + k.name).join(''); });
   return s;
@@ -267,7 +267,7 @@ function answer(q, scope = [], fileNames = [], space = null) {
   const names = searched.map(k => k.name);
   const searchLabel = names.length <= 2 ? names.join(' and ') : `${names[0]}, ${names[1]} and ${names.length - 2} more`;
   const noRes = restricted => {
-    const r = { text: 'I couldn’t find this in the knowledge you can access.', citations: [], searchLabel, activity: [{ kind: 'search', label: `Searched ${plural(searched.length, 'knowledge base')}`, detail: 'No relevant passages' }], noResults: { scoped: scope.length > 0, restricted: restricted || lockedExists }, files };
+    const r = { text: 'I couldn’t find this in the knowledge you can access.', citations: [], searchLabel, activity: [{ kind: 'search', label: `Searched ${plural(searched.length, 'collection')}`, detail: 'No relevant passages' }], noResults: { scoped: scope.length > 0, restricted: restricted || lockedExists }, files };
     // Not covered where the caller searched: offer who can answer; unscoped misses become a knowledge gap.
     if (!restricted && hasModule('requests')) { const n = askNext(q, scope, space); r.next = n.length ? n : null; if (!scope.length) r.gap = { q: q.trim(), kb: null }; }
     return r;
@@ -281,7 +281,7 @@ function answer(q, scope = [], fileNames = [], space = null) {
   pr.citations.forEach(c => { const d = docById(c.doc); c.page = Math.max(1, Math.min(c.page, d.pages)); });
   const readDocs = [...new Set(pr.citations.map(c => c.doc))].map(docById);
   const activity = [
-    { kind: 'search', label: `Searched ${names.length <= 2 && names.length ? searchLabel : plural(searched.length, 'knowledge base')}`, detail: `${pr.citations.length * 3 + 1} relevant passages` },
+    { kind: 'search', label: `Searched ${names.length <= 2 && names.length ? searchLabel : plural(searched.length, 'collection')}`, detail: `${pr.citations.length * 3 + 1} relevant passages` },
     ...fileNames.map(f => ({ kind: 'read', label: `Read ${f}`, detail: 'your attachment' })),
     ...readDocs.map(d => ({ kind: 'read', label: `Read ${d.name}`, detail: plural(pr.citations.filter(c => c.doc === d.id).length, 'passage') })),
     ...extra,
@@ -326,7 +326,7 @@ function md(text, ctx) {
 }
 
 /* ═══════════════ Composer ═══════════════ */
-/** What the composer searches: the open conversation, or the home composer. Both carry scope (knowledge base ids) and space (context). */
+/** What the composer searches: the open conversation, or the home composer. Both carry scope (collection ids) and space (context). */
 function scopeHolder() { const conv = S.cur?.r.page === 'chatThread' && convById(S.cur.params.id); if (conv) { conv.scope ??= []; return conv; } return composer(composerKey()); }
 const readableKbsOf = sp => (sp?.kbs || []).filter(id => canReadKb(kbById(id)));
 /** Spaces offered as a scope: mine, with knowledge I can read. */
@@ -382,7 +382,7 @@ function afterComposer(changed) {
   if (changed) { scopeUi().kbs = false; setTimeout(() => { const t = $('#chat-input'); if (!t || document.activeElement !== t && document.activeElement !== document.body && document.activeElement) return; t.focus({ preventScroll: true }); const n = t.value.length; t.setSelectionRange(n, n); }, 0); }
 }
 A['chat-draft'] = el => grow(el);
-/* Scope picker (Popover): "Search in" is one choice — the whole workspace, one of my spaces, or specific knowledge bases.
+/* Scope picker (Popover): "Search in" is one choice — the whole workspace, one of my spaces, or specific collections.
    Only that last choice reveals the knowledge-base checklist (multi-select), so a space and a base with the same name never sit side by side. */
 const scopeUi = () => ui('chatScope', { kbs: false });
 function scopeMode(h) { const sp = holderSpace(h); return sp ? 'sp:' + sp.id : h.scope.length || scopeUi().kbs ? 'kbs' : 'all'; }
@@ -392,10 +392,10 @@ function scopeOpt(value, on, icon, label, meta) {
 }
 PO['chat-scope'] = () => {
   const h = scopeHolder(), mode = scopeMode(h), spaces = scopeSpaces(), kbs = visibleKbs().filter(canReadKb);
-  const radios = [scopeOpt('all', mode === 'all', 'layers', allLabel(), plural(kbs.length, 'knowledge base')),
-    ...spaces.map(s => scopeOpt('sp:' + s.id, mode === 'sp:' + s.id, spaceType(s.type).icon, s.name, `Space · ${plural(readableKbsOf(s).length, 'knowledge base')}`)),
-    scopeOpt('kbs', mode === 'kbs', 'book', 'Specific knowledge bases', mode === 'kbs' && h.scope.length ? `${h.scope.length} selected` : 'Choose one or more')].join('');
-  const list = mode === 'kbs' ? `<div class="chat-scope-pop__kbs" role="group" aria-label="Knowledge bases">${kbs.map(k => checkbox({ checked: h.scope.includes(k.id), act: 'chat-scope-kb', data: { id: k.id }, label: `${ic(k.personal ? 'user' : 'book', 'i-sm chat-opt__icon')}<span class="chat-opt__body"><span class="chat-opt__label truncate">${esc(k.name)}</span><span class="chat-opt__meta">${k.personal ? 'Only you' : plural(docCount(k), 'document')}</span></span>` })).join('')}</div>` : '';
+  const radios = [scopeOpt('all', mode === 'all', 'layers', allLabel(), plural(kbs.length, 'collection')),
+    ...spaces.map(s => scopeOpt('sp:' + s.id, mode === 'sp:' + s.id, spaceType(s.type).icon, s.name, `Space · ${plural(readableKbsOf(s).length, 'collection')}`)),
+    scopeOpt('kbs', mode === 'kbs', 'book', 'Specific collections', mode === 'kbs' && h.scope.length ? `${h.scope.length} selected` : 'Choose one or more')].join('');
+  const list = mode === 'kbs' ? `<div class="chat-scope-pop__kbs" role="group" aria-label="Collections">${kbs.map(k => checkbox({ checked: h.scope.includes(k.id), act: 'chat-scope-kb', data: { id: k.id }, label: `${ic(k.personal ? 'user' : 'book', 'i-sm chat-opt__icon')}<span class="chat-opt__body"><span class="chat-opt__label truncate">${esc(k.name)}</span><span class="chat-opt__meta">${k.personal ? 'Only you' : plural(docCount(k), 'document')}</span></span>` })).join('')}</div>` : '';
   return { title: 'Search in', body: `<div class="chat-scope-pop"><div class="chat-scope-pop__group" role="radiogroup" aria-label="Search in">${radios}</div>${list}</div>` };
 };
 A['chat-scope-set'] = el => {
@@ -500,7 +500,7 @@ function aiInner(conv, m) {
   if ((m.state || 'done') === 'done') {
     if (m.noResults) {
       h += `<div class="row gap-8 wrap mt-12">${m.noResults.scoped ? btn(`Ask again in ${allLabel().replace(/^All/, 'all')}`, { v: 'secondary', size: 'sm', icon: 'layers', act: 'chat-unscope', data: { msg: m.id } }) : ''}${btn('Browse knowledge', { v: 'ghost', size: 'sm', icon: 'book', href: '/knowledge' })}</div>`;
-      if (m.noResults.restricted) h += `<p class="chat-hint">${ic('lock', 'i-xs')}<span>Some knowledge bases are restricted. You can request access from Knowledge.</span></p>`;
+      if (m.noResults.restricted) h += `<p class="chat-hint">${ic('lock', 'i-xs')}<span>Some collections are restricted. You can request access from Knowledge.</span></p>`;
     } else if (m.partial || vis.length < all.length) h += `<p class="chat-hint">${ic('lock', 'i-xs')}<span>Knowledge you can’t access may have more on this.</span></p>`;
     if (m.lowConf) h += `<p class="chat-hint">${ic('info', 'i-xs')}<span>The sources don’t settle this, so it’s been flagged to the people who keep this knowledge.</span></p>`;
     h += X.chatFiles?.cards(m) || '';
@@ -547,25 +547,31 @@ A['chat-panel-close'] = () => { if (X.chatFiles?.leaveEdit && !X.chatFiles.leave
 /* ═══════════════ Pages ═══════════════ */
 const STARTER_IC = ['file-text', 'list', 'users'];
 /** One suggestion area under the composer. Searching a space (or one base of a space) with AI workflows swaps the starter
-    questions for that space's workflows — same cards, so the layout never grows a second row of ideas. */
-function suggestions(c) {
+    questions for that space's workflows — same cards, so the layout never grows a second row of ideas. Starter questions
+    only help before the first conversation (starters: false hides them once the list below has something to pick up). */
+function suggestions(c, starters = true) {
   const sp = hasModule('work') && (holderSpace(c) || (c.scope.length === 1 && hasModule('spaces') && spaceById(kbById(c.scope[0])?.space))) || null;
   const wfs = sp ? workflowsFor(sp).slice(0, 3) : [];
   const card = (attrs, icon, title, desc) => `<button type="button" class="chat-starter" ${attrs}><span class="chat-starter__title">${ic(icon, 'i-sm')}<span class="truncate">${esc(title)}</span></span>${desc ? `<span class="chat-starter__prompt clamp-2">${esc(desc)}</span>` : ''}</button>`;
   if (wfs.length) return `<div class="chat-starters" id="chat-starters" role="group" aria-label="${esc(`Start work in ${sp.name}`)}">${wfs.map(w => card(`data-act="chat-workflow" data-workflow="${esc(w.id)}" data-space="${esc(sp.id)}"`, w.icon, w.label, w.desc)).join('')}</div>`;
-  const starters = (X.assistantStarters?.() || D.assistant.starters || []).filter(s => s?.prompt).slice(0, 3);
-  return starters.length ? `<div class="chat-starters" id="chat-starters" role="group" aria-label="Suggested questions">${starters.map((s, i) => card(`data-act="chat-starter" data-prompt="${esc(s.prompt)}"`, STARTER_IC[i % 3], s.title || s.prompt, s.title ? s.prompt : '')).join('')}</div>` : '';
+  const picks = starters ? (X.assistantStarters?.() || D.assistant.starters || []).filter(s => s?.prompt).slice(0, 3) : [];
+  return picks.length ? `<div class="chat-starters" id="chat-starters" role="group" aria-label="Suggested questions">${picks.map((s, i) => card(`data-act="chat-starter" data-prompt="${esc(s.prompt)}"`, STARTER_IC[i % 3], s.title || s.prompt, s.title ? s.prompt : '')).join('')}</div>` : '';
 }
 A['chat-workflow'] = el => {
   const { workflow, space } = el.dataset; const data = { workflow, ...(space ? { space } : {}) };
   if (A['work-start']) A['work-start']({ dataset: data }); else go(NEXT_ROUTE['work-start'](data));
 };
+/** AI Chat (/chat): one destination to start a conversation (the composer, with its scope and attachments) and to pick up any
+    earlier one (the list below it, conversations.js). */
 P.chatHome = () => {
-  const a = D.assistant, c = composer('home');
+  const a = D.assistant, c = composer('home'), first = !myConvs().length;
   return `<div class="chat-home chat-drop" data-drop="home"><div class="chat-home__inner">
-    <h1 class="chat-home__title">${esc(a.welcome || 'What can I help you find?')}</h1>
-    ${composerHtml({ key: 'home', holder: c, lg: true })}
-    ${suggestions(c)}
+    <div class="chat-home__start">
+      <h1 class="chat-home__title">${esc(a.welcome || 'What can I help you find?')}</h1>
+      ${composerHtml({ key: 'home', holder: c, lg: true })}
+      ${suggestions(c, first)}
+    </div>
+    ${X.conversations?.list() || ''}
   </div></div>`;
 };
 AFTER.chatHome = ({ changed }) => { if (changed) { cui().panel = null; cui().edit = null; } afterComposer(changed); };
@@ -575,17 +581,18 @@ function threadSkel() {
 P.chatThread = ({ params }) => {
   const conv = convById(params.id);
   if (!isMine(conv)) {
-    crumbs([{ label: 'Conversations', to: '/chats' }, { label: 'Not found' }]);
-    return `<div class="page">${emptyState({ icon: 'message', title: 'This conversation isn’t available', desc: 'It may have been deleted, or it belongs to someone else.', actions: btn('New chat', { v: 'primary', icon: 'message-plus', href: '/chat' }) + btn('Conversations', { href: '/chats' }) })}</div>`;
+    crumbs([{ label: 'AI Chat', to: '/chat' }, { label: 'Not found' }]);
+    return `<div class="page">${emptyState({ icon: 'message', title: 'This conversation isn’t available', desc: 'It may have been deleted, or it belongs to someone else.', actions: btn('Go to AI Chat', { v: 'primary', icon: 'message', href: '/chat' }) })}</div>`;
   }
   ensureSeed(conv); conv.scope ??= []; settleStale(conv);
   const sp = holderSpace(conv);
   const proj = X.projects?.of(conv);
-  crumbs(sp ? [{ label: 'Spaces', to: '/spaces' }, { label: sp.name, to: '/space/' + sp.id }, { label: conv.title }] : proj ? [{ label: proj.name, to: '/project/' + proj.id }, { label: conv.title }] : [{ label: 'Conversations', to: '/chats' }, { label: conv.title }]);
-  topbarActions(`<span class="chat-top-actions">${btn(conv.share ? 'Shared' : 'Share', { v: 'ghost', size: 'sm', icon: conv.share ? 'users' : 'share', act: 'chat-share', data: { id: conv.id }, tip: conv.share ? shareSummary(conv) : '' })}${iconBtn('more', 'More', { size: 'sm', menu: 'chat-more', data: { id: conv.id } })}</span>`);
+  crumbs(sp ? [{ label: 'Spaces', to: '/spaces' }, { label: sp.name, to: '/space/' + sp.id }, { label: conv.title }] : proj ? [{ label: 'Projects', to: '/projects' }, { label: proj.name, to: '/project/' + proj.id }, { label: conv.title }] : [{ label: 'AI Chat', to: '/chat' }, { label: conv.title }]);
+  // The conversation's title is the top row's H1, its Share and ⋯ the row's actions: the thread starts right under it.
+  pageHeader({ title: conv.title, actions: `<span class="chat-top-actions">${btn(conv.share ? 'Shared' : 'Share', { v: 'ghost', size: 'sm', icon: conv.share ? 'users' : 'share', act: 'chat-share', data: { id: conv.id }, tip: conv.share ? shareSummary(conv) : '' })}${iconBtn('more', 'More', { size: 'sm', menu: 'chat-more', data: { id: conv.id } })}</span>` });
   const u = cui(); const panel = u.panel?.conv === conv.id ? u.panel : null;
   const streaming = run?.conv === conv.id;
-  const ok = () => `<h1 class="sr-only">${esc(conv.title)}</h1><div class="chat-thread">${conv.messages.map(m => m.role === 'user' ? userHtml(m) : `<div class="chat-msg chat-msg--ai" id="msg-${m.id}">${aiInner(conv, m)}</div>`).join('')}</div>`;
+  const ok = () => `<div class="chat-thread">${conv.messages.map(m => m.role === 'user' ? userHtml(m) : `<div class="chat-msg chat-msg--ai" id="msg-${m.id}">${aiInner(conv, m)}</div>`).join('')}</div>`;
   const side = panel?.kind === 'file' ? X.chatFiles?.panel(conv, panel) || '' : '';
   return `<div class="split chat-split">
     <div class="split__main chat-main chat-drop" data-drop="${conv.id}">
@@ -712,7 +719,7 @@ A['chat-variant'] = el => { const { m } = findMsg(el.dataset.msg); if (!m?.varia
 A['chat-steps'] = el => { const u = cui(); u.open[el.dataset.msg] = !u.open[el.dataset.msg]; refresh(); };
 A['chat-run'] = el => { const u = cui(); u.open[el.dataset.k] = !u.open[el.dataset.k]; const { m } = findMsg(el.dataset.k.split(':run:')[0]); m ? paint(m) : refresh(); };
 
-/** Shared entry point: start a new conversation with question q, optionally scoped to a knowledge base or a space (its knowledge), with one resource (doc) or several (docs, comma list) attached as references. Empty q opens /chat with that scope chosen. */
+/** Shared entry point: start a new conversation with question q, optionally scoped to a collection or a space (its knowledge), with one resource (doc) or several (docs, comma list) attached as references. Empty q opens /chat with that scope chosen. */
 A['chat-ask'] = el => {
   const { q = '', kb, space, doc, docs } = el?.dataset || {};
   const sp = space && hasModule('spaces') ? spaceById(space) : null;
@@ -806,7 +813,7 @@ A['chat-request'] = el => {
   toast('Access requested'); refresh();
 };
 
-/* Thread ⋯: the same conversation menu as /chats and the sidebar (conversations.js) */
+/* Thread ⋯: the same conversation menu as AI Chat's list and project pages (conversations.js) */
 MENUS['chat-more'] = el => X.conversations?.menu(convById(el.dataset.id)) || [];
 
 /* ═══════════════ Share ═══════════════
@@ -877,16 +884,18 @@ A['esc-page'] = () => {
 
 /* ═══════════════ Product tour: Home, the real landing page ═══════════════
    Starts by itself the first time a person lands on Home in a workspace (remembered per person and workspace), and from
-   the account menu any time. Steps skip what isn't on screen (the sidebar on phones). The card never covers what it points
-   at: it sits beside the target, or as a bottom sheet on phones with the target scrolled above it. One way out: Skip tour (or Esc). */
+   the account menu any time. Home is the workspace's knowledge map: the tour shows its collections, how to find your way in
+   it, and one branch; then AI Chat and Search. Steps skip what isn't on screen (the sidebar on phones). The card never covers
+   what it points at: it sits beside the target, or as a bottom sheet on phones with the target scrolled above it. One way out:
+   Skip tour (or Esc). */
 DATA_KEYS.push('tourSeen');
 const touch = () => matchMedia('(hover: none)').matches;
 const TOUR = [
-  { sel: '.home-box', title: 'Ask or find, in one box', body: () => 'Ask a question to get an answer that cites its sources, or type a few words to find a document.' },
-  { sel: '.home-box__scope, .home-scope-chip', title: 'Choose where to look', body: () => `Look in all of ${curWs().name}, one knowledge base or one of your spaces.` },
-  { sel: '.home-body > .home-sec', title: 'Pick up where you left off', body: () => 'What’s waiting for you, what changed in documents you can read, and what to read next.' },
-  { sel: '#side-new-chat', title: 'Start a conversation', body: () => 'Open a new chat to attach files or choose exactly what to search. Conversations and projects stay in the sidebar.' },
-  { sel: '#topbar-search', title: 'Find anything', body: () => touch() ? 'Search conversations, documents and pages.' : 'Search conversations, documents and pages, or press ⌘K.' },
+  { sel: '.atlas .an--ws', title: 'Everything this workspace knows', body: () => `The map starts at ${curWs().name}. Each tinted territory is one collection, drawn the way its documents are kept.` },
+  { sel: '.atlas-toolbar', title: 'Find your way', body: () => 'Type a name to narrow the map, hide the documents to see only the levels, or go straight to a collection.' },
+  { sel: '.atlas .an--root', title: 'Open any branch', body: () => (touch() ? 'Tap a box for its details; its handle opens or folds what’s inside. Drag to move, pinch to zoom.' : 'Select a box for its details; its handle opens or folds what’s inside. Drag to move, ⌘ or Ctrl and scroll to zoom.') },
+  { sel: '#nav-chat', title: 'AI Chat', body: () => 'AI Chat: start a conversation or pick up an earlier one. Attach files or choose exactly what to search.' },
+  { sel: '#side-search, #topbar-search', title: 'Find anything', body: () => touch() ? 'Search conversations, documents and pages.' : 'Search conversations, documents and pages, or press ⌘K.' },
 ];
 let tourAt = null;
 const tourKey = () => `${me().id}:${S.ws}`;
@@ -944,15 +953,15 @@ X.startTour = () => {
 function tourAuto() {
   if (tourAt != null || !S.signedIn || S.cur?.r.page !== 'home' || S.pageState !== 'live' || S.modal || S.drawer || S.palette || S.menu) return;
   if (tourSeen()[tourKey()]) return;
-  if (S.navLoading || !$('.home-box')) { setTimeout(tourAuto, 300); return; }
+  if (S.navLoading || !$('.atlas .an--ws, .home .empty-state')) { setTimeout(tourAuto, 300); return; }
   tourBegin();
 }
-/* Home re-renders (typing, scope, workspace switch) keep the tour on its target. */
+/* Home re-renders (workspace switch, page state) keep the tour on its target. */
 new MutationObserver(() => { if (tourAt != null) requestAnimationFrame(() => tourPaint(false)); }).observe(document.getElementById('app'), { childList: true });
-const tourDone = () => { tourClose(); if (!touch()) $('#home-q')?.focus(); };
+const tourDone = () => tourClose();
 A['chat-tour-step'] = el => {
   const n = tourAt + +el.dataset.d;
-  if (n >= tourSteps().length) { tourDone(); toast('You’re all set. Ask your first question in the box.'); return; }
+  if (n >= tourSteps().length) { tourDone(); toast('You’re all set. Open a document from the map or ask a question.'); return; }
   tourAt = Math.max(0, n); tourPaint(true);
 };
 A['chat-tour-skip'] = tourDone;

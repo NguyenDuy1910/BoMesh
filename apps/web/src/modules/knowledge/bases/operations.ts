@@ -4,18 +4,16 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useMemo } from "react";
 
-import { confirm } from "@/components/ui/Confirm";
 import { toast } from "@/components/ui/Toast";
 import { errorMessage } from "@/lib/api/client";
-import { plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 
 import { deleteItem, undeleteItem } from "../api";
 import { invalidateKnowledge } from "../queries";
-import type { Item } from "./model";
+import { collectionHref, COLLECTIONS_HREF, type Item } from "./model";
 
-/** Base-level operations (preview `A['kb-archive']`). */
-export function useBaseOperations() {
+/** Collection-level operations (preview `A['kb-archive']`). */
+export function useCollectionOperations() {
   const { id: ws } = useWorkspace();
   const qc = useQueryClient();
   const router = useRouter();
@@ -24,38 +22,24 @@ export function useBaseOperations() {
     const refresh = () => invalidateKnowledge(qc, ws);
     const fail = (error: unknown) => toast(errorMessage(error), { tone: "danger" });
 
-    async function restore(base: Item) {
-      try {
-        await undeleteItem(ws, base.name ?? "");
-        refresh();
-        toast(`Restored “${base.displayName ?? ""}”`);
-      } catch (error) {
-        fail(error);
-      }
-    }
-
     return {
-      /** Typed confirmation, soft delete with its documents (30-day restore), back to the list, Undo. */
-      async archive(base: Item): Promise<boolean> {
-        const n = base.collection?.documentCount ?? 0;
-        const name = base.displayName ?? "";
-        const ok = await confirm({
-          title: `Archive ${name}?`,
-          description: n ? `Its ${plural(n, "document")} will stop appearing in answers for everyone.` : "It will disappear for everyone.",
-          confirmLabel: "Archive",
-          tone: "danger",
-          typed: name,
-        });
-        if (!ok) return false;
+      /** Archiving is reversible: it happens at once (soft delete with its documents), back to Collections, with Undo. */
+      async archive(collection: Item): Promise<void> {
+        const name = collection.displayName ?? "";
         try {
-          await deleteItem(ws, base.name ?? "", { force: true });
+          await deleteItem(ws, collection.name ?? "", { force: true });
           refresh();
-          router.push("/knowledge/bases");
-          toast(`Archived “${name}”`, { undo: () => void restore(base) });
-          return true;
+          router.push(COLLECTIONS_HREF);
+          toast(`Archived “${name}”`, {
+            undo: () => {
+              undeleteItem(ws, collection.name ?? "").then(() => {
+                refresh();
+                router.push(collectionHref(collection.name, "settings"));
+              }, fail);
+            },
+          });
         } catch (error) {
           fail(error);
-          return false;
         }
       },
     };

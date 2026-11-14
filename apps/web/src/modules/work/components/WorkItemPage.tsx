@@ -1,13 +1,13 @@
 "use client";
 
 import { Button, Drawer, Dropdown, Input, Label, ProgressBar, Separator, Spinner, TextField } from "@heroui/react";
-import { ChevronRight, CircleCheck, CircleDashed, Download, FileText, Lock, MoreHorizontal, Pencil, Search, Share2, Trash2, TriangleAlert, Users } from "lucide-react";
+import { ChevronRight, CircleCheck, CircleDashed, Download, FileText, History, Lock, MoreHorizontal, Pencil, Search, Share2, Table, Trash2, TriangleAlert, Users } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useRef, useState, type Key, type MutableRefObject, type ReactNode } from "react";
 
 import { PageChrome } from "@/components/shell/page-chrome";
-import { Callout, EmptyState, ErrorState, FileIcon, IconButton, List, ListItem, Page, SkeletonRows, Tip, toast } from "@/components/ui";
+import { Callout, EmptyState, ErrorState, FileIcon, IconButton, List, ListItem, PageHeader, SkeletonRows, Tip, toast } from "@/components/ui";
 import { ApiError, errorMessage, resourceId, type Schema } from "@/lib/api/client";
 import { plural, rel } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
@@ -16,15 +16,18 @@ import { useSpace } from "@/modules/spaces";
 
 import { useStartWork, useWorkActions, type DownloadFormat, type WorkActions } from "../actions";
 import { isSpaceStaff, kindMeta } from "../kinds";
-import { dropRecipe, loadRecipe, recipeOf, type Artifact } from "../model";
+import { dropRecipe, loadRecipe, recipeOf, reviewSources, sourceLine, type Artifact } from "../model";
 import { useDocs, useOperation, useWorkItem } from "../queries";
 import { DraftActions, DraftView } from "./DraftView";
 import { GuideActions, GuideView } from "./GuideView";
 import { SpaceTag, WorkStatusChip, WorkTile } from "./parts";
 import { QuizActions, QuizView } from "./QuizView";
-import { ReviewActions, ReviewView } from "./ReviewView";
+import { EvidencePanel, ReviewActions, ReviewView } from "./ReviewView";
 
 type Space = Schema<"Space">;
+
+/** The one side panel a work page may have open (preview: one panel at a time). */
+export type WorkPanel = { kind: "cell"; option: string; criterion: string } | { kind: "rail"; tab: "sources" | "versions" };
 
 /** What every kind's view gets. */
 export interface WorkViewProps {
@@ -35,6 +38,18 @@ export interface WorkViewProps {
   actions: WorkActions;
   /** Saves pending edits before an action that depends on them (draft autosave). */
   flush: MutableRefObject<() => Promise<void>>;
+  /** The open side panel: a review cell's evidence or the draft's citations/versions rail. */
+  panel: WorkPanel | null;
+  setPanel: (panel: WorkPanel | null) => void;
+}
+
+/** The page's own scroller (`/work/[id]` is a bare route): the hero, top-row peek and kept scroll follow it. */
+function WorkScroll({ children }: { children: ReactNode }) {
+  return (
+    <div className="work-scroll" id="work-scroll" data-keep-scroll>
+      {children}
+    </div>
+  );
 }
 
 /** `/work/[id]` — one piece of work (preview `P.workItem`). */
@@ -45,62 +60,64 @@ export function WorkItemPage({ id }: { id: string }) {
   const a = query.data;
   const space = useSpace(a?.space ? resourceId(a.space) : "").data ?? null;
   const fromSpace = params.get("from") === "space" && space;
-  const crumbs = (title: string) =>
-    fromSpace
-      ? [{ label: space.displayName, href: `/space/${resourceId(space.name)}` }, { label: "Work", href: `/space/${resourceId(space.name)}?tab=work` }, { label: title }]
-      : [{ label: "Work", href: "/work" }, { label: title }];
+  const crumbs = fromSpace
+    ? [
+        { label: space.displayName ?? "Space", href: `/space/${resourceId(space.name)}` },
+        { label: "Work", href: `/space/${resourceId(space.name)}?tab=work` },
+      ]
+    : [{ label: "Work", href: "/work" }];
 
   if (query.isPending)
     return (
-      <Page>
-        <PageChrome crumbs={[{ label: "Work", href: "/work" }]} />
-        <SkeletonRows rows={6} />
-      </Page>
+      <WorkScroll>
+        <div className="page work-page">
+          <PageChrome crumbs={[{ label: "Work", href: "/work" }]} />
+          <SkeletonRows rows={6} />
+        </div>
+      </WorkScroll>
     );
   if (query.isError || !a || a.state === "DELETED") {
     const denied = query.error instanceof ApiError && query.error.status === 403;
     const missing = !a || a.state === "DELETED" || (query.error instanceof ApiError && query.error.isNotFound);
     return (
-      <Page narrow>
-        <PageChrome crumbs={[{ label: "Work", href: "/work" }, { label: "Not available" }]} />
-        {denied || missing ? (
-          <EmptyState
-            icon={denied ? Lock : Search}
-            title={denied ? "You don’t have access to this" : "This work doesn’t exist"}
-            description={denied ? "It’s private, or only the teaching team of its space can see it. Ask the owner to share it." : "It may have been deleted."}
-            actions={
-              <Button variant="primary" onPress={() => router.push("/work")}>
-                Back to Work
-              </Button>
-            }
-          />
-        ) : (
-          <ErrorState error={query.error} onRetry={() => void query.refetch()} />
-        )}
-      </Page>
+      <WorkScroll>
+        <div className="page page--narrow">
+          <PageChrome crumbs={[{ label: "Work", href: "/work" }, { label: "Not available" }]} />
+          {denied || missing ? (
+            <EmptyState
+              icon={denied ? Lock : Search}
+              title={denied ? "You don’t have access to this" : "This work doesn’t exist"}
+              description={denied ? "It’s private, or only the teaching team of its space can see it. Ask the owner to share it." : "It may have been deleted."}
+              actions={
+                <Button variant="primary" onPress={() => router.push("/work")}>
+                  Back to Work
+                </Button>
+              }
+            />
+          ) : (
+            <ErrorState error={query.error} onRetry={() => void query.refetch()} />
+          )}
+        </div>
+      </WorkScroll>
     );
   }
-  return (
-    <>
-      <PageChrome crumbs={crumbs(a.displayName ?? "")} />
-      <WorkItem artifact={a} space={space} />
-    </>
-  );
+  return <WorkItem key={a.name} artifact={a} space={space} crumbs={crumbs} />;
 }
 
-function WorkItem({ artifact: a, space }: { artifact: Artifact; space: Space | null }) {
+function WorkItem({ artifact: a, space, crumbs }: { artifact: Artifact; space: Space | null; crumbs: { label: string; href: string }[] }) {
   const { member } = useWorkspace();
   const actions = useWorkActions(a);
   const isOwner = !!a.owner && a.owner === member.name;
   const meta = kindMeta(a.kind);
   const flush = useRef<() => Promise<void>>(async () => undefined);
   const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [panel, setPanel] = useState<WorkPanel | null>(null);
   /* First generation shows progress; a revision of existing work keeps its view (busy) like the preview. */
   const generating = a.state === "GENERATING" && !a.revision;
   const failed = a.state === "FAILED";
-  const layout = meta.layout === "wide" ? "work-page--wide" : meta.layout === "doc" ? "work-page--doc" : "work-page";
+  const layout = meta.layout === "wide" ? "page--wide work-page--wide" : meta.layout === "doc" ? "page--wide work-page--doc" : "work-page";
 
-  const view: WorkViewProps = { artifact: a, canEdit: isOwner, space, actions, flush };
+  const view: WorkViewProps = { artifact: a, canEdit: isOwner, space, actions, flush, panel, setPanel };
   let kindActions: ReactNode = null;
   if (!generating && !failed) {
     if (a.kind === "EVIDENCE_REVIEW") kindActions = <ReviewActions {...view} />;
@@ -117,10 +134,33 @@ function WorkItem({ artifact: a, space }: { artifact: Artifact; space: Space | n
   else if (a.kind === "QUIZ") body = <QuizView {...view} />;
   else body = <EmptyState icon={meta.icon} title="This can’t be shown here yet" description={`${meta.label} needs a newer version of BoMesh.`} boxed />;
 
+  /* Drafts open their own citations rail; the rest list the documents in a drawer. */
+  const openSources = () => {
+    if (a.kind === "DRAFT" && !generating && !failed) setPanel(panel?.kind === "rail" && panel.tab === "sources" ? null : { kind: "rail", tab: "sources" });
+    else setSourcesOpen(true);
+  };
+
   return (
-    <div className={`page ${meta.layout === "narrow" ? "" : "page--wide"} ${layout}`}>
-      <Header artifact={a} space={space} isOwner={isOwner} actions={actions} kindActions={kindActions} onSources={() => setSourcesOpen(true)} />
-      {body}
+    <div className="split work-split">
+      <div className="split__main">
+        <WorkScroll>
+          <div className={`page ${layout}`}>
+            <Header
+              artifact={a}
+              space={space}
+              isOwner={isOwner}
+              actions={actions}
+              kindActions={kindActions}
+              crumbs={crumbs}
+              onSources={openSources}
+              onVersions={a.kind === "DRAFT" && !generating && !failed ? () => setPanel({ kind: "rail", tab: "versions" }) : undefined}
+            />
+            {body}
+          </div>
+        </WorkScroll>
+      </div>
+      {/* The review's evidence sits beside the page, non-modal, so the work stays usable while it's open. */}
+      {a.kind === "EVIDENCE_REVIEW" && panel?.kind === "cell" && !generating ? <EvidencePanel {...view} at={panel} /> : null}
       <SourcesDrawer artifact={a} isOpen={sourcesOpen} onClose={() => setSourcesOpen(false)} />
     </div>
   );
@@ -134,14 +174,18 @@ function Header({
   isOwner,
   actions,
   kindActions,
+  crumbs,
   onSources,
+  onVersions,
 }: {
   artifact: Artifact;
   space: Space | null;
   isOwner: boolean;
   actions: WorkActions;
   kindActions: ReactNode;
+  crumbs: { label: string; href: string }[];
   onSources: () => void;
+  onVersions?: () => void;
 }) {
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState("");
@@ -169,11 +213,11 @@ function Header({
   if (n)
     meta.push(
       <button key="src" type="button" className="link-button work-meta__src" onClick={onSources}>
-        {plural(n, "source")}
+        {sourceLine(a)}
       </button>,
     );
   meta.push(<span key="upd">Updated {rel(a.updateTime)}</span>);
-  if (!isOwner) meta.push(<span key="by">by {owners.get(a.owner ?? "") ?? "someone"}</span>);
+  if (!isOwner) meta.push(<span key="by">by {owners.get(a.owner ?? "") || "someone"}</span>);
   if (isOwner && a.space)
     meta.push(
       <span key="vis" className="work-meta__vis">
@@ -182,56 +226,51 @@ function Header({
       </span>,
     );
 
+  const heading = renaming ? (
+    <div className="work-rename">
+      <TextField aria-label="Title" value={name} onChange={setName} autoFocus className="grow">
+        <Input
+          translate="no"
+          onKeyDown={(e) => {
+            if (e.key === "Enter") save();
+            if (e.key === "Escape") setRenaming(false);
+          }}
+          onFocus={(e) => e.currentTarget.select()}
+        />
+      </TextField>
+      <Button size="sm" variant="primary" onPress={save}>
+        Save
+      </Button>
+      <Button size="sm" variant="ghost" onPress={() => setRenaming(false)}>
+        Cancel
+      </Button>
+    </div>
+  ) : isOwner ? (
+    <Tip content="Rename">
+      <button
+        type="button"
+        className="work-title__btn"
+        translate="no"
+        onClick={() => {
+          setName(a.displayName ?? "");
+          setRenaming(true);
+        }}
+      >
+        {a.displayName}
+        <Pencil className="i work-title__pen" aria-hidden />
+      </button>
+    </Tip>
+  ) : (
+    <span translate="no">{a.displayName}</span>
+  );
+
   return (
-    <header className="page-header work-head">
-      <div className="page-header__lead">
-        <WorkTile kind={a.kind} />
-      </div>
-      <div className="page-header__body">
-        <div className="page-header__title-row">
-          {renaming ? (
-            <div className="work-rename">
-              <TextField aria-label="Title" value={name} onChange={setName} autoFocus className="grow">
-                <Input
-                  translate="no"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") save();
-                    if (e.key === "Escape") setRenaming(false);
-                  }}
-                  onFocus={(e) => e.currentTarget.select()}
-                />
-              </TextField>
-              <Button size="sm" variant="primary" onPress={save}>
-                Save
-              </Button>
-              <Button size="sm" variant="ghost" onPress={() => setRenaming(false)}>
-                Cancel
-              </Button>
-            </div>
-          ) : isOwner ? (
-            <h1 className="page-header__title work-title">
-              <Tip content="Rename">
-                <button
-                  type="button"
-                  className="work-title__btn"
-                  translate="no"
-                  onClick={() => {
-                    setName(a.displayName ?? "");
-                    setRenaming(true);
-                  }}
-                >
-                  {a.displayName}
-                  <Pencil className="i work-title__pen" aria-hidden />
-                </button>
-              </Tip>
-            </h1>
-          ) : (
-            <h1 className="page-header__title work-title" translate="no">
-              {a.displayName}
-            </h1>
-          )}
-          {renaming ? null : <WorkStatusChip artifact={a} staffQuiz={isSpaceStaff(space)} />}
-        </div>
+    <PageHeader
+      title={a.displayName ?? "Work"}
+      heading={heading}
+      lead={<WorkTile kind={a.kind} />}
+      chips={renaming ? null : <WorkStatusChip artifact={a} staffQuiz={isSpaceStaff(space)} />}
+      meta={
         <div className="work-meta">
           {meta.map((m, i) => [
             i ? (
@@ -242,33 +281,39 @@ function Header({
             m,
           ])}
         </div>
-      </div>
-      {kindActions || !busy ? (
-        <div className="page-header__actions">
-          {kindActions}
-          {busy ? null : <MoreMenu artifact={a} space={space} isOwner={isOwner} actions={actions} />}
-        </div>
-      ) : null}
-    </header>
+      }
+      actions={
+        kindActions || !busy ? (
+          <>
+            {kindActions}
+            {busy ? null : <MoreMenu artifact={a} space={space} isOwner={isOwner} actions={actions} onVersions={onVersions} />}
+          </>
+        ) : null
+      }
+      crumbs={crumbs}
+    />
   );
 }
 
-function MoreMenu({ artifact: a, space, isOwner, actions }: { artifact: Artifact; space: Space | null; isOwner: boolean; actions: WorkActions }) {
+/** ⋯ (preview `moreItems`): the kind's own entries, downloads, sharing, then Delete. */
+function MoreMenu({ artifact: a, space, isOwner, actions, onVersions }: { artifact: Artifact; space: Space | null; isOwner: boolean; actions: WorkActions; onVersions?: () => void }) {
   const failed = a.state === "FAILED";
-  const kindPublishes = a.kind === "QUIZ" && isSpaceStaff(space);
-  const canShare = isOwner && !failed && !!space && !kindPublishes;
+  /* A staff quiz publishes through its own action; a draft is shared by sending it for review. */
+  const ownFlow = (a.kind === "QUIZ" && isSpaceStaff(space)) || a.kind === "DRAFT";
+  const canShare = isOwner && !failed && !!space && !ownFlow;
   const canDownload = !failed && a.kind !== "STUDY_GUIDE";
-  const items: { id: string; label: string; icon: typeof Trash2; danger?: boolean }[] = [];
-  if (canDownload)
-    items.push(
-      { id: "dl:word", label: "Download as Word", icon: FileText },
-      { id: "dl:pdf", label: "Download as PDF", icon: Download },
-    );
+  const items: { id: string; label: string; icon: typeof Trash2 }[] = [];
+  if (onVersions) items.push({ id: "versions", label: "Version history", icon: History });
+  if (canDownload) {
+    items.push({ id: "dl:word", label: "Download as Word", icon: FileText }, { id: "dl:pdf", label: "Download as PDF", icon: Download });
+    if (a.kind === "EVIDENCE_REVIEW") items.push({ id: "dl:csv", label: "Download as CSV", icon: Table });
+  }
   if (canShare) items.push(a.audience === "SPACE" ? { id: "private", label: "Make private", icon: Lock } : { id: "share", label: `Share to ${space.displayName}`, icon: Share2 });
   if (!items.length && !isOwner) return null;
   const onAction = (key: Key) => {
     const k = String(key);
-    if (k.startsWith("dl:")) void actions.download(k.slice(3) as DownloadFormat);
+    if (k === "versions") onVersions?.();
+    else if (k.startsWith("dl:")) void actions.download(k.slice(3) as DownloadFormat);
     else if (k === "share") void actions.setAudience("SPACE", `Shared to ${space?.displayName ?? "the space"}`);
     else if (k === "private") void actions.setAudience("PRIVATE", "Now only you can see it");
     else if (k === "delete") void actions.remove();
@@ -396,10 +441,18 @@ function FailedState({ artifact: a, isOwner, actions }: { artifact: Artifact; is
 
 /* ═══════════════ Sources drawer ═══════════════ */
 
+/** Preview `DR['work-sources']`: the documents, grouped Compared · Context for a review; locked ones can't be opened. */
 function SourcesDrawer({ artifact: a, isOpen, onClose }: { artifact: Artifact; isOpen: boolean; onClose: () => void }) {
   const docs = useDocs(isOpen ? (a.sourceItems ?? []) : []);
   const hidden = a.hiddenSourceCount ?? 0;
-  const n = (a.sourceItems?.length ?? 0) + hidden;
+  const review = reviewSources(a);
+  const groups =
+    a.kind === "EVIDENCE_REVIEW"
+      ? [
+          { title: "Compared", ids: review.compared },
+          { title: "Context", ids: review.context },
+        ]
+      : [{ title: "", ids: a.sourceItems ?? [] }];
   return (
     <Drawer.Backdrop isOpen={isOpen} onOpenChange={(o) => !o && onClose()}>
       <Drawer.Content placement="right">
@@ -407,29 +460,34 @@ function SourcesDrawer({ artifact: a, isOpen, onClose }: { artifact: Artifact; i
           <Drawer.CloseTrigger aria-label="Close" />
           <Drawer.Header>
             <Drawer.Heading>Sources</Drawer.Heading>
-            <p className="drawer__description">
-              {kindMeta(a.kind).label} built from {plural(n, "document")}.
-            </p>
+            <p className="drawer__description">{sourceLine(a)}</p>
           </Drawer.Header>
           <Drawer.Body>
             {docs.isPending ? (
               <SkeletonRows rows={3} />
             ) : (
-              <List plain>
-                {(a.sourceItems ?? []).map((s) => {
-                  const d = docs.byName.get(s);
-                  return (
-                    <ListItem
-                      key={s}
-                      lead={<FileIcon mime={d?.document?.mimeType} name={d?.document?.fileName} />}
-                      title={<span translate="no">{d?.displayName ?? "Removed document"}</span>}
-                      description={d?.ancestors?.[0]?.displayName}
-                      actions={d ? <ChevronRight className="i muted" aria-hidden /> : <Lock className="i muted" aria-hidden />}
-                      href={d ? `/doc/${resourceId(s)}` : undefined}
-                    />
-                  );
-                })}
-              </List>
+              groups
+                .filter((g) => g.ids.length)
+                .map((g) => (
+                  <div key={g.title || "all"}>
+                    {g.title ? <div className="t-label mt-16 mb-8">{g.title}</div> : null}
+                    <List plain>
+                      {g.ids.map((s) => {
+                        const d = docs.byName.get(s);
+                        return (
+                          <ListItem
+                            key={s}
+                            lead={<FileIcon mime={d?.document?.mimeType} name={d?.document?.fileName} />}
+                            title={<span translate="no">{d?.displayName ?? "Removed document"}</span>}
+                            description={d?.ancestors?.[0]?.displayName}
+                            actions={d ? <ChevronRight className="i muted" aria-hidden /> : <Lock className="i muted" aria-hidden />}
+                            href={d ? `/doc/${resourceId(s)}` : undefined}
+                          />
+                        );
+                      })}
+                    </List>
+                  </div>
+                ))
             )}
             {hidden ? <Callout className="mt-16" title={`${plural(hidden, "source")} you can’t open`} description="They are hidden because you can no longer read them." /> : null}
           </Drawer.Body>

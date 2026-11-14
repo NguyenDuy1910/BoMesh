@@ -1,36 +1,40 @@
 "use client";
 
 import { Button } from "@heroui/react";
-import { Building2, FileText, MessageSquare, Plus, Users } from "lucide-react";
+import { Building2, Plus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { PageChrome } from "@/components/shell/page-chrome";
-import {
-  ClearFilters,
-  DataTable,
-  EmptyState,
-  FilterButton,
-  Gate,
-  NoMatches,
-  Page,
-  PageHeader,
-  PreviewChip,
-  SearchInput,
-  SkeletonRows,
-  StatCard,
-  toast,
-  WorkspaceMark,
-} from "@/components/ui";
-import { fmtCompact, fmtNum, plural } from "@/lib/format";
+import { ClearFilters, DataTable, EmptyState, FilterButton, Gate, NoMatches, Page, PageHeader, PreviewChip, SearchInput, SkeletonRows, toast, WorkspaceMark } from "@/components/ui";
+import { fmtNum, plural } from "@/lib/format";
 
 import type { Workspace } from "../api";
-import { lastSegment, TEMPLATES, WORKSPACE_STATUS_OPTIONS, workspaceStatus, type TemplateId } from "../model";
+import { lastSegment, TEMPLATES, WORKSPACE_STATUS_OPTIONS, workspaceStatus, type TemplateId, type WorkspaceStatus } from "../model";
 import { useIsPlatformAdmin, usePlatformWorkspaces, useUsage } from "../queries";
 import { CreateWorkspaceDialog } from "./CreateWorkspaceDialog";
 import { PREVIEW_TIP, useUrlState, workspaceUrl } from "./shared";
 import { TemplateChip, WorkspaceDrawer, WorkspaceStatusChip } from "./WorkspaceDrawer";
 
-/** Preview `P.pWorkspaces`: KPIs, search, status and template filters, table, drawer, create. */
+/** Search and filters appear once the list is long enough to need them (preview `TOOLS_MIN`). */
+const TOOLS_MIN = 7;
+
+/** What needs an operator first: setting up, then suspended, then the steady state, archived last. */
+const RANK: Record<WorkspaceStatus, number> = { new: 1, suspended: 2, active: 3, archived: 4 };
+
+/** Preview `wsSummary`: how many workspaces, and which ones aren't simply active. */
+function summary(all: readonly Workspace[]): string {
+  const count = (s: WorkspaceStatus) => all.filter((w) => workspaceStatus(w.state) === s).length;
+  const suspended = count("suspended");
+  const fresh = count("new");
+  const archived = count("archived");
+  const parts = [plural(all.length, "workspace")];
+  if (suspended) parts.push(`${fmtNum(suspended)} suspended`);
+  if (fresh) parts.push(`${fmtNum(fresh)} setting up`);
+  if (archived) parts.push(`${fmtNum(archived)} archived`);
+  if (parts.length === 1) parts.push("all active");
+  return parts.join(" · ");
+}
+
+/** Preview `P.pWorkspaces`: one table of workspaces (what needs an operator first), drawer, create. */
 export function WorkspacesPage() {
   const url = useUrlState();
   const isAdmin = useIsPlatformAdmin();
@@ -57,22 +61,20 @@ export function WorkspacesPage() {
       const w = workspaces.data?.find((x) => lastSegment(x.name) === id);
       if (w && w.state !== "CREATING") {
         pending.current.delete(id);
-        toast(`${w.displayName} is ready`, { action: { label: "View", onPress: () => url.set({ open: id }) } });
+        toast(`${w.displayName} is ready`, { action: { label: "Open", onPress: () => url.set({ open: id }) } });
       }
     }
   });
 
-  const usageBy = new Map((usage.data ?? []).map((u) => [lastSegment(u.workspace), u]));
-  const questions = (w: Workspace) => Number(usageBy.get(lastSegment(w.name))?.questionCount ?? 0);
-  const processed = (w: Workspace) => Number(usageBy.get(lastSegment(w.name))?.processedDocumentCount ?? 0);
-  const usageCell = (v: number) => (usage.data ? fmtNum(v) : <span className="muted">—</span>);
+  const questionsBy = new Map((usage.data ?? []).map((u) => [lastSegment(u.workspace), Number(u.questionCount ?? 0)]));
+  const questions = (w: Workspace) => questionsBy.get(lastSegment(w.name)) ?? 0;
 
-  const create = isAdmin ? (
-    <Button variant="primary" onPress={() => setCreating(true)}>
+  const createButton = (variant: "primary" | "tertiary") => (
+    <Button variant={variant} onPress={() => setCreating(true)}>
       <Plus className="i" aria-hidden />
       Create workspace
     </Button>
-  ) : null;
+  );
 
   const onCreated = (w: Workspace) => {
     const id = lastSegment(w.name);
@@ -82,10 +84,19 @@ export function WorkspacesPage() {
     setTimeout(() => setFresh((cur) => (cur === id ? null : cur)), 2600);
   };
 
+  const all = workspaces.data ?? [];
+  // Templates only help when workspaces differ; otherwise the chip and filter are noise.
+  const mixed = new Set(all.map((w) => w.template ?? "ENTERPRISE")).size > 1;
+  const filtered = Boolean(q || status || template);
+
   return (
-    <Page>
-      <PageChrome crumbs={[{ label: "Workspaces" }]} />
-      <PageHeader title="Workspaces" chips={<PreviewChip tooltip={PREVIEW_TIP} />} actions={create} />
+    <Page width="wide">
+      <PageHeader
+        title="Workspaces"
+        chips={<PreviewChip tooltip={PREVIEW_TIP} />}
+        meta={workspaces.data?.length ? summary(workspaces.data) : undefined}
+        actions={isAdmin ? createButton("primary") : null}
+      />
       <Gate
         query={workspaces}
         skeleton={<SkeletonRows rows={7} />}
@@ -95,48 +106,38 @@ export function WorkspacesPage() {
             icon={Building2}
             title="No workspaces yet"
             description="Create one for each customer or team. Its first admin sets up the rest."
-            actions={
-              isAdmin ? (
-                <Button variant="tertiary" onPress={() => setCreating(true)}>
-                  <Plus className="i" aria-hidden />
-                  Create workspace
-                </Button>
-              ) : undefined
-            }
+            actions={isAdmin ? createButton("tertiary") : undefined}
             boxed
           />
         }
       >
-        {(all) => {
-          const sum = (f: (w: Workspace) => number) => all.reduce((a, w) => a + f(w), 0);
+        {(data) => {
           const needle = q.trim().toLowerCase();
-          const rows = all
+          const rows = data
             .filter(
               (w) =>
                 (!needle || [w.displayName, w.code].some((v) => v?.toLowerCase().includes(needle))) &&
                 (!status || workspaceStatus(w.state) === status) &&
                 (!template || w.template === template),
             )
-            .sort((a, b) => Date.parse(b.createTime ?? "") - Date.parse(a.createTime ?? ""));
+            .sort((a, b) => RANK[workspaceStatus(a.state)] - RANK[workspaceStatus(b.state)] || Date.parse(b.createTime ?? "") - Date.parse(a.createTime ?? ""));
           return (
             <>
-              <div className="grid cols-4 pf-kpis">
-                <StatCard icon={Building2} label="Active workspaces" value={fmtNum(all.filter((w) => w.state === "ACTIVE").length)} meta={`of ${fmtNum(all.length)}`} />
-                <StatCard icon={Users} label="Members" value={fmtNum(sum((w) => w.memberCount ?? 0))} />
-                <StatCard icon={FileText} label="Documents processed, 30 days" value={usage.data ? fmtCompact(sum(processed)) : "—"} />
-                <StatCard icon={MessageSquare} label="Questions, 30 days" value={usage.data ? fmtCompact(sum(questions)) : "—"} />
-              </div>
-              <div className="toolbar">
-                <SearchInput value={q} onChange={(v) => url.set({ q: v })} placeholder="Search workspaces" />
-                <FilterButton label="Status" value={status} onChange={(v) => url.set({ status: v })} options={WORKSPACE_STATUS_OPTIONS} />
-                <FilterButton
-                  label="Template"
-                  value={template}
-                  onChange={(v) => url.set({ template: v })}
-                  options={(Object.keys(TEMPLATES) as TemplateId[]).map((id) => ({ value: id, label: TEMPLATES[id].label }))}
-                />
-                <ClearFilters isActive={Boolean(status || template)} onClear={() => url.set({ status: null, template: null })} />
-              </div>
+              {data.length >= TOOLS_MIN || filtered ? (
+                <div className="toolbar">
+                  <SearchInput value={q} onChange={(v) => url.set({ q: v })} placeholder="Search workspaces" />
+                  <FilterButton label="Status" value={status} onChange={(v) => url.set({ status: v })} options={WORKSPACE_STATUS_OPTIONS} />
+                  {mixed || template ? (
+                    <FilterButton
+                      label="Template"
+                      value={template}
+                      onChange={(v) => url.set({ template: v })}
+                      options={(Object.keys(TEMPLATES) as TemplateId[]).map((id) => ({ value: id, label: TEMPLATES[id].label }))}
+                    />
+                  ) : null}
+                  <ClearFilters isActive={Boolean(status || template)} onClear={() => url.set({ status: null, template: null })} />
+                </div>
+              ) : null}
               {rows.length ? (
                 <DataTable
                   label="Workspaces"
@@ -154,24 +155,34 @@ export function WorkspacesPage() {
                         <div className="row gap-12">
                           <WorkspaceMark name={w.displayName ?? ""} size={32} />
                           <div className="stack">
-                            <span className="cell-title truncate" translate="no">
-                              {w.displayName}
+                            <span className="cell-title row gap-8">
+                              <span className="truncate" translate="no">
+                                {w.displayName}
+                              </span>
+                              {mixed ? <TemplateChip workspace={w} /> : null}
                             </span>
                             <span className="cell-sub mono truncate">{workspaceUrl(w)}</span>
                           </div>
                         </div>
                       ),
                     },
-                    { id: "template", header: "Template", mobileLabel: "Template", cell: (w) => <TemplateChip workspace={w} /> },
                     { id: "members", header: "Members", align: "end", mobileLabel: "Members", sortValue: (w) => w.memberCount ?? 0, cell: (w) => <span className="num">{fmtNum(w.memberCount ?? 0)}</span> },
-                    { id: "processed", header: "Documents processed, 30 days", align: "end", hideOnMobile: true, className: "hide-md", sortValue: processed, cell: (w) => <span className="num">{usageCell(processed(w))}</span> },
-                    { id: "questions", header: "Questions, 30 days", align: "end", mobileLabel: "Questions", sortValue: questions, cell: (w) => <span className="num">{usageCell(questions(w))}</span> },
+                    {
+                      id: "questions",
+                      header: "Questions, 30 days",
+                      align: "end",
+                      mobileLabel: "Questions",
+                      sortValue: questions,
+                      cell: (w) => (usage.data ? <span className="num">{fmtNum(questions(w))}</span> : <span className="muted">—</span>),
+                    },
                     { id: "status", header: "Status", cell: (w) => <WorkspaceStatusChip workspace={w} /> },
                   ]}
                   footer={
-                    <div className="table-foot">
-                      <span className="num">{plural(rows.length, "workspace")}</span>
-                    </div>
+                    filtered ? (
+                      <div className="table-foot">
+                        <span className="num">{plural(rows.length, "workspace")}</span>
+                      </div>
+                    ) : undefined
                   }
                 />
               ) : (

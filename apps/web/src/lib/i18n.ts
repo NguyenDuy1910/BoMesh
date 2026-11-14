@@ -36,8 +36,10 @@ export const LANGUAGES: readonly LanguageOption[] = [
   { code: "vi", native: "Tiếng Việt", english: "Vietnamese" },
 ];
 
+/** Content the localizer never touches (answers, documents, quotes, typed text). Entity names in the shell's chrome are
+ *  marked `translate="no"` where they render (CompactHeader peek title, `.page-hero__title`), so no name list is needed. */
 const SKIP_SEL =
-  '[translate="no"], .chat-answer, .chat-bubble, .doc-page, .doc-note, .chat-cite__quote, .home-suggest__chip, .chat-starter__prompt, script, style, textarea, code, pre, [contenteditable="true"]';
+  '[translate="no"], .chat-answer, .chat-bubble, .doc-page, .doc-note, .pv-quote, .chat-cite__quote, .chat-starter__prompt, script, style, textarea, code, pre, [contenteditable="true"]';
 const ATTRS = ["placeholder", "aria-label", "title", "data-tip", "alt"] as const;
 
 interface Pattern {

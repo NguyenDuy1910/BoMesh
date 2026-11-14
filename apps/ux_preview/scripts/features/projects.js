@@ -1,17 +1,17 @@
 (() => {
 'use strict';
-/* Projects (/project/:id): ChatGPT-style folders for AI conversations. A
-   project has a name, its conversations and its project documents (references
+/* Projects (/projects, /project/:id): ChatGPT-style folders for AI conversations.
+   A project has a name, its conversations and its project documents (references
    to Knowledge documents, attached to every new chat started in it — shown as
    removable chips in the project's composer). It is not a document store, a
    dashboard or a task list: Knowledge stays the source of truth.
-   The sidebar shows New chat, Projects (a link to the project page plus a
-   chevron that expands its conversations) and Recent (conversations in no
-   project), so each conversation appears exactly once.
-   Exports: X.projects { sidebar, of, byId, refs, moveItems, addDocs, list, max }.
+   /projects lists your folders (Your work → Projects in the sidebar); the
+   sidebar never lists folders or conversations inline. Every conversation is
+   also in AI Chat, so moving one out of a project never loses it.
+   Exports: X.projects { of, byId, refs, moveItems, addDocs, list, max, room, docIds }.
    Actions: proj-*. Modal: proj-name. Menus: proj-row (conversation rows use conv-menu). */
 
-const MAX_REFS = 10, KIDS = 6, RECENT = 8;
+const MAX_REFS = 10;
 const C = () => X.chat;
 const mine = p => !p.owner || p.owner === me().id;
 /** Projects the caller can see: seeded demo folders plus their own, most recently used first. */
@@ -24,41 +24,41 @@ const of = c => (c?.project ? byId(c.project) : null);
 /** Knowledge references the caller can open, as composer attachments. Unreadable ones are never shown or attached. */
 const readableDocs = p => (p?.docs || []).map(docById).filter(d => d && canOpenRes(d));
 const refs = pid => readableDocs(byId(pid)).map(d => ({ name: d.name, type: d.type, kind: 'ref', doc: d.id, ready: true }));
-const nav = () => ui('projNav', { open: {} });
 const save = () => { persist(); refresh(); };
 
-/* ═══════════════ Sidebar ═══════════════ */
-function convLink(c, cur, sub) {
-  const here = cur.path === '/chat/' + c.id;
-  return `<div class="${cx('side-conv', sub && 'side-conv--sub')}"><a class="nav-item nav-item--recent" href="#/chat/${esc(c.id)}" ${here ? 'aria-current="page"' : ''} data-tip="${esc(c.title)}"><span class="nav-item__label">${esc(c.title)}</span></a>${iconBtn('more', `Options for ${c.title}`, { size: 'sm', menu: 'conv-menu', data: { id: c.id }, cls: 'side-more' })}</div>`;
-}
-/** New chat (the one entry to /chat), Projects (link + expand chevron) and Recent (conversations in no project). */
-function sidebar(cur) {
-  const u = nav(), conv = cur.r.page === 'chatThread' ? convById(cur.params.id) : null;
-  const active = cur.r.page === 'project' ? cur.params.id : conv?.project;
-  const projects = myProjects();
-  const newChat = `<div class="sidebar__group side-new"><a class="nav-item" id="side-new-chat" href="#/chat" ${cur.r.page === 'chatHome' ? 'aria-current="page"' : ''}>${ic('message-plus')}<span class="nav-item__label">New chat</span></a></div>`;
-  const folders = projects.map(p => {
-    const open = u.open[p.id] ?? p.id === active, convs = convsIn(p), here = cur.path === '/project/' + p.id;
-    const kids = open ? `<div class="side-kids" role="group" aria-label="${esc(p.name)}">${convs.slice(0, KIDS).map(c => convLink(c, cur, true)).join('')}${convs.length > KIDS ? `<a class="nav-item nav-item--recent side-kids__more" href="#/project/${esc(p.id)}"><span class="nav-item__label">See all ${fmtNum(convs.length)}</span></a>` : ''}${convs.length ? '' : `<span class="side-kids__empty">No conversations yet</span>`}</div>` : '';
-    const chevron = `<button type="button" class="side-proj__chev" data-act="proj-toggle" data-id="${esc(p.id)}" aria-expanded="${open}" aria-label="${esc(`${open ? 'Collapse' : 'Expand'} ${p.name}`)}">${ic(open ? 'chevron-down' : 'chevron-right', 'i-xs')}</button>`;
-    return `<div class="side-proj"><div class="side-conv">${chevron}<a class="nav-item side-proj__link" id="side-proj-${esc(p.id)}" href="#/project/${esc(p.id)}" ${here ? 'aria-current="page"' : ''} data-tip="${esc(p.name)}">${ic(open ? 'folder-open' : 'folder')}<span class="nav-item__label">${esc(p.name)}</span></a>${iconBtn('more', `Options for ${p.name}`, { size: 'sm', menu: 'proj-row', data: { id: p.id }, cls: 'side-more' })}</div>${kids}</div>`;
-  }).join('') || `<button type="button" class="nav-item nav-item--recent" data-act="proj-new">${ic('folder-plus', 'i-sm')}<span class="nav-item__label">New project</span></button>`;
-  const loose = myConvs().filter(c => !of(c)).sort((a, b) => b.at - a.at);
-  const recent = loose.length ? `<div class="sidebar__group"><div class="sidebar__group-label"><span>Recent</span><a href="#/chats" ${cur.r.nav === 'chats' ? 'aria-current="page"' : ''}>All</a></div>${loose.slice(0, RECENT).map(c => convLink(c, cur, false)).join('')}</div>` : '';
-  // One entry point for New project: the "+" in the label once there are folders, the row itself while there are none.
-  const add = projects.length ? iconBtn('plus', 'New project', { size: 'sm', act: 'proj-new', cls: 'side-add' }) : '';
-  return `${newChat}<div class="sidebar__group"><div class="sidebar__group-label"><span>Projects</span>${add}</div>${folders}</div>${recent}`;
-}
+/* ═══════════════ Projects page: your folders, most recently used first ═══════════════ */
+P.projects = () => {
+  const uk = 'projList', projects = myProjects(), tools = needsTools(projects.length, uk);
+  const rows = projects.filter(p => matchesQ(uk, p.name));
+  const row = p => {
+    const n = convsIn(p).length, docs = readableDocs(p).length;
+    return item({
+      lead: itemIcon('folder', '', 'sm'), title: esc(p.name), href: '/project/' + p.id,
+      desc: esc([plural(n, 'conversation'), plural(docs, 'document')].join(' · ')),
+      meta: esc(rel(lastAt(p))),
+      trail: `<span class="reveal-on-hover">${iconBtn('more', `Options for ${p.name}`, { size: 'sm', menu: 'proj-row', data: { id: p.id } })}</span>`,
+    });
+  };
+  const empty = () => emptyState({ icon: 'folder', title: 'No projects yet', desc: 'A project keeps related chats together, with the documents every new chat in it starts from. Only you can see your projects.', actions: btn('New project', { v: 'primary', icon: 'folder-plus', act: 'proj-new' }), boxed: true });
+  // The empty state carries the one New project; with folders it moves to the header.
+  const head = pageHeader({ title: 'Projects', actions: projects.length ? btn('New project', { v: 'primary', icon: 'folder-plus', act: 'proj-new' }) : '' });
+  const body = gate({
+    empty,
+    ok: () => !projects.length ? empty()
+      : (tools ? `<div class="toolbar">${searchField({ uiKey: uk, placeholder: 'Search projects' })}</div>` : '')
+        + (rows.length ? list(rows.map(row), 'proj-list') : noMatches(uk, [], 'projects')),
+  });
+  return `<div class="page page--narrow">${head}${body}</div>`;
+};
 
 /* ═══════════════ Project page: start a chat (with the project documents attached), its documents, its conversations ═══════════════ */
 P.project = ({ params }) => {
   const p = byId(params.id);
   if (!p) {
-    crumbs([{ label: 'Project not found' }]);
-    return `<div class="page">${emptyState({ icon: 'folder', title: 'This project isn’t available', desc: 'It may have been deleted, or it belongs to someone else.', actions: btn('Home', { v: 'primary', href: '/home' }) + btn('Conversations', { href: '/chats' }), boxed: true })}</div>`;
+    crumbs([{ label: 'Projects', to: '/projects' }, { label: 'Project not found' }]);
+    return `<div class="page">${emptyState({ icon: 'folder', title: 'This project isn’t available', desc: 'It may have been deleted, or it belongs to someone else.', actions: btn('Your projects', { v: 'primary', href: '/projects' }) + btn('AI Chat', { href: '/chat' }), boxed: true })}</div>`;
   }
-  crumbs([{ label: p.name }]);
+  crumbs([{ label: 'Projects', to: '/projects' }, { label: p.name }]);
   const key = 'proj:' + p.id, c = C().composer(key), docs = readableDocs(p), convs = convsIn(p);
   convs.forEach(x => C().ensureSeed(x));
   const docChips = docs.map(d => `<span class="proj-doc" data-reveal-root><a class="proj-doc__link" href="#/doc/${esc(d.id)}" data-tip="${esc(d.name)}">${fileIcon(d.type, 'sm')}<span class="truncate">${esc(bareName(d.name))}</span></a><span class="reveal-on-hover">${iconBtn('x', `Remove ${d.name} from this project`, { size: 'sm', act: 'proj-doc-remove', data: { id: p.id, doc: d.id }, cls: 'proj-doc__x' })}</span></span>`).join('');
@@ -112,24 +112,23 @@ A['proj-name-save'] = async () => {
   }
   f.busy = true; props.guard = true; refreshLayer(); await sleep(400);
   const p = { id: uid('pj'), owner: me().id, name, created: Date.now(), docs: [] };
-  all().unshift(p); nav().open[p.id] = true; closeModal();
+  all().unshift(p); closeModal();
   const conv = props.conv && convById(props.conv);
   if (conv) { const before = conv.project; conv.project = p.id; save(); toast(`Moved to “${name}”`, { action: { label: 'Undo', run: () => { if (before) conv.project = before; else delete conv.project; save(); } } }); return; }
   persist(); go('/project/' + p.id);
   toast(`Created “${name}”`);
 };
 A['proj-new'] = () => openName();
-A['proj-toggle'] = el => { const u = nav(), id = el.dataset.id, cur = S.cur, conv = cur.r.page === 'chatThread' ? convById(cur.params.id) : null; const active = cur.r.page === 'project' ? cur.params.id : conv?.project; u.open[id] = !(u.open[id] ?? id === active); refresh(); };
-/** Delete is reversible (conversations move back to Recent, documents stay in Knowledge): it happens at once, Undo restores
-    the project and its conversations. Deleting the open project goes one level up, to Home. */
+/** Delete is reversible (its conversations stay in AI Chat, documents stay in Knowledge): it happens at once, Undo restores
+    the project and its conversations. Deleting the open project goes one level up, to Projects. */
 function remove(p) {
   const convs = convsIn(p), i = all().indexOf(p); if (i < 0) return;
   all().splice(i, 1); convs.forEach(c => delete c.project);
   const here = S.cur.path === '/project/' + p.id;
-  persist(); if (here) go('/home'); else refresh();
-  toast(convs.length ? `Deleted “${p.name}”. Its ${plural(convs.length, 'conversation')} moved to Recent.` : `Deleted “${p.name}”`, { action: { label: 'Undo', run: () => { all().splice(Math.min(i, all().length), 0, p); convs.forEach(c => (c.project = p.id)); persist(); if (here) go('/project/' + p.id); else refresh(); } } });
+  persist(); if (here) go('/projects'); else refresh();
+  toast(convs.length ? `Deleted “${p.name}”. Its ${plural(convs.length, 'conversation')} stay in AI Chat.` : `Deleted “${p.name}”`, { action: { label: 'Undo', run: () => { all().splice(Math.min(i, all().length), 0, p); convs.forEach(c => (c.project = p.id)); persist(); if (here) go('/project/' + p.id); else refresh(); } } });
 }
-/* The project page is where new chats in it start (its name in the sidebar opens it), so the menu only holds what the row can't do. */
+/* The project page is where new chats in it start (its row on Projects opens it), so the menu only holds what the row can't do. */
 MENUS['proj-row'] = el => {
   const p = byId(el.dataset.id); if (!p) return [];
   return [
@@ -147,7 +146,7 @@ function move(conv, pid) {
   const p = pid && byId(pid);
   toast(p ? `Moved to “${p.name}”` : 'Removed from the project', { action: { label: 'Undo', run: () => { if (before) conv.project = before; else delete conv.project; save(); } } });
 }
-/** Menu items to file a conversation: other projects, a new one, or back to Recent. */
+/** Menu items to file a conversation: other projects, a new one, or out of its project (it stays in AI Chat). */
 function moveItems(conv) {
   if (!conv || !C().isMine(conv)) return [];
   const others = myProjects().filter(p => p.id !== conv.project);
@@ -175,5 +174,5 @@ function addDocs(pid, ids) {
   return fresh.length;
 }
 
-X.projects = { sidebar, of, byId, refs, moveItems, addDocs, list: myProjects, max: MAX_REFS, room: pid => MAX_REFS - (byId(pid)?.docs.length || 0), docIds: pid => byId(pid)?.docs || [] };
+X.projects = { of, byId, refs, moveItems, addDocs, list: myProjects, max: MAX_REFS, room: pid => MAX_REFS - (byId(pid)?.docs.length || 0), docIds: pid => byId(pid)?.docs || [] };
 })();

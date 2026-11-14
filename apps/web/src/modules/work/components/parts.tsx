@@ -17,10 +17,10 @@ export function WorkTile({ kind, size }: { kind: string | undefined; size?: "sm"
   return <ItemIcon icon={meta.icon} tone={meta.tone} size={size} />;
 }
 
-/** Work status (preview `statusChip(w)`). */
+/** Work status (preview `statusChip(w)`); nothing for generated work that needs no action. */
 export function WorkStatusChip({ artifact, staffQuiz }: { artifact: Artifact; staffQuiz?: boolean }) {
   const s = workStatus(artifact, { staffQuiz });
-  return <StatusChip label={s.label} tone={s.tone} variant={s.variant} live={s.live} dot />;
+  return s ? <StatusChip label={s.label} tone={s.tone} variant={s.variant} live={s.live} dot /> : null;
 }
 
 /** Space name with its colour dot (preview `spaceTag(sp)`). */

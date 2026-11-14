@@ -52,23 +52,23 @@ export interface InboxView {
 
 const OPEN_REQUEST: Readonly<Record<string, true>> = { OPEN: true, NEEDS_INFO: true };
 
-/** Where the notification's subject lives in the app. */
+/** Where the notification's subject lives in the app ("" when it has no page of its own: opening only marks it read). */
 export function hrefOf(t: TargetRef, n: Pick<Notification, "kind">): string {
   switch (t.type) {
     case "items":
       return `/doc/${t.id}`;
     case "contributions":
-      return n.kind === "contribution_submitted" ? "/documents?tab=review" : `/knowledge/library?tab=contributions&open=${t.id}`;
+      return n.kind === "contribution_submitted" ? "/studio?tab=review" : `/contributions?open=${t.id}`;
     case "requests":
       return `/requests/${t.id}`;
     case "sources":
-      return `/sources?source=${t.id}`;
+      return `/studio?tab=sources&open=${t.id}`;
     case "connections":
-      return `/sources?reconnect=${t.id}`;
+      return `/studio?tab=sources&view=accounts&reconnect=${t.id}`;
     case "spaces":
       return `/space/${t.id}`;
     default:
-      return "/inbox";
+      return "";
   }
 }
 
@@ -93,7 +93,7 @@ export function viewOf(n: Notification, subjects: Subjects): InboxView {
       const pending = r && OPEN_REQUEST[r.state ?? ""];
       // Base access: admins decide in People › Requests, owners on the base's Access tab. Space membership: the request page.
       const base = r?.kind === "COLLECTION_ACCESS" ? r.collection : undefined;
-      const decideHref = base ? (subjects.admin ? "/people?tab=requests" : `/knowledge/${resourceId(base)}?tab=access`) : href;
+      const decideHref = base ? (subjects.admin ? "/people?tab=requests" : `/studio/collections/${resourceId(base)}?tab=access`) : href;
       return { icon: UserPlus, tone: "warning", href: decideHref, action: pending ? { kind: "decide", request: r } : { kind: "open", href: decideHref } };
     }
     case "contribution_submitted":
@@ -120,4 +120,9 @@ export function viewOf(n: Notification, subjects: Subjects): InboxView {
   if (t.type === "spaces") return { icon: Megaphone, tone: "accent", href, action: open };
   if (t.type === "items") return { icon: FileText, tone: "accent", href, action: open };
   return { icon: Bell, tone: "", href, action: open };
+}
+
+/** Needs you: a decision or a person waiting on the caller (approve, reconnect, reply, review, revise) or something broken. */
+export function needsYou(view: InboxView): boolean {
+  return view.action.kind === "decide" || view.action.kind === "reconnect" || view.action.kind === "cta" || view.tone === "danger";
 }

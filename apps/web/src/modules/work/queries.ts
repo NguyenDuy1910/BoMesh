@@ -1,14 +1,13 @@
 "use client";
 
-import { useQueries, useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 
 import { ApiError, resourceId, type Schema } from "@/lib/api/client";
 import { useWorkspace } from "@/lib/workspace";
 import { getArtifact, getOperation, getRevision, listAllArtifacts } from "@/modules/artifacts/api";
 import { artifactKeys } from "@/modules/artifacts/queries";
-import { getItem, listAllItems, listMaterials, quote, type Item } from "@/modules/knowledge/api";
-import { knowledgeKeys } from "@/modules/knowledge/queries";
+import { batchGetItems, listAllItems, listMaterials, quote, type Item } from "@/modules/knowledge/api";
+import { useItemsByName } from "@/modules/knowledge/queries";
 
 import { isWorkKind } from "./kinds";
 import { reviewGenerating, type Artifact } from "./model";
@@ -82,24 +81,10 @@ export function useArtifactText(artifact: Artifact | undefined) {
   });
 }
 
-/** Documents (FULL items) for names, in order; unreadable ones are left out. */
+/** Documents (FULL items) for names, in one batch read; unreadable ones are left out. */
 export function useDocs(names: readonly string[]) {
-  const { id } = useWorkspace();
-  const results = useQueries({
-    queries: names.map((name) => ({
-      queryKey: knowledgeKeys.item(id, resourceId(name)),
-      queryFn: () => getItem(id, resourceId(name)),
-      staleTime: 60_000,
-      retry: false,
-    })),
-  });
-  const key = results.map((r) => r.data?.name ?? (r.isError ? "x" : "")).join("|");
-  return useMemo(() => {
-    const byName = new Map<string, Item>();
-    for (const r of results) if (r.data?.name) byName.set(r.data.name, r.data);
-    return { byName, isPending: results.some((r) => r.isPending) };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `key` captures the resolved items
-  }, [key]);
+  const docs = useItemsByName(names);
+  return { byName: docs.items, isPending: docs.isPending };
 }
 
 /* ═══════════════ Materials ═══════════════ */
@@ -157,10 +142,9 @@ export function useMaterialDocs(space: Space | null, { mine = false, enabled = t
       const docs: Item[] = [];
       if (space?.name) {
         const materials = await listMaterials(id, resourceId(space.name));
-        const items = await Promise.all(materials.map((m) => getItem(id, resourceId(m.item), "BASIC").catch(() => undefined)));
+        const items = await batchGetItems(id, materials.map((m) => m.item ?? ""));
         const scoped = new Set(space.collections ?? []);
         for (const item of items) {
-          if (!item) continue;
           if (isDoc(item)) docs.push(item);
           else if (item.itemType === "COLLECTION" && item.name) scoped.add(item.name);
         }
@@ -199,10 +183,10 @@ export function usePassedDocs(ids: readonly string[]) {
     enabled: ids.length > 0,
     staleTime: 30_000,
     queryFn: async (): Promise<DocGroup[]> => {
-      const docs = (await Promise.all(ids.map((d) => getItem(id, resourceId(d), "BASIC").catch(() => undefined)))).filter((d): d is Item => !!d && isDoc(d));
+      const found = new Map((await batchGetItems(id, [...ids])).map((d) => [resourceId(d.name), d]));
+      const docs = ids.flatMap((d) => found.get(resourceId(d)) ?? []).filter(isDoc);
       const parents = [...new Set(docs.map((d) => d.parentItem ?? "").filter(Boolean))];
-      const cols = await Promise.all(parents.map((p) => getItem(id, resourceId(p), "BASIC").catch(() => undefined)));
-      const parent = new Map(cols.filter((c): c is Item => !!c?.name).map((c) => [c.name ?? "", c]));
+      const parent = new Map((await batchGetItems(id, parents)).filter((c) => !!c.name).map((c) => [c.name ?? "", c]));
       const groups = new Map<string, DocGroup>();
       for (const d of docs) {
         const p = parent.get(d.parentItem ?? "");

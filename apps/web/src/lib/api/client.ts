@@ -4,7 +4,7 @@ import createClient, { type Middleware } from "openapi-fetch";
 
 import type { components, paths } from "@/lib/api/schema";
 import { getApiUrl } from "@/lib/api/config";
-import { handleUnauthenticated, sessionToken } from "@/lib/session";
+import { getExpiredSession, handleUnauthenticated, sessionToken } from "@/lib/session";
 
 /**
  * The one boundary to the BoMesh API (`/api/v1`, backend/docs_design/openapi.yaml).
@@ -12,7 +12,8 @@ import { handleUnauthenticated, sessionToken } from "@/lib/session";
  * `schema.d.ts` is generated from the contract (`bun run api:types`), so a call
  * to a path, parameter or field the contract does not define fails to compile.
  * Every request carries only `Authorization: Bearer …` (auth_contract.md
- * "Client session boundary"); a 401 for the current token signs the UI out.
+ * "Client session boundary"); a 401 for the current token expires the session,
+ * and while it is expired requests are answered locally instead of being sent.
  */
 export type Schemas = components["schemas"];
 export type Schema<K extends keyof Schemas> = Schemas[K];
@@ -81,10 +82,30 @@ export function toApiError(status: number, payload: unknown): ApiError {
   );
 }
 
+/** Public methods (`security: []`) keep working while the session is expired: they are how a person signs in again. */
+const PUBLIC_METHODS: Record<string, true> = {
+  "POST /api/v1/sessions": true,
+  "POST /api/v1/users": true,
+  "POST /api/v1/users:resetPassword": true,
+  "POST /api/v1/users:sendPasswordReset": true,
+};
+
+/** google.rpc.Status for requests made while the session is expired (never sent). */
+const EXPIRED = { error: { code: 401, status: "UNAUTHENTICATED", message: "Your session expired. Sign in again to continue." } };
+
 const auth: Middleware = {
-  onRequest({ request }) {
+  onRequest({ request, schemaPath }) {
+    // Sign-in reads the new user with the new token before storing the session (modules/auth/api.ts).
+    if (request.headers.has("Authorization")) return request;
     const token = sessionToken();
-    if (token) request.headers.set("Authorization", `Bearer ${token}`);
+    if (token) {
+      request.headers.set("Authorization", `Bearer ${token}`);
+      return request;
+    }
+    // Expired: nothing goes out until the person signs in again, so no 401 storm and nothing for retries to repeat.
+    if (getExpiredSession() && !PUBLIC_METHODS[`${request.method} ${schemaPath}`]) {
+      return new Response(JSON.stringify(EXPIRED), { status: 401, headers: { "Content-Type": "application/json" } });
+    }
     return request;
   },
   onResponse({ request, response }) {
@@ -131,6 +152,7 @@ export async function call<T>(
  */
 export async function rawFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const token = sessionToken();
+  if (!token && getExpiredSession()) throw toApiError(401, EXPIRED);
   const headers = new Headers(init.headers);
   if (token) headers.set("Authorization", `Bearer ${token}`);
   let response: Response;

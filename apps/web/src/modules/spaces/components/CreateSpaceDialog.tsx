@@ -1,12 +1,14 @@
 "use client";
 
-import { Button, Checkbox, FieldError, Input, Label, TextField } from "@heroui/react";
+import { Button, FieldError, Input, Label, TextField } from "@heroui/react";
 import { useQueryClient } from "@tanstack/react-query";
+import { Link as LinkIcon, Plus, Users } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { ChoiceGroup, SkeletonRows, toast } from "@/components/ui";
+import { ChoiceGroup, Disclosure, SkeletonRows, SwitchRow, toast } from "@/components/ui";
 import { errorMessage, resourceId } from "@/lib/api/client";
+import { plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { updateItem } from "@/modules/knowledge/api";
 import { createBase } from "@/modules/knowledge/bases/api";
@@ -32,7 +34,7 @@ export interface CreateSpaceDialogProps {
   type?: string;
 }
 
-/** Create space (preview `M['sp-create']`): type, name, description, knowledge to link or create. */
+/** Create space (preview `M['sp-create']`): type, name, description, a new collection and existing ones to link. */
 export function CreateSpaceDialog({ isOpen, onClose, type }: CreateSpaceDialogProps) {
   return isOpen ? <CreateSpaceForm onClose={onClose} type={type} /> : null;
 }
@@ -54,13 +56,15 @@ function CreateSpaceForm({ onClose, type }: Omit<CreateSpaceDialogProps, "isOpen
   const [busy, setBusy] = useState(false);
   const error = touched ? spaceNameError(name, spaces.data ?? []) : "";
   const linkable = (bases.data ?? []).filter((b) => b.editable && !b.base.collection?.space);
+  const linked = linkable.filter((b) => picked.includes(b.base.name ?? ""));
+  const def = spaceType(kind, settings);
+  const lead = def.roles[0][1].toLowerCase();
 
   async function submit() {
     setTouched(true);
     if (spaceNameError(name, spaces.data ?? [])) return;
     setBusy(true);
     try {
-      const def = spaceType(kind, settings);
       const space = await createSpace(ws, {
         displayName: name.trim(),
         description: desc.trim() || undefined,
@@ -84,7 +88,7 @@ function CreateSpaceForm({ onClose, type }: Omit<CreateSpaceDialogProps, "isOpen
       onClose();
       router.push(`/space/${resourceId(space.name)}`);
       const failed = results.filter((r) => r.status === "rejected").length;
-      if (failed) toast(`Created “${name.trim()}”, but ${failed === 1 ? "a knowledge base" : `${failed} knowledge bases`} couldn’t be linked`, { tone: "warning" });
+      if (failed) toast(`Created “${name.trim()}”, but ${failed === 1 ? "a collection" : `${failed} collections`} couldn’t be linked`, { tone: "warning" });
       else toast(`Created “${name.trim()}”`);
     } catch (e) {
       toast(errorMessage(e), { tone: "danger" });
@@ -92,20 +96,23 @@ function CreateSpaceForm({ onClose, type }: Omit<CreateSpaceDialogProps, "isOpen
     }
   }
 
-  const def = spaceType(kind, settings);
   return (
     <KnowledgeModal
       isOpen
       onClose={onClose}
       guard={busy}
       size="lg"
+      icon={Users}
       title="Create space"
+      description="A shared home for people, knowledge and work. You can change everything later."
+      footerStart={<span>You’ll be its {lead}.</span>}
       footer={
         <>
-          <Button variant="tertiary" onPress={onClose} isDisabled={busy}>
+          <Button variant="ghost" onPress={onClose} isDisabled={busy}>
             Cancel
           </Button>
           <Button variant="primary" onPress={() => void submit()} isPending={busy}>
+            <Plus aria-hidden />
             Create space
           </Button>
         </>
@@ -120,14 +127,14 @@ function CreateSpaceForm({ onClose, type }: Omit<CreateSpaceDialogProps, "isOpen
       >
         {types.length ? (
           <div className="field sp-types">
-            <span className="label">Type</span>
+            <span className="label">What kind of space?</span>
             <ChoiceGroup
-              label="Type"
+              label="What kind of space?"
               value={kind}
               onChange={setKind}
               isDisabled={busy}
               columns={Math.min(types.length, 3)}
-              options={types.map((t) => ({ value: t.key, title: t.label, description: t.desc }))}
+              options={types.map((t) => ({ value: t.key, title: t.label, description: t.desc, icon: t.icon }))}
             />
           </div>
         ) : null}
@@ -142,39 +149,44 @@ function CreateSpaceForm({ onClose, type }: Omit<CreateSpaceDialogProps, "isOpen
           </Label>
           <Input placeholder="What happens here, in one line" />
         </TextField>
-        <div className="field">
-          <span className="label">Knowledge</span>
-          <div className="description">Members can read and ask about linked knowledge bases.</div>
-          <div className="stack gap-8 mt-4">
-            {bases.isPending ? <SkeletonRows rows={2} /> : null}
-            {linkable.map(({ base }) => (
-              <Checkbox
-                key={base.name}
-                isDisabled={busy}
-                isSelected={picked.includes(base.name ?? "")}
-                onChange={(on) => setPicked(on ? [...picked, base.name ?? ""] : picked.filter((x) => x !== base.name))}
-              >
-                <Checkbox.Content>
-                  <Checkbox.Control>
-                    <Checkbox.Indicator />
-                  </Checkbox.Control>
-                  <span translate="no">{base.displayName}</span>
-                </Checkbox.Content>
-              </Checkbox>
-            ))}
-            {canCreateBase ? (
-              <Checkbox isDisabled={busy} isSelected={newBase} onChange={setNewBase}>
-                <Checkbox.Content>
-                  <Checkbox.Control>
-                    <Checkbox.Indicator />
-                  </Checkbox.Control>
-                  Create a new knowledge base for it
-                </Checkbox.Content>
-              </Checkbox>
-            ) : null}
-            {!bases.isPending && !linkable.length && !canCreateBase ? <p className="t-sm muted">No knowledge bases to link yet.</p> : null}
+        {canCreateBase || linkable.length || bases.isPending ? (
+          <div className="field">
+            <span className="label">Knowledge</span>
+            <div className="stack gap-8 mt-8">
+              {canCreateBase ? (
+                <SwitchRow
+                  title="Start a new collection for this space"
+                  description="Named after the space, owned by you. Members contribute to it."
+                  isSelected={newBase}
+                  onChange={setNewBase}
+                  isDisabled={busy}
+                />
+              ) : null}
+              {bases.isPending ? <SkeletonRows rows={2} /> : null}
+              {linkable.length ? (
+                <Disclosure
+                  title="Link existing collections"
+                  icon={LinkIcon}
+                  summary={linked.length ? (linked.length === 1 ? <span translate="no">{linked[0].base.displayName}</span> : plural(linked.length, "collection")) : "None yet"}
+                >
+                  <div className="stack gap-4">
+                    {linkable.map(({ base }) => (
+                      <SwitchRow
+                        key={base.name}
+                        title={<span translate="no">{base.displayName}</span>}
+                        label={base.displayName}
+                        description={plural(base.collection?.documentCount ?? 0, "document")}
+                        isDisabled={busy}
+                        isSelected={picked.includes(base.name ?? "")}
+                        onChange={(on) => setPicked(on ? [...picked, base.name ?? ""] : picked.filter((x) => x !== base.name))}
+                      />
+                    ))}
+                  </div>
+                </Disclosure>
+              ) : null}
+            </div>
           </div>
-        </div>
+        ) : null}
       </form>
     </KnowledgeModal>
   );

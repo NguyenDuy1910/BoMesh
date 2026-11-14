@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -14,7 +14,7 @@ from sqlalchemy.orm import aliased
 
 from bomesh import etag as etags
 from bomesh.db.engine import SessionFactory
-from bomesh.db.models import Item, ItemLink, ItemTopic, ItemUpload, Topic
+from bomesh.db.models import Item, ItemLink, ItemRevision, ItemTopic, ItemUpload, Topic
 from bomesh.document_index import ItemIndex
 from bomesh.errors import (
     FailedPrecondition,
@@ -22,7 +22,7 @@ from bomesh.errors import (
     NotFound,
     PermissionDenied,
 )
-from bomesh.iam.authorizer import ItemRef, not_found, permission_denied
+from bomesh.iam.authorizer import ItemNode, ItemRef, not_found, permission_denied
 from bomesh.iam.visibility import ItemVisibility, require_visible_item
 from bomesh.services.kernel.context import RequestContext
 from bomesh.services.kernel.retention import purge_time
@@ -30,10 +30,8 @@ from bomesh.services.kernel.workspaces import WorkspaceResolver
 from bomesh.services.knowledge_items.indexing import ItemIngestionService
 from bomesh.services.knowledge_items.item_store import (
     HIDDEN_KINDS,
-    ItemService,
     catalog_visibility,
     has_open_contribution,
-    in_subtree,
     is_personal,
     purpose,
 )
@@ -47,7 +45,7 @@ from bomesh.services.knowledge_items.records import (
     Origin,
     Verification,
 )
-from bomesh.services.knowledge_items.spaces import space_name_of
+from bomesh.services.knowledge_items.spaces import space_names
 from bomesh.storage import DocumentStorage
 
 if TYPE_CHECKING:
@@ -274,7 +272,13 @@ def origin(item: Item) -> Origin | None:
 
 
 class Projector:
-    """Turn rows into :class:`ItemRecord` for one caller in one workspace."""
+    """Turn rows into :class:`ItemRecord` for one caller in one workspace.
+
+    Projection is set-based: :meth:`project_many` costs a fixed number of
+    queries whatever the number of rows (``project`` is the one-row case).
+    ``visibility`` is the caller's live catalog visibility when the caller
+    already has it; otherwise it is computed only if a projection needs it.
+    """
 
     def __init__(
         self,
@@ -283,53 +287,72 @@ class Projector:
         workspace_id: UUID,
         deps: KnowledgeDeps,
         *,
-        visibility: ItemVisibility,
+        visibility: ItemVisibility | None = None,
     ) -> None:
         self._session = session
         self._ctx = ctx
         self._workspace_id = workspace_id
         self._deps = deps
-        self._visibility = visibility
+        self._known_visibility = visibility
         self._processing_version: str | None = None
+        self._now: datetime | None = None
 
-    @classmethod
-    async def open(
-        cls, session: AsyncSession, ctx: RequestContext, workspace_id: UUID, deps: KnowledgeDeps
-    ) -> Projector:
-        visibility = await catalog_visibility(session, ctx.authorizer, ctx.principal, workspace_id)
-        return cls(session, ctx, workspace_id, deps, visibility=visibility)
+    async def _visibility(self) -> ItemVisibility:
+        if self._known_visibility is None:
+            self._known_visibility = await catalog_visibility(
+                self._session, self._ctx.authorizer, self._ctx.principal, self._workspace_id
+            )
+        return self._known_visibility
 
     async def project(self, item: Item, *, full: bool = False) -> ItemRecord:
-        held = await self._ctx.authorizer.collection_permissions(
-            self._ctx.principal, item.id, include_deleted=item.deleted_at is not None
-        )
-        record = ItemRecord(
-            workspace_id=item.tenant_id,
-            item_id=item.id,
-            item_type=item.item_type.upper(),
-            display_name=item.title,
-            parent_id=item.parent_item_id,
-            parent_relation=item.parent_relation.upper() if item.parent_relation else None,
-            access=_access(held),
-            state="DELETED" if item.deleted_at is not None else "ACTIVE",
-            creator_id=item.created_by_user_id,
-            create_time=item.created_at,
-            update_time=item.updated_at,
-            delete_time=item.deleted_at,
-            purge_time=purge_time(item.deleted_at),
-            ancestors=await self.ancestors(item) if full else None,
-            collection=(
-                await self._collection(item) if item.item_type == "collection" else None
-            ),
-            document=(
-                await self._document(item, editor=EDIT in held)
-                if item.item_type == "document"
-                else None
-            ),
-        )
+        (record,) = await self.project_many((item,), full=full)
         return record
 
-    async def locked(self, item: Item) -> ItemRecord:
+    async def project_many(self, items: Sequence[Item], *, full: bool = False) -> list[ItemRecord]:
+        """Project ``items`` in order; ``full`` adds ``ancestors`` (view FULL)."""
+        if not items:
+            return []
+        authorizer = self._ctx.authorizer
+        paths = await authorizer.ancestries(item.id for item in items)
+        keys = [(item.id, item.deleted_at is not None) for item in items]
+        if full:
+            keys += [
+                (node.item_id, True)
+                for item in items
+                for node in _ancestor_collections(paths[item.id])
+            ]
+        held = await authorizer.collection_permissions_many(self._ctx.principal, keys)
+        collections = await self._collections(
+            [item for item in items if item.item_type == "collection"]
+        )
+        documents = await self._documents(
+            [item for item in items if item.item_type == "document"], held
+        )
+        ancestors = await self._ancestors(items, paths, held) if full else {}
+        return [
+            ItemRecord(
+                workspace_id=item.tenant_id,
+                item_id=item.id,
+                item_type=item.item_type.upper(),
+                display_name=item.title,
+                parent_id=item.parent_item_id,
+                parent_relation=item.parent_relation.upper() if item.parent_relation else None,
+                access=_access(held[(item.id, item.deleted_at is not None)]),
+                state="DELETED" if item.deleted_at is not None else "ACTIVE",
+                creator_id=item.created_by_user_id,
+                create_time=item.created_at,
+                update_time=item.updated_at,
+                delete_time=item.deleted_at,
+                purge_time=purge_time(item.deleted_at),
+                ancestors=ancestors[item.id] if full else None,
+                collection=collections.get(item.id),
+                document=documents.get(item.id),
+            )
+            for item in items
+        ]
+
+    @staticmethod
+    def locked(item: Item) -> ItemRecord:
         """The LOCKED projection of a discoverable root the caller cannot read."""
         return ItemRecord(
             workspace_id=item.tenant_id,
@@ -360,125 +383,221 @@ class Projector:
             ),
         )
 
-    async def ancestors(self, item: Item) -> tuple[Ancestor, ...]:
+    async def _ancestors(
+        self,
+        items: Sequence[Item],
+        paths: Mapping[UUID, tuple[ItemNode, ...]],
+        held: Mapping[tuple[UUID, bool], frozenset[str]],
+    ) -> dict[UUID, tuple[Ancestor, ...]]:
         """Root-first collections the caller can read, plus discoverable roots."""
-        path = (await self._ctx.authorizer.ancestry(item.id))[1:]
-        shown: list[UUID] = []
-        for node in reversed(path):
-            if node.item_type != "collection" or node.system_kind in HIDDEN_KINDS:
-                continue
-            held = await self._ctx.authorizer.collection_permissions(
-                self._ctx.principal, node.item_id, include_deleted=True
-            )
-            if READ in held or node.parent_item_id is None:
-                shown.append(node.item_id)
-        if not shown:
-            return ()
-        rows = {
-            row.id: row
-            for row in await self._session.scalars(select(Item).where(Item.id.in_(shown)))
+        shown = {
+            item.id: [
+                node.item_id
+                for node in _ancestor_collections(paths[item.id])
+                if READ in held[(node.item_id, True)] or node.parent_item_id is None
+            ]
+            for item in items
         }
-        return tuple(
-            Ancestor(item_id=identifier, display_name=rows[identifier].title)
-            for identifier in shown
-            if identifier in rows
-            and (
-                rows[identifier].parent_item_id is not None
-                or rows[identifier].metadata_.get("discoverable") is True
-                or rows[identifier].id in self._visibility.readable
+        wanted = {identifier for chain in shown.values() for identifier in chain}
+        rows = (
+            {
+                row.id: row
+                for row in await self._session.scalars(select(Item).where(Item.id.in_(wanted)))
+            }
+            if wanted
+            else {}
+        )
+        # A root shows when discoverable or readable (only then is visibility needed).
+        roots = {
+            identifier
+            for identifier, row in rows.items()
+            if row.parent_item_id is None and row.metadata_.get("discoverable") is not True
+        }
+        readable = (await self._visibility()).readable if roots else frozenset()
+        return {
+            item_id: tuple(
+                Ancestor(item_id=identifier, display_name=rows[identifier].title)
+                for identifier in chain
+                if identifier in rows and (identifier not in roots or identifier in readable)
             )
+            for item_id, chain in shown.items()
+        }
+
+    async def _collections(self, items: Sequence[Item]) -> dict[UUID, CollectionFacet]:
+        if not items:
+            return {}
+        spaces = await space_names(
+            self._session,
+            self._workspace_id,
+            {item.space_id for item in items if item.space_id is not None},
+        )
+        children, documents, links = await self._collection_counts(
+            [item.id for item in items if item.deleted_at is None]
+        )
+        facets: dict[UUID, CollectionFacet] = {}
+        for item in items:
+            personal = is_personal(item)
+            live = item.deleted_at is None
+            facets[item.id] = CollectionFacet(
+                kind="PERSONAL" if personal else "STANDARD",
+                owner_id=item.created_by_user_id if personal else None,
+                owner_summary=_text(item.metadata_.get("owner_summary")),
+                description=_text(item.metadata_.get("description")),
+                inherit_access=item.inherit_access,
+                discoverable=item.metadata_.get("discoverable") is True,
+                accepts_contributions=item.metadata_.get("accepts_contributions") is True,
+                space=spaces.get(item.space_id) if item.space_id is not None else None,
+                child_count=children.get(item.id, 0) if live else None,
+                document_count=documents.get(item.id, 0) if live else None,
+                link_count=links.get(item.id, 0) if live else None,
+            )
+        return facets
+
+    async def _collection_counts(
+        self, collection_ids: list[UUID]
+    ) -> tuple[dict[UUID, int], dict[UUID, int], dict[UUID, int]]:
+        """Visible children, visible published documents of the live subtree and
+        visible links of each live collection: one grouped query each."""
+        if not collection_ids:
+            return {}, {}, {}
+        visibility = await self._visibility()
+        visible = visibility.clause()
+        children = await self._session.execute(
+            select(Item.parent_item_id, func.count())
+            .where(Item.parent_item_id.in_(collection_ids), visible)
+            .group_by(Item.parent_item_id)
+        )
+        tree = (
+            select(Item.id.label("root_id"), Item.id.label("id"))
+            .where(Item.id.in_(collection_ids), Item.deleted_at.is_(None))
+            .cte("collection_subtree", recursive=True)
+        )
+        child = aliased(Item, name="subtree_child")
+        tree = tree.union_all(
+            select(tree.c.root_id, child.id).where(
+                child.parent_item_id == tree.c.id, child.deleted_at.is_(None)
+            )
+        )
+        documents = await self._session.execute(
+            select(tree.c.root_id, func.count())
+            .select_from(tree)
+            .join(Item, Item.id == tree.c.id)
+            .where(
+                tree.c.id != tree.c.root_id,
+                Item.item_type == "document",
+                Item.publication_state == "published",
+                visible,
+            )
+            .group_by(tree.c.root_id)
+        )
+        linked = (
+            visible_links(visibility)
+            .where(ItemLink.collection_item_id.in_(collection_ids))
+            .subquery()
+        )
+        links = await self._session.execute(
+            select(linked.c.collection_item_id, func.count()).group_by(
+                linked.c.collection_item_id
+            )
+        )
+        return (
+            {key: int(count) for key, count in children},
+            {key: int(count) for key, count in documents},
+            {key: int(count) for key, count in links},
         )
 
-    async def _collection(self, item: Item) -> CollectionFacet:
-        personal = is_personal(item)
-        live = item.deleted_at is None
-        return CollectionFacet(
-            kind="PERSONAL" if personal else "STANDARD",
-            owner_id=item.created_by_user_id if personal else None,
-            owner_summary=_text(item.metadata_.get("owner_summary")),
-            description=_text(item.metadata_.get("description")),
-            inherit_access=item.inherit_access,
-            discoverable=item.metadata_.get("discoverable") is True,
-            accepts_contributions=item.metadata_.get("accepts_contributions") is True,
-            space=(
-                await space_name_of(self._session, item.tenant_id, item.space_id)
-                if item.space_id is not None
-                else None
-            ),
-            child_count=await self._count(
-                select(Item.id).where(Item.parent_item_id == item.id, self._visibility.clause())
+    async def _documents(
+        self, items: Sequence[Item], held: Mapping[tuple[UUID, bool], frozenset[str]]
+    ) -> dict[UUID, DocumentFacet]:
+        if not items:
+            return {}
+        ids = [item.id for item in items]
+        revisions = {
+            item_id: int(number)
+            for item_id, number in await self._session.execute(
+                select(ItemRevision.item_id, func.max(ItemRevision.revision_number))
+                .where(ItemRevision.item_id.in_(ids), ItemRevision.deleted_at.is_(None))
+                .group_by(ItemRevision.item_id)
             )
-            if live
-            else None,
-            document_count=await self._count(
-                select(Item.id).where(
-                    Item.item_type == "document",
-                    Item.publication_state == "published",
-                    in_subtree(Item.id, item.id),
-                    self._visibility.clause(),
-                )
-            )
-            if live
-            else None,
-            link_count=await self._count(visible_links(self._visibility, item.id)) if live else None,
-        )
-
-    async def _document(self, item: Item, *, editor: bool) -> DocumentFacet:
-        revision = await ItemService(self._session).current_revision(item.id)
-        topics = tuple(
-            await self._session.scalars(
-                select(Topic.code)
-                .join(ItemTopic, ItemTopic.topic_id == Topic.id)
-                .where(ItemTopic.item_id == item.id)
-                .order_by(Topic.code)
-            )
-        )
+        }
+        topics: dict[UUID, list[str]] = {}
+        for item_id, code in await self._session.execute(
+            select(ItemTopic.item_id, Topic.code)
+            .join(Topic, ItemTopic.topic_id == Topic.id)
+            .where(ItemTopic.item_id.in_(ids))
+            .order_by(ItemTopic.item_id, Topic.code)
+        ):
+            topics.setdefault(item_id, []).append(code)
+        uploaders = await self._uploaders([item.id for item in items if _awaits_upload(item)])
         if self._processing_version is None:
             self._processing_version = self._deps.processing_version()
-        now = await self._session.scalar(select(func.now()))
-        assert now is not None
-        return DocumentFacet(
-            file_name=_text(item.metadata_.get("file_name")),
-            mime_type=item.mime_type,
-            size_bytes=item.size_bytes,
-            purpose=purpose(item).upper(),
-            document_type=item.document_type,
-            topics=topics,
-            summary=_text(item.metadata_.get("summary")),
-            language_code=_text(item.metadata_.get("language")),
-            owner_id=_uuid(item.metadata_.get("owner_user_id")),
-            content_state=_CONTENT_STATES.get(item.status, "PENDING"),
-            publication_state=(item.publication_state or "published").upper(),
-            indexing_state=indexing_state(item, self._processing_version),
-            revision=revision.revision_number if revision is not None else None,
-            indexed_revision=item.indexed_revision_number,
-            verification=verification(item, now),
-            origin=origin(item),
-            merged_into=_uuid(item.metadata_.get("merged_into")),
-            upload_uri=await self._upload_uri(item),
-            thumbnail_uri=thumbnail_uri(
-                self._deps.preview, item, expires_seconds=self._deps.download_url_seconds
-            ),
-            editor=editor,
-        )
+        if self._now is None:
+            self._now = await self._session.scalar(select(func.now()))
+        assert self._now is not None
+        return {
+            item.id: DocumentFacet(
+                file_name=_text(item.metadata_.get("file_name")),
+                mime_type=item.mime_type,
+                size_bytes=item.size_bytes,
+                purpose=purpose(item).upper(),
+                document_type=item.document_type,
+                topics=tuple(topics.get(item.id, ())),
+                summary=_text(item.metadata_.get("summary")),
+                language_code=_text(item.metadata_.get("language")),
+                owner_id=_uuid(item.metadata_.get("owner_user_id")),
+                content_state=_CONTENT_STATES.get(item.status, "PENDING"),
+                publication_state=(item.publication_state or "published").upper(),
+                indexing_state=indexing_state(item, self._processing_version),
+                revision=revisions.get(item.id),
+                indexed_revision=item.indexed_revision_number,
+                verification=verification(item, self._now),
+                origin=origin(item),
+                merged_into=_uuid(item.metadata_.get("merged_into")),
+                upload_uri=(
+                    self._upload_uri(item)
+                    if uploaders.get(item.id) == self._ctx.user_id
+                    else None
+                ),
+                thumbnail_uri=thumbnail_uri(
+                    self._deps.preview, item, expires_seconds=self._deps.download_url_seconds
+                ),
+                editor=EDIT in held[(item.id, item.deleted_at is not None)],
+            )
+            for item in items
+        }
 
-    async def _upload_uri(self, item: Item) -> str | None:
-        if item.status != "pending" or item.storage_key is None or item.deleted_at is not None:
-            return None
-        owner = await self._session.scalar(
-            select(ItemUpload.owner_user_id).where(ItemUpload.item_id == item.id)
+    async def _uploaders(self, item_ids: list[UUID]) -> dict[UUID, UUID]:
+        """Who uploads each of the documents still awaiting their bytes."""
+        if not item_ids:
+            return {}
+        rows = await self._session.execute(
+            select(ItemUpload.item_id, ItemUpload.owner_user_id).where(
+                ItemUpload.item_id.in_(item_ids)
+            )
         )
-        if owner != self._ctx.user_id:
-            return None
+        return {item_id: owner for item_id, owner in rows}
+
+    def _upload_uri(self, item: Item) -> str:
+        assert item.storage_key is not None
         return self._deps.storage.presign_upload(
             item.storage_key,
             content_type=item.mime_type or "application/octet-stream",
             expires_seconds=self._deps.upload_url_seconds,
         ).url
 
-    async def _count(self, statement: Any) -> int:
-        value = await self._session.scalar(select(func.count()).select_from(statement.subquery()))
-        return int(value or 0)
+
+def _awaits_upload(item: Item) -> bool:
+    """A live document whose bytes are still expected at ``uploadUri``."""
+    return item.status == "pending" and item.storage_key is not None and item.deleted_at is None
+
+
+def _ancestor_collections(path: tuple[ItemNode, ...]) -> list[ItemNode]:
+    """The non-hidden collections strictly above ``path[0]``, root first."""
+    return [
+        node
+        for node in reversed(path[1:])
+        if node.item_type == "collection" and node.system_kind not in HIDDEN_KINDS
+    ]
 
 
 #: The link's target and, when it was merged, the merge target (``visible_links``).

@@ -1,19 +1,19 @@
 'use strict';
 /* Knowledge catalog — the resource model behind Knowledge (Discover, Browse,
-   Library, Reader) and Knowledge health.
+   the personal sections, Reader), Knowledge Studio → Documents and Knowledge health.
 
    Concepts (one meaning each):
    - Source          where content comes from (a connector source or an upload). Provenance only.
-   - Resource        one canonical document (D.docs). Lives in exactly one knowledge base.
-   - Knowledge base  the governed home of resources: ownership + access boundary (backend Collection).
+   - Resource        one canonical document (D.docs). Lives in exactly one collection.
+   - Collection  the governed home of resources: ownership + access boundary (backend Reading list).
    - Space/context   a course, group, office, team or project. Resources link to many spaces
-                     (doc.contexts, plus the knowledge base's own space) without being copied.
+                     (doc.contexts, plus the collection's own space) without being copied.
    - Topic           the workspace taxonomy (domain → topic), D.topics.
-   - Collection      a curated, ordered list of references (D.collections). Never grants access.
+   - Reading list      a curated, ordered list of references (D.collections). Never grants access.
    - Saved view      a stored Browse query (D.views), kept and managed in Browse's Filters.
-   Browse = the organization's knowledge (topics, collections shared with you, filters).
-   My library = saved + recent + my files + my collections + contributions. Managing
-   knowledge bases (access, sources, settings) is Manage → Knowledge bases.
+   Browse = the organization's knowledge (topics, reading lists shared with you, filters).
+   My library = saved + recent + my files + my reading lists + contributions. Managing
+   collections (access, sources, settings) is Manage → Collections.
 
    Feature code reads metadata through res(doc), so derived defaults apply everywhere and
    resources without hand-written metadata (uploads, synced files) still work. Workspace-
@@ -77,10 +77,25 @@ const topicName = id => topicById(id)?.name || 'Untitled topic';
 const topicTree = () => (D.topics || []).filter(t => !t.parent && !t.archived).map(d => ({ ...d, children: D.topics.filter(t => t.parent === d.id && !t.archived) }));
 /** A topic and its domain (selecting a domain matches everything under it). */
 const topicLineage = id => { const t = topicById(id); return t ? (t.parent ? [t.parent, t.id] : [t.id]) : []; };
+/** Topics as removable chips beside an "Add topic…" select (Contribute's Check the details, the Process dialog).
+    Fires A[`${act}-remove`] (data-topic) and A[`${act}-add`] (the select's value: a topic id, or `domain:<id>` when
+    `domains` offers whole domains). `data` goes on both. `limit` shows that many chips and a "+N more" toggle
+    (A[`${act}-more`]) unless `expanded`; `quiet` uses neutral chips (settings, not the document's own metadata). */
+function topicPicker({ id, ids, act, data = {}, label, empty = '', domains = false, limit = 0, expanded = false, quiet = false }) {
+  const shown = limit && !expanded && ids.length > limit + 1 ? ids.slice(0, limit) : ids;
+  const chips = shown.map(t => `<span class="topic-pick__chip"><span class="truncate" translate="no">${esc(topicName(t))}</span><button type="button" class="topic-pick__x" data-act="${act}-remove" ${dataAttrs({ ...data, topic: t })} aria-label="${esc(`Remove ${topicName(t)}`)}">${ic('x', 'i-xs')}</button></span>`).join('');
+  const more = shown.length < ids.length ? `<button type="button" class="topic-pick__more" data-act="${act}-more" ${dataAttrs(data)}>${esc(`+${ids.length - shown.length} more`)}</button>` : '';
+  const opts = [['', 'Add topic…'], ...topicTree().flatMap(dm => {
+    const left = dm.children.filter(t => !ids.includes(t.id));
+    return [...(domains && left.length > 1 ? [[`domain:${dm.id}`, `${dm.name} · all topics`]] : []), ...left.map(t => [t.id, `${dm.name} · ${t.name}`])];
+  })];
+  const add = opts.length > 1 ? select({ id, value: '', options: opts, change: `${act}-add`, size: 'sm', cls: 'topic-pick__add', label: 'Add topic', attrs: dataAttrs(data) }) : '';
+  return `<div class="${cx('topic-pick', quiet && 'topic-pick--quiet')}" role="group" aria-label="${esc(label)}">${chips || (empty ? `<span class="t-sm muted">${esc(empty)}</span>` : '')}${more}${add}</div>`;
+}
 
 /* ═══════════════ Resource metadata ═══════════════ */
 const READABLE_STATUS = ['ready', 'outdated'];
-/** Library records that are reader-facing: index status is an editor concern. */
+/** Catalog records that are reader-facing: index status is an editor concern. */
 const isReaderVisible = doc => [...READABLE_STATUS, 'unsupported'].includes(doc.status);
 const isSearchable = doc => READABLE_STATUS.includes(doc.status);
 function ownerOfKb(kb) {
@@ -89,7 +104,7 @@ function ownerOfKb(kb) {
   const o = (kb.shares || []).find(s => s.role === 'owner');
   return o ? (o.kind === 'group' ? groupById(o.id)?.name : memberById(o.id)?.name) || '' : '';
 }
-/** Spaces a resource belongs to: its own links plus its knowledge base's space. Spaces module only. */
+/** Spaces a resource belongs to: its own links plus its collection's space. Spaces module only. */
 function resContexts(doc) {
   if (!hasModule('spaces')) return [];
   const kb = kbById(doc.kb);
@@ -104,14 +119,17 @@ function provenance(doc) {
 }
 function defaultSummary(doc) {
   const k = kindMeta(doc.kind || inferKind(doc)).label.toLowerCase(), kb = kbById(doc.kb);
-  return `${k[0].toUpperCase() + k.slice(1)} in ${kb?.name || 'this knowledge base'}.`;
+  return `${k[0].toUpperCase() + k.slice(1)} in ${kb?.name || 'this collection'}.`;
 }
-/** Everything the catalog knows about a resource. Cheap; call freely. */
+/** A resource's kind and topics without building the whole record (lists that facet or filter thousands of documents). */
+const resKind = doc => doc.kind || inferKind(doc);
+const resTopics = doc => doc.topics || kbById(doc.kb)?.topics || [];
+/** Everything the catalog knows about a resource. Cheap for one; use resKind / resTopics across thousands. */
 function res(doc) {
   const kb = kbById(doc.kb);
   return {
-    kind: doc.kind || inferKind(doc),
-    topics: doc.topics || kb?.topics || [],
+    kind: resKind(doc),
+    topics: resTopics(doc),
     contexts: resContexts(doc),
     owner: doc.owner || ownerOfKb(kb) || '',
     lang: doc.lang || 'en',
@@ -147,23 +165,73 @@ function trustOf(doc) {
 /** Fictional-data marker for demo workspaces (curWs().demo holds the explanation). */
 const isDemoWs = () => !!curWs()?.demo;
 
+/* ═══════════════ Structure: folders (nested collections) ═══════════════
+   A collection holds folders (D.folders: { id, kb, parent, name, order, desc?, level?, own? }) and documents (doc.folder;
+   none = its top level). A folder uses its collection's access unless it has its own (`own: { shares }`, the backend's
+   inheritAccess = false): then only the people and groups it names read it and everything under it — workspace admins
+   always. The collection's own people don't reach inside: a collection grant never overrides a folder's own access. */
+const folderById = id => (id && (D.folders || []).find(f => f.id === id)) || null;
+/** A collection's folders directly under `parent` (null = its top level), in their sibling order. */
+const foldersIn = (kbId, parent = null) => (D.folders || []).filter(f => f.kb === kbId && (f.parent || null) === parent)
+  .sort((a, b) => (a.order ?? 1e9) - (b.order ?? 1e9) || a.name.localeCompare(b.name));
+/** The folders from the collection's top level down to this one ([] for the top level). */
+function folderPath(id) {
+  const out = [], seen = new Set();
+  for (let f = folderById(id); f && !seen.has(f.id); f = folderById(f.parent)) { seen.add(f.id); out.unshift(f); }
+  return out;
+}
+/** This folder and every folder under it. */
+const folderSubtree = id => [id, ...(D.folders || []).filter(f => f.parent === id).flatMap(f => folderSubtree(f.id))];
+/** The folder a document sits in, if it belongs to the document's own collection (a reviewer can file a submission
+    elsewhere, leaving a stale folder behind); null = the collection's top level. */
+const docFolder = d => (folderById(d?.folder)?.kb === d?.kb ? d.folder : null);
+/** Where access is decided for what's in this folder: the nearest folder with its own access, else null (the collection). */
+const accessFolder = id => [...folderPath(id)].reverse().find(f => f.own) || null;
+const coversMe = s => (s.kind === 'user' ? s.id === me().id : !!memberById(me().id)?.groups.includes(s.id));
+/** May the caller read inside this folder? (Its collection's access is checked separately.) */
+const canReadFolder = id => { const b = accessFolder(id); return !b || isAdmin() || b.own.shares.some(coversMe); };
+/** What each level is: one icon per kind (identity), wherever it sits — Home's map and the Studio's Contents share it. */
+const LEVEL_ICON = {
+  Faculty: 'building', 'Academic department': 'network', 'Program group': 'layers', Major: 'graduation', 'Administrative office': 'briefcase', Forms: 'clipboard',
+  Area: 'library', Section: 'layers', Subsection: 'network', Folder: 'folder',
+};
+const DEPTH_ICON = ['landmark', 'building', 'network', 'layers', 'folder'];
+/** The label of a container at a depth (root collection = 1): its own level when it names one of the workspace's levels, else its depth's. */
+function levelOf(node, depth) {
+  const lv = mapLevels();
+  if (node?.level && lv.includes(node.level)) return node.level;
+  return lv[Math.min(depth, lv.length) - 1] || 'Folder';
+}
+const levelIcon = (label, depth) => LEVEL_ICON[label] || DEPTH_ICON[Math.min(depth, DEPTH_ICON.length - 1)];
+
 /* ═══════════════ Access-aware pools ═══════════════ */
 /** Published = past review (the lifecycle lives in core/lifecycle.js). Submissions, rejected and unpublished documents never reach readers, search or the assistant. */
 const isPublishedStage = d => !d.stage || d.stage === 'published';
 /** Published resources the caller may read (any publishing status). Authorization happens here, before any listing, search or AI use. */
-const readableResources = () => D.docs.filter(d => { const kb = kbById(d.kb); return !d.archived && isPublishedStage(d) && kb && !kb.archived && canReadKb(kb); });
+const readableResources = () => D.docs.filter(d => { const kb = kbById(d.kb); return !d.archived && isPublishedStage(d) && kb && !kb.archived && canReadKb(kb) && canReadFolder(docFolder(d)); });
 /** Every published resource the caller can use, My files included (search, ⌘K, the assistant). */
 const catalogPool = () => readableResources().filter(isReaderVisible);
 /** What Browse lists: the organization's knowledge. Personal files live in My library. */
 const sharedPool = () => catalogPool().filter(d => !kbById(d.kb)?.personal);
-const canOpenRes = doc => !!doc && !doc.archived && isPublishedStage(doc) && canReadKb(kbById(doc.kb)) && !kbById(doc.kb)?.archived;
-/** Where a knowledge base opens for reading: its documents in Browse (a locked base offers Request access there); My files in My library. */
+const canOpenRes = doc => !!doc && !doc.archived && isPublishedStage(doc) && canReadKb(kbById(doc.kb)) && !kbById(doc.kb)?.archived && canReadFolder(docFolder(doc));
+/** Where a collection opens for reading: its documents in Browse (a locked base offers Request access there); My files in My library. */
 const kbHref = kb => (!kb ? '/knowledge' : kb.personal ? '/knowledge/library?tab=files' : catalogHref({ filters: { kb: [kb.id] } }));
-/** Bases the caller manages (owner or editor) — Manage → Knowledge bases. */
+/** Bases the caller manages (owner or editor) — Manage → Collections. */
 const managedKbs = () => visibleKbs().filter(k => !k.personal && canEditKb(k));
 const canManageKbs = () => can('knowledge.manage') || managedKbs().length > 0;
-/** A managed base's page (access, sources, settings). */
-const kbManageHref = (kb, tab = '') => '/bases/' + kb.id + (tab ? '?tab=' + tab : '');
+/** A managed base's page (contents, access, sources, settings), under Knowledge Studio → Collections. */
+const kbManageHref = (kb, tab = '') => '/studio/collections/' + kb.id + (tab ? '?tab=' + tab : '');
+/** A collection's Contents, opened on one of its folders (none = its top level). */
+const kbContentsHref = (kb, folder = '') => '/studio/collections/' + kb.id + '?' + new URLSearchParams({ tab: 'contents', ...(folder ? { folder } : {}) });
+/** Knowledge Studio addresses: a tab, optionally with a view (Sources: sources | history | accounts) and more query. */
+const studioHref = (tab, q = {}) => '/studio?' + new URLSearchParams({ tab, ...q });
+/** Knowledge Studio → Documents: view all (the registry; processing = a processing state), review (submissions and what a
+    sync held back), issues (what couldn't be processed) or quality (part = reverify | details | duplicates). */
+const docsHref = (view = 'all', q = {}) => studioHref('documents', { view, ...q });
+/** Knowledge Studio → Topics: view topics (the tree and a topic's detail; node = a topic) or suggestions (what the
+    pipeline wasn't sure of and what reviewers' corrections suggest). */
+const topicsHref = (view = 'topics', q = {}) => studioHref('topics', { view, ...q });
+const onStudioTab = (tab, view) => S.cur?.r.page === 'studio' && S.cur.query.tab === tab && (!view || (S.cur.query.view || '') === view);
 
 /* ═══════════════ Search ═══════════════ */
 const _textCache = new Map();
@@ -231,7 +299,7 @@ const FACETS = [
   { id: 'kind', label: 'Type', values: (d, r) => [r.kind], name: id => kindMeta(id).label },
   { id: 'owner', label: 'Owner', values: (d, r) => (r.owner ? [r.owner] : ['—']), name: v => (v === '—' ? 'No owner' : v) },
   { id: 'src', label: 'Source', values: (d, r) => [r.source.key], name: id => (id === 'upload' ? 'Uploaded files' : srcById(id)?.name || 'Source') },
-  { id: 'kb', label: 'Knowledge base', values: d => [d.kb], name: id => kbById(id)?.name || 'Knowledge base' },
+  { id: 'kb', label: 'Collection', values: d => [d.kb], name: id => kbById(id)?.name || 'Collection' },
   { id: 'trust', label: 'Trust', values: d => [trustOf(d).state], name: id => TRUST[id]?.label || id },
   { id: 'upd', label: 'Updated', single: true, values: d => UPDATED_WINDOWS.filter(w => Date.now() - d.updated <= w[2] * DAY).map(w => w[0]), name: id => UPDATED_WINDOWS.find(w => w[0] === id)?.[1] || id },
   { id: 'fmt', label: 'Format', values: d => [formatOf(d)[0]], name: id => Object.values(FORMATS).find(f => f[0] === id)?.[1] || 'Other' },
@@ -303,18 +371,17 @@ function trackRecent(id) {
 const recentResources = (n = 40) => userList('recent').map(x => ({ doc: docById(x.doc), at: x.at })).filter(x => canOpenRes(x.doc)).slice(0, n);
 const myViews = () => userList('views');
 
-/* ═══════════════ Home curation: featured and recently published ═══════════════ */
-/** Workspace admins pick the documents featured on Home (D.featured = doc ids, in order). Only resources the caller can open are returned. */
+/* ═══════════════ Home curation: documents to read first ═══════════════ */
+/** Workspace admins mark documents to read first (D.featured = doc ids, in order): on Home they lead their folder with a star. */
 const featuredIds = () => (D.featured ??= []);
 const isFeatured = id => featuredIds().includes(id);
 function toggleFeatured(id) { const l = featuredIds(), i = l.indexOf(id); if (i >= 0) l.splice(i, 1); else l.unshift(id); persist(); return i < 0; }
-const featuredResources = (n = 8) => featuredIds().map(docById).filter(d => canOpenRes(d) && isReaderVisible(d)).slice(0, n);
 /** When a document became available to readers: its approval/publication event, else its last update. */
 const publishedAt = d => { const e = (d.submission?.events || []).filter(x => x.kind === 'approved' || x.kind === 'published').at(-1); return e ? e.at : d.updated; };
 /** Trusted, readable, ready documents, newest first (Home "Recently published"). */
 const recentlyPublished = (n = 6) => catalogPool().filter(d => d.status === 'ready' && !kbById(d.kb)?.personal).sort((a, b) => publishedAt(b) - publishedAt(a)).slice(0, n);
 
-/* ═══════════════ Collections ═══════════════ */
+/* ═══════════════ Reading lists ═══════════════ */
 const collectionById = id => (D.collections || []).find(c => c.id === id && !c.archived);
 /** Share scopes: 'private' | 'workspace' | 'space:<id>'. */
 const collectionSpace = c => (c.share?.startsWith('space:') ? spaceById(c.share.slice(6)) : null);

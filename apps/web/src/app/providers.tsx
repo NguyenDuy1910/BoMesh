@@ -3,13 +3,13 @@
 import { I18nProvider, RouterProvider } from "@heroui/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { ConfirmHost } from "@/components/ui/Confirm";
 import { ToastHost } from "@/components/ui/Toast";
 import { ApiError } from "@/lib/api/client";
 import { startLocalizer, useLanguage } from "@/lib/i18n";
-import { useSession } from "@/lib/session";
+import { sessionTransition, watchSession } from "@/lib/session";
 import { applyTheme } from "@/lib/theme";
 
 /** 4xx answers are final; only transient failures are retried. */
@@ -37,17 +37,22 @@ export function Providers({ children }: { children: ReactNode }) {
     startLocalizer();
   }, []);
 
-  // A session ended (401, expiry, Sign out): the gate has already swapped the app for its redirect in
-  // this commit, so stop in-flight requests and drop that user's data without triggering refetches.
-  const sessionName = useSession()?.name;
-  const previousSession = useRef(sessionName);
-  useEffect(() => {
-    const ended = previousSession.current && previousSession.current !== sessionName;
-    previousSession.current = sessionName;
-    if (!ended) return;
-    void queryClient.cancelQueries();
-    queryClient.clear();
-  }, [sessionName, queryClient]);
+  // Caches follow the session, synchronously before the shell re-renders (lib/session.ts `watchSession`): an expired
+  // session keeps every result on screen and only stops in-flight requests; the same person signing in again refetches
+  // what is shown; another account or Sign out drops the previous user's data (the gate has left the page by then).
+  useEffect(
+    () =>
+      watchSession((prev, next) => {
+        const change = sessionTransition(prev, next);
+        if (change === "expired") void queryClient.cancelQueries();
+        else if (change === "renewed") void queryClient.invalidateQueries();
+        else if (change === "switched" || change === "ended") {
+          void queryClient.cancelQueries();
+          queryClient.clear();
+        }
+      }),
+    [queryClient],
+  );
 
   return (
     <QueryClientProvider client={queryClient}>

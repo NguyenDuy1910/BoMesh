@@ -250,12 +250,24 @@ class Authorizer:
 
     async def ancestry(self, item_id: UUID) -> tuple[ItemNode, ...]:
         """The item and every ancestor, nearest first; empty if the item does not exist."""
-        cached = self._ancestry.get(item_id)
-        if cached is None:
+        return (await self.ancestries((item_id,)))[item_id]
+
+    async def ancestries(self, item_ids: Iterable[UUID]) -> dict[UUID, tuple[ItemNode, ...]]:
+        """:meth:`ancestry` of each item; the uncached ones in one recursive query.
+
+        Every ancestor's own path (a suffix of a fetched path) is memoized too.
+        """
+        ids = list(dict.fromkeys(item_ids))
+        missing = [item_id for item_id in ids if item_id not in self._ancestry]
+        if missing:
             async with transaction_scope(self._sessions) as session:
-                cached = await item_ancestry(session, item_id)
-            self._ancestry[item_id] = cached
-        return cached
+                paths = await item_ancestries(session, missing)
+            for item_id in missing:
+                path = paths.get(item_id, ())
+                self._ancestry[item_id] = path
+                for depth in range(1, len(path)):
+                    self._ancestry.setdefault(path[depth].item_id, path[depth:])
+        return {item_id: self._ancestry[item_id] for item_id in ids}
 
     async def governing_collection(self, item_id: UUID) -> UUID | None:
         """The nearest COLLECTION of the item's canonical path, the item itself included."""
@@ -276,29 +288,58 @@ class Authorizer:
         ancestor is DELETED. With ``include_deleted`` grants resolve through
         the deleted cohort.
         """
-        key = (principal.user_id, item_id, include_deleted)
-        cached = self._collection.get(key)
-        if cached is not None:
-            return cached
-        result: frozenset[str] = frozenset()
-        path = await self.ancestry(item_id)
-        if path and (include_deleted or all(node.deleted_at is None for node in path)):
-            workspace_id = path[0].tenant_id
-            tenant = await self.workspace_permissions(principal, workspace_id)
-            if await self.is_active_member(principal, workspace_id):
-                chain = governing_chain(path)
-                groups = await self.group_ids(principal, workspace_id)
-                async with transaction_scope(self._sessions) as session:
-                    rows = await session.execute(
-                        _grants().where(
-                            RoleAssignment.item_id.in_(chain),
-                            _held_by(principal, groups, all_members=True),
-                        )
+        key = (item_id, include_deleted)
+        return (await self.collection_permissions_many(principal, (key,)))[key]
+
+    async def collection_permissions_many(
+        self, principal: Principal, keys: Iterable[tuple[UUID, bool]]
+    ) -> dict[tuple[UUID, bool], frozenset[str]]:
+        """:meth:`collection_permissions` of each ``(item_id, include_deleted)``.
+
+        The uncached ones cost one ancestry query and one grants query per workspace.
+        """
+        wanted = list(dict.fromkeys(keys))
+        missing = [
+            key for key in wanted if (principal.user_id, *key) not in self._collection
+        ]
+        if missing:
+            paths = await self.ancestries(item_id for item_id, _ in missing)
+            chains: dict[UUID, dict[tuple[UUID, bool], tuple[UUID, ...]]] = {}
+            for item_id, include_deleted in missing:
+                path = paths[item_id]
+                if path and (include_deleted or all(node.deleted_at is None for node in path)):
+                    chains.setdefault(path[0].tenant_id, {})[(item_id, include_deleted)] = (
+                        governing_chain(path)
                     )
-                    granted = _conferred(rows, Scope.COLLECTION)
-                result = (tenant & _COLLECTION_SCOPED) | granted
-        self._collection[key] = result
-        return result
+                else:
+                    self._collection[(principal.user_id, item_id, include_deleted)] = frozenset()
+            for workspace_id, by_key in chains.items():
+                tenant = await self.workspace_permissions(principal, workspace_id)
+                member = await self.is_active_member(principal, workspace_id)
+                granted: dict[UUID, list[tuple[str, str]]] = {}
+                collections = {collection for chain in by_key.values() for collection in chain}
+                if member and collections:
+                    groups = await self.group_ids(principal, workspace_id)
+                    async with transaction_scope(self._sessions) as session:
+                        rows = await session.execute(
+                            _grants()
+                            .add_columns(RoleAssignment.item_id)
+                            .where(
+                                RoleAssignment.item_id.in_(collections),
+                                _held_by(principal, groups, all_members=True),
+                            )
+                        )
+                        for scope_type, code, collection in rows:
+                            granted.setdefault(collection, []).append((scope_type, code))
+                for (item_id, include_deleted), chain in by_key.items():
+                    result: frozenset[str] = frozenset()
+                    if member:
+                        result = (tenant & _COLLECTION_SCOPED) | _conferred(
+                            (row for collection in chain for row in granted.get(collection, ())),
+                            Scope.COLLECTION,
+                        )
+                    self._collection[(principal.user_id, item_id, include_deleted)] = result
+        return {key: self._collection[(principal.user_id, *key)] for key in wanted}
 
     async def space_permissions(self, principal: Principal, space_id: UUID) -> frozenset[str]:
         """Workspace grants valid on spaces ∪ the caller's grants on the space."""
@@ -508,8 +549,19 @@ class WorkspaceAccess:
 
 async def item_ancestry(session: AsyncSession, item_id: UUID) -> tuple[ItemNode, ...]:
     """The item and every ancestor in one recursive query, nearest first."""
+    return (await item_ancestries(session, (item_id,))).get(item_id, ())
+
+
+async def item_ancestries(
+    session: AsyncSession, item_ids: Iterable[UUID]
+) -> dict[UUID, tuple[ItemNode, ...]]:
+    """:func:`item_ancestry` of each existing item, all in one recursive query."""
+    ids = list(dict.fromkeys(item_ids))
+    if not ids:
+        return {}
     path = (
         select(
+            Item.id.label("origin_id"),
             Item.id,
             Item.tenant_id,
             Item.item_type,
@@ -520,12 +572,13 @@ async def item_ancestry(session: AsyncSession, item_id: UUID) -> tuple[ItemNode,
             Item.publication_state,
             literal(0).label("depth"),
         )
-        .where(Item.id == item_id)
+        .where(Item.id.in_(ids))
         .cte("item_path", recursive=True)
     )
     parent = Item.__table__.alias("parent_item")
     path = path.union_all(
         select(
+            path.c.origin_id,
             parent.c.id,
             parent.c.tenant_id,
             parent.c.item_type,
@@ -537,20 +590,21 @@ async def item_ancestry(session: AsyncSession, item_id: UUID) -> tuple[ItemNode,
             path.c.depth + 1,
         ).where(parent.c.id == path.c.parent_item_id)
     )
-    rows = await session.execute(select(path).order_by(path.c.depth))
-    return tuple(
-        ItemNode(
-            item_id=row.id,
-            tenant_id=row.tenant_id,
-            item_type=row.item_type,
-            parent_item_id=row.parent_item_id,
-            inherit_access=row.inherit_access,
-            deleted_at=row.deleted_at,
-            system_kind=row.system_kind,
-            publication_state=row.publication_state,
+    paths: dict[UUID, list[ItemNode]] = {}
+    for row in await session.execute(select(path).order_by(path.c.origin_id, path.c.depth)):
+        paths.setdefault(row.origin_id, []).append(
+            ItemNode(
+                item_id=row.id,
+                tenant_id=row.tenant_id,
+                item_type=row.item_type,
+                parent_item_id=row.parent_item_id,
+                inherit_access=row.inherit_access,
+                deleted_at=row.deleted_at,
+                system_kind=row.system_kind,
+                publication_state=row.publication_state,
+            )
         )
-        for row in rows
-    )
+    return {item_id: tuple(nodes) for item_id, nodes in paths.items()}
 
 
 def governing_chain(path: tuple[ItemNode, ...]) -> tuple[UUID, ...]:
@@ -679,6 +733,7 @@ __all__ = [
     "WorkspaceRef",
     "governing_chain",
     "item_ancestry",
+    "item_ancestries",
     "not_found",
     "permission_denied",
 ]

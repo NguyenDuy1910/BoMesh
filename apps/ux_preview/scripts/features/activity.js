@@ -104,12 +104,14 @@
   /** The shared list-tools rule (core needsTools), plus a non-default time window counts as "in use". */
   const needsTools = (n, uiKey, fields) => window.needsTools(n, uiKey, fields) || (ui(uiKey).win || '30') !== '30';
 
+  /** Activity's sections are sidebar sub-rows of Activity (pageSections). */
+  const sections = () => pageSections('/activity', [{ id: 'changes', label: 'Changes' }, { id: 'signins', label: 'Sign-ins' }]);
+  (X.sections ||= {}).activity = () => sections().nav();
   P.activity = ({ query }) => {
-    const tab = query.tab === 'signins' ? 'signins' : 'changes';
+    const s = sections(), tab = s.section(query);
     const live = S.pageState === 'live' && !S.navLoading;
-    const head = pageHeader({ title: 'Activity', desc: `Who changed what in ${esc(curWs().name)}, and who signed in.`, actions: exportActions('act-export', live) });
-    const t = tabs([{ id: 'changes', label: 'Changes' }, { id: 'signins', label: 'Sign-ins' }], tab, '/activity');
-    return `<div class="page">${head}<div class="page-tabs">${t}</div>${tab === 'signins' ? signinsTab() : changesTab()}</div>`;
+    const head = pageHeader({ title: s.title(query), actions: exportActions('act-export', live) });
+    return `<div class="page page--wide">${head}${tab === 'signins' ? signinsTab() : changesTab()}</div>`;
   };
 
   function changesTab() {
@@ -175,7 +177,7 @@
         const d = D.docs.find(x => x.name === t); if (d) return { label: 'Open document', to: '/doc/' + d.id };
         return null;
       }
-      case 'Sources': { const s = D.sources.find(x => x.name === t); return s ? { label: `Open ${s.name}`, to: '/sources', then: later(() => A['src-open']?.({ dataset: { id: s.id } })) } : null; }
+      case 'Sources': { const s = D.sources.find(x => x.name === t); return s ? { label: `Open ${s.name}`, to: studioHref('sources'), then: later(() => A['src-open']?.({ dataset: { id: s.id } })) } : null; }
       case 'People': {
         const m = D.members.find(x => x.name === t || x.email === t); if (m) return { label: `View ${m.name}`, to: '/people?tab=members', then: later(() => A['member-open']?.({ dataset: { id: m.id } })) };
         const g = D.groups.find(x => x.name === t); if (g) return { label: `Open ${g.name}`, to: '/people?tab=groups', then: later(() => A['ppl-group-open']?.({ dataset: { id: g.id } })) };

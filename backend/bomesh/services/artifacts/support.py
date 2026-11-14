@@ -44,11 +44,7 @@ from bomesh.services.collaboration.membership import (
     space_id_for_code,
     space_member_ids,
 )
-from bomesh.services.conversations.citations import (
-    readable_summaries,
-    render_citations,
-    unreadable_items,
-)
+from bomesh.services.conversations.citations import render_citations, unreadable_items
 from bomesh.services.conversations.records import StoredCitation
 from bomesh.services.conversations.references import conversation_codes
 from bomesh.services.kernel.context import RequestContext
@@ -59,7 +55,7 @@ from bomesh.services.knowledge_items.content import (
     resolve_rendition,
 )
 from bomesh.services.knowledge_items.records import PageAsset
-from bomesh.services.knowledge_items.summary import ItemSummary
+from bomesh.services.knowledge_items.summary import ItemSummary, get_item_summaries
 
 if TYPE_CHECKING:
     from bomesh.runtime import AppRuntime
@@ -235,7 +231,7 @@ async def render_review(
         return EvidenceReviewRecord(options, criteria, None, None, None)
     synthesis_citations = stored_citations(review.get("synthesis_citations"))
     cited = [c.item_id for *_, citations in stored_cells for c in citations]
-    readable = await readable_summaries(
+    readable = await get_item_summaries(
         session,
         ctx.authorizer,
         ctx.principal,
@@ -295,7 +291,7 @@ async def readable_sources(
 ) -> tuple[list[ItemSummary], int]:
     """The sources the caller can read now, and how many are withheld."""
     sources = await source_ids(session, artifact.item_id)
-    readable = await readable_summaries(session, ctx.authorizer, ctx.principal, workspace_id, sources)
+    readable = await get_item_summaries(session, ctx.authorizer, ctx.principal, workspace_id, sources)
     return [readable[value] for value in sources if value in readable], len(sources) - len(
         [value for value in sources if value in readable]
     )

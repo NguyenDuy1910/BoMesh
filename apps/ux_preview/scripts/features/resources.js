@@ -3,7 +3,7 @@
    (Save and ⋯ revealed on hover/focus, always on touch), the document card
    (content preview, or a type tile when previews would repeat; Home, Browse
    grid), the metadata list — and the shared actions: save, add to a
-   collection, ask (always the Reader's Ask panel: /doc/:id?ask=1), use in a
+   reading list, ask (always the Reader's Ask panel: /doc/:id?ask=1), use in a
    workflow, edit details, link to spaces, verify, copy link. The ⋯ menu never
    repeats what its surface shows and holds at most 8 entries. Pages (home.js,
    hub.js, library.js, reader.js, knowledge.js, spaces.js, governance.js)
@@ -51,19 +51,37 @@
   }
   /** Fictional-data marker for demo workspaces. */
   const demoChip = () => (isDemoWs() ? chip('Demo data', { size: 'sm', icon: 'info', tip: curWs().demo }) : '');
-  /** Knowledge area header: title, demo marker, section tabs (Browse · My library) and the page's actions. Managing knowledge bases lives in Manage. */
-  const HUB_TABS = [['browse', 'Browse', '/knowledge'], ['library', 'My library', '/knowledge/library']];
-  function hubHeader(active, { actions = '', desc = '' } = {}) {
-    const nav = `<nav class="tabs hub-tabs" aria-label="Knowledge sections" data-overflow><div class="tabs__list">${HUB_TABS.map(([id, label, to]) => `<a class="tabs__tab" href="#${to}" ${id === active ? 'aria-current="page"' : ''}>${esc(label)}</a>`).join('')}</div></nav>`;
-    return pageHeader({ title: 'Knowledge', extra: demoChip(), desc, actions }) + `<div class="hub-nav">${nav}</div>`;
+  /** Knowledge's personal sections. Browse is Knowledge itself; Saved · My files · My reading lists are pages of their own that the
+      sidebar lists as sub-rows of Knowledge while you're in it (core/shell.js navItem) — no tab bar on the page. Managing
+      collections lives in Manage. */
+  function librarySections() {
+    const kb = visibleKbs().find(k => k.personal);
+    return [
+      { id: 'saved', label: 'Saved', to: '/knowledge/library?tab=saved' },
+      kb && { id: 'files', label: 'My files', to: '/knowledge/library?tab=files' },
+      { id: 'lists', label: 'My reading lists', to: '/knowledge/library?tab=lists' },
+    ].filter(Boolean);
+  }
+  /** The library section a query asks for (an unknown or unavailable one falls back to Saved). */
+  const libraryTab = query => (librarySections().some(t => t.id === query?.tab) ? query.tab : 'saved');
+  /** Sidebar sub-rows; the current one is the section you're on (your own reading list counts as My reading lists). */
+  function libraryNav() {
+    const cur = S.cur, colId = cur?.r.page === 'collection' && cur.params.id;
+    const here = cur?.r.page === 'library' ? libraryTab(cur.query) : colId && collectionById(colId)?.owner === me().id ? 'lists' : '';
+    return librarySections().map(t => ({ ...t, current: t.id === here }));
+  }
+  /** Knowledge page header: Browse is titled Knowledge, a library section by its name (the top row holds it). */
+  function hubHeader(active, { actions = '' } = {}) {
+    const title = librarySections().find(t => t.id === active)?.label || 'Knowledge';
+    return pageHeader({ title, extra: demoChip(), actions });
   }
   /** Knowledge header entry point: Contribute (review before publishing) for contributors; otherwise upload to My files. */
   const uploadBtn = (v = 'secondary') => (canContribute() ? btn('Contribute', { v, icon: 'upload', act: 'contribute' }) : visibleKbs().some(k => k.personal) ? btn('Upload', { v, icon: 'upload', act: 'contribute', data: { private: '1' } }) : '');
 
   /* ═══════════════ Row, card, table ═══════════════ */
-  /** Rich list row. opts: q (highlight + snippet), act (default open), data, active, note (collection note), trail (always-visible next step,
+  /** Rich list row. opts: q (highlight + snippet), act (default open), data, active, note (reading list note), trail (always-visible next step,
       e.g. Revise or Process), reveal (secondary actions shown with Save and ⋯ on hover/focus), select (uiKey for checkbox), pos (position
-      in an ordered list), read (already opened: a quiet check), hide (['kb']: context every row in the list shares — a knowledge base's
+      in an ordered list), read (already opened: a quiet check), hide (['kb']: context every row in the list shares — a collection's
       own page, My files — so it isn't repeated on each row). Save and ⋯ appear on hover or keyboard focus (always on touch); a saved
       bookmark stays visible. */
   function row(d, { q = '', act = 'res-open', data, active = false, note = '', trail = '', reveal = '', select, compact = false, hide = [], pos, read = false } = {}) {
@@ -209,29 +227,30 @@
 
   /** Metadata list (About): what it is, where it lives, where it came from, who owns it, who can see it. */
   function details(d) {
-    const r = res(d), t = trustOf(d), who = X.whoCanSee ? X.whoCanSee(r.kb) : { icon: 'lock', label: '' };
+    const r = res(d), t = trustOf(d), who = X.whoCanSee && r.kb ? X.whoCanSee(r.kb, docFolder(d)) : { icon: 'lock', label: '' };
+    const path = folderPath(docFolder(d)).map(f => f.name);
     const spaces = r.contexts.map(spaceById).filter(Boolean);
     return kv([
       ['Type', `<span class="row gap-6">${ic(kindMeta(r.kind).icon, 'i-sm muted')}${esc(kindMeta(r.kind).label)}</span>`],
       ['Topics', r.topics.length ? `<span class="res-topics">${r.topics.map(id => `<a class="res-topic" href="#${topicHref(id)}">${esc(topicName(id))}</a>`).join('')}</span>` : '<span class="muted">None yet</span>'],
       hasModule('spaces') && ['Spaces', spaces.length ? spaces.map(s => `<a class="link" href="#/space/${s.id}">${esc(s.code ? `${s.name} · ${s.code}` : s.name)}</a>`).join(', ') : '<span class="muted">Not linked</span>'],
       ['Owner', esc(r.owner || 'No owner')],
-      ['Knowledge base', r.kb ? `<a class="link" href="#${kbHref(r.kb)}">${esc(r.kb.name)}</a>` : '—'],
+      ['Collection', r.kb ? `<span class="stack gap-2"><a class="link" href="#${kbHref(r.kb)}">${esc(r.kb.name)}</a>${path.length ? `<span class="t-xs muted" translate="no">${esc(path.join(' › '))}</span>` : ''}</span>` : '—'],
       ['Source', `<span class="stack gap-2"><span class="row gap-6">${appIcon(r.source.app, 'sm')}${esc(r.source.name)}</span><span class="t-xs muted res-path">${esc(r.source.path)}</span></span>`],
       ['Trust', `<span class="stack gap-2">${trustChip(d) || esc(t.label)}<span class="t-xs muted">${esc(t.note || t.desc)}</span></span>`],
       ['Version', `v${r.version} · ${esc(fmtDate(d.updated))}`],
       ['Language', esc(LANGS[r.lang] || r.lang)],
-      ['Who can see it', `<span class="row gap-6">${ic(who.icon, 'i-sm muted')}${esc(who.label)}</span>`],
+      ['Who can see it', `<span class="stack gap-2"><span class="row gap-6">${ic(who.icon, 'i-sm muted')}${esc(who.label)}</span>${who.via ? `<span class="t-xs muted">${esc(`Set on the folder ${who.via.name}, not the collection`)}</span>` : ''}</span>`],
     ]);
   }
 
-  X.res = { kindChip, trustChip, statusChip, saveBtn, moreBtn, provenance, topicChips, topicHref, demoChip, hubHeader, uploadBtn, row, rows, card, previewKey, glance, blurb, matchPassage, details, canEditRes, linkableSpaces };
+  X.res = { kindChip, trustChip, statusChip, saveBtn, moreBtn, provenance, topicChips, topicHref, demoChip, hubHeader, libraryNav, libraryTab, uploadBtn, row, rows, card, previewKey, glance, blurb, matchPassage, details, canEditRes, linkableSpaces };
 
   /* ═══════════════ Actions ═══════════════ */
   /** Knowledge dialogs validate on submit, then clear the error as soon as the field is filled (data-input="kn-revalidate"
       data-form="<S.ui key>"). Re-renders only when the error goes away, so typing (and Vietnamese IME composition) isn't interrupted. */
   A['kn-revalidate'] = el => { const f = S.ui[el.dataset.form]; if (f?.touched && el.value.trim()) { f.touched = false; refreshLayer(); } };
-  /** A document row anywhere (library, collections, search, Related, spaces' materials): preview first, open full later (preview.js). */
+  /** A document row anywhere (library, reading lists, search, Related, spaces' materials): preview first, open full later (preview.js). */
   A['res-open'] = el => { const { id, q } = el.dataset; X.preview.open({ id, q }); };
   A['res-save'] = el => {
     const d = docById(el.dataset.id); if (!d) return;
@@ -269,7 +288,7 @@
     const askShown = reader || el.dataset.ctx === 'peek';
     const reading = [
       !askShown && readable && { label: 'Ask about this document', icon: 'sparkles', run: () => A['res-ask']({ dataset: { id: d.id } }) },
-      { label: 'Add to collection…', icon: 'list-plus', run: () => A['res-collect']({ dataset: { id: d.id } }) },
+      { label: 'Add to reading list…', icon: 'list-plus', run: () => A['res-collect']({ dataset: { id: d.id } }) },
       { label: 'Copy link', icon: 'link', run: () => A['res-copy-link']({ dataset: { id: d.id } }) },
       { label: 'Download', icon: 'download', run: () => X.downloadDocument?.(d) },
       ...(reader ? X.rdr?.panels?.(d, el) || [] : []),
@@ -282,8 +301,8 @@
       edit && !personal && { label: trustOf(d).state === 'verified' ? 'Renew verification' : 'Mark as verified', icon: 'shield-check', run: () => A['res-verify']({ dataset: { id: d.id } }) },
       // A new file only for uploads: synced documents are updated at their source (Publish update).
       canContribute() && !personal && (edit || isMine(d)) && res(d).source.key === 'upload' && { label: 'Submit a new version…', icon: 'upload', run: () => A['contribute']?.({ dataset: { versionOf: d.id } }) },
-      isAdmin() && isPublishedStage(d) && !personal && { label: isFeatured(d.id) ? 'Remove from Home' : 'Feature on Home', icon: 'home', run: () => { const on = toggleFeatured(d.id); refresh(); toast(on ? 'Featured on Home for everyone who can read it' : 'Removed from Home', { action: { label: 'Undo', run: () => { toggleFeatured(d.id); refresh(); } } }); } },
-      canReviewKb(kb) && can('knowledge.manage') && { label: 'Manage in Documents', icon: 'files', run: () => go('/documents?tab=all&q=' + encodeURIComponent(docTitle(d))) },
+      isAdmin() && isPublishedStage(d) && !personal && { label: isFeatured(d.id) ? 'Remove “Read first”' : 'Mark as read first', icon: 'star', run: () => { const on = toggleFeatured(d.id); refresh(); toast(on ? 'Marked as read first. It leads its folder on Home.' : 'No longer marked as read first', { action: { label: 'Undo', run: () => { toggleFeatured(d.id); refresh(); } } }); } },
+      canReviewKb(kb) && can('knowledge.manage') && { label: 'Open in Documents', icon: 'library', run: () => go(docsHref('all', { q: docTitle(d) })) },
     ].filter(Boolean);
     const archive = edit ? [{ sep: true }, { label: 'Archive', icon: 'archive', danger: true, run: () => X.archiveDocs?.([d]) }] : [];
     if (!manage.length) return [...head, ...archive];
@@ -292,7 +311,7 @@
     return [...head, { sep: true }, { label: 'Manage…', icon: 'settings', run: () => openMenu(el, section, 'res-manage:' + d.id) }];
   };
 
-  /* ── Add to collection ── */
+  /* ── Add to reading list ── */
   A['res-collect'] = el => {
     const ids = (el.dataset.ids || el.dataset.id || '').split(',').filter(Boolean); if (!ids.length) return;
     const editable = visibleCollections().filter(canEditCollection);
@@ -300,21 +319,21 @@
     S.ui.resCollect = { ids, had, picked: [...had], name: '', creating: !editable.length, touched: false };
     openModal('res-collect', {});
   };
-  /** What saving does: collections that gain the resources (a new one counts) and, for one resource, the ones that lose it. */
+  /** What saving does: reading lists that gain the resources (a new one counts) and, for one resource, the ones that lose it. */
   const collectDelta = f => ({ add: f.picked.filter(id => !f.had.includes(id)).length + (f.creating && f.name.trim() ? 1 : 0), drop: f.ids.length === 1 ? f.had.filter(id => !f.picked.includes(id)).length : 0 });
   M['res-collect'] = () => {
     const f = ui('resCollect'), editable = visibleCollections().filter(canEditCollection), n = f.ids.length, { add, drop } = collectDelta(f);
-    const err = f.touched && !add && !drop ? (f.creating ? 'Name the new collection.' : 'Pick a collection or create a new one.') : '';
+    const err = f.touched && !add && !drop ? (f.creating ? 'Name the new reading list.' : 'Pick a reading list or create a new one.') : '';
     const rows = editable.map(c => { const s = shareLabel(c); return checkbox({ checked: f.picked.includes(c.id), act: 'res-collect-pick', data: { id: c.id }, label: `<span class="res-opt"><span class="res-opt__name">${esc(c.name)}</span><span class="res-opt__meta">${ic(s.icon, 'i-xs')}<span class="truncate">${esc(s.label)}</span>${DOT}${plural(c.items.length, 'item')}</span></span>` }); }).join('');
     const create = f.creating
-      ? field({ id: 'resc-name', label: rows ? 'New collection' : 'Name your first collection', error: err, desc: 'Only you can see it until you share it.', control: input({ id: 'resc-name', bind: 'resCollect.name', value: f.name, placeholder: 'e.g. On-call reading list', autofocus: true, onEnter: 'res-collect-go', invalid: !!err, attrs: 'maxlength="60" data-input="kn-revalidate" data-form="resCollect"' }) })
-      : `${err ? `<div class="field-error mb-8" role="alert">${ic('alert-circle')}<span>${esc(err)}</span></div>` : ''}${btn('New collection', { v: 'ghost', size: 'sm', icon: 'plus', act: 'res-collect-new', cls: 'res-newcol' })}`;
+      ? field({ id: 'resc-name', label: rows ? 'New reading list' : 'Name your first reading list', error: err, desc: 'Only you can see it until you share it.', control: input({ id: 'resc-name', bind: 'resCollect.name', value: f.name, placeholder: 'e.g. On-call reading list', autofocus: true, onEnter: 'res-collect-go', invalid: !!err, attrs: 'maxlength="60" data-input="kn-revalidate" data-form="resCollect"' }) })
+      : `${err ? `<div class="field-error mb-8" role="alert">${ic('alert-circle')}<span>${esc(err)}</span></div>` : ''}${btn('New reading list', { v: 'ghost', size: 'sm', icon: 'plus', act: 'res-collect-new', cls: 'res-newcol' })}`;
     const what = n === 1 ? `“${esc(docTitle(docById(f.ids[0])))}”` : plural(n, 'resource');
-    const label = drop ? 'Save changes' : f.creating ? 'Create and add' : add > 1 ? `Add to ${add} collections` : 'Add to collection';
+    const label = drop ? 'Save changes' : f.creating ? 'Create and add' : add > 1 ? `Add to ${add} reading lists` : 'Add to reading list';
     return {
-      size: 'md', title: 'Add to collection', icon: 'list-plus',
+      size: 'md', title: 'Add to reading list', icon: 'list-plus',
       desc: `Group ${what} with related reading.`,
-      body: `<div class="stack gap-12">${rows ? `<div class="option-list" role="group" aria-label="Collections">${rows}</div>` : ''}<div>${create}</div></div>`,
+      body: `<div class="stack gap-12">${rows ? `<div class="option-list" role="group" aria-label="Reading lists">${rows}</div>` : ''}<div>${create}</div></div>`,
       footStart: 'Documents keep their own access.',
       foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn(label, { v: 'primary', icon: drop ? 'check' : 'plus', act: 'res-collect-go' }),
     };
@@ -332,7 +351,7 @@
     let created = null, added = 0, removed = 0;
     if (f.creating && name) {
       created = { id: uid('col'), name, desc: '', owner: me().id, share: 'private', created: Date.now(), updated: Date.now(), items: [] };
-      (D.collections ??= []).unshift(created); f.picked.push(created.id); audit('Created a collection', name);
+      (D.collections ??= []).unshift(created); f.picked.push(created.id); audit('Created a reading list', name);
     }
     [...editable, ...(created ? [created] : [])].forEach(c => {
       const want = f.picked.includes(c.id);
@@ -345,12 +364,12 @@
     closeModal(); refresh();
     const gained = [...(created ? [created] : []), ...editable.filter(c => f.picked.includes(c.id) && !f.had.includes(c.id))];
     const undo = () => { before.forEach((s, c) => { c.items = s.items; c.updated = s.updated; }); if (created) D.collections = D.collections.filter(c => c !== created); persist(); refresh(); };
-    if (added && gained.length) toast(`Added to “${gained[0].name}”${gained.length > 1 ? ` and ${plural(gained.length - 1, 'other')}` : ''}`, { action: { label: 'Open', run: () => go('/knowledge/collections/' + gained[0].id) } });
-    else if (removed) toast(removed === 1 ? 'Removed from the collection' : `Removed from ${plural(removed, 'collection')}`, { action: { label: 'Undo', run: undo } });
+    if (added && gained.length) toast(`Added to “${gained[0].name}”${gained.length > 1 ? ` and ${plural(gained.length - 1, 'other')}` : ''}`, { action: { label: 'Open', run: () => go('/knowledge/lists/' + gained[0].id) } });
+    else if (removed) toast(removed === 1 ? 'Removed from the reading list' : `Removed from ${plural(removed, 'reading list')}`, { action: { label: 'Undo', run: undo } });
   };
 
-  /* ── Create / edit a collection ── */
-  /** Who can see a collection: only you, the members of one space you run, or everyone (admins). A space the collection is already
+  /* ── Create / edit a reading list ── */
+  /** Who can see a reading list: only you, the members of one space you run, or everyone (admins). A space the reading list is already
       shared with stays selectable even if you no longer run it. */
   function colScopes(f) {
     const cur = f.share.startsWith('space:') ? spaceById(f.share.slice(6)) : null, mine = linkableSpaces();
@@ -367,7 +386,7 @@
     const share = c?.share || 'private', sp = share.startsWith('space:') ? share.slice(6) : linkableSpaces()[0]?.id || '';
     return { id: c?.id || '', name: c?.name || '', desc: c?.desc || '', share, scope: share === 'workspace' ? 'workspace' : share.startsWith('space:') ? 'space' : 'private', space: sp, ids, touched: false, busy: false };
   }
-  /** A['col-new']({dataset:{ids?}}) creates a collection (optionally with resources); A['col-edit']({dataset:{id}}) edits one. */
+  /** A['col-new']({dataset:{ids?}}) creates a reading list (optionally with resources); A['col-edit']({dataset:{id}}) edits one. */
   A['col-new'] = el => { S.ui.colEdit = colEditState(null, (el?.dataset?.ids || '').split(',').filter(Boolean)); openModal('col-edit', {}); };
   A['col-edit'] = el => { const c = collectionById(el.dataset.id); if (!canEditCollection(c)) return; S.ui.colEdit = colEditState(c); openModal('col-edit', {}); };
   M['col-edit'] = () => {
@@ -380,13 +399,13 @@
       : `<p class="col-only">${ic('lock', 'i-sm')}<span>Only you can see it.</span></p>`;
     const n = f.ids.length;
     return {
-      size: 'md', title: f.id ? 'Edit collection' : 'New collection', icon: f.id ? 'pencil' : 'list',
+      size: 'md', title: f.id ? 'Edit reading list' : 'New reading list', icon: f.id ? 'pencil' : 'list',
       desc: f.id ? 'Change its name, description or who can see it.' : n ? `A reading list that starts with ${plural(n, 'resource')}.` : 'A reading list you can order, annotate and share.',
       body: `<div class="kn-form">${field({ id: 'col-name', label: 'Name', required: true, error: err, control: input({ id: 'col-name', bind: 'colEdit.name', value: f.name, placeholder: 'e.g. On-call reading list', autofocus: true, onEnter: 'col-edit-go', invalid: !!err, attrs: `maxlength="60" data-input="kn-revalidate" data-form="colEdit" ${dis}` }) })}
         ${field({ id: 'col-desc', label: 'Description', optional: true, control: textarea({ id: 'col-desc', bind: 'colEdit.desc', value: f.desc, rows: 2, placeholder: 'What it’s for and who should read it', attrs: `maxlength="200" ${dis}` }) })}
         ${who}</div>`,
       footStart: 'Documents keep their own access.',
-      foot: btn('Cancel', { v: 'ghost', act: 'close-modal', disabled: f.busy }) + btn(f.id ? 'Save changes' : 'Create collection', { v: 'primary', icon: f.id ? 'check' : 'plus', act: 'col-edit-go', loading: f.busy }),
+      foot: btn('Cancel', { v: 'ghost', act: 'close-modal', disabled: f.busy }) + btn(f.id ? 'Save changes' : 'Create reading list', { v: 'primary', icon: f.id ? 'check' : 'plus', act: 'col-edit-go', loading: f.busy }),
     };
   };
   A['col-edit-scope'] = el => { ui('colEdit').scope = el.dataset.value; refreshLayer(); };
@@ -400,15 +419,15 @@
     if (f.id) {
       const c = collectionById(f.id), prev = { name: c.name, desc: c.desc, share: c.share, updated: c.updated };
       Object.assign(c, { name: f.name.trim(), desc: f.desc.trim(), share, updated: Date.now() });
-      audit('Updated a collection', c.name); closeModal(); refresh();
-      toast('Collection saved', { action: { label: 'Undo', run: () => { Object.assign(c, prev); persist(); refresh(); } } }); return;
+      audit('Updated a reading list', c.name); closeModal(); refresh();
+      toast('Reading list saved', { action: { label: 'Undo', run: () => { Object.assign(c, prev); persist(); refresh(); } } }); return;
     }
     const c = { id: uid('col'), name: f.name.trim(), desc: f.desc.trim(), owner: me().id, share, created: Date.now(), updated: Date.now(), items: f.ids.map(doc => ({ doc, added: Date.now() })) };
-    (D.collections ??= []).unshift(c); audit('Created a collection', c.name);
-    closeModal(); go('/knowledge/collections/' + c.id); toast(c.items.length ? `Created “${c.name}”` : `Created “${c.name}”. Add resources to start the list.`);
+    (D.collections ??= []).unshift(c); audit('Created a reading list', c.name);
+    closeModal(); go('/knowledge/lists/' + c.id); toast(c.items.length ? `Created “${c.name}”` : `Created “${c.name}”. Add resources to start the list.`);
   };
 
-  /* ── Edit details (editors of the knowledge base) ── */
+  /* ── Edit details (editors of the collection) ── */
   A['res-edit'] = el => {
     const d = docById(el.dataset.id); if (!canEditRes(d)) return; const r = res(d);
     // People edit the title; the file keeps its extension (the format badge already says PDF/MD).
@@ -431,7 +450,7 @@
         ${field({ id: 'rese-kind', label: 'Type', control: select({ id: 'rese-kind', bind: 'resEdit.kind', value: f.kind, options: kinds, attrs: dis }) })}
         ${field({ id: 'rese-sum', label: 'Summary', optional: true, desc: 'One or two sentences shown in results and previews.', control: textarea({ id: 'rese-sum', bind: 'resEdit.summary', value: f.summary, rows: 2, attrs: `maxlength="280" ${dis}` }) })}
         <div class="stack gap-8">${tree.length ? disclosure({ path: 'resEdit.showTopics', icon: 'tag', title: 'Topics', summary: topicSum, body: `<div class="res-tgroups">${topics}</div>` }) : '<p class="t-sm muted">This workspace has no topics yet.</p>'}
-        ${disclosure({ path: 'resEdit.more', icon: 'sliders', title: 'Language and owner', summary: moreSum, body: `<div class="grid cols-2 res-more">${field({ id: 'rese-lang', label: 'Language', control: select({ id: 'rese-lang', bind: 'resEdit.lang', value: f.lang, options: Object.entries(LANGS), change: 'res-edit-refresh', attrs: dis }) })}${field({ id: 'rese-owner', label: 'Owner', optional: true, desc: kbOwner ? `Empty uses the knowledge base owner, ${esc(kbOwner)}.` : '', control: input({ id: 'rese-owner', bind: 'resEdit.owner', value: f.owner, placeholder: kbOwner || 'Team or office', onEnter: 'res-edit-go', attrs: dis }) })}</div>` })}</div></div>`,
+        ${disclosure({ path: 'resEdit.more', icon: 'sliders', title: 'Language and owner', summary: moreSum, body: `<div class="grid cols-2 res-more">${field({ id: 'rese-lang', label: 'Language', control: select({ id: 'rese-lang', bind: 'resEdit.lang', value: f.lang, options: Object.entries(LANGS), change: 'res-edit-refresh', attrs: dis }) })}${field({ id: 'rese-owner', label: 'Owner', optional: true, desc: kbOwner ? `Empty uses the collection owner, ${esc(kbOwner)}.` : '', control: input({ id: 'rese-owner', bind: 'resEdit.owner', value: f.owner, placeholder: kbOwner || 'Space or office', onEnter: 'res-edit-go', attrs: dis }) })}</div>` })}</div></div>`,
       footStart: 'Changes show for everyone right away.',
       foot: btn('Cancel', { v: 'ghost', act: 'close-modal', disabled: f.busy }) + btn('Save changes', { v: 'primary', icon: 'check', act: 'res-edit-go', loading: f.busy }),
     };
@@ -442,13 +461,15 @@
     const f = ui('resEdit'), d = docById(f.id); if (f.busy || !d) return;
     f.touched = true;
     if (!f.name.trim()) { refreshLayer(); $('#rese-name')?.focus(); return; }
-    const keys = ['name', 'kind', 'topics', 'lang', 'summary', 'owner'], prev = Object.fromEntries(keys.map(k => [k, Array.isArray(d[k]) ? [...d[k]] : d[k]]));
+    const keys = ['name', 'kind', 'topics', 'lang', 'summary', 'owner', 'classifiedBy'], prev = Object.fromEntries(keys.map(k => [k, Array.isArray(d[k]) ? [...d[k]] : d[k]]));
     f.busy = true; S.modal.props.guard = true; refreshLayer(); await sleep(400);
-    const ext = d.name.slice(docTitle(d).length);
-    Object.assign(d, { name: f.name.trim() + ext, kind: f.kind, topics: [...f.topics], lang: f.lang, summary: f.summary.trim() || undefined, owner: f.owner.trim() || undefined });
+    const ext = d.name.slice(docTitle(d).length), before = res(d).topics;
+    // A person changing topics the pipeline chose is a correction the topics can learn from (Topics → Suggestions).
+    const retagged = String(before) !== String(f.topics), c = retagged && topicsByPipeline(d) ? recordCorrection(d, before, f.topics) : null;
+    Object.assign(d, { name: f.name.trim() + ext, kind: f.kind, topics: [...f.topics], lang: f.lang, summary: f.summary.trim() || undefined, owner: f.owner.trim() || undefined }, retagged ? { classifiedBy: 'person' } : {});
     if (!d.summary) delete d.summary; if (!d.owner) delete d.owner;
     audit('Edited resource details', d.name); closeModal(); refresh();
-    toast('Details saved', { action: { label: 'Undo', run: () => { keys.forEach(k => { if (prev[k] === undefined) delete d[k]; else d[k] = prev[k]; }); refresh(); } } });
+    toast('Details saved', { action: { label: 'Undo', run: () => { keys.forEach(k => { if (prev[k] === undefined) delete d[k]; else d[k] = prev[k]; }); if (c) D.classCorrections = D.classCorrections.filter(x => x !== c); refresh(); } } });
   };
 
   /* ── Link to spaces (space staff / admins) ── */
@@ -457,7 +478,7 @@
     const f = ui('resLink'), d = docById(f.id), home = kbById(d.kb)?.space, spaces = linkableSpaces();
     const rows = spaces.map(s => {
       const fixed = s.id === home;
-      return checkbox({ checked: fixed || f.picked.includes(s.id), disabled: fixed, act: 'res-link-pick', data: { id: s.id }, label: `<span class="res-opt res-opt--mark">${X.spaceMark ? X.spaceMark(s, 28) : ''}<span class="res-opt__text"><span class="res-opt__name">${esc(s.name)}${s.code ? ` · ${esc(s.code)}` : ''}</span><span class="res-opt__meta">${fixed ? 'Always: its knowledge base belongs here' : esc(spaceType(s.type).label)}</span></span></span>` });
+      return checkbox({ checked: fixed || f.picked.includes(s.id), disabled: fixed, act: 'res-link-pick', data: { id: s.id }, label: `<span class="res-opt res-opt--mark">${X.spaceMark ? X.spaceMark(s, 28) : ''}<span class="res-opt__text"><span class="res-opt__name">${esc(s.name)}${s.code ? ` · ${esc(s.code)}` : ''}</span><span class="res-opt__meta">${fixed ? 'Always: its collection belongs here' : esc(spaceType(s.type).label)}</span></span></span>` });
     }).join('');
     const n = spaces.filter(s => s.id === home || f.picked.includes(s.id)).length;
     return {

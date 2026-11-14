@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, and_, case, exists, func, select
+from sqlalchemy import ColumnElement, and_, case, exists, func, or_, select
 from sqlalchemy.orm import aliased
 
 from bomesh.db.models import Item, ItemRevision, ItemTopic, Topic
@@ -70,12 +70,18 @@ def indexing_state(processing_version: str) -> ColumnElement[Any]:
     )
 
 
+#: The domain a tag's topic sits under (``document.topics`` is hierarchical).
+_DOMAIN = aliased(Topic)
+
+
 def has_topic(code: str) -> ColumnElement[bool]:
-    """``document.topics:"workspaces/w/topics/{code}"``."""
+    """``document.topics:"workspaces/w/topics/{code}"``: tagged with the topic or, for a
+    DOMAIN, with any topic under it (like ``ancestors:`` for collections)."""
     return exists(
         select(ItemTopic.item_id)
         .join(Topic, Topic.id == ItemTopic.topic_id)
-        .where(ItemTopic.item_id == Item.id, Topic.code == code)
+        .outerjoin(_DOMAIN, _DOMAIN.id == Topic.parent_topic_id)
+        .where(ItemTopic.item_id == Item.id, or_(Topic.code == code, _DOMAIN.code == code))
     )
 
 

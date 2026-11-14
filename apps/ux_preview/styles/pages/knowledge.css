@@ -1,5 +1,5 @@
-/* Manage → Knowledge bases (features/knowledge.js). Prefix: kb-. The reader and
-   its page canvas live in reader.css; document curation in curation.css. Tokens only. */
+/* Knowledge Studio → Collections (features/knowledge.js): cards, one collection's Contents (folder tree + the open folder),
+   access, sources and settings. Prefixes: kb-, st- (structure). The reader lives in reader.css; curation in curation.css. Tokens only. */
 
 /* ───── Knowledge base mark ───── */
 .kb-mark { --kb-mark: 36px; display: inline-grid; place-items: center; width: var(--kb-mark); height: var(--kb-mark); border-radius: calc(var(--kb-mark) * 0.28); flex: none; color: var(--white); font-weight: 600; font-size: calc(var(--kb-mark) * 0.42); line-height: 1; }
@@ -34,6 +34,40 @@
 .kb-share-list .item { padding: 8px 12px; }
 .kb-share-none { padding: 12px; font-size: 13px; color: var(--muted); }
 
+/* ───── Contents: the folder tree beside the open folder (the Taxonomy's tree + detail pattern) ───── */
+.st-panes { display: grid; grid-template-columns: 272px minmax(0, 1fr); gap: 20px; align-items: start; }
+.st-side { position: sticky; top: 0; max-height: calc(100dvh - 160px); padding: 6px; border-radius: var(--radius-2xl); background: var(--surface); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); overflow-y: auto; }
+.st-tree, .st-group { margin: 0; padding: 0; list-style: none; }
+.st-row { display: flex; align-items: center; gap: 2px; min-height: 32px; padding-left: calc(var(--depth, 0) * 14px); border-radius: var(--radius-lg); transition: background-color var(--dur-fast); }
+.st-row:hover { background: var(--default-soft); }
+.st-row.is-selected { background: var(--accent-soft); color: var(--accent-soft-foreground); }
+.st-row__chev { display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: var(--radius-sm); color: var(--muted); }
+button.st-row__chev:hover { background: var(--default-soft-hover); color: var(--foreground); }
+button.st-row__chev:focus-visible, .st-row__main:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.st-row__main { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; min-height: 32px; padding: 4px 8px 4px 2px; border-radius: var(--radius-lg); font: inherit; font-size: 13px; line-height: 18px; color: inherit; text-align: left; }
+.st-row--root .st-row__main { font-weight: 600; }
+.st-row__icon { display: inline-flex; flex: none; color: var(--muted); }
+.st-row.is-selected .st-row__icon { color: inherit; }
+.st-row__name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-row__count { flex: none; font-size: 12px; color: var(--muted); }
+.st-row.is-selected .st-row__count { color: inherit; opacity: .8; }
+.st-main { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.st-head { display: flex; flex-direction: column; gap: 4px; }
+.st-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; font-size: 13px; color: var(--muted); }
+.st-crumb { padding: 0 4px; margin: 0 -2px; border-radius: var(--radius-sm); font: inherit; color: inherit; }
+.st-crumb:hover { color: var(--foreground); text-decoration: underline; text-underline-offset: 3px; }
+.st-crumb:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.st-head__row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.st-head__title { margin: 0; font-size: 18px; line-height: 26px; font-weight: 600; overflow-wrap: anywhere; }
+.st-head__meta { margin: 0; font-size: 13px; line-height: 19px; color: var(--muted); }
+.st-head__desc { margin: 0; font-size: 13px; line-height: 19px; }
+.st-access { display: flex; align-items: center; gap: 8px; min-height: 36px; margin-top: 6px; padding: 4px 4px 4px 12px; border-radius: var(--radius-lg); background: var(--surface-secondary); font-size: 13px; line-height: 19px; }
+.st-access > .i { flex: none; color: var(--muted); }
+.st-access .link { font: inherit; font-weight: 500; }
+.st-tools { margin: 0; }
+.st-ficon { display: inline-grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: var(--radius-lg); background: var(--default-soft); color: var(--muted); }
+.st-empty { padding: 24px 0; }
+
 /* ───── Responsive ───── */
 @container app (max-width: 679px) {
   /* General access, roles and requests: the control wraps under the name at full width (no clipped labels). */
@@ -44,4 +78,11 @@
   .kb-card { min-height: 0; }
   .kb-create-row { grid-template-columns: minmax(0, 1fr); }
   .kb-req-access .choice-group { grid-template-columns: minmax(0, 1fr) !important; }
+  .st-access { flex-wrap: wrap; padding-right: 12px; }
+  .st-access > .grow { flex: 1 1 calc(100% - 32px); }
+}
+/* Contents without room for two panes: the tree sits above the open folder, short and scrollable. */
+@container app (max-width: 900px) {
+  .st-panes { grid-template-columns: minmax(0, 1fr); }
+  .st-side { position: static; max-height: 240px; }
 }

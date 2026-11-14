@@ -1,6 +1,6 @@
 "use client";
 
-import { Alert, Button, Checkbox, FieldError, Form, Input, Label, TextField } from "@heroui/react";
+import { Alert, Button, Checkbox, Description, FieldError, Form, Input, Label, TextField } from "@heroui/react";
 import { AlertCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useRef, useState, type FormEvent } from "react";
@@ -75,9 +75,20 @@ export function SignUpPage() {
   return (
     <AuthLayout single innerClassName="au-narrow">
       <h1 className="t-title au-title">Create your account</h1>
-      <p className="muted au-sub">Your workspace admin adds you to a workspace afterwards.</p>
+      <p className="muted au-sub">Use your work email. If a workspace admin invited you, use the address the invite went to.</p>
       <Form ref={form} onSubmit={submit} method="post" validationBehavior="aria" className="flex flex-col gap-16">
-        <TextField className="field" name="name" value={name} onChange={setName} isInvalid={!!errors.name} autoFocus autoComplete="name">
+        <TextField
+          className="field"
+          name="name"
+          value={name}
+          onChange={(v) => {
+            setName(v);
+            if (errors.name) setErrors((e) => ({ ...e, name: undefined }));
+          }}
+          isInvalid={!!errors.name}
+          autoFocus
+          autoComplete="name"
+        >
           <Label>Full name</Label>
           <Input placeholder="Kevin Ng" />
           <FieldError>{errors.name}</FieldError>
@@ -104,14 +115,32 @@ export function SignUpPage() {
             ) : null}
           </FieldError>
         </TextField>
-        <TextField className="field" name="password" value={pw} onChange={setPw} isInvalid={!!errors.pw}>
+        <TextField
+          className="field"
+          name="password"
+          value={pw}
+          onChange={(v) => {
+            setPw(v);
+            if (errors.pw) setErrors((e) => ({ ...e, pw: undefined }));
+          }}
+          isInvalid={!!errors.pw}
+        >
           <Label>Password</Label>
           <PasswordInput autoComplete="new-password" />
-          <PasswordStrength value={pw} />
+          {/* The checklist appears once there's a password to check; before that one line says what's needed. */}
+          {pw ? <PasswordStrength value={pw} /> : errors.pw ? null : <Description>At least 8 characters, with letters and numbers.</Description>}
           <FieldError>{errors.pw}</FieldError>
         </TextField>
-        <div className="au-terms" style={{ margin: "4px 0 8px" }}>
-          <Checkbox name="terms" isSelected={terms} onChange={setTerms} aria-describedby={errors.terms ? "su-terms-err" : undefined}>
+        <div className="au-terms">
+          <Checkbox
+            name="terms"
+            isSelected={terms}
+            onChange={(v) => {
+              setTerms(v);
+              if (errors.terms) setErrors((e) => ({ ...e, terms: undefined }));
+            }}
+            aria-describedby={errors.terms ? "su-terms-err" : undefined}
+          >
             <Checkbox.Content>
               <Checkbox.Control>
                 <Checkbox.Indicator />

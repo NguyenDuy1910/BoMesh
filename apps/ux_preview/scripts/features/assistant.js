@@ -147,7 +147,7 @@
 
   P.assistant = () => {
     /* Below 1024 px the preview sits behind one button (it would otherwise come after the whole form). */
-    const head = pageHeader({ title: 'Assistant', desc: 'How it answers and what people see first.', actions: S.pageState === 'live' && !S.navLoading ? btn('Preview', { v: 'secondary', icon: 'eye', act: 'asst-preview-open', cls: 'asst-prev-open' }) : '' });
+    const head = pageHeader({ title: 'Assistant', actions: S.pageState === 'live' && !S.navLoading ? btn('Preview', { v: 'secondary', icon: 'eye', act: 'asst-preview-open', cls: 'asst-prev-open' }) : '' });
     const body = gate({
       loading: () => `<div class="asst-layout"><div class="stack gap-16">${skelCards(2)}</div><div class="card"><span class="skeleton" style="height:280px"></span></div></div>`,
       error: () => errorState({ title: 'Assistant settings didn’t load' }),

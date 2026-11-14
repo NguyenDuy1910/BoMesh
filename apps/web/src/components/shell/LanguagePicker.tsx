@@ -3,23 +3,9 @@
 import { Description, Label, ListBox, Select } from "@heroui/react";
 import { ChevronsUpDown, Globe } from "lucide-react";
 
-import { toast } from "@/components/ui/Toast";
-import { getLanguage, LANGUAGES, setLanguage, useLanguage, type Language } from "@/lib/i18n";
+import { LANGUAGES, useLanguage, type Language } from "@/lib/i18n";
 
-/**
- * Switch the interface language with an Undo toast (preview `X.lang.change`).
- * The toast is written in English; the active dictionary localizes it like any other copy.
- */
-export function changeLanguage(code: Language): void {
-  const before = getLanguage();
-  if (code === before) return;
-  void setLanguage(code).then(() => {
-    toast(code === "vi" ? "Language changed to Tiếng Việt" : "Language changed to English", {
-      tone: "accent",
-      undo: () => void setLanguage(before),
-    });
-  });
-}
+import { changeLanguage } from "./language";
 
 /** Compact picker for pages without the shell (sign-in, sign-up, workspace choice). */
 export function LanguagePicker() {

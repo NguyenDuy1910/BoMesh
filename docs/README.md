@@ -24,6 +24,7 @@ create a second API contract here.
 | Document | Scope |
 | --- | --- |
 | [Data schema](data.schema.md) | Pointer to the canonical schema and storage-ownership design. |
+| [Universal file preview](universal-file-preview.md) | **Proposal.** Audit of the current preview pipeline and a redesign in which the browser renders the original file directly — no server-side rasterization (measured at 2.34× the bytes for worse output). Decouples preview from RAG ingestion. Not implemented. |
 | [Agent architecture](references/agent-loop.md) | OpenResponses protocol, streaming lifecycle, tools, and citation projection. |
 
 ## Documentation principles

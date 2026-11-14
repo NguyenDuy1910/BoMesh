@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { queryOptions, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useMemo, type ReactNode } from "react";
 
@@ -45,6 +45,7 @@ export const WORKSPACE_PERMISSIONS = [
   "auditEvents.export",
   "knowledgeGaps.list",
   "spaces.create",
+  "spaces.update",
   "requests.list",
   "artifacts.create",
   "readingLists.create",
@@ -97,6 +98,20 @@ export async function rememberWorkspace(workspaceId: string): Promise<void> {
   ).catch(() => undefined);
 }
 
+/**
+ * The caller's `users/me/preferences`: one cache entry per user, shared by workspace
+ * resolution and the shell's preferences sync.
+ */
+export const preferencesQueryKey = ["users", "me", "preferences"] as const;
+
+export function preferencesQuery(user: string | undefined) {
+  return queryOptions({
+    queryKey: [...preferencesQueryKey, user],
+    queryFn: () => call(api.GET("/api/v1/users/{user}/preferences", { params: { path: { user: "me" } } })),
+    staleTime: 5 * 60_000,
+  });
+}
+
 export async function listMyWorkspaces(): Promise<Schema<"Workspace">[]> {
   return listAll(
     (pageToken) => call(api.GET("/api/v1/workspaces", { params: { query: { pageSize: 100, pageToken } } })),
@@ -108,13 +123,11 @@ export async function listMyWorkspaces(): Promise<Schema<"Workspace">[]> {
  * Resolves which workspace to open: remembered on this device, else the
  * server-side `lastWorkspace`, else the only one. `null` means "show the chooser".
  */
-export async function resolveWorkspace(workspaces: Schema<"Workspace">[]): Promise<string | null> {
+export async function resolveWorkspace(workspaces: Schema<"Workspace">[], queryClient: QueryClient): Promise<string | null> {
   const ids = new Set(workspaces.map((w) => resourceId(w.name)));
   const local = rememberedWorkspace();
   if (local && ids.has(local)) return local;
-  const preferences = await call(
-    api.GET("/api/v1/users/{user}/preferences", { params: { path: { user: "me" } } }),
-  ).catch(() => null);
+  const preferences = await queryClient.fetchQuery(preferencesQuery(getSession()?.user.name)).catch(() => null);
   const last = resourceId(preferences?.lastWorkspace);
   if (last && ids.has(last)) return last;
   return workspaces.length === 1 ? resourceId(workspaces[0].name) : null;
@@ -128,12 +141,11 @@ interface Loaded {
   permissions: string[];
 }
 
-async function loadWorkspace(): Promise<Loaded | null> {
-  const workspaces = await listMyWorkspaces();
-  const chosen = await resolveWorkspace(workspaces);
-  const workspace = workspaces.find((w) => resourceId(w.name) === chosen);
-  if (!workspace || !chosen) return null;
-  const path = { workspace: chosen };
+type Context = Pick<Loaded, "member" | "settings" | "permissions">;
+
+/** The caller's membership, the workspace settings and the shell's permissions, in parallel. */
+async function loadContext(workspace: string): Promise<Context> {
+  const path = { workspace };
   const [member, settings, permissions] = await Promise.all([
     call(api.GET("/api/v1/workspaces/{workspace}/members/{member}", { params: { path: { ...path, member: "me" } } })),
     call(api.GET("/api/v1/workspaces/{workspace}/settings", { params: { path } })).catch(() => null),
@@ -144,8 +156,28 @@ async function loadWorkspace(): Promise<Loaded | null> {
       }),
     ),
   ]);
+  return { member, settings, permissions: permissions.permissions ?? [] };
+}
+
+/**
+ * The workspace list and the chosen workspace's context. A workspace remembered on this
+ * device is almost always still the choice, so its context loads alongside the list and is
+ * used only once the list confirms the membership; otherwise (no longer a member, or none
+ * remembered) the context of the resolved workspace loads after it. The API authorizes each call.
+ */
+async function loadWorkspace(queryClient: QueryClient): Promise<Loaded | null> {
+  const remembered = rememberedWorkspace();
+  const listing = listMyWorkspaces();
+  const early = remembered ? loadContext(remembered) : null;
+  early?.catch(() => undefined);
+  if (!remembered) void queryClient.prefetchQuery(preferencesQuery(getSession()?.user.name));
+  const workspaces = await listing;
+  const chosen = await resolveWorkspace(workspaces, queryClient);
+  const workspace = workspaces.find((w) => resourceId(w.name) === chosen);
+  if (!workspace || !chosen) return null;
+  const context = early && chosen === remembered ? await early : await loadContext(chosen);
   window.localStorage.setItem(activeKey(getSession()!.user.name), chosen);
-  return { workspaces, workspace, member, settings, permissions: permissions.permissions ?? [] };
+  return { workspaces, workspace, ...context };
 }
 
 export const workspaceQueryKey = ["workspace-context"] as const;
@@ -168,7 +200,7 @@ export function WorkspaceProvider({
   const queryClient = useQueryClient();
   const query = useQuery({
     queryKey: [...workspaceQueryKey, session?.user.name],
-    queryFn: loadWorkspace,
+    queryFn: () => loadWorkspace(queryClient),
     enabled: Boolean(session),
     staleTime: 5 * 60_000,
   });

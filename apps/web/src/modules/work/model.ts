@@ -25,20 +25,17 @@ export interface WorkStatus {
 }
 
 /**
- * Preview statuses (generating · draft · ready · published) on the API's `state` and `audience`:
- * a DRAFT shared with its space is "ready for review"; a QUIZ shared with its space is published;
- * a staff quiz still private is a draft only the teaching team sees.
+ * Preview `statusChip(w)` on the API's `state` and `audience`. Generated work carries no chip; a DRAFT moves
+ * Draft (private) → In review (shared with its space); a QUIZ shared with its space is Published for the
+ * teaching team, and a staff quiz still private is a Draft. `null` = no chip.
  */
-export function workStatus(a: Artifact, { staffQuiz = false }: { staffQuiz?: boolean } = {}): WorkStatus {
+export function workStatus(a: Artifact, { staffQuiz = false }: { staffQuiz?: boolean } = {}): WorkStatus | null {
   if (a.state === "GENERATING") return { label: "Generating", tone: "accent", variant: "soft", live: true };
   if (a.state === "FAILED") return { label: "Failed", tone: "danger" };
   const shared = a.audience === "SPACE";
-  if (a.kind === "DRAFT") return shared ? { label: "Ready", tone: "success", variant: "tertiary" } : { label: "Draft", tone: "default" };
-  if (a.kind === "QUIZ") {
-    if (shared) return { label: "Published", tone: "accent" };
-    if (staffQuiz) return { label: "Draft", tone: "default" };
-  }
-  return { label: "Ready", tone: "success", variant: "tertiary" };
+  if (a.kind === "DRAFT") return shared ? { label: "In review", tone: "accent" } : { label: "Draft", tone: "default" };
+  if (a.kind === "QUIZ" && staffQuiz) return shared ? { label: "Published", tone: "accent" } : { label: "Draft", tone: "default" };
+  return null;
 }
 
 /** One line for lists (preview `kind.summary`). */
@@ -50,9 +47,26 @@ export function workSummary(a: Artifact): string {
     return `${plural(r?.options?.length ?? 0, "source")} · ${plural(r?.criteria?.length ?? 0, "criterion", "criteria")}${synth}`;
   }
   const n = a.sourceItems?.length ?? 0;
-  const base = n ? `${meta.label} · ${plural(n, "source")}` : meta.label;
-  if (a.kind === "DRAFT" && a.audience === "SPACE") return `${base} · review requested`;
-  return base;
+  return n ? `${meta.label} · ${plural(n, "source")}` : meta.label;
+}
+
+/** Evidence review: the source items that are compared (matrix rows) and those read only for context. */
+export function reviewSources(a: Artifact): { compared: string[]; context: string[] } {
+  const rows = new Set((a.evidenceReview?.options ?? []).map((o) => o.key));
+  const compared: string[] = [];
+  const context: string[] = [];
+  for (const s of a.sourceItems ?? []) (rows.has(tail(s)) ? compared : context).push(s);
+  return { compared, context };
+}
+
+/** One count per kind, said the same way in the header and the Sources panel (preview `sourceLine`). */
+export function sourceLine(a: Artifact): string {
+  if (a.kind === "EVIDENCE_REVIEW") {
+    const n = a.evidenceReview?.options?.length ?? 0;
+    const c = reviewSources(a).context.length;
+    return `${plural(n, "source")} compared${c ? ` · ${plural(c, "context document")}` : ""}`;
+  }
+  return plural((a.sourceItems?.length ?? 0) + (a.hiddenSourceCount ?? 0), "source");
 }
 
 export const isOwnerOf = (a: Artifact, memberName: string) => !!a.owner && a.owner === memberName;
@@ -79,9 +93,17 @@ export function citationText(c: Citation): string {
 
 /* ═══════════════ Evidence review ═══════════════ */
 
-export const DEFAULT_CRITERIA = ["Method", "Dataset", "Result", "Limitations"] as const;
-export const SUGGESTED_CRITERIA = ["Cost", "Operations effort", "Data residency", "Risks"] as const;
-export const MAX_SOURCE_CHOICES = [4, 6, 8] as const;
+/* Defaults follow the space: research groups and courses compare papers; teams and projects compare options. */
+const RESEARCH_CRITERIA = ["Method", "Dataset", "Result", "Limitations"] as const;
+const OPTION_CRITERIA = ["Cost", "Operations effort", "Risks"] as const;
+const MORE_CRITERIA = ["Data residency", "Security", "Vendor support"] as const;
+const comparesPapers = (spaceType: string | undefined) => spaceType === "research" || spaceType === "course";
+/** The criteria a new review starts with in a space of this type (preview `criteriaFor`). */
+export const criteriaFor = (spaceType: string | undefined): string[] => [...(comparesPapers(spaceType) ? RESEARCH_CRITERIA : OPTION_CRITERIA)];
+/** More criteria to offer (preview `suggestionsFor`). */
+export const suggestionsFor = (spaceType: string | undefined): string[] => [...new Set([...(comparesPapers(spaceType) ? OPTION_CRITERIA : RESEARCH_CRITERIA), ...MORE_CRITERIA])];
+/** A comparison stays readable up to this many rows; the New work flow says so before generating. */
+export const MAX_REVIEW_SOURCES = 8;
 
 /** A matrix key (1–64 letters, digits, `_` or `-`) from a label, unique among `taken`. */
 export function entryKey(label: string, taken: Iterable<string>): string {
@@ -175,7 +197,6 @@ export function withDraftDefaults(o: WorkOptions, spaceType: string | undefined,
 export interface WorkOptions {
   /* review */
   criteria?: string[];
-  maxPapers?: number;
   /* draft */
   type?: DraftType;
   tone?: Tone;
@@ -232,7 +253,7 @@ function topicsLine(names: readonly string[]) {
 }
 
 export function defaultTitle(kind: WorkKind, { spaceName, docNames, options, staffQuiz }: { spaceName?: string; docNames: readonly string[]; options: WorkOptions; staffQuiz?: boolean }): string {
-  if (kind === "EVIDENCE_REVIEW") return spaceName ? `${spaceName} — evidence matrix` : "Evidence matrix";
+  if (kind === "EVIDENCE_REVIEW") return spaceName ? `${spaceName} — evidence review` : "Evidence review";
   if (kind === "DRAFT") return `${draftTypeLabel(options.type ?? "email")}${spaceName ? ` — ${spaceName}` : ""}`;
   if (!docNames.length) return kindMeta(kind).label;
   if (kind === "STUDY_GUIDE") return `${topicsLine(docNames)} — study guide`;

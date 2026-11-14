@@ -16,7 +16,7 @@ function render() {
   const app = $('#app');
   const denied = cur.r.perm && !can(cur.r.perm);
   const moduleOff = cur.r.module && !hasModule(cur.r.module);
-  S.crumbs = null; S.topbarEnd = '';
+  S.crumbs = null; S.topbarEnd = ''; S.head = null;
   let html;
   try {
     const fn = P[cur.r.page];
@@ -35,9 +35,9 @@ function render() {
   renderProto();
   if (!changed) restoreFocus(snap, '#app');
   else { const sc = $('#scroll'); if (sc) sc.scrollTop = 0; $$('#app input[data-indeterminate]').forEach(el => (el.indeterminate = true)); }
-  syncOverflow(changed);
+  syncOverflow(changed); syncHeader();
   if (S.popover) positionPopover();   // after scroll positions are restored, so it stays on its trigger
-  document.title = (cur.r.title || 'BoMesh') + ' · BoMesh';
+  document.title = (S.head?.title || cur.r.title || 'BoMesh') + ' · BoMesh';
   try { AFTER[cur.r.page]?.({ params: cur.params, query: cur.query, changed }); } catch (e) { console.error(e); }
   if (changed) { const af = $('#app [data-autofocus]'); if (af) af.focus(); }
   persist();
@@ -55,14 +55,32 @@ function overflowEdges(el) {
   el.classList.toggle('is-fade-start', more && el.scrollLeft > 1);
   el.classList.toggle('is-fade-end', more && el.scrollLeft < el.scrollWidth - el.clientWidth - 1);
 }
-document.addEventListener('scroll', e => { if (e.target.matches?.('[data-overflow]')) overflowEdges(e.target); }, true);
+/** Scrollers that carry a page's content (most pages scroll #scroll; chat, work items and the reader scroll their own pane). */
+const PAGE_SCROLLERS = '#scroll, #chat-scroll, #work-scroll, #rdr-scroll';
+document.addEventListener('scroll', e => { if (e.target.matches?.(PAGE_SCROLLERS)) syncHeader(); else if (e.target.matches?.('[data-overflow]')) overflowEdges(e.target); }, true);
+/** CompactHeader state from the page's scroll: `is-scrolled` once content passes under the top row (it draws a hairline unless a
+    sticky ContextualToolbar sits right below it), `is-past-hero` once an entity page's identity block has left the view (the top
+    row then shows its title). */
+function syncHeader() {
+  const main = $('#main'); if (!main) return;
+  main.classList.toggle('is-scrolled', $$(PAGE_SCROLLERS).some(s => s.scrollTop > 2));
+  const hero = $('#page-hero'), sc = hero?.closest('[data-keep-scroll]'); if (!sc) return;
+  main.classList.toggle('is-past-hero', hero.getBoundingClientRect().bottom <= sc.getBoundingClientRect().top + 8);
+}
 
 /* ── Generic actions ── */
 A['close-modal'] = () => closeModal();
 A['close-drawer'] = () => closeDrawer();
 A['modal-scrim'] = (el, e) => { if (e.target === el && !S.modal?.guard && !S.modal?.props?.guard) closeModal(); };
-A['nav-toggle'] = () => { if ($('#frame').clientWidth < 1024) S.navOpen = !S.navOpen; else S.collapsed = !S.collapsed; refresh(); };
-A['nav-close'] = () => { S.navOpen = false; refresh(); };
+/** Desktop: expanded ↔ icon rail (remembered). Below 1024 px: open/close the off-canvas sidebar. Focus stays on the control that
+    toggles it (the sidebar's own button when it opens, the top row's menu button when it closes). */
+A['nav-toggle'] = () => {
+  const narrow = narrowFrame();
+  if (narrow) S.navOpen = !S.navOpen; else S.collapsed = !S.collapsed;
+  refresh();
+  (narrow && !S.navOpen ? $('#topbar-menu') : $('#sidebar-toggle'))?.focus();
+};
+A['nav-close'] = () => { S.navOpen = false; refresh(); $('#topbar-menu')?.focus(); };
 A.go = el => go(el.dataset.to);
 A['retry-load'] = () => { S.pageState = 'live'; S.navLoading = true; refresh(); setTimeout(() => { S.navLoading = false; refresh(); }, 600); };
 A.sort = el => { const u = ui(el.dataset.ui); const k = el.dataset.key; u.sort = u.sort?.key === k ? (u.sort.dir === 'asc' ? { key: k, dir: 'desc' } : null) : { key: k, dir: 'asc' }; refresh(); };
@@ -122,6 +140,7 @@ document.addEventListener('keydown', e => {
   const inApp = ['workspace', 'platform'].includes(S.cur?.r.mode);
   if ((e.metaKey || e.ctrlKey) && k.toLowerCase() === 'k') { e.preventDefault(); if (inApp) S.palette ? closePalette() : openPalette(); return; }
   if ((e.metaKey || e.ctrlKey) && e.shiftKey && k.toLowerCase() === 'o') { e.preventDefault(); if (inApp) go('/chat'); return; }
+  if ((e.metaKey || e.ctrlKey) && k === '\\') { e.preventDefault(); if (inApp && !S.modal) A['nav-toggle'](); return; }
   if (S.palette) {
     const n = S.palette.flat?.length || 0;
     if (k === 'Escape') { e.preventDefault(); closePalette(); return; }
@@ -143,7 +162,7 @@ document.addEventListener('keydown', e => {
   if (k === 'Escape') {
     if (S.modal) { if (!S.modal.guard && !S.modal.props?.guard) closeModal(); return; }
     if (S.drawer) { closeDrawer(); return; }
-    if (S.navOpen) { S.navOpen = false; refresh(); return; }
+    if (S.navOpen) { A['nav-close'](); return; }
     if (A['esc-page']?.()) return;
   }
   if (k === 'Tab' && (S.modal || S.drawer)) {
@@ -160,7 +179,12 @@ document.addEventListener('keydown', e => {
   if ((k === 'Enter' || k === ' ') && t.matches?.('[data-act][role="button"],tr[data-act],.card--action[data-act]:not(button)')) { e.preventDefault(); A[t.dataset.act]?.(t, e); }
 });
 window.addEventListener('hashchange', render);
-window.addEventListener('resize', () => { if (S.menu) closeMenu(false); if (S.popover) renderLayer(); syncOverflow(false); });
+/* Crossing 1024 px swaps the rail for the off-canvas sidebar (and back): re-render so its markup and labels match. */
+let lastNarrow = null;
+window.addEventListener('resize', () => {
+  if (S.menu) closeMenu(false); if (S.popover) renderLayer(); syncOverflow(false);
+  const n = narrowFrame(); if (lastNarrow !== null && n !== lastNarrow && S.cur && !['auth', 'proto'].includes(S.cur.r.mode)) refresh(); lastNarrow = n;
+});
 
 /* ── Boot (runs after every feature module registered its pages) ── */
 function boot() {

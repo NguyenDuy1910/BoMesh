@@ -6,8 +6,8 @@
 .rdr { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; }
 .rdr-msg { height: 100%; overflow: auto; padding: 48px 24px; }
 
-/* Header */
-.rdr-head { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 12px 20px; border-bottom: 1px solid var(--separator); background: var(--background); transition: margin-top var(--dur) var(--ease-out); }
+/* Header: the document's identity under the top row (which holds the trail and Ask · Save · ⋯), aligned with it. */
+.rdr-head { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 4px var(--page-px, 16px) 12px; border-bottom: 1px solid var(--separator); background: var(--background); transition: margin-top var(--dur) var(--ease-out); }
 .rdr-back { flex: none; margin-left: -6px; }
 .rdr-head__row { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .rdr-head__main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -16,18 +16,11 @@
 .rdr-head__title-row .chip { flex: none; }
 .rdr-head__meta { display: flex; align-items: center; flex-wrap: wrap; gap: 0 6px; font-size: 13px; line-height: 18px; color: var(--muted); min-width: 0; }
 .rdr-head__meta .res-dot { color: var(--muted); }
-.rdr-head__actions { display: flex; align-items: center; gap: 8px; flex: none; }
 .rdr-hits { display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 12px; border-radius: var(--radius-xl); background: var(--evidence); font-size: 13px; font-weight: 500; }
 .rdr-hits .button--ghost { --button-bg-hover: var(--evidence-strong); }
 
-/* Body: outline · canvas · rail */
+/* Body: canvas · rail */
 .rdr-body { position: relative; flex: 1 1 auto; min-height: 0; display: flex; }
-.rdr-outline { flex: none; width: 220px; padding: 12px; border-right: 1px solid var(--separator); overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
-.rdr-outline--closed { width: auto; padding: 12px 6px; }
-.rdr-outline__head { display: flex; align-items: center; justify-content: space-between; padding: 0 0 6px 10px; }
-.rdr-outline__link { display: block; width: 100%; text-align: left; padding: 6px 10px; border-radius: var(--radius-lg); font-size: 13px; line-height: 18px; color: var(--muted); }
-.rdr-outline__link:hover { background: var(--default); color: var(--foreground); }
-.rdr-outline__link.is-on { color: var(--foreground); font-weight: 500; background: var(--default); }
 .rdr-canvas { flex: 1 1 auto; min-width: 0; overflow: auto; padding: 28px; background: var(--surface-secondary); }
 .rdr-banners { max-width: 760px; margin: 0 auto 16px; display: flex; flex-direction: column; gap: 8px; }
 .rdr-sub-quote { margin: 4px 0 6px; padding: 6px 10px; border-left: 2px solid var(--border-secondary); border-radius: 0 var(--radius-lg) var(--radius-lg) 0; background: color-mix(in oklab, var(--surface) 60%, transparent); color: var(--foreground); white-space: pre-line; }
@@ -222,21 +215,15 @@
   .doc-page--pdf, .doc-page--docx { padding: 64px 56px 56px; }
   .doc-run { left: 56px; right: 56px; }
 }
-/* Narrow: no outline column; its sections are under ⋯ → Contents. */
-@container app (max-width: 760px) {
-  .rdr-outline { display: none; }
-}
-/* Phones: one compact row — (Back) · title on one line · Ask, Save and ⋯ as icons. The meta lives in About, the zoom stays in the
-   file's own app (only "Page n of N" remains), and the header slides away while reading down (.is-collapsed, set on scroll). */
+/* Phones: the head is the title on one line (Ask, Save and ⋯ are icons in the top row). The meta lives in About, the zoom stays
+   in the file's own app (only "Page n of N" remains), and the head slides away while reading down (.is-collapsed, set on
+   scroll) — the top row then shows the title. */
 @container app (max-width: 679px) {
   .rdr-head { padding: 6px 8px 6px 12px; gap: 6px; }
   .rdr-head__row { gap: 4px; }
   .rdr-head__row > .file-icon, .rdr-head__meta, .rdr-head__title-row .chip { display: none; }
   .rdr-head__title { font-size: 15px; line-height: 22px; }
-  .rdr-head__actions { gap: 2px; }
-  .rdr-head__actions .button { min-width: 40px; height: 40px; padding: 0 10px; }
-  .rdr-head__actions .button > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  .rdr-head__actions .res-save:not(.is-on) { background: transparent; box-shadow: none; }
+  .topbar__actions .res-save:not(.is-on) { background: transparent; box-shadow: none; }
   .rdr-back { margin-left: -8px; min-width: 40px; height: 40px; }
   .rdr.is-collapsed .rdr-head { margin-top: calc(-1 * var(--rdr-head-h, 53px)); }
   .doc-viewer__zoom { display: none; }

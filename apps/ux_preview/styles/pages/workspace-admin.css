@@ -92,6 +92,14 @@
 .set-opt__icon { color: var(--muted); margin-right: -2px; }
 .set-opt__meta { font-size: 12px; font-weight: 400; color: var(--muted); }
 .set-opt__desc { font-size: 12px; line-height: 16px; color: var(--muted); }
+/* Knowledge map levels: one numbered row per level (1–4 name map depths; extras are a dash) */
+.set-levels { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.set-level { display: flex; align-items: flex-start; gap: 8px; }
+.set-level__num { flex: none; display: grid; place-items: center; width: 20px; height: 36px; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--muted); }
+.set-level__num--extra { font-weight: 400; }
+.set-level__field { flex: 1 1 auto; min-width: 0; }
+.set-level__actions { flex: none; display: flex; gap: 2px; padding-top: 4px; }
+.set-levels + .row { padding-left: 28px; }
 
 /* Assistant: who a starter list is for (Everyone, a role or a group) */
 .asst-aud-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 16px; }

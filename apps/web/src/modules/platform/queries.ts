@@ -155,16 +155,18 @@ export function useIncidents() {
 }
 
 /**
- * Sidebar attention counts for the platform console (preview `X.pIndexAlerts()` and the
- * degraded-services count): `indexing` = degraded + paused workspaces, `health` = components degraded or down.
+ * Sidebar attention counts for the platform console (preview `X.pIndexAlerts()`, the Jobs sub-row count and the
+ * degraded-services count): `indexing` = degraded + paused workspaces (Indexing row and its By workspace sub-row),
+ * `failedJobs` = failed jobs in the last 24 hours (Indexing › Jobs), `health` = components degraded or down.
  */
-export function usePlatformNavBadges(): { indexing?: number; health?: number } {
+export function usePlatformNavBadges(): { indexing?: number; failedJobs?: number; health?: number } {
   const workspaces = usePlatformWorkspaces();
   const summaries = useIngestionSummaries();
   const components = useComponents();
-  const indexing =
-    workspaces.data && summaries.data
-      ? indexingAlerts(buildIndexing(workspaces.data, summaries.data.now, summaries.data.day, []))
-      : undefined;
-  return { indexing, health: components.data ? unhealthyComponents(components.data).length : undefined };
+  const rows = workspaces.data && summaries.data ? buildIndexing(workspaces.data, summaries.data.now, summaries.data.day, []) : undefined;
+  return {
+    indexing: rows ? indexingAlerts(rows) : undefined,
+    failedJobs: rows ? rows.reduce((a, r) => a + r.failed, 0) : undefined,
+    health: components.data ? unhealthyComponents(components.data).length : undefined,
+  };
 }

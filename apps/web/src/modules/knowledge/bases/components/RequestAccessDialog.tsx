@@ -2,7 +2,7 @@
 
 import { Button, Description, FieldError, Label, TextArea, TextField } from "@heroui/react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Clock, Lock } from "lucide-react";
+import { Clock, Eye, Lock, Pencil, Send, Users } from "lucide-react";
 import { useRef, useState } from "react";
 
 import { ChoiceGroup } from "@/components/ui/ChoiceGroup";
@@ -14,7 +14,7 @@ import { useWorkspace } from "@/lib/workspace";
 
 import { KnowledgeModal } from "../../components/KnowledgeModal";
 import { createAccessRequest } from "../api";
-import type { Item } from "../model";
+import { ROLE_DESC, ROLE_LABEL, type Item } from "../model";
 import { basesKeys, useMyAccessRequest } from "../queries";
 import { ownersLabel } from "./parts";
 
@@ -69,43 +69,51 @@ export function RequestAccessDialog({ base, isOpen, onOpenChange }: RequestAcces
       isOpen={isOpen}
       onClose={close}
       guard={busy}
-      size="sm"
+      size="md"
+      icon={Lock}
       title="Request access"
-      description={
-        <>
-          <span translate="no">{base.displayName}</span>
-          {owners ? ` · ${owners}` : null}
-        </>
+      description={`Ask the owners of ${base.displayName ?? ""} to share it with you.`}
+      footerStart={
+        owners ? (
+          <span className="row gap-6 t-xs muted">
+            <Users className="i i-sm" aria-hidden />
+            <span>{owners}</span>
+          </span>
+        ) : undefined
       }
       footer={
         <>
-          <Button variant="tertiary" onPress={close} isDisabled={busy}>
+          <Button variant="ghost" onPress={close} isDisabled={busy}>
             Cancel
           </Button>
           <Button variant="primary" onPress={() => void send()} isPending={busy}>
+            {busy ? null : <Send className="i" aria-hidden />}
             Send request
           </Button>
         </>
       }
     >
-      <div className="field">
-        <span className="label">Access you need</span>
-        <ChoiceGroup
-          label="Access you need"
-          value={role}
-          onChange={setRole}
-          isDisabled={busy}
-          options={[
-            { value: "viewer", title: "View", description: "Search and read its documents." },
-            { value: "editor", title: "Edit", description: "Also add and organize documents." },
-          ]}
-        />
+      <div className="kn-form">
+        <div className="field kb-req-access">
+          <span className="label">Access you need</span>
+          <ChoiceGroup
+            label="Access you need"
+            columns={2}
+            value={role}
+            onChange={setRole}
+            isDisabled={busy}
+            options={[
+              { value: "viewer", title: ROLE_LABEL.viewer, description: ROLE_DESC.viewer, icon: Eye },
+              { value: "editor", title: ROLE_LABEL.editor, description: ROLE_DESC.editor, icon: Pencil },
+            ]}
+          />
+        </div>
+        <TextField className="field" value={note} onChange={setNote} isRequired isInvalid={!!error} isDisabled={busy}>
+          <Label>Reason</Label>
+          <TextArea ref={noteRef} rows={3} maxLength={300} placeholder="e.g. I need the settlement cut-off times for an incident review" />
+          {error ? <FieldError>{error}</FieldError> : <Description>The owners see this with your request.</Description>}
+        </TextField>
       </div>
-      <TextField className="mt-16" value={note} onChange={setNote} isRequired isInvalid={!!error} isDisabled={busy}>
-        <Label>Reason</Label>
-        <TextArea ref={noteRef} rows={3} placeholder="e.g. I need the renewal terms for a customer call" />
-        {error ? <FieldError>{error}</FieldError> : <Description>The owners see this with your request.</Description>}
-      </TextField>
     </KnowledgeModal>
   );
 }

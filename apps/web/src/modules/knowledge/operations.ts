@@ -75,7 +75,7 @@ export function useDocumentOperations() {
         else await deleteReadingListEntry(ws, FEATURED_LIST, doc.name);
         void qc.invalidateQueries({ queryKey: knowledgeKeys.readingLists(ws) });
         if (!quiet) {
-          toast(featured ? "Featured on Home for everyone who can read it" : "Removed from Home", { undo: () => void setFeatured(doc, !featured, { quiet: true }) });
+          toast(featured ? "Marked as read first. It leads its folder on Home." : "No longer marked as read first", { undo: () => void setFeatured(doc, !featured, { quiet: true }) });
         }
       } catch (error) {
         fail(error);

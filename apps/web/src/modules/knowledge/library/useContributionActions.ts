@@ -3,7 +3,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useMemo, useSyncExternalStore } from "react";
 
-import { confirm } from "@/components/ui/Confirm";
 import { toast } from "@/components/ui/Toast";
 import { errorMessage } from "@/lib/api/client";
 import { useWorkspace } from "@/lib/workspace";
@@ -33,7 +32,7 @@ export function useRemovingContributions(): ReadonlySet<string> {
   );
 }
 
-/** Withdraw (confirm, Undo re-submits), remove (Undo), resubmit (optional new file) — preview `ctb-withdraw` / `ctb-resubmit`. */
+/** Withdraw (Undo re-submits), remove (Undo), resubmit (optional new file) — preview `ctb-withdraw` / `ctb-resubmit`. */
 export function useContributionActions() {
   const { id: ws, member } = useWorkspace();
   const qc = useQueryClient();
@@ -65,15 +64,8 @@ export function useContributionActions() {
     }
 
     return {
-      /** Confirm, withdraw; Undo submits it again. Resolves true when withdrawn. */
+      /** Withdraws at once (preview: cheap to reverse, no confirmation); Undo submits it again. Resolves true when withdrawn. */
       async withdraw(v: ContributionView): Promise<boolean> {
-        const ok = await confirm({
-          title: "Withdraw this submission?",
-          description: `Reviewers won’t see “${v.title}” anymore. You can contribute it again later.`,
-          confirmLabel: "Withdraw",
-          tone: "danger",
-        });
-        if (!ok) return false;
         try {
           await withdrawContribution(ws, v.contribution.name ?? "", v.contribution.etag);
           refresh();

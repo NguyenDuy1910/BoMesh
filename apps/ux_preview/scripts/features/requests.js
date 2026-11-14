@@ -213,11 +213,12 @@
     const tab = hasQueue ? (['mine', 'queue'].includes(query.tab) ? query.tab : myRows.length ? 'mine' : 'queue') : 'mine';
     const q = hasQueue ? queueAll() : [];
     const head = pageHeader({ title: 'Requests', actions: btn('New request', { v: 'primary', icon: 'plus', href: '/requests/new' }) });
-    const tb = hasQueue ? `<div class="page-tabs">${tabs([
+    const tb = hasQueue ? contextBar(tabs([
       { id: 'mine', label: 'My requests', count: myRows.filter(isOpen).length || '' },
       { id: 'queue', label: 'Queue', count: q.filter(r => ACTIONABLE.includes(r.status)).length || '', alert: q.some(overdue) },
-    ], tab, '/requests')}</div>` : '';
-    return `<div class="page rq-page">${head}${tb}${tab === 'queue' ? queueView(q) : mineView(myRows)}</div>`;
+    ], tab, '/requests')) : '';
+    // The staff queue is a table and takes the full width; your own requests are a short list in the centred column.
+    return `<div class="${cx('page', tab === 'queue' && 'page--wide', 'rq-page')}">${head}${tb}${tab === 'queue' ? queueView(q) : mineView(myRows)}</div>`;
   };
 
   function mineView(rows) {
@@ -323,7 +324,7 @@
     const scoped = query.space && all.find(g => g.sp.id === query.space);
     const groups = scoped ? [scoped] : all;
     const shown = groups.map(g => ({ sp: g.sp, list: g.list.filter(t => matchesQ('rqCat', t.name, t.desc, g.sp.name, g.sp.code)) })).filter(g => g.list.length);
-    const head = pageHeader({ title: 'New request', desc: 'Ask a team or office for something they handle. The assistant checks the rules before you send.', actions: scoped && all.length > 1 ? btn('All request types', { v: 'ghost', href: '/requests/new' }) : '' });
+    const head = pageHeader({ title: 'New request', actions: scoped && all.length > 1 ? btn('All request types', { v: 'ghost', href: '/requests/new' }) : '' });
     const total = groups.reduce((n, g) => n + g.list.length, 0);
     const toolbar = needsTools(total, 'rqCat') ? `<div class="toolbar">${searchField({ uiKey: 'rqCat', placeholder: 'Search requests and offices' })}</div>` : '';
     const empty = () => emptyState({ icon: 'clipboard', boxed: true, title: 'No one takes requests here yet', desc: isAdmin() ? 'Office and team leads add request types in their space’s Settings, under Requests.' : 'When an office or team starts taking requests, you’ll find them here.', actions: btn('Back to requests', { href: '/requests' }) });
@@ -562,7 +563,7 @@
     const r = create(t, { question: text }, { ...(tried ? { aiTried: tried } : {}), ...(p.conv ? { from: p.conv } : {}), ...(p.about ? { about: p.about } : {}) });
     delete S.ui.rqAsk;
     closeModal(); refresh();
-    toast(`Question sent to ${teamWord(sp)}`, { action: { label: 'View', run: () => go('/requests/' + r.id) } });
+    toast(`Question sent to ${teamWord(sp)}`, { action: { label: 'Open', run: () => go('/requests/' + r.id) } });
   };
 
   /* ═══════════════ /requests/:id ═══════════════ */

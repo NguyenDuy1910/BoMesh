@@ -50,10 +50,35 @@ export const sourceName = (source: Source) => source.displayName || source.exter
 /** What the source reads ("Shared drives / Sales Enablement"). */
 export const scopeText = (source: Source) => source.externalResource?.displayName || "Everything";
 
+/** Studio → Sources with the source drawer open. */
+export const sourceHref = (source: string | undefined) => `/studio?tab=sources&open=${resourceId(source)}`;
+
 export const isReviewFirst = (source: Pick<Source, "publishingPolicy">) => source.publishingPolicy !== "AUTO_PUBLISH";
 
 /** Pause needs an ACTIVE source, Resume a PAUSED one (a FAILED or expired one can do neither). */
 export const canTogglePause = (source: Pick<Source, "state">) => source.state === "ACTIVE" || source.state === "PAUSED";
+
+/** The source's running sync is its first one (trigger CREATION), from the sync list. */
+export function isFirstSync(source: Source, syncs: ReadonlyMap<string, Sync>): boolean {
+  return source.lastSync?.state === "RUNNING" && syncs.get(source.lastSync.sync ?? "")?.trigger === "CREATION";
+}
+
+/** A finished sync where some files couldn't be read (preview `srcState` "partial"). */
+export const syncedWithIssues = (source: Source) => sourceStatus(source) === "healthy" && source.lastSync?.state === "SUCCEEDED" && (source.lastSync.failedCount ?? 0) > 0;
+
+/** The one visible row action (preview `rowActKind`): the row's fix, else what it's doing, else a quiet Sync now. */
+export type RowActionKind = "reconnect" | "retry" | "resume" | "publish" | "sync" | "";
+
+export function rowActionKind(source: Source, connection: Connection | undefined): RowActionKind {
+  const status = sourceStatus(source);
+  if (status === "syncing") return "";
+  if (status === "reconnect") return "reconnect";
+  if (status === "failed") return "retry";
+  if (status === "paused") return "resume";
+  if ((source.pendingDocumentCount ?? 0) > 0) return "publish";
+  if (connection?.state === "ACTIVE") return "sync";
+  return "";
+}
 
 /** The last sync in a few words: "3 added · 5 updated", "4 sent to review", "Failed". */
 export function lastSyncText(source: Source): string {
@@ -73,14 +98,14 @@ export const POLICY: Readonly<Record<PublishingPolicy, { label: string; short: s
     label: "Publish automatically",
     short: "Publishes automatically",
     icon: Zap,
-    desc: "For trusted systems. New and changed files become searchable without a review.",
+    desc: "For trusted systems. Everything publishes after each sync; the assistant classifies it.",
     css: "auto",
   },
   REVIEW_FIRST: {
-    label: "Send to review first",
-    short: "Review first",
+    label: "Review everything",
+    short: "Reviews everything",
     icon: ShieldCheck,
-    desc: "A reviewer of the knowledge base approves each new or changed file before it’s published.",
+    desc: "For untrusted or small feeds. Every new or changed file waits in the review queue.",
     css: "review",
   },
 };

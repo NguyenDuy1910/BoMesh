@@ -1,20 +1,20 @@
 "use client";
 
-import { Archive, Check, Download, EyeOff, FileText, Folder, Info, Pencil, Play, RefreshCw, RotateCcw, Upload, type LucideIcon } from "lucide-react";
+import { Archive, Check, Download, EyeOff, FileText, Folder, Pencil, Play, Plug, RefreshCw, RotateCcw, Upload, type LucideIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo } from "react";
 
-import { confirm, toast, type RowAction } from "@/components/ui";
+import { toast, type RowAction } from "@/components/ui";
 import { errorMessage, resourceId } from "@/lib/api/client";
 import { plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { publishItem, unpublishItem } from "@/modules/knowledge/api";
-import { openContribute } from "@/modules/knowledge/components/Contribute";
+import { openContribute } from "@/modules/knowledge/components/contribute-store";
 import { openEditDetails, openMoveItems } from "@/modules/knowledge/components/dialogs";
 import { useDocumentOperations } from "@/modules/knowledge/operations";
 
 import { createIngestionRun } from "../api";
-import { canPublishRow, canUnpublishRow, DOCS_BASE, opsFor, type DocOp, type DocRow } from "../model";
+import { canArchiveRow, canPublishRow, canUnpublishRow, isLocked, isRowFix, opsFor, reviewQueueHref, studioHref, type DocOp, type DocRow } from "../model";
 import { useInvalidateCuration } from "../queries";
 
 export const OP_META: Readonly<Record<DocOp, { label: string; icon: LucideIcon; danger?: boolean }>> = {
@@ -23,6 +23,7 @@ export const OP_META: Readonly<Record<DocOp, { label: string; icon: LucideIcon; 
   retry: { label: "Retry", icon: RotateCcw },
   replace: { label: "Replace file", icon: Upload },
   update: { label: "Publish update", icon: RefreshCw },
+  source: { label: "Open source", icon: Plug },
   republish: { label: "Publish again", icon: Upload },
   unpublish: { label: "Unpublish", icon: EyeOff },
   edit: { label: "Edit details…", icon: Pencil },
@@ -33,20 +34,20 @@ export const OP_META: Readonly<Record<DocOp, { label: string; icon: LucideIcon; 
 };
 
 export interface DocOps {
-  /** Starts processing (Publish now · Retry · Publish update). */
-  process: (rows: DocRow[], how: "now" | "again" | "update") => Promise<void>;
+  /** Publish (or retry, or publish the update of) rows; password-protected files are skipped and said so. */
   bulkPublish: (rows: DocRow[], done?: () => void) => Promise<void>;
+  /** Unpublishing is reversible: it happens at once, with Undo (no confirmation). */
   unpublish: (rows: DocRow[], done?: () => void) => Promise<void>;
   archive: (rows: DocRow[], done?: () => void) => Promise<void>;
-  /** Runs one lifecycle operation on a row. */
+  /** Runs one lifecycle operation on a row (`after` closes the drawer first when the op navigates away). */
   run: (op: DocOp, row: DocRow, after?: () => void) => void;
-  /** Row ⋯ menu (preview `MENUS['cur-row']`). */
-  menu: (row: DocRow, details: () => void) => RowAction[];
+  /** Row ⋯ (preview `MENUS['cur-row']`): what the row and the drawer footer don't already show. */
+  menu: (row: DocRow, ctx: "row" | "drawer", after?: () => void) => RowAction[];
 }
 
-/** Lifecycle operations of All documents (preview `OPS`): data first, then a toast (Undo where the API reverses it). */
+/** Lifecycle operations on curated documents (preview `OPS`): data first, then a toast (Undo where the API reverses it). */
 export function useDocOps(): DocOps {
-  const { id: ws } = useWorkspace();
+  const { id: ws, can } = useWorkspace();
   const router = useRouter();
   const docs = useDocumentOperations();
   const invalidate = useInvalidateCuration();
@@ -59,20 +60,7 @@ export function useDocOps(): DocOps {
     const names = (rows: DocRow[]) => rows.flatMap((r) => (r.item?.name ? [r.item.name] : []));
     const ref = (r: DocRow) => ({ name: r.item?.name ?? "", title: r.title, fileName: r.fileName, etag: r.item?.etag });
 
-    async function process(rows: DocRow[], how: "now" | "again" | "update") {
-      const items = names(rows);
-      if (!items.length) return;
-      try {
-        await createIngestionRun(ws, items);
-        invalidate();
-        const what = rows.length === 1 ? rows[0].title : plural(rows.length, "document");
-        toast(how === "update" ? `Publishing the update to ${what}` : how === "again" ? `Publishing ${what} again` : `Publishing ${what}`, { tone: "accent" });
-      } catch (error) {
-        fail(error);
-      }
-    }
-
-    /** Unpublished documents go back to readers; anything not yet searchable is processed. */
+    /** Unpublished documents go back to readers; anything not yet searchable is processed (an ingestion run). */
     async function publishRows(rows: DocRow[]) {
       const again = rows.filter((r) => r.lifecycle === "unpublished");
       await Promise.all(again.map((r) => publishItem(ws, r.item!.name!)));
@@ -80,21 +68,25 @@ export function useDocOps(): DocOps {
       if (names(toProcess).length) await createIngestionRun(ws, names(toProcess));
     }
 
+    async function process(rows: DocRow[], msg: string) {
+      try {
+        await publishRows(rows);
+        invalidate();
+        toast(msg, { tone: "accent" });
+      } catch (error) {
+        fail(error);
+      }
+    }
+
     async function bulkPublish(rows: DocRow[], done?: () => void) {
       const ok = rows.filter(canPublishRow);
       const skipped = rows.length - ok.length;
       if (!ok.length) {
-        toast("None of these need publishing", { tone: "danger" });
+        toast(rows.some((r) => isLocked(r.item)) ? "Password-protected files can’t be published. Replace them or remove the password at the source." : "None of these need publishing", { tone: "danger" });
         return;
       }
-      try {
-        await publishRows(ok);
-        done?.();
-        invalidate();
-        toast(`Publishing ${plural(ok.length, "document")}${skipped ? ` · ${skipped} skipped` : ""}`, { tone: "accent" });
-      } catch (error) {
-        fail(error);
-      }
+      done?.();
+      await process(ok, `Publishing ${plural(ok.length, "document")}${skipped ? ` · ${skipped} skipped` : ""}`);
     }
 
     async function unpublish(rows: DocRow[], done?: () => void) {
@@ -104,18 +96,11 @@ export function useDocOps(): DocOps {
         return;
       }
       const one = list.length === 1;
-      const ok = await confirm({
-        title: one ? `Unpublish “${list[0].title}”?` : `Unpublish ${plural(list.length, "document")}?`,
-        description: `${one ? "It" : "They"} leave${one ? "s" : ""} Browse, search and answers. ${one ? "It stays" : "They stay"} here, and you can publish ${one ? "it" : "them"} again.`,
-        confirmLabel: "Unpublish",
-        tone: "danger",
-      });
-      if (!ok) return;
       try {
         await Promise.all(list.map((r) => unpublishItem(ws, r.item!.name!)));
         done?.();
         invalidate();
-        toast(one ? `Unpublished “${list[0].title}”` : `Unpublished ${plural(list.length, "document")}`, {
+        toast(one ? `Unpublished “${list[0].title}”. It left search and answers.` : `Unpublished ${plural(list.length, "document")}. They left search and answers.`, {
           undo: () =>
             void Promise.all(list.map((r) => publishItem(ws, r.item!.name!))).then(() => {
               invalidate();
@@ -128,8 +113,11 @@ export function useDocOps(): DocOps {
     }
 
     async function archive(rows: DocRow[], done?: () => void) {
-      const list = rows.filter((r) => r.item?.name);
-      if (!list.length) return;
+      const list = rows.filter(canArchiveRow);
+      if (!list.length) {
+        toast("Documents in review can’t be archived", { tone: "danger" });
+        return;
+      }
       if (await docs.archive(list.map(ref))) {
         done?.();
         invalidate();
@@ -141,16 +129,21 @@ export function useDocOps(): DocOps {
       switch (op) {
         case "review":
           after?.();
-          router.push(`${DOCS_BASE}?tab=review&sel=${resourceId(r.contribution?.name)}`);
+          router.push(reviewQueueHref("submissions", { sel: resourceId(r.contribution?.name) }));
           return;
         case "publish":
-          void process([r], "now");
+          void process([r], `Publishing ${r.title}`);
           return;
         case "retry":
-          void process([r], "again");
+          void process([r], `Publishing ${r.title} again`);
           return;
         case "update":
-          void process([r], "update");
+          // Changed at its source: republish from the source (never a file picker for synced documents).
+          void process([r], `Publishing the update to ${r.title}`);
+          return;
+        case "source":
+          after?.();
+          router.push(can("sources.list") && r.source ? studioHref("sources", { open: resourceId(r.source) }) : studioHref("sources"));
           return;
         case "replace":
           openContribute({ item: r.item?.name });
@@ -186,12 +179,13 @@ export function useDocOps(): DocOps {
       }
     }
 
-    function menu(r: DocRow, details: () => void): RowAction[] {
+    function menu(r: DocRow, ctx: "row" | "drawer", after?: () => void): RowAction[] {
       const { main, more, tail } = opsFor(r);
-      const item = (op: DocOp): RowAction => ({ id: op, label: OP_META[op].label, icon: OP_META[op].icon, danger: OP_META[op].danger, onAction: () => run(op, r) });
-      return [{ id: "details", label: "Details", icon: Info, onAction: details }, item(main), ...more.map(item), ...tail.map(item)];
+      const item = (op: DocOp): RowAction => ({ id: op, label: OP_META[op].label, icon: OP_META[op].icon, danger: OP_META[op].danger, onAction: () => run(op, r, after) });
+      const shown = ctx === "drawer" || isRowFix(main);
+      return [...(shown ? [] : [main]), ...more, ...tail].map(item);
     }
 
-    return { process, bulkPublish, unpublish, archive, run, menu };
-  }, [ws, router, docs, invalidate]);
+    return { bulkPublish, unpublish, archive, run, menu };
+  }, [ws, can, router, docs, invalidate]);
 }

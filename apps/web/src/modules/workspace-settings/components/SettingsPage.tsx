@@ -1,15 +1,15 @@
 "use client";
 
-import { Button, Checkbox, Description, FieldError, InputGroup, TextField, Input } from "@heroui/react";
+import { Button, Checkbox, Description, FieldError, Input, InputGroup, Label, TextField } from "@heroui/react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { Archive, Copy, History, Pause, Users } from "lucide-react";
+import { Archive, Building2, Copy, GraduationCap, Settings, type LucideIcon } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
-import { PageChrome } from "@/components/shell/page-chrome";
-import { Callout, ChoiceGroup, ErrorState, FormSection, IconButton, Page, PageHeader, PreviewChip, SaveBar, SectionTabs, SwitchRow, confirm, toast } from "@/components/ui";
+import { Callout, ChoiceGroup, Disclosure, ErrorState, FormSection, IconButton, Page, PageHeader, SaveBar, SwitchRow, Tip, confirm, toast } from "@/components/ui";
 import { ApiError, errorMessage } from "@/lib/api/client";
-import { plural, rel } from "@/lib/format";
+import { fmtDate, plural, rel } from "@/lib/format";
+import { sectionTitle, settingsSections, useSection } from "@/lib/navigation";
 import { isPlatformOperator, useSession } from "@/lib/session";
 import { useWorkspace, workspaceQueryKey } from "@/lib/workspace";
 import { spaceType, useSpaces } from "@/modules/spaces";
@@ -24,10 +24,9 @@ import {
   identityDirty,
   identityErrors,
   identityPatch,
-  isOverridden,
-  moduleChanged,
   resetBody,
   setupBody,
+  setupChanges,
   setupOf,
   spaceTypeKeys,
   spaceTypesWith,
@@ -40,9 +39,6 @@ import {
   type WorkflowKey,
 } from "../model";
 
-const TABS = ["general", "setup", "danger"] as const;
-type Tab = (typeof TABS)[number];
-
 /** Icon names stored with a space type the workspace adds (the API keeps a Lucide name). */
 const SPACE_TYPE_ICONS: Readonly<Record<string, string>> = {
   course: "graduation-cap",
@@ -51,6 +47,9 @@ const SPACE_TYPE_ICONS: Readonly<Record<string, string>> = {
   team: "users",
   project: "route",
 };
+
+/** Template marks: the icons the domain uses elsewhere (office building, course cap). */
+const TEMPLATE_ICON: Readonly<Record<TemplateKey, typeof Building2>> = { ENTERPRISE: Building2, CAMPUS: GraduationCap };
 
 /** The cached workspace context (`lib/workspace.tsx`), patched in place so navigation follows a change at once. */
 interface ContextData {
@@ -73,33 +72,26 @@ function patchContext(qc: QueryClient, patch: { workspace?: Workspace; settings?
   void qc.invalidateQueries({ queryKey: workspaceQueryKey });
 }
 
-/** Settings (preview `P.settings`, `/settings?tab=general|setup|danger`). */
+/**
+ * Settings (preview `P.settings`): sections General · Workspace setup are sidebar sub-rows (`?tab=`), each titled by
+ * its name. Archiving lives under General › Advanced; the old `?tab=danger` link opens it there.
+ */
 export function SettingsPage() {
   const params = useSearchParams();
   const { workspace } = useWorkspace();
-  const tab: Tab = (TABS as readonly string[]).includes(params.get("tab") ?? "") ? (params.get("tab") as Tab) : "general";
+  const legacyDanger = params.get("tab") === "danger";
+  const tab = useSection(settingsSections, "general");
   return (
-    <Page narrow>
-      <PageChrome crumbs={[{ label: "Settings" }]} />
-      <PageHeader title="Settings" description={<span translate="no">{workspace.displayName}</span>}>
-        <SectionTabs
-          base="/settings"
-          active={tab}
-          items={[
-            { id: "general", label: "General" },
-            { id: "setup", label: "Workspace setup" },
-            { id: "danger", label: "Danger zone" },
-          ]}
-        />
-      </PageHeader>
-      {tab === "danger" ? <DangerZone /> : tab === "setup" ? <SetupTab /> : <GeneralTab key={workspace.etag} />}
+    <Page width="narrow">
+      <PageHeader title={sectionTitle(settingsSections, tab)} />
+      {tab === "setup" ? <SetupTab /> : <GeneralTab key={workspace.etag} advancedOpen={legacyDanger} />}
     </Page>
   );
 }
 
-/* ── General: name, web address, workspace ID ── */
+/* ── General: name, web address; Advanced: workspace ID, archive ── */
 
-function GeneralTab() {
+function GeneralTab({ advancedOpen }: { advancedOpen: boolean }) {
   const qc = useQueryClient();
   const { workspace, id } = useWorkspace();
   const current: IdentityDraft = { name: workspace.displayName, code: workspace.code };
@@ -147,17 +139,18 @@ function GeneralTab() {
 
   return (
     <>
+      <ArchiveNotice />
       <div className="set-form">
         <FormSection title="Workspace name" description="Shown in navigation, invitations and emails.">
           <TextField value={draft.name} onChange={(v) => edit("name", v)} isInvalid={Boolean(show("name"))} aria-label="Workspace name" maxLength={MAX_NAME}>
             <Input id="set-name" onKeyDown={onEnter} translate="no" />
             {show("name") ? (
               <FieldError>{show("name")}</FieldError>
-            ) : (
+            ) : draft.name.length >= MAX_NAME - 10 ? (
               <div className="row end">
                 <span className="counter">{`${draft.name.length}/${MAX_NAME}`}</span>
               </div>
-            )}
+            ) : null}
           </TextField>
         </FormSection>
         <FormSection title="Web address" description="Where people sign in to this workspace.">
@@ -166,7 +159,7 @@ function GeneralTab() {
               <InputGroup.Prefix className="set-url__prefix">bomesh.app/</InputGroup.Prefix>
               <InputGroup.Input id="set-code" spellCheck={false} onKeyDown={onEnter} />
             </InputGroup>
-            {show("code") ? <FieldError>{show("code")}</FieldError> : <Description>3–32 lowercase letters, numbers or hyphens.</Description>}
+            {show("code") ? <FieldError>{show("code")}</FieldError> : null}
           </TextField>
           {codeChanged ? (
             <Callout
@@ -180,27 +173,8 @@ function GeneralTab() {
             />
           ) : null}
         </FormSection>
-        <FormSection title="Workspace ID" description="For support requests and API calls.">
-          <TextField value={id} isReadOnly aria-label="Workspace ID">
-            <InputGroup fullWidth className="set-id">
-              <InputGroup.Input className="mono" />
-              <InputGroup.Suffix>
-                <IconButton
-                  icon={Copy}
-                  tip="Copy workspace ID"
-                  size="sm"
-                  onPress={() =>
-                    void navigator.clipboard.writeText(id).then(
-                      () => toast("Workspace ID copied"),
-                      () => toast("Couldn’t copy. Select the ID and copy it.", { tone: "danger" }),
-                    )
-                  }
-                />
-              </InputGroup.Suffix>
-            </InputGroup>
-          </TextField>
-        </FormSection>
       </div>
+      <Advanced defaultOpen={advancedOpen} />
       <SaveBar
         isDirty={dirty}
         isSaving={busy}
@@ -216,14 +190,120 @@ function GeneralTab() {
   );
 }
 
-/* ── Workspace setup: template, modules, space types, AI workflows ── */
+/** An archived workspace is status, not an option: it stays above the form (preview `archiveNotice`). */
+function ArchiveNotice() {
+  const qc = useQueryClient();
+  const session = useSession();
+  const { workspace, id } = useWorkspace();
+  const [busy, setBusy] = useState(false);
+  if (workspace.state !== "ARCHIVED") return null;
+  const since = workspace.updateTime ?? "";
+  const restore = async () => {
+    setBusy(true);
+    try {
+      patchContext(qc, { workspace: await activateWorkspace(id) });
+      toast("Workspace restored");
+    } catch (error) {
+      toast(errorMessage(error), { tone: "danger" });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="set-notice">
+      <Callout
+        tone="danger"
+        title="Archived"
+        description={`${workspace.displayName} was archived ${rel(since).toLowerCase()}. Members can’t open it. A platform admin can restore it until ${fmtDate(Date.parse(since) + 30 * 86_400_000)}.`}
+        actions={
+          isPlatformOperator(session) ? (
+            <Button variant="secondary" size="sm" isPending={busy} onPress={() => void restore()}>
+              Restore workspace
+            </Button>
+          ) : undefined
+        }
+      />
+    </div>
+  );
+}
+
+/** Rare and administrative: the workspace ID and archiving, behind one disclosure (preview `advancedHtml`). */
+function Advanced({ defaultOpen }: { defaultOpen: boolean }) {
+  const qc = useQueryClient();
+  const { workspace, id, can } = useWorkspace();
+  const [busy, setBusy] = useState(false);
+  const canArchive = can("workspaces.archive") && workspace.state !== "ARCHIVED";
+
+  async function archive() {
+    const ok = await confirm({
+      title: `Archive ${workspace.displayName}?`,
+      description: "Everyone loses access and source syncs pause. A platform admin can restore it for 30 days.",
+      confirmLabel: "Archive workspace",
+      tone: "danger",
+      typed: workspace.code,
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      patchContext(qc, { workspace: await archiveWorkspace(id, workspace.code, workspace.etag) });
+      toast("Workspace archived", { tone: "accent" });
+    } catch (error) {
+      toast(errorMessage(error), { tone: "danger" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="set-advanced">
+      <Disclosure icon={Settings} title="Advanced" summary={canArchive ? "Workspace ID, archive" : "Workspace ID"} defaultOpen={defaultOpen}>
+        <TextField value={id} isReadOnly aria-label="Workspace ID">
+          <Label>Workspace ID</Label>
+          <InputGroup fullWidth className="set-id">
+            <InputGroup.Input className="mono" />
+            <InputGroup.Suffix>
+              <IconButton
+                icon={Copy}
+                tip="Copy workspace ID"
+                size="sm"
+                onPress={() =>
+                  void navigator.clipboard.writeText(id).then(
+                    () => toast("Workspace ID copied"),
+                    () => toast("Couldn’t copy. Select the ID and copy it.", { tone: "danger" }),
+                  )
+                }
+              />
+            </InputGroup.Suffix>
+          </InputGroup>
+          <Description>For support requests and API calls.</Description>
+        </TextField>
+        {canArchive ? (
+          <div className="set-archive">
+            <p className="grow t-sm muted">
+              <span>
+                Archive <span translate="no">{workspace.displayName}</span>. It disappears for everyone; its data is kept and a platform admin can restore it for 30 days.
+              </span>
+            </p>
+            <Button variant="danger-soft" size="sm" isPending={busy} onPress={() => void archive()}>
+              <Archive className="i" aria-hidden />
+              Archive workspace
+            </Button>
+          </div>
+        ) : null}
+      </Disclosure>
+    </div>
+  );
+}
+
+/* ── Workspace setup: modules, space types, AI workflows, template ── */
 
 const spaceTypeLabel = (key: string) => ({ displayName: spaceType(key).label, icon: SPACE_TYPE_ICONS[key] ?? "layers" });
 
-function OptionLabel({ title, desc, meta }: { title: string; desc: string; meta?: string }) {
+function OptionLabel({ title, desc, meta, icon: Icon }: { title: string; desc: string; meta?: string; icon?: LucideIcon }) {
   return (
     <span className="set-opt">
       <span className="set-opt__title">
+        {Icon ? <Icon className="i-sm set-opt__icon" aria-hidden /> : null}
         {title}
         {meta ? <span className="set-opt__meta">{meta}</span> : null}
       </span>
@@ -254,18 +334,13 @@ function SetupTab() {
   latest.current = settings;
 
   if (!settings) {
-    return (
-      <ErrorState
-        title="Settings didn’t load"
-        description="Try again. Your settings haven’t changed."
-        onRetry={() => void qc.invalidateQueries({ queryKey: workspaceQueryKey })}
-      />
-    );
+    return <ErrorState title="Settings didn’t load" description="Try again. Your settings haven’t changed." onRetry={() => void qc.invalidateQueries({ queryKey: workspaceQueryKey })} />;
   }
 
   const tplKey = templateKey(workspace.template);
   const tpl = TEMPLATES[tplKey];
   const setup = setupOf(settings);
+  const changes = setupChanges(setup, tpl);
   const name = workspace.displayName;
 
   /** Applies a setup change now (navigation follows at once); Undo restores the previous setup. */
@@ -280,10 +355,7 @@ function SetupTab() {
         undo: () => {
           const { body, updateMask } = setupBody(snapshot);
           void updateSettings(id, { ...body, etag: latest.current?.etag ?? saved.etag }, updateMask).then(
-            (restored) => {
-              patchContext(qc, { settings: restored });
-              toast("Change undone", { tone: "accent" });
-            },
+            (restored) => patchContext(qc, { settings: restored }),
             (error: unknown) => toast(errorMessage(error), { tone: "danger" }),
           );
         },
@@ -297,10 +369,7 @@ function SetupTab() {
 
   const toggleModule = (key: ModuleKey, label: string) => {
     const on = !setup.modules[key];
-    void apply(
-      { body: { modules: { [key]: on } }, updateMask: `modules.${key}` },
-      on ? `${label} is on for everyone in ${name}` : `${label} is off and hidden from navigation`,
-    );
+    void apply({ body: { modules: { [key]: on } }, updateMask: `modules.${key}` }, on ? `${label} is on for everyone in ${name}` : `${label} is off and hidden from navigation`);
   };
 
   const toggleSpaceType = (key: string) => {
@@ -322,55 +391,19 @@ function SetupTab() {
   };
 
   const spaceCount = (key: string) => spaces.data?.filter((s) => s.spaceType === key).length ?? 0;
+  const TemplateIcon = TEMPLATE_ICON[tplKey];
 
   return (
     <div className="set-form set-setup">
-      <FormSection title="Template" description="Sets which modules, space types and AI workflows this workspace starts with.">
-        <div>
-          <ChoiceGroup<TemplateKey>
-            label="Template"
-            name="set-tpl"
-            columns={2}
-            value={tplKey}
-            onChange={() => undefined}
-            options={(Object.keys(TEMPLATES) as TemplateKey[]).map((k) => ({
-              value: k,
-              title: TEMPLATES[k].label,
-              description: TEMPLATES[k].desc,
-              isDisabled: k !== tplKey,
-            }))}
-          />
-          <p className="t-xs muted mt-8">The template is chosen when the workspace is created.</p>
-          {isOverridden(setup, tpl) ? (
-            <div className="set-reset">
-              <button type="button" className="link-button" disabled={busy} onClick={() => void apply(resetBody(settings, tpl, spaceTypeLabel), `Back to the ${tpl.label} defaults`)}>
-                Reset to {tpl.label} defaults
-              </button>
-            </div>
-          ) : null}
-        </div>
-      </FormSection>
       <FormSection title="Modules" description="Changes apply to everyone right away. Turning a module off hides it; nothing is deleted.">
         <div className="set-switches">
           {MODULES.map((m) => (
-            <SwitchRow
-              key={m.key}
-              title={m.label}
-              description={
-                <>
-                  {m.desc}
-                  {moduleChanged(setup, tpl, m.key) ? <span className="set-changed">Changed from {tpl.label}</span> : null}
-                </>
-              }
-              isSelected={setup.modules[m.key]}
-              isDisabled={busy}
-              onChange={() => toggleModule(m.key, m.label)}
-            />
+            <SwitchRow key={m.key} title={m.label} description={m.desc} isSelected={setup.modules[m.key]} isDisabled={busy} onChange={() => toggleModule(m.key, m.label)} />
           ))}
         </div>
       </FormSection>
-      <FormSection title="Space types" description="How people group members, materials and work.">
-        {setup.modules.spaces ? (
+      {setup.modules.spaces ? (
+        <FormSection title="Space types" description="How people group members, materials and work.">
           <div className="set-checks">
             {spaceTypeKeys(settings).map((key) => {
               const t = spaceType(key, settings);
@@ -381,139 +414,65 @@ function SetupTab() {
                   isSelected={setup.spaceTypes.includes(key)}
                   isDisabled={busy}
                   onChange={() => toggleSpaceType(key)}
-                  label={<OptionLabel title={t.label} desc={t.desc} meta={n ? plural(n, "space") : undefined} />}
+                  label={<OptionLabel title={t.label} desc={t.desc} meta={n ? plural(n, "space") : undefined} icon={t.icon} />}
                 />
               );
             })}
           </div>
-        ) : (
-          <p className="t-sm muted">Turn on Spaces to choose how people organise their work.</p>
-        )}
-      </FormSection>
-      <FormSection title="AI workflows" description="Guided tasks people start from Work and from their spaces.">
-        {setup.modules.work ? (
+        </FormSection>
+      ) : null}
+      {setup.modules.work ? (
+        <FormSection title="AI workflows" description="Guided tasks people start from Work and from their spaces.">
           <div className="set-checks">
             {WORKFLOW_KEYS.map((key) => {
               const wf = workflowOf(key)!;
+              // A workflow that only runs in space types that are off can't be used: disabled, with what turns it on.
+              const off = wf.spaceTypes && !(setup.modules.spaces && wf.spaceTypes.some((t) => setup.spaceTypes.includes(t)));
+              const why = off
+                ? setup.modules.spaces
+                  ? `Turn on ${wf.spaceTypes!.map((t) => spaceType(t, settings).label).join(" or ")} spaces to use this`
+                  : "Turn on Spaces to use this"
+                : "";
               const where = wf.spaceTypes ? wf.spaceTypes.map((t) => spaceType(t, settings).plural).join(", ") : "Anywhere";
-              return (
+              const box = (
                 <Check
-                  key={key}
-                  isSelected={setup.workflows.includes(key)}
-                  isDisabled={busy}
+                  isSelected={!off && setup.workflows.includes(key)}
+                  isDisabled={busy || Boolean(off)}
                   onChange={() => toggleWorkflow(key, wf.label)}
-                  label={<OptionLabel title={wf.label} desc={wf.desc} meta={where} />}
+                  label={<OptionLabel title={wf.label} desc={wf.desc} meta={off ? why : where} icon={wf.icon} />}
                 />
+              );
+              return off ? (
+                <Tip key={key} content={why}>
+                  <span className="set-opt-off">{box}</span>
+                </Tip>
+              ) : (
+                <span key={key}>{box}</span>
               );
             })}
           </div>
-        ) : (
-          <p className="t-sm muted">Turn on Work to offer AI workflows.</p>
-        )}
+        </FormSection>
+      ) : null}
+      <FormSection title="Template" description="Sets which modules, space types and AI workflows this workspace starts with.">
+        <Disclosure icon={TemplateIcon} title="Change template" summary={changes ? `${tpl.label} · ${plural(changes, "change")}` : tpl.label}>
+          <ChoiceGroup<TemplateKey>
+            label="Template"
+            name="set-tpl"
+            columns={2}
+            value={tplKey}
+            onChange={() => undefined}
+            options={(Object.keys(TEMPLATES) as TemplateKey[]).map((k) => ({ value: k, title: TEMPLATES[k].label, description: TEMPLATES[k].desc, isDisabled: k !== tplKey }))}
+          />
+          <p className="t-xs muted mt-8">The template is chosen when the workspace is created.</p>
+        </Disclosure>
+        {changes ? (
+          <div className="set-reset">
+            <button type="button" className="link-button" disabled={busy} onClick={() => void apply(resetBody(settings, tpl, spaceTypeLabel), `Back to the ${tpl.label} defaults`)}>
+              {`Reset to ${tpl.label} defaults`}
+            </button>
+          </div>
+        ) : null}
       </FormSection>
-    </div>
-  );
-}
-
-/* ── Danger zone: archive ── */
-
-function DangerZone() {
-  const qc = useQueryClient();
-  const session = useSession();
-  const { workspace, id } = useWorkspace();
-  const [busy, setBusy] = useState(false);
-  const archived = workspace.state === "ARCHIVED";
-  const operator = isPlatformOperator(session);
-
-  async function archive() {
-    const ok = await confirm({
-      title: `Archive ${workspace.displayName}?`,
-      description: "Everyone loses access and source syncs pause. Platform admins can restore it for 30 days.",
-      confirmLabel: "Archive workspace",
-      tone: "danger",
-      typed: workspace.code,
-    });
-    if (!ok) return;
-    setBusy(true);
-    try {
-      const saved = await archiveWorkspace(id, workspace.code, workspace.etag);
-      patchContext(qc, { workspace: saved });
-      toast("Workspace archived", { tone: "accent", ...(operator ? { undo: () => void restore() } : {}) });
-    } catch (error) {
-      toast(errorMessage(error), { tone: "danger" });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function restore() {
-    setBusy(true);
-    try {
-      patchContext(qc, { workspace: await activateWorkspace(id) });
-      toast("Workspace restored");
-    } catch (error) {
-      toast(errorMessage(error), { tone: "danger" });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="card card--lg set-danger">
-      <div className="card__header">
-        <span className="item-icon item-icon--danger">
-          <Archive className="i" aria-hidden />
-        </span>
-        <div className="grow">
-          <div className="row gap-8">
-            <h3 className="card__title">Archive workspace</h3>
-            <PreviewChip tooltip="Design proposal — backend contract pending" />
-          </div>
-          <p className="card__description">
-            Removes <span translate="no">{workspace.displayName}</span> for everyone without deleting its data.
-          </p>
-        </div>
-      </div>
-      {archived ? (
-        <Callout
-          tone="warning"
-          title="Workspace archived"
-          description={`Archived ${rel(workspace.updateTime ?? "").toLowerCase()}. It’s read-only; platform admins can restore it for 30 days.`}
-          actions={
-            operator ? (
-              <Button variant="secondary" size="sm" isPending={busy} onPress={() => void restore()}>
-                Restore workspace
-              </Button>
-            ) : undefined
-          }
-        />
-      ) : (
-        <>
-          <ul className="set-impact">
-            <li>
-              <Users className="i i-sm" aria-hidden />
-              <span>Everyone loses access, including you.</span>
-            </li>
-            <li>
-              <Pause className="i i-sm" aria-hidden />
-              <span>Source syncs pause.</span>
-            </li>
-            <li>
-              <History className="i i-sm" aria-hidden />
-              <span>Platform admins can restore it for 30 days.</span>
-            </li>
-          </ul>
-          <div className="card__footer">
-            <span className="grow t-sm muted">
-              You’ll confirm by typing <span className="mono strong">{workspace.code}</span>.
-            </span>
-            <Button variant="danger-soft" isPending={busy} onPress={() => void archive()}>
-              <Archive className="i" aria-hidden />
-              Archive workspace
-            </Button>
-          </div>
-        </>
-      )}
     </div>
   );
 }

@@ -6,36 +6,49 @@
 
 export type Category = "KNOWLEDGE" | "FILES" | "SOURCES" | "PEOPLE" | "SETTINGS" | "SPACES" | "REQUESTS" | "SIGN_IN";
 
+/** Areas in the order people think about them (preview `AREA_ORDER`). Sign-ins have their own section. */
 export const AREAS: readonly { value: Category; label: string; module?: "spaces" | "requests" }[] = [
   { value: "KNOWLEDGE", label: "Knowledge" },
   { value: "FILES", label: "Files" },
   { value: "SOURCES", label: "Sources" },
-  { value: "PEOPLE", label: "People & access" },
-  { value: "SETTINGS", label: "Settings" },
   { value: "SPACES", label: "Spaces", module: "spaces" },
   { value: "REQUESTS", label: "Requests", module: "requests" },
+  { value: "PEOPLE", label: "People" },
+  { value: "SETTINGS", label: "Settings" },
   { value: "SIGN_IN", label: "Sign-in" },
 ];
 
 export const areaLabel = (category: string | undefined) => AREAS.find((a) => a.value === category)?.label ?? "Other";
 
-export type Window = "24h" | "7d" | "30d";
-export const WINDOWS: readonly { value: Window; label: string; ms: number; summary: "P1D" | "P7D" | "P30D" }[] = [
+export type Window = "24h" | "7d" | "30d" | "90d";
+/** Time windows (preview `WIN_OPTS`); `summary` is the matching SummarizeAuditEvents window, when there is one. */
+export const WINDOWS: readonly { value: Window; label: string; ms: number; summary?: "P1D" | "P7D" | "P30D" }[] = [
   { value: "24h", label: "24 hours", ms: 86_400_000, summary: "P1D" },
   { value: "7d", label: "7 days", ms: 7 * 86_400_000, summary: "P7D" },
   { value: "30d", label: "30 days", ms: 30 * 86_400_000, summary: "P30D" },
+  { value: "90d", label: "90 days", ms: 90 * 86_400_000 },
 ];
 
 /** Escapes a value for an AIP-160 string literal. */
 export const quote = (value: string) => `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 
-/** ListAuditEvents filter for the window and server-side facets. */
-export function auditFilter({ since, category, actor, outcome }: { since: Date; category?: string; actor?: string; outcome?: string }): string {
+/** ListAuditEvents filter for the window and server-side facets; `exclude` drops one category (Changes has no sign-ins). */
+export function auditFilter({ since, category, exclude, actor, outcome }: { since: Date; category?: string; exclude?: string; actor?: string; outcome?: string }): string {
   const parts = [`createTime >= ${quote(since.toISOString())}`];
   if (category) parts.push(`category = ${quote(category)}`);
+  else if (exclude) parts.push(`category != ${quote(exclude)}`);
   if (actor) parts.push(`actor = ${quote(actor)}`);
   if (outcome) parts.push(`outcome = ${quote(outcome)}`);
   return parts.join(" AND ");
+}
+
+/**
+ * How someone signed in, from the event's fixed sentence ("Signed in with Google" → "Google"). Any other text is not
+ * a method (e.g. a generic "Create session (session)") and reads "—".
+ */
+export function signInMethod(description: string | undefined): string {
+  const m = /^signed in (?:with|using|via) (.+?)\.?$/i.exec(String(description ?? "").trim());
+  return m ? m[1] : "—";
 }
 
 /** Sentences for actions whose generic reading would be unclear. */
@@ -51,7 +64,7 @@ const SPECIAL: Record<string, string> = {
   CreateMembership: "Added someone to a group",
   DeleteMembership: "Removed someone from a group",
   SetWorkspaceIamPolicy: "Changed workspace roles",
-  SetItemIamPolicy: "Changed who can open a knowledge base",
+  SetItemIamPolicy: "Changed who can open a collection",
   SetSpaceIamPolicy: "Changed space roles",
   UpdateWorkspace: "Changed the workspace name or address",
   UpdateWorkspaceSettings: "Changed the workspace setup",
@@ -60,7 +73,13 @@ const SPECIAL: Record<string, string> = {
   CreateIngestionRun: "Started processing documents",
   CancelIngestionRun: "Cancelled a processing run",
   CreateSync: "Started a sync",
-  CreateItem: "Created an item",
+  PauseWorkspaceIngestion: "Paused processing for the workspace",
+  ResumeWorkspaceIngestion: "Resumed processing for the workspace",
+  SendBackRequest: "Sent a request back",
+  CreateSpaceMember: "Added someone to a space",
+  DeleteSpaceMember: "Removed someone from a space",
+  CreateReadingListEntry: "Added to a reading list",
+  DeleteReadingListEntry: "Removed from a reading list",
   VerifyItem: "Marked a document as verified",
   PublishItem: "Published a document",
   UnpublishItem: "Unpublished a document",
@@ -130,13 +149,18 @@ const NOUN: Record<string, string> = {
   iam: "access",
   policy: "",
   tenant: "workspace",
-  collection: "knowledge base",
+  collection: "collection",
+  artifact: "work item",
+  connection: "connected account",
 };
 
 const article = (word: string) => (/^[aeiou]/i.test(word) ? "an" : "a");
 
-/** Plain sentence for an audit `action` (`CreateSpace` → "Created a space"). Never returns the raw code. */
-export function describeAction(action: string | undefined | null): string {
+/**
+ * Plain sentence for an audit `action` (`CreateSpace` → "Created a space"). Never returns the raw code. `item` names
+ * the target when it is known (a collection), instead of the generic "item".
+ */
+export function describeAction(action: string | undefined | null, item?: string): string {
   const code = String(action ?? "").trim();
   if (!code) return "Did something";
   if (SPECIAL[code]) return SPECIAL[code];
@@ -146,14 +170,14 @@ export function describeAction(action: string | undefined | null): string {
   const past = PAST[verb];
   const noun = rest
     .map((w) => w.toLowerCase())
-    .map((w) => NOUN[w] ?? w)
+    .map((w) => (w === "item" && item ? item : (NOUN[w] ?? w)))
     .filter(Boolean)
     .join(" ");
   if (!past) return [verb[0].toUpperCase() + verb.slice(1).toLowerCase(), noun].filter(Boolean).join(" ");
   return noun ? `${past} ${article(noun)} ${noun}` : past;
 }
 
-export type TargetKind = "member" | "user" | "group" | "role" | "item" | "space" | "source" | "connection" | "settings" | "assistant" | "workspace" | "session" | "request" | "topic" | "contribution" | "readingList" | "other";
+export type TargetKind = "member" | "user" | "group" | "role" | "item" | "space" | "source" | "connection" | "settings" | "assistant" | "workspace" | "session" | "request" | "topic" | "contribution" | "readingList" | "artifact" | "other";
 
 /** What a target resource name points at, and its bare ID. */
 export function targetOf(name: string | undefined | null): { kind: TargetKind; id: string } {
@@ -178,6 +202,7 @@ export function targetOf(name: string | undefined | null): { kind: TargetKind; i
     topics: "topic",
     contributions: "contribution",
     readingLists: "readingList",
+    artifacts: "artifact",
   };
   return { kind: KINDS[parts[2]] ?? "other", id: parts.length > 3 ? parts[3] : id };
 }

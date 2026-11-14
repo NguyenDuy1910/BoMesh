@@ -10,11 +10,10 @@ import { ResourceDetails } from "@/modules/knowledge/components/ResourceDetails"
 import { clip, RESOURCE_KINDS } from "@/modules/knowledge/model";
 import { useItem, useKnowledgeModel } from "@/modules/knowledge/queries";
 
-import { suggestedKind } from "../model";
+import { suggestedKind, versionOf } from "../model";
 import type { Submission } from "../queries";
 import { CurationDrawer } from "./CurationDrawer";
 import { firstPageText, useFirstPage } from "./FirstPage";
-import { versionOf } from "./ReviewDetail";
 
 /** Compare a submission with the published document it resembles (preview `DR['cur-compare']`). */
 export function CompareDrawer({
@@ -82,7 +81,7 @@ function SubmissionColumn({ submission, item, contributor, baseName }: { submiss
       <KeyValue
         pairs={[
           ["Type", RESOURCE_KINDS[kind]?.label ?? kind],
-          ["Knowledge base", baseName || "—"],
+          ["Collection", baseName || "—"],
           ["Contributor", contributor || "—"],
           ["Submitted", fmtDateTime(submission.contribution.createTime)],
           ["Size", fmtSize(item.document?.sizeBytes)],

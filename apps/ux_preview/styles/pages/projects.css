@@ -1,27 +1,6 @@
-/* Projects (features/projects.js): sidebar New chat, project folders and Recent, and the
-   project page (composer with its documents attached, Project documents, Conversations).
-   Prefix: side-, proj-. HeroUI tokens only. */
-
-/* ───── Sidebar: New chat, folders and conversations ───── */
-.side-new { padding-bottom: 0; }
-.sidebar__group-label .side-add { width: 24px; height: 24px; min-width: 24px; margin: -4px -4px -4px 0; }
-.side-conv { position: relative; display: flex; align-items: center; min-width: 0; }
-.side-conv > .nav-item { flex: 1 1 auto; min-width: 0; }
-/* ⋯ appears on hover or keyboard focus, never as a permanent column; always on touch. */
-.side-more { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 24px; height: 24px; min-width: 24px; opacity: 0; background: var(--default); transition: opacity var(--dur-fast); }
-.side-conv:hover > .side-more, .side-conv:focus-within > .side-more, .side-more[aria-expanded="true"] { opacity: 1; }
-.side-conv:hover > .nav-item, .side-conv:focus-within > .nav-item { padding-right: 32px; }
-@media (hover: none) { .side-more { opacity: 1; background: transparent; } .side-conv > .nav-item { padding-right: 32px; } }
-/* A project row: its name opens the project page; the chevron before it expands its conversations. */
-.side-proj__chev { position: absolute; left: 2px; top: 50%; z-index: 1; transform: translateY(-50%); display: grid; place-items: center; width: 20px; height: 24px; border-radius: var(--radius-md); color: var(--muted); }
-.side-proj__chev:hover { background: var(--default); color: var(--foreground); }
-.side-proj__chev:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
-.side-proj__link { padding-left: 24px; gap: 8px; }
-.side-kids { display: flex; flex-direction: column; gap: 1px; margin: 1px 0 4px 22px; padding-left: 8px; border-left: 1px solid var(--separator); }
-.side-kids .nav-item--recent { height: 30px; }
-.side-kids__more { color: var(--muted); }
-.side-kids__empty { padding: 6px 10px; font-size: 12px; line-height: 16px; color: var(--muted); }
-@media (hover: none) { .side-proj__chev { width: 32px; height: 40px; left: 0; } .side-proj__link { padding-left: 32px; } }
+/* Projects (features/projects.js): the Projects list (/projects) and the project page
+   (composer with its documents attached, Project documents, Conversations).
+   Prefix: proj-. HeroUI tokens only. */
 
 /* ───── Project page ───── */
 .proj { display: flex; flex-direction: column; gap: 32px; padding-top: 40px; }

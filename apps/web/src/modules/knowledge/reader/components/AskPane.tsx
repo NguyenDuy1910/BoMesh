@@ -1,14 +1,17 @@
 "use client";
 
 import { Button } from "@heroui/react";
-import { ArrowRight, MessageSquare, RotateCcw, Sparkles } from "lucide-react";
+import { ArrowRight, MessageSquare, RotateCcw } from "lucide-react";
+import dynamic from "next/dynamic";
 
 import { Callout } from "@/components/ui/Callout";
 import { resourceId } from "@/lib/api/client";
 import type { AnswerSource, Turn } from "@/modules/chat/turn";
-import { AnswerMarkdown } from "@/modules/chat/components/AnswerMarkdown";
 
 import { clip } from "../../model";
+
+/** The markdown + math stack loads with the first answer, not with the reader. */
+const AnswerMarkdown = dynamic(() => import("@/modules/chat/components/AnswerMarkdown").then((m) => m.AnswerMarkdown), { ssr: false });
 
 /** Suggested questions per resource type (preview `PROMPTS`). */
 const GUIDE = ["What are the key steps?", "What are the deadlines?", "Summarize this"];
@@ -66,10 +69,7 @@ export function AskPane({ kind, itemName, thread, onAsk, onRetry, onShowPassages
   if (!thread.length) {
     return (
       <div className="rdr-ask-empty">
-        <div className="rdr-ask-empty__title">
-          <Sparkles className="i i-sm" aria-hidden />
-          Ask about this document
-        </div>
+        <div className="rdr-ask-empty__title">Try asking</div>
         <div className="rdr-prompts">
           {(PROMPTS[kind] ?? DEFAULT_PROMPTS).map((p) => (
             <button key={p} type="button" className="rdr-prompt" onClick={() => onAsk(p)}>
@@ -94,7 +94,7 @@ export function AskPane({ kind, itemName, thread, onAsk, onRetry, onShowPassages
       ))}
       {done ? (
         <div className="rdr-ask-foot">
-          <Button size="sm" variant="secondary" onPress={onContinue}>
+          <Button size="sm" variant="tertiary" onPress={onContinue}>
             <MessageSquare className="i" aria-hidden />
             Continue in chat
           </Button>
@@ -157,7 +157,7 @@ function Answer({ t, itemName, onRetry, onShowPassages, onOpenSource }: { t: Ask
           title="The answer stopped before it finished"
           description={t.error || turn?.error || "Retry to get the full answer."}
           actions={
-            <Button size="sm" variant="secondary" onPress={() => onRetry(t)}>
+            <Button size="sm" variant="tertiary" onPress={() => onRetry(t)}>
               <RotateCcw className="i" aria-hidden />
               Retry
             </Button>

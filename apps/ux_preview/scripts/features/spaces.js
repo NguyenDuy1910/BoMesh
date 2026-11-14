@@ -3,9 +3,96 @@
    projects. Create a space, ask to join, announcements, materials from linked
    knowledge, the space's work and request queue (the Requests queue, scoped),
    members, settings (incl. request types). Settings opens from the header gear.
-   Shared: X.spaceMark(sp, size), X.spaceLinkedDocs(sp), A['space-ask']({dataset:{space, q?}}). Prefix: sp-. */
+   Shared: X.spaceMark(sp, size), X.spaceLinkedDocs(sp), A['space-ask']({dataset:{space, q?}}),
+   X.upNext({space?, limit?, queue?}) and X.upNextList(items, {empty?, space?}) — what's coming up in the caller's spaces
+   (a space's Up next, AI Chat's "what's due"). Prefix: sp-. */
 (() => {
   'use strict';
+
+  /* ═══════════════ Up next: events, quizzes, replies and queues that need the caller ═══════════════ */
+  const WAITING = ['submitted', 'in_review'];
+  const DUE_KINDS = ['deadline', 'quiz', 'queue'];
+  const KIND_ICON = { deadline: 'clock', quiz: 'check-circle', exam: 'file-text', meeting: 'users', reply: 'message', queue: 'inbox' };
+  const dayStart = ts => { const d = new Date(ts); d.setHours(0, 0, 0, 0); return d.getTime(); };
+  const dayDiff = ts => Math.round((dayStart(ts) - dayStart(NOW)) / DAY);
+  /** Relative, human wording for an up-next item: "Due tomorrow, 9:00 PM", "In 3 days", "Overdue · Oct 30". */
+  function when(it) {
+    if (it.kind === 'reply') return { text: 'Needs your reply', tone: 'soon' };
+    const due = DUE_KINDS.includes(it.kind), prefix = it.kind === 'queue' ? 'Oldest due' : 'Due', d = dayDiff(it.at);
+    if (it.at < NOW) return { text: due ? `${it.kind === 'queue' ? 'Oldest overdue' : 'Overdue'} · ${fmtDate(it.at)}` : fmtDate(it.at), tone: due ? 'danger' : '' };
+    const day = d <= 0 ? `today, ${fmtTime(it.at)}` : d === 1 ? `tomorrow, ${fmtTime(it.at)}` : d < 7 ? `in ${d} days` : fmtDate(it.at);
+    return { text: due ? `${prefix} ${day}` : day[0].toUpperCase() + day.slice(1), tone: due && d <= 1 ? 'soon' : '' };
+  }
+  const requestTypeOf = r => (D.requestTypes || []).find(t => t.id === r.type);
+  function attempted(w) {
+    if (X.work?.myAttempt) return !!X.work.myAttempt(w);
+    const id = me().id; return (w.data?.attempts || []).some(a => a?.user === id);
+  }
+  function eventVisible(e) {
+    const sp = e.space && spaceById(e.space);
+    if (e.space && (!sp || sp.archived)) return false;
+    if (e.audience === 'all') return true;
+    if (e.audience === 'staff') return isSpaceStaff(sp);
+    return !!spaceRole(sp);
+  }
+  /** The one action for an event; null = nothing left to do (e.g. quiz already taken). */
+  function eventAction(e, sp) {
+    const w = e.work && hasModule('work') && (D.works || []).find(x => x.id === e.work);
+    if (w) {
+      if (w.kind === 'quiz' && w.owner !== me().id && !isSpaceStaff(sp)) return attempted(w) ? null : { label: 'Take quiz', href: '/work/' + w.id, strong: true };
+      return { label: w.owner !== me().id ? 'Open' : w.status === 'published' ? 'Results' : 'Continue', href: '/work/' + w.id };
+    }
+    if (e.requestType && hasModule('requests')) {
+      if (isSpaceStaff(sp)) return { label: 'Review queue', href: `/space/${sp.id}?tab=queue` };
+      if (me().profile) return { label: 'Start request', act: 'upnext-request', data: { type: e.requestType } };
+    }
+    const doc = e.doc && docById(e.doc);
+    if (doc && canReadKb(kbById(doc.kb))) return { label: 'Open', href: '/doc/' + doc.id };
+    return sp ? { label: 'Open', href: '/space/' + sp.id } : undefined;
+  }
+  /** What's coming up for the caller: visible events plus quizzes to take, requests waiting on them and (staff) their queues. */
+  X.upNext = ({ space, limit = 6, queue = true } = {}) => {
+    const out = [], inScope = id => !space || id === space, eventWorks = new Set();
+    (D.events || []).forEach(e => {
+      if (!inScope(e.space) || !eventVisible(e) || e.at < NOW - 2 * DAY) return;
+      if (e.work) eventWorks.add(e.work);
+      const sp = spaceById(e.space), action = eventAction(e, sp);
+      if (action === null) return;
+      out.push({ id: e.id, title: e.title, at: e.at, space: e.space, kind: e.kind, action });
+    });
+    if (hasModule('work')) (D.works || []).forEach(w => {
+      const sp = spaceById(w.space);
+      if (w.kind !== 'quiz' || w.status !== 'published' || w.visibility !== 'space' || eventWorks.has(w.id) || !inScope(w.space)) return;
+      if (!sp || sp.archived || !spaceRole(sp) || isSpaceStaff(sp) || w.owner === me().id || attempted(w)) return;
+      out.push({ id: 'quiz-' + w.id, title: w.title, at: w.due || w.published || w.updated, space: w.space, kind: 'quiz', action: { label: 'Take quiz', href: '/work/' + w.id, strong: true } });
+    });
+    if (hasModule('requests')) {
+      (D.svcRequests || []).filter(r => r.requester === me().id && r.status === 'needs_info' && inScope(r.space)).forEach(r =>
+        out.push({ id: 'req-' + r.id, title: requestTypeOf(r)?.name || 'Request', at: r.updated, space: r.space, kind: 'reply', action: { label: 'Reply', href: '/requests/' + r.id, strong: true } }));
+      if (queue) (D.spaces || []).filter(sp => !sp.archived && inScope(sp.id) && isSpaceStaff(sp)).forEach(sp => {
+        const open = (D.svcRequests || []).filter(r => r.space === sp.id && WAITING.includes(r.status));
+        if (!open.length) return;
+        const oldest = open.reduce((a, b) => ((a.due || a.created) <= (b.due || b.created) ? a : b));
+        const questions = open.every(r => requestTypeOf(r)?.question);
+        out.push({ id: 'queue-' + sp.id, title: `${plural(open.length, questions ? 'question' : 'request')} waiting`, at: oldest.due || oldest.created, space: sp.id, kind: 'queue', action: { label: 'Review queue', href: `/space/${sp.id}?tab=queue` } });
+      });
+    }
+    return out.sort((a, b) => (b.kind === 'reply') - (a.kind === 'reply') || a.at - b.at).slice(0, limit);
+  };
+  /** List of up-next items, each with one action. Pass {space} to drop the space name (inside a space page). */
+  X.upNextList = (items, { empty, space } = {}) => {
+    if (!items.length) return empty ?? emptyState({ icon: 'calendar', title: 'You’re all caught up', desc: 'Deadlines, quizzes and requests that need you show up here.', compact: true, boxed: true });
+    return list(items.map(it => {
+      const w = when(it), sp = !space && it.space && spaceById(it.space), a = it.action;
+      const desc = `<span class="${cx('upnext-when', w.tone && 'upnext-when--' + w.tone)}" data-tip="${esc(fmtDateTime(it.at))}">${esc(w.text)}</span>${sp ? ` · ${esc(sp.name)}` : ''}`;
+      const trail = a ? btn(a.label, { v: a.strong ? 'secondary' : 'tertiary', size: 'sm', href: a.href, act: a.act, data: a.data }) : '';
+      return item({ lead: itemIcon(KIND_ICON[it.kind] || 'calendar', w.tone === 'danger' ? 'danger' : w.tone === 'soon' ? 'warning' : '', 'sm'), title: esc(it.title), desc, trail });
+    }), 'upnext');
+  };
+  A['upnext-request'] = el => {
+    const type = el?.dataset?.type;
+    if (A['rq-new']) A['rq-new']({ dataset: { type } }); else go('/requests/new' + (type ? '?type=' + type : ''));
+  };
 
   const COLORS = ['#2F6FB5', '#0E7C66', '#4E6B2E', '#B4467A', '#6B4FBF', '#C2620F', '#1F7A8C', '#A23B3B'];
   const DEFAULT_VIS = { course: 'members', research: 'discoverable', office: 'open', team: 'discoverable', project: 'members' };
@@ -144,7 +231,7 @@
         return rows.length ? grid(rows, tab) : noMatches('spList', [], 'spaces');
       },
     });
-    return `<div class="page">${head}${useTabs ? `<div class="page-tabs">${tabs(tabList, tab, '/spaces')}</div>` : ''}${S.pageState === 'empty' ? '' : toolbar}${body}</div>`;
+    return `<div class="page page--wide">${head}${useTabs ? contextBar(tabs(tabList, tab, '/spaces')) : ''}${S.pageState === 'empty' ? '' : toolbar}${body}</div>`;
   };
 
   /* ── Create ── */
@@ -156,7 +243,7 @@
   /** Code suggestion from the name: initials of up to four words (“Field robotics” → FR). */
   const suggestCode = name => name.trim().split(/\s+/).filter(w => /\w/.test(w)).slice(0, 4).map(w => w[0]).join('').toUpperCase();
   /* Knowledge linking, one pattern in Create and Settings: a Switch to start the space's own base, then a Switch per base to link. */
-  const newKbRow = (on, act, o = {}) => switchRow({ id: o.id, title: 'Start a new knowledge base for this space', desc: o.desc || 'Named after the space, owned by you. Members contribute to it.', on, act, disabled: o.disabled });
+  const newKbRow = (on, act, o = {}) => switchRow({ id: o.id, title: 'Start a new collection for this space', desc: o.desc || 'Named after the space, owned by you. Members contribute to it.', on, act, disabled: o.disabled });
   const kbRow = (k, on, act, o = {}) => switchRow({ title: k.name, desc: canReadKb(k) ? plural(docsIn(k.id).length, 'document') : 'You can’t read this one', on, act, data: { kb: k.id }, disabled: o.disabled });
   M['sp-create'] = () => {
     const f = ui('spCreate'), err = f.touched ? nameError(f.name) : '';
@@ -173,9 +260,9 @@
           ${field({ id: 'spc-code', label: 'Code', optional: true, desc: 'Shown next to the name.', control: input({ id: 'spc-code', bind: 'spCreate.code', value: f.code, placeholder: code || (f.type === 'course' ? 'IT4080' : 'e.g. FR'), onEnter: 'sp-create-go', attrs: `maxlength="16" ${dis}` }) })}
         </div>
         ${field({ id: 'spc-desc', label: 'Short description', optional: true, control: input({ id: 'spc-desc', bind: 'spCreate.desc', value: f.desc, placeholder: 'What happens here, in one line', onEnter: 'sp-create-go', attrs: `maxlength="140" ${dis}` }) })}
-        <div class="field"><span class="label">Knowledge</span><div class="description">Members can read and ask about the knowledge bases linked to the space.</div>
+        <div class="field"><span class="label">Knowledge</span>
           <div class="stack gap-8 mt-8">${newKbRow(f.newKb, 'sp-create-newkb', { id: 'spc-newkb', disabled: f.busy })}
-          ${kbs.length ? disclosure({ path: 'spCreate.showKbs', icon: 'link', title: 'Link existing knowledge bases', summary: linked.length ? esc(linked.length === 1 ? linked[0].name : plural(linked.length, 'knowledge base')) : 'None yet', body: `<div class="stack gap-4">${kbs.map(k => kbRow(k, !!f.kbs[k.id], 'sp-create-kb', { disabled: f.busy })).join('')}</div>` }) : ''}</div></div>`,
+          ${kbs.length ? disclosure({ path: 'spCreate.showKbs', icon: 'link', title: 'Link existing collections', summary: linked.length ? esc(linked.length === 1 ? linked[0].name : plural(linked.length, 'collection')) : 'None yet', body: `<div class="stack gap-4">${kbs.map(k => kbRow(k, !!f.kbs[k.id], 'sp-create-kb', { disabled: f.busy })).join('')}</div>` }) : ''}</div></div>`,
       footStart: `You’ll be its ${esc(lead.toLowerCase())}.`,
       foot: btn('Cancel', { v: 'ghost', act: 'close-modal', disabled: f.busy }) + btn('Create space', { v: 'primary', icon: 'plus', act: 'sp-create-go', loading: f.busy }),
     };
@@ -289,7 +376,7 @@
     // Settings is a rare admin task: its own page behind the header gear, not a sixth tab.
     if (query.tab === 'settings' && manage) {
       crumbs([{ label: 'Spaces', to: '/spaces' }, { label: sp.name, to: '/space/' + sp.id }, { label: 'Settings' }]);
-      return `<div class="page">${pageHeader({ title: 'Space settings', lead: spaceMark(sp, 40), desc: esc(sp.name) })}${settingsTab(sp)}</div>`;
+      return `<div class="page">${pageHeader({ title: 'Space settings', lead: spaceMark(sp, 40) })}${settingsTab(sp)}</div>`;
     }
     crumbs([{ label: 'Spaces', to: '/spaces' }, { label: sp.name }]);
     const ctx = { role, staff, manage, visitor };
@@ -298,7 +385,7 @@
     const tab = tabList.some(t => t.id === query.tab) ? query.tab : tabList[0].id;
     const head = pageHeader({ title: sp.name, lead: spaceMark(sp, 48), desc: `<span class="sp-head__meta">${metaLine(sp)}</span>${peopleLine(sp, !visitor)}`, actions: headerActions(sp, ctx) });
     const body = { overview: overviewTab, materials: materialsTab, work: workTab, queue: queueTab, people: peopleTab }[tab](sp, ctx);
-    return `<div class="page">${head}<div class="page-tabs">${tabs(tabList, tab, '/space/' + sp.id)}</div>${body}</div>`;
+    return `<div class="page page--wide">${head}${contextBar(tabs(tabList, tab, '/space/' + sp.id))}${body}</div>`;
   };
 
   /* ── Overview ── */
@@ -330,7 +417,7 @@
     const side = sideList(catalog.length ? 'What you can request' : '', catalog)
       + sideList('Get started', start)
       + sideList('Knowledge', kbs)
-      + sideList('Collections', spaceCollections(sp).map(c => item({ lead: itemIcon('list', 'accent', 'sm'), title: esc(c.name), desc: plural(c.items.length, 'item'), href: '/knowledge/collections/' + c.id })));
+      + sideList('Collections', spaceCollections(sp).map(c => item({ lead: itemIcon('list', 'accent', 'sm'), title: esc(c.name), desc: plural(c.items.length, 'item'), href: '/knowledge/lists/' + c.id })));
     const target = manage && !readableKbs(sp).some(k => docsIn(k.id).length) && editableKbs(sp)[0];
     const setup = target ? `<div class="mb-24">${alertBox('accent', 'Add materials to get started', 'Members can ask about them and use them in workflows.', btn('Contribute documents', { size: 'sm', icon: 'upload', act: 'sp-upload', data: { kb: target.id } }))}</div>` : '';
     return gate({ loading: () => skelRows(4), ok: () => `${setup}<div class="sp-overview"><div class="sp-overview__main">${next}${announcements(sp, manage)}</div>${side ? `<aside class="sp-overview__side">${side}</aside>` : ''}</div>` });
@@ -387,14 +474,14 @@
   };
 
   /* ── Materials ── */
-  /** Resources from other knowledge bases that staff linked to this space (doc.contexts), readable by the caller. Work's source picker offers them too. */
+  /** Resources from other collections that staff linked to this space (doc.contexts), readable by the caller. Work's source picker offers them too. */
   function linkedDocs(sp) {
     const own = new Set(linkedKbs(sp).map(k => k.id));
     return D.docs.filter(d => (d.contexts || []).includes(sp.id) && !own.has(d.kb) && canOpenRes(d) && isReaderVisible(d)).sort((a, b) => b.updated - a.updated);
   }
   X.spaceLinkedDocs = linkedDocs;
   const spaceCollections = sp => visibleCollections().filter(c => c.share === 'space:' + sp.id);
-  /** Add materials ▾ — the one way in: contribute to the space's base, link a knowledge base, link single documents. */
+  /** Add materials ▾ — the one way in: contribute to the space's base, link a collection, link single documents. */
   function addMaterials(sp, v = 'tertiary') {
     const editable = editableKbs(sp), manage = canManageSpace(sp);
     if (!manage) return editable.length === 1 ? btn('Contribute', { v, icon: 'upload', act: 'sp-upload', data: { kb: editable[0].id } }) : '';
@@ -406,7 +493,7 @@
     return [
       ...editable.map(kb => ({ label: editable.length === 1 ? 'Contribute documents' : `Contribute to ${kb.name}`, icon: 'upload', run: () => A['sp-upload']({ dataset: { kb: kb.id } }) })),
       ...(canManageSpace(sp) ? [
-        { label: 'Link a knowledge base', icon: 'library', run: () => go(`/space/${sp.id}?tab=settings`) },
+        { label: 'Link a collection', icon: 'library', run: () => go(`/space/${sp.id}?tab=settings`) },
         { label: 'Link documents', icon: 'link-2', run: () => A['sp-link-res']({ dataset: { id: sp.id } }) },
       ] : []),
     ];
@@ -416,7 +503,7 @@
     const pick = hasModule('work') && workflowsFor(sp).length > 0;
     const linked = linkedDocs(sp);
     if (!kbs.length && !linked.length) {
-      return emptyState({ icon: 'book', title: 'No materials yet', desc: manage ? 'Link a knowledge base or single documents so members can read and ask about them.' : 'Nothing has been shared here yet.', actions: addMaterials(sp, 'primary'), boxed: true });
+      return emptyState({ icon: 'book', title: 'No materials yet', desc: manage ? 'Link a collection or single documents so members can read and ask about them.' : 'Nothing has been shared here yet.', actions: addMaterials(sp, 'primary'), boxed: true });
     }
     const all = kbs.flatMap(k => docsIn(k.id));
     const matches = all.filter(d => matchesQ(uk, d.name));
@@ -427,7 +514,7 @@
     // One list component for every group: the shared resource row (trust, Save, ⋯). Selecting rows starts a workflow with them.
     const rowOpts = extra => d => ({ compact: true, hide: ['kb'], select: pick ? uk : undefined, ...(extra ? extra(d) : {}) });
     const head = (lead, name, count) => `<div class="sp-mat__head">${lead}${name}<span class="t-sm muted none">${count}</span></div>`;
-    const linkedGroup = () => (linkedMatches.length ? `<section class="sp-mat">${head(itemIcon('link-2', '', 'sm'), '<span class="sp-mat__name truncate">Linked from other knowledge bases</span>', plural(linked.length, 'document'))}${X.res.rows(linkedMatches, rowOpts(d => ({ hide: [], trail: staff ? `<span class="reveal-on-hover">${iconBtn('x', 'Unlink from this space', { size: 'sm', act: 'sp-unlink-res', data: { id: sp.id, doc: d.id } })}</span>` : '' })))}</section>` : '');
+    const linkedGroup = () => (linkedMatches.length ? `<section class="sp-mat">${head(itemIcon('link-2', '', 'sm'), '<span class="sp-mat__name truncate">Linked from other collections</span>', plural(linked.length, 'document'))}${X.res.rows(linkedMatches, rowOpts(d => ({ hide: [], trail: staff ? `<span class="reveal-on-hover">${iconBtn('x', 'Unlink from this space', { size: 'sm', act: 'sp-unlink-res', data: { id: sp.id, doc: d.id } })}</span>` : '' })))}</section>` : '');
     const group = kb => {
       const docs = matches.filter(d => d.kb === kb.id).sort((a, b) => b.updated - a.updated);
       const edit = canEditKb(kb);
@@ -455,7 +542,7 @@
   const pickRow = ({ id, lead, title, meta, checked, act, data }) => checkbox({ id, checked, act, data, label: `<span class="sp-opt">${lead}<span class="sp-opt__text"><span class="sp-opt__title truncate">${title}</span><span class="sp-opt__meta truncate">${meta}</span></span></span>` });
   const pickError = err => (err ? `<div class="field-error mt-8" role="alert">${ic('alert-circle')}<span>${esc(err)}</span></div>` : '');
 
-  /* Link documents from other knowledge bases (space staff). Access doesn't change: readers still need access to the base. */
+  /* Link documents from other collections (space staff). Access doesn't change: readers still need access to the base. */
   A['sp-link-res'] = el => { const sp = spaceById(el.dataset.id); if (!sp || !canManageSpace(sp)) return; S.ui.spLinkRes = { id: sp.id, q: '', picked: [], err: '' }; openModal('sp-link-res', {}); };
   M['sp-link-res'] = () => {
     const f = ui('spLinkRes'), sp = spaceById(f.id), own = new Set(linkedKbs(sp).map(k => k.id)), n = f.picked.length;
@@ -463,10 +550,10 @@
     const rows = found.map(d => pickRow({ id: 'splr-' + d.id, lead: fileIcon(d.type, 'sm'), title: esc(d.name), meta: `${esc(kindMeta(res(d).kind).label)} · ${esc(res(d).kb?.name || '')}`, checked: f.picked.includes(d.id), act: 'sp-link-res-pick', data: { id: d.id } })).join('');
     return {
       size: 'lg', title: 'Link documents', icon: 'link-2',
-      desc: 'Show documents from other knowledge bases in Materials and use them in workflows. Who can open them doesn’t change.',
+      desc: 'Show documents from other collections in Materials and use them in workflows. Who can open them doesn’t change.',
       body: `${dlgSearch('splr-q', 'spLinkRes.q', f.q, 'Search by title or topic')}
         ${rows ? `<div class="option-list sp-options mt-12" id="splr-list" data-keep-scroll role="group" aria-label="Documents">${rows}</div>` : `<p class="t-sm muted sp-options__empty">${f.q ? 'No documents match. Try another word.' : 'Every document you can read is already here.'}</p>`}${pickError(f.err)}`,
-      footStart: n ? `${plural(n, 'document')} selected` : 'They stay in their knowledge base.',
+      footStart: n ? `${plural(n, 'document')} selected` : 'They stay in their collection.',
       foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn(n ? `Link ${plural(n, 'document')}` : 'Link documents', { v: 'primary', icon: 'link-2', act: 'sp-link-res-go' }),
     };
   };
@@ -594,7 +681,7 @@
   const TEXT_FIELDS = ['name', 'code', 'term', 'schedule', 'desc'];
   const isDirty = (f, sp) => TEXT_FIELDS.some(k => f[k].trim() !== (sp[k] || '')) || f.visibility !== (sp.visibility || 'members') || f.newKb || [...f.kbs].sort().join() !== [...(sp.kbs || [])].sort().join();
   const ownKb = sp => linkedKbs(sp).find(k => k.space === sp.id);
-  /** The space's own knowledge base (Create, or later from Settings). */
+  /** The space's own collection (Create, or later from Settings). */
   function makeSpaceKb(sp, { name = sp.name, code = sp.code, desc = sp.desc } = {}) {
     const kb = { id: uid('kb'), name: code ? `${name} · ${code}` : name, desc: desc || `Materials for ${name}.`, color: sp.color, general: 'restricted', memberRole: null, shares: [{ kind: 'user', id: me().id, role: 'owner' }], updated: Date.now(), created: Date.now(), space: sp.id };
     D.kbs.push(kb);
@@ -630,16 +717,16 @@
     const row = k => kbRow(k, f.kbs.includes(k.id), 'sp-set-kb');
     const saved = cands.filter(k => (sp.kbs || []).includes(k.id)), rest = cands.filter(k => !(sp.kbs || []).includes(k.id));
     const picked = rest.filter(k => f.kbs.includes(k.id)).length;
-    const more = rest.length ? disclosure({ path: 'spSet.moreKbs', icon: 'link', title: 'Link existing knowledge bases', summary: picked ? `${fmtNum(picked)} selected` : `${fmtNum(rest.length)} available`, body: `<div class="stack gap-4">${rest.map(row).join('')}</div>` }) : '';
+    const more = rest.length ? disclosure({ path: 'spSet.moreKbs', icon: 'link', title: 'Link existing collections', summary: picked ? `${fmtNum(picked)} selected` : `${fmtNum(rest.length)} available`, body: `<div class="stack gap-4">${rest.map(row).join('')}</div>` }) : '';
     const kbRows = (ownKb(sp) ? '' : newKbRow(f.newKb, 'sp-set-newkb', { desc: 'Named after the space, owned by you. Members contribute to it.' })) + saved.map(row).join('') + (more ? `<div class="mt-8">${more}</div>` : '');
     const vis = choiceGroup({ name: 'sps-vis', value: f.visibility, act: 'sp-set-vis', options: visibilityOptions(sp) });
-    const danger = `<div class="card sp-danger"><div class="card__header"><span class="item-icon item-icon--danger">${ic('archive')}</span><div class="grow"><h3 class="card__title">Archive space</h3><p class="card__description">Hides it for everyone. Linked knowledge bases and saved work stay where they are.</p></div>${btn('Archive', { v: 'danger-soft', icon: 'archive', act: 'sp-archive', data: { id: sp.id } })}</div></div>`;
+    const danger = `<div class="card sp-danger"><div class="card__header"><span class="item-icon item-icon--danger">${ic('archive')}</span><div class="grow"><h3 class="card__title">Archive space</h3><p class="card__description">Hides it for everyone. Linked collections and saved work stay where they are.</p></div>${btn('Archive', { v: 'danger-soft', icon: 'archive', act: 'sp-archive', data: { id: sp.id } })}</div></div>`;
     const bar = isDirty(f, sp) ? `<div class="savebar" role="region" aria-label="Unsaved changes"><span class="savebar__text">Unsaved changes</span>${btn('Discard', { v: 'ghost', act: 'sp-set-discard', disabled: f.busy })}${btn('Save changes', { v: 'primary', act: 'sp-set-save', loading: f.busy })}</div>` : '';
     return gate({
       loading: () => skelRows(4),
       ok: () => `<div class="sp-settings">
         ${formSection('Details', 'Shown on the space page, in Spaces and in search.', details)}
-        ${formSection('Knowledge', 'Members can read and ask about linked knowledge bases. Access to each base still applies.', `<div class="stack gap-4">${kbRows || '<p class="t-sm muted">No knowledge bases to link yet.</p>'}</div>`)}
+        ${formSection('Knowledge', 'Members can read and ask about linked collections. Access to each collection still applies.', `<div class="stack gap-4">${kbRows || '<p class="t-sm muted">No collections to link yet.</p>'}</div>`)}
         ${takesRequests(sp) ? formSection('Requests', 'What people can ask for, and how soon you usually answer. Changes apply right away.', requestTypesSection(sp)) : ''}
         ${formSection('Who can find it', '', vis)}
         ${formSection('Archive', '', danger)}
@@ -666,7 +753,7 @@
     const sp = spaceById(el.dataset.id); if (!sp) return;
     confirmAction({
       title: `Archive ${sp.name}?`, danger: true, confirm: 'Archive space',
-      body: 'Members lose the space page, its announcements and queue. Linked knowledge bases and saved work stay where they are.',
+      body: 'Members lose the space page, its announcements and queue. Linked collections and saved work stay where they are.',
       onConfirm: () => {
         sp.archived = true; S.ui.spSet = null; audit('Archived space', sp.name);
         go('/spaces');

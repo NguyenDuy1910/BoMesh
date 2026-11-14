@@ -10,7 +10,7 @@ from sqlalchemy import func, select, update
 from bomesh.db.engine import transaction_scope
 from bomesh.db.models import Item, Message
 from conftest import Chat
-from conversations_support import answer, conversation_url, error_reason, script_model, search
+from conversations_support import answer, conversation_url, conversations_url, error_reason, script_model, search
 
 pytestmark = pytest.mark.asyncio
 
@@ -55,6 +55,33 @@ async def test_list_filters_orders_and_pages(chat: Chat) -> None:
     assert len(first.json()["messages"]) == 3
     assert [m["text"] for m in rest.json()["messages"]] == ["You're welcome."]
     assert bad_filter.status_code == 400
+
+
+async def test_conversation_carries_its_latest_completed_answer(chat: Chat) -> None:
+    code = await _two_turns(chat)
+    empty = (await chat.conversation())["name"]
+    api = await chat.api()
+
+    def snippets(response: Any) -> dict[str, str | None]:
+        assert response.status_code == 200, response.text
+        return {c["name"]: c.get("lastAnswerSnippet") for c in response.json()["conversations"]}
+
+    listed = snippets(await api.get(conversations_url(chat.workspace)))
+    async with transaction_scope(chat.sessions) as session:
+        latest = await session.scalar(
+            select(func.max(Message.sequence_number)).where(Message.role == "assistant")
+        )
+        await session.execute(
+            update(Message).where(Message.sequence_number == latest).values(generation_state="failed")
+        )
+    after_failure = snippets(await api.get(conversations_url(chat.workspace)))
+    fetched = await api.get(conversation_url(chat.workspace, code))
+
+    name = f"workspaces/{chat.workspace.id}/conversations/{code}"
+    assert listed == {name: "You're welcome.", empty: None}
+    assert after_failure[name] == "Ask your manager [1]."
+    assert fetched.json()["lastAnswerSnippet"] == "Ask your manager [1]."
+
 
 
 async def test_messages_are_owner_private(chat: Chat) -> None:

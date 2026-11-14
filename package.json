@@ -2,6 +2,9 @@
   "name": "bomesh",
   "private": true,
   "scripts": {
-    "web": "cd apps/web && bun run dev"
+    "web": "cd apps/web && bun run dev",
+    "web:build": "cd apps/web && bun run build",
+    "web:start": "cd apps/web && bun run start",
+    "web:prod": "cd apps/web && bun run build && bun run start"
   }
 }

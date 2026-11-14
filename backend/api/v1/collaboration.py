@@ -696,12 +696,12 @@ async def list_requests(
         for restriction in filtering.restrictions(filtering.parse(params.filter))
         if restriction.field == "space" and not restriction.value.is_null
     ]
-    page = paging.page(
-        await requests.list(ctx, workspace, query, filtered_spaces=spaces)
-    )
+    records, total = await requests.list(ctx, workspace, query, filtered_spaces=spaces)
+    page = paging.page(records, total_size=total)
     return ListRequestsResponse(
         requests=[request_message(record) for record in page.items],
         next_page_token=page.next_page_token or None,
+        total_size=page.total_size,
     )
 
 

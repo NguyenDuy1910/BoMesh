@@ -1,12 +1,10 @@
-/* My library (/knowledge/library?tab=saved|recent|contributions|files|collections)
-   and one collection (/knowledge/collections/:id): the personal side of
-   Knowledge — saved resources, recent reads, your contributions and where they
-   stand, My files and My collections (the reading lists you made). Collections
-   others share with you are in Browse ("Shared with you"); saved views are in
-   Browse's Views. Each tab carries its own one action (Contributions →
-   Contribute, My files → Upload, My collections → New collection). Uses X.res
-   (resources.js), X.ctb + DR['ctb'] (contribute.js), core/catalog.js and
-   core/lifecycle.js. Prefix: lib-, col-. */
+/* My library sections (/knowledge/library?tab=saved|files|lists), My contributions (/contributions) and one reading list
+   (/knowledge/lists/:id): the personal side of Knowledge — Saved, My files and My reading lists (the reading lists you
+   made), each listed in the sidebar under Knowledge; and, under Your work, what you contributed and where it stands. Recent
+   reads are Your work → Recent (recent.js). Reading lists others share with you are in Browse ("Shared with you"); saved views
+   are in Browse's Views. Each section carries its own one action (My files → Upload, My reading lists → New reading list); My
+   contributions' header carries Contribute. Uses X.res (resources.js), X.ctb + DR['ctb'] (contribute.js),
+   core/catalog.js and core/lifecycle.js. Prefix: lib-, col-. */
 (() => {
   'use strict';
 
@@ -21,55 +19,43 @@
   /** Search, sort, filters and bulk selection appear once a list is long enough to need them (core TOOLS_MIN), or while one is in use. */
   const longOr = (n, active) => n >= TOOLS_MIN || !!active;
 
-  /* ═══════════════ My library ═══════════════ */
-  const TABS = [['saved', 'Saved'], ['recent', 'Recent'], ['contributions', 'Contributions'], ['files', 'My files'], ['collections', 'My collections']];
+  /* ═══════════════ My library sections ═══════════════ */
   const SAVED_SORTS = { saved: 'Recently saved', updated: 'Recently updated', title: 'Title A–Z' };
   /** A tab's one action, at the end of its toolbar. */
   const tabBar = (start, action) => `<div class="toolbar lib-bar">${start}${action ? `<div class="toolbar__end">${action}</div>` : ''}</div>`;
 
   P.library = ({ query }) => {
-    // The Knowledge tabs say where you are: no breadcrumb trail on top of them.
-    const kb = personalKb(), ctb = myContributions();
-    const counts = { saved: savedResources().length, recent: recentResources().length, contributions: ctb.length, files: kb ? docsIn(kb.id).length : 0, collections: myCollections().length };
-    const shown = { files: !!kb, contributions: canContribute() || ctb.length > 0 };
-    // Contributions: when something waits on you, the tab shows that number (highlighted), not the total.
-    const waiting = ctb.filter(d => stageOf(d) === 'changes').length;
-    const list = TABS.filter(([id]) => shown[id] ?? true).map(([id, label]) => ({ id, label, count: id === 'contributions' && waiting ? waiting : counts[id], alert: id === 'contributions' && waiting > 0 }));
-    const tab = list.some(t => t.id === query.tab) ? query.tab : 'saved';
-    // No header action: each tab has its own (Saved and Recent need none).
-    const head = X.res.hubHeader('library');
-    const body = { saved: savedTab, recent: recentTab, contributions: contributionsTab, files: filesTab, collections: collectionsTab }[tab](kb);
-    return `<div class="page lib">${head}<div class="page-tabs lib-tabs">${tabs(list, tab, '/knowledge/library', { label: 'My library' })}</div>${body}</div>`;
-  };
-  /** ?open=<id> (inbox, reader "Track") opens that contribution once, then leaves the address clean. */
-  AFTER.library = ({ query }) => {
-    if (query.tab !== 'contributions' || !query.open) return;
-    const id = query.open, q = { ...query }; delete q.open;
-    history.replaceState(null, '', '#' + S.cur.path + '?' + new URLSearchParams(q).toString());
-    S.cur.query = q;
-    if (docById(id)) openDrawer('ctb', { id });
+    const kb = personalKb(), tab = X.res.libraryTab(query);
+    // Each section is its own page (the sidebar lists it under Knowledge); no header action: each section has its own.
+    const head = X.res.hubHeader(tab);
+    const body = { saved: savedTab, files: filesTab, lists: collectionsTab }[tab](kb);
+    return `<div class="page page--wide lib">${head}${body}</div>`;
   };
 
-  /* ── Contributions: what you shared, where it stands, what to do next ── */
+  /* ═══════════════ My contributions: what you shared, where it stands, what to do next ═══════════════ */
   const CTB_GROUPS = [['all', 'All', null], ['changes', 'Needs your action', ['changes']], ['review', 'In review', ['analyzing', 'review']],
     ['published', 'Published', ['published', 'publishing', 'queued', 'merged', 'failed', 'update', 'stored']], ['rejected', LIFECYCLE.rejected.label, ['rejected']]];
   /** The one row action, only when the contribution waits on you. Everything else (Withdraw, Remove, Open) is in its panel. */
   const ctbAction = d => (lifecycleOf(d).key === 'changes' ? btn('Revise', { v: 'secondary', size: 'sm', icon: 'pencil', act: 'ctb-revise', data: { id: d.id } }) : '');
-  function contributionsTab() {
+  P.contributions = () => {
     const uk = 'libCtb', u = ui(uk, { seg: 'all' });
     const all = myContributions();
     const group = CTB_GROUPS.find(g => g[0] === u.seg) || CTB_GROUPS[0];
-    const rows = all.filter(d => (!group[2] || group[2].includes(lifecycleOf(d).key)) && matchesQ(uk, d.name, kbById(d.kb)?.name));
-    const contribute = canContribute() ? btn('Contribute', { v: 'primary', size: 'sm', icon: 'upload', act: 'contribute' }) : '';
-    const empty = () => emptyState({ icon: 'upload', title: 'No contributions yet', desc: 'Share a document with your team. A reviewer checks it before it’s published.', actions: btn('Contribute', { v: 'primary', icon: 'upload', act: 'contribute' }), boxed: true });
-    return gate({
+    const inGroup = (d, g) => !g[2] || g[2].includes(lifecycleOf(d).key);
+    const rows = all.filter(d => inGroup(d, group) && matchesQ(uk, d.name, kbById(d.kb)?.name));
+    const contribute = canContribute() ? btn('Contribute', { v: 'primary', icon: 'upload', act: 'contribute' }) : '';
+    const empty = () => emptyState({ icon: 'upload', title: 'No contributions yet', desc: canContribute() ? 'Share a document with your team. You check what the assistant suggests, then a reviewer publishes it.' : 'Documents you share with your team show up here, with where they stand.', boxed: true });
+    const head = pageHeader({ title: 'My contributions', actions: contribute });
+    const body = gate({
       loading: () => skelRows(4), empty,
       ok: () => {
-        if (!all.length) return canContribute() ? empty() : '';
-        const n = key => all.filter(d => CTB_GROUPS.find(g => g[0] === key)[2].includes(lifecycleOf(d).key)).length;
-        const opts = CTB_GROUPS.map(([id, label]) => [id, id === 'changes' && n('changes') ? `${label} (${n('changes')})` : label]);
-        const tools = longOr(all.length, u.seg !== 'all' || u.q) ? `<div class="lib-ctb-seg">${seg({ value: group[0], options: opts, act: 'lib-ctb-seg', label: 'Show' })}</div>${searchField({ uiKey: uk, placeholder: 'Search contributions' })}` : '';
-        const toolbar = tabBar(tools, contribute);
+        if (!all.length) return empty();
+        // One filter per state a contribution can be in (counts only where there is something); search earns its place on a long list.
+        const n = g => all.filter(d => inGroup(d, g)).length;
+        const opts = CTB_GROUPS.map(g => [g[0], g[2] && n(g) ? `${g[1]} · ${fmtNum(n(g))}` : g[1]]);
+        const seg_ = `<div class="lib-ctb-seg">${seg({ value: group[0], options: opts, act: 'lib-ctb-seg', label: 'Show' })}</div>`;
+        const search = longOr(all.length, u.q) ? searchField({ uiKey: uk, placeholder: 'Search contributions' }) : '';
+        const toolbar = seg_ || search ? `<div class="toolbar lib-bar">${seg_}${search}</div>` : '';
         if (!rows.length) return toolbar + noMatches(uk, ['seg'], 'contributions');
         return toolbar + list(rows.map(d => item({
           lead: fileIcon(d.type), title: esc(docTitle(d)), titleExtra: lifeChip(d, 'sm'),
@@ -78,7 +64,18 @@
         })), 'lib-list');
       },
     });
-  }
+    return `<div class="page page--wide lib">${head}${body}</div>`;
+  };
+  /** ?open=<id> (Home, Inbox, the Reader's Track, the submit toast) opens that contribution once, then leaves the address clean. */
+  AFTER.contributions = ({ query }) => {
+    if (!query.open) return;
+    const id = query.open, q = { ...query }; delete q.open;
+    const qs = new URLSearchParams(q).toString();
+    history.replaceState(null, '', '#' + S.cur.path + (qs ? '?' + qs : ''));
+    S.cur.query = q;
+    const d = docById(id);
+    if (d && canSeeDoc(d)) openDrawer('ctb', { id }); else toast('This contribution isn’t available', { tone: 'danger' });
+  };
   A['lib-ctb-seg'] = el => { ui('libCtb').seg = el.dataset.value; refresh(); };
 
   /* ── Saved ── */
@@ -99,7 +96,7 @@
         if (!all.length) return empty();
         // Short lists act per row (⋯); selecting several only helps in a long one.
         const listHtml = rows.length ? X.res.rows(rows, { q: u.q || '', select: tools ? uk : undefined }) : noMatches(uk, [], 'saved resources');
-        const bar = sel.length ? bulkBar(uk, btn('Add to collection', { v: 'ghost', size: 'sm', icon: 'list-plus', act: 'res-collect', data: { ids: sel.join(',') } }) + btn('Remove from saved', { v: 'ghost', size: 'sm', icon: 'bookmark', act: 'lib-unsave' })) : '';
+        const bar = sel.length ? bulkBar(uk, btn('Add to reading list', { v: 'ghost', size: 'sm', icon: 'list-plus', act: 'res-collect', data: { ids: sel.join(',') } }) + btn('Remove from saved', { v: 'ghost', size: 'sm', icon: 'bookmark', act: 'lib-unsave' })) : '';
         return toolbar + listHtml + bar;
       },
     });
@@ -110,32 +107,6 @@
     const n = ids.filter(id => l.includes(id)).length; if (!n) return;
     D.saved[me().id] = l.filter(id => !ids.includes(id)); u.sel = {}; persist(); refresh();
     toast(`Removed ${plural(n, 'resource')} from saved`, { action: { label: 'Undo', run: () => { D.saved[me().id] = before; persist(); refresh(); } } });
-  };
-
-  /* ── Recent ── */
-  function recentTab() {
-    const all = recentResources();
-    const empty = () => emptyState({ icon: 'history', title: 'No recent reads', desc: 'Resources you open show up here.', actions: btn('Browse knowledge', { v: 'primary', href: '/knowledge' }), boxed: true });
-    return gate({
-      loading: () => skelRows(6), empty,
-      ok: () => {
-        if (!all.length) return empty();
-        const start = new Date(); start.setHours(0, 0, 0, 0);
-        const today = start.getTime(), week = today - 6 * DAY;
-        const groups = [['Today', x => x.at >= today], ['This week', x => x.at < today && x.at >= week], ['Earlier', x => x.at < week]];
-        const html = groups.map(([label, fn]) => {
-          const items = all.filter(fn); if (!items.length) return '';
-          return `<section class="lib-group"><h2 class="lib-group__title">${esc(label)}</h2>${X.res.rows(items.map(x => x.doc), { compact: true })}</section>`;
-        }).join('');
-        // The tab already shows how many: the toolbar only offers clearing.
-        return `<div class="toolbar"><div class="toolbar__end">${btn('Clear history', { v: 'ghost', size: 'sm', icon: 'x', act: 'lib-clear-recent' })}</div></div><div class="stack gap-24">${html}</div>`;
-      },
-    });
-  }
-  A['lib-clear-recent'] = () => {
-    const before = [...mine('recent')];
-    D.recent[me().id] = []; persist(); refresh();
-    toast('History cleared', { action: { label: 'Undo', run: () => { D.recent[me().id] = before; persist(); refresh(); } } });
   };
 
   /* ── My files ── */
@@ -161,56 +132,56 @@
   }
   A['lib-process'] = el => { const d = docById(el.dataset.id); if (d && !X.processDocs([d], { msg: `Processing “${d.name}”` })) toast('This file can’t be processed', { tone: 'danger' }); };
 
-  /* ── My collections: the reading lists you made (ones shared with you are in Browse → Shared with you) ── */
+  /* ── My reading lists: the reading lists you made (ones shared with you are in Browse → Shared with you) ── */
   function colItem(c) {
     const s = shareLabel(c);
     const desc = [`<span class="row gap-4">${ic(s.icon, 'i-xs')}${esc(s.label)}</span>`, plural((c.items || []).length, 'item')].join(dot);
-    return item({ lead: itemIcon('list', c.featured ? 'accent' : '', 'sm'), title: esc(c.name), desc: `<span class="row gap-4 lib-col__meta">${desc}</span>`, meta: `Updated ${esc(relLow(c.updated))}`, href: '/knowledge/collections/' + c.id });
+    return item({ lead: itemIcon('list', c.featured ? 'accent' : '', 'sm'), title: esc(c.name), desc: `<span class="row gap-4 lib-col__meta">${desc}</span>`, meta: `Updated ${esc(relLow(c.updated))}`, href: '/knowledge/lists/' + c.id });
   }
   function collectionsTab() {
     const yours = myCollections();
-    const empty = () => emptyState({ icon: 'list', title: 'No collections yet', desc: 'Group resources into a reading list, put them in order and share it with your team.', actions: btn('New collection', { v: 'primary', icon: 'plus', act: 'col-new' }), boxed: true });
+    const empty = () => emptyState({ icon: 'list', title: 'No reading lists yet', desc: 'Group resources into a reading list, put them in order and share it with your team.', actions: btn('New reading list', { v: 'primary', icon: 'plus', act: 'col-new' }), boxed: true });
     return gate({
       loading: () => skelRows(4), empty,
       // The tab already counts them: the toolbar only offers making another.
-      ok: () => !yours.length ? empty() : tabBar('', btn('New collection', { v: 'primary', size: 'sm', icon: 'plus', act: 'col-new' })) + list(yours.map(colItem), 'lib-list'),
+      ok: () => !yours.length ? empty() : tabBar('', btn('New reading list', { v: 'primary', size: 'sm', icon: 'plus', act: 'col-new' })) + list(yours.map(colItem), 'lib-list'),
     });
   }
 
-  /* ═══════════════ Collection page ═══════════════ */
+  /* ═══════════════ Reading list page ═══════════════ */
   const colKey = id => 'col_' + id;
   function colUnavailable() {
     crumbs([{ label: 'Knowledge', to: '/knowledge' }, { label: 'Not available' }]);
-    return `<div class="page">${emptyState({ icon: 'list', title: 'This collection isn’t available', desc: 'It may have been archived, or it isn’t shared with you.', actions: btn('Browse knowledge', { v: 'primary', href: '/knowledge' }), boxed: true })}</div>`;
+    return `<div class="page">${emptyState({ icon: 'list', title: 'This reading list isn’t available', desc: 'It may have been archived, or it isn’t shared with you.', actions: btn('Browse knowledge', { v: 'primary', href: '/knowledge' }), boxed: true })}</div>`;
   }
-  /** A collection is an ordered reading list: view mode numbers the items and checks the ones you've read; Edit (one entry, for
+  /** A reading list is ordered: view mode numbers the items and checks the ones you've read; Edit (one entry, for
       editors) turns the page into its editor — name and description inline, reorder, notes, remove, Add resources — with Done as the
       only primary. Every change saves as you make it (quiet toast with Undo). */
   P.collection = ({ params }) => {
     const c = collectionById(params.id);
     if (!c || !canSeeCollection(c)) return colUnavailable();
-    // Yours sit in My library; a shared collection was found in Browse, so its trail is just Knowledge.
-    crumbs([{ label: 'Knowledge', to: '/knowledge' }, ...(c.owner === me().id ? [{ label: 'My library', to: libHref('collections') }] : []), { label: c.name }]);
+    // Yours sit in My reading lists; a shared reading list was found in Browse, so its trail is just Knowledge.
+    crumbs([{ label: 'Knowledge', to: '/knowledge' }, ...(c.owner === me().id ? [{ label: 'My reading lists', to: libHref('lists') }] : []), { label: c.name }]);
     const edit = canEditCollection(c), u = ui(colKey(c.id), { edit: false });
     if (!edit) u.edit = false;
     const { ok, locked } = collectionItems(c);
     const s = shareLabel(c);
     const meta = `<span class="lib-col__head-meta">${chip(s.label, { icon: s.icon, size: 'sm' })}<span class="t-sm muted">${esc(c.owner === me().id ? 'By you' : 'By ' + actorName(c.owner))} · Updated ${esc(relLow(c.updated))}</span></span>`;
-    // View: one primary (Ask about this collection), Edit, and ⋯ (Use in, copy, duplicate, archive). Edit mode: Done is the primary.
+    // View: one primary (Ask about this reading list), Edit, and ⋯ (Use in, copy, duplicate, archive). Edit mode: Done is the primary.
     const actions = u.edit
       ? btn('Add resources', { icon: 'plus', act: 'col-add' }) + btn('Done', { v: 'primary', icon: 'check', act: 'col-edit-mode', data: { id: c.id } })
-      : (ok.length ? btn('Ask about this collection', { v: 'primary', icon: 'sparkles', act: 'col-ask', data: { id: c.id } }) : '')
+      : (ok.length ? btn('Ask about this reading list', { v: 'primary', icon: 'sparkles', act: 'col-ask', data: { id: c.id } }) : '')
         + (edit ? btn('Edit', { icon: 'pencil', act: 'col-edit-mode', data: { id: c.id } }) : '')
         + iconBtn('more', 'More actions', { menu: 'col-more', data: { id: c.id } });
     const head = u.edit
-      ? pageHeader({ title: 'Edit collection', lead: itemIcon('list', 'accent'), desc: 'Changes save as you go.', actions })
+      ? pageHeader({ title: 'Edit reading list', lead: itemIcon('list', 'accent'), desc: 'Changes save as you go.', actions })
       : pageHeader({ title: c.name, lead: itemIcon('list', 'accent'), desc: (c.desc ? esc(c.desc) + '<br>' : '') + meta, extra: X.res.demoChip(), actions });
-    const details = u.edit ? `<section class="lib-edit__meta" aria-label="Collection details">
+    const details = u.edit ? `<section class="lib-edit__meta" aria-label="Reading list details">
       ${field({ id: 'colm-name', label: 'Name', required: true, error: u.nameErr || '', control: input({ id: 'colm-name', value: c.name, attrs: `maxlength="60" data-change="col-meta-save" data-field="name" data-id="${esc(c.id)}"`, invalid: !!u.nameErr }) })}
       ${field({ id: 'colm-desc', label: 'Description', optional: true, control: input({ id: 'colm-desc', value: c.desc || '', placeholder: 'What it’s for and who should read it', attrs: `maxlength="200" data-change="col-meta-save" data-field="desc" data-id="${esc(c.id)}"` }) })}
       <div class="lib-edit__share"><span class="label">Who can see it</span><span class="row gap-8">${chip(s.label, { icon: s.icon, size: 'sm' })}${linkBtn('Change', { act: 'col-edit', data: { id: c.id } })}</span></div></section>` : '';
     const lockedRow = locked ? `<div class="lib-locked">${ic('lock', 'i-sm')}<span>${plural(locked, 'item')} ${locked === 1 ? 'isn’t' : 'aren’t'} shared with you</span></div>` : '';
-    const empty = () => emptyState({ icon: 'list', title: 'This collection is empty', desc: edit ? 'Add resources people should read, in order.' : 'The owner hasn’t added anything yet.', actions: edit ? btn('Add resources', { v: 'primary', icon: 'plus', act: 'col-add' }) : '', boxed: true });
+    const empty = () => emptyState({ icon: 'list', title: 'This reading list is empty', desc: edit ? 'Add resources people should read, in order.' : 'The owner hasn’t added anything yet.', actions: edit ? btn('Add resources', { v: 'primary', icon: 'plus', act: 'col-add' }) : '', boxed: true });
     const read = new Set(recentResources(200).map(x => x.doc.id));
     const body = gate({
       loading: () => skelRows(5), empty,
@@ -228,7 +199,7 @@
     return `<div class="lib-edit__row">
       <span class="lib-edit__order"><span class="num t-sm muted">${i + 1}</span>${iconBtn('arrow-up', 'Move up', { size: 'sm', act: 'col-move', data: { id: c.id, doc: d.id, dir: -1 }, disabled: i === 0 })}${iconBtn('arrow-down', 'Move down', { size: 'sm', act: 'col-move', data: { id: c.id, doc: d.id, dir: 1 }, disabled: i === n - 1 })}</span>
       <span class="lib-edit__body">${fileIcon(d.type)}<span class="stack gap-4 grow"><span class="medium truncate">${esc(title)}</span>${input({ id: 'coln-' + d.id, value: x.note ?? '', placeholder: 'Add a note for readers', size: 'sm', onEnter: 'col-note-enter', attrs: `maxlength="160" data-change="col-note-save" data-id="${esc(c.id)}" data-doc="${esc(d.id)}" aria-label="Note for ${esc(title)}"` })}</span></span>
-      ${iconBtn('trash', 'Remove from collection', { size: 'sm', act: 'col-remove', data: { id: c.id, doc: d.id } })}
+      ${iconBtn('trash', 'Remove from reading list', { size: 'sm', act: 'col-remove', data: { id: c.id, doc: d.id } })}
     </div>`;
   }
   A['col-edit-mode'] = el => {
@@ -245,7 +216,7 @@
     u.nameErr = '';
     if ((c[k] || '') === v) { refresh(); return; }
     const prev = { [k]: c[k], updated: c.updated };
-    c[k] = v; c.updated = Date.now(); audit('Updated a collection', c.name); persist(); refresh();
+    c[k] = v; c.updated = Date.now(); audit('Updated a reading list', c.name); persist(); refresh();
     toast(k === 'name' ? 'Name saved' : 'Description saved', { action: { label: 'Undo', run: () => { Object.assign(c, prev); persist(); refresh(); } } });
   };
   /** A note saves when you leave its field (Enter leaves it too). */
@@ -255,7 +226,7 @@
     const it = c.items.find(i => i.doc === el.dataset.doc); if (!it) return;
     const v = el.value.trim(), prev = it.note, prevAt = c.updated; if ((it.note || '') === v) return;
     if (v) it.note = v; else delete it.note;
-    c.updated = Date.now(); audit('Edited collection notes', c.name); persist(); refresh();
+    c.updated = Date.now(); audit('Edited reading list notes', c.name); persist(); refresh();
     toast(v ? 'Note saved' : 'Note removed', { action: { label: 'Undo', run: () => { if (prev) it.note = prev; else delete it.note; c.updated = prevAt; persist(); refresh(); } } });
   };
   A['col-move'] = el => {
@@ -272,7 +243,7 @@
     const c = collectionById(el.dataset.id); if (!canEditCollection(c)) return;
     const i = c.items.findIndex(x => x.doc === el.dataset.doc); if (i < 0) return;
     const [it] = c.items.splice(i, 1), d = docById(it.doc), prev = c.updated;
-    c.updated = Date.now(); audit('Removed from a collection', `${c.name}: ${d?.name || ''}`); persist(); refresh();
+    c.updated = Date.now(); audit('Removed from a reading list', `${c.name}: ${d?.name || ''}`); persist(); refresh();
     toast(`Removed “${d ? docTitle(d) : 'item'}”`, { action: { label: 'Undo', run: () => { c.items.splice(i, 0, it); c.updated = prev; persist(); refresh(); } } });
   };
   A['col-ask'] = el => {
@@ -280,7 +251,7 @@
     const ids = collectionItems(c).ok.map(x => x.d.id).join(',');
     A['chat-ask']?.({ dataset: { q: 'Summarize what these resources cover and how they relate', docs: ids, ...(collectionSpace(c) ? { space: collectionSpace(c).id } : {}) } });
   };
-  /** Workflows a collection can start, with all its readable items (Work module). */
+  /** Workflows a reading list can start, with all its readable items (Work module). */
   function colUseItems(c) {
     const ids = collectionItems(c).ok.map(x => x.d.id).join(',');
     if (!hasModule('work') || !ids) return [];
@@ -293,20 +264,20 @@
     // Editing (name, description, who can see it, items) is the header's Edit; ⋯ holds the rest.
     return [
       ...colUseItems(c),
-      { label: 'Copy link', icon: 'link', run: () => copyText(location.href.split('#')[0] + '#/knowledge/collections/' + c.id, 'Link copied') },
-      !own && { label: 'Duplicate to my collections', icon: 'copy', run: () => duplicate(c) },
+      { label: 'Copy link', icon: 'link', run: () => copyText(location.href.split('#')[0] + '#/knowledge/lists/' + c.id, 'Link copied') },
+      !own && { label: 'Duplicate to my reading lists', icon: 'copy', run: () => duplicate(c) },
       edit && { sep: true },
       edit && { label: 'Archive', icon: 'archive', danger: true, run: () => archive(c) },
     ].filter(Boolean);
   };
   function duplicate(c) {
     const copy = { id: uid('col'), name: `${c.name} (copy)`, desc: c.desc || '', owner: me().id, share: 'private', created: Date.now(), updated: Date.now(), items: c.items.map(i => ({ ...i })) };
-    (D.collections ??= []).unshift(copy); audit('Duplicated a collection', c.name); persist();
-    go('/knowledge/collections/' + copy.id); toast(`Copied to “${copy.name}”`);
+    (D.collections ??= []).unshift(copy); audit('Duplicated a reading list', c.name); persist();
+    go('/knowledge/lists/' + copy.id); toast(`Copied to “${copy.name}”`);
   }
   function archive(c) {
-    c.archived = true; audit('Archived a collection', c.name); persist(); go(c.owner === me().id ? libHref('collections') : '/knowledge');
-    toast(`Archived “${c.name}”`, { action: { label: 'Undo', run: () => { c.archived = false; persist(); go('/knowledge/collections/' + c.id); } } });
+    c.archived = true; audit('Archived a reading list', c.name); persist(); go(c.owner === me().id ? libHref('lists') : '/knowledge');
+    toast(`Archived “${c.name}”`, { action: { label: 'Undo', run: () => { c.archived = false; persist(); go('/knowledge/lists/' + c.id); } } });
   }
 
   /* ── Add resources ── */
@@ -324,12 +295,12 @@
     const found = catalogSearch(parseCatalogQuery({ q: f.q })).rows.map(x => x.doc).filter(d => isReaderVisible(d) && fits(d) && !have.has(d.id) && !f.picked.includes(d.id)).slice(0, 25);
     const err = f.touched && !picked.length ? 'Pick at least one resource.' : '';
     const rows = picked.map(d => pickRow(d, true)).join('') + found.map(d => pickRow(d, false)).join('');
-    const none = f.q.trim() ? `No resources match “${esc(f.q.trim())}”.` : 'Everything you can open is already in this collection.';
+    const none = f.q.trim() ? `No resources match “${esc(f.q.trim())}”.` : 'Everything you can open is already in this reading list.';
     const n = picked.length;
     return {
       size: 'md', title: 'Add resources', icon: 'list-plus',
       desc: `Pick what belongs in “${esc(c.name)}”.`,
-      body: `<div class="stack gap-12">${searchField({ bind: 'colAdd.q', live: true, id: 'cola-q', size: 'md', full: true, autofocus: true, placeholder: 'Search by title, topic or knowledge base' })}
+      body: `<div class="stack gap-12">${searchField({ bind: 'colAdd.q', live: true, id: 'cola-q', size: 'md', full: true, autofocus: true, placeholder: 'Search by title, topic or collection' })}
         ${err ? `<div class="field-error" role="alert">${ic('alert-circle')}<span>${esc(err)}</span></div>` : ''}
         ${rows ? `<div class="option-list lib-add" role="group" aria-label="Resources">${rows}</div>` : `<p class="lib-add-none">${none}</p>`}</div>`,
       footStart: n ? `${plural(n, 'resource')} selected` : 'Documents keep their own access.',
@@ -341,7 +312,7 @@
     const f = ui('colAdd'), c = collectionById(f.id); if (!canEditCollection(c)) return;
     if (!f.picked.length) { f.touched = true; refreshLayer(); $('#cola-q')?.focus(); return; }
     const add = f.picked.filter(id => !c.items.some(i => i.doc === id)).map(doc => ({ doc, added: Date.now() }));
-    c.items.push(...add); c.updated = Date.now(); audit('Added to a collection', c.name); persist(); closeModal(); refresh();
+    c.items.push(...add); c.updated = Date.now(); audit('Added to a reading list', c.name); persist(); closeModal(); refresh();
     toast(`Added ${plural(add.length, 'resource')}`, { action: { label: 'Undo', run: () => { c.items = c.items.filter(i => !add.includes(i)); persist(); refresh(); } } });
   };
 })();

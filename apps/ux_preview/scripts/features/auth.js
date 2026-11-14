@@ -26,8 +26,8 @@
     return msg ? html.replace(/<\/div>$/, `<div class="field-error" id="${o.id}-err" role="alert">${ic('alert-circle')}<span>${esc(msg)}${action ? ' ' + action : ''}</span></div></div>`) : html;
   }
   /** Password input with a show/hide icon button. */
-  function passwordInput({ id, bind, value, show, act, onEnter, autocomplete, invalid, live }) {
-    return `<div class="input-group input-group--suffix au-pw">${input({ id, bind, value, type: show ? 'text' : 'password', onEnter, autocomplete, invalid, attrs: live ? 'data-live' : '' })}<span class="input-group__suffix">${iconBtn(show ? 'eye-off' : 'eye', show ? 'Hide password' : 'Show password', { size: 'sm', act })}</span></div>`;
+  function passwordInput({ id, bind, value, show, act, onEnter, autocomplete, invalid, live, autofocus }) {
+    return `<div class="input-group input-group--suffix au-pw">${input({ id, bind, value, type: show ? 'text' : 'password', onEnter, autocomplete, invalid, autofocus, attrs: live ? 'data-live' : '' })}<span class="input-group__suffix">${iconBtn(show ? 'eye-off' : 'eye', show ? 'Hide password' : 'Show password', { size: 'sm', act })}</span></div>`;
   }
 
   /* ── Sign in ── */
@@ -58,13 +58,15 @@
     return `<div class="au-demo">${disclosure({ path: 'auSignin.demo', icon: 'users', title: 'Try a demo account', summary: 'Password <span class="mono">demo</span>', body: grid })}</div>`;
   }
 
-  P.signin = () => {
+  P.signin = ({ query }) => {
     const s = signinUi(), e = s.err, busy = !!s.busy;
     return `<div class="auth au-page">
       <main class="auth__form"><div class="auth__form-inner">
         ${brand()}
         <h1 class="t-title au-title">Sign in</h1>
-        <p class="muted au-sub">Welcome back. Pick up where your team left off.</p>
+        ${query.reason === 'expired'
+          ? `<div class="au-notice">${alertBox('accent', 'Your session expired', 'Sign in again to go back to where you were.', '', { icon: 'clock' })}</div>`
+          : '<p class="muted au-sub">Welcome back. Pick up where your team left off.</p>'}
         ${field({ id: 'au-id', label: 'Email or username', error: e.id, control: input({ id: 'au-id', bind: 'auSignin.id', value: s.id, placeholder: 'name@company.com', onEnter: 'au-signin', autocomplete: 'username', invalid: !!e.id, autofocus: true }) })}
         ${field({ id: 'au-pw', label: 'Password', error: e.pw, control: passwordInput({ id: 'au-pw', bind: 'auSignin.pw', value: s.pw, show: s.show, act: 'au-signin-show', onEnter: 'au-signin', autocomplete: 'current-password', invalid: !!e.pw }) })}
         <div class="row end au-forgot">${linkBtn('Forgot password?', { act: 'au-forgot' })}</div>
@@ -87,11 +89,14 @@
     if (!s.pw) e.pw = 'Enter your password.';
     return e;
   }
-  /** Signed in as persona `pid`: straight in when they belong to one workspace, else choose. */
+  /** Signed in as persona `pid`: back to `?next=` when the same person signs in again after their session expired;
+      otherwise straight in when they belong to one workspace, else choose. */
   function enterAs(pid) {
     const s = signinUi(); s.busy = ''; s.pw = ''; s.err = {}; s.show = false;
+    const next = S.cur.query.next, back = S.cur.query.reason === 'expired' && pid === S.persona && /^\/(?![/\\])/.test(next || '');
     S.persona = pid; S.ui.prefs = null; S.signedIn = true;
     Object.assign(wsUi(), { fresh: false, checks: 0 });
+    if (back) { persist(); go(next); return; }
     const mine = workspacesForMe();
     if (mine.length === 1) { enterWorkspace(mine[0].id, { quiet: true }); return; }
     persist();
@@ -121,6 +126,61 @@
   };
   /** Fill the form with a demo account and hand focus to Sign in, so Enter (or one click) finishes. */
   A['au-demo'] = el => { const s = signinUi(), p = PERSONAS[el?.dataset?.p] || PERSONAS.member; s.id = p.email; s.pw = 'demo'; s.err = {}; refresh(); $('#au-submit')?.focus(); };
+
+  /* ── Session expired: sign in again in place ──
+     The page underneath stays exactly as it was (no reload, nothing re-requested until the person is back). The same person
+     signing in closes the dialog and the page refreshes its data; another account starts clean on Home; the full page is a
+     fallback that returns here afterwards. Not dismissable: every way out is an explicit choice. */
+  const expiredUi = () => ui('auExpired', { id: '', pw: '', show: false, err: {}, busy: '' });
+  M.sessionExpired = () => {
+    const s = expiredUi(), e = s.err, busy = !!s.busy;
+    return {
+      size: 'sm', guard: true, noClose: true, icon: 'clock', title: 'Your session expired',
+      desc: 'Sign in again to pick up where you left off. This page stays open.',
+      body: `<div class="au-reauth">
+        ${btn('Continue with Google', { v: 'outline', size: 'lg', full: true, act: 'au-reauth-google', loading: s.busy === 'google', disabled: busy, cls: 'au-google' }).replace('<span>', GOOGLE + '<span>')}
+        <div class="au-or" role="separator"><span>or</span></div>
+        ${field({ id: 'ax-id', label: 'Email or username', error: e.id, control: input({ id: 'ax-id', bind: 'auExpired.id', value: s.id, onEnter: 'au-reauth', autocomplete: 'username', invalid: !!e.id, autofocus: !s.id }) })}
+        ${field({ id: 'ax-pw', label: 'Password', error: e.pw, control: passwordInput({ id: 'ax-pw', bind: 'auExpired.pw', value: s.pw, show: s.show, act: 'au-reauth-show', onEnter: 'au-reauth', autocomplete: 'current-password', invalid: !!e.pw, autofocus: !!s.id }) })}
+        ${e.form ? `<div class="au-form-error">${alertBox('danger', e.form)}</div>` : ''}
+        ${btn('Sign in', { v: 'primary', size: 'lg', full: true, act: 'au-reauth', loading: s.busy === 'pw', disabled: busy, id: 'ax-submit' })}
+        <p class="au-foot">${linkBtn('Use the full sign-in page', { act: 'au-reauth-page' })} · ${linkBtn('Sign out', { act: 'au-reauth-signout' })}</p>
+      </div>`,
+    };
+  };
+  /** Prototype trigger: the session ends while you work (the dialog opens over the current page). */
+  X.expireSession = () => { Object.assign(expiredUi(), { id: me().email, pw: '', show: false, err: {}, busy: '' }); openModal('sessionExpired'); };
+  /** Signed in again from the dialog as persona `pid`. */
+  function resumeAs(pid) {
+    Object.assign(expiredUi(), { pw: '', show: false, err: {}, busy: '' });
+    if (pid === S.persona) { closeModal(); return; }   // same person: the page stays, its data reloads
+    S.modal = null; S.ui = {}; enterAs(pid);         // another account: nothing of the previous one stays; Home
+  }
+  A['au-reauth'] = async () => {
+    const s = expiredUi(); if (s.busy) return;
+    s.err = validateSignin(s);
+    if (s.err.id || s.err.pw) { refreshLayer(); $(s.err.id ? '#ax-id' : '#ax-pw')?.focus(); return; }
+    s.busy = 'pw'; refreshLayer();
+    await sleep(700);
+    const pid = personaFor(s.id);
+    if (!pid || s.pw !== 'demo') { s.busy = ''; s.pw = ''; s.err = { form: 'Email or password is incorrect' }; refreshLayer(); $('#ax-pw')?.focus(); return; }
+    resumeAs(pid);
+  };
+  A['au-reauth-google'] = async () => {
+    const s = expiredUi(); if (s.busy) return;
+    s.err = {}; s.busy = 'google'; refreshLayer();
+    await sleep(900);
+    resumeAs(S.persona);
+  };
+  A['au-reauth-show'] = () => { const s = expiredUi(); s.show = !s.show; refreshLayer(); $('#ax-pw')?.focus(); };
+  /** Fallback: the full sign-in page explains why, then returns to this address. */
+  A['au-reauth-page'] = () => {
+    const back = S.cur.full;
+    Object.assign(signinUi(), { id: expiredUi().id, pw: '', err: {}, busy: '' });
+    S.modal = null; S.signedIn = false; persist();
+    go(`/signin?next=${encodeURIComponent(back)}&reason=expired`);
+  };
+  A['au-reauth-signout'] = () => { S.modal = null; S.signedIn = false; persist(); go('/signin'); toast('Signed out', { tone: 'accent' }); };
 
   /* ── Create account ── */
   const PW_RULES = [

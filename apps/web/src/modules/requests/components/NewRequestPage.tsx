@@ -1,25 +1,27 @@
 "use client";
 
-import { Button, Checkbox, FieldError, Input, Label, ListBox, Select, Spinner, TextArea, TextField } from "@heroui/react";
-import { ChevronRight, ClipboardList, Clock, MessageCircle, Send, ShieldCheck } from "lucide-react";
+import { Button, Card, Checkbox, FieldError, Input, Label, ListBox, Select, Spinner, TextArea, TextField } from "@heroui/react";
+import { ArrowUpRight, ChevronRight, CircleAlert, ClipboardList, Clock, MessageCircle, Send, ShieldCheck } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { PageChrome } from "@/components/shell/page-chrome";
-import { Callout, EmptyState, ErrorState, ItemIcon, KeyValue, List, ListItem, NoMatches, Page, PageHeader, SearchInput, SkeletonRows, toast } from "@/components/ui";
+import { Callout, Disclosure, EmptyState, ErrorState, ItemIcon, LinkButton, List, ListItem, NoMatches, Page, PageHeader, SearchInput, SkeletonRows, toast } from "@/components/ui";
 import { ApiError, errorMessage, resourceId } from "@/lib/api/client";
+import { plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
+import { useItem } from "@/modules/knowledge/queries";
 import { SpaceMark, useSpace } from "@/modules/spaces";
 
 import { createRequest } from "../api";
 import {
-  capital,
   checkLines,
   initialValues,
   slaUsual,
   teamWord,
   toStruct,
   validateValues,
+  type CheckLine,
   type FieldValues,
   type Request,
   type RequestType,
@@ -28,52 +30,85 @@ import {
 } from "../model";
 import { useCatalog, useCreateRequest, useRequestType } from "../queries";
 import { AskSpaceDialog } from "./AskSpaceDialog";
-import { LinkButton, RqCard } from "./parts";
+import { ButtonLink, RqCard } from "./parts";
 import { RuleChecks } from "./RuleChecks";
 
-/** /requests/new — the catalog, or `?space=&type=` the form with the rule check (preview `P.requestNew`). */
+/** Preview list-tools rule (`needsTools`): search from 7 items, or while searching. */
+const TOOLS_MIN = 7;
+
+/**
+ * /requests/new — the catalog (`?space=` scopes it to one space), or `?space=&type=` the form with the
+ * rule check (preview `P.requestNew`). `?space=&ask` (old question links) opens the space's Ask dialog.
+ */
 export function NewRequestPage() {
   const params = useSearchParams();
   const space = params.get("space");
   const type = params.get("type");
   if (space && type) return <NewRequestForm key={`${space}/${type}`} spaceId={space} typeId={type} />;
-  return <Catalog />;
+  return <Catalog key={space ?? ""} spaceId={space ?? ""} />;
 }
 
 /* ═══════════════ Catalog ═══════════════ */
 
-function Catalog() {
+/** Service request types only; questions go through the space's Ask dialog. */
+function Catalog({ spaceId }: { spaceId: string }) {
   const { can } = useWorkspace();
+  const router = useRouter();
+  const params = useSearchParams();
   const catalog = useCatalog();
+  const askSpace = useSpace(params.has("ask") ? spaceId : "").data;
+  const [asking, setAsking] = useState(params.has("ask"));
   const [q, setQ] = useState("");
+  // From a space's page ("New request"), the catalog is that space's; the rest stays one link away.
+  const scoped = spaceId ? catalog.groups.find((g) => resourceId(g.space.name) === spaceId) : undefined;
+  const groups = scoped ? [scoped] : catalog.groups;
+  const total = groups.reduce((n, g) => n + g.types.length, 0);
+  const onlyType = scoped && scoped.types.length === 1 && !params.has("ask") ? scoped.types[0] : undefined;
   const needle = q.trim().toLowerCase();
-  const shown = catalog.groups
+  const shown = groups
     .map((g) => ({
       space: g.space,
       types: g.types.filter((t) => !needle || [t.displayName, t.description, g.space.displayName].some((s) => (s ?? "").toLowerCase().includes(needle))),
     }))
     .filter((g) => g.types.length);
+
+  // A space that takes a single kind of request opens its form directly.
+  useEffect(() => {
+    if (onlyType) router.replace(`/requests/new?space=${spaceId}&type=${resourceId(onlyType.name)}`);
+  }, [onlyType, router, spaceId]);
+
   const empty = (
     <EmptyState
       icon={ClipboardList}
       boxed
       title="No one takes requests here yet"
-      description={can("spaces.create") ? "Offices and teams add request types in their space settings." : "When an office or team starts taking requests, you’ll find them here."}
-      actions={<LinkButton href="/requests">Back to requests</LinkButton>}
+      description={can("spaces.create") ? "Office and team leads add request types in their space’s Settings, under Requests." : "When an office or team starts taking requests, you’ll find them here."}
+      actions={<ButtonLink href="/requests">Back to requests</ButtonLink>}
     />
   );
   return (
-    <Page narrow className="rq-page">
-      <PageChrome crumbs={[{ label: "Requests", href: "/requests" }, { label: "New request" }]} />
-      <PageHeader title="New request" description="Ask a team or office for something they handle. The assistant checks the rules before you send." />
-      <div className="toolbar">
-        <SearchInput value={q} onChange={setQ} placeholder="Search requests and offices" />
-      </div>
+    <Page width="narrow" className="rq-page">
+      <PageHeader
+        title="New request"
+        actions={
+          scoped && catalog.groups.length > 1 ? (
+            <ButtonLink href="/requests/new" variant="ghost">
+              All request types
+            </ButtonLink>
+          ) : null
+        }
+        crumbs={[{ label: "Requests", href: "/requests" }, { label: "New request" }]}
+      />
+      {total >= TOOLS_MIN || q ? (
+        <div className="toolbar">
+          <SearchInput value={q} onChange={setQ} placeholder="Search requests and offices" />
+        </div>
+      ) : null}
       {catalog.isError && !catalog.groups.length ? (
         <ErrorState error={catalog.error} onRetry={catalog.refetch} />
-      ) : catalog.isPending ? (
+      ) : catalog.isPending || onlyType ? (
         <SkeletonRows rows={6} />
-      ) : !catalog.groups.length ? (
+      ) : !groups.length ? (
         empty
       ) : !shown.length ? (
         <NoMatches what="request types" onClear={() => setQ("")} />
@@ -121,6 +156,7 @@ function Catalog() {
           </section>
         ))
       )}
+      {askSpace ? <AskSpaceDialog space={askSpace} isOpen={asking} onClose={() => setAsking(false)} initialQuestion={params.get("q") ?? ""} /> : null}
     </Page>
   );
 }
@@ -147,23 +183,23 @@ function NewRequestForm({ spaceId, typeId }: { spaceId: string; typeId: string }
           title="This request type isn’t available"
           description="It may have been removed by the office."
           actions={
-            <LinkButton href="/requests/new" variant="primary">
+            <ButtonLink href="/requests/new" variant="primary">
               See all request types
-            </LinkButton>
+            </ButtonLink>
           }
         />
       </Page>
     );
   if ((type.isError && !type.data) || (space.isError && !space.data))
     return (
-      <Page narrow>
+      <Page width="narrow">
         <PageChrome crumbs={crumbsBase} />
         <ErrorState error={type.error ?? space.error} onRetry={() => (void type.refetch(), void space.refetch())} />
       </Page>
     );
   if (!type.data || !space.data)
     return (
-      <Page narrow>
+      <Page width="narrow">
         <PageChrome crumbs={crumbsBase} />
         <SkeletonRows rows={6} />
       </Page>
@@ -172,6 +208,18 @@ function NewRequestForm({ spaceId, typeId }: { spaceId: string; typeId: string }
 }
 
 type Phase = "checking" | "done";
+
+/** Rules that are met fold into one line; only what blocks the request stays open (preview `metLine`). */
+function MetLine({ lines }: { lines: readonly CheckLine[] }) {
+  const met = lines.filter((c) => c.state === "pass").length;
+  const know = lines.length - met;
+  const summary = [met ? `${plural(met, "rule")} met` : "", know ? `${plural(know, "thing")} to know` : ""].filter(Boolean).join(" · ");
+  return (
+    <Disclosure icon={ShieldCheck} title="Rules the assistant checked" summary={summary}>
+      <RuleChecks lines={lines} />
+    </Disclosure>
+  );
+}
 
 function FormBody({ type: t, space: sp }: { type: RequestType; space: Space }) {
   const { id } = useWorkspace();
@@ -182,6 +230,7 @@ function FormBody({ type: t, space: sp }: { type: RequestType; space: Space }) {
   const [vals, setVals] = useState<FieldValues>(() => initialValues(fields, params));
   const [errs, setErrs] = useState<Record<string, string>>({});
   const [phase, setPhase] = useState<Phase>(rules.length ? "checking" : "done");
+  const [waitNote, setWaitNote] = useState(false);
   const [eligibility, setEligibility] = useState<Request["eligibility"] | null>(null);
   const [asking, setAsking] = useState(false);
   const create = useCreateRequest();
@@ -189,6 +238,11 @@ function FormBody({ type: t, space: sp }: { type: RequestType; space: Space }) {
   const team = teamWord(sp);
   const lines = checkLines(rules, eligibility, team);
   const failing = lines.filter((c) => c.state === "fail");
+  const ok = lines.filter((c) => c.state !== "fail");
+  // A failed rule about the requester can't be fixed in the form, so the form waits; asking the office is the way forward.
+  const hideForm = failing.some((c) => !c.fixable);
+  const fixCite = failing.find((c) => c.cite)?.cite;
+  const policy = useItem(fixCite);
   const struct = JSON.stringify(toStruct(fields, vals));
 
   // Server rule check (CreateRequest validateOnly) on open and as the details change.
@@ -214,6 +268,7 @@ function FormBody({ type: t, space: sp }: { type: RequestType; space: Space }) {
   };
 
   const send = () => {
+    if (phase !== "done") return setWaitNote(true);
     const e = validateValues(fields, vals);
     setErrs(e);
     const bad = Object.keys(e);
@@ -243,89 +298,101 @@ function FormBody({ type: t, space: sp }: { type: RequestType; space: Space }) {
   };
 
   const askQuestion = `About “${t.displayName}”: ${failing[0]?.label ?? ""}. What are my options?`.replace(/\s+/g, " ").replace(/\.\./g, ".");
-  const usually = slaUsual(t);
+
+  let checkCard: ReactNode = null;
+  if (rules.length && phase !== "done")
+    checkCard = (
+      <RqCard className="rq-checkcard">
+        <div className="rq-checking" role="status">
+          <Spinner size="sm" />
+          <span>Checking the rules that apply to you…</span>
+        </div>
+      </RqCard>
+    );
+  else if (rules.length && !failing.length)
+    checkCard = (
+      <Card className="rq-checkcard rq-checkcard--ok">
+        <MetLine lines={ok} />
+      </Card>
+    );
+  else if (failing.length)
+    // One red box: what blocks the request, then what to do about it.
+    checkCard = (
+      <RqCard className="rq-checkcard" title="Before you send" icon={<ItemIcon icon={ShieldCheck} tone="accent" size="sm" />}>
+        <Callout
+          tone="danger"
+          title="You can’t send this request yet"
+          description={failing.map((c) => c.consequence ?? c.detail).join(" ")}
+          actions={
+            <>
+              <Button variant="secondary" size="sm" onPress={() => setAsking(true)}>
+                <MessageCircle className="i" aria-hidden />
+                {`Ask ${team} instead`}
+              </Button>
+              {fixCite && policy.data && policy.data.state !== "DELETED" ? (
+                <LinkButton href={`/doc/${resourceId(fixCite)}`} icon={ArrowUpRight} size="sm">
+                  Read the policy
+                </LinkButton>
+              ) : null}
+            </>
+          }
+        />
+        <div className="mt-12">
+          <RuleChecks lines={failing} notes={false} />
+        </div>
+        {ok.length ? (
+          <div className="mt-8">
+            <MetLine lines={ok} />
+          </div>
+        ) : null}
+      </RqCard>
+    );
 
   return (
-    <Page narrow className="rq-page">
-      <PageChrome
+    <Page width="narrow" className="rq-page">
+      <PageHeader
+        title={t.displayName}
+        heading={<span translate="no">{t.displayName}</span>}
+        lead={<SpaceMark space={sp} size={40} />}
+        meta={[sp.displayName, slaUsual(t)].filter(Boolean).join(" · ")}
         crumbs={[
           { label: "Requests", href: "/requests" },
           { label: "New request", href: "/requests/new" },
           { label: t.displayName },
         ]}
       />
-      <PageHeader lead={<SpaceMark space={sp} size={40} />} title={<span translate="no">{t.displayName}</span>} description={[sp.displayName, usually].filter(Boolean).join(" · ")} />
       <div className="rq-new">
-        {rules.length ? (
-          <RqCard
-            className="rq-checkcard"
-            title="Before you send"
-            icon={<ItemIcon icon={ShieldCheck} tone="accent" size="sm" />}
-            description={phase === "done" ? "The assistant checked the rules that apply to you. Select a number to read the source." : undefined}
-          >
-            {phase !== "done" ? (
-              <>
-                <div className="rq-checking" role="status">
+        {checkCard}
+        {hideForm ? null : (
+          <RqCard className="rq-formcard" title="Details">
+            {t.description ? (
+              <p className="t-sm muted" translate="no">
+                {t.description}
+              </p>
+            ) : null}
+            <div className="rq-fields">
+              {fields.map((f) => (
+                <FieldControl key={f.key} field={f} value={vals[f.key] ?? ""} error={errs[f.key]} onChange={(v) => set(f.key, v)} />
+              ))}
+            </div>
+            {/* Where it goes and how long it takes are in the header. */}
+            <div className="rq-form__foot">
+              {waitNote && phase !== "done" ? (
+                <span className="rq-form__fee" role="status">
                   <Spinner size="sm" />
-                  <span>Checking the rules…</span>
-                </div>
-                <div className="stack gap-12 mt-4" aria-hidden>
-                  {rules.map((_, i) => (
-                    <span key={i} className="skeleton skeleton--line" style={{ width: `${[78, 62, 70][i % 3]}%` }} />
-                  ))}
-                </div>
-              </>
-            ) : (
-              <>
-                <RuleChecks lines={lines} />
-                {failing.length ? (
-                  <div className="mt-12">
-                    <Callout
-                      tone="danger"
-                      title="You can’t send this request"
-                      description={`${capital(team)} can still tell you what’s possible, for example whether an exception applies.`}
-                      actions={
-                        <Button variant="secondary" size="sm" onPress={() => setAsking(true)}>
-                          <MessageCircle className="i" aria-hidden />
-                          {`Ask ${team} instead`}
-                        </Button>
-                      }
-                    />
-                  </div>
-                ) : null}
-              </>
-            )}
+                  Still checking the rules. One moment.
+                </span>
+              ) : null}
+              <ButtonLink href="/requests/new" variant="ghost">
+                Cancel
+              </ButtonLink>
+              <Button variant="primary" onPress={send} isDisabled={failing.length > 0} isPending={create.isPending}>
+                <Send className="i" aria-hidden />
+                Send request
+              </Button>
+            </div>
           </RqCard>
-        ) : null}
-        <RqCard className="rq-formcard" title="Details">
-          {t.description ? (
-            <p className="t-sm muted" translate="no">
-              {t.description}
-            </p>
-          ) : null}
-          <div className="rq-fields">
-            {fields.map((f) => (
-              <FieldControl key={f.key} field={f} value={vals[f.key] ?? ""} error={errs[f.key]} onChange={(v) => set(f.key, v)} />
-            ))}
-          </div>
-          <div className="rq-summary">
-            <KeyValue
-              pairs={[
-                ["Sent to", <span translate="no">{sp.displayName || "—"}</span>],
-                usually ? ["Usually takes", usually.replace(/^Usually /, "")] : null,
-              ]}
-            />
-          </div>
-          <div className="rq-form__foot">
-            <LinkButton href="/requests/new" variant="tertiary">
-              Cancel
-            </LinkButton>
-            <Button variant="primary" onPress={send} isDisabled={phase !== "done" || failing.length > 0} isPending={create.isPending}>
-              <Send className="i" aria-hidden />
-              Send request
-            </Button>
-          </div>
-        </RqCard>
+        )}
       </div>
       <AskSpaceDialog space={sp} isOpen={asking} onClose={() => setAsking(false)} initialQuestion={askQuestion} about={`About ${t.displayName}`} />
     </Page>
@@ -368,7 +435,12 @@ function FieldControl({ field: f, value, error, onChange }: { field: RequestType
             <Label>{label}</Label>
           </Checkbox.Content>
         </Checkbox>
-        {error ? <div className="field-error" role="alert">{error}</div> : null}
+        {error ? (
+          <div className="field-error" role="alert">
+            <CircleAlert className="i" aria-hidden />
+            <span>{error}</span>
+          </div>
+        ) : null}
       </div>
     );
   return (

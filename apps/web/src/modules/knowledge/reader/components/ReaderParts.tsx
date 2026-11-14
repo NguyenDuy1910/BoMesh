@@ -1,9 +1,8 @@
 "use client";
 
-import { Button, buttonVariants, Tooltip } from "@heroui/react";
-import { ArrowLeft, CircleAlert, Clock, Download, File, FileText, LoaderCircle, Lock, PanelRight, Play, RotateCcw, X } from "lucide-react";
+import { Button, buttonVariants } from "@heroui/react";
+import { CircleAlert, Clock, Download, File, FileText, LoaderCircle, Lock, Play, RotateCcw, X } from "lucide-react";
 import NextLink from "next/link";
-import { useRouter } from "next/navigation";
 import { Fragment, useEffect, useState, type ReactNode, type RefObject } from "react";
 
 import { PageChrome } from "@/components/shell/page-chrome";
@@ -32,27 +31,40 @@ export function useWidth(ref: RefObject<HTMLElement | null>): number {
   return width;
 }
 
-/** "Back": where the reader came from, else Browse (preview `rdr-back`). */
-export function BackButton({ conversation }: { conversation?: string }) {
-  const router = useRouter();
-  if (conversation) {
-    return (
-      <NextLink className="link-button rdr-back" href={`/chat/${conversation}`}>
-        <ArrowLeft className="i i-sm" aria-hidden />
-        Back to conversation
-      </NextLink>
-    );
-  }
-  return (
-    <button
-      type="button"
-      className="link-button rdr-back"
-      onClick={() => (window.history.length > 1 ? router.back() : router.push("/knowledge"))}
-    >
-      <ArrowLeft className="i i-sm" aria-hidden />
-      Back
-    </button>
-  );
+/**
+ * Phones: the head slides away while reading down and comes back on the way up (preview
+ * `headHidden`, applied by CSS on narrow screens only). Also marks `#main.is-past-hero` so the
+ * top row shows the title while the head is away.
+ */
+export function useCollapsingHead(scroll: RefObject<HTMLElement | null>, head: RefObject<HTMLElement | null>, key: string): boolean {
+  const [hidden, setHidden] = useState(false);
+  useEffect(() => {
+    const sc = scroll.current;
+    const root = head.current?.parentElement;
+    if (!sc) return;
+    if (head.current && root) root.style.setProperty("--rdr-head-h", `${head.current.offsetHeight}px`);
+    let last = sc.scrollTop;
+    let state = false;
+    const apply = (want: boolean) => {
+      if (want === state) return;
+      state = want;
+      setHidden(want);
+      document.getElementById("main")?.classList.toggle("is-past-hero", want);
+    };
+    const onScroll = () => {
+      const top = sc.scrollTop;
+      const dy = top - last;
+      last = top;
+      apply(top <= 48 ? false : dy > 4 ? true : dy < -4 ? false : state);
+    };
+    sc.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      sc.removeEventListener("scroll", onScroll);
+      document.getElementById("main")?.classList.remove("is-past-hero");
+      setHidden(false);
+    };
+  }, [scroll, head, key]);
+  return hidden;
 }
 
 /** "Updated 2 days ago" with the exact time on hover. */
@@ -61,10 +73,10 @@ export function Updated({ at, prefix = "Updated" }: { at?: string; prefix?: stri
 }
 
 /** Meta line items joined by the preview's dot. */
-export function Meta({ parts }: { parts: ReadonlyArray<ReactNode> }) {
+export function Meta({ parts, className = "rdr-head__meta" }: { parts: ReadonlyArray<ReactNode>; className?: string }) {
   const shown = parts.filter(Boolean);
   return (
-    <div className="rdr-head__meta">
+    <span className={className}>
       {shown.map((p, i) => (
         <Fragment key={i}>
           {i ? (
@@ -75,24 +87,26 @@ export function Meta({ parts }: { parts: ReadonlyArray<ReactNode> }) {
           {p}
         </Fragment>
       ))}
-    </div>
+    </span>
   );
 }
 
 export interface ReaderHeadProps {
   resource: Resource;
-  conversation?: string;
   chips: ReactNode;
   meta: ReadonlyArray<ReactNode>;
-  actions: ReactNode;
+  headRef?: RefObject<HTMLElement | null>;
+  /** The find-in-document bar (`.rdr-hits`). */
   children?: ReactNode;
 }
 
-/** Reader header (preview `.rdr-head`): back, file tile, title with chips, meta line, actions, optional hits bar. */
-export function ReaderHead({ resource: r, conversation, chips, meta, actions, children }: ReaderHeadProps) {
+/**
+ * The document's identity under the top row (preview `.rdr-head`): file tile, title with chips, meta,
+ * and the find-in-document bar. Ask, Save and ⋯ sit in the top row with the trail.
+ */
+export function ReaderHead({ resource: r, chips, meta, headRef, children }: ReaderHeadProps) {
   return (
-    <header className="rdr-head">
-      <BackButton conversation={conversation} />
+    <header className="rdr-head" id="rdr-head" ref={headRef}>
       <div className="rdr-head__row">
         <FileIcon type={r.ext} mime={r.mime} name={r.fileName} size="lg" />
         <div className="rdr-head__main">
@@ -104,47 +118,36 @@ export function ReaderHead({ resource: r, conversation, chips, meta, actions, ch
           </div>
           <Meta parts={meta} />
         </div>
-        <div className="rdr-head__actions">{actions}</div>
       </div>
       {children}
     </header>
   );
 }
 
-/** The panel toggle (`aria-pressed`). */
-export function PanelToggle({ open, onToggle }: { open: boolean; onToggle: () => void }) {
-  const label = open ? "Hide panel" : "Show panel";
-  return (
-    <Tooltip>
-      <Button isIconOnly variant="ghost" className="button--muted" aria-label={label} aria-pressed={open} onPress={onToggle}>
-        <PanelRight aria-hidden />
-      </Button>
-      <Tooltip.Content>{label}</Tooltip.Content>
-    </Tooltip>
-  );
-}
-
-export function DownloadButton({ onPress, className = "rdr-wide" }: { onPress: () => void; className?: string }) {
-  return <IconButton icon={Download} tip="Download" onPress={onPress} className={className} />;
-}
-
 export interface RailProps {
-  tabs: { id: string; label: string }[];
-  tab: string;
-  onTab: (id: string) => void;
+  /** Ask · About · Related; omitted for a single titled panel. */
+  tabs?: { id: string; label: string }[];
+  tab?: string;
+  onTab?: (id: string) => void;
+  /** Title of a panel without tabs. */
+  title?: string;
   onClose: () => void;
   bodyRef?: RefObject<HTMLDivElement | null>;
   children: ReactNode;
   composer?: ReactNode;
 }
 
-/** Right rail (preview `.rdr-rail`) with its scrim for the overlay layout. */
-export function Rail({ tabs, tab, onTab, onClose, bodyRef, children, composer }: RailProps) {
+/** Side panel (preview `.rdr-rail`) with its scrim for the overlay layout. */
+export function Rail({ tabs, tab = "", onTab, title, onClose, bodyRef, children, composer }: RailProps) {
   return (
     <>
-      <aside className="rdr-rail" aria-label="Document panel">
+      <aside className="rdr-rail" aria-label={title ?? "Document panel"}>
         <div className="rdr-rail__head">
-          <SectionTabs items={tabs} active={tab} onChange={onTab} label="Document panel" className="tabs" />
+          {tabs ? (
+            <SectionTabs items={tabs} active={tab} onChange={(id) => onTab?.(id)} label="Document panel" className="tabs" />
+          ) : (
+            <h2 className="rdr-rail__title">{title}</h2>
+          )}
           <IconButton icon={X} tip="Close panel" size="sm" onPress={onClose} />
         </div>
         <div className="rdr-rail__body" id="rdr-rail-body" ref={bodyRef}>
@@ -182,7 +185,10 @@ export function RailSkeleton() {
   );
 }
 
-/** Not found or archived (preview `notAvailable`), or not shared with the caller (`locked`, preview `noAccess`). */
+/**
+ * Not found or archived (preview `notAvailable`), or not visible to the caller (`locked`, preview
+ * `noAccess` without a readable collection: the API answers 403 alike whether or not it exists).
+ */
 export function Unavailable({
   title = "This document isn’t available",
   description = "It may have been archived or removed.",
@@ -199,7 +205,7 @@ export function Unavailable({
       <PageChrome crumbs={[{ label: "Knowledge", href: "/knowledge" }, { label: "Not available" }]} />
       <div className="rdr-msg">
         <EmptyState
-          icon={locked || actions ? Lock : File}
+          icon={locked ? Lock : File}
           title={title}
           description={description}
           actions={
@@ -249,7 +255,7 @@ export function NotReady({ resource: r, error, canFix, fixing, onFix, onDownload
           title="This file can’t be previewed"
           description="Images and some file types can’t be read or searched. Download it to view."
           actions={
-            <Button variant="secondary" onPress={onDownload}>
+            <Button variant="tertiary" onPress={onDownload}>
               <Download className="i" aria-hidden />
               Download
             </Button>
@@ -262,7 +268,7 @@ export function NotReady({ resource: r, error, canFix, fixing, onFix, onDownload
           icon={CircleAlert}
           tone="danger"
           title="This document couldn’t be read"
-          description={`${error || "The file couldn’t be opened."}${canFix ? "" : ` Ask an owner of ${r.base?.displayName || "its knowledge base"} to fix it.`}`}
+          description={`${error || "The file couldn’t be opened."}${canFix ? "" : ` Ask an owner of ${r.base?.displayName || "its collection"} to fix it.`}`}
           actions={fix("Try again", RotateCcw)}
         />,
       );

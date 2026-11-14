@@ -17,29 +17,29 @@ import {
 import { fmtDate, rel } from "@/lib/format";
 
 import type { Contribution, Item } from "../api";
-import { lifecycleKey, type LifecycleKey } from "../model";
+import { LIFECYCLE, lifecycleKey, type LifecycleKey } from "../model";
 
-/** My library → Contributions, optionally opening one contribution's panel (`?open=`). */
+/** My contributions (`/contributions`), optionally opening one contribution's panel (`?open=`). */
 export function contributionHref(id?: string | null): string {
   const bare = id ? id.slice(id.lastIndexOf("/") + 1) : "";
-  return `/knowledge/library?tab=contributions${bare ? `&open=${bare}` : ""}`;
+  return `/contributions${bare ? `?open=${bare}` : ""}`;
 }
 
 /**
  * How a contribution reads for its contributor (preview `features/contribute.js` `X.ctb`):
- * one lifecycle key, the latest event in one line, and the history timeline.
+ * one lifecycle key, the latest event in one line, the progress stepper and the history timeline.
  * Pure: names and items are passed in.
  */
 
 export type ContributionGroup = "all" | "changes" | "review" | "published" | "rejected";
 
-/** Contributions filter (preview `CTB_GROUPS`): [id, label, lifecycle keys | null = all]. */
+/** My contributions filter (preview `CTB_GROUPS`): [id, label, lifecycle keys | null = all]. */
 export const CTB_GROUPS: ReadonlyArray<readonly [ContributionGroup, string, readonly LifecycleKey[] | null]> = [
   ["all", "All", null],
   ["changes", "Needs your action", ["changes"]],
   ["review", "In review", ["analyzing", "review"]],
   ["published", "Published", ["published", "publishing", "queued", "merged", "failed", "update", "stored"]],
-  ["rejected", "Not approved", ["rejected"]],
+  ["rejected", LIFECYCLE.rejected.label, ["rejected"]],
 ];
 
 export const PUBLISHED_KEYS = CTB_GROUPS[3][2]!;
@@ -92,8 +92,10 @@ export interface ContributionContext {
   me: string;
   /** Member name → display name. */
   names: ReadonlyMap<string, string>;
-  /** Knowledge base display name. */
+  /** Collection display name. */
   base: string;
+  /** Who will see it once published (`Contribution.audienceSummary`). */
+  audience?: string;
   /** The approved document (published) or the revised one (merged), when readable. */
   published?: Item | null;
 }
@@ -102,12 +104,12 @@ const VERB: Readonly<Record<EventKind, string>> = {
   submitted: "submitted it",
   resubmitted: "resubmitted it",
   changes: "asked for changes",
-  rejected: "didn’t approve it",
+  rejected: "declined it",
   approved: "approved it",
   withdrawn: "withdrew it",
 };
 
-const relLow = (at?: string) => rel(at).replace(/^(Just now|Yesterday)$/, (m) => m.toLowerCase());
+export const relLow = (at?: string) => rel(at).replace(/^(Just now|Yesterday)$/, (m) => m.toLowerCase());
 
 /** "You", the member's name, or "Someone" when the name isn't known. */
 export function who(by: string, ctx: Pick<ContributionContext, "me" | "names">): string {
@@ -118,6 +120,11 @@ export function who(by: string, ctx: Pick<ContributionContext, "me" | "names">):
 /** The reviewer's last message of a kind (state block quotes). */
 export function lastEvent(c: Contribution, kind: EventKind): ContributionEventView | undefined {
   return lastOf(eventsOf(c), kind);
+}
+
+/** When anything last happened to it (History summary). */
+export function lastEventAt(c: Contribution): string {
+  return lastOf(eventsOf(c))?.at || c.updateTime || c.createTime || "";
 }
 
 /** One line for lists: the latest thing that happened, in plain language (preview `eventLine`). */
@@ -177,13 +184,20 @@ const STEP: Readonly<Record<EventKind, readonly [LucideIcon, StepTone]>> = {
   withdrawn: [Undo2, ""],
 };
 
+export type TimelineContext = ContributionContext & {
+  mine: boolean;
+  revisedName?: string;
+  /** The contributor confirmed type, topics and collection before submitting (written on the candidate item). */
+  confirmed?: boolean;
+};
+
 /** What happens next (or happened last) beyond the stored events (preview `tail`). */
-function tail(c: Contribution, ctx: ContributionContext & { mine: boolean; revisedName?: string }): TimelineStep | null {
+function tail(c: Contribution, ctx: TimelineContext): TimelineStep | null {
   const key = contributionLife(c, ctx.published);
-  const kb = ctx.base || "the knowledge base";
+  const kb = ctx.base || "the collection";
   switch (key) {
     case "analyzing":
-      return { icon: Sparkles, tone: "accent", title: "The assistant is reading it", desc: "It suggests a type, topics and a knowledge base for the reviewer.", live: true };
+      return { icon: Sparkles, tone: "accent", title: "The assistant is reading it", desc: "It suggests a type, topics and a collection for the reviewer.", live: true };
     case "review":
       return { icon: Clock, tone: "", title: "Waiting for a reviewer", desc: `The reviewers of ${kb} check it before it’s published.`, next: true };
     case "changes":
@@ -212,15 +226,98 @@ function tail(c: Contribution, ctx: ContributionContext & { mine: boolean; revis
   }
 }
 
-/** Vertical history: who did what, when, and what reviewers wrote (preview `timeline`). */
-export function timelineSteps(c: Contribution, ctx: ContributionContext & { mine: boolean; revisedName?: string }): TimelineStep[] {
+/**
+ * Vertical history: who did what, when, and what reviewers wrote (preview `timeline`).
+ * `quoted`: the event whose message is already shown above (the state alert), so it isn't repeated.
+ */
+export function timelineSteps(c: Contribution, ctx: TimelineContext, quoted?: ContributionEventView): TimelineStep[] {
   const steps: TimelineStep[] = eventsOf(c).map((e) => {
     const [icon, tone] = STEP[e.kind] ?? [CircleDashed, ""];
-    return { icon, tone, title: `${who(e.by, ctx)} ${VERB[e.kind]}`, at: e.at, quote: e.text || undefined };
+    const same = !!quoted && quoted.kind === e.kind && quoted.at === e.at && quoted.by === e.by;
+    return { icon, tone, title: `${who(e.by, ctx)} ${VERB[e.kind]}`, at: e.at, quote: same ? undefined : e.text || undefined };
   });
   const t = tail(c, ctx);
   if (t) steps.push(t);
   return steps;
+}
+
+/* ── Progress: Submitted → Analyzed → In review → Approved → Published (preview `progressSteps`) ── */
+
+export type ProgressState = "done" | "current" | "issue" | "skipped" | "todo";
+
+export interface ProgressStep {
+  label: string;
+  state: ProgressState;
+  /** Working right now (spinner dot). */
+  busy?: boolean;
+  text: string;
+  at?: string;
+}
+
+/** The Studio's document stepper told from the contributor's side. */
+export function progressSteps(c: Contribution, ctx: TimelineContext): ProgressStep[] {
+  const k = contributionLife(c, ctx.published);
+  const base = ctx.base || "the collection";
+  const events = eventsOf(c);
+  const byOf = (e?: ContributionEventView) => (e?.by && e.by !== ctx.me && ctx.names.get(e.by) ? ` by ${ctx.names.get(e.by)}` : "");
+  const sent = [...events].reverse().find((e) => e.kind === "submitted" || e.kind === "resubmitted");
+  const changes = lastOf(events, "changes");
+  const rejected = lastOf(events, "rejected");
+  const ok = lastOf(events, "approved");
+  const audience = ctx.audience ?? "";
+  const open = k === "analyzing" || k === "review" || k === "changes";
+
+  const submitted: Omit<ProgressStep, "label"> = {
+    state: "done",
+    at: sent?.at || c.createTime,
+    text: `${sent?.kind === "resubmitted" ? "Resubmitted" : "Sent"} to ${base}`,
+  };
+  const analyzed: Omit<ProgressStep, "label"> =
+    k === "analyzing"
+      ? { state: "current", busy: true, text: "Reading the file and matching it against the taxonomy…" }
+      : {
+          state: "done",
+          text: ctx.confirmed
+            ? `Type, topics and collection confirmed by ${ctx.mine ? "you" : who(c.contributor ?? "", ctx)}`
+            : "Type, topics and collection suggested",
+        };
+  const review: Omit<ProgressStep, "label"> =
+    k === "analyzing"
+      ? { state: "todo", text: `The reviewers of ${base} check it` }
+      : k === "review"
+        ? { state: "current", text: `Waiting for a reviewer of ${base}` }
+        : k === "changes"
+          ? { state: "issue", text: `Changes requested${byOf(changes)}`, at: changes?.at }
+          : k === "rejected"
+            ? { state: "issue", text: `Declined${byOf(rejected)}`, at: rejected?.at }
+            : { state: "done", text: `Checked by the reviewers of ${base}` };
+  const approved: Omit<ProgressStep, "label"> = open
+    ? { state: "todo", text: "A reviewer approves it, or asks for changes" }
+    : k === "rejected"
+      ? { state: "skipped", text: "Won’t be published" }
+      : { state: "done", text: `Approved${byOf(ok)}`, at: ok?.at };
+  const searchable = audience ? `Searchable · ${audience}` : "Searchable";
+  const PUB: Partial<Record<LifecycleKey, Omit<ProgressStep, "label">>> = {
+    queued: { state: "current", text: "Waiting to publish" },
+    publishing: { state: "current", busy: true, text: "Making it searchable…" },
+    published: { state: "done", text: searchable, at: ctx.published?.updateTime },
+    update: { state: "done", text: searchable, at: ctx.published?.updateTime },
+    stored: { state: "done", text: "Stored · people can download it; this file type can’t be searched" },
+    merged: { state: "done", text: "Published as a new version", at: c.decision?.decideTime },
+    failed: { state: "issue", text: "Couldn’t publish · the reviewers have been told" },
+    unpublished: { state: "issue", text: "Unpublished" },
+    rejected: { state: "skipped", text: "Won’t be published" },
+  };
+  const published = PUB[k] ?? { state: "todo", text: audience ? `${audience} will see it once it’s published` : "Searchable once it’s published" };
+  return (
+    [
+      ["Submitted", submitted],
+      ["Analyzed", analyzed],
+      ["In review", review],
+      ["Approved", approved],
+      ["Published", published],
+    ] as const
+  ).map(([label, s]) => ({ label, ...s }));
 }
 
 /** Contribution flags as the contributor reads them (preview `ai.flags`). */

@@ -43,7 +43,6 @@
       <div class="field"><span class="label">Background tint</span>${seg({ value: L.base, options: BASES.map(([id, l]) => [id, l]), act: 'look-base', label: 'Background tint', full: true })}<div class="description">How much the accent colors the canvas, cards, borders and text.</div></div>
       <div class="field"><span class="label">Corner radius</span>${seg({ value: L.radius, options: RADII.map(([id, l]) => [id, l === 'Extra large' ? 'XL' : l]), act: 'look-radius', label: 'Corner radius', full: true })}</div>
       <div class="field"><span class="label">Font</span>${fonts}</div>
-      <p class="description">Status colors (success, warning, danger) and cited-evidence highlights keep their meaning in every theme.</p>
     </div>`;
     return `<div class="stack gap-20 appearance">
       <div class="field"><span class="label">Mode</span>${seg({ value: S.theme, options: [['light', 'Light', 'sun'], ['dark', 'Dark', 'moon'], ['system', 'System', 'monitor']], act: 'look-mode', label: 'Mode', full: true })}</div>
@@ -60,7 +59,7 @@
       title: 'Appearance', clear: true,
       desc: 'Changes the whole app right away. Saved for you on this device.',
       body: controls(),
-      footStart: isDefaultLook() ? '' : btn('Reset to BoMesh', { v: 'ghost', icon: 'refresh', act: 'look-reset' }),
+      footStart: isDefaultLook() ? '' : btn(`Reset to ${themeLabel(DEFAULT_LOOK)}`, { v: 'ghost', icon: 'refresh', act: 'look-reset' }),
       foot: btn('Done', { v: 'primary', act: 'close-drawer' }),
     };
   };
@@ -101,5 +100,5 @@
   A['look-base'] = el => setLook({ base: el.dataset.value });
   A['look-radius'] = el => setLook({ radius: el.dataset.value });
   A['look-font'] = el => setLook({ font: el.dataset.value });
-  A['look-reset'] = () => { const before = { ...S.look }; resetLook(); toast('Appearance reset to BoMesh', { action: { label: 'Undo', run: () => { S.look = before; applyTheme(); persist(); refresh(); } } }); };
+  A['look-reset'] = () => { const before = { ...S.look }; resetLook(); toast(`Appearance reset to ${themeLabel(DEFAULT_LOOK)}`, { action: { label: 'Undo', run: () => { S.look = before; applyTheme(); persist(); refresh(); } } }); };
 })();

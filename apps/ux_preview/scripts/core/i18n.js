@@ -10,20 +10,20 @@
    covered. Numbers, dates, relative times and "N things" counters come from
    util.js formatters (uiLocale, rel, plural).
    Content is never translated: documents, answers, quotes, user input and
-   workspace data (knowledge base, topic and document names) stay in the
+   workspace data (collection, topic and document names) stay in the
    language they were written in. Mark extra content with translate="no". */
 
 /** [code, native name, English name] */
 const UI_LANGS = [['en', 'English', 'English'], ['vi', 'Tiếng Việt', 'Vietnamese']];
 S.lang = 'en';
 
-const SKIP_SEL = '[translate="no"], .chat-answer, .chat-bubble, .doc-page, .doc-note, .pv-quote, .home-suggest__chip, .chat-starter__prompt, script, style, textarea, code, pre, [contenteditable="true"]';
+const SKIP_SEL = '[translate="no"], .chat-answer, .chat-bubble, .doc-page, .doc-note, .pv-quote, .chat-starter__prompt, script, style, textarea, code, pre, [contenteditable="true"]';
 const ATTRS = ['placeholder', 'aria-label', 'title', 'data-tip', 'alt'];
 /** Chrome where a word is always interface copy, even if a workspace record has the same name. */
-const CHROME_SEL = '.sidebar, .topbar, .menu, .palette, .tabs, [role="tablist"], .page-header, .modal__heading, .drawer__heading, #proto-root, .button, .toggle-group';
+const CHROME_SEL = '.sidebar, .topbar, .menu, .palette, .tabs, [role="tablist"], .page-hero, .ctx-bar, .modal__heading, .drawer__heading, #proto-root, .button, .toggle-group';
 const _dicts = {};
 let _names = null, _namesWs = null;
-/** Names authored in the workspace (topics, knowledge bases, spaces, collections, documents): content, never translated. */
+/** Names authored in the workspace (topics, collections, spaces, reading lists, documents): content, never translated. */
 function workspaceNames() {
   if (_namesWs === S.ws && _names) return _names;
   const w = DB.ws[S.ws] || {}, set = new Set();

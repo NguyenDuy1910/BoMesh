@@ -263,7 +263,7 @@ function historyHtml(a, cur) {
     trail: (r.n !== cur.n ? btn('View', { v: 'ghost', size: 'sm', act: 'wk-goto', data: { rev: r.n } }) : '') + (r.n !== last.n ? btn('Restore', { v: 'ghost', size: 'sm', act: 'wk-restore', data: { rev: r.n } }) : ''),
     cls: cx('wk-rev', r.n === cur.n && 'is-on'),
   })));
-  const pub = a.published.map(x => { const k = kbById(x.kb); return item({ lead: itemIcon('book', '', 'sm'), title: esc(k?.name || 'Knowledge base'), desc: `Version ${x.rev} · ${rel(x.at)}`, trail: x.rev < last.n ? btn(`Update to v${last.n}`, { size: 'sm', act: 'wk-publish', data: { id: a.id, kb: x.kb } }) : chip('Up to date', { tone: 'success', variant: 'tertiary', size: 'sm' }) }); });
+  const pub = a.published.map(x => { const k = kbById(x.kb); return item({ lead: itemIcon('book', '', 'sm'), title: esc(k?.name || 'Collection'), desc: `Version ${x.rev} · ${rel(x.at)}`, trail: x.rev < last.n ? btn(`Update to v${last.n}`, { size: 'sm', act: 'wk-publish', data: { id: a.id, kb: x.kb } }) : chip('Up to date', { tone: 'success', variant: 'tertiary', size: 'sm' }) }); });
   const src = (a.sources || []).map(docById).filter(d => d && C().canDoc(d));
   return `<div class="stack gap-24">
     <div><div class="t-label mb-8">Versions</div>${revs}<p class="t-xs muted mt-8">Restoring makes a new version. Nothing is overwritten.</p></div>
@@ -482,8 +482,8 @@ document.addEventListener('mousedown', e => {
 });
 document.addEventListener('keydown', e => { const b = e.target.closest?.('[data-wk-cmd]'); if (b && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); b.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); } });
 
-/* Save to knowledge: publish a version into a knowledge base you can edit */
-/** Default target: where it was saved before, else the knowledge base its sources came from, else the first shared one you can edit. */
+/* Save to knowledge: publish a version into a collection you can edit */
+/** Default target: where it was saved before, else the collection its sources came from, else the first shared one you can edit. */
 A['wk-publish'] = el => {
   const a = art(el.dataset.id); const kbs = visibleKbs().filter(canEditKb); if (!a || !kbs.length) return;
   const ok = id => kbs.some(k => k.id === id) && id;
@@ -499,7 +499,7 @@ M['wk-publish'] = () => {
   return { title: existing ? 'Update saved copy' : 'Save to knowledge', icon: existing ? 'refresh' : 'book',
     desc: existing ? `Replace version ${existing.rev} in ${esc(kb.name)} with version ${l.n}.` : 'Turn this file into a document people can find, read and ask about.',
     body: file
-      + field({ id: 'wk-pub-kb', label: 'Knowledge base', desc: `<span class="wk-pub__who">${ic(whoIcon, 'i-xs')}<span>${esc(who)}</span></span>`, control: select({ id: 'wk-pub-kb', bind: 'wkPub.kb', value: f.kb, change: 'wk-pub-kb', options: kbs.map(k => [k.id, k.name]), attrs: dis }) })
+      + field({ id: 'wk-pub-kb', label: 'Collection', desc: `<span class="wk-pub__who">${ic(whoIcon, 'i-xs')}<span>${esc(who)}</span></span>`, control: select({ id: 'wk-pub-kb', bind: 'wkPub.kb', value: f.kb, change: 'wk-pub-kb', options: kbs.map(k => [k.id, k.name]), attrs: dis }) })
       + field({ id: 'wk-pub-name', label: 'Document name', error: err, control: input({ id: 'wk-pub-name', bind: 'wkPub.name', value: f.name, onEnter: 'wk-pub-save', invalid: !!err, attrs: `maxlength="120" data-live ${dis}` }) }),
     foot: btn('Cancel', { v: 'ghost', act: 'close-modal', disabled: f.busy }) + btn(existing ? `Update to version ${l.n}` : 'Save to knowledge', { v: 'primary', icon: existing ? 'refresh' : 'book', act: 'wk-pub-save', loading: f.busy }) };
 };
@@ -587,7 +587,7 @@ document.addEventListener('drop', e => {
 });
 
 /* Add from knowledge: reference documents instead of re-uploading — to this message, or (wkPick.project) to a project.
-   One scrollable option list grouped by knowledge base; long groups show the newest few until expanded or searched. */
+   One scrollable option list grouped by collection; long groups show the newest few until expanded or searched. */
 const PICK_FEW = 5;
 function openPicker() { S.ui.wkPick = { q: '', sel: {}, more: {} }; openModal('wk-pick'); }
 M['wk-pick'] = () => {
@@ -605,7 +605,7 @@ M['wk-pick'] = () => {
     return `<div class="wk-pick__kb" role="presentation">${esc(k.name)}<span class="num">${fmtNum(l.length)}</span></div>${shown.map(row).join('')}${all ? '' : `<button type="button" class="wk-pick__more" data-act="wk-pick-more" data-kb="${esc(k.id)}">${ic('chevron-down', 'i-sm')}<span>Show ${fmtNum(l.length - PICK_FEW)} more</span></button>`}`;
   };
   const empty = q
-    ? emptyState({ icon: 'search', title: 'No documents match', desc: 'Try another word, or clear the search to browse by knowledge base.', actions: btn('Clear search', { v: 'ghost', size: 'sm', act: 'wk-pick-clear' }), compact: true })
+    ? emptyState({ icon: 'search', title: 'No documents match', desc: 'Try another word, or clear the search to browse by collection.', actions: btn('Clear search', { v: 'ghost', size: 'sm', act: 'wk-pick-clear' }), compact: true })
     : emptyState({ icon: 'check-circle', title: 'Nothing left to add', desc: 'Every document you can access is already here.', compact: true });
   const body = `<div class="wk-pick">${searchField({ id: 'wk-pick-q', bind: 'wkPick.q', live: true, size: 'md', full: true, autofocus: true, placeholder: 'Search documents you can access', label: 'Search documents' })}
     ${groups.length ? `<div class="option-list wk-pick__list" role="group" aria-label="Documents">${groups.map(group).join('')}</div>` : empty}</div>`;

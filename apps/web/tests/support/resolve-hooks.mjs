@@ -1,6 +1,7 @@
 // Node resolve hooks that mirror the web app's bundler resolution for tests:
-// the `@/` alias maps to `apps/web/src/`, and extensionless TypeScript specifiers
-// probe `.ts` and `/index.ts` the way Next's bundler does.
+// the `@/` alias maps to `apps/web/src/`, extensionless TypeScript specifiers
+// probe `.ts` and `/index.ts`, and `next/<subpath>` (no package exports map)
+// resolves to its `.js` file, the way Next's bundler does.
 import { existsSync, statSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -22,6 +23,7 @@ function probe(url) {
 }
 
 export async function resolve(specifier, context, nextResolve) {
+  if (/^next\/[^.]+$/.test(specifier)) return nextResolve(`${specifier}.js`, context);
   let target = null;
   if (specifier.startsWith("@/")) {
     target = probe(new URL(specifier.slice(2), sourceRoot));

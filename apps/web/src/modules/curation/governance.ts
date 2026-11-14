@@ -1,30 +1,37 @@
-import { CircleDashed, Clock, RefreshCw, StickyNote, Tag, User, type LucideIcon } from "lucide-react";
+import { CircleDashed, Clock, StickyNote, Tag, User, type LucideIcon } from "lucide-react";
 
-import { fmtNum, plural } from "@/lib/format";
 import type { Item, Topic } from "@/modules/knowledge/api";
 import { fold, type Resource } from "@/modules/knowledge/model";
 
 /**
- * Manage → Documents › Quality and Topics (preview `features/governance.js`): pure signals over
- * the API. Scope = published documents in shared knowledge bases the caller can edit.
+ * Knowledge Studio → Review, the To keep right queues (preview `features/governance.js`), and the taxonomy's
+ * pure helpers: signals over the API. Scope = published documents in shared collections the caller can edit.
  */
 
 /* ═══════════════ Scope ═══════════════ */
 
-/** Published documents the caller looks after (editor/owner on a shared base; personal bases are excluded upstream). */
+/** Published documents the caller looks after (editor/owner on a shared collection; personal ones are excluded upstream). */
 export const inScope = (r: Resource) => r.editable && !r.isPersonal && !r.deleted && r.item.document?.publicationState === "PUBLISHED";
 
 const issues = (item: Item) => item.document?.qualityIssues ?? [];
 const hasIssue = (item: Item, kind: string) => issues(item).some((i) => i.kind === kind);
 
-/* ═══════════════ Due for re-verification ═══════════════ */
+/** One line above each queue: what it finds and what to do about it (counts live on the queue chooser). */
+export const QUEUE_HINT = {
+  problems: "Approved, but not in front of people yet. Each row shows its fix; select several to publish them together.",
+  reverify: "Verification expired or never happened. Verify what’s still right.",
+  details: "Documents without a topic, owner or summary are harder to find. Fill in what’s missing.",
+  duplicates: "Near-identical documents compete in answers. Compare each pair and keep one.",
+} as const;
 
-export type ReasonKey = "source" | "expired" | "never";
+/* ═══════════════ Re-verification due ═══════════════ */
+
+/** A document that changed at its source is a publishing state (Review → Publishing problems), not a trust check. */
+export type ReasonKey = "expired" | "never";
 
 export const REASONS: Readonly<Record<ReasonKey, { label: string; icon: LucideIcon; rank: number }>> = {
-  source: { label: "Changed at source", icon: RefreshCw, rank: 0 },
-  expired: { label: "Verification expired", icon: Clock, rank: 1 },
-  never: { label: "Never verified", icon: CircleDashed, rank: 2 },
+  expired: { label: "Verification expired", icon: Clock, rank: 0 },
+  never: { label: "Never verified", icon: CircleDashed, rank: 1 },
 };
 
 export interface ReviewEntry {
@@ -35,14 +42,12 @@ export interface ReviewEntry {
   due: number | null;
 }
 
-/** Why a document needs its owner's attention, else null. */
+/** Why a document needs its owner to re-verify it, else null. */
 export function reviewEntry(r: Resource): ReviewEntry | null {
   const doc = r.item.document;
+  if (doc?.indexingState === "OUTDATED" || hasIssue(r.item, "CHANGED_AT_SOURCE")) return null;
   const dueIso = doc?.verification?.nextReviewTime;
   const due = dueIso ? Date.parse(dueIso) : null;
-  if (doc?.indexingState === "OUTDATED" || hasIssue(r.item, "CHANGED_AT_SOURCE")) {
-    return { r, reason: "source", note: "The original changed at the source. Answers use the previous version until it’s reprocessed.", due };
-  }
   if (r.trust.state === "review" || hasIssue(r.item, "REVIEW_DUE")) return { r, reason: "expired", note: r.trust.note, due };
   if (r.trust.state === "unverified" && doc?.indexingState === "SUCCEEDED") return { r, reason: "never", note: r.trust.note, due: null };
   return null;
@@ -110,25 +115,6 @@ export function duplicatePairs(pool: readonly Resource[], visible: ReadonlyMap<s
   return [...pairs.values()];
 }
 
-/* ═══════════════ Summary line ═══════════════ */
-
-export function qualitySummary(pool: readonly Resource[], rv: number, dt: number, dp: number): string {
-  if (!pool.length) return "You don’t look after any published documents yet.";
-  const kbs = new Set(pool.map((r) => r.base?.name ?? "")).size;
-  if (!rv && !dt && !dp) return `${plural(pool.length, "published document")} across ${plural(kbs, "knowledge base")} — all verified, described and unique.`;
-  return `${plural(rv, "document")} due for re-verification, ${fmtNum(dt)} missing details and ${plural(dp, "possible duplicate")} across ${plural(kbs, "knowledge base")} you look after.`;
-}
-
-export const QUALITY_SEGS = ["reverify", "details", "duplicates"] as const;
-export type QualitySeg = (typeof QUALITY_SEGS)[number];
-
-/** `?seg=` (legacy `review` → reverify); unknown → the first segment with work, else reverify. */
-export function resolveSeg(raw: string, counts: Readonly<Record<QualitySeg, number>>): QualitySeg {
-  const want = raw === "review" ? "reverify" : raw;
-  if ((QUALITY_SEGS as readonly string[]).includes(want)) return want as QualitySeg;
-  return QUALITY_SEGS.find((k) => counts[k]) ?? "reverify";
-}
-
 /** Case/diacritics-insensitive substring match over several fields. */
 export function matches(q: string, ...fields: (string | undefined | null)[]): boolean {
   const needle = fold(q.trim());
@@ -144,6 +130,9 @@ const live = (t: Topic) => t.state === "ACTIVE";
 
 /** Active domains, in API order. */
 export const activeDomains = (topics: readonly Topic[]) => topics.filter((t) => t.kind === "DOMAIN" && live(t));
+
+/** Active topics of a domain. */
+export const topicsOf = (topics: readonly Topic[], domain: string) => topics.filter((t) => t.kind === "TOPIC" && live(t) && t.parentTopic === domain);
 
 /** A same-level name clash among active topics (`parent` null = domains), ignoring `except`. */
 export function nameTaken(topics: readonly Topic[], name: string, parent: string | null, except?: string): boolean {
@@ -194,4 +183,17 @@ export function topicCounts(topics: readonly Topic[], published: readonly Item[]
     domain: (name) => Math.max(docDomains.get(name) ?? 0, docFloor.get(name) ?? 0),
     reviewDomain: (name) => Math.max(reviewDomains.get(name) ?? 0, reviewFloor.get(name) ?? 0),
   };
+}
+
+/** Published documents per collection tagged with any of `topics` (a topic, or a domain and its topics), busiest first. */
+export function distribution(published: readonly Resource[], topics: readonly string[]): { base: NonNullable<Resource["base"]>; n: number }[] {
+  const want = new Set(topics);
+  const m = new Map<string, { base: NonNullable<Resource["base"]>; n: number }>();
+  for (const r of published) {
+    if (!r.base || !r.topics.some((t) => want.has(t))) continue;
+    const cur = m.get(r.base.name);
+    if (cur) cur.n += 1;
+    else m.set(r.base.name, { base: r.base, n: 1 });
+  }
+  return [...m.values()].sort((a, b) => b.n - a.n);
 }

@@ -1,26 +1,26 @@
 "use client";
 
 import { Button } from "@heroui/react";
-import { UserPlus } from "lucide-react";
+import { Plus, UserPlus } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { PageChrome } from "@/components/shell/page-chrome";
-import { Page, PageHeader, SectionTabs } from "@/components/ui";
+import { Page, PageHeader, toast } from "@/components/ui";
 import { resourceId } from "@/lib/api/client";
+import { peopleSections, sectionTitle, useSection } from "@/lib/navigation";
 import { useWorkspace } from "@/lib/workspace";
 
-import { useAccessRequestsQuery, useDirectory } from "../queries";
+import type { Group } from "../api";
+import { useDirectory } from "../queries";
 import { AddPeopleDialog } from "./AddPeopleDialog";
 import { GroupDrawer } from "./GroupDrawer";
-import { CreateGroupDialog, GroupsTab } from "./GroupsTab";
+import { GroupFormDialog, GroupsTab } from "./GroupsTab";
 import { MemberDrawer } from "./MemberDrawer";
 import { MembersTab, type MemberFilters } from "./MembersTab";
-import { RequestsTab, isPending } from "./RequestsTab";
+import { RequestsTab } from "./RequestsTab";
 import { RolesTab, roleParam } from "./RolesTab";
 
-const TABS = ["members", "groups", "roles", "requests"] as const;
-type Tab = (typeof TABS)[number];
+const NO_FILTERS: MemberFilters = { q: "", role: "", status: "" };
 
 /** Rows/cards that just appeared flash for a moment (preview `markFresh`). */
 function useFresh() {
@@ -36,8 +36,9 @@ function useFresh() {
 }
 
 /**
- * People (preview `P.people`, `/people?tab=members|groups|roles|requests`).
- * Deep links: `?tab=members&open=<memberId>`, `?tab=groups&open=<groupId>`, `?tab=roles&role=<roleId>`.
+ * People (preview `P.people`): sections Members · Groups · Roles · Access requests are sidebar sub-rows
+ * (`?tab=`); each section is titled by its name and has its one header action.
+ * Deep links: `?tab=members&open=<memberId>` (`&add=1` opens Add people), `?tab=groups&open=<groupId>`, `?tab=roles&role=<roleId>`.
  */
 export function PeoplePage() {
   const router = useRouter();
@@ -45,12 +46,11 @@ export function PeoplePage() {
   const params = useSearchParams();
   const { can, id: ws } = useWorkspace();
   const dir = useDirectory();
-  const requests = useAccessRequestsQuery();
-  const tab: Tab = (TABS as readonly string[]).includes(params.get("tab") ?? "") ? (params.get("tab") as Tab) : "members";
+  const tab = useSection(peopleSections);
   const open = params.get("open");
-  const [filters, setFilters] = useState<MemberFilters>({ q: "", role: "", status: "" });
-  const [adding, setAdding] = useState(false);
-  const [creatingGroup, setCreatingGroup] = useState(false);
+  const [filters, setFilters] = useState<MemberFilters>(NO_FILTERS);
+  const [groupForm, setGroupForm] = useState<{ group: Group | null } | null>(null);
+  const [creatingRole, setCreatingRole] = useState(false);
   const [freshMembers, markMembers] = useFresh();
   const [freshGroups, markGroups] = useFresh();
 
@@ -66,76 +66,67 @@ export function PeoplePage() {
     [params, pathname, router],
   );
 
-  const pending = requests.data?.filter(isPending).length ?? 0;
+  const adding = tab === "members" && params.get("add") === "1" && can("members.create");
   const groupName = tab === "groups" && open ? `workspaces/${ws}/groups/${open}` : null;
-  const memberId = tab === "members" && open ? open : null;
+  // `member=` is the command palette's link to one person; `open=` the table's.
+  const memberId = tab === "members" ? (open ?? params.get("member")) : null;
+
+  const actions =
+    tab === "members" && can("members.create") ? (
+      <Button variant="primary" onPress={() => go({ add: "1" })}>
+        <UserPlus className="i" aria-hidden />
+        Add people
+      </Button>
+    ) : tab === "groups" && can("groups.create") ? (
+      <Button variant="primary" onPress={() => setGroupForm({ group: null })}>
+        <Plus className="i" aria-hidden />
+        New group
+      </Button>
+    ) : tab === "roles" && can("roles.create") ? (
+      <Button variant="primary" onPress={() => setCreatingRole(true)}>
+        <Plus className="i" aria-hidden />
+        New role
+      </Button>
+    ) : null;
 
   return (
-    <Page>
-      <PageChrome crumbs={[{ label: "People" }]} />
-      <PageHeader
-        title="People"
-        actions={
-          can("members.create") ? (
-            <Button variant="primary" onPress={() => setAdding(true)}>
-              <UserPlus className="i" aria-hidden />
-              Add people
-            </Button>
-          ) : null
-        }
-      >
-        <SectionTabs
-          base="/people"
-          active={tab}
-          items={[
-            { id: "members", label: "Members", count: dir.data?.people.length },
-            { id: "groups", label: "Groups", count: dir.data?.groups.length },
-            { id: "roles", label: "Roles", count: dir.data?.roles.length },
-            { id: "requests", label: "Requests", count: pending || null, alert: true },
-          ]}
-        />
-      </PageHeader>
+    <Page width="wide">
+      <PageHeader title={sectionTitle(peopleSections, tab)} actions={actions} />
       {tab === "members" ? (
-        <MembersTab
-          query={dir}
-          filters={filters}
-          onFiltersChange={setFilters}
-          fresh={freshMembers}
-          canAdd={can("members.create")}
-          onAdd={() => setAdding(true)}
-          onOpen={(p) => go({ open: p.id })}
-        />
+        <MembersTab query={dir} filters={filters} onFiltersChange={setFilters} fresh={freshMembers} canAdd={can("members.create")} onOpen={(p) => go({ open: p.id })} />
       ) : tab === "groups" ? (
-        <GroupsTab query={dir} fresh={freshGroups} onOpen={(g) => go({ open: resourceId(g.name) })} onCreate={() => setCreatingGroup(true)} />
+        <GroupsTab query={dir} fresh={freshGroups} onOpen={(g) => go({ open: resourceId(g.name) })} />
       ) : tab === "roles" ? (
         <RolesTab
           query={dir}
           selected={params.get("role") ?? roleParam("roles/workspaceAdmin")}
           onSelect={(role) => go({ role })}
-          onShowMembers={(role) => {
-            setFilters({ q: "", role, status: "" });
+          creating={creatingRole}
+          onCreatingChange={setCreatingRole}
+          onShowMembers={(role, fromBlocked) => {
+            setFilters({ ...NO_FILTERS, role });
             router.replace("/people?tab=members", { scroll: false });
+            if (fromBlocked) toast("Select them, then use Change role to move them", { tone: "accent" });
           }}
         />
       ) : (
         <RequestsTab dir={dir.data} />
       )}
-      <MemberDrawer dir={dir.data} memberId={memberId} onClose={() => go({ open: null })} />
-      <GroupDrawer dir={dir.data} groupName={groupName} onClose={() => go({ open: null })} />
+      <MemberDrawer dir={dir.data} memberId={memberId} onClose={() => go({ open: null, member: null })} />
+      <GroupDrawer dir={dir.data} groupName={groupName} onClose={() => go({ open: null })} onEdit={(group) => setGroupForm({ group })} />
       <AddPeopleDialog
         isOpen={adding}
-        onClose={() => setAdding(false)}
+        onClose={() => go({ add: null })}
         dir={dir.data}
         onAdded={(ids) => {
-          setFilters({ q: "", role: "", status: "" });
+          setFilters(NO_FILTERS);
           markMembers(ids);
-          if (tab !== "members") router.replace("/people?tab=members", { scroll: false });
         }}
       />
-      <CreateGroupDialog
-        isOpen={creatingGroup}
-        onClose={() => setCreatingGroup(false)}
+      <GroupFormDialog
+        state={groupForm}
         dir={dir.data}
+        onClose={() => setGroupForm(null)}
         onCreated={(g) => {
           markGroups([g.name ?? ""]);
           router.replace(`/people?tab=groups&open=${resourceId(g.name)}`, { scroll: false });

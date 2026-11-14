@@ -56,7 +56,7 @@
 .rq-sla--muted { color: var(--muted); }
 
 /* Request page */
-.rq-page--item .page-header__title { overflow-wrap: anywhere; }
+.rq-page--item .page-hero__title { overflow-wrap: anywhere; }
 .rq-sub { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .rq-detail { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 24px; align-items: start; }
 .rq-main, .rq-side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }

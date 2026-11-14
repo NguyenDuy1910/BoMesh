@@ -17,17 +17,40 @@ export interface IconButtonProps {
   /** Show the tooltip (default true). Turn off when the label is visible nearby. */
   showTip?: boolean;
   className?: string;
+  id?: string;
+  /** Disclosure state for a toggle (e.g. the sidebar toggle). */
+  ariaExpanded?: boolean;
+  ariaControls?: string;
+  ariaKeyShortcuts?: string;
 }
 
 /**
  * Icon-only button with tooltip (preview `iconBtn(icon, tip)`, HeroUI Button `isIconOnly` + Tooltip).
  * Ghost icon buttons use the muted foreground like the preview.
  */
-export function IconButton({ icon: Icon, tip, onPress, variant = "ghost", size, isDisabled, isPending, showTip = true, className }: IconButtonProps) {
+export function IconButton({
+  icon: Icon,
+  tip,
+  onPress,
+  variant = "ghost",
+  size,
+  isDisabled,
+  isPending,
+  showTip = true,
+  className,
+  id,
+  ariaExpanded,
+  ariaControls,
+  ariaKeyShortcuts,
+}: IconButtonProps) {
   const button = (
     <Button
       isIconOnly
       aria-label={tip}
+      id={id}
+      aria-expanded={ariaExpanded}
+      aria-controls={ariaControls}
+      aria-keyshortcuts={ariaKeyShortcuts}
       variant={variant}
       size={size}
       isDisabled={isDisabled}

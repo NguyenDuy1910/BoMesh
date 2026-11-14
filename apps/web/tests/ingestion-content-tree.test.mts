@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { addChildren, checkState, EMPTY_TREE, matches, pathOf, ROOT, sourceNameFor, toggleSelection, type ContentNode } from "../src/modules/ingestion/content-tree.ts";
+import { addChildren, checkState, claimOf, EMPTY_TREE, matches, pathOf, ROOT, sourceNameFor, toggleSelection, type ContentNode } from "../src/modules/ingestion/content-tree.ts";
 
 const node = (id: string, name: string, type = "folder", hasChildren = false): ContentNode => ({ id, name, type, path: id, hasChildren });
 
@@ -45,4 +45,24 @@ test("paths, search and source names", () => {
   wiki = addChildren(wiki, "po", [node("pol", "Policies", "page")]);
   assert.equal(sourceNameFor(wiki, "po", "confluence"), "People Ops space");
   assert.equal(sourceNameFor(wiki, "pol", "confluence"), "People Ops — Policies");
+});
+
+test("a folder another source already syncs is never picked", () => {
+  const taken = new Map([["price", "Pricing source"]]);
+  const blocked = (id: string) => taken.has(id);
+  // Picking the parent selects only what can still be picked.
+  let sel = toggleSelection(tree, [], "sales", blocked);
+  assert.deepEqual(sel, ["decks"]);
+  assert.equal(checkState(tree, sel, "sales", blocked), "all");
+  // Higher up, the covered part stays split so the taken folder is left out.
+  sel = toggleSelection(tree, [], "sd", blocked);
+  assert.deepEqual(sel.sort(), ["decks", "legal"]);
+  assert.equal(checkState(tree, sel, "sd", blocked), "all");
+  // Clearing a node selected through its parts clears them; the taken node itself can't be toggled.
+  assert.deepEqual(toggleSelection(tree, sel, "sd", blocked), []);
+  assert.deepEqual(toggleSelection(tree, [], "price", blocked), []);
+  // The claim on a node comes from it or the nearest ancestor.
+  assert.equal(claimOf(tree, "price", taken), "Pricing source");
+  assert.equal(claimOf(tree, "decks", taken), undefined);
+  assert.equal(claimOf(tree, "decks", new Map([["sales", "Sales source"]])), "Sales source");
 });

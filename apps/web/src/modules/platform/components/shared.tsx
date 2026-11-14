@@ -1,22 +1,29 @@
 "use client";
 
-import { Drawer } from "@heroui/react";
-import { Layers } from "lucide-react";
+import { Button, Drawer, Dropdown, Label, Separator } from "@heroui/react";
+import { Layers, MoreHorizontal, type LucideIcon } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { WorkspaceMark } from "@/components/ui";
+import { toast, WorkspaceMark } from "@/components/ui";
 import type { Schema } from "@/lib/api/client";
 
 /** Every platform page is a proposal on top of the API; each header carries one Preview chip (SCREEN_INVENTORY). */
 export const PREVIEW_TIP = "The platform console is a design proposal; some numbers the preview shows aren’t in the API yet.";
 
+/** Query-string state of a console page (`useUrlState`). */
+export interface UrlState {
+  get: (key: string) => string;
+  /** Merges a patch into the query string; empty values remove their key. */
+  set: (patch: Record<string, string | null | undefined>) => void;
+}
+
 /**
- * Filters, tabs and open drawers live in the query string (`?q=&status=&open=`), like the preview's
+ * Filters, sections and open drawers live in the query string (`?q=&status=&open=`), like the preview's
  * hash routes. `set` merges a patch (empty values are removed) and applies it at once: the pending
  * query is kept locally until the router catches up, so typing into a search field never drops keys.
  */
-export function useUrlState() {
+export function useUrlState(): UrlState {
   const params = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -80,25 +87,28 @@ export interface PlatformDrawerProps {
   title: ReactNode;
   lead?: ReactNode;
   description?: ReactNode;
+  /** Rare actions beside the close button (preview `headActions`, usually a `<MoreMenu/>`). */
+  headActions?: ReactNode;
   footerStart?: ReactNode;
   footer?: ReactNode;
   children: ReactNode;
 }
 
 /** Right-side drawer with the preview's anatomy: lead mark, title, description, body sections, split footer. */
-export function PlatformDrawer({ isOpen, onClose, title, lead, description, footerStart, footer, children }: PlatformDrawerProps) {
+export function PlatformDrawer({ isOpen, onClose, title, lead, description, headActions, footerStart, footer, children }: PlatformDrawerProps) {
   return (
     <Drawer.Backdrop isOpen={isOpen} onOpenChange={(open) => !open && onClose()}>
       <Drawer.Content placement="right">
         <Drawer.Dialog>
           <Drawer.CloseTrigger aria-label="Close" />
           <Drawer.Header>
-            <div className="row gap-12">
+            <div className="row gap-12 pf-drawer__head">
               {lead}
               <div className="grow">
                 <Drawer.Heading>{title}</Drawer.Heading>
                 {description ? <p className="drawer__description">{description}</p> : null}
               </div>
+              {headActions ? <div className="pf-drawer__actions row gap-4 none">{headActions}</div> : null}
             </div>
           </Drawer.Header>
           <Drawer.Body>{children}</Drawer.Body>
@@ -112,6 +122,50 @@ export function PlatformDrawer({ isOpen, onClose, title, lead, description, foot
       </Drawer.Content>
     </Drawer.Backdrop>
   );
+}
+
+export interface MoreMenuItem {
+  id: string;
+  label: string;
+  icon?: LucideIcon;
+  danger?: boolean;
+  isDisabled?: boolean;
+  /** Draw a separator above this entry. */
+  separator?: boolean;
+  onAction: () => void;
+}
+
+/** Preview `iconBtn('more', 'More actions', { menu })`: a ⋯ button with a short menu of rare actions. */
+export function MoreMenu({ items, label = "More actions" }: { items: readonly MoreMenuItem[]; label?: string }) {
+  if (!items.length) return null;
+  return (
+    <Dropdown>
+      <Button isIconOnly size="sm" variant="ghost" aria-label={label} className="button--muted">
+        <MoreHorizontal className="i" aria-hidden />
+      </Button>
+      <Dropdown.Popover placement="bottom end">
+        <Dropdown.Menu aria-label={label} onAction={(key) => items.find((i) => i.id === key)?.onAction()} disabledKeys={items.filter((i) => i.isDisabled).map((i) => i.id)}>
+          {items.flatMap((item) => [
+            ...(item.separator ? [<Separator key={`sep-${item.id}`} />] : []),
+            <Dropdown.Item key={item.id} id={item.id} textValue={item.label} variant={item.danger ? "danger" : undefined}>
+              {item.icon ? <item.icon className="i" aria-hidden /> : null}
+              <Label>{item.label}</Label>
+            </Dropdown.Item>,
+          ])}
+        </Dropdown.Menu>
+      </Dropdown.Popover>
+    </Dropdown>
+  );
+}
+
+/** Copies text and confirms with a toast (preview `copyText`). */
+export async function copyText(text: string, message: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(message);
+  } catch {
+    toast("Couldn’t copy. Select the text and copy it instead.", { tone: "danger" });
+  }
 }
 
 /** Saves text as a file the browser downloads (client-side CSV of what the page shows). */

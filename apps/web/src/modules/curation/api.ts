@@ -4,9 +4,9 @@ import { api, call, listAll, requestId, resourceId, type Schema } from "@/lib/ap
 import { listAllItems, type Contribution, type Item, type Topic } from "@/modules/knowledge/api";
 
 /**
- * Manage → Documents (`/documents`): reviewer decisions on contributions, every curated
- * document, processing retries, duplicate merges and the taxonomy (openapi.yaml "Knowledge"
- * + "Ingestion"). Path params are bare IDs; bodies carry full resource names.
+ * Knowledge Studio (`/studio`): reviewer decisions on contributions, every curated document, processing
+ * retries, duplicate merges and the taxonomy (openapi.yaml "Knowledge" + "Ingestion"). Path params are bare
+ * IDs; bodies carry full resource names.
  */
 
 export type { Contribution, Item, Topic };
@@ -109,15 +109,18 @@ export function listAllTopics(workspace: string, { deleted = false }: { deleted?
   );
 }
 
-export function createTopic(workspace: string, topic: Pick<Topic, "displayName" | "kind" | "parentTopic">): Promise<Topic> {
+export function createTopic(workspace: string, topic: Pick<Topic, "displayName" | "kind" | "parentTopic" | "description">): Promise<Topic> {
   return call(api.POST("/api/v1/workspaces/{workspace}/topics", { params: { path: { workspace }, query: { requestId: requestId() } }, body: topic }));
 }
 
-export function renameTopic(workspace: string, topic: Topic, displayName: string): Promise<Topic> {
+export type TopicPatch = Partial<Pick<Topic, "displayName" | "description" | "parentTopic">>;
+
+/** Changes only the fields in `patch` (`updateMask` names them); stale etag → ABORTED. */
+export function updateTopic(workspace: string, topic: Topic, patch: TopicPatch): Promise<Topic> {
   return call(
     api.PATCH("/api/v1/workspaces/{workspace}/topics/{topic}", {
-      params: { path: tPath(workspace, topic.name ?? ""), query: { updateMask: "displayName" } },
-      body: { displayName, etag: topic.etag },
+      params: { path: tPath(workspace, topic.name ?? ""), query: { updateMask: Object.keys(patch).join(",") } },
+      body: { ...patch, etag: topic.etag },
     }),
   );
 }
@@ -132,7 +135,7 @@ export function undeleteTopic(workspace: string, topic: string): Promise<Topic> 
 }
 
 /** PROPOSED → ACTIVE under a domain (optionally renamed); tags the contributions that proposed it. */
-export function acceptTopic(workspace: string, topic: string, body: { parentTopic?: string; displayName?: string }): Promise<Topic> {
+export function acceptTopic(workspace: string, topic: string, body: Schema<"AcceptTopicRequest">): Promise<Topic> {
   return call(api.POST("/api/v1/workspaces/{workspace}/topics/{topic}:accept", { params: { path: tPath(workspace, topic) }, body }));
 }
 

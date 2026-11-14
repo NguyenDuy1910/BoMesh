@@ -2,10 +2,11 @@
 
 import { Button } from "@heroui/react";
 import clsx from "clsx";
-import { Fragment, memo, useState, type ReactNode } from "react";
+import { memo, useState, type ReactNode } from "react";
 
 import { fmtNum } from "@/lib/format";
 
+import type { DocFormat } from "../format";
 import type { BlockMarks, DocumentMarks, MarkRange } from "../marks";
 import { markableText, renditionPages, type DocumentRendition, type RenditionBlock, type TableBlock, type TextBlock } from "../rendition";
 
@@ -18,20 +19,30 @@ export interface RenditionViewProps {
   marks: DocumentMarks;
   /** The mark the reader is on (`mark.evidence.is-focus`). */
   focusHit?: number;
-  /** Spreadsheets read as sheets (`doc-page--sheet`), without page numbers. */
-  sheet?: boolean;
-  /** For "Page 3 of 48" and the gaps between rendered pages. */
+  /** The file's native format: decides the page chrome (running header, page/slide numbers). */
+  format: DocFormat;
+  /** Pages of the source, for "Page 3 of 48" and the gaps between rendered pages. */
   pageCount?: number;
-  /** `pages`: one `.doc-page` per source page (Reader). `column`: the blocks only (side panels). */
-  layout?: "pages" | "column";
+  /** PDF running header on every page after the first: the document and its workspace. */
+  runningHead?: readonly [string, string];
+}
+
+/** Pages a rendition reads as in its native format (preview documents.js `model().count`). */
+export function renditionPageCount(rendition: DocumentRendition, format: DocFormat, pageCount = 0): number {
+  const pages = renditionPages(rendition);
+  if (format === "slide") return pages.length;
+  return Math.max(pageCount, 1, ...pages.map((p) => p.page ?? 0));
 }
 
 /**
- * The document canvas (preview reader.js `pagesHtml` + documents.js markup): headings, paragraphs,
- * lists and tables of the rendition on reading-size pages, with evidence marks on cited passages
- * and search matches. Document content is never localized (`.doc-page` is skipped by the localizer).
+ * The document's own pages (preview reader.js `viewerHtml` + documents.js `model`): the rendition's
+ * headings, paragraphs, lists and tables laid out as the file's app shows them — PDF and Word pages
+ * with their print chrome, a slide deck, sheets with gridlines and tabs, or one continuous page for
+ * Markdown, web pages, text and email — with evidence marks on cited passages and search matches.
+ * Paged formats carry `data-n` (page or slide number) for the viewer bar. Document content is never
+ * localized (`translate="no"`).
  */
-export function RenditionView({ rendition, marks, focusHit = -1, sheet = false, pageCount = 0, layout = "pages" }: RenditionViewProps) {
+export function RenditionView({ rendition, marks, focusHit = -1, format, pageCount = 0, runningHead }: RenditionViewProps) {
   const body = (blocks: readonly RenditionBlock[]) =>
     blocks.map((block) => {
       const blockMarks = marks.blocks.get(block.id);
@@ -39,11 +50,12 @@ export function RenditionView({ rendition, marks, focusHit = -1, sheet = false, 
       return <Block key={block.id} block={block} marks={blockMarks} focusHit={blockMarks ? focusHit : -1} title={block === rendition.blocks[0] && block.kind === "heading"} />;
     });
 
-  if (layout === "column") return <div className="doc-column" translate="no">{body(rendition.blocks)}</div>;
-
   const pages = renditionPages(rendition);
-  const total = Math.max(pageCount, ...pages.map((p) => p.page ?? 0));
-  if (sheet) {
+  const truncated = rendition.truncated ? <p className="doc-gap">Showing the first part of this file. Download it for the rest.</p> : null;
+  // A "sheet" without tables reads as pages (preview: no sheet pages → pdf).
+  const f: DocFormat = format === "sheet" && !rendition.blocks.some((b) => b.kind === "table") ? "pdf" : format;
+
+  if (f === "sheet") {
     return (
       <>
         {pages.map((page, index) => (
@@ -60,11 +72,24 @@ export function RenditionView({ rendition, marks, focusHit = -1, sheet = false, 
             ) : null}
           </div>
         ))}
-        {rendition.truncated ? <p className="doc-page-no">Showing the first part of this file. Download it for the rest.</p> : null}
+        {truncated}
       </>
     );
   }
 
+  if (f !== "pdf" && f !== "docx" && f !== "slide") {
+    // Web-like files have no pages: one continuous page (passages keep their page for citations).
+    return (
+      <>
+        <section className={`doc-page doc-page--${f}`} data-page={pages[0]?.page ?? 1}>
+          {body(rendition.blocks)}
+        </section>
+        {truncated}
+      </>
+    );
+  }
+
+  const total = renditionPageCount(rendition, f, pageCount);
   const out: ReactNode[] = [];
   let prev = 0;
   const gap = (from: number, to: number) => (
@@ -73,23 +98,31 @@ export function RenditionView({ rendition, marks, focusHit = -1, sheet = false, 
     </div>
   );
   pages.forEach((page, index) => {
-    const no = page.page;
-    if (no !== null && no > prev + 1) out.push(gap(prev + 1, no - 1));
+    const no = page.page ?? prev + 1;
+    const n = f === "slide" ? index + 1 : no;
+    if (f !== "slide" && no > prev + 1) out.push(gap(prev + 1, no - 1));
+    const titleSlide = f === "slide" && index === 0 && page.blocks[0] === rendition.blocks[0] && page.blocks[0]?.kind === "heading";
     out.push(
-      <Fragment key={`${no ?? "none"}:${index}`}>
-        <div className="doc-page" data-page={no ?? undefined} translate="no">
-          {body(page.blocks)}
+      <div key={`${no}:${index}`} className={clsx("doc-page", `doc-page--${f}`, titleSlide && "doc-slide--title")} data-page={no} data-n={n}>
+        {f === "pdf" && index > 0 && runningHead ? (
+          <div className="doc-run" aria-hidden>
+            <span>{runningHead[0]}</span>
+            <span>{runningHead[1]}</span>
+          </div>
+        ) : null}
+        {body(page.blocks)}
+        <div className="doc-foot" aria-hidden>
+          {f === "docx" ? `Page ${no} of ${total}` : String(n)}
         </div>
-        {no !== null ? <div className="doc-page-no">{`Page ${no} of ${total}`}</div> : null}
-      </Fragment>,
+      </div>,
     );
-    if (no !== null) prev = no;
+    prev = no;
   });
-  if (prev > 0 && total > prev) out.push(gap(prev + 1, total));
+  if (f !== "slide" && total > prev) out.push(gap(prev + 1, total));
   return (
     <>
       {out}
-      {rendition.truncated ? <p className="doc-page-no">Showing the first part of this file. Download it for the rest.</p> : null}
+      {truncated}
     </>
   );
 }
@@ -237,7 +270,8 @@ function TableView({ block, marks, focusHit }: { block: TableBlock; marks?: Bloc
 
 const NUMERIC = /^-?[\d.,\s]+%?$/;
 
-function columnLetter(index: number): string {
+/** Spreadsheet column name (0 → A, 26 → AA). */
+export function columnLetter(index: number): string {
   let name = "";
   for (let value = index + 1; value > 0; value = Math.floor((value - 1) / 26)) name = LETTERS[(value - 1) % 26] + name;
   return name;

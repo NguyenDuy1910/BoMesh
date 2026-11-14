@@ -1,8 +1,10 @@
 """The reader view of a document: content, passages (citation targets).
 
-PostgreSQL authorizes first; the index is then read by ``item_id``, never by
-the payload's collection, so a lagging payload cannot hide content
-(``item_model.md`` §4.10).
+GetItemContent is PostgreSQL plus signed storage URLs only: the document is
+read from its stored rendition and page images, never from the search index.
+Passages are the index's citation targets; PostgreSQL authorizes first and the
+index is then read by ``item_id``, never by the payload's collection, so a
+lagging payload cannot hide content (``item_model.md`` §4.10).
 """
 
 from __future__ import annotations
@@ -26,7 +28,6 @@ from bomesh.services.knowledge_items.names import item_name
 from bomesh.services.knowledge_items.preview import KnowledgePreview, parse_manifest
 from bomesh.services.knowledge_items.records import (
     BoundingBox,
-    ContentElement,
     ContentRecord,
     PageAsset,
     PassageRecord,
@@ -84,14 +85,10 @@ class ItemContentService:
                     "This revision has no stored preview.", reason="REVISION_NOT_RENDERED"
                 )
             raise FailedPrecondition("The document has not been rendered yet.")
-        elements = (
-            await self._elements(item) if number == item.indexed_revision_number else ()
-        )
         return ContentRecord(
             workspace_id=workspace_id,
             item_id=item_id,
             revision=number,
-            elements=elements,
             page_assets=resolve_page_assets(
                 self._deps.preview,
                 item,
@@ -176,31 +173,6 @@ class ItemContentService:
         revision = await ItemService(session).revision(item.id, item.indexed_revision_number)
         manifest = parse_manifest(revision.exports.get("preview")) if revision else None
         return manifest or parse_manifest(item.metadata_.get("preview"))
-
-    async def _elements(self, item: Item) -> tuple[ContentElement, ...]:
-        """The indexed passages as reader elements (the view without a rendition)."""
-        chunks = await self._chunks(item)
-        async with transaction_scope(self._deps.sessions) as session:
-            citations = await CitationService(session).get_for_chunks(
-                item.id, [chunk.id for chunk in chunks]
-            )
-        elements: list[ContentElement] = []
-        for chunk in chunks:
-            citation = citations.get(chunk.id, chunk.citation)
-            element_id = next(
-                (span.element_id for span in citation.spans if span.element_id), chunk.id
-            )
-            elements.append(
-                ContentElement(
-                    element_id=element_id,
-                    kind="PARAGRAPH",
-                    text=chunk.chunk_text,
-                    level=None,
-                    page_number=citation.page_start,
-                    chunk_id=chunk.id,
-                )
-            )
-        return tuple(elements)
 
     def _page_urls(self, item: Item, manifest: PreviewManifest | None) -> dict[int, str]:
         if manifest is None:

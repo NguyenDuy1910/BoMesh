@@ -1,10 +1,11 @@
 "use client";
 
-import { Button, Checkbox, FieldError, Input, Label, TextArea, TextField } from "@heroui/react";
+import { Button, FieldError, Input, Label, TextArea, TextField } from "@heroui/react";
 import { useQueryClient } from "@tanstack/react-query";
+import { CalendarPlus, Check, Megaphone, Pencil, Plus, Send } from "lucide-react";
 import { useState } from "react";
 
-import { toast } from "@/components/ui";
+import { SwitchRow, toast } from "@/components/ui";
 import { errorMessage } from "@/lib/api/client";
 import { useWorkspace } from "@/lib/workspace";
 import { KnowledgeModal } from "@/modules/knowledge/components/KnowledgeModal";
@@ -34,7 +35,7 @@ export function AnnouncementDialog({ space, announcement, onClose }: { space: Sp
       else await createAnnouncement(ws, space.name ?? "", data);
       void invalidateSpaces(qc, ws);
       onClose();
-      toast(announcement ? "Announcement updated" : "Announcement posted");
+      toast(announcement ? "Announcement updated" : `Posted to ${space.displayName}`);
     } catch (e) {
       toast(errorMessage(e), { tone: "danger" });
       setBusy(false);
@@ -46,21 +47,25 @@ export function AnnouncementDialog({ space, announcement, onClose }: { space: Sp
       isOpen
       onClose={onClose}
       guard={busy}
+      icon={announcement ? Pencil : Megaphone}
       title={announcement ? "Edit announcement" : "Post announcement"}
       description={
-        announcement ? undefined : (
+        announcement ? (
+          "Changes show on the space page right away."
+        ) : (
           <>
-            Everyone in <span translate="no">{space.displayName}</span> sees it on the space page.
+            Everyone in <span translate="no">{space.displayName}</span> sees it first on the space page.
           </>
         )
       }
       footer={
         <>
-          <Button variant="tertiary" onPress={onClose} isDisabled={busy}>
+          <Button variant="ghost" onPress={onClose} isDisabled={busy}>
             Cancel
           </Button>
           <Button variant="primary" onPress={() => void save()} isPending={busy}>
-            {announcement ? "Save" : "Post"}
+            {announcement ? <Check aria-hidden /> : <Send aria-hidden />}
+            {announcement ? "Save changes" : "Post announcement"}
           </Button>
         </>
       }
@@ -75,18 +80,15 @@ export function AnnouncementDialog({ space, announcement, onClose }: { space: Sp
           <Label>
             Message <span className="label__opt">(optional)</span>
           </Label>
-          <TextArea rows={4} />
+          <TextArea rows={4} placeholder="The details members need: what changes, when, what to do." />
         </TextField>
-        <div className="mt-8">
-          <Checkbox isSelected={pinned} onChange={setPinned}>
-            <Checkbox.Content>
-              <Checkbox.Control>
-                <Checkbox.Indicator />
-              </Checkbox.Control>
-              Pin to the top
-            </Checkbox.Content>
-          </Checkbox>
-        </div>
+        <SwitchRow
+          title="Pin to the top"
+          description="Stays above newer announcements until you unpin it."
+          isSelected={pinned}
+          onChange={setPinned}
+          isDisabled={busy}
+        />
       </div>
     </KnowledgeModal>
   );
@@ -143,6 +145,7 @@ export function EventDialog({ space, event, onClose }: { space: Space; event?: S
       isOpen
       onClose={onClose}
       guard={busy}
+      icon={event ? Pencil : CalendarPlus}
       title={event ? "Edit event" : "Add event"}
       description={
         event ? undefined : (
@@ -153,11 +156,12 @@ export function EventDialog({ space, event, onClose }: { space: Space; event?: S
       }
       footer={
         <>
-          <Button variant="tertiary" onPress={onClose} isDisabled={busy}>
+          <Button variant="ghost" onPress={onClose} isDisabled={busy}>
             Cancel
           </Button>
           <Button variant="primary" onPress={() => void save()} isPending={busy}>
-            {event ? "Save" : "Add event"}
+            {event ? <Check aria-hidden /> : <Plus aria-hidden />}
+            {event ? "Save changes" : "Add event"}
           </Button>
         </>
       }

@@ -2,12 +2,13 @@
 
 import { Button, Description, Drawer, FieldError, Label, Spinner, TextArea, TextField } from "@heroui/react";
 import { useQueries } from "@tanstack/react-query";
-import { CircleAlert, Eye, File as FileGlyph, FileText, GitCompare, Plus, Send, Shield, Trash2, Undo2, Upload, X } from "lucide-react";
+import { CircleAlert, Eye, File as FileGlyph, FileText, GitCompare, History, Plus, Send, Shield, Trash2, Undo2, Upload, X } from "lucide-react";
 import NextLink from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState, type ReactNode } from "react";
 
 import { Callout } from "@/components/ui/Callout";
+import { Disclosure } from "@/components/ui/Disclosure";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { FileIcon } from "@/components/ui/FileIcon";
 import { IconButton } from "@/components/ui/IconButton";
@@ -15,24 +16,20 @@ import { KeyValue } from "@/components/ui/KeyValue";
 import { SkeletonRows } from "@/components/ui/SkeletonRows";
 import { StatusChip } from "@/components/ui/StatusChip";
 import { resourceId } from "@/lib/api/client";
-import { fmtDateTime, fmtSize } from "@/lib/format";
+import { fmtSize } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 
 import type { Contribution } from "../../api";
-import { openContribute } from "../../components/Contribute";
-import { LifecycleChip } from "../../components/LifecycleChip";
+import { openContribute } from "../../components/contribute-store";
 import { CONTRIBUTE_TYPES, fileProblem, kindMeta, LIFECYCLE } from "../../model";
-import { useContribution, useKnowledgeModel } from "../../queries";
+import { useContribution, useItemsByName, useKnowledgeModel } from "../../queries";
 import { getTopic } from "../api";
-import { flagText, lastEvent, PUBLISHED_KEYS, who } from "../contributions";
-import { useItemsByName } from "../queries";
+import { flagText, lastEvent, lastEventAt, PUBLISHED_KEYS, relLow, who, type ContributionEventView } from "../contributions";
 import { useContributionActions } from "../useContributionActions";
 import { useContributionViews, type ContributionView } from "../useContributionViews";
-import { TimelineSteps } from "./ContributionTimeline";
+import { ProgressStepper, TimelineSteps } from "./ContributionTimeline";
 
-const pct = (conf?: number) => <span className="ctb-conf">{Math.round((conf ?? 0) * 100)}%</span>;
-
-/** The contribution panel (preview `DR['ctb']`): state, revise form, history, the assistant's suggestions, details. */
+/** The contribution panel (preview `DR['ctb']`): where it stands, the revise form, progress, details and history. */
 export function ContributionDrawer({ id, focusRevise, onClose }: { id: string; focusRevise?: boolean; onClose: () => void }) {
   const query = useContribution(id);
   return (
@@ -67,6 +64,18 @@ export function ContributionDrawer({ id, focusRevise, onClose }: { id: string; f
   );
 }
 
+/** Which details section the panel shows: how a published one is classified, or what was suggested/confirmed. */
+function detailsOf(v: ContributionView): "classified" | "suggested" | null {
+  if (PUBLISHED_KEYS.includes(v.life) && v.published) return "classified";
+  if (v.life === "analyzing" || v.life === "review" || v.life === "changes" || v.contribution.suggestions) return "suggested";
+  return null;
+}
+
+/**
+ * One contribution. Each fact appears once: the file (and, when no section names it, the collection) in the
+ * subtitle; where it stands in Progress (plus an alert with the reviewer's message); the details in their
+ * section; every event in History (collapsed).
+ */
 function Panel({ contribution, focusRevise, onClose }: { contribution: Contribution; focusRevise?: boolean; onClose: () => void }) {
   const router = useRouter();
   const { can } = useWorkspace();
@@ -79,7 +88,28 @@ function Panel({ contribution, focusRevise, onClose }: { contribution: Contribut
   const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
 
+  const details = detailsOf(v);
+  const state = stateBlock(v);
   const openId = v.published ? resourceId(v.published.name) : resourceId(c.item);
+  const ext = (v.fileName.split(".").pop() || "file").toUpperCase();
+  const subtitle: ReactNode[] = [
+    !details && v.base ? (
+      <span key="kb" translate="no">
+        {v.base}
+      </span>
+    ) : null,
+    `${ext} · ${fmtSize(v.sizeBytes)}`,
+    !v.mine ? `Contributed by ${who(c.contributor ?? "", v.ctx)}` : null,
+    c.replacesItem ? (
+      <span key="orig">
+        New version of{" "}
+        <NextLink className="link" href={`/doc/${resourceId(c.replacesItem)}`} translate="no">
+          {v.revised?.displayName ?? "the published document"}
+        </NextLink>
+      </span>
+    ) : null,
+  ].filter(Boolean);
+
   const withdrawBtn = (
     <Button
       variant="ghost"
@@ -119,6 +149,7 @@ function Panel({ contribution, focusRevise, onClose }: { contribution: Contribut
     switch (v.life) {
       case "analyzing":
       case "review":
+        // The API withdraws only once it's in review (not while the assistant is reading it).
         footStart = c.state === "IN_REVIEW" ? withdrawBtn : null;
         foot = openBtn("Open preview", "secondary", <Eye className="i" aria-hidden />);
         break;
@@ -158,7 +189,7 @@ function Panel({ contribution, focusRevise, onClose }: { contribution: Contribut
       case "rejected":
         foot = (
           <Button
-            variant="secondary"
+            variant="danger-soft"
             onPress={() => {
               actions.remove(v);
               onClose();
@@ -181,42 +212,31 @@ function Panel({ contribution, focusRevise, onClose }: { contribution: Contribut
             <Drawer.Heading>
               <span translate="no">{v.title}</span>
             </Drawer.Heading>
-            {v.base ? (
-              <p className="drawer__description" translate="no">
-                {v.base}
-              </p>
-            ) : null}
+            <p className="drawer__description">
+              {subtitle.map((part, i) => (
+                <span key={i}>
+                  {i ? " · " : null}
+                  {part}
+                </span>
+              ))}
+            </p>
           </div>
         </div>
       </Drawer.Header>
       <Drawer.Body>
         <div className="ctb-panel">
-          <StateBlock view={v} />
+          {state.alert}
           {v.life === "changes" && v.mine ? (
             <ReviseForm note={note} setNote={setNote} file={file} setFile={setFile} touched={touched} autoFocus={focusRevise} />
           ) : null}
           <section>
-            <h3 className="ctb-sec__title">History</h3>
-            <TimelineSteps view={v} />
+            <h3 className="ctb-sec__title">Progress</h3>
+            <ProgressStepper view={v} />
           </section>
-          <Suggestions view={v} />
-          <section>
-            <h3 className="ctb-sec__title">Details</h3>
-            <KeyValue
-              pairs={[
-                ["Knowledge base", <span key="kb" translate="no">{v.base || "—"}</span>],
-                ["File", `${(v.fileName.split(".").pop() || "file").toUpperCase()} · ${fmtSize(v.sizeBytes)}`],
-                ["Submitted", fmtDateTime(c.createTime)],
-                !v.mine && ["Contributed by", who(c.contributor ?? "", v.ctx)],
-                !!c.replacesItem && [
-                  "New version of",
-                  <NextLink key="orig" className="link" href={`/doc/${resourceId(c.replacesItem)}`} translate="no">
-                    {v.revised?.displayName ?? "The published document"}
-                  </NextLink>,
-                ],
-              ]}
-            />
-          </section>
+          {details ? <Details view={v} kind={details} /> : null}
+          <Disclosure icon={History} title="History" summary={`Last update ${relLow(lastEventAt(c))}`}>
+            <TimelineSteps view={v} quoted={state.quoted} />
+          </Disclosure>
         </div>
       </Drawer.Body>
       {foot || footStart ? (
@@ -229,40 +249,39 @@ function Panel({ contribution, focusRevise, onClose }: { contribution: Contribut
   );
 }
 
-/** Lifecycle chip + plain description, and the reviewer's message when it matters (preview `stateBlock`). */
-function StateBlock({ view: v }: { view: ContributionView }) {
-  const c = v.contribution;
+/**
+ * Where it stands when someone decided something: an alert with their message (History doesn't repeat it).
+ * Every other state is the stepper's current step. Returns the event the alert quotes (preview `stateBlock`).
+ */
+function stateBlock(v: ContributionView): { alert: ReactNode; quoted?: ContributionEventView } {
   const quote = (text?: string) =>
     text ? (
       <blockquote className="ctb-quote" translate="no">
         {text}
       </blockquote>
     ) : null;
-  let alert: ReactNode = null;
+  const c = v.contribution;
   if (v.life === "changes") {
     const e = lastEvent(c, "changes");
-    alert = <Callout tone="warning" title={`${who(e?.by ?? "", v.ctx)} asked for changes`} description={quote(e?.text)} />;
-  } else if (v.life === "rejected") {
-    const e = lastEvent(c, "rejected");
-    alert = <Callout tone="danger" title={`${who(e?.by ?? "", v.ctx)} didn’t approve it`} description={quote(e?.text) ?? "It won’t be published."} />;
-  } else if (v.life === "failed") {
-    alert = (
-      <Callout
-        tone="danger"
-        title="Couldn’t publish — the reviewers have been told"
-        description="It was approved, but the file couldn’t be made searchable. You don’t need to do anything."
-      />
-    );
+    return { alert: <Callout tone="warning" title={`${who(e?.by ?? "", v.ctx)} asked for changes`} description={quote(e?.text)} />, quoted: e };
   }
-  return (
-    <div>
-      <div className="ctb-state">
-        <LifecycleChip lifecycle={v.life} size="md" />
-        <span className="t-sm muted">{LIFECYCLE[v.life].desc}</span>
-      </div>
-      {alert}
-    </div>
-  );
+  if (v.life === "rejected") {
+    const e = lastEvent(c, "rejected");
+    return { alert: <Callout tone="danger" title={`${who(e?.by ?? "", v.ctx)} declined it`} description={quote(e?.text) ?? "It won’t be published."} />, quoted: e };
+  }
+  if (v.life === "unpublished") return { alert: <Callout tone="default" title={LIFECYCLE.unpublished.label} description={LIFECYCLE.unpublished.desc} /> };
+  if (v.life === "failed") {
+    return {
+      alert: (
+        <Callout
+          tone="danger"
+          title="Couldn’t publish — the reviewers have been told"
+          description="It was approved, but the file couldn’t be made searchable. You don’t need to do anything."
+        />
+      ),
+    };
+  }
+  return { alert: null };
 }
 
 const ACCEPT = CONTRIBUTE_TYPES.map((x) => `.${x}`).join(",");
@@ -343,37 +362,51 @@ function ReviseForm({
 
 const FLAG_ICON = { PERSONAL_DATA: Shield, UNSEARCHABLE_FORMAT: FileGlyph } as const;
 
-/** What the assistant suggested (open contributions) or how it's classified (published) — read-only. */
-function Suggestions({ view: v }: { view: ContributionView }) {
+/**
+ * Read-only details (preview `suggestion`): how a published one is classified; otherwise what the contributor
+ * confirmed (type and topics written on the candidate) or what the assistant suggested. Contributors never see
+ * the assistant's confidence; reviewers do.
+ */
+function Details({ view: v, kind }: { view: ContributionView; kind: "classified" | "suggested" }) {
   const { id: ws } = useWorkspace();
   const { ctx } = useKnowledgeModel();
   const c = v.contribution;
   const s = c.suggestions;
-  const related = useItemsByName((c.flags ?? []).map((f) => f.relatedItem));
+  const related = useItemsByName(
+    (c.flags ?? []).map((f) => f.relatedItem),
+    { view: "BASIC" },
+  );
   const proposed = useQueries({
     queries: (s?.proposedTopics ?? []).map((t) => ({ queryKey: [ws, "topics", "one", resourceId(t)], queryFn: () => getTopic(ws, t), retry: false, staleTime: 5 * 60_000 })),
   });
   const topicChip = (name: string) => <StatusChip key={name} label={ctx.topicNames?.get(name) ?? "Untitled topic"} size="sm" dot={false} />;
+  const pct = (conf?: number) => (v.mine ? null : <span className="ctb-conf">{Math.round((conf ?? 0) * 100)}%</span>);
+  const collection = (sub?: string) => (
+    <span key="kb" className="stack gap-2">
+      {v.base ? <span translate="no">{v.base}</span> : <span className="muted">Not chosen yet</span>}
+      {sub ? <span className="t-xs muted">{sub}</span> : null}
+    </span>
+  );
 
-  if (PUBLISHED_KEYS.includes(v.life) && v.published) {
-    const d = v.published.document;
-    const kind = kindMeta(d?.documentType ?? "", ctx.documentTypes);
+  if (kind === "classified") {
+    const d = v.published?.document;
     return (
       <section>
         <h3 className="ctb-sec__title">How it’s classified</h3>
         <KeyValue
           pairs={[
-            ["Type", kind.label],
+            ["Type", kindMeta(d?.documentType ?? "", ctx.documentTypes).label],
             ["Topics", d?.topics?.length ? <span className="ctb-topics">{d.topics.map(topicChip)}</span> : <span className="muted">None</span>],
-            ["Knowledge base", <span key="kb" translate="no">{v.base || "—"}</span>],
+            ["Collection", collection()],
           ]}
         />
       </section>
     );
   }
-  if (!(v.life === "review" || v.life === "changes" || v.life === "analyzing") && !s) return null;
-  const head = <h3 className="ctb-sec__title">What the assistant suggested</h3>;
-  if (v.life === "analyzing" || !s) {
+
+  const confirmed = !!v.ctx.confirmed;
+  const head = <h3 className="ctb-sec__title">{confirmed ? (v.mine ? "What you confirmed" : "Confirmed by the contributor") : "What the assistant suggested"}</h3>;
+  if (!confirmed && (v.life === "analyzing" || !s)) {
     return (
       <section>
         {head}
@@ -384,12 +417,19 @@ function Suggestions({ view: v }: { view: ContributionView }) {
       </section>
     );
   }
-  const topics = s.topics ?? [];
+  const doc = v.candidate?.document;
+  const type = confirmed ? doc?.documentType : s?.documentType;
+  const topics = (confirmed ? doc?.topics : s?.topics) ?? [];
   const proposals = proposed.flatMap((p) => (p.data?.displayName ? [p.data.displayName] : []));
   const flags = (c.flags ?? []).map((f) => {
     const rel = f.relatedItem ? related.items.get(f.relatedItem)?.displayName : undefined;
     return { kind: f.kind ?? "", text: flagText(f.kind, rel) };
   });
+  const chosenBy = c.targetCollection
+    ? `Chosen by ${v.mine ? "you" : who(c.contributor ?? "", v.ctx)}`
+    : v.base
+      ? "Suggested by the assistant"
+      : "The assistant picks the best fit. A reviewer confirms it.";
   return (
     <section>
       {head}
@@ -398,8 +438,8 @@ function Suggestions({ view: v }: { view: ContributionView }) {
           [
             "Type",
             <span key="type" className="row gap-6">
-              {s.documentType ? kindMeta(s.documentType, ctx.documentTypes).label : "—"}
-              {s.documentType ? pct(s.documentTypeConfidence) : null}
+              {type ? kindMeta(type, ctx.documentTypes).label : "—"}
+              {type && !confirmed ? pct(s?.documentTypeConfidence) : null}
             </span>,
           ],
           [
@@ -407,7 +447,7 @@ function Suggestions({ view: v }: { view: ContributionView }) {
             topics.length || proposals.length ? (
               <span key="topics" className="ctb-topics">
                 {topics.map(topicChip)}
-                {topics.length ? pct(s.topicsConfidence) : null}
+                {topics.length && !confirmed ? pct(s?.topicsConfidence) : null}
                 {proposals.map((name) => (
                   <StatusChip
                     key={`p-${name}`}
@@ -425,13 +465,7 @@ function Suggestions({ view: v }: { view: ContributionView }) {
               </span>
             ),
           ],
-          [
-            "Knowledge base",
-            <span key="kb" className="stack gap-2">
-              <span translate="no">{v.base || "—"}</span>
-              <span className="t-xs muted">{c.targetCollection ? `Chosen by ${v.mine ? "you" : who(c.contributor ?? "", v.ctx)}` : "Suggested by the assistant"}</span>
-            </span>,
-          ],
+          ["Collection", collection(chosenBy)],
         ]}
       />
       {flags.length ? (

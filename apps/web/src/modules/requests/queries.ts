@@ -15,6 +15,7 @@ import {
   answerRequest,
   approveRequest,
   closeRequest,
+  countRequests,
   createRequest,
   createRequestMessage,
   denyRequest,
@@ -26,7 +27,7 @@ import {
   setAssignee,
   withdrawRequest,
 } from "./api";
-import { isActionable, type Request, type RequestType, type Space } from "./model";
+import type { Request, RequestType, Space } from "./model";
 
 /** Query keys; every key starts with the workspace ID and `"requests"`. */
 export const requestsKeys = {
@@ -177,15 +178,21 @@ export function useCatalog() {
 
 /**
  * Requests nav badge (preview `X.requestsBadge`): staff — open requests filed by others
- * that wait on them; requester — their own requests that need a reply.
+ * that wait on them (OPEN or APPROVED); requester — their own requests that need a reply.
+ * One server count (`pageSize=1`, `totalSize`), not the /requests list.
  */
 export function useRequestsBadge(): number | undefined {
-  const { member } = useWorkspace();
-  const requests = useRequests();
-  return useMemo(
-    () => requests.data?.filter((r) => (r.requester === member.name ? r.state === "NEEDS_INFO" : isActionable(r))).length,
-    [requests.data, member.name],
-  );
+  const { id, member, hasModule } = useWorkspace();
+  const me = member.name ?? "";
+  const filter =
+    `(kind = "SERVICE" OR kind = "QUESTION") AND ((requester = "${me}" AND state = "NEEDS_INFO")` +
+    ` OR (requester != "${me}" AND (state = "OPEN" OR state = "APPROVED")))`;
+  return useQuery({
+    queryKey: [id, "shell-badge", "requests"],
+    queryFn: () => countRequests(id, filter),
+    enabled: hasModule("requests") && !!me,
+    staleTime: 5 * 60_000,
+  }).data;
 }
 
 /* ═══════════════ Mutations ═══════════════ */

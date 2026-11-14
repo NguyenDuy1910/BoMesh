@@ -5,19 +5,23 @@ import { Upload } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { PageHeader } from "@/components/ui/PageHeader";
-import { SectionTabs } from "@/components/ui/SectionTabs";
 import { StatusChip } from "@/components/ui/StatusChip";
+import { librarySections, sectionTitle } from "@/lib/navigation";
 import { useWorkspace } from "@/lib/workspace";
 
-import { openContribute } from "./Contribute";
+import { openContribute } from "./contribute-store";
 
-const HUB_TABS = [
-  { id: "browse", label: "Browse", href: "/knowledge" },
-  { id: "library", label: "My library", href: "/knowledge/library" },
-  { id: "bases", label: "Knowledge bases", href: "/knowledge/bases" },
-] as const;
+/** A Knowledge personal section id (Foundation's `librarySections`): saved · files · lists. */
+export type LibrarySection = "saved" | "files" | "lists";
 
-export type KnowledgeSection = (typeof HUB_TABS)[number]["id"];
+/** Where "My reading lists" lives (trail target of an own reading list). */
+export const MY_LISTS_HREF = "/knowledge/library?tab=lists";
+
+/** The personal sections this member has: My files only with a personal collection. */
+export function useLibrarySections() {
+  const { member } = useWorkspace();
+  return librarySections.filter((s) => s.id !== "files" || !!member.personalCollection);
+}
 
 /**
  * Knowledge entry point (preview `X.res.uploadBtn`): Contribute (review before publishing) for
@@ -42,28 +46,28 @@ export function ContributeButton({ variant = "secondary" }: { variant?: "primary
   );
 }
 
-export interface KnowledgeHeaderProps {
-  /** The active section tab. */
-  active: KnowledgeSection;
-  /** Page actions; defaults to the Contribute button. Pass `null` for none. */
-  actions?: ReactNode;
-  description?: ReactNode;
+/** The fictional-data marker for demo workspaces (preview `X.res.demoChip`). */
+export function DemoChip() {
+  const { workspace } = useWorkspace();
+  if (!workspace.demo) return null;
+  return <StatusChip label="Demo data" tone="default" dot={false} size="sm" tooltip="This workspace holds fictional demo content." />;
 }
 
-/** Knowledge area header (preview `X.res.hubHeader`): title, demo marker, Browse · My library · Knowledge bases. */
-export function KnowledgeHeader({ active, actions, description }: KnowledgeHeaderProps) {
-  const { workspace } = useWorkspace();
-  return (
-    <>
-      <PageHeader
-        title="Knowledge"
-        description={description}
-        chips={workspace.demo ? <StatusChip label="Demo data" tone="default" dot={false} size="sm" tooltip="This workspace holds fictional demo content." /> : null}
-        actions={actions === undefined ? <ContributeButton /> : actions}
-      />
-      <div className="hub-nav">
-        <SectionTabs className="hub-tabs" variant="primary" items={HUB_TABS} active={active} label="Knowledge sections" />
-      </div>
-    </>
-  );
+export interface KnowledgeHeaderProps {
+  /** Browse (titled Knowledge) or a personal section (titled by its name). */
+  section?: "browse" | LibrarySection;
+  /** Top-row actions; defaults to the Contribute button. Pass `null` for none. */
+  actions?: ReactNode;
+  /** Short dynamic status for the top row. */
+  meta?: ReactNode;
+}
+
+/**
+ * Knowledge top-row header (preview `X.res.hubHeader`): Browse is titled Knowledge, a library
+ * section by its name; the Demo data chip marks demo workspaces. No tab bar: the sections are
+ * sidebar sub-rows.
+ */
+export function KnowledgeHeader({ section = "browse", actions, meta }: KnowledgeHeaderProps) {
+  const title = section === "browse" ? "Knowledge" : sectionTitle(librarySections, section);
+  return <PageHeader title={title} chips={<DemoChip />} meta={meta} actions={actions === undefined ? <ContributeButton /> : actions} />;
 }

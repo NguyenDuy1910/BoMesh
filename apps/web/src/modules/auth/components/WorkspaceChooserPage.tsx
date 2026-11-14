@@ -6,14 +6,24 @@ import { Building, ChevronRight, Layers, RefreshCw } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
-import { EmptyState, ErrorState, List, ListItem, NoMatches, SkeletonRows, toast, WorkspaceMark } from "@/components/ui";
+import { EmptyState, ErrorState, List, ListItem, NoMatches, SkeletonRows, StatusChip, toast, WorkspaceMark } from "@/components/ui";
 import { api, call, resourceId, type Schema } from "@/lib/api/client";
-import { rel } from "@/lib/format";
+import { plural, rel } from "@/lib/format";
 import { useLanguage } from "@/lib/i18n";
-import { isPlatformOperator, useSession } from "@/lib/session";
+import { isPlatformOperator, useSession, useSessionExpired } from "@/lib/session";
 import { listMyWorkspaces } from "@/lib/workspace";
 import { openWorkspace, roleDisplayName, signOut, TEMPLATE_LABEL, workspacesOpened } from "@/modules/auth/api";
 import { AuthLayout } from "@/modules/auth/components/AuthLayout";
+import { signInHref } from "@/modules/auth/next";
+
+/** Search appears once the list is long enough to need it (preview `TOOLS_MIN`). */
+const TOOLS_MIN = 7;
+
+/** "Last opened 5 h ago" / "Last opened Sep 27": lower-case relative words, keep month names as written. */
+function openedLabel(at: number): string {
+  const r = rel(at);
+  return `Last opened ${/^\p{Lu}\p{Ll}+ \d/u.test(r) ? r : r.toLowerCase()}`;
+}
 
 interface Choice {
   id: string;
@@ -41,22 +51,26 @@ export function WorkspaceChooserPage() {
   const router = useRouter();
   const next = useSearchParams().get("next");
   const session = useSession();
+  const expired = useSessionExpired();
   // Re-render on a language switch so "Last opened …" follows it (`rel` reads the interface language).
   useLanguage();
   const [signedOutChecked, setSignedOutChecked] = useState(false);
   const [q, setQ] = useState("");
   const [opening, setOpening] = useState<string | null>(null);
 
-  // useSession is null during server render; check after mount before redirecting.
+  // useSession is null during server render; check after mount before redirecting. An expired session has
+  // nothing to keep on this page: Sign in explains and comes back here.
   useEffect(() => setSignedOutChecked(true), []);
   useEffect(() => {
-    if (signedOutChecked && !session) router.replace("/signin");
-  }, [signedOutChecked, session, router]);
+    if (!signedOutChecked) return;
+    if (expired) router.replace(signInHref(`${window.location.pathname}${window.location.search}`, "expired"));
+    else if (!session) router.replace("/signin");
+  }, [signedOutChecked, session, expired, router]);
 
   const query = useQuery({
     queryKey: ["my-workspaces", session?.user.name],
     queryFn: loadChoices,
-    enabled: !!session,
+    enabled: !!session && !expired,
   });
 
   const rows = useMemo(() => {
@@ -86,7 +100,7 @@ export function WorkspaceChooserPage() {
     const result = await query.refetch();
     const found = result.data ?? [];
     if (found.length) toast(`You were added to ${found[0].workspace.displayName}`, { tone: "success" });
-    else toast("Not yet. Your admin hasn’t added you.", { tone: "accent" });
+    else toast("Not yet. No workspace has added or invited you.", { tone: "accent" });
   }
 
   async function leave() {
@@ -94,6 +108,9 @@ export function WorkspaceChooserPage() {
     router.replace("/signin");
     toast("Signed out", { tone: "accent" });
   }
+
+  // The template only helps tell workspaces apart when they differ.
+  const mixed = new Set(all.map((c) => c.workspace.template ?? "ENTERPRISE")).size > 1;
 
   let body: React.ReactNode;
   if (query.isPending) body = <SkeletonRows rows={3} />;
@@ -105,7 +122,7 @@ export function WorkspaceChooserPage() {
         title="No workspace yet"
         description={
           <>
-            Ask your workspace admin to add <strong>{session.user.email}</strong>. It shows up here as soon as they do.
+            When a workspace admin adds or invites <strong>{session.user.email}</strong>, the workspace shows up here.
           </>
         }
         actions={
@@ -120,7 +137,7 @@ export function WorkspaceChooserPage() {
   } else {
     body = (
       <>
-        {all.length > 3 ? (
+        {all.length >= TOOLS_MIN || q ? (
           <div className="mb-12">
             <SearchField value={q} onChange={setQ} aria-label="Search workspaces" fullWidth>
               <SearchField.Group>
@@ -133,23 +150,31 @@ export function WorkspaceChooserPage() {
         ) : null}
         {rows.length ? (
           <List>
-            {rows.map((c) => (
-              <ListItem
-                key={c.id}
-                lead={<WorkspaceMark name={c.workspace.displayName} size={36} />}
-                title={c.workspace.displayName}
-                contentTitle
-                titleExtra={
-                  c.workspace.template ? (
-                    <Chip size="sm">{TEMPLATE_LABEL[c.workspace.template]}</Chip>
-                  ) : undefined
-                }
-                description={`${c.role} · ${c.workspace.memberCount ?? 0} ${c.workspace.memberCount === 1 ? "member" : "members"}`}
-                meta={c.opened ? `Last opened ${rel(c.opened).toLowerCase()}` : undefined}
-                actions={<ChevronRight className="i au-chev" aria-hidden />}
-                onPress={() => void open(c.id)}
-              />
-            ))}
+            {rows.map((c) =>
+              c.workspace.state === "ARCHIVED" ? (
+                <ListItem
+                  key={c.id}
+                  className="au-ws-off"
+                  lead={<WorkspaceMark name={c.workspace.displayName} size={36} />}
+                  title={c.workspace.displayName}
+                  contentTitle
+                  titleExtra={<StatusChip label="Archived" tone="default" size="sm" />}
+                  description="Archived. Ask a platform admin to restore it."
+                />
+              ) : (
+                <ListItem
+                  key={c.id}
+                  lead={<WorkspaceMark name={c.workspace.displayName} size={36} />}
+                  title={c.workspace.displayName}
+                  contentTitle
+                  titleExtra={mixed && c.workspace.template ? <Chip size="sm">{TEMPLATE_LABEL[c.workspace.template]}</Chip> : undefined}
+                  description={`${c.role} · ${plural(c.workspace.memberCount ?? 0, "member")}`}
+                  meta={c.opened ? openedLabel(c.opened) : undefined}
+                  actions={<ChevronRight className="i au-chev" aria-hidden />}
+                  onPress={() => void open(c.id)}
+                />
+              ),
+            )}
           </List>
         ) : (
           <NoMatches what="workspaces" onClear={() => setQ("")} />
@@ -161,9 +186,16 @@ export function WorkspaceChooserPage() {
   return (
     <AuthLayout single innerClassName="au-ws">
       <h1 className="t-title au-title">{fresh ? "Welcome to BoMesh" : "Choose a workspace"}</h1>
+      <p className="muted au-sub au-who">
+        Signed in as <span className="medium au-who__email">{session.user.email}</span> ·{" "}
+        <button type="button" className="link link-button" onClick={() => void leave()}>
+          Sign out
+        </button>
+      </p>
       {body}
       {isPlatformOperator(session) ? (
-        <div className="mt-12">
+        <div className="au-group">
+          <div className="t-label au-group__label">Administration</div>
           <List>
             <ListItem
               lead={
@@ -172,19 +204,13 @@ export function WorkspaceChooserPage() {
                 </span>
               }
               title="Platform console"
-              description="All workspaces"
+              description="Workspaces, users, connectors and system health"
               actions={<ChevronRight className="i au-chev" aria-hidden />}
               href="/p/workspaces"
             />
           </List>
         </div>
       ) : null}
-      <p className="au-foot au-foot--start">
-        Signed in as {session.user.email} ·{" "}
-        <button type="button" className="link link-button" onClick={() => void leave()}>
-          Sign out
-        </button>
-      </p>
     </AuthLayout>
   );
 }

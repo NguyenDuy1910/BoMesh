@@ -1,7 +1,8 @@
 'use strict';
 /* Knowledge seeds: taxonomy, resource metadata (type, topics, spaces, owner,
-   verification, versions, summaries), the larger Finx catalog, plus each
-   persona's collections, saved resources, recent reads and saved views.
+   verification, versions, summaries), the larger Finx catalog, the knowledge
+   map's folder tree (D.folders, doc.folder), plus each persona's reading lists,
+   saved resources, recent reads and saved views.
    Loaded after mock.js and finx.js; uses the same seedWorkspace() scope.
    All Finx records are fictional demo data (see ws.demo). */
 
@@ -11,6 +12,35 @@
   /** Merge metadata into existing documents: { id: {…fields} }. */
   const meta = map => Object.entries(map).forEach(([id, o]) => { const d = D.docs.find(x => x.id === id); if (d) Object.assign(d, o); });
   const views = () => Math.round(5 + rnd() * 400);
+  /** Topics (Knowledge Studio → Topics): domain codes, topic codes (DOMAIN-nn in order) and the keywords the
+      assistant classifies incoming documents by, plus the import history. */
+  const master = (codes, keywords, imports = []) => {
+    D.topics.filter(t => !t.parent).forEach(dm => {
+      dm.code = codes[dm.id];
+      D.topics.filter(t => t.parent === dm.id).forEach((t, i) => { t.code = `${dm.code}-${String(i + 1).padStart(2, '0')}`; if (keywords[t.id]) t.keywords = keywords[t.id]; });
+    });
+    D.masterImports = imports;
+  };
+  /** Topic detail (Knowledge Studio → Topics): business description (desc), guidance for the assistant,
+      synonyms, rules and example documents (ids or titles, resolved once the catalog exists — call after the documents). */
+  const taxonomy = map => Object.entries(map).forEach(([id, o]) => {
+    const t = D.topics.find(x => x.id === id); if (!t) return;
+    const { examples, ...rest } = o;
+    Object.assign(t, rest);
+    if (examples) t.examples = examples.map(n => D.docs.find(d => d.id === n || d.name === n)?.id).filter(Boolean);
+  });
+  /** Knowledge map (Home): the folder tree of one root collection, in sibling order.
+      rows = [id, parent, name, docs, opts?]: parent null = directly under the root; docs = ids or names (extension optional)
+      of the documents the folder holds directly; opts = { desc, level } (level: a label from the workspace's map levels
+      when the folder is a different kind than its depth says). Call after the documents exist. */
+  const tree = (kb, rows) => {
+    D.folders ??= [];
+    const base = n => n.replace(/\.[^.]+$/, '');
+    rows.forEach(([id, parent, name, docs, o = {}], order) => {
+      D.folders.push({ id, kb, parent, name, order, ...o });
+      docs.forEach(ref => D.docs.forEach(d => { if (d.kb === kb && (d.id === ref || d.name === ref || base(d.name) === ref)) d.folder = id; }));
+    });
+  };
 
   /* ═══════════════════════════ Northwind (Enterprise) ═══════════════════════════ */
   seedWorkspace('ws-northwind', () => {
@@ -22,6 +52,12 @@
       { id: 'd-legal', name: 'Legal', icon: 'key', color: '#6B4FBF', desc: 'Customer and vendor agreements.' }, { id: 't-custagr', name: 'Customer agreements', parent: 'd-legal' }, { id: 't-vendagr', name: 'Vendor agreements', parent: 'd-legal' },
       { id: 'd-eng', name: 'Engineering', icon: 'terminal', color: '#1F7A8C', desc: 'Runbooks, incidents and on-call.' }, { id: 't-incidents', name: 'Incidents & on-call', parent: 'd-eng' },
     ];
+    // Topics were added by hand: no import yet, few keywords (the Studio offers Import).
+    master({ 'd-people': 'PPL', 'd-sales': 'SAL', 'd-product': 'PRD', 'd-finance': 'FIN', 'd-legal': 'LEG', 'd-eng': 'ENG' }, {
+      't-travel': ['business trip', 'per diem', 'expense claim'], 't-leave': ['parental leave', 'vacation', 'benefits'],
+      't-pricing': ['price list', 'discount'], 't-compete': ['battlecard', 'competitor'], 't-api': ['api', 'webhook', 'sdk'],
+      't-releases': ['release notes', 'changelog'], 't-security': ['security whitepaper', 'retention'], 't-incidents': ['incident', 'on-call', 'runbook'],
+    });
     const units = { 'kb-hr': 'People Ops', 'kb-sales': 'Sales Enablement', 'kb-product': 'Product', 'kb-fin': 'Finance', 'kb-legal': 'Legal', 'kb-eng': 'Engineering' };
     D.kbs.forEach(k => { if (units[k.id]) k.unit = units[k.id]; });
     D.docs.push(mkDoc('kb-sales', 'd-sales-dup', 'Enterprise Pricing Guide (copy).pdf', { source: 'src-sales', addedBy: 'Sales Enablement', updated: ago(40 * DAY) }));
@@ -44,6 +80,13 @@
       if (d.kb === 'kb-legal') d.verify = V('Legal', 12 + Math.round(rnd() * 60));
     });
     D.docs.find(d => d.id === 'd-sales-dup').dupOf = 'd-sales-0';
+    taxonomy({
+      't-travel': { desc: 'Booking business trips, per diems and claiming expenses back.', synonyms: ['reimbursement', 'travel policy'] },
+      't-leave': { desc: 'Time off of every kind and the benefits that come with working here.', synonyms: ['time off', 'pto'] },
+      't-pricing': { desc: 'List prices, discount rules and who approves a deal below them.', synonyms: ['rate card', 'price book'] },
+      't-api': { desc: 'Building on the product: REST API, webhooks, SDKs and integration guides.', synonyms: ['rest api', 'integration guide'] },
+      't-incidents': { desc: 'Keeping the service up: on-call rotations, runbooks and what we learn from incidents.', synonyms: ['outage', 'postmortem'] },
+    });
     meta({
       'd-hr-travel': { kind: 'policy', topics: ['t-travel'], summary: 'How to plan business travel, what Northwind pays for (flights, hotels, per diem) and how to claim it back within 30 days.', version: 6, versions: [{ v: 6, at: ago(18 * DAY), by: 'People Ops', note: 'Per diem raised to USD 75 for international trips' }, { v: 5, at: ago(380 * DAY), by: 'People Ops', note: 'High-cost city list (Appendix B) added' }, { v: 4, at: ago(760 * DAY), by: 'People Ops', note: 'Booking moved to the travel tool' }], path: 'People Ops / Policies / Travel & Expense Policy', verify: V('People Ops', 18, 165) },
       'd-hr-handbook': { kind: 'handbook', topics: ['t-onboarding', 't-conduct'], summary: 'Everything about working at Northwind in one place: hours, leave, expenses and equipment, with links to the full policies.', version: 3 },
@@ -71,6 +114,52 @@
     D.views = { 'u-minh': [{ id: 'vw-nw-1', name: 'Verified sales material', query: 'topic=d-sales&trust=verified', created: ago(9 * DAY) }] };
     D.dupDismissed = [];
     D.featured = ['d-hr-travel', 'd-sales-0', 'd-hr-handbook', 'd-fin-approvals', 'd-hr-parental', 'd-prod-6'];
+
+    /* ── Knowledge map: Area (collection) › Section › Subsection › Folder ── */
+    D.folders = [];
+    tree('kb-hr', [
+      ['f-nw-hr-work', null, 'Working at Northwind', ['d-hr-handbook', 'd-hr-conduct', 'd-hr-security', 'd-hr-remote', 'd-hr-equip', 'd-hr-perf'], { desc: 'The handbook and the rules for everyday work.' }],
+      ['f-nw-hr-time', null, 'Time off & benefits', ['d-hr-benefits', 'd-hr-parental', 'd-hr-holiday', 'd-hr-wellbeing'], { desc: 'Leave, holidays and what Northwind offers on top of pay.' }],
+      ['f-nw-hr-travel', null, 'Travel & relocation', ['d-hr-travel', 'd-hr-relocation'], { desc: 'Business trips, expenses and moving for work.' }],
+      ['f-nw-hr-onboard', null, 'Onboarding', ['d-hr-onboard', 'd-hr-contractor']],
+    ]);
+    tree('kb-sales', [
+      ['f-nw-sales-method', null, 'Sales method', ['Value Selling Framework'], { desc: 'How Northwind sells, from first call to renewal.' }],
+      ['f-nw-sales-stages', 'f-nw-sales-method', 'Deal stages', []],
+      ['f-nw-sales-discover', 'f-nw-sales-stages', 'Discovery', ['Discovery Call Script', 'Email Sequences']],
+      ['f-nw-sales-demo', 'f-nw-sales-stages', 'Demo & pitch', ['Demo Script v4', 'Mid-market Pitch Deck', 'Objection Handling']],
+      ['f-nw-sales-close', 'f-nw-sales-stages', 'Close & hand off', ['ROI Calculator', 'Onboarding Handoff Guide']],
+      ['f-nw-sales-renew', 'f-nw-sales-method', 'Renewals & expansion', ['Renewal Playbook']],
+      ['f-nw-sales-pricing', null, 'Pricing & deals', ['Enterprise Pricing Guide', 'Enterprise Pricing Guide (copy)', 'Discount Approval Guidelines'], { desc: 'List prices and who approves a discount.' }],
+      ['f-nw-sales-market', null, 'Market & competition', ['Win-Loss Analysis Q2', 'Competitive Battlecard — Contoso'], { desc: 'Competitors, win-loss and industry briefs.' }],
+      ['f-nw-sales-industry', 'f-nw-sales-market', 'Industry briefs', ['Industry Brief — Healthcare', 'Industry Brief — Manufacturing']],
+      ['f-nw-sales-proof', null, 'Customer proof', ['Customer Reference List', 'Case Study — Fabrikam', 'Case Study — Tailspin']],
+      ['f-nw-sales-security', null, 'Security & procurement', ['Security FAQ for Prospects', 'Procurement Questionnaire Answers'], { desc: 'Answers for security reviews and buyer questionnaires.' }],
+      ['f-nw-sales-partner', null, 'Partners & events', ['Partner Program Overview', 'Trade Show Kit']],
+      ['f-nw-sales-templates', null, 'Templates', ['Territory Plan Template', 'Proposal Template'], { level: 'Folder' }],
+    ]);
+    tree('kb-product', [
+      ['f-nw-prod-platform', null, 'Platform overview', ['Architecture Overview', 'Roadmap H2', 'Glossary'], { desc: 'What the Northwind platform is and where it is going.' }],
+      ['f-nw-prod-dev', null, 'Developers', ['Sandbox Environments'], { desc: 'APIs and integrations for building on Northwind.' }],
+      ['f-nw-prod-api', 'f-nw-prod-dev', 'API reference', ['Rate Limits', 'Error Codes']],
+      ['f-nw-prod-endpoints', 'f-nw-prod-api', 'Endpoints', ['API Reference — Authentication', 'API Reference — Orders', 'API Reference — Webhooks']],
+      ['f-nw-prod-int', 'f-nw-prod-dev', 'Integrations', ['Integration Guide — SAP', 'Integration Guide — Salesforce', 'Import & Export']],
+      ['f-nw-prod-admin', null, 'Administration', ['Admin Console Guide', 'Billing & Invoices'], { desc: 'Setting Northwind up for a company.' }],
+      ['f-nw-prod-access', 'f-nw-prod-admin', 'Access & sign-in', ['SSO Setup Guide', 'User Roles Explained', 'Audit Log Reference']],
+      ['f-nw-prod-use', null, 'Using Northwind', ['Reporting Dashboards', 'Notifications', 'Search Syntax', 'Mobile App FAQ']],
+      ['f-nw-prod-releases', null, 'Releases', ['Changelog 2026', 'Migration Guide v3 to v4'], { desc: 'What changed in each version and how to upgrade.' }],
+      ['f-nw-prod-notes', 'f-nw-prod-releases', 'Release notes', ['Release Notes 4.2', 'Release Notes 4.1']],
+      ['f-nw-prod-trust', null, 'Trust & compliance', ['Uptime & SLA', 'Data Retention Spec', 'Accessibility Statement']],
+    ]);
+    tree('kb-fin', [
+      ['f-nw-fin-approvals', null, 'Approvals & claims', ['d-fin-approvals', 'd-fin-reimb']],
+      ['f-nw-fin-purchasing', null, 'Purchasing', ['d-fin-po', 'd-fin-vendor']],
+    ]);
+    tree('kb-legal', [
+      ['f-nw-legal-cust', null, 'Customer agreements', ['Standard Terms of Service', 'Fabrikam — Data Processing Addendum', 'Contoso — Mutual NDA', 'Tailspin — Reseller Agreement', 'Woodgrove — SOW 3', 'Litware — Pilot Agreement'], { desc: 'Executed agreements with customers and resellers.' }],
+      ['f-nw-legal-acme', 'f-nw-legal-cust', 'Acme Corp', ['Acme Corp — Master Services Agreement', 'Acme Corp — Order Form 2026'], { level: 'Folder' }],
+      ['f-nw-legal-vendor', null, 'Vendor agreements', ['Vendor — CloudHost DPA', 'Vendor — Payroll Co MSA']],
+    ]);
   });
 
   /* ═══════════════════════════ Finx Workspace (Enterprise with spaces) ═══════════════════════════ */
@@ -89,6 +178,19 @@
       { id: 'd-people', name: 'Internal Policies & Guidelines', icon: 'users', color: '#B4467A', desc: 'Leave, travel, conduct, hybrid work and onboarding.' },
       { id: 't-hr', name: 'Leave & benefits', parent: 'd-people' }, { id: 't-travel', name: 'Travel & expenses', parent: 'd-people' }, { id: 't-conduct', name: 'Code of conduct', parent: 'd-people' }, { id: 't-hybrid', name: 'Hybrid work', parent: 'd-people' }, { id: 't-onboarding', name: 'Onboarding', parent: 'd-people' },
     ];
+    master({ 'd-eng': 'ENG', 'd-data': 'DAT', 'd-ops': 'OPS', 'd-sec': 'SEC', 'd-product': 'PRD', 'd-people': 'POL' }, {
+      't-arch': ['adr', 'architecture decision', 'design review', 'target architecture'], 't-api': ['api', 'webhook', 'idempotency', 'endpoint', 'openapi'],
+      't-reliability': ['runbook', 'on-call', 'slo', 'failover'], 't-cloud': ['kubernetes', 'aws', 'terraform', 'kafka', 'infrastructure'], 't-devex': ['ci cd', 'code review', 'developer tooling'],
+      't-dwh': ['warehouse', 'dbt', 'data dictionary', 'data pipeline'], 't-metrics': ['metric definition', 'kpi', 'active customers', 'dashboard'],
+      't-models': ['fraud model', 'credit score', 'model monitoring', 'scorecard'], 't-datagov': ['data lineage', 'data quality', 'masking', 'data owner'],
+      't-payments': ['napas', 'settlement', 'cut-off', 'transfer limit', 'qr payment'], 't-recon': ['reconciliation', 'statement file', 'break', 'matching'],
+      't-cards': ['chargeback', 'dispute', 'card scheme', 'visa', 'mastercard'], 't-kyc': ['kyc', 'aml', 'account opening'],
+      't-infosec': ['access control', 'least privilege', 'mfa', 'vulnerability'], 't-pci': ['pci dss', 'pci', 'cardholder data'], 't-regulatory': ['sbv', 'circular', 'state bank', 'decree'],
+      't-privacy': ['personal data', 'decree 13', 'privacy', 'pii', 'consent'], 't-incident': ['incident response', 'postmortem', 'sev 1', 'breach'],
+      't-roadmap': ['roadmap', 'okr', 'strategy', 'prd'], 't-pricing': ['fee', 'pricing', 'tariff'], 't-customers': ['customer research', 'survey', 'market'], 't-partners': ['partner', 'merchant', 'vendor'],
+      't-hr': ['leave', 'benefits', 'insurance', 'parental'], 't-travel': ['travel', 'per diem', 'expense claim', 'business trip'], 't-conduct': ['code of conduct', 'gift', 'conflict of interest', 'whistleblowing'],
+      't-hybrid': ['hybrid', 'office days', 'remote work', 'team days'], 't-onboarding': ['new joiner', 'onboarding', 'first month', 'buddy'],
+    }, [{ id: 'mdi-fx-1', file: 'finx-master-data-2026-10.xlsx', by: 'u-fx-lan', at: P(12, 3), mode: 'merge', counts: { added: 4, updated: 9, archived: 0 } }]);
     const UNIT = { 'kb-fx-eng': 'Platform Engineering', 'kb-fx-pay': 'Payments Platform', 'kb-fx-data': 'Data Platform', 'kb-fx-ops': 'Banking Operations', 'kb-fx-sec': 'Risk & Compliance', 'kb-fx-prod': 'Product', 'kb-fx-pol': 'People & Culture', 'kb-fx-lead': 'Finance' };
     const KB_TOPICS = { 'kb-fx-eng': ['t-arch'], 'kb-fx-pay': ['t-payments'], 'kb-fx-data': ['t-dwh'], 'kb-fx-ops': ['t-payments'], 'kb-fx-sec': ['t-infosec'], 'kb-fx-prod': ['t-roadmap'], 'kb-fx-pol': ['t-hr'], 'kb-fx-lead': ['t-roadmap'] };
     D.kbs.forEach(k => { if (UNIT[k.id]) Object.assign(k, { unit: UNIT[k.id], topics: KB_TOPICS[k.id] }); });
@@ -142,7 +244,7 @@
       'fx-lead-budget': { kind: 'sheet', topics: ['t-roadmap'], views: 42, summary: 'FY2027 operating and capital budget by department, approved by the board.' },
     });
 
-    /* ── The wider catalog: what each knowledge base holds after a few years of real use ──
+    /* ── The wider catalog: what each collection holds after a few years of real use ──
        row = [name, kind, topics, summary?, opts?]; opts: id, upd (days ago), due (verification due in days; null = no expiry),
        verify:false, by, owner, vi, status, error, dupOf, dupReason, contexts, pages. */
     const SRC = { 'kb-fx-eng': ['src-fx-eng', 'Engineering wiki'], 'kb-fx-pay': ['src-fx-pay', 'payments-docs'], 'kb-fx-data': ['src-fx-data', 'Data space'], 'kb-fx-ops': ['src-fx-ops', 'Operations procedures'], 'kb-fx-sec': ['src-fx-sec', 'GRC policies'], 'kb-fx-prod': ['src-fx-prod', 'Product shared drive'], 'kb-fx-pol': ['src-fx-pol', 'People policies'], 'kb-fx-lead': ['upload', 'Lý Thanh Tùng'] };
@@ -157,7 +259,7 @@
       const verified = o.verify !== false && (o.verify === true || h % 8 !== 3);
       Object.assign(d, { kind, topics: topics.split(' '), views: views(),
         ...(summary ? { summary } : {}), ...(o.vi ? { lang: 'vi' } : {}), ...(o.owner ? { owner: o.owner } : {}), ...(o.contexts ? { contexts: o.contexts } : {}),
-        ...(verified ? { verify: V(o.by || o.owner || UNIT[kb], upd, due) } : {}), ...(o.dupOf ? { dupOf: o.dupOf, dupReason: o.dupReason } : {}) });
+        ...(verified ? { verify: V(o.by || o.owner || UNIT[kb], upd, due) } : {}), ...(o.dupOf ? { dupOf: o.dupOf, dupReason: o.dupReason } : {}), ...(o.classifiedBy ? { classifiedBy: o.classifiedBy } : {}) });
       D.docs.push(d);
     });
 
@@ -290,8 +392,8 @@
       ['SOP — Suspicious transaction escalation.pdf', 'procedure', 't-kyc t-regulatory', 'When and how to escalate a suspicious transaction to the AML team.'],
       ['SOP — Card replacement & PIN reset.pdf', 'procedure', 't-cards', 'Replacing lost, stolen or damaged cards and resetting PINs safely.'],
       ['SOP — Merchant settlement exceptions.pdf', 'procedure', 't-recon t-payments', 'Handling short, late or duplicate merchant settlements.'],
-      ['SOP — End-of-day balancing.pdf', 'procedure', 't-recon', 'Balancing nostro accounts against the ledger at the end of each business day.'],
-      ['Quy trình đối soát giao dịch NAPAS.pdf', 'procedure', 't-recon', 'Quy trình đối soát giao dịch chuyển khoản liên ngân hàng NAPAS hằng ngày.', { vi: true }],
+      ['SOP — End-of-day balancing.pdf', 'procedure', 't-recon', 'Balancing nostro accounts against the ledger at the end of each business day.', { classifiedBy: 'person' }],
+      ['Quy trình đối soát giao dịch NAPAS.pdf', 'procedure', 't-recon', 'Quy trình đối soát giao dịch chuyển khoản liên ngân hàng NAPAS hằng ngày.', { vi: true, classifiedBy: 'person' }],
       ['Quy trình xử lý tra soát, khiếu nại thẻ.pdf', 'procedure', 't-cards', 'Quy trình tiếp nhận và xử lý tra soát, khiếu nại giao dịch thẻ.', { vi: true }],
       ['Settlement holiday calendar 2027.xlsx', 'calendar', 't-payments t-recon', 'Days without batch settlement in 2027, including the Lunar New Year break.', { upd: 20 }],
       ['Dispute reason codes — Visa & Mastercard.xlsx', 'sheet', 't-cards', 'Reason codes, time limits and required evidence by card scheme.'],
@@ -301,6 +403,10 @@
       ['Daily operations checklist.docx', 'form', 't-recon', 'Morning and evening checks for the operations floor.'],
       ['Payment cut-off times (2025).pdf', 'procedure', 't-payments', '', { upd: 380, due: -200, dupOf: 'fx-ops-cutoff', dupReason: 'Older copy of the same cut-off table' }],
       ['Signed dispute forms — scanned 2019.pdf', 'form', 't-cards', '', { id: 'fx-ops-scan', verify: false, upd: 0, status: 'failed', error: 'This file has no readable text. It may be a scanned image.' }],
+      // Filed under Payments by the pipeline ("QR"), moved to Reconciliation by a reviewer (D.classCorrections below).
+      ['Hướng dẫn đối soát giao dịch QR cuối ngày.pdf', 'procedure', 't-recon', 'Đối soát giao dịch thanh toán QR với tệp quyết toán NAPAS vào cuối mỗi ngày.', { vi: true, classifiedBy: 'person', upd: 3 }],
+      // Tagged by the pipeline (Payments, from "NAPAS"); adding "đối soát" to Reconciliation re-files it there too.
+      ['Bảng đối soát quyết toán NAPAS tháng 10.xlsx', 'sheet', 't-payments', 'Đối chiếu tệp quyết toán NAPAS với sổ cái cho tháng 10/2026.', { id: 'fx-ops-napas-oct', vi: true, upd: 12 }],
     ]);
     gen('kb-fx-sec', [
       ['Information Security Policy.pdf', 'policy', 't-infosec', 'The top-level security policy: roles, principles and the standards under it.', { verify: true }],
@@ -391,8 +497,187 @@
       ['Strategic partnerships pipeline — confidential.pdf', 'report', 't-partners', 'Partnership discussions in progress and where each one stands.', { verify: false }],
     ]);
     D.docs.forEach(d => { if (d.views == null && !kbById(d.kb)?.personal) d.views = views(); });
+    // Chargeback procedures live in their own folder of the operations library (Taxonomy rule on t-cards).
+    D.docs.filter(d => /^SOP — Chargeback evidence pack|^Dispute reason codes/.test(d.name)).forEach(d => { d.path = `Banking Operations / Procedures / Cards & disputes / Chargebacks / ${d.name}`; });
 
-    /* ── Collections, saved, recent, views ── */
+    /* ── Knowledge map: Area (collection) › Section › Subsection › Folder, following the sources' own folders ── */
+    D.folders = [];
+    const adr = (...n) => n.map(x => 'fx-eng-adr' + String(x).padStart(3, '0'));
+    tree('kb-fx-eng', [
+      ['f-fx-eng-adr', null, 'Architecture decisions', ['Tech radar — H2 2026', 'Service catalog'], { desc: 'Every ADR, by area. Superseded ones stay for history.' }],
+      ['f-fx-eng-adr-data', 'f-fx-eng-adr', 'Data & storage', adr(1, 14, 15, 18, 23, 28, 37, 39, 40, 41)],
+      ['f-fx-eng-adr-events', 'f-fx-eng-adr', 'Events & messaging', adr(8, 12, 19, 24, 25, 27, 38)],
+      ['f-fx-eng-adr-api', 'f-fx-eng-adr', 'APIs', adr(3, 5, 21, 31, 32)],
+      ['f-fx-eng-adr-infra', 'f-fx-eng-adr', 'Infrastructure & security', adr(2, 7, 22, 29, 30, 35)],
+      ['f-fx-eng-adr-delivery', 'f-fx-eng-adr', 'Delivery & reliability', adr(4, 9, 11, 17, 26, 33, 34, 36)],
+      ['f-fx-eng-cbm', null, 'Core Banking Modernization', ['fx-eng-cbmarch'], { desc: 'Moving accounts, ledger and payments off the legacy core.' }],
+      ['f-fx-eng-cbm-w2', 'f-fx-eng-cbm', 'Wave 2 — Ledger read path', ['fx-eng-cbmplan']],
+      ['f-fx-eng-cbm-stream', 'f-fx-eng-cbm-w2', 'Streaming platform evaluation', ['fx-eng-eval-kafka', 'fx-eng-eval-pulsar', 'fx-eng-eval-msk']],
+      ['f-fx-eng-handbook', null, 'Handbook', ['fx-eng-handbook', 'Engineering career ladder', 'Code review guidelines'], { desc: 'How engineering works at Finx.' }],
+      ['f-fx-eng-start', 'f-fx-eng-handbook', 'Getting started', ['Local development setup', 'Hướng dẫn thiết lập môi trường phát triển']],
+      ['f-fx-eng-guides', null, 'Platform guides', [], { desc: 'Building, shipping and running services on the platform.' }],
+      ['f-fx-eng-build', 'f-fx-eng-guides', 'Build & deploy', ['CI/CD pipeline guide', 'Kubernetes deployment guide', 'Terraform module standards', 'Dependency upgrade policy', 'Secure coding checklist']],
+      ['f-fx-eng-apistd', 'f-fx-eng-guides', 'API standards', ['fx-eng-apiguide', 'API design guidelines — old wiki copy', 'Error code catalogue — public APIs']],
+      ['f-fx-eng-rel', 'f-fx-eng-guides', 'Reliability & on-call', ['fx-eng-oncall', 'fx-eng-sev', 'Observability standards', 'SLO definitions — payment services', 'Load testing playbook', 'Disaster recovery plan — core banking', 'Incident retrospective template', 'Hướng dẫn trực sự cố cho kỹ sư mới']],
+    ]);
+    tree('kb-fx-pay', [
+      ['f-fx-pay-rb', null, 'Runbooks', ['Payments on-call rota & escalation'], { desc: 'What to do when payments break, by area.' }],
+      ['f-fx-pay-rb-gw', 'f-fx-pay-rb', 'Gateway & cards', ['fx-pay-runbook', 'Runbook — Acquirer certificate rotation', 'Runbook — 3-D Secure failures']],
+      ['f-fx-pay-rb-transfers', 'f-fx-pay-rb', 'Transfers & QR', ['fx-pay-rb-napas', 'fx-pay-rb-qr']],
+      ['f-fx-pay-rb-settle', 'f-fx-pay-rb', 'Settlement & ledger', ['Runbook — Settlement file not received', 'Runbook — Refund queue backlog', 'fx-pay-rb-ledger']],
+      ['f-fx-pay-api', null, 'API reference', ['fx-pay-api'], { desc: 'Payments, refunds and merchant APIs.' }],
+      ['f-fx-pay-api-v3', 'f-fx-pay-api', 'Payments API v3', ['Payments API v3 — Webhooks', 'Payments API v3 — Error codes', 'Refunds API reference']],
+      ['f-fx-pay-api-partner', 'f-fx-pay-api', 'Merchant & partner APIs', ['VietQR merchant API reference', 'Partner bank adapter guide', 'Merchant onboarding — technical checklist', 'Chargeback API integration notes']],
+      ['f-fx-pay-api-old', 'f-fx-pay-api', 'Deprecated', ['Payouts API reference v2 (deprecated)'], { level: 'Folder' }],
+      ['f-fx-pay-design', null, 'Designs', ['Payment state machine', 'NAPAS settlement file format', 'Design — Tokenization service v2', 'Design — Smart routing between acquirers']],
+      ['f-fx-pay-pm', null, 'Postmortems', [], { desc: 'What went wrong, why, and what changed after.' }],
+      ['f-fx-pay-pm-2026', 'f-fx-pay-pm', '2026', ['fx-pay-postmortem', 'Postmortem — NAPAS timeout spike, 2 Sep', 'Postmortem — Duplicate refunds, 21 Aug', 'Postmortem — Acquirer certificate expiry, 3 Jul', 'Postmortem — Ledger lag during the 9.9 sale'], { level: 'Folder' }],
+    ]);
+    tree('kb-fx-data', [
+      ['f-fx-data-metrics', null, 'Metrics', ['fx-data-mau', 'Metric definitions — Transaction success rate', 'Metric definitions — Payment volume (GMV)', 'Metric definitions — Customer churn', 'fx-data-fraudloss', 'Metric definitions — Active customers (draft 2025)'], { desc: 'The official definition behind every number.' }],
+      ['f-fx-data-dwh', null, 'Warehouse', ['fx-data-dict'], { desc: 'Tables, pipelines and the rules for building them.' }],
+      ['f-fx-data-tables', 'f-fx-data-dwh', 'Tables', ['fx-data-txn', 'Table — dwh.dim_customer', 'Table — dwh.fact_card_auth', 'fx-data-settle', 'Table — mart.daily_kpis']],
+      ['f-fx-data-pipes', 'f-fx-data-dwh', 'Pipelines & standards', ['fx-data-dbt', 'Airflow DAG conventions', 'Data quality checks — standard']],
+      ['f-fx-data-dash', null, 'Dashboards', ['Dashboard guide — Payments health', 'fx-data-dashfraud']],
+      ['f-fx-data-reg', 'f-fx-data-dash', 'Regulatory reporting', ['Dashboard guide — SBV regulatory reporting', 'SBV monthly payment statistics — report spec', 'Hướng dẫn lập báo cáo giao dịch hằng tháng']],
+      ['f-fx-data-models', null, 'Models', ['fx-data-mrm', 'Credit scoring model v3 — Model card', 'Feature store guide'], { desc: 'Model cards and the rules every model follows.' }],
+      ['f-fx-data-fraud', 'f-fx-data-models', 'Fraud', ['fx-data-fraud', 'fx-data-fraudv1']],
+      ['f-fx-data-gov', null, 'Governance', ['Data access tiers & masking', 'Data retention schedule']],
+    ]);
+    tree('kb-fx-ops', [
+      ['f-fx-ops-proc', null, 'Procedures', ['Operations escalation contacts'], { desc: 'How the operations floor runs payments, cards and accounts.' }],
+      ['f-fx-ops-pay', 'f-fx-ops-proc', 'Payments & settlement', ['fx-ops-cutoff', 'Payment cut-off times (2025)', 'SOP — Failed NAPAS transfer investigation', 'Settlement holiday calendar 2027', 'Bảng đối soát quyết toán NAPAS tháng 10']],
+      ['f-fx-ops-recon', 'f-fx-ops-proc', 'Reconciliation', ['fx-ops-recon', 'SOP — Merchant settlement exceptions', 'SOP — End-of-day balancing', 'Quy trình đối soát giao dịch NAPAS', 'Hướng dẫn đối soát giao dịch QR cuối ngày', 'Daily operations checklist']],
+      ['f-fx-ops-cards', 'f-fx-ops-proc', 'Cards & disputes', ['fx-ops-dispute', 'Quy trình xử lý tra soát, khiếu nại thẻ', 'SOP — Card replacement & PIN reset', 'SOP — Refund approval limits', 'Customer complaint handling procedure']],
+      ['f-fx-ops-cb', 'f-fx-ops-cards', 'Chargebacks', ['SOP — Chargeback evidence pack', 'Dispute reason codes — Visa & Mastercard', 'fx-ops-scan']],
+      ['f-fx-ops-kyc', 'f-fx-ops-proc', 'KYC & accounts', ['SOP — KYC document review', 'SOP — eKYC manual review queue', 'SOP — Account closure', 'SOP — Suspicious transaction escalation', 'KYC risk rating matrix']],
+    ]);
+    tree('kb-fx-sec', [
+      ['f-fx-sec-pol', null, 'Published policies', ['Information Security Policy'], { desc: 'The security policy and the standards under it.' }],
+      ['f-fx-sec-pol-access', 'f-fx-sec-pol', 'Access & acceptable use', ['fx-sec-access', 'Password & Authentication Standard', 'Acceptable Use Policy']],
+      ['f-fx-sec-pol-data', 'f-fx-sec-pol', 'Data protection', ['fx-sec-privacy', 'Data Classification Standard', 'Encryption & Key Management Standard', 'Nghị định 13/2023 — Hướng dẫn áp dụng nội bộ']],
+      ['f-fx-sec-pol-ops', 'f-fx-sec-pol', 'Secure operations', ['Logging & Monitoring Standard', 'Vulnerability Management Standard', 'Secure SDLC Standard', 'Change Management Policy', 'fx-sec-vendor', 'fx-sec-exception', 'Phishing simulation results — Q3 2026']],
+      ['f-fx-sec-pol-inc', 'f-fx-sec-pol', 'Incidents & continuity', ['fx-sec-incident', 'Business Continuity Policy', 'Security incident report template', 'Tabletop exercise — ransomware, Sep 2026']],
+      ['f-fx-sec-ctrl', null, 'Controls', ['fx-sec-pci', 'fx-sec-ac04', 'Control — CM-02 Production change approval', 'fx-sec-lm01', 'Control — VM-03 Critical patches within 14 days'], { desc: 'Each control with how it is run and evidenced.' }],
+      ['f-fx-sec-pcidss', 'f-fx-sec-ctrl', 'PCI DSS assessment', ['fx-sec-scope', 'PCI DSS — Requirement 8 implementation notes']],
+      ['f-fx-sec-evidence', 'f-fx-sec-pcidss', 'Evidence 2026', ['PCI DSS — Report on Compliance 2026 (summary)', 'fx-sec-ev-q3', 'fx-sec-pentest']],
+      ['f-fx-sec-reg', null, 'Regulations', ['Regulatory reporting calendar 2027'], { desc: 'SBV circulars and Vietnamese law in plain language.' }],
+      ['f-fx-sec-reg-sbv', 'f-fx-sec-reg', 'SBV circulars', ['SBV Circular 09/2020 — Information system security (summary)', 'SBV Circular 18/2024 — Bank card operations (summary)', 'SBV Circular 50/2024 — Online service safety (summary)', 'Tóm tắt Thông tư 09/2020/TT-NHNN về an toàn hệ thống thông tin']],
+      ['f-fx-sec-reg-law', 'f-fx-sec-reg', 'Laws & decrees', ['Decree 13/2023 — Personal data protection (summary)', 'AML obligations — summary of the 2022 law']],
+    ]);
+    tree('kb-fx-prod', [
+      ['f-fx-prod-strategy', null, 'Roadmap & strategy', ['fx-prod-roadmap', 'Product principles', 'OKRs — H2 2026 Product'], { desc: 'Where the product is going and why.' }],
+      ['f-fx-prod-prd', 'f-fx-prod-strategy', 'PRDs', ['PRD — Scheduled transfers', 'PRD — Split bill in QR payments', 'PRD — Virtual cards for SMEs', 'PRD — Instant account opening with eKYC', 'PRD — Merchant dashboard v2']],
+      ['f-fx-prod-briefs', 'f-fx-prod-strategy', 'Briefs', ['Brief — Buy now, pay later pilot', 'Brief — Cross-border QR with Thailand and Cambodia']],
+      ['f-fx-prod-market', null, 'Customers & market', ['Market sizing — SME payments in Vietnam 2027', 'Customer research — How Gen Z banks', 'Competitive landscape — e-wallets and digital banks', 'Go-to-market — Virtual cards for SMEs']],
+      ['f-fx-prod-pricing', null, 'Pricing', ['fx-prod-pricing', 'Biểu phí dịch vụ khách hàng cá nhân 2027', 'Merchant discount rates 2026', 'Retail account fee schedule 2026'], { desc: 'Customer and merchant fees, current and past.' }],
+      ['f-fx-prod-partners', null, 'Partners', ['Partner integration guide — Merchant acquiring', 'Partner integration guide — Banking as a service', 'Partner onboarding checklist']],
+      ['f-fx-prod-launch', null, 'Launches', ['Launch checklist', 'Release notes — Finx app 6.4', 'Release notes — Finx app 6.5']],
+    ]);
+    tree('kb-fx-pol', [
+      ['f-fx-pol-start', null, 'Getting started', ['fx-pol-onboarding', 'First week checklist', 'fx-pol-itacc'], { desc: 'Your first weeks at Finx.' }],
+      ['f-fx-pol-leave', null, 'Leave & benefits', ['Benefits overview 2026', 'Annual Leave Policy', 'Sick Leave & Medical Insurance', 'Parental Leave Policy', 'Public holidays 2027']],
+      ['f-fx-pol-growth', null, 'Pay & growth', ['Learning & development budget', 'Performance review cycle 2026', 'Employee referral programme']],
+      ['f-fx-pol-work', null, 'Hybrid work & offices', ['fx-pol-hybrid', 'Quy định làm việc kết hợp (Hybrid)', 'Home office equipment allowance', 'Laptops & mobile devices — IT acceptable use', 'Bring your own device (BYOD) guideline'], { desc: 'Office days, equipment and the offices themselves.' }],
+      ['f-fx-pol-offices', 'f-fx-pol-work', 'Offices', ['Office guide — Ho Chi Minh City HQ', 'Office guide — Hanoi']],
+      ['f-fx-pol-conduct', null, 'Conduct', ['fx-pol-conduct', 'Anti-bribery & Gifts Policy', 'Whistleblowing Procedure', 'Nội quy lao động']],
+      ['f-fx-pol-travel', null, 'Travel & expenses', ['fx-pol-travel', 'Domestic per diem table 2026', 'How to submit an expense claim', 'Business travel booking — how to']],
+    ]);
+
+    /* Reviewers' corrections to the pipeline's topics (Documents → Review, "Use my change to improve classification"):
+       three reconciliation procedures the pipeline filed under Payments ("NAPAS", "QR", "settlement"). Two share
+       "đối soát", which Topics → Suggestions offers as a keyword of Reconciliation. */
+    const opsDoc = name => D.docs.find(d => d.kb === 'kb-fx-ops' && d.name === name);
+    D.classCorrections = [
+      ['Hướng dẫn đối soát giao dịch QR cuối ngày.pdf', 'u-fx-lan', 0.2],
+      ['Quy trình đối soát giao dịch NAPAS.pdf', 'u-fx-lan', 6],
+      ['SOP — End-of-day balancing.pdf', 'u-fx-lan', 11],
+    ].map(([name, by, days], i) => { const d = opsDoc(name); return { id: 'cc-fx-' + (i + 1), doc: d.id, title: d.name, from: ['t-payments'], to: ['t-recon'], by, at: P(days, 2), status: 'open' }; });
+    tree('kb-fx-lead', [
+      ['f-fx-lead-board', null, 'Board & leadership', ['Board pack — Q3 2026', 'Leadership offsite notes — October 2026', 'Strategic partnerships pipeline — confidential']],
+      ['f-fx-lead-plans', null, 'Plans & budgets', ['fx-lead-budget', 'Headcount plan 2027', 'Capital adequacy forecast 2027']],
+    ]);
+    // A folder with its own access (inheritAccess = false): PCI evidence (pentest results, the latest assessment) is for Risk &
+    // Compliance only, though everyone in Finx reads the rest of Security & Compliance.
+    D.folders.find(f => f.id === 'f-fx-sec-evidence').own = { shares: [{ kind: 'group', id: 'g-fx-grc', role: 'owner' }] };
+    // A bulk upload nobody has processed yet (1,200 scanned operations records): admins choose what to process —
+    // by kind, by year — from Knowledge Studio → Documents → All → Not processed.
+    D.folders.push({ id: 'f-fx-ops-upload', kb: 'kb-fx-ops', parent: null, name: 'Archive upload 2016–2025', order: 9, desc: 'Scanned and exported operations records, uploaded in bulk and processed in batches.' });
+    const Y = k => 2016 + (k % 10), BANKS = ['Vietcombank', 'BIDV', 'Techcombank', 'VPBank', 'MB'];
+    seedBulkUpload({ kb: 'kb-fx-ops', folder: 'f-fx-ops-upload', prefix: 'fx-up', n: 1200, by: 'Võ Thị Lan', daysAgo: 1, templates: [
+      k => `Daily reconciliation report — ${String((k % 28) + 1).padStart(2, '0')}-${String((k % 12) + 1).padStart(2, '0')}-${Y(k)}.pdf`,
+      k => `Settlement statement — ${BANKS[k % BANKS.length]} — ${Y(k)}-${String((k % 12) + 1).padStart(2, '0')}.pdf`,
+      k => `Chargeback case file — CB-${Y(k)}-${String(k).padStart(4, '0')}.pdf`,
+      k => `Biên bản đối soát giao dịch thẻ tháng ${(k % 12) + 1}-${Y(k)}.docx`,
+      k => `Branch cash count — Branch ${(k % 40) + 1} — ${Y(k)}.xlsx`,
+      k => `Operations incident note ${Y(k)}-${String(k).padStart(3, '0')}.md`,
+    ] });
+
+    /* ── Taxonomy detail: what each topic means, how the assistant should use it, synonyms, examples, rules ── */
+    taxonomy({
+      't-cards': {
+        desc: 'Card products and what happens when a cardholder disputes a payment: chargebacks, scheme rules, reason codes, card replacement.',
+        guidance: 'Use for card disputes, chargebacks, scheme timelines, card replacement and PINs.\nNot for merchant fees (Pricing & fees) or payment cut-offs (Payments & settlement).',
+        synonyms: ['card complaint', 'reason code', 'cardholder dispute'],
+        examples: ['fx-ops-dispute', 'SOP — Chargeback evidence pack.pdf', 'Dispute reason codes — Visa & Mastercard.xlsx'],
+        rules: [{ field: 'path', op: 'contains', value: 'Chargebacks' }],
+      },
+      't-pci': {
+        desc: 'The Payment Card Industry Data Security Standard at Finx: scope, controls, evidence and the yearly assessment.',
+        guidance: 'Use for anything about protecting cardholder data and the PCI DSS assessment.\nNot for general security policies (Information security) unless they define PCI scope.',
+        synonyms: ['card data security', 'cardholder data environment'],
+        examples: ['fx-sec-pci', 'fx-sec-scope', 'PCI DSS — Requirement 8 implementation notes.md'],
+        rules: [{ field: 'source', op: 'is', value: 'src-fx-sec' }],
+      },
+      't-kyc': {
+        desc: 'Knowing who the customer is: identity checks when an account opens, eKYC exceptions, AML screening and account closure.',
+        guidance: 'Use for identity verification, eKYC reviews, AML and suspicious-transaction escalation.\nNot for card disputes or general customer complaints.',
+        synonyms: ['eKYC', 'customer due diligence', 'know your customer'],
+        examples: ['SOP — KYC document review.pdf', 'SOP — eKYC manual review queue.pdf', 'KYC risk rating matrix.xlsx'],
+      },
+      't-payments': {
+        desc: 'How money moves: NAPAS 247 and batch transfers, QR and card settlement, cut-off times and limits.',
+        guidance: 'Use for transfers, settlement windows, cut-offs and payment limits.\nNot for reconciling the ledger afterwards (Reconciliation).',
+        synonyms: ['interbank transfer', 'settlement window'],
+        examples: ['fx-ops-cutoff', 'fx-pay-rb-napas'],
+      },
+      't-recon': {
+        desc: 'Matching the ledger against NAPAS, acquirer and bank statement files every day, and clearing the breaks.',
+        synonyms: ['nostro', 'suspense account'],
+        examples: ['fx-ops-recon', 'SOP — End-of-day balancing.pdf'],
+      },
+      't-arch': {
+        desc: 'Decisions that shape Finx systems for years: ADRs, target architecture and design reviews.',
+        guidance: 'Use for decision records and design reviews.\nNot for how-to guides on one tool (Developer tooling, Cloud & infrastructure).',
+        synonyms: ['architecture decision record', 'design decision'],
+        examples: ['fx-eng-adr027', 'fx-eng-adr031'],
+        rules: [{ field: 'path', op: 'contains', value: 'Architecture decisions' }],
+      },
+      't-incident': {
+        desc: 'Declaring, running and learning from incidents: severity levels, communication, SBV notification and postmortems.',
+        synonyms: ['outage', 'post-incident review'],
+        examples: ['fx-sec-incident', 'fx-pay-postmortem', 'fx-eng-sev'],
+        rules: [{ field: 'path', op: 'contains', value: 'postmortems' }],
+      },
+      't-privacy': {
+        desc: 'Protecting customers’ personal data: Decree 13 obligations, masking, consent and access to PII.',
+        synonyms: ['data protection', 'pdpd'],
+        examples: ['fx-sec-privacy'],
+      },
+      't-hybrid': {
+        desc: 'Where and how we work: office days, team days, home office equipment and the offices themselves.',
+        guidance: 'Use for office attendance, remote work and office guides.\nNot for leave or holidays (Leave & benefits).',
+        synonyms: ['work from home', 'wfh'],
+        examples: ['fx-pol-hybrid', 'Home office equipment allowance.pdf'],
+      },
+      't-metrics': {
+        desc: 'The official definitions behind every number Finx reports, and the dashboards that show them.',
+        synonyms: ['metric dictionary', 'kpi definition'],
+        examples: ['fx-data-mau'],
+      },
+    });
+
+    /* ── Reading lists, saved, recent, views ── */
     D.collections = [
       { id: 'col-fx-new', name: 'New joiner essentials', desc: 'Read these in your first two weeks.', owner: 'u-fx-an', share: 'workspace', featured: true, created: P(120), updated: P(4),
         items: [{ doc: 'fx-pol-onboarding', note: 'Start here.' }, { doc: 'fx-pol-itacc' }, { doc: 'fx-pol-hybrid', note: 'Tuesday and Thursday are team days.' }, { doc: 'fx-sec-access', note: 'Before you ask for any production access.' }, { doc: 'fx-eng-handbook', note: 'Engineers: chapters 2–4.' }, { doc: 'fx-pol-conduct' }, { doc: 'fx-pol-travel' }, { doc: 'fx-sec-privacy' }] },

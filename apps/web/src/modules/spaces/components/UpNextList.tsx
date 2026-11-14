@@ -51,7 +51,7 @@ export function UpNextList({ items, space, empty, renderActions }: UpNextListPro
       </>
     );
   return (
-    <List className="home-upnext">
+    <List className="upnext">
       {items.map((it) => {
         const w = upNextWhen(it);
         const a = it.action;
@@ -63,7 +63,7 @@ export function UpNextList({ items, space, empty, renderActions }: UpNextListPro
             contentTitle
             description={
               <>
-                <span className={clsx("home-when", w.tone && `home-when--${w.tone}`)} title={fmtDateTime(it.at)}>
+                <span className={clsx("upnext-when", w.tone && `upnext-when--${w.tone}`)} title={fmtDateTime(it.at)}>
                   {w.text}
                 </span>
                 {!space && it.spaceName ? (

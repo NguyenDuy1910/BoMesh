@@ -1,5 +1,5 @@
-/* Contribute (features/contribute.js): the contribute dialog, the contribution panel
-   (state, history timeline, assistant suggestions, revise form). Tokens only. */
+/* Contribute (features/contribute.js): the contribute dialog (pick files → Analyzing → Check the details), the contribution
+   panel (progress stepper, assistant suggestions, revise form, history timeline). Tokens only. */
 
 /* ───── Dialog ───── */
 .ctb-current { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 12px; margin-bottom: 16px; border-radius: var(--radius-xl); background: var(--surface-secondary); }
@@ -16,9 +16,22 @@
 .ctb-fields { display: grid; gap: 16px; margin-top: 16px; }
 .ctb-fields > :is(.field, .disclosure) { margin-top: 0; }
 
+/* Analyzing: one live line above the files being read */
+.ctb-analyzing { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-4); padding: var(--space-3) var(--space-4); border-radius: var(--radius-xl); background: var(--accent-soft); color: var(--accent-soft-foreground); font-size: var(--text-sm); line-height: var(--leading-sm); }
+
+/* Check the details: one form per file, set apart by a hairline (no card in a dialog) */
+.ctb-checks { display: flex; flex-direction: column; }
+.ctb-check { display: flex; flex-direction: column; gap: var(--space-4); }
+.ctb-check + .ctb-check { margin-top: var(--space-6); padding-top: var(--space-6); border-top: 1px solid var(--separator); }
+.ctb-check > .field { margin-top: 0; }
+.ctb-check__file { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.ctb-check__row { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: var(--space-4); align-items: start; }
+.ctb-check__row > .field { margin-top: 0; }
+.ctb-check .cur-why { margin-top: var(--space-2); }
+
 /* ───── Contribution panel ───── */
 .ctb-panel { display: flex; flex-direction: column; gap: 24px; }
-.ctb-state { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.ctb-panel .flow-steps { margin-top: var(--space-1); }
 .ctb-sec__title { margin: 0 0 10px; font-size: 13px; line-height: 18px; font-weight: 600; }
 .ctb-panel .kv { font-size: 13px; }
 .ctb-quote { margin: 6px 0 0; padding: 8px 12px; border-left: 2px solid var(--border-secondary); border-radius: 0 var(--radius-lg) var(--radius-lg) 0; background: var(--surface-secondary); color: var(--foreground); font-size: 13px; line-height: 18px; white-space: pre-line; }
@@ -67,5 +80,6 @@
 @container app (max-width: 679px) {
   /* choiceGroup sets its columns inline; stack the destination choices on phones. */
   .ctb-dest .choice-group { grid-template-columns: minmax(0, 1fr) !important; }
+  .ctb-check__row { grid-template-columns: minmax(0, 1fr); }
   .ctb-revise { padding: 12px; }
 }

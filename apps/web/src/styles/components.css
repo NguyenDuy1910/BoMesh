@@ -20,30 +20,37 @@
   --tooltip-close-delay: 0ms;
 }
 
-/* Dark fields carry a 1 px inset outline instead of the light theme's shadow (preview `inset 0 0 0 1px`); an inset
-   shadow, unlike a border, keeps fields at the light theme's height. */
-[data-theme="dark"] {
-  --field-border: var(--border);
-  --field-shadow: inset 0 0 0 1px var(--border);
-}
-
 /* Input-group prefix/suffix sit inside the field with no separator (HeroUI draws one from the field border width). */
 .input-group__prefix, .input-group__suffix { border-inline: none; }
 
 /* Focus ring (HeroUI status-focused) on the product's own interactive rows/cards. */
-.item__hit:focus-visible, .card--action:focus-visible, .filter-button:focus-visible, .link-button:focus-visible, .tip-trigger:focus-visible {
+.item__hit:focus-visible, .card--action:focus-visible, .filter-button:focus-visible, .link-button:focus-visible, .tip-trigger:focus-visible,
+.nav-item:focus-visible, .table__row[data-act]:focus-visible, .toggle-group button:focus-visible {
   outline: none;
   box-shadow: 0 0 0 var(--ring-offset-width) var(--background), 0 0 0 calc(var(--ring-offset-width) + 2px) var(--focus);
 }
+/* Rows sit inside clipped lists: their ring is drawn inside. The row's real control is its title (.item__action). */
+a.item:focus-visible, .item--action:has(> .item__body .item__action:focus-visible) { outline: none; box-shadow: inset 0 0 0 2px var(--focus); border-radius: inherit; }
+.item__action:focus-visible { outline: none; box-shadow: none; }
 
 /* Button — sizes sm 32 / md 36 / lg 40 at every width (HeroUI grows to 40/36/44 on touch widths). */
-.button { height: 36px; line-height: 20px; flex: none; }
-.button--sm { height: 32px; padding-inline: 12px; font-size: 13px; }
+.button { height: var(--control-md); line-height: 20px; font-size: var(--text-md); flex: none; }
+.button--sm { height: var(--control-sm); padding-inline: 12px; font-size: var(--text-sm); }
 .button--lg { height: 40px; padding-inline: 20px; font-size: 15px; }
 .button--icon-only { width: 36px; padding: 0; }
 .button--icon-only.button--sm { width: 32px; }
 .button--icon-only.button--lg { width: 40px; }
 .button svg:not([data-slot="spinner"] svg) { width: 16px; height: 16px; margin-block: 0; }
+/* Pending (`isPending`; preview `btn({ loading })`): HeroUI v3 draws no spinner, so the label hides in place (the button keeps
+   its width) and a spinner in the button's own ink turns over it. */
+.button[data-pending="true"] { color: transparent; }
+.button[data-pending="true"] > * { opacity: 0; }
+.button[data-pending="true"]::after { content: ""; position: absolute; inset: 0; width: 16px; height: 16px; margin: auto; border-radius: 50%; border: 2px solid var(--button-fg); border-right-color: transparent; animation: spin 0.7s linear infinite; }
+.button--sm[data-pending="true"]::after { width: 14px; height: 14px; }
+.button--primary { box-shadow: var(--button-shadow); }
+/* Secondary: a quiet outlined surface — clearly clickable, never competing with the primary. */
+.button--secondary { --button-bg: var(--surface); --button-bg-hover: var(--surface-hover); --button-bg-pressed: var(--surface-hover); --button-fg: var(--foreground); box-shadow: var(--field-shadow), inset 0 0 0 1px var(--field-border); }
+.button--secondary svg:not([data-slot="spinner"] svg) { color: var(--accent-soft-foreground); }
 .button--outline { box-shadow: inset 0 0 0 1px var(--border); }
 .button--ghost.button--muted { --button-fg: var(--muted); }
 @media (hover: hover) { .button--ghost.button--muted:hover { --button-fg: var(--foreground); } }
@@ -53,10 +60,38 @@
   font-size: 14px;
   line-height: 20px;
 }
+/* A long selected value stays on one line and ellipsizes (preview `.select`), so the trigger keeps its 36 px. */
+.select__value, .autocomplete__value { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: start; }
+/* Preview `.textarea`: never shorter than 80 px, so a 2-row field reads as a paragraph box (HeroUI: 38 px). The chat composer's
+   TextArea is a growing one-line input, not a form field. */
+.textarea:not(.chat-composer__input) { min-height: 80px; }
 
-/* Link-styled inline button (preview `linkBtn`). */
-.link-button { display: inline-flex; align-items: center; gap: 4px; color: var(--accent-soft-foreground); font-weight: 500; border-radius: var(--radius-sm); }
-.link-button:hover { text-decoration: underline; text-underline-offset: 3px; }
+/* Field edge (preview `.input`): a hairline inset ring in --field-border on every field box — HeroUI draws its edge as a
+   border whose width (--field-border-width) is 0, which leaves white fields invisible on white surfaces (dialogs, cards).
+   States are low-specificity (`:where`) so page rules that strip the edge (composers, inline chip inputs) still win. */
+:is(.input, .textarea, .input-group, .search-field__group, .select__trigger, .autocomplete__trigger) { box-shadow: var(--field-shadow), inset 0 0 0 1px var(--field-border); }
+.input-group :is(.input, .input-group__input) { box-shadow: none; }
+@media (hover: hover) {
+  :is(.input, .textarea):where(:hover:not(:focus, [readonly], [data-invalid="true"])),
+  :is(.input-group, .search-field__group):where(:hover:not(:focus-within, [data-invalid="true"])),
+  :is(.select__trigger, .autocomplete__trigger):where(:hover) { box-shadow: var(--field-shadow), inset 0 0 0 1px color-mix(in oklab, var(--foreground) 20%, transparent); }
+}
+/* Focus: accent edge + soft halo (calm, still unmistakable). */
+:is(.input, .textarea):where(:focus, [data-focused="true"]),
+:is(.input-group, .search-field__group):where(:focus-within),
+:is(.select__trigger, .autocomplete__trigger):where(:focus-visible, [data-focus-visible="true"]) { outline: none; box-shadow: inset 0 0 0 1px var(--focus), 0 0 0 3px var(--focus-halo); }
+/* Invalid: a danger edge (danger halo while focused) instead of HeroUI's outline. */
+:is(.input, .textarea, .input-group, .search-field__group):where([data-invalid="true"], [aria-invalid="true"]),
+:where(.select, .autocomplete):where([data-invalid="true"]) :is(.select__trigger, .autocomplete__trigger) { outline: none; box-shadow: inset 0 0 0 1px var(--danger); }
+:is(.input, .textarea):where([data-invalid="true"], [aria-invalid="true"]):where(:focus),
+:is(.input-group, .search-field__group):where([data-invalid="true"]):where(:focus-within) { box-shadow: inset 0 0 0 1px var(--danger), 0 0 0 3px var(--danger-soft); }
+
+/* Link button — LinkButton / preview `linkBtn()`; `.link-button` is the same look for hand-written anchors. */
+.link-button, .button--link { display: inline-flex; align-items: center; gap: 4px; color: var(--accent-soft-foreground); font-weight: 500; border-radius: var(--radius-sm); }
+.button.button--link { height: auto; min-height: 24px; padding: 0 2px; --button-bg: transparent; --button-bg-hover: transparent; --button-bg-pressed: transparent; --button-fg: var(--accent-soft-foreground); font-size: inherit; }
+.button--link svg:not([data-slot="spinner"] svg) { width: 14px; height: 14px; margin: 0; }
+.link-button:hover, .button--link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.button.button--link:active { transform: none; }
 
 /* Chip — 20 px tall pill; quiet tertiary; outline; status dot. */
 .chip { gap: 4px; line-height: 16px; }
@@ -65,23 +100,28 @@
 .chip--lg { padding: 4px 12px; font-size: 13px; }
 .chip--tertiary:not(.chip--outline) { padding-inline: 0; }
 .chip--tertiary.chip--default:not(.chip--outline) { --chip-fg: var(--muted); }
+.chip--tertiary.chip--success:not(.chip--outline) { --chip-fg: var(--success-soft-foreground); }
+.chip--soft.chip--default { --chip-bg: var(--default-soft); --chip-fg: var(--default-foreground); }
 .chip--outline { --chip-bg: transparent; box-shadow: inset 0 0 0 1px var(--border); }
 .chip__dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
 .chip--live .chip__dot { animation: pulse 1.6s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: 0.35; } }
 .tip-trigger { display: inline-flex; border-radius: var(--radius-2xl); }
 
-/* Card — 16 px radius, 1 px border in dark mode. */
-.card { border-radius: var(--radius-2xl); background: var(--surface); color: var(--surface-foreground); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); min-width: 0; }
+/* Card — 16 px radius, 20 px padding, a hairline edge (--card-border). */
+.card { gap: 12px; padding: var(--space-5); border-radius: var(--radius-2xl); background: var(--surface); color: var(--surface-foreground); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); min-width: 0; }
+.card--flush { padding: 0; gap: 0; overflow: hidden; }
+.card--flush > .card__header { padding: 16px 16px 12px; }
+.card--flush > .card__footer { padding: 12px 16px; border-top: 1px solid var(--separator); }
 .card--secondary, .card--transparent { box-shadow: none; }
 .card--secondary { background: var(--surface-secondary); }
 .card--tertiary { background: var(--surface-tertiary); }
-.card--transparent { background: transparent; }
-.card__title { font-weight: 600; }
-.card__description { font-size: 13px; line-height: 18px; }
-.card--action { cursor: pointer; text-align: left; color: inherit; transition: background-color var(--dur-fast), transform var(--dur) var(--ease-out); }
-@media (hover: hover) { .card--action:hover { background: var(--surface-hover); } }
-.card--action:active { transform: scale(0.995); }
+.card--transparent { background: transparent; padding: 0; }
+.card__title { font-size: 15px; line-height: 22px; font-weight: var(--weight-semibold); letter-spacing: var(--tracking-snug); }
+.card__description { font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--muted); }
+.card--action { cursor: pointer; text-align: left; color: inherit; transition: background-color var(--dur-fast), box-shadow var(--dur-fast), transform var(--dur) var(--ease-out); }
+@media (hover: hover) { .card--action:hover { background: var(--surface-hover); box-shadow: var(--lift-shadow), inset 0 0 0 1px color-mix(in oklab, var(--foreground) 11%, transparent); transform: translateY(-1px); } }
+.card--action:active { transform: translateY(0) scale(0.995); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); }
 .card--lg { padding: 24px; gap: 16px; }
 /* Preview card header (`icon · .grow(title, description) · actions`) is a row; HeroUI's
    Card.Header with Title/Description as direct children keeps its stacked column. */
@@ -90,7 +130,7 @@
 /* Alert — 16 px radius; `alert--soft` tints the surface by tone. */
 .alert { gap: 12px; border-radius: var(--radius-2xl); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); min-width: 0; }
 .alert__indicator { padding: 4px 0 0; }
-.alert__title { font-weight: 500; }
+.alert__title { font-size: 14px; line-height: 24px; font-weight: 500; }
 .alert__description { font-size: 13px; line-height: 18px; }
 .alert__actions { flex: none; display: flex; gap: 8px; align-items: center; align-self: center; }
 .alert--soft { box-shadow: none; }
@@ -105,11 +145,17 @@
 .label { font-size: 13px; line-height: 18px; font-weight: 500; }
 /* Labels keep their colour when the field is invalid (preview: only the control and the error turn red). */
 .label.label--invalid, [data-invalid=true] > .label { color: var(--foreground); }
-.label__req { color: var(--danger); }
+/* Required marker 4 px after the label (preview `.label` gap): our explicit `*` span and HeroUI's `::after` (2 px there; the
+   margin is inert on labels without the marker). */
+.label__req { color: var(--danger); margin-inline-start: 4px; }
+.label::after { margin-inline-start: 4px; }
 .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.description { font-size: 12px; line-height: 17px; color: var(--muted); }
+.fieldset { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.fieldset__legend { padding: 0; font-size: 13px; font-weight: 500; margin-bottom: 4px; }
 /* Read-only values (e.g. the account email) sit on the secondary surface, flat (preview `.input[readonly]`). */
 .input[readonly], .input[readonly]:hover { background: var(--surface-secondary); box-shadow: none; }
-.field + .field { margin-top: 16px; }
+.field + .field, .field + .fieldset, .fieldset + .field, .field + .disclosure, .disclosure + .field { margin-top: 18px; }
 .field-error { display: flex; align-items: center; gap: 4px; padding: 0; font-size: 12px; line-height: 16px; color: var(--danger-soft-foreground); }
 .field-error .i { width: 12px; height: 12px; }
 /* HeroUI hides `.field-error` until FieldError sets [data-visible]; the preview's own `.field-error` rows are always shown. */
@@ -123,6 +169,9 @@
 /* Switch (default size) — preview 40×24 track with a 20 px thumb. */
 .switch:not(.switch--sm):not(.switch--lg) .switch__control { width: 40px; height: 24px; }
 .switch:not(.switch--sm):not(.switch--lg) .switch__thumb { width: 20px; height: 20px; --switch-thumb-offset: calc(100% - 24px); }
+/* Preview `.switch`: the thumb's shadow carries its shape on a white card (on and off); dark mode tracks sit on surface-tertiary. */
+.switch .switch__thumb, .switch[data-selected="true"] .switch__thumb { box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18); }
+[data-theme="dark"] .switch { --switch-control-bg: var(--surface-tertiary); }
 
 /* Checkbox / Radio — preview 18 px controls with a visible border while unselected. */
 .checkbox__control { width: 18px; height: 18px; border-radius: 6px; }
@@ -132,6 +181,12 @@
 /* HeroUI paints the unselected indicator as a full-size surface disc that hides the control's ring (preview: ring visible). */
 .radio:not([data-selected]) .radio__indicator::before { background: transparent; }
 .checkbox__content { gap: 10px; font-weight: 400; }
+/* Plain-markup radios (preview `<input type=radio> + .radio__control`, e.g. option rows built without HeroUI Radio): the
+   preview ring, then an accent disc with a dot once checked. HeroUI's Radio hides its input in a wrapper, so these never match it. */
+input[type="radio"] + .radio__control { flex: none; display: grid; place-items: center; width: 18px; height: 18px; border: 0; border-radius: 50%; background: var(--field-background); box-shadow: var(--field-shadow), inset 0 0 0 1px var(--border-secondary); }
+input[type="radio"]:checked + .radio__control { background: var(--accent); box-shadow: none; }
+input[type="radio"]:checked + .radio__control::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent-foreground); }
+input[type="radio"]:focus-visible + .radio__control { box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--focus); }
 
 /* Search field (SearchInput) — 320 px toolbar width; sm = 32 px. */
 .search-input { width: 100%; max-width: 320px; min-width: 0; }
@@ -145,17 +200,26 @@
 .section-tabs .tabs__tab { width: auto; gap: 6px; flex: none; }
 .section-tabs--primary > .tabs__list-container { width: fit-content; max-width: 100%; }
 .section-tabs--secondary .tabs__list { gap: 4px; }
-.section-tabs--secondary .tabs__tab { height: 40px; padding-inline: 12px; }
+.section-tabs--secondary .tabs__tab { height: 40px; padding-inline: 10px; }
 /* Preview tabs clip and scroll by touch/keyboard; HeroUI's overlay chevrons cover the last tab on phones. */
 .section-tabs .tabs__list-container__scroll-prev, .section-tabs .tabs__list-container__scroll-next { display: none; }
+/* Scrollable strips ([data-overflow]) fade on the side that has more. */
+[data-overflow].is-fade-end { -webkit-mask-image: linear-gradient(to right, var(--black) calc(100% - 32px), transparent); mask-image: linear-gradient(to right, var(--black) calc(100% - 32px), transparent); }
+[data-overflow].is-fade-start { -webkit-mask-image: linear-gradient(to left, var(--black) calc(100% - 32px), transparent); mask-image: linear-gradient(to left, var(--black) calc(100% - 32px), transparent); }
+[data-overflow].is-fade-start.is-fade-end { -webkit-mask-image: linear-gradient(to right, transparent, var(--black) 32px, var(--black) calc(100% - 32px), transparent); mask-image: linear-gradient(to right, transparent, var(--black) 32px, var(--black) calc(100% - 32px), transparent); }
+/* A quiet divider between groups of tabs (daily work | setup). */
+.tabs__sep { flex: none; align-self: center; width: 1px; height: 18px; margin: 0 8px; background: var(--separator); }
 .tabs__count { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .tabs__badge { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: var(--radius-full); background: var(--accent); color: var(--accent-foreground); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
 
-/* Count badge (preview `.badge`) — plain spans only; HeroUI's Badge sets data-slot="badge" and keeps its own look. */
-.badge:not([data-slot]) { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: var(--radius-full); background: var(--default); color: var(--default-foreground); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; flex: none; }
+/* Count badge (preview `.badge`) — plain spans only; HeroUI's Badge sets data-slot="badge" and keeps its own look. HeroUI's
+   `.badge` also sets a 28 px min-height, which the preview's 20 px pill (16 px on the rail) must not inherit. */
+.badge:not([data-slot]) { display: inline-grid; place-items: center; min-width: 20px; min-height: 0; height: 20px; padding: 0 6px; border-radius: var(--radius-full); background: var(--default); color: var(--default-foreground); font-size: 11px; line-height: 1; font-weight: 600; font-variant-numeric: tabular-nums; flex: none; }
 .badge--accent:not([data-slot]) { background: var(--accent); color: var(--accent-foreground); }
 .badge--danger:not([data-slot]) { background: var(--danger); color: var(--danger-foreground); }
-.badge-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; }
+.badge-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.badge-dot--accent { background: var(--accent); }
+.badge-dot--danger { background: var(--danger); }
 
 /* Segmented (ToggleButtonGroup) — gray track, raised selected segment (preview `.toggle-group`). */
 .segmented { padding: 3px; gap: 2px; border-radius: var(--radius-3xl); background: var(--default); flex: none; }
@@ -164,13 +228,33 @@
   --toggle-button-fg: var(--muted);
   --toggle-button-bg-selected: var(--segment); --toggle-button-bg-selected-hover: var(--segment); --toggle-button-bg-selected-pressed: var(--segment);
   --toggle-button-fg-selected: var(--segment-foreground);
-  height: 28px; padding: 0 12px; gap: 6px; border-radius: var(--radius-3xl) !important; font-size: 13px;
+  height: 30px; padding: 0 12px; gap: 6px; border-radius: var(--radius-3xl) !important; font-size: 13px; font-weight: 500;
 }
 .segmented .toggle-button.toggle-button--icon-only { width: 34px; padding: 0; }
 @media (hover: hover) { .segmented .toggle-button:not([data-selected="true"]):hover { color: var(--foreground); } }
-.segmented .toggle-button[data-selected="true"] { box-shadow: var(--surface-shadow); }
+.segmented .toggle-button[data-selected="true"] { box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); }
 .segmented--full { display: flex; width: 100%; }
 .segmented--full .toggle-button { flex: 1; }
+
+/* Popover anatomy (preview `.popover__*`): title row with its × on one line, body, optional footer. A HeroUI Popover.Dialog
+   that carries these parts drops its own 16 px padding so the parts set the rhythm. */
+.popover__dialog:has(> :is(.popover__header, .popover__body)) { padding: 0; display: flex; flex-direction: column; min-height: 0; }
+.popover__header { display: flex; align-items: center; gap: 8px; padding: 12px 12px 4px 16px; }
+.popover__title { flex: 1 1 auto; min-width: 0; font-size: 14px; line-height: 20px; font-weight: 600; }
+.popover__body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 8px 16px 12px; }
+.popover__header + .popover__body { padding-top: 4px; }
+.popover__footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--separator); }
+/* PopoverSheet on phones (preview `.popover--sheet`): a bottom drawer with the popover's small title, 20 px sides, and
+   the footer (actions, then Done, each sharing the row) on the safe area. */
+.popover-sheet .drawer__dialog { padding: 0; max-height: min(80vh, calc(100vh - 48px)); border-start-start-radius: var(--radius-3xl); border-start-end-radius: var(--radius-3xl); }
+.popover-sheet .drawer__header { padding: 16px 20px 4px; }
+.popover-sheet .drawer__heading { font-size: 14px; line-height: 20px; font-weight: 600; letter-spacing: 0; }
+.popover-sheet .drawer__body { margin: 0; padding: 8px 20px 16px; color: var(--foreground); }
+.popover-sheet .drawer__footer { margin: 0; padding: 12px 20px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--separator); }
+.popover-sheet .drawer__footer > .button { flex: 1; }
+/* Inside a form field the track spans the field with its options from the start (preview `.field > .toggle-group`, a
+   stretched flex item). */
+.field > .segmented { align-self: stretch; width: auto; justify-content: flex-start; }
 
 /* Avatar (UserAvatar) — round, preview sizes xs 20 · sm 24 · md 32 · lg 40 · xl 56. */
 .user-avatar { --avatar-radius: 9999px; --avatar-size: 32px; width: var(--avatar-size); height: var(--avatar-size); }
@@ -193,8 +277,8 @@
 .empty-state__icon--danger { background: var(--danger-soft); color: var(--danger-soft-foreground); }
 .empty-state__icon--success { background: var(--success-soft); color: var(--success-soft-foreground); }
 .empty-state__icon--accent { background: var(--accent-soft); color: var(--accent-soft-foreground); }
-.empty-state__title { font-size: 15px; line-height: 22px; font-weight: 600; }
-.empty-state__description { font-size: 13px; line-height: 20px; color: var(--muted); max-width: 380px; }
+.empty-state__title { font-size: 15px; line-height: 22px; font-weight: var(--weight-semibold); }
+.empty-state__description { font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--muted); max-width: 400px; text-wrap: pretty; }
 .empty-state__actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; justify-content: center; }
 .empty-state--boxed { background: var(--surface); border-radius: var(--radius-2xl); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); }
 .empty-state--compact { padding: 28px 16px; }
@@ -209,9 +293,16 @@
 .table__sort svg { width: 12px; height: 12px; opacity: 0.6; }
 .table__column[aria-sort]:not([aria-sort="none"]) { color: var(--foreground); }
 .table__column--num .table__sort { justify-content: flex-end; }
-.table__row--action { cursor: pointer; }
-@media (hover: hover) { .table__row--action:hover .table__cell { background: color-mix(in oklab, var(--surface-hover) 60%, var(--surface)); } }
-.table__row[data-selected="true"] .table__cell { background: color-mix(in oklab, var(--accent) 7%, var(--surface)); }
+.table__row--action, .table__row[data-act] { cursor: pointer; }
+@media (hover: hover) { :is(.table__row--action, .table__row[data-act], .table__row--hover):hover .table__cell { background: color-mix(in oklab, var(--surface-hover) 60%, var(--surface)); } }
+.table__row:is([data-selected="true"], [aria-selected="true"]) .table__cell { background: color-mix(in oklab, var(--accent) 7%, var(--surface)); }
+/* An action row (opens a drawer or page) is one target. React Aria focuses the pressed cell and a closing drawer hands focus
+   back to it, so a focused cell rings the whole row (HeroUI's row ring), never the single cell. */
+.table__row--action:has(> .table__cell:is(:focus-visible, [data-focus-visible="true"])) > .table__cell { box-shadow: inset 0 2px 0 0 var(--focus), inset 0 -2px 0 0 var(--focus); outline: none; }
+.table__row--action:has(> .table__cell:is(:focus-visible, [data-focus-visible="true"])) > .table__cell:first-child { box-shadow: inset 2px 0 0 0 var(--focus), inset 0 2px 0 0 var(--focus), inset 0 -2px 0 0 var(--focus); }
+.table__row--action:has(> .table__cell:is(:focus-visible, [data-focus-visible="true"])) > .table__cell:last-child { box-shadow: inset -2px 0 0 0 var(--focus), inset 0 2px 0 0 var(--focus), inset 0 -2px 0 0 var(--focus); }
+.table__row--action:has(> .table__cell:is(:focus-visible, [data-focus-visible="true"])) > .table__cell:not(:first-child):not(:last-child) { border-radius: 0; }
+.table__row--action:has(> .table__cell:is(:focus-visible, [data-focus-visible="true"])) > .table__cell:only-child { box-shadow: inset 0 0 0 2px var(--focus); }
 .table__cell .cell-title { font-weight: 500; }
 .table__cell .cell-sub { font-size: 12px; line-height: 16px; color: var(--muted); }
 .table-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 4px 0; font-size: 13px; color: var(--muted); }
@@ -226,6 +317,9 @@
   .table--stack .table__row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 12px 16px; background: var(--surface); border-bottom: 1px solid var(--separator); }
   .table--stack .table__row:last-child { border-bottom: 0; }
   .table--stack .table__cell { display: block; padding: 0; border: 0; background: transparent !important; border-radius: 0 !important; width: auto; }
+  .table--stack .table__row--action:has(> .table__cell:is(:focus-visible, [data-focus-visible="true"])),
+  .table--stack .table__row:is(:focus-visible, [data-focus-visible="true"]) { box-shadow: inset 0 0 0 2px var(--focus); outline: none; }
+  .table--stack .table__row .table__cell { box-shadow: none !important; }
   .table--stack .table__cell--check { order: 0; }
   .table--stack .table__cell--primary { order: 1; flex: 1 1 calc(100% - 120px); min-width: 0; }
   .table--stack .table__cell--actions { order: 2; }
@@ -238,8 +332,20 @@
 
 /* Dropdown menu — preview `.menu` (16 px radius) and item metrics; filter menu counts and trailing check. */
 .dropdown__popover { border-radius: var(--radius-2xl); }
-.menu-item { min-height: 36px; border-radius: var(--radius-xl); font-size: 14px; }
+.menu-item { min-height: 36px; gap: 10px; padding-inline: 10px; border-radius: var(--radius-lg); font-size: var(--text-md); }
+/* Item text is a HeroUI `<Label>` (`.label`): it reads as the item (14/20 regular), not as a 13 px medium form label. */
+.menu-item > .label { font-size: inherit; line-height: inherit; font-weight: inherit; }
+.menu-item__trail, .menu-item__meta { margin-left: auto; color: var(--muted); }
+.menu-item__meta { font-size: 12px; white-space: nowrap; }
 .menu-item > svg.i { color: var(--muted); }
+/* Selection check trails the item in the accent (preview `.menu-item__check`), section labels and inset separators. */
+.menu-item:has(.menu-item__indicator:not(.menu-item__indicator--submenu)) { padding-inline-start: 10px; }
+.menu-item__indicator:not(.menu-item__indicator--submenu) { position: static; transform: none; translate: none; order: 99; margin-left: auto; width: 16px; height: 16px; color: var(--accent-soft-foreground); }
+.menu-item__indicator [data-slot="menu-item-indicator--checkmark"] { width: 12px; height: 12px; }
+.menu-item__meta + .menu-item__indicator { margin-left: 0; }
+.dropdown__menu .header { padding: 8px 10px 4px; font-size: 12px; line-height: 20px; font-weight: 500; color: var(--muted); }
+/* `align-self`: inside a `.menu-section` (a flex column aligned to the start) an auto-width separator collapsed to 0 px. */
+.dropdown__menu .separator--horizontal { margin: 6px 4px; width: auto; align-self: stretch; }
 /* HeroUI colors only `[data-slot="label"]`; our `<Label>` renders `.label`, so tint the whole item. */
 .menu-item--danger, .menu-item--danger .label { color: var(--danger); }
 .menu-item--danger > svg.i { color: currentColor; }
@@ -248,22 +354,35 @@
 .filter-menu__check { position: static; translate: none; margin-left: auto; color: var(--accent-soft-foreground); }
 .filter-menu__count + .filter-menu__check { margin-left: 0; }
 
-/* Overlays — headings 16/24 semibold, body text in foreground (paragraphs opt into `.muted`). */
-.modal__heading, .alert-dialog__heading, .drawer__heading { font-size: 16px; line-height: 24px; font-weight: 600; }
+/* Overlays — headings 18/26 semibold, body text in foreground (paragraphs opt into `.muted`). */
+.modal__heading, .alert-dialog__heading, .drawer__heading { font-size: var(--text-xl); line-height: var(--leading-xl); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-snug); }
 .modal__body, .alert-dialog__body, .drawer__body { color: var(--foreground); }
 /* Overlay close (×) — preview ghost icon button: no resting fill, gray on hover. */
 .close-button--default { background: transparent; }
 @media (hover: hover) { .close-button--default:hover, .close-button--default[data-hovered="true"] { background: var(--default); } }
 .modal__close-trigger, .drawer__close-trigger, .alert-dialog__close-trigger { top: 12px; inset-inline-end: 12px; width: 32px; height: 32px; }
-/* Preview modal rhythm: 20 px top/bottom, 16 px from the heading to the content, 20 px from the content to the
-   actions (HeroUI: 24 px padding, 11 px and 23 px). The body keeps HeroUI's 3 px focus-ring padding. */
-.modal__dialog { padding: 20px 24px; }
-.modal__body { margin-top: 13px; }
-.modal__footer { margin-top: 17px; }
-.modal__close-trigger { top: 14px; }
-/* HeroUI also sets `modal__dialog--md` by default, so the product sizes need the doubled class. */
-.modal__dialog.modal__dialog--sm, .alert-dialog__dialog--sm { max-width: 380px; }
-.modal__dialog--md { max-width: 440px; }
+/* Preview `.backdrop`: the dimmed page is also softly blurred. */
+:is(.modal__backdrop--opaque, .drawer__backdrop--opaque, .alert-dialog__backdrop--opaque) { -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
+/* Preview modal rhythm: header 24 px in, 20 px to the content, and the decision in a quiet footer band. */
+.modal__dialog { padding: 0; gap: 0; }
+/* A header stacks its heading, description and anything under them (e.g. a wizard stepper); only a leading icon tile puts it
+   in a row (preview: icon · text block). */
+.modal__header { flex-direction: column; align-items: stretch; gap: 0; padding: var(--space-6) 56px 0 var(--space-6); }
+.modal__header:has(> .modal__icon) { flex-direction: row; align-items: flex-start; gap: 14px; }
+.modal__body { margin: 0; padding: var(--space-5) var(--space-6) var(--space-6); overflow-y: auto; min-height: 0; flex: 1 1 auto; }
+.modal__header + .modal__footer { margin-top: var(--space-5); }
+.modal__footer { margin: 0; padding: 14px 24px; gap: 8px; flex-wrap: wrap; border-top: 1px solid var(--separator); background: color-mix(in oklab, var(--surface-secondary) 55%, var(--overlay)); }
+.modal__close-trigger { top: 18px; inset-inline-end: 16px; }
+/* Icon tile: names the action at a glance (create, share, move, delete…). */
+.modal__icon { flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: var(--radius-xl); background: var(--accent-soft); color: var(--accent-soft-foreground); }
+.modal__icon svg { width: 20px; height: 20px; }
+.modal__icon--success { background: var(--success-soft); color: var(--success-soft-foreground); }
+.modal__icon--warning { background: var(--warning-soft); color: var(--warning-soft-foreground); }
+.modal__icon--danger { background: var(--danger-soft); color: var(--danger-soft-foreground); }
+.modal__icon--default { background: var(--default); color: var(--default-foreground); }
+/* HeroUI also sets `modal__dialog--md` by default, so the product sizes need the doubled class. Preview: sm 400 · md 460. */
+.modal__dialog.modal__dialog--sm, .alert-dialog__dialog--sm { max-width: 400px; }
+.modal__dialog--md { max-width: 460px; }
 .modal__dialog--lg { max-width: 600px; }
 .modal__dialog.modal__dialog--xl { max-width: 880px; }
 /* Drawer (placement right) — floating sheet 8 px from the edges, 24 px radius; sizes md 480 · lg 720 · xl 960. */
@@ -275,20 +394,36 @@
 .drawer__dialog[data-placement="right"].drawer__dialog--xl { width: min(960px, calc(100vw - 16px)); }
 .drawer__dialog[data-placement="right"] > .drawer__header { gap: 2px; padding: 20px 56px 16px 20px; border-bottom: 1px solid var(--separator); }
 .drawer__dialog[data-placement="right"] > .drawer__body { margin: 0; padding: 20px; }
-.drawer__dialog[data-placement="right"] > .drawer__footer { padding: 12px 20px; border-top: 1px solid var(--separator); flex-wrap: wrap; }
-.drawer__description, .modal__description { font-size: 13px; line-height: 18px; color: var(--muted); margin-top: 2px; }
-.modal__header:has(> .modal__description) { gap: 0; }
+.drawer__dialog[data-placement="right"] > .drawer__footer { padding: 14px 20px; border-top: 1px solid var(--separator); flex-wrap: wrap; background: color-mix(in oklab, var(--surface-secondary) 55%, var(--overlay)); }
+.drawer__description, .modal__description { font-size: 13px; line-height: 19px; color: var(--muted); margin-top: 2px; }
 .drawer__section + .drawer__section { margin-top: 24px; }
 .drawer__section-title { font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 8px; }
-.drawer__footer-start, .modal__footer-start { margin-right: auto; }
+.drawer__footer-start, .modal__footer-start { margin-right: auto; flex: 1 1 0; min-width: 0; font-size: 12px; line-height: 16px; color: var(--muted); }
+/* Dialog wrappers that pass a footer note in a `.grow` wrapper get the same shrinkable slot: the note wraps instead of pushing
+   the buttons onto their own line. */
+:is(.modal__footer, .drawer__footer, .alert-dialog__footer) > .grow { margin-right: auto; flex: 1 1 0; min-width: 0; }
 @media (max-width: 679px) {
+  /* Dialogs are bottom sheets (preview): flush with the bottom edge, full width, top corners rounded. */
+  .modal__container:not(.palette-container) { padding: 0; }
+  .modal__container:not(.palette-container) > .modal__dialog { width: 100%; max-width: none; margin: auto 0 0; max-height: min(92dvh, calc(100% - 24px)); border-radius: var(--radius-3xl) var(--radius-3xl) 0 0; }
+  .modal__footer { padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
   .drawer__dialog[data-placement="right"] { width: 100%; height: 94vh; margin: 6vh 0 0; border-radius: var(--radius-3xl) var(--radius-3xl) 0 0; }
   .modal__footer .button, .alert-dialog__footer .button { flex: 1; }
+  .modal__footer-start, .drawer__footer-start, :is(.modal__footer, .drawer__footer, .alert-dialog__footer) > .grow { flex-basis: 100%; }
 }
 
-/* Toast — 16 px radius overlay card; tone icons. */
-.toast { border-radius: var(--radius-2xl); background: var(--overlay); color: var(--overlay-foreground); }
-.toast .toast__title { color: var(--overlay-foreground); font-weight: 400; }
+/* Toast — a small note in the bottom-right corner, out of the content's way (full width at the bottom on phones;
+   above the chat composer on threads): one compact row, icon · message · action · ×. */
+/* The region keeps HeroUI's z-index (above modals and drawers): an Undo toast fired from a drawer stays visible and clickable. */
+.toast { align-items: center; min-height: 40px; padding: 4px 4px 4px 12px; border-radius: var(--radius-xl); background: var(--overlay); color: var(--overlay-foreground); font-size: var(--text-sm); line-height: var(--leading-sm); }
+.toast .toast__title { color: var(--overlay-foreground); font-size: var(--text-sm); line-height: var(--leading-sm); font-weight: 400; }
+.toast .toast__description { font-size: var(--text-xs); line-height: var(--leading-xs); color: var(--muted); }
+.toast .toast__indicator { padding: 0; align-self: center; }
+.toast .toast__content { align-self: center; }
+.toast .toast__action { --button-bg: transparent; --button-bg-hover: var(--default); --button-fg: var(--accent-soft-foreground); font-weight: 600; }
+.toast .toast__close-button { position: static; align-self: center; }
+@media (max-width: 679px) { .toast-region { left: 12px; right: 12px; width: auto; translate: none; transform: none; } }
+body:has(.chat-dock) .toast-region { bottom: calc(var(--dock-h, 96px) + 12px); }
 .toast__icon--success { color: var(--success-soft-foreground); }
 .toast__icon--danger { color: var(--danger-soft-foreground); }
 .toast__icon--accent { color: var(--accent-soft-foreground); }
@@ -298,7 +433,7 @@
 .tooltip { max-width: 260px; padding: 6px 10px; font-size: 12px; line-height: 16px; word-break: normal; }
 
 /* Kbd — preview key cap: 20 px, 11 px medium text. */
-.kbd { height: 20px; padding: 0 6px; border-radius: 6px; font-size: 11px; font-weight: 500; }
+.kbd { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border-radius: 6px; background: var(--default); color: var(--muted); font-size: 11px; font-weight: 500; font-family: var(--font-sans); white-space: nowrap; }
 
 /* ═════════════ Part 2 — product components (preview classes) ═════════════ */
 
@@ -327,6 +462,12 @@
 @media (hover: hover) { .item--action:hover { background: var(--surface-hover); } }
 .list--plain > .item--action:hover { background: transparent; }
 .item__hit { position: absolute; inset: 0; z-index: 0; border-radius: inherit; }
+/* Clickable row (preview `item()`): the title's button/link is stretched over the whole row, so the row is one target while
+   trailing actions stay separate, keyboard-reachable siblings above it. */
+a.item { cursor: pointer; transition: background-color var(--dur-fast); }
+@media (hover: hover) { a.item:hover { background: var(--surface-hover); } }
+.item__action { display: flex; min-width: 0; max-width: 100%; padding: 0; color: inherit; font: inherit; text-align: left; }
+.item__action::after { content: ""; position: absolute; inset: 0; z-index: 0; }
 .item__lead { flex: none; display: grid; place-items: center; }
 .item__body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .item--action .item__lead, .item--action .item__body, .item--action .item__meta { pointer-events: none; }
@@ -335,7 +476,31 @@
 .item__desc { font-size: 13px; line-height: 18px; color: var(--muted); min-width: 0; }
 .item__meta { font-size: 12px; color: var(--muted); flex: none; white-space: nowrap; }
 .item__trail { flex: none; display: flex; align-items: center; gap: 8px; position: relative; z-index: 1; }
+.item--action :is(.item__trail, .item__title a, .item__title button:not(.item__action), .item__desc a, .item__desc button, .item__meta a, .item__meta button), .item__title .chip[data-tip] { position: relative; z-index: 1; }
 .item--unread .item__title::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; }
+/* Messages and notifications: two title lines on phones, so the subject is never cut off. */
+@container app (max-width: 679px) {
+  .item--lines-2 .item__title .truncate { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .item--lines-2 { align-items: flex-start; }
+  /* Trailing actions and meta wrap under the content instead of squeezing the title. */
+  .item:has(> .item__trail .button:not(.button--icon-only)) { flex-wrap: wrap; }
+  .item:has(> .item__trail .button:not(.button--icon-only)) > .item__body { flex: 1 1 0; min-width: 0; }
+  .item:has(> .item__trail .button:not(.button--icon-only)) > .item__trail { flex-basis: 100%; justify-content: flex-start; flex-wrap: wrap; padding-left: var(--item-indent, 0); }
+  .item:has(> .item__lead):has(> .item__trail .button:not(.button--icon-only)) { --item-indent: 48px; }
+  .item:has(> .item__lead :is(.item-icon--sm, .avatar--sm, .file-icon--sm, .user-avatar--sm)):has(> .item__trail .button:not(.button--icon-only)) { --item-indent: 40px; }
+  /* Section headers and card headers: actions drop under the title instead of overflowing. */
+  .section__header, .card__header { flex-wrap: wrap; }
+  .section__header > .row, .card__header > .row { flex-wrap: wrap; }
+}
+
+/* Reveal row actions on hover/focus only (preview `.reveal-on-hover`); always visible on touch, and a
+   control that is toggled on stays visible so its state is never hidden. */
+.reveal-on-hover { display: inline-flex; align-items: center; gap: 4px; }
+@media (hover: hover) {
+  .reveal-on-hover > :where(:not(.is-on, [aria-pressed="true"], [aria-expanded="true"])) { opacity: 0; transition: opacity var(--dur-fast); }
+  :is(.item, .res-row, .table__row, .card:not(:has(.item, .res-row, .table__row)), [data-reveal-root]):is(:hover, :focus-within) .reveal-on-hover > *,
+  .reveal-on-hover > :focus-visible { opacity: 1; }
+}
 .item-icon { width: 36px; height: 36px; border-radius: var(--radius-xl); display: grid; place-items: center; background: var(--default); color: var(--default-foreground); flex: none; }
 .item-icon--sm { width: 28px; height: 28px; border-radius: var(--radius-lg); }
 .item-icon--accent { background: var(--accent-soft); color: var(--accent-soft-foreground); }
@@ -382,14 +547,56 @@
 
 /* Choice cards (RadioGroup card composition) */
 .choice-group { display: grid; gap: 8px; }
-.radio.choice { display: flex; flex-direction: row; align-items: stretch; padding: 0; margin: 0; border-radius: var(--radius-xl); background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); position: relative; transition: box-shadow var(--dur-fast), background-color var(--dur-fast); }
-.choice:hover { background: var(--surface-hover); }
-.choice:has([aria-checked="true"]), .choice[data-selected] { box-shadow: inset 0 0 0 2px var(--accent); background: color-mix(in oklab, var(--accent) 4%, var(--surface)); }
-.choice:has([data-focus-visible="true"]) { box-shadow: inset 0 0 0 2px var(--accent), 0 0 0 4px var(--accent-soft); }
+.radio.choice { display: flex; flex-direction: row; align-items: stretch; padding: 0; margin: 0; border-radius: var(--radius-xl); background: var(--surface); box-shadow: inset 0 0 0 1px var(--field-border); position: relative; transition: box-shadow var(--dur-fast), background-color var(--dur-fast); }
+@media (hover: hover) { .choice:hover { box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--foreground) 20%, transparent); } }
+.choice:has([aria-checked="true"]), .choice[data-selected] { box-shadow: inset 0 0 0 1.5px var(--accent); background: color-mix(in oklab, var(--accent) 5%, var(--surface)); }
+.choice:has([data-focus-visible="true"]) { box-shadow: inset 0 0 0 1.5px var(--accent), 0 0 0 3px var(--focus-halo); }
+.choice__icon { flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: var(--radius-lg); background: var(--default); color: var(--muted); transition: background-color var(--dur-fast), color var(--dur-fast); }
+.choice:is(:has([aria-checked="true"]), [data-selected]) .choice__icon { background: var(--accent-soft); color: var(--accent-soft-foreground); }
+/* Three or more icon choices read as tiles: icon on top, text below. */
+.choice-group--tiles .choice--icon .choice__content { flex-direction: column; gap: 10px; padding: 14px; }
+@container app (max-width: 679px) { .choice-group--tiles { grid-template-columns: minmax(0, 1fr) !important; } .choice-group--tiles .choice--icon .choice__content { flex-direction: row; } }
 .choice__content.radio__content { display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 12px; font-weight: 400; }
 .choice__content .radio__control { margin-top: 2px; }
 .choice__title { display: block; font-weight: 500; }
-.choice__desc { display: block; font-size: 12px; line-height: 16px; color: var(--muted); margin-top: 2px; }
+.choice__desc { display: block; font-size: 12px; line-height: 17px; color: var(--muted); margin-top: 2px; }
+
+/* Disclosure (progressive disclosure inside forms and dialogs) */
+.disclosure { border-radius: var(--radius-xl); box-shadow: inset 0 0 0 1px var(--field-border); background: var(--surface); }
+.disclosure__trigger { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 10px 14px; border-radius: inherit; text-align: left; font-weight: 500; transition: background-color var(--dur-fast); }
+.disclosure__trigger > .i:first-child { color: var(--muted); }
+@media (hover: hover) { .disclosure__trigger:hover { background: var(--surface-hover); } }
+.disclosure__trigger:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--focus); }
+.disclosure__summary { font-size: 13px; font-weight: 400; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 55%; }
+.disclosure__chevron { color: var(--muted); transition: transform var(--dur) var(--ease-out); }
+.disclosure.is-open .disclosure__chevron { transform: rotate(180deg); }
+.disclosure__body { padding: 4px 14px 14px; animation: rise var(--dur) var(--ease-out); }
+
+/* Option list: a scrollable, bordered set of checkbox rows (pickers inside dialogs). */
+.option-list { display: flex; flex-direction: column; max-height: 220px; overflow-y: auto; padding: 4px; border-radius: var(--radius-xl); box-shadow: inset 0 0 0 1px var(--field-border); background: var(--surface); }
+.option-list > :is(.checkbox, .radio) { padding: 8px 10px; border-radius: var(--radius-lg); width: 100%; align-items: stretch; justify-content: center; transition: background-color var(--dur-fast); }
+/* HeroUI lays the control out as a column of max-content rows: a long label pushed the box past the list. Rows span it instead. */
+.option-list > :is(.checkbox, .radio) > :is(.checkbox__content, .radio__content) { display: flex; align-items: center; gap: 10px; min-width: 0; }
+@media (hover: hover) { .option-list > :is(.checkbox, .radio):hover { background: var(--surface-hover); } }
+.disclosure__body > .option-list { margin-top: 4px; }
+
+/* Toggle button group (preview `seg()` markup, for in-content filters drawn as plain buttons) */
+.toggle-group { display: inline-flex; padding: 3px; gap: 2px; border-radius: var(--radius-3xl); background: var(--default); flex: none; max-width: 100%; }
+.toggle-group button { height: 30px; padding: 0 12px; border-radius: var(--radius-3xl); font-size: 13px; font-weight: 500; color: var(--muted); transition: background-color var(--dur-fast), color var(--dur-fast), box-shadow var(--dur-fast); display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; }
+.toggle-group button:hover { color: var(--foreground); }
+.toggle-group button[aria-pressed="true"] { background: var(--segment); color: var(--segment-foreground); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); }
+.toggle-group--full { display: flex; }
+.toggle-group--full button { flex: 1; justify-content: center; }
+.toggle-group--icons button { width: 32px; padding: 0; }
+.toggle-group--sm button { height: 26px; font-size: 12px; }
+.toggle-group--sm.toggle-group--icons button { width: 28px; }
+
+/* Progress (ProgressBar) */
+.progress-bar { position: relative; display: block; height: 6px; border-radius: var(--radius-full); background: var(--default); overflow: hidden; min-width: 48px; }
+.progress-bar__fill { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: var(--accent); transition: width var(--dur-slow) var(--ease-out); }
+.progress-bar--success .progress-bar__fill { background: var(--success); }
+.progress-bar--warning .progress-bar__fill { background: var(--warning); }
+.progress-bar--danger .progress-bar__fill { background: var(--danger); }
 
 /* Collection toolbar (filters row) — a plain div, not HeroUI's role="toolbar" Toolbar. */
 div.toolbar:not([role="toolbar"]) { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; min-width: 0; width: auto; }
@@ -398,10 +605,13 @@ div.toolbar:not([role="toolbar"]) { display: flex; align-items: center; gap: 8px
 .filter-button:hover { background: var(--default-soft); color: var(--foreground); }
 .filter-button.is-set { background: var(--accent-soft); color: var(--accent-soft-foreground); box-shadow: none; }
 .filter-button svg { width: 14px; height: 14px; }
+.pagination { display: flex; align-items: center; gap: 8px; }
 
 /* Bulk selection bar */
 .bulk-bar { position: sticky; bottom: 16px; z-index: var(--z-sticky); display: flex; align-items: center; gap: 8px; width: fit-content; max-width: calc(100% - 16px); margin: 12px auto 0; padding: 6px 6px 6px 16px; border-radius: var(--radius-3xl); background: var(--foreground); color: var(--background); box-shadow: var(--overlay-shadow); animation: rise var(--dur) var(--ease-out); flex-wrap: wrap; }
-.bulk-bar .button--ghost { --button-fg: var(--background); --button-bg-hover: color-mix(in oklab, var(--background) 14%, transparent); }
+/* On the inverted bar, hover and pressed (incl. a trigger whose menu is open) tint with the bar's ink; HeroUI's pressed
+   --default would be a light pill under light text. */
+.bulk-bar .button--ghost { --button-fg: var(--background); --button-bg-hover: color-mix(in oklab, var(--background) 14%, transparent); --button-bg-pressed: color-mix(in oklab, var(--background) 22%, transparent); }
 .bulk-bar__count { font-size: 13px; font-weight: 500; margin-right: 8px; }
 
 /* Skeleton rows (table placeholder) */
@@ -423,6 +633,8 @@ div.toolbar:not([role="toolbar"]) { display: flex; align-items: center; gap: 8px
 .chart-legend { display: flex; gap: 12px; font-size: 12px; color: var(--muted); }
 .chart-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .chart-legend i { width: 8px; height: 8px; border-radius: 50%; background: var(--c, var(--accent)); }
+.meter { display: flex; height: 8px; border-radius: var(--radius-full); overflow: hidden; background: var(--default); gap: 2px; }
+.meter > span { display: block; height: 100%; }
 
 /* Command palette (rendered by the shell on HeroUI Modal + Autocomplete.Filter + ListBox) — preview `.palette`:
    620 px sheet 12vh from the top, 56 px borderless search row, scrolling results, key hints. */
@@ -431,9 +643,10 @@ div.toolbar:not([role="toolbar"]) { display: flex; align-items: center; gap: 8px
 .textfield.palette__input { flex-direction: row; flex: none; }
 .palette__input .input { flex: 1 1 auto; height: 100%; min-width: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; outline: none; font-size: 16px; }
 .palette__list { flex: 1 1 auto; min-height: 0; }
+/* Phones: a full-screen sheet with a Cancel button. */
 @media (max-width: 679px) {
-  .modal__container.palette-container { padding-top: 8px; }
-  .modal__dialog.palette { max-height: calc(100dvh - 16px); }
+  .modal__container.palette-container { padding: 0; }
+  .modal__dialog.palette { width: 100%; height: 100dvh; max-height: none; border-radius: 0; }
 }
 .palette__input { display: flex; align-items: center; gap: 10px; padding: 0 16px; height: 56px; border-bottom: 1px solid var(--separator); color: var(--muted); }
 .palette__input input { flex: 1; border: 0; background: transparent; font-size: 16px; color: var(--foreground); height: 100%; min-width: 0; }
@@ -443,7 +656,13 @@ div.toolbar:not([role="toolbar"]) { display: flex; align-items: center; gap: 8px
 .palette__item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 8px 10px; border-radius: var(--radius-xl); text-align: left; font-size: 14px; }
 .palette__item .i { color: var(--muted); }
 /* The highlighted result is the one ↵ opens: a fill, no focus ring (preview `aria-selected`). */
-.palette__item[aria-selected="true"], .palette__item[data-focused="true"] { background: var(--default); box-shadow: none; outline: none; }
+.palette__item[aria-selected="true"], .palette__item[data-focused="true"] { background: var(--default-soft-hover); box-shadow: none; outline: none; }
+.palette__item:is([aria-selected="true"], [data-focused="true"]) .i { color: var(--foreground); }
+.palette__item .kbd { flex: none; }
+/* ↵ marks the highlighted row only. */
+.palette__item:not([data-focused="true"]) .palette__enter { display: none; }
+/* Touch: no keyboard hints. */
+.palette--touch :is(.palette__foot, .palette__item .kbd) { display: none; }
 .palette__item-meta { margin-left: auto; font-size: 12px; color: var(--muted); flex: none; max-width: 40%; }
 .palette__foot { display: flex; gap: 16px; padding: 8px 16px; border-top: 1px solid var(--separator); font-size: 12px; color: var(--muted); }
 
@@ -452,6 +671,23 @@ div.toolbar:not([role="toolbar"]) { display: flex; align-items: center; gap: 8px
 .cite:hover, .cite[aria-pressed="true"] { background: var(--evidence-strong); }
 mark.evidence { background: var(--evidence); color: inherit; border-radius: 3px; padding: 1px 0; box-shadow: 0 0 0 2px var(--evidence); }
 mark.evidence.is-focus { background: var(--evidence-strong); box-shadow: 0 0 0 2px var(--evidence-strong); }
+
+/* Search hit highlight (one rule everywhere: ⌘K, /search, Knowledge) — neutral, never the evidence amber. */
+mark.srch-hl { background: var(--highlight); color: var(--highlight-foreground); border-radius: 3px; padding: 0 1px; font-weight: inherit; }
+
+/* /search overview */
+.srch-top { margin-bottom: 16px; }
+.srch-ask { flex-direction: row; align-items: center; gap: 12px; width: 100%; margin-bottom: 28px; padding: 12px 16px; }
+.srch-list .item__desc { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.srch-back { margin: -8px 0 12px -8px; }
+@container app (max-width: 679px) { .srch-list .item__meta { display: none; } }
+
+/* Touch screens: every target at least --touch-min tall, and no hover-only affordances. */
+@media (pointer: coarse) {
+  .button, .filter-button, .menu-item, .tabs__tab, .toggle-group button, .segmented .toggle-button, .nav-item, .palette__item { min-height: var(--touch-min); }
+  .button--icon-only { min-width: var(--touch-min); }
+  .button.button--link { min-height: 32px; }
+}
 
 /* Shared motion (preview keyframes; page CSS animates with these names). */
 .table__row--new .table__cell { animation: rowflash 1.6s var(--ease-out); }

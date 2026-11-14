@@ -1,0 +1,253 @@
+/* Knowledge Studio (features/curation.js, features/masterdata.js): the Review queue chooser, the flow strip on the
+   Library, the document drawer's progress steps, the classification evidence in Review, the Taxonomy section
+   (summary, domains → topics, the topic editor, the import check), review batches and topics to confirm (first syncs
+   at scale), base cards' topics, and Overview → Knowledge health. Its sections are sidebar sub-rows (no tab bar).
+   Prefixes: rq-, flow-, flow-steps-, cur-why, md-, rb-, cg-, kb-card__topics, health-.
+   Tokens only. */
+
+/* ───── The Studio page: wider than reading pages (it's a workbench; .main sets --page-max 1680 px). It is
+   the `studio` container, so the Review panes respond to the room the page really has (rail or expanded sidebar). ───── */
+.page--studio { container: studio / inline-size; padding-bottom: var(--space-6); }
+
+/* ───── Flow strip: In review › Publishing › Published · Needs attention · Not published ───── */
+.flow { display: flex; align-items: stretch; gap: 4px; margin-bottom: 16px; padding: 6px; border-radius: var(--radius-2xl); background: var(--surface); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); overflow-x: auto; scrollbar-width: none; }
+.flow::-webkit-scrollbar { display: none; }
+.flow__main { display: flex; align-items: stretch; gap: 2px; flex: 1 0 auto; }
+.flow__off { display: flex; align-items: stretch; gap: 2px; flex: none; padding-left: 6px; border-left: 1px solid var(--separator); }
+.flow__div { width: 1px; margin: 6px 2px; background: var(--separator); flex: none; }
+.flow__sep { display: grid; place-items: center; align-self: center; flex: none; color: var(--muted); opacity: .7; }
+.flow__step { display: flex; flex-direction: column; align-items: flex-start; flex: 1 1 0; min-width: 88px; padding: 6px 12px; border-radius: var(--radius-xl); color: var(--foreground); text-align: left; transition: background-color var(--dur-fast); }
+.flow > .flow__step, .flow__off .flow__step { flex: 0 0 auto; }
+.flow__step:hover { background: var(--default-soft); }
+.flow__step[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-soft-foreground); }
+.flow__step:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.flow__label { font-size: 12px; line-height: 16px; font-weight: 500; color: var(--muted); white-space: nowrap; }
+.flow__step[aria-pressed="true"] .flow__label { color: inherit; }
+.flow__count { font-size: 20px; line-height: 28px; font-weight: 600; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+.flow__step--accent .flow__count { color: var(--accent); }
+.flow__step--danger .flow__count { color: var(--danger); }
+
+/* ───── Document drawer: progress steps ───── */
+.flow-steps { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.flow-steps__item { position: relative; display: flex; gap: 12px; padding-bottom: 16px; }
+.flow-steps__item:last-child { padding-bottom: 0; }
+/* The rail between dots: solid up to where the document is, dashed after. */
+.flow-steps__item:not(:last-child)::before { content: ''; position: absolute; left: 11px; top: 26px; bottom: 2px; border-left: 2px solid var(--separator); }
+.flow-steps__item.is-done:not(:last-child)::before { border-left-color: color-mix(in oklab, var(--success) 45%, transparent); }
+.flow-steps__item.is-todo::before, .flow-steps__item.is-skipped::before { border-left-style: dashed; }
+.flow-steps__dot { display: grid; place-items: center; flex: none; width: 24px; height: 24px; border-radius: var(--radius-full); background: var(--default); color: var(--muted); }
+.flow-steps__dot--success { background: var(--success-soft); color: var(--success-soft-foreground); }
+.flow-steps__dot--accent { background: var(--accent-soft); color: var(--accent-soft-foreground); }
+.flow-steps__dot--warning { background: var(--warning-soft); color: var(--warning-soft-foreground); }
+.flow-steps__item.is-busy .flow-steps__dot .i { animation: spin 1.2s linear infinite; }
+.flow-steps__item.is-todo .medium, .flow-steps__item.is-skipped .medium { color: var(--muted); }
+.flow-steps__text { font-size: 13px; line-height: 19px; color: var(--foreground); overflow-wrap: anywhere; }
+.flow-steps__item.is-todo .flow-steps__text, .flow-steps__item.is-skipped .flow-steps__text { color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { .flow-steps__item.is-busy .flow-steps__dot .i { animation: none; } }
+
+/* ───── Setup guide (Overview of a brand-new workspace only): bases → taxonomy → sources → first sync ───── */
+.setup { margin-bottom: 20px; padding: 16px 16px 8px; }
+.setup__head { display: flex; align-items: center; gap: 16px; padding: 0 4px 12px; border-bottom: 1px solid var(--separator); }
+.setup__heading { font-size: 15px; line-height: 22px; font-weight: 600; }
+.setup__steps { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.setup__step { display: flex; align-items: center; gap: 12px; padding: 12px 4px; min-width: 0; }
+.setup__step + .setup__step { border-top: 1px solid var(--separator); }
+.setup__num { display: grid; place-items: center; flex: none; width: 26px; height: 26px; border-radius: var(--radius-full); background: var(--default); color: var(--muted); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.setup__step.is-next .setup__num { background: var(--accent); color: var(--accent-foreground); }
+.setup__title { font-size: 14px; line-height: 20px; font-weight: 500; }
+.setup__desc { margin: 2px 0 0; font-size: 13px; line-height: 19px; color: var(--muted); max-width: 68ch; }
+.setup__step:not(.is-next) .setup__desc { display: none; }
+
+/* ───── Setup sections: base cards' topics; Sources views ───── */
+.kb-card__topics { display: flex; align-items: center; gap: 6px; min-width: 0; margin-top: 4px; font-size: 12px; line-height: 16px; color: var(--muted); }
+.kb-card__topics > .i { flex: none; }
+.src-views { margin-bottom: 16px; max-width: 100%; overflow-x: auto; }
+
+/* ───── Review: the queue chooser — one row of pills, groups split by a hairline; one select on phones ───── */
+.rq { margin-bottom: 12px; min-width: 0; }
+.rq__groups { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 0; min-width: 0; }
+.rq__group { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.rq__group + .rq__group { margin-left: 12px; padding-left: 12px; box-shadow: inset 1px 0 0 var(--separator); }
+.rq__label { flex: none; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--muted); white-space: nowrap; }
+.rq__pills { display: flex; flex-wrap: wrap; gap: 2px; min-width: 0; }
+.rq__pill { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px 0 12px; border-radius: var(--radius-full); font-size: 13px; font-weight: 500; color: var(--muted); white-space: nowrap; transition: background-color var(--dur-fast), color var(--dur-fast); }
+.rq__pill:not(:has(.rq__n)) { padding-right: 12px; }
+.rq__pill:hover { background: var(--default-soft); color: var(--foreground); }
+.rq__pill[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-soft-foreground); }
+.rq__pill:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+/* Counts: quiet for the To keep right queues; decisions waiting (To publish) stand out. */
+.rq__n { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: var(--radius-full); background: var(--default); color: var(--muted); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.rq__pill--due .rq__n { background: var(--accent); color: var(--accent-foreground); }
+.rq__select { display: none; width: 100%; }
+/* Publishing problems: what stopped, under the lifecycle chip. */
+.cur-prob__why { display: block; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ───── Overview → Knowledge health: one compact strip; each metric opens its Review queue ───── */
+.health { display: flex; flex-wrap: wrap; border-radius: var(--radius-2xl); background: var(--surface); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); overflow: hidden; }
+.health__item { display: flex; flex-direction: column; gap: 2px; flex: 1 1 128px; min-width: 0; padding: 12px 16px; color: var(--muted); box-shadow: inset 1px 0 0 var(--separator); transition: background-color var(--dur-fast); }
+.health__item:first-child { box-shadow: none; }
+.health__item:hover { background: var(--default-soft); }
+.health__item:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.health__value { font-size: 20px; line-height: 28px; font-weight: 600; letter-spacing: -0.01em; color: var(--muted); }
+.health__label { font-size: 12px; line-height: 16px; text-wrap: balance; }
+.health__item.is-due .health__label, .health__item--share .health__value { color: var(--foreground); }
+.health__item--accent .health__value { color: var(--accent); }
+.health__item--danger .health__value { color: var(--danger); }
+.health__item--warning .health__value { color: var(--warning-soft-foreground); }
+
+/* ───── Review: why each topic was suggested ───── */
+.cur-why { display: flex; flex-direction: column; gap: 2px; margin: 8px 0 0; padding: 8px 10px; list-style: none; border-radius: var(--radius-lg); background: var(--surface-secondary); font-size: 12px; line-height: 18px; }
+.cur-why li { overflow-wrap: anywhere; }
+
+/* ───── Taxonomy pieces still shared: codes, proposals, import check (the tree and detail live in taxonomy.css) ───── */
+.md-min { min-width: 0; }
+
+.md-code { display: inline-flex; align-items: center; flex: none; min-width: 52px; font-family: var(--font-mono); font-size: 11.5px; line-height: 16px; color: var(--muted); letter-spacing: .01em; }
+.md-code--domain { min-width: 0; padding: 1px 6px; border-radius: var(--radius-sm); background: var(--default); color: var(--default-foreground); }
+
+/* Proposed by the assistant: compact rows — the name as a sentence, the reason, Accept and ⋯. */
+.md-props { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; border-radius: var(--radius-2xl); background: var(--surface); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); overflow: hidden; }
+.md-prop { display: flex; align-items: flex-start; gap: 12px; padding: 12px 12px 12px 16px; min-width: 0; }
+.md-prop + .md-prop { border-top: 1px solid var(--separator); }
+.md-prop > .item-icon { margin-top: 2px; }
+.md-prop__main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.md-prop__title { font-size: 14px; line-height: 20px; min-width: 0; overflow-wrap: anywhere; }
+.md-prop__docs { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 6px; min-width: 0; font-size: 12px; line-height: 18px; color: var(--muted); }
+.md-prop__doc { display: inline-flex; min-width: 0; max-width: 280px; }
+.md-prop__edit { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 12px; margin-top: 8px; }
+.md-prop__edit .field { flex: 0 1 240px; min-width: 160px; margin: 0; }
+.md-prop__acts { display: flex; align-items: center; gap: 4px; flex: none; }
+
+
+/* Import: the file, what will change, what happens next */
+.md-file { display: flex; align-items: center; gap: 12px; padding: 10px 10px 10px 12px; border-radius: var(--radius-xl); background: var(--surface-secondary); }
+.md-errs { display: flex; flex-direction: column; gap: 2px; margin: 4px 0 0; padding: 0; list-style: none; }
+.md-errs .md-code { min-width: 0; margin-right: 4px; }
+.md-chg { display: flex; flex-direction: column; gap: 6px; }
+.md-chg__title { display: flex; align-items: center; gap: 8px; font-size: 13px; line-height: 20px; font-weight: 600; }
+.md-chg__list { display: flex; flex-direction: column; margin: 0; padding: 4px 0; list-style: none; border-radius: var(--radius-xl); box-shadow: inset 0 0 0 1px var(--card-border); font-size: 13px; line-height: 20px; }
+.md-chg__list li { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 6px; padding: 4px 12px; min-width: 0; overflow-wrap: anywhere; }
+.md-effects { display: flex; gap: 10px; padding: 12px 14px; border-radius: var(--radius-xl); background: var(--accent-soft); color: var(--accent-soft-foreground); font-size: 13px; line-height: 19px; }
+.md-effects > .i { flex: none; margin-top: 2px; }
+.md-effects p { margin: 0; }
+
+@container app (max-width: 679px) {
+  /* Two rows of three: All · In review · Publishing / Published · Needs attention · Not published — nothing scrolls out of sight. */
+  .flow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; overflow: visible; }
+  .flow__main, .flow__off { display: contents; }
+  .flow__sep, .flow__div { display: none; }
+  .flow__step { min-width: 0; padding: 6px 10px; }
+  .flow__label { overflow: hidden; max-width: 100%; text-overflow: ellipsis; }
+  .flow__count { font-size: 18px; line-height: 24px; }
+  .md-prop { flex-wrap: wrap; padding: 12px; }
+  .md-prop__main { flex-basis: calc(100% - 44px); }
+  .md-prop__acts { width: 100%; justify-content: flex-end; }
+  .md-prop__edit .field { flex-basis: 100%; }
+  .setup__head { flex-wrap: wrap; }
+  .setup__bar { flex-basis: 100%; }
+  .setup__step { flex-wrap: wrap; }
+  .setup__step > .button { margin-left: 38px; }
+  .rq__groups { display: none; }
+  .rq__select { display: block; }
+  .health { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .health__item, .health__item:first-child { box-shadow: inset 0 -1px 0 var(--separator); }
+  .health__item:nth-child(even) { box-shadow: inset 1px 0 0 var(--separator), inset 0 -1px 0 var(--separator); }
+}
+
+/* ───── Review batches (rb-) · Topics to confirm (cg-): first syncs at scale, decided per batch / per group ───── */
+/* Sync batches queue: a batch row leads with its reason tile. */
+.rb-item > .item-icon { margin: 2px 2px 0 0; }
+.rb-detail .cur-detail__head > .item-icon { margin-top: 2px; }
+/* Sample titles (batch detail, group disclosure): plain rows, not links. */
+.rb-sample, .cg-sample { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.rb-sample { padding: 0 4px 4px; }
+.rb-sample__row, .cg-sample__row { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 6px 0; font-size: 13px; line-height: 19px; }
+.rb-sample__row + .rb-sample__row, .cg-sample__row + .cg-sample__row { border-top: 1px solid var(--separator); }
+
+/* Review → Topics to confirm: one card per group; the card's sample titles fold into a flat footer row. */
+.cg-list { display: flex; flex-direction: column; gap: 12px; }
+.cg-card { min-width: 0; border-radius: var(--radius-2xl); background: var(--surface); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); overflow: hidden; }
+.cg-card__head { display: flex; align-items: flex-start; gap: 12px; min-width: 0; padding: 14px 14px 12px 16px; }
+.cg-card__main { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; }
+.cg-card__title { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; font-size: 14px; line-height: 20px; }
+.cg-card__meta { display: flex; flex-wrap: wrap; gap: 0 2px; font-size: 13px; line-height: 19px; color: var(--muted); overflow-wrap: anywhere; }
+.cg-card__acts { display: flex; align-items: center; gap: 4px; flex: none; }
+.cg-card .disclosure { border-top: 1px solid var(--separator); border-radius: 0; box-shadow: none; background: transparent; }
+.cg-card .disclosure__trigger { min-height: 40px; padding: 8px 16px; font-size: 13px; }
+.cg-card .disclosure__body { padding: 0 16px 8px; }
+.cg-props { display: flex; flex-direction: column; gap: 6px; padding: 0 14px 12px 64px; }
+.cg-prop-list { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; border-radius: var(--radius-xl); background: var(--surface-secondary); }
+.cg-prop { display: flex; align-items: flex-start; gap: 10px; min-width: 0; padding: 10px 10px 10px 12px; }
+.cg-prop + .cg-prop { border-top: 1px solid var(--separator); }
+.cg-prop__main { display: flex; flex-direction: column; gap: 4px; flex: 1 1 auto; min-width: 0; }
+.cg-prop__title { font-size: 14px; line-height: 20px; overflow-wrap: anywhere; }
+.cg-prop__kw { display: flex; flex-wrap: wrap; gap: 4px; }
+.cg-prop__acts { display: flex; align-items: center; flex: none; }
+.cg-rest { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; padding: 0 14px 12px 64px; font-size: 13px; line-height: 19px; color: var(--muted); }
+.cg-rest > .i { flex: none; }
+
+@container app (max-width: 679px) {
+  .page--studio { padding-bottom: 40px; }
+  /* Batch detail stacks: the reason tile gives way to Back. */
+  .rb-detail .cur-detail__head > .item-icon { display: none; }
+  .rb-sample__row, .cg-sample__row { padding: 8px 0; }
+  /* Topic groups wrap: the actions drop under the text, full width. */
+  .cg-card__head { flex-wrap: wrap; padding: 12px; }
+  .cg-card__main { flex-basis: calc(100% - 48px); }
+  .cg-card__acts { width: 100%; justify-content: flex-end; }
+  .cg-card__acts > .button:not(.button--icon-only) { flex: 1 1 auto; }
+  .cg-props, .cg-rest { padding-left: 12px; padding-right: 12px; }
+  .cg-prop { flex-wrap: wrap; }
+  .cg-prop__main { flex-basis: calc(100% - 38px); }
+  .cg-prop__acts { width: 100%; }
+  .cg-prop__acts > .button { flex: 1 1 auto; }
+  .cg-card .disclosure__trigger { padding: 8px 12px; }
+  .cg-card .disclosure__body { padding: 0 12px 8px; }
+}
+
+/* ───── First sync at scale · source filters (bf-): run pipeline, source card, wizard filters and estimate ───── */
+/* One quiet line of facts under a progress bar (throughput · time left · held for review). */
+.bf-meta { font-size: 13px; line-height: 19px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.bf-card .button { margin: -4px -6px -4px 0; }
+/* Run drawer: five stages, each with its count, a short note and a thin bar. */
+.bf-pipe { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.bf-stage { position: relative; display: flex; align-items: flex-start; gap: 12px; padding-bottom: 14px; }
+.bf-stage:last-child { padding-bottom: 0; }
+.bf-stage:not(:last-child)::before { content: ""; position: absolute; left: 11px; top: 28px; bottom: 2px; width: 2px; border-radius: 1px; background: var(--separator); }
+.bf-stage__icon { width: 24px; height: 24px; flex: none; display: grid; place-items: center; border-radius: 50%; background: var(--default); color: var(--muted); }
+.bf-stage--done .bf-stage__icon { background: var(--success-soft); color: var(--success-soft-foreground); }
+.bf-stage--warn .bf-stage__icon { background: var(--warning-soft); color: var(--warning-soft-foreground); }
+.bf-stage--active .bf-stage__icon { background: var(--accent-soft); color: var(--accent-soft-foreground); }
+.bf-stage--paused .bf-stage__icon { background: var(--warning-soft); color: var(--warning-soft-foreground); }
+.bf-stage__body { display: flex; flex-direction: column; gap: 4px; flex: 1 1 auto; min-width: 0; }
+.bf-stage__head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; min-width: 0; }
+.bf-stage__n { flex: none; font-size: 13px; color: var(--foreground); }
+.bf-stage__body .description { overflow-wrap: anywhere; }
+.bf-stage__body .progress-bar { height: 4px; margin-top: 2px; }
+/* Classification split: one stacked bar and its legend. */
+.bf-split { display: flex; height: 8px; border-radius: var(--radius-full); background: var(--default); overflow: hidden; }
+.bf-split__seg { height: 100%; min-width: 2px; }
+.bf-split__seg--confident { background: var(--success); }
+.bf-split__seg--confirm { background: var(--warning); }
+.bf-split__seg--none { background: var(--muted); }
+.bf-legend { display: flex; flex-direction: column; gap: 4px; margin: 10px 0 0; padding: 0; list-style: none; font-size: 13px; line-height: 19px; }
+.bf-legend li { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.bf-legend__dot { width: 8px; height: 8px; flex: none; border-radius: 50%; }
+/* Source drawer: the source's filters as one line under what it syncs. */
+.bf-filters { display: flex; align-items: flex-start; gap: 8px; margin: 10px 0 0; font-size: 13px; line-height: 19px; color: var(--muted); }
+.bf-filters > .i { flex: none; margin-top: 2px; }
+/* Wizard: the live estimate under the selection (found · filtered out (why) · to sync). */
+.bf-est { margin: 0; font-size: 13px; line-height: 19px; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* File types as checkbox chips. */
+.bf-types { display: flex; flex-wrap: wrap; gap: 8px; }
+.bf-types > .checkbox { align-items: center; gap: 8px; padding: 5px 12px 5px 8px; border-radius: var(--radius-full); background: var(--surface); box-shadow: inset 0 0 0 1px var(--field-border); transition: background-color var(--dur-fast), box-shadow var(--dur-fast); }
+.bf-types > .checkbox:has(input:checked) { background: var(--accent-soft); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 40%, transparent); }
+.bf-types > .checkbox:has(input:focus-visible) { box-shadow: 0 0 0 2px var(--focus); }
+.bf-types .checkbox__control { margin-top: 0; }
+.bf-filt-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 12px; }
+.bf-filt-grid > .field { margin: 0; }
+
+@container app (max-width: 679px) {
+  .bf-filt-grid { grid-template-columns: minmax(0, 1fr); }
+  .bf-stage__head { flex-wrap: wrap; gap: 0 12px; }
+}
