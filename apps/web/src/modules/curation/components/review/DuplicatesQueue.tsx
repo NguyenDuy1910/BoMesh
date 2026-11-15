@@ -230,7 +230,7 @@ function CompareColumn({ r, keep, newer, onSwap }: { r: Resource; keep: boolean;
             {excerpt}
           </p>
         ) : (
-          <p className="t-sm muted">No text yet. It hasn’t been published.</p>
+          <p className="t-sm muted">No text yet. It hasn’t been processed.</p>
         )}
       </div>
     </section>

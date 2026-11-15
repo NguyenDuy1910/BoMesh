@@ -77,15 +77,10 @@
 .rq__group + .rq__group { margin-left: 12px; padding-left: 12px; box-shadow: inset 1px 0 0 var(--separator); }
 .rq__label { flex: none; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--muted); white-space: nowrap; }
 .rq__pills { display: flex; flex-wrap: wrap; gap: 2px; min-width: 0; }
-.rq__pill { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px 0 12px; border-radius: var(--radius-full); font-size: 13px; font-weight: 500; color: var(--muted); white-space: nowrap; transition: background-color var(--dur-fast), color var(--dur-fast); }
-.rq__pill:not(:has(.rq__n)) { padding-right: 12px; }
+.rq__pill { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: var(--radius-full); font-size: 13px; font-weight: 500; color: var(--muted); white-space: nowrap; transition: background-color var(--dur-fast), color var(--dur-fast); }
 .rq__pill:hover { background: var(--default-soft); color: var(--foreground); }
 .rq__pill[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-soft-foreground); }
 .rq__pill:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-/* Counts: quiet by default; what keeps documents from people stands out (Review, Issues). */
-.rq__n { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: var(--radius-full); background: var(--default); color: var(--muted); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.rq__pill--accent .rq__n { background: var(--accent); color: var(--accent-foreground); }
-.rq__pill--danger .rq__n { background: var(--danger); color: var(--danger-foreground); }
 /* Review: the list's two kinds (held back by a sync · submissions), when both are there. */
 .cur-queue__label { padding: 10px 12px 4px; color: var(--muted); }
 /* Quality's three lists. */
@@ -96,9 +91,6 @@
 /* All: where it is, its topics (and who chose them), its processing. */
 .cur-topic-cell { min-width: 0; }
 .cur-topic-cell.is-none { color: var(--muted); font-size: 13px; }
-.cur-by--hi { color: var(--success-soft-foreground); }
-.cur-by--mid { color: var(--muted); }
-.cur-by--lo { color: var(--warning-soft-foreground); }
 .cur-ix--bad { color: var(--danger); }
 .rq__select { display: none; width: 100%; }
 /* Issues: what stopped, under the processing chip. */
@@ -244,7 +236,7 @@
 /* Classification split: one stacked bar and its legend. */
 .bf-split { display: flex; height: 8px; border-radius: var(--radius-full); background: var(--default); overflow: hidden; }
 .bf-split__seg { height: 100%; min-width: 2px; }
-.bf-split__seg--confident { background: var(--success); }
+.bf-split__seg--filed { background: var(--success); }
 .bf-split__seg--confirm { background: var(--warning); }
 .bf-split__seg--none { background: var(--muted); }
 .bf-legend { display: flex; flex-direction: column; gap: 4px; margin: 10px 0 0; padding: 0; list-style: none; font-size: 13px; line-height: 19px; }

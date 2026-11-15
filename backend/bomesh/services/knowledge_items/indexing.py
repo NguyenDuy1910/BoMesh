@@ -13,7 +13,7 @@ import logging
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from sqlalchemy import func, select, update
@@ -24,6 +24,8 @@ from bomesh.connector.protocol import Chunk, DocumentItem
 from bomesh.db.engine import advisory_lock_scope, transaction_scope
 from bomesh.db.models import Item
 from bomesh.document_index import (
+    ClassificationRequest,
+    DocumentClassification,
     EmbeddingRejectedError,
     IndexingContext,
     IndexProgress,
@@ -38,9 +40,14 @@ from bomesh.services import (
     StoredFileContent,
     current_processing_version,
 )
+from bomesh.services.knowledge_curation.topics import classification_candidates
 from bomesh.services.knowledge_items.citations import CitationService
+from bomesh.services.knowledge_items.documents import apply_assistant_topics
 from bomesh.services.knowledge_items.item_store import ItemService
 from bomesh.services.knowledge_items.preview import KnowledgePreview
+
+if TYPE_CHECKING:
+    from bomesh.services.ingestion.run_engine import RunClassification
 
 log = logging.getLogger(__name__)
 
@@ -137,21 +144,46 @@ class ItemIngestionService:
 
         return current_processing_version(self._index.current_processing_signature())
 
+    async def classification_request(
+        self, tenant_id: UUID, classification: RunClassification | None
+    ) -> ClassificationRequest | None:
+        """A run's CLASSIFYING candidates, loaded once for all its Documents.
+
+        The run's topics, a DOMAIN standing for itself and its ACTIVE topics;
+        none = every ACTIVE topic of the workspace; each with its signals and
+        rules. ``None`` without candidates.
+        """
+
+        async with transaction_scope(self._session_factory) as session:
+            candidates = await classification_candidates(
+                session, tenant_id, classification.topics if classification is not None else ()
+            )
+        if not candidates:
+            return None
+        return ClassificationRequest(
+            candidates=candidates,
+            note=classification.note if classification is not None else None,
+        )
+
     async def process_document(
         self,
         document_id: UUID,
         *,
         tenant_id: UUID,
         progress: IndexProgress | None = None,
+        classification: ClassificationRequest | None = None,
     ) -> int:
-        """Parse, chunk, contextualize, embed and index one Document's current revision.
+        """Parse, chunk, classify, contextualize, embed and index one Document's current revision.
 
         Uploads and connector Items alike. Authorization happened when the run
         was created; this only requires the Document to belong to the tenant
-        and its original to be stored. The index is recorded as current only
-        if the revision and governing collection did not change meanwhile;
-        otherwise the Document waits for another run and its payload is
-        re-applied. Returns the chunk count. A content problem raises
+        and its original to be stored. ``classification`` is the run's
+        :meth:`classification_request`; a candidate whose rule matches the
+        Document (an ancestor collection, its source) settles its topics. The
+        index (and the topics CLASSIFYING chose) is recorded only if the
+        revision and governing collection did not change meanwhile; otherwise
+        the Document waits for another run and its payload is re-applied.
+        Returns the chunk count. A content problem raises
         ``DocumentProcessingError`` (the Document is failed); anything else is
         infrastructure and raises as is.
         """
@@ -193,6 +225,13 @@ class ItemIngestionService:
                 ),
                 processed_version=self.processing_version(),
                 revision_number=started.revision_number,
+                classification=(
+                    classification.for_document(
+                        started.ancestor_ids, _metadata_source_code(document)
+                    )
+                    if classification is not None
+                    else None
+                ),
                 progress=progress,
             )
 
@@ -205,6 +244,7 @@ class ItemIngestionService:
         context: IndexingContext,
         processed_version: str,
         revision_number: int | None = None,
+        classification: ClassificationRequest | None = None,
         progress: IndexProgress | None = None,
     ) -> int:
         """Index canonical content through the source-neutral path."""
@@ -222,10 +262,11 @@ class ItemIngestionService:
                     # A deleted document keeps its tombstoned citations.
                     await CitationService(session).replace_for_item(stored.id, chunks)
 
-            count = await self._index.index_item_content(
+            count, classified = await self._index.index_item_content(
                 item,
                 chunks,
                 context=context,
+                classification=classification,
                 progress=progress,
             )
 
@@ -236,6 +277,7 @@ class ItemIngestionService:
                     context=context,
                     processed_version=processed_version,
                     revision_number=revision_number,
+                    classified=classified,
                 )
             return count
         except Exception:
@@ -345,7 +387,10 @@ class ItemIngestionService:
                 raise DocumentUnavailableError("document content is not available")
             if not document.storage_key:
                 raise DocumentUnavailableError("the document has no stored original")
-            collection_id = await _governing_collection(session, document.id)
+            path = await item_ancestry(session, document.id)
+            collection_id = next(
+                (node.item_id for node in path if node.item_type == "collection"), None
+            )
             if collection_id is None:
                 raise DocumentUnavailableError("the document is not in a collection")
             revision = await ItemService(session).current_revision(document.id)
@@ -353,6 +398,7 @@ class ItemIngestionService:
                 document=document,
                 collection_id=collection_id,
                 revision_number=revision.revision_number if revision is not None else None,
+                ancestor_ids=tuple(str(node.item_id) for node in path[1:]),
             )
 
     @staticmethod
@@ -363,8 +409,10 @@ class ItemIngestionService:
         context: IndexingContext,
         processed_version: str,
         revision_number: int | None,
+        classified: DocumentClassification | None = None,
     ) -> None:
-        """Mark the index current, unless the content or placement moved on meanwhile."""
+        """Mark the index current and apply the classified topics, unless the
+        content or placement moved on meanwhile."""
 
         item = await session.get(Item, item_id, with_for_update=True, populate_existing=True)
         if item is None:
@@ -391,6 +439,10 @@ class ItemIngestionService:
             processed_version=processed_version,
             indexed_revision_number=revision_number,
         )
+        if classified is not None:
+            await apply_assistant_topics(
+                session, item_id, [UUID(topic.id) for topic in classified.topics]
+            )
         if (item.publication_state == "published") != context.published:
             item.payload_dirty_at = func.now()
             await session.flush()
@@ -461,6 +513,15 @@ class _ProcessingStart:
     document: Item
     collection_id: UUID
     revision_number: int | None
+    #: Every ancestor Item ID, for CLASSIFYING's collection rules.
+    ancestor_ids: tuple[str, ...]
+
+
+def _metadata_source_code(document: Item) -> str | None:
+    """The source that registered a synced Document (``metadata.source.source_code``)."""
+    source = document.metadata_.get("source")
+    code = source.get("source_code") if isinstance(source, dict) else None
+    return code if isinstance(code, str) and code else None
 
 
 async def _live_for_update(session: AsyncSession, item_id: UUID) -> bool:

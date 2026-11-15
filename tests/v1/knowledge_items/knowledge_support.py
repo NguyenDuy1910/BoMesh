@@ -27,7 +27,7 @@ from bomesh.connector.protocol import (
 from bomesh.connector.protocol.citation import BoundingBox
 from bomesh.db.engine import transaction_scope
 from bomesh.db.models import Item, ItemRevision
-from bomesh.document_index import IndexingContext
+from bomesh.document_index import ClassificationRequest, IndexingContext
 from bomesh.runtime import AppRuntime
 from bomesh.services.knowledge_items.item_store import ItemService
 from bomesh.services.knowledge_items.indexing import ItemIngestionService
@@ -76,6 +76,7 @@ class Knowledge:
         texts: Sequence[str],
         *,
         page: int | None = None,
+        classification: ClassificationRequest | None = None,
     ) -> list[str]:
         """Index ``texts`` as chunks ``{item}:{n}`` of ``document`` (its current payload
         state), marked SUCCEEDED for its current revision; returns the chunk IDs."""
@@ -136,6 +137,7 @@ class Knowledge:
             ),
             processed_version=self.runtime.processing_version(),
             revision_number=revision.revision_number if revision is not None else None,
+            classification=classification,
         )
         return [chunk.id for chunk in chunks]
 

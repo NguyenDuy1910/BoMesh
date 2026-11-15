@@ -31,6 +31,10 @@ export interface Draft {
   /** Target collection (full name). */
   kb: string;
   summary: string;
+  /** Process it now (default on): approval starts a processing run on the published document. */
+  process: boolean;
+  /** Use my change to improve classification (default on): approval records a topic correction when the topics differ. */
+  teach: boolean;
   /** What the assistant suggested (Edited badges). */
   initial: { kind: string };
 }

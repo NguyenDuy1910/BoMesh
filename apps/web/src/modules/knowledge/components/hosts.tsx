@@ -23,7 +23,7 @@ export function ContributeHost() {
   return <ContributeDialog key={key} {...options} isOpen onClose={closeContribute} />;
 }
 
-/** Renders the knowledge dialogs opened with `openAddToReadingList`, `openEditDetails`, `openLinkToSpaces`, `openMoveItems`, `openReadingListEditor`. */
+/** Renders the knowledge dialogs opened with `openAddToReadingList`, `openEditDetails`, `openLinkToSpaces`, `openMoveItems`, `openMoveFolder`, `openReadingListEditor`. */
 export function KnowledgeDialogsHost() {
   const dialog = knowledgeDialogs.useCurrent();
   if (!dialog) return null;
@@ -36,7 +36,7 @@ export function KnowledgeDialogsHost() {
     case "link":
       return <LinkToSpacesDialog key={dialog.key} item={dialog.item} isOpen onClose={close} />;
     case "move":
-      return <MoveDialog key={dialog.key} items={dialog.items} from={dialog.from} isOpen onClose={close} />;
+      return <MoveDialog key={dialog.key} items={dialog.items} from={dialog.from} folder={dialog.folder} isOpen onClose={close} />;
     case "readingList":
       return <ReadingListDialog key={dialog.key} list={dialog.list} items={dialog.items} isOpen onClose={close} />;
   }

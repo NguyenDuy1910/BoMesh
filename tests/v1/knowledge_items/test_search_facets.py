@@ -12,7 +12,7 @@ import pytest
 from sqlalchemy import update
 
 from bomesh.db.engine import transaction_scope
-from bomesh.db.models import Item, ItemTopic, Topic
+from bomesh.db.models import Item, ItemTopic, TenantMembership, Topic
 from harness import World
 from knowledge_support import Knowledge, item_name, ws_url
 
@@ -149,6 +149,44 @@ async def test_topic_facet_rolls_domains_up_like_the_filter(
         item_name(leave_doc),
         item_name(both),
     }
+
+
+async def test_owner_facet_carries_member_display_names(client, world: World, knowledge: Knowledge) -> None:
+    workspace, viewer, _, handbook, _secret = await _world(world)
+    ana = await world.add_member(workspace, await world.make_user(display_name="Ana Tran"))
+    bao = await world.add_member(workspace, await world.make_user("bao@example.com"))
+    gone = await world.add_member(workspace, await world.make_user(display_name="Former Owner"))
+    owners = {
+        await world.make_document(handbook, title="Policy"): ana,
+        await world.make_document(handbook, title="Guide"): ana,
+        await world.make_document(handbook, title="Notes"): bao,
+        await world.make_document(handbook, title="Archive"): gone,
+    }
+    async with transaction_scope(knowledge.sessions) as session:
+        for document, owner in owners.items():
+            row = await session.get(Item, document.id)
+            row.metadata_ = {**(row.metadata_ or {}), "owner_user_id": str(owner.id)}
+        await session.execute(
+            update(TenantMembership)
+            .where(TenantMembership.user_id == gone.id, TenantMembership.tenant_id == workspace.id)
+            .values(deleted_at=datetime.now(UTC))
+        )
+
+    body = await _search(await client.as_(viewer), workspace, facetSpecs=[{"field": "document.owner"}])
+
+    member = lambda user: f"workspaces/{workspace.id}/members/{user.id}"  # noqa: E731
+    # One label per owner straight from the search: display name, else email; none for an ex-member.
+    assert _facet(body, "document.owner") == [
+        {"value": member(ana), "displayName": "Ana Tran", "documentCount": 2},
+        *sorted(
+            [
+                {"value": member(bao), "displayName": "bao@example.com", "documentCount": 1},
+                {"value": member(gone), "documentCount": 1},
+            ],
+            key=lambda value: value["value"],
+        ),
+    ]
+
 
 
 async def test_facet_intervals_are_validated(client, world: World) -> None:

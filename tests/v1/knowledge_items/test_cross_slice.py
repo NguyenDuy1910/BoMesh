@@ -15,7 +15,6 @@ import pytest
 from sqlalchemy import select, update
 
 from bomesh.services.kernel.context import RequestContext
-from bomesh.services.knowledge_items.content import item_thumbnail
 from bomesh.services.knowledge_items.documents import set_document_metadata, tag_document
 from bomesh.services.knowledge_items.indexing import sync_item_payloads
 from bomesh.services.knowledge_items.item_store import (
@@ -145,7 +144,7 @@ async def test_create_document_stores_bytes_with_revision_one(
     collection = await world.make_collection(workspace)
     ctx = RequestContext(principal=Principal(admin.id), authorizer=Authorizer(knowledge.sessions))
 
-    record = await create_document(
+    item_id = await create_document(
         KnowledgeItemService.from_runtime(runtime),
         ctx,
         workspace.id,
@@ -155,13 +154,10 @@ async def test_create_document_stores_bytes_with_revision_one(
         published=False,
     )
 
-    assert record.document is not None
-    assert (record.document.content_state, record.document.publication_state) == (
-        "AVAILABLE",
-        "UNPUBLISHED",
-    )
-    assert record.document.revision == 1
-    revisions = await knowledge.revisions(await knowledge.row(record.item_id))
+    row = await knowledge.row(item_id)
+    assert (row.item_type, row.status, row.publication_state) == ("document", "ready", "unpublished")
+    revisions = await knowledge.revisions(row)
+    assert [revision.revision_number for revision in revisions] == [1]
     assert fakes.storage.objects[revisions[0].storage_key].data == b"# Report"
 
 
@@ -234,40 +230,6 @@ async def test_purge_deletes_only_objects_no_live_revision_references(
     ) == 0
     gone = await (await client.as_(admin)).post(item_url(purged, ":undelete"), json={})
     assert gone.status_code == 404
-
-
-async def test_thumbnail_is_the_first_page_of_the_current_revision(
-    client, runtime, world: World, knowledge: Knowledge
-) -> None:
-    admin = await world.make_user()
-    workspace = await world.make_workspace(admin)
-    collection = await world.make_collection(workspace)
-    document = await world.make_document(collection)
-    prefix = f"tenants/{workspace.id}/items/{document.id}/previews/"
-    page = {"content_type": "image/webp", "size_bytes": 1, "width": 10, "height": 10}
-    manifest = {
-        "source_version": "v1",
-        "representation": "pages",
-        "assets": [
-            {**page, "key": f"{prefix}page-2.webp", "page": 2},
-            {**page, "key": f"{prefix}page-1.webp", "page": 1},
-        ],
-    }
-    api = await client.as_(admin)
-    assert "thumbnailUri" not in (await api.get(item_url(document))).json()["document"]
-    async with transaction_scope(knowledge.sessions) as session:
-        await session.execute(
-            update(Item).where(Item.id == document.id).values(metadata_={"preview": manifest})
-        )
-
-    shown = (await api.get(item_url(document))).json()["document"]["thumbnailUri"]
-    async with transaction_scope(knowledge.sessions) as session:
-        helper = await item_thumbnail(
-            session, runtime.knowledge_preview(), document.id, expires_seconds=60
-        )
-
-    assert f"{prefix}page-1.webp" in shown
-    assert helper is not None and f"{prefix}page-1.webp" in helper
 
 
 async def test_collection_space_is_named_by_the_space_code(client, world: World) -> None:

@@ -10,11 +10,11 @@ an unreadable entry looks absent and is counted in ``hiddenItemCount``.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, select, update
+from sqlalchemy import case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh import etag as etags
@@ -144,10 +144,9 @@ class ReadingListService:
                 statement = statement.where(ReadingList.deleted_at.is_(None))
             total = int(await session.scalar(query.count(statement)) or 0)
             rows = list(await session.scalars(query.apply(statement)))
-            return [
-                await reading_list_record(session, ctx.authorizer, ctx.principal, row)
-                for row in rows
-            ], total
+            return await reading_list_records(
+                session, ctx.authorizer, ctx.principal, workspace_id, rows
+            ), total
 
     async def update(
         self,
@@ -452,17 +451,8 @@ async def _require_audience(
 async def _visible_clause(
     session: AsyncSession, authorizer: Authorizer, principal: Principal, workspace_id: UUID
 ) -> Any:
-    """SQL: lists the caller may read (space membership resolved per space)."""
-    spaces = await session.scalars(
-        select(ReadingList.space_id)
-        .where(ReadingList.tenant_id == workspace_id, ReadingList.audience == "space")
-        .distinct()
-    )
-    member_of = [
-        space_id
-        for space_id in spaces
-        if space_id is not None and SPACE_READ in await authorizer.space_permissions(principal, space_id)
-    ]
+    """SQL: lists the caller may read (the spaces they belong to resolved in one query)."""
+    member_of = await authorizer.allowed_spaces(principal, workspace_id, SPACE_READ)
     return (ReadingList.owner_user_id == principal.user_id) | (
         ReadingList.deleted_at.is_(None)
         & (
@@ -492,28 +482,42 @@ def reading_list_etag(row: ReadingList) -> str:
 async def reading_list_record(
     session: AsyncSession, authorizer: Authorizer, principal: Principal, row: ReadingList
 ) -> ReadingListRecord:
-    readable = await _readable_entries(session, authorizer, principal, row)
-    total = await _size(session, row.id)
-    return ReadingListRecord(
-        workspace_id=row.tenant_id,
-        id=row.id,
-        code=row.code,
-        display_name=row.title,
-        description=row.description,
-        owner_id=row.owner_user_id,
-        audience=row.audience,
-        space_code=(await space_codes(session, [row.space_id]))[row.space_id]
-        if row.space_id
-        else None,
-        kind=row.kind,
-        item_count=len(readable),
-        hidden_item_count=total - len(readable),
-        create_time=row.created_at,
-        update_time=row.updated_at,
-        delete_time=row.deleted_at,
-        purge_time=purge_time(row.deleted_at),
-        etag=reading_list_etag(row),
-    )
+    return (await reading_list_records(session, authorizer, principal, row.tenant_id, [row]))[0]
+
+
+async def reading_list_records(
+    session: AsyncSession,
+    authorizer: Authorizer,
+    principal: Principal,
+    workspace_id: UUID,
+    rows: Sequence[ReadingList],
+) -> list[ReadingListRecord]:
+    """:func:`reading_list_record` of each list of the workspace, in a number of
+    queries constant in ``rows`` (one visibility check over every entry)."""
+    entries = await _entries(session, [row.id for row in rows])
+    readable = await _readable_entries_of(session, authorizer, principal, workspace_id, entries)
+    spaces = await space_codes(session, (row.space_id for row in rows if row.space_id))
+    return [
+        ReadingListRecord(
+            workspace_id=row.tenant_id,
+            id=row.id,
+            code=row.code,
+            display_name=row.title,
+            description=row.description,
+            owner_id=row.owner_user_id,
+            audience=row.audience,
+            space_code=spaces[row.space_id] if row.space_id else None,
+            kind=row.kind,
+            item_count=len(readable[row.id]),
+            hidden_item_count=len(entries[row.id]) - len(readable[row.id]),
+            create_time=row.created_at,
+            update_time=row.updated_at,
+            delete_time=row.deleted_at,
+            purge_time=purge_time(row.deleted_at),
+            etag=reading_list_etag(row),
+        )
+        for row in rows
+    ]
 
 
 def _entry_record(row: ReadingList, entry: ReadingListEntry, summary: ItemSummary) -> EntryRecord:
@@ -532,17 +536,46 @@ def _entry_record(row: ReadingList, entry: ReadingListEntry, summary: ItemSummar
 async def _readable_entries(
     session: AsyncSession, authorizer: Authorizer, principal: Principal, row: ReadingList
 ) -> list[tuple[ReadingListEntry, ItemSummary]]:
-    entries = list(
-        await session.scalars(
+    entries = await _entries(session, [row.id])
+    return (await _readable_entries_of(session, authorizer, principal, row.tenant_id, entries))[row.id]
+
+
+async def _entries(session: AsyncSession, list_ids: Sequence[UUID]) -> dict[UUID, list[ReadingListEntry]]:
+    """The entries of each list in position order, in one query (every list has a key)."""
+    result: dict[UUID, list[ReadingListEntry]] = {list_id: [] for list_id in list_ids}
+    if result:
+        for entry in await session.scalars(
             select(ReadingListEntry)
-            .where(ReadingListEntry.reading_list_id == row.id)
-            .order_by(ReadingListEntry.position, ReadingListEntry.created_at)
-        )
-    )
+            .where(ReadingListEntry.reading_list_id.in_(list(result)))
+            .order_by(
+                ReadingListEntry.reading_list_id,
+                ReadingListEntry.position,
+                ReadingListEntry.created_at,
+            )
+        ):
+            result[entry.reading_list_id].append(entry)
+    return result
+
+
+async def _readable_entries_of(
+    session: AsyncSession,
+    authorizer: Authorizer,
+    principal: Principal,
+    workspace_id: UUID,
+    entries: Mapping[UUID, Sequence[ReadingListEntry]],
+) -> dict[UUID, list[tuple[ReadingListEntry, ItemSummary]]]:
+    """The entries of each list the caller can read now, with their summaries."""
     summaries = await get_item_summaries(
-        session, authorizer, principal, row.tenant_id, (entry.item_id for entry in entries)
+        session,
+        authorizer,
+        principal,
+        workspace_id,
+        (entry.item_id for values in entries.values() for entry in values),
     )
-    return [(entry, summaries[entry.item_id]) for entry in entries if entry.item_id in summaries]
+    return {
+        list_id: [(entry, summaries[entry.item_id]) for entry in values if entry.item_id in summaries]
+        for list_id, values in entries.items()
+    }
 
 
 async def _visible_entry(
@@ -681,64 +714,80 @@ async def _audit_entry(
 # -- Cross-slice API -----------------------------------------------------------------
 
 
-async def reading_list_summaries(
+async def home_reading_lists(
     session: AsyncSession,
     authorizer: Authorizer,
     principal: Principal,
     workspace_id: UUID,
     *,
+    featured_limit: int,
     limit: int,
-) -> list[ReadingListSummary]:
-    """Live STANDARD lists shared with the member (WORKSPACE, or SPACE they belong to)."""
+) -> tuple[list[UUID], list[ReadingListSummary]]:
+    """Library Home: the readable (merge-resolved) items of ``readingLists/featured`` in
+    position order (at most ``featured_limit``), and the newest live STANDARD lists
+    shared with the member (WORKSPACE, or SPACE they belong to) with their readable
+    entry counts.
+
+    The lists and their entries load in one statement and every entry is
+    re-checked with one visibility computation.
+    """
     visible = await _visible_clause(session, authorizer, principal, workspace_id)
-    rows = await session.scalars(
-        select(ReadingList)
+    featured = ReadingList.kind == FEATURED
+    # The FEATURED list (at most one) sorts first, so ``limit + 1`` rows hold ``limit`` shared ones.
+    listed = (
+        select(ReadingList.id)
         .where(
             ReadingList.tenant_id == workspace_id,
-            ReadingList.kind == "standard",
-            ReadingList.audience != "private",
             ReadingList.deleted_at.is_(None),
-            visible,
+            featured
+            | (
+                (ReadingList.kind == "standard")
+                & (ReadingList.audience != "private")
+                & visible
+            ),
         )
-        .order_by(ReadingList.updated_at.desc(), ReadingList.id)
-        .limit(limit)
+        .order_by(case((featured, 0), else_=1), ReadingList.updated_at.desc(), ReadingList.id)
+        .limit(limit + 1)
     )
-    return [
+    rows: dict[UUID, ReadingList] = {}
+    entries: dict[UUID, list[ReadingListEntry]] = {}
+    for row, entry in await session.execute(
+        select(ReadingList, ReadingListEntry)
+        .outerjoin(ReadingListEntry, ReadingListEntry.reading_list_id == ReadingList.id)
+        .where(ReadingList.id.in_(listed))
+        .order_by(
+            case((featured, 0), else_=1),
+            ReadingList.updated_at.desc(),
+            ReadingList.id,
+            ReadingListEntry.position,
+            ReadingListEntry.created_at,
+        )
+    ):
+        rows.setdefault(row.id, row)
+        values = entries.setdefault(row.id, [])
+        if entry is not None:
+            values.append(entry)
+    readable = await _readable_entries_of(session, authorizer, principal, workspace_id, entries)
+    featured_ids = [
+        summary.item_id
+        for row in rows.values()
+        if row.kind == FEATURED
+        for _, summary in readable[row.id]
+    ]
+    shared = [row for row in rows.values() if row.kind != FEATURED][:limit]
+    return list(dict.fromkeys(featured_ids))[:featured_limit], [
         ReadingListSummary(
             reading_list_id=row.id,
             code=row.code,
             display_name=row.title,
-            item_count=len(await _readable_entries(session, authorizer, principal, row)),
+            item_count=len(readable[row.id]),
         )
-        for row in rows
+        for row in shared
     ]
-
-
-async def featured_item_ids(
-    session: AsyncSession,
-    authorizer: Authorizer,
-    principal: Principal,
-    workspace_id: UUID,
-    *,
-    limit: int,
-) -> list[UUID]:
-    """Readable (merge-resolved) items of ``readingLists/featured``, in position order."""
-    row = await session.scalar(
-        select(ReadingList).where(
-            ReadingList.tenant_id == workspace_id,
-            ReadingList.kind == FEATURED,
-            ReadingList.deleted_at.is_(None),
-        )
-    )
-    if row is None:
-        return []
-    readable = await _readable_entries(session, authorizer, principal, row)
-    return list(dict.fromkeys(summary.item_id for _, summary in readable))[:limit]
 
 
 __all__ = [
     "ReadingListService",
-    "featured_item_ids",
+    "home_reading_lists",
     "reading_list_etag",
-    "reading_list_summaries",
 ]

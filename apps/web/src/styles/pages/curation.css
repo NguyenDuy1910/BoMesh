@@ -1,6 +1,6 @@
-/* Knowledge Studio → Review and Library (features/curation.js): the review workbench (queue | document |
-   inspector, each pane scrolling on its own), assistant suggestions with confidence badges, the decision
-   footer, the Library and Publishing problems tables, compare and the document history. Prefix: cur-.
+/* Knowledge Studio → Documents (features/curation.js): the review workbench (queue | document | inspector, each
+   pane scrolling on its own), assistant suggestions with confidence badges, the decision footer, the All and
+   Issues tables, compare and the document history. Prefix: cur-.
    Tokens only. */
 
 /* ───── Review: the workbench — three panes at viewport height, each scrolling on its own ───── */
@@ -150,18 +150,24 @@
 .cur-quick__opt[aria-pressed="true"] > .i { color: inherit; }
 .cur-quick__opt:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 
-/* Move documents (features/documents.js, M['doc-move']): radio rows in an option list, each with who will see it */
-.mv-list { max-height: 288px; }
-.mv-list > .radio { display: flex; align-items: center; gap: 12px; width: 100%; padding: 8px 10px; border-radius: var(--radius-lg); transition: background-color var(--dur-fast); }
+/* Move (features/documents.js, X.move): one destination tree (collection › folders) for documents and folders */
+.mv-list { max-height: 320px; margin-top: 8px; }
+.mv-list > .radio { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 10px 6px calc(10px + var(--depth, 0) * 20px); border-radius: var(--radius-lg); transition: background-color var(--dur-fast); }
 .mv-list > .radio input { inset: 0; width: 100%; height: 100%; }
 .mv-list > .radio .radio__control { margin-top: 0; }
-@media (hover: hover) { .mv-list > .radio:hover { background: var(--surface-hover); } }
+@media (hover: hover) { .mv-list > .radio:not(.is-here):hover { background: var(--surface-hover); } }
 .mv-list > .radio:has(input:checked) { background: color-mix(in oklab, var(--accent) 7%, var(--surface)); }
 .mv-list > .radio:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: -2px; }
+.mv-list > .radio.is-here { cursor: default; }
+.mv-list > .radio.is-here .radio__control { opacity: .4; }
 .mv-list[aria-invalid="true"] { box-shadow: inset 0 0 0 1px var(--danger); }
 .mv-opt__name { display: block; font-weight: 500; }
-.mv-opt__who { display: flex; align-items: center; gap: 4px; min-width: 0; margin-top: 1px; }
-.mv-opt__who .i { flex: none; }
+.mv-opt__icon { display: inline-flex; flex: none; color: var(--muted); }
+.mv-opt__here { flex: none; font-size: 12px; color: var(--muted); }
+.mv-none { margin: 0; padding: 12px 10px; font-size: 13px; color: var(--muted); }
+.mv-who { display: flex; align-items: flex-start; gap: 8px; margin-top: 10px; font-size: 13px; line-height: 19px; color: var(--muted); }
+.mv-who > .i { flex: none; margin-top: 2px; }
+.mv-who--change { padding: 8px 10px; border-radius: var(--radius-lg); background: var(--warning-soft); color: var(--warning-soft-foreground); }
 
 /* ───── Compare ───── */
 .cur-cmp { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
@@ -170,22 +176,20 @@
 .cur-cmp__text { margin: 0; font-size: 13px; line-height: 20px; color: var(--muted); }
 .cur-cmp .kv { font-size: 13px; grid-template-columns: minmax(84px, max-content) minmax(0, 1fr); gap: 8px 16px; }
 
-/* ───── Library, Publishing problems and history ───── */
+/* ───── All, Issues and history ───── */
 .cur-nowrap { white-space: nowrap; }
 .cur-origin { min-width: 0; max-width: 100%; }
 .cur-origin > .app-icon { flex: none; }
-.cur-owner { min-width: 0; }
-.cur-owner > .truncate { display: block; }
 @container app (min-width: 680px) {
   .cur-all .table__content, .cur-prob .table__content { table-layout: fixed; width: 100%; }
   .cur-all .table__column:nth-child(1), .cur-prob .table__column:nth-child(1) { width: 48px; }
-  /* Library: Name · Origin · Owner · Lifecycle · Updated · actions (wide enough for the longest fix: Publish update + ⋯) */
-  .cur-all .table__column:nth-child(3) { width: 16%; }
-  .cur-all .table__column:nth-child(4) { width: 13%; }
-  .cur-all .table__column:nth-child(5) { width: 150px; }
+  /* All: Name · Processing · Publication · Topics · Updated · actions (wide enough for the longest fix: Process the update + ⋯) */
+  .cur-all .table__column:nth-child(3) { width: 176px; }
+  .cur-all .table__column:nth-child(4) { width: 144px; }
+  .cur-all .table__column:nth-child(5) { width: 18%; }
   .cur-all .table__column:nth-child(6) { width: 104px; }
   .cur-all .table__column:nth-child(7) { width: 176px; }
-  /* Publishing problems: Name · Problem · Origin · Updated · fix */
+  /* Issues: Name · Issue · Origin · Updated · fix */
   .cur-prob .table__column:nth-child(3) { width: 28%; }
   .cur-prob .table__column:nth-child(4) { width: 16%; }
   .cur-prob .table__column:nth-child(5) { width: 104px; }
@@ -235,23 +239,21 @@
 }
 @container app (max-width: 1023px) {
   .cur-split { grid-template-columns: 260px minmax(0, 1fr); }
+  /* All: Publication and Topics give way (Name, Processing and the row's fix stay). */
+  .cur-all .table__column:nth-child(4), .cur-all .table__cell:nth-child(4), .cur-all .table__column:nth-child(5), .cur-all .table__cell:nth-child(5) { display: none; }
+  .cur-all .table__column:nth-child(7) { width: 144px; }
+  .cur-all .table__column:nth-child(6) { width: 88px; }
 }
-/* Columns give way by the Studio page's own width (beside the sidebar at 1024 it is ~780 px), so Name stays readable.
-   Library: Owner first, then Origin (the name line already says where it lives); Lifecycle stays. */
+/* Issues' columns give way by the Studio page's own width (beside the sidebar at 1024 it is ~780 px), so Name stays readable. */
 @container studio (max-width: 999px) {
-  .cur-all .table__column:nth-child(4), .cur-all .table__cell:nth-child(4) { display: none; }
   .cur-prob .table__column:nth-child(4), .cur-prob .table__cell:nth-child(4) { display: none; }
-  .cur-all .table__column:nth-child(6), .cur-prob .table__column:nth-child(5) { width: 88px; }
-}
-/* Rows stack below 680 px and keep Origin there. */
-@container app (min-width: 680px) {
-  @container studio (max-width: 859px) {
-    .cur-all .table__column:nth-child(3), .cur-all .table__cell:nth-child(3) { display: none; }
-  }
+  .cur-prob .table__column:nth-child(5) { width: 88px; }
 }
 @container app (max-width: 760px) {
   .cur-detail__nav .t-xs { display: none; }
   .cur-cmp { grid-template-columns: minmax(0, 1fr); }
+  /* All as cards: name, then processing and updated, then the row's fix at the end of that line. */
+  .cur-all .table--stack .table__cell--actions { order: 4; margin-left: auto; }
 }
 /* Phones: the queue alone; picking an item opens the inspector full width with Back, the page scrolls, the decision floats. */
 @container app (max-width: 679px) {

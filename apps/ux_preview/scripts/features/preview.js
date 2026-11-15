@@ -27,11 +27,20 @@
     return '/doc/' + c.id + (qs ? '?' + qs : '');
   }
 
+  /** Documents whose pages were fetched this session: opening one again is instant (cached). The first open shows the cover while the
+      pages load (GetItemContent, ~380 ms here). */
+  const fetched = new Set();
   function open(p) {
     const cites = p.cites || [];
-    S.ui.docPrev = { id: p.id, q: (p.q || '').trim(), page: p.page || '', quote: p.quote || '', from: p.from || '', cites: cites.length ? cites : null, i: Math.max(0, cites.findIndex(c => c.n === p.n)), hit: 0, scroll: true };
+    S.ui.docPrev = { id: p.id, q: (p.q || '').trim(), page: p.page || '', quote: p.quote || '', from: p.from || '', cites: cites.length ? cites : null, i: Math.max(0, cites.findIndex(c => c.n === p.n)), hit: 0, scroll: true, loading: false };
     // A document drawer underneath (older entry points) would only compete with the preview.
     if (S.drawer) { S.drawer = null; renderLayer(); }
+    const id = current()?.id;
+    if (id && !fetched.has(id)) {
+      const st = S.ui.docPrev;
+      fetched.add(id); st.loading = true;
+      setTimeout(() => { if (pv() === st && st.loading) { st.loading = false; st.scroll = true; refreshLayer(); } }, 380);
+    }
     openModal('doc-preview', {});
   }
   X.preview = { open };
@@ -66,13 +75,18 @@
     }
 
     let body;
-    if (readable && X.rdr?.viewer) {
+    if (readable && X.rdr?.viewer && (p.loading || S.pageState === 'loading')) {
+      // Cover first: the list's cover is page 1 at once; the pages replace it when they arrive.
+      body = `<div class="pv-doc pv-doc--${X.docFormat(d)}">${X.rdr.coverPages(d)}</div>`;
+    } else if (readable && X.rdr?.viewer) {
       const m = X.docModel(d);
       if (c.quote) X.rdr.injectQuote(m, c.quote, c.page);
       body = `<div class="pv-doc pv-doc--${m.format}">${X.rdr.viewer(m, { bar: false })}</div>`;
     } else {
+      // Not processed yet: the message, then the cover (made when the content arrived) so the document is still recognisable.
       const about = X.res.blurb?.(d) || '';
-      body = `<div class="pv-none">${fileIcon(d.type, 'lg')}<p class="pv-none__title">There’s no preview for this file yet</p>${about ? `<p class="pv-none__about">${esc(about)}</p>` : ''}<p class="pv-none__hint">Open it to read or download it.</p></div>`;
+      const cover = X.rdr?.coverPages?.(d, { loading: false }) || '';
+      body = `<div class="pv-none">${cover ? '' : fileIcon(d.type, 'lg')}<p class="pv-none__title">There’s no preview for this file yet</p>${about ? `<p class="pv-none__about">${esc(about)}</p>` : ''}<p class="pv-none__hint">Open it to read or download it.</p></div>${cover ? `<div class="pv-doc pv-doc--${X.docFormat(d)}">${cover}</div>` : ''}`;
     }
     return {
       size: 'preview',

@@ -104,7 +104,7 @@ export function RecentPage() {
               )
             }
             meta={rel(at)}
-            onPress={() => openDocumentPreview({ item: res.name, from: originParam({ kind: "recent" }) })}
+            onPress={() => openDocumentPreview({ item: res.name, listed: res.item, from: originParam({ kind: "recent" }) })}
           />
         ),
       });

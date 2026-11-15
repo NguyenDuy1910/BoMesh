@@ -33,7 +33,7 @@ async def main() -> None:
     worker = await asyncio.create_subprocess_exec(
         sys.executable,
         "-m",
-        "bomesh.services.workflow.worker",
+        "bomesh.services.ingestion.worker",  # [temporal-disabled] was bomesh.services.workflow.worker
         cwd=Path(__file__).parent,
         start_new_session=True,  # Ctrl-C reaches the API; the supervisor stops the worker.
     )
@@ -49,7 +49,7 @@ async def main() -> None:
         if worker_task in done and not api_task.done():
             server.should_exit = True
             await api_task
-            raise RuntimeError(f"Temporal ingestion worker exited ({worker.returncode})")
+            raise RuntimeError(f"Ingestion worker exited ({worker.returncode})")
         await api_task
     finally:
         if worker.returncode is None:
@@ -68,8 +68,8 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    # Reuse the non-destructive local bootstrap: dependencies, bucket, and
-    # Temporal search attributes. Configuration is loaded after make config.
+    # Reuse the non-destructive local bootstrap: dependencies and the bucket.
+    # Configuration is loaded after make config.
     subprocess.run(["make", "services"], cwd=ROOT, check=True)
     load_dotenv(ROOT / ".env", override=False)
     with suppress(KeyboardInterrupt):

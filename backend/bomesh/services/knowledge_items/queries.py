@@ -77,12 +77,34 @@ _DOMAIN = aliased(Topic)
 def has_topic(code: str) -> ColumnElement[bool]:
     """``document.topics:"workspaces/w/topics/{code}"``: tagged with the topic or, for a
     DOMAIN, with any topic under it (like ``ancestors:`` for collections)."""
+    return _tagged_with(code)
+
+
+def has_assistant_topic(code: str) -> ColumnElement[bool]:
+    """``document.assistantTopics:"workspaces/w/topics/{code}"``: :func:`has_topic` over
+    the tags the assistant applied (no person has set or confirmed them)."""
+    return _tagged_with(code, ItemTopic.created_by_user_id.is_(None))
+
+
+def _tagged_with(code: str, *conditions: ColumnElement[bool]) -> ColumnElement[bool]:
     return exists(
         select(ItemTopic.item_id)
         .join(Topic, Topic.id == ItemTopic.topic_id)
         .outerjoin(_DOMAIN, _DOMAIN.id == Topic.parent_topic_id)
-        .where(ItemTopic.item_id == Item.id, or_(Topic.code == code, _DOMAIN.code == code))
+        .where(
+            ItemTopic.item_id == Item.id,
+            or_(Topic.code == code, _DOMAIN.code == code),
+            *conditions,
+        )
     )
+
+
+#: ``document.topics:*``: tagged with at least one topic.
+HAS_TOPICS: ColumnElement[bool] = exists().where(ItemTopic.item_id == Item.id)
+#: ``document.assistantTopics:*``: carries at least one assistant-applied tag.
+HAS_ASSISTANT_TOPICS: ColumnElement[bool] = exists().where(
+    ItemTopic.item_id == Item.id, ItemTopic.created_by_user_id.is_(None)
+)
 
 
 def has_ancestor(item_id: UUID) -> ColumnElement[bool]:
@@ -92,6 +114,8 @@ def has_ancestor(item_id: UUID) -> ColumnElement[bool]:
 
 __all__ = [
     "CONTENT_STATE",
+    "HAS_ASSISTANT_TOPICS",
+    "HAS_TOPICS",
     "ITEM_TYPE",
     "LANGUAGE",
     "OWNER_ID",
@@ -101,6 +125,7 @@ __all__ = [
     "SOURCE_CODE",
     "VERIFICATION_STATE",
     "has_ancestor",
+    "has_assistant_topic",
     "has_topic",
     "indexing_state",
 ]

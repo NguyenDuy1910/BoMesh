@@ -170,7 +170,7 @@ function Results({ q, tab, page, setPage, setTab, onClear }: { q: string; tab: s
               resource={resource}
               q={q}
               snippet={snippet}
-              onOpen={() => openDocumentPreview({ item: resource.name, q, from: originParam({ kind: "search" }) })}
+              onOpen={() => openDocumentPreview({ item: resource.name, listed: resource.item, q, from: originParam({ kind: "search" }) })}
             />
           ))}
         </ResourceList>

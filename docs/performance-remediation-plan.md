@@ -309,3 +309,55 @@ the logging itself. With it off, the same 20 calls complete in ~180 ms.
 Lesson for whoever repeats this: **measure query counts in the application, not
 by turning on Postgres logging on a live instance.** A benchmark that changes
 the system it measures will produce a confident, wrong answer.
+
+---
+
+## API load test (2026-11)
+
+Harness: `tests/perf/` — `seed.py` (one workspace: 5,000 documents, 200 collections,
+151 members, 64 topics, 20 ingestion runs with 5,375 tasks, …), `load_api.py`
+(`setup --recreate` · `run` · `teardown`, isolated database `bomesh_perf`; every
+`openapi.yaml` operation except the model-backed ones: statement count in-process,
+5 sequential calls per case against uvicorn, 20 virtual users for 60 s) and
+`test_query_budgets.py` (statement budgets, flat in page size, run by the suite).
+No model is called.
+
+| | Before | After |
+| --- | ---: | ---: |
+| Throughput, 20 users, one uvicorn process | 7.5 req/s | **70.3 req/s** |
+| Unexpected errors / 500s | 0 | 0 |
+| ListItems p50 (sequential) | 6,012 ms | 72 ms |
+| SearchItems facets p50 | 11,129 ms | 119 ms |
+| ListIngestionTasks ps=200 p50 | 9,626 ms | ≈ 40 ms |
+| ListTopics p50 | 2,390 ms | ≈ 70 ms |
+| GetMemberHome p50 | 11,952 ms (142 stmts) | 248 ms (39 stmts) |
+| ListNotifications | 90 stmts, 1,033 ms | 12 stmts, ≈ 32 ms |
+| CreateRequest | 139 stmts | 23 stmts |
+| PublishArtifact | 638 stmts, 618 checkouts | 27 stmts, 7 checkouts |
+| ListArtifacts / ListReadingLists | 74→101 / 65 stmts | 13 / 14 stmts, flat |
+| ImportTopics validateOnly (210 rows) | 221 stmts, row locks | 8 stmts, no locks |
+| Pool checkouts per read request | 7–15 | ≤ 3 |
+
+Fixes:
+
+- **Visibility** (`iam/visibility.py`): the visible set is one `MATERIALIZED`, `DISTINCT`
+  CTE per statement, tested with a hashed `IN … IS TRUE`; only the document-child walk
+  recurses. The recursive estimate went from ~8 M rows to the real ~5 k, so JIT and
+  per-row rescans no longer occur. ListTopics counts are one grouped count.
+- **Pool and authorizer**: JIT off on the app engines; `BOMESH_DB_POOL_SIZE` /
+  `BOMESH_DB_MAX_OVERFLOW` (default 20 + 20); a request's authorization lookups share one
+  autocommit connection (`Authorizer.keep_connection`); the workspace row is read once
+  per request.
+- **Set-based authorization**: `Authorizer.holders_permissions` / `active_members`
+  (notification fan-out, PublishArtifact audience via `visible_to`), SQL read rules for
+  notification subjects (`readable_requests`, `readable_contributions`).
+- **Batching**: ListArtifacts, ListReadingLists, Home (`home_reading_lists`), ImportTopics
+  (in-memory plan, multi-row inserts, no locks for `validateOnly`).
+
+Remaining:
+
+- Under 20 concurrent users the p95 of most reads is 0.7–1 s: one uvicorn process is
+  CPU-bound at ~70 req/s. Run several API workers or replicas in production.
+- GetMemberHome is still the heaviest read (39 statements, p95 0.6 s sequential, 1.9 s
+  under load); ListItems/SearchItems keep 16–17 statements (7 authentication and
+  authorization, flat in page size).

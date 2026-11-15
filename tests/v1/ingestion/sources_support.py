@@ -20,7 +20,6 @@ from bomesh.db.models import (
     User,
 )
 from bomesh.services.ingestion.credentials import IntegrationCredentialService
-from fakes import FakeWorkflows
 from harness import ENCRYPTION_KEY, ApiClient, Sessions, World
 
 #: A custom workspace role: every Source and Sync method, no item permissions.
@@ -235,14 +234,8 @@ async def syncs_of(sessions: Sessions, source_id: UUID) -> list[IngestionSync]:
         )
 
 
-async def end_sync(
-    sessions: Sessions,
-    workflows: FakeWorkflows,
-    source_id: UUID,
-    *,
-    failed: bool = False,
-) -> None:
-    """What the worker does when a sync ends: the row is final and the workflow closed."""
+async def end_sync(sessions: Sessions, source_id: UUID, *, failed: bool = False) -> None:
+    """What the worker does when a sync ends: the row is final."""
     async with sessions.begin() as session:
         await session.execute(
             update(IngestionSync)
@@ -256,7 +249,6 @@ async def end_sync(
                 error={"code": 9, "message": "The sync failed."} if failed else None,
             )
         )
-    workflows.finish_sync(source_id)
 
 
 async def set_connection_status(

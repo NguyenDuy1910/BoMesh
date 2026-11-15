@@ -1,7 +1,7 @@
 "use client";
 
 import { Button, buttonVariants, Dropdown, Label } from "@heroui/react";
-import { AlertTriangle, BookOpen, Building2, Clock, Ellipsis, Files, Link, Plug } from "lucide-react";
+import { AlertTriangle, BookOpen, Building2, Clock, Ellipsis, Files, Link, Plug, Upload } from "lucide-react";
 import NextLink from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 
@@ -21,24 +21,26 @@ import { useWorkspace } from "@/lib/workspace";
 import { CollectionSources } from "@/modules/ingestion";
 import { useSources } from "@/modules/ingestion/queries";
 
+import { openContribute } from "../../components/contribute-store";
 import { catalogHref } from "../../model";
-import { useItem } from "../../queries";
+import { useContributionTargets, useItem } from "../../queries";
 import { collectionHref, COLLECTIONS_HREF, generalAccessOf, isEditor, isLocked, isOwner, isPersonal, type Item } from "../model";
 import { useBasePolicy, useCollectionReviewCounts, usePendingRequestsFor } from "../queries";
 import { AccessTab } from "./AccessTab";
+import { ContentsTab } from "./ContentsTab";
 import { BaseMark } from "./BaseMark";
 import { AccessChip, ownersLabel, SpaceChip, useBaseSpace } from "./parts";
 import { SettingsTab } from "./SettingsTab";
 
-type TabId = "access" | "sources" | "settings";
+type TabId = "contents" | "access" | "sources" | "settings";
 
 const STUDIO: Crumb = { label: "Knowledge Studio", href: "/studio" };
 const COLLECTIONS: Crumb = { label: "Collections", href: COLLECTIONS_HREF };
 
 /**
  * `/studio/collections/[id]` (preview `P.kbDetail`): one collection its owners and editors look after.
- * Owners see Access · Sources · Settings; editors see Sources. Its documents live in Studio → Documents
- * (reviewers) or Browse.
+ * Everyone who edits it sees Contents (its folders and documents) and Sources; owners also Access and
+ * Settings. One primary: Add documents, into the folder on screen.
  */
 export function CollectionPage({ id }: { id: string }) {
   const item = useItem(id);
@@ -97,28 +99,31 @@ function CollectionDetail({ collection }: { collection: Item }) {
   const name = collection.displayName ?? "";
   const reviewer = owner && can("contributions.review");
   const review = useCollectionReviewCounts(collection, reviewer);
+  const targets = useContributionTargets();
   const sourceCount = (sources.data ?? []).filter((s) => s.targetCollection === collection.name).length;
 
-  const tabs: SectionTab[] = [];
+  const tabs: SectionTab[] = [{ id: "contents", label: "Contents" }];
   if (owner) tabs.push({ id: "access", label: "Access", count: requests.data.length || null, alert: true });
   tabs.push({ id: "sources", label: "Sources", count: can("sources.list") ? sourceCount : null });
   if (owner) tabs.push({ id: "settings", label: "Settings" });
   const asked = search.get("tab") ?? "";
   const tab = (tabs.some((t) => t.id === asked) ? asked : tabs[0]!.id) as TabId;
+  const folder = tab === "contents" ? search.get("folder") : null;
 
-  // Its documents: Studio → Documents for reviewers, otherwise what readers see in Browse.
-  const docsHref = reviewer ? `/studio?tab=documents&kb=${cId}` : catalogHref({ filters: { kb: [cId] } });
+  // Every document with its processing and publication, for its reviewers; what readers see for everyone.
+  const docsHref = `/studio?tab=documents&view=all&kb=${cId}`;
+  const browseHref = catalogHref({ filters: { kb: [cId] } });
   // The link people can open: its documents in Browse.
   const copyLink = async () => {
     try {
-      await navigator.clipboard.writeText(`${window.location.origin}${catalogHref({ filters: { kb: [cId] } })}`);
+      await navigator.clipboard.writeText(`${window.location.origin}${browseHref}`);
       toast("Link copied");
     } catch {
       toast("Couldn’t copy the link", { tone: "danger" });
     }
   };
 
-  /** For the collection's reviewers: what's waiting in Review, with the task as the action. */
+  /** For the collection's reviewers: what's waiting in Documents → Review and Issues, with the task as the action. */
   const n = reviewer ? review.submissions : 0;
   const m = reviewer ? review.problems : 0;
   const alert =
@@ -127,16 +132,16 @@ function CollectionDetail({ collection }: { collection: Item }) {
         <Callout
           tone={m ? "warning" : "accent"}
           icon={m ? AlertTriangle : Clock}
-          title={[n && `${plural(n, "submission")} waiting for review`, m && `${plural(m, "document")} couldn’t be published`].filter(Boolean).join(" · ")}
+          title={[n && `${plural(n, "submission")} waiting for review`, m && `${plural(m, "document")} couldn’t be processed`].filter(Boolean).join(" · ")}
           actions={
             <>
               {m ? (
-                <NextLink href={`/studio?tab=review&queue=problems&kb=${cId}`} className={buttonVariants({ variant: n ? "ghost" : "secondary", size: "sm" })}>
-                  Fix publishing
+                <NextLink href={`/studio?tab=documents&view=issues&kb=${cId}`} className={buttonVariants({ variant: n ? "ghost" : "secondary", size: "sm" })}>
+                  See issues
                 </NextLink>
               ) : null}
               {n ? (
-                <NextLink href={`/studio?tab=review&queue=submissions&kb=${cId}`} className={buttonVariants({ variant: "secondary", size: "sm" })}>
+                <NextLink href={`/studio?tab=documents&view=review&kb=${cId}`} className={buttonVariants({ variant: "secondary", size: "sm" })}>
                   {`Review ${fmtNum(n)}`}
                 </NextLink>
               ) : null}
@@ -146,21 +151,22 @@ function CollectionDetail({ collection }: { collection: Item }) {
       </div>
     ) : null;
 
-  // Rare actions only: access and archiving live in their own tabs. While the review alert shows, its actions lead to Review, so View documents moves here.
+  // Rare actions only: contents, access and archiving live in their own tabs, so they aren't repeated here.
   const menu = [
-    ...(alert ? [{ id: "docs", label: "View documents", icon: Files, run: () => router.push(docsHref) }] : []),
+    ...(reviewer ? [{ id: "docs", label: "Open in Documents", icon: Files, run: () => router.push(docsHref) }] : []),
+    { id: "browse", label: "Open in Knowledge", icon: BookOpen, run: () => router.push(browseHref) },
     ...(can("sources.create") && tab !== "sources" ? [{ id: "source", label: "Add source", icon: Plug, run: () => router.push(collectionHref(collection.name, "sources")) }] : []),
     { id: "link", label: "Copy link", icon: Link, run: () => void copyLink() },
   ];
 
   const actions = (
     <>
-      {alert ? null : (
-        <NextLink href={docsHref} className={buttonVariants({ variant: "tertiary" })}>
-          <Files className="i" aria-hidden />
-          View documents
-        </NextLink>
-      )}
+      {targets.data.some((t) => t.name === collection.name) ? (
+        <Button variant="primary" onPress={() => openContribute({ collection: collection.name, folder: folder ? folder : undefined })}>
+          <Upload className="i" aria-hidden />
+          Add documents
+        </Button>
+      ) : null}
       <Dropdown>
         <Button isIconOnly variant="ghost" aria-label="More" className="button--muted">
           <Ellipsis aria-hidden />
@@ -219,7 +225,15 @@ function CollectionDetail({ collection }: { collection: Item }) {
           <SectionTabs items={tabs} active={tab} base={collectionHref(collection.name)} label="Collection sections" />
         </ContextBar>
       ) : null}
-      {tab === "sources" ? <CollectionSources collection={collection.name ?? ""} /> : tab === "settings" ? <SettingsTab key={collection.etag} base={collection} /> : <AccessTab base={collection} />}
+      {tab === "sources" ? (
+        <CollectionSources collection={collection.name ?? ""} />
+      ) : tab === "settings" ? (
+        <SettingsTab key={collection.etag} base={collection} />
+      ) : tab === "access" ? (
+        <AccessTab base={collection} />
+      ) : (
+        <ContentsTab collection={collection} folder={folder} />
+      )}
     </Page>
   );
 }

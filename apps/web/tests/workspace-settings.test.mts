@@ -6,6 +6,10 @@ import {
   identityDirty,
   identityErrors,
   identityPatch,
+  mapBgFileError,
+  mapBgPlan,
+  mapBgSize,
+  mapBgToast,
   moduleChanged,
   resetBody,
   setupBody,
@@ -13,6 +17,7 @@ import {
   setupOf,
   spaceTypeKeys,
   spaceTypesWith,
+  strengthOf,
   toggled,
   workflowsWith,
 } from "../src/modules/workspace-settings/model.ts";
@@ -81,4 +86,31 @@ test("toggled refuses to empty a list; reset and undo bodies cover the whole set
   assert.deepEqual(reset.body.spaceTypes?.map((t) => t.key), ["team", "project"]);
   assert.deepEqual(reset.body.workflows?.filter((w) => w.enabled).map((w) => w.key), ["EVIDENCE_REVIEW", "DRAFT"]);
   assert.deepEqual(setupBody({ modules: { spaces: true } }).body, { modules: { spaces: true }, spaceTypes: [], workflows: [] });
+});
+
+test("map background: accepted files, upload size and strength follow the preview", () => {
+  assert.equal(mapBgFileError({ type: "image/svg+xml", size: 1000 }), null);
+  assert.equal(mapBgFileError({ type: "image/gif", size: 1000 }), "Use a JPG, PNG, WebP or SVG image.");
+  assert.equal(mapBgFileError({ type: "image/jpeg", size: 10 * 1024 * 1024 + 1 }), "That image is larger than 10 MB. Choose a smaller one.");
+  assert.deepEqual(mapBgSize(3264, 1836, false), { w: 1920, h: 1080 });
+  assert.deepEqual(mapBgSize(800, 600, false), { w: 800, h: 600 });
+  assert.deepEqual(mapBgSize(800, 450, true), { w: 1920, h: 1080 });
+  assert.equal(strengthOf(undefined), 25);
+  assert.equal(strengthOf(140), 100);
+  assert.equal(strengthOf("35"), 35);
+  assert.equal(strengthOf(0), 0);
+});
+
+test("map background save plan: remove, upload then strength only when it differs, or nothing", () => {
+  const saved = { fileName: "campus.jpg", strength: 40 };
+  assert.equal(mapBgPlan(undefined, null, 25), null);
+  assert.equal(mapBgPlan(saved, { isNew: false }, 40), null);
+  assert.deepEqual(mapBgPlan(saved, { isNew: false }, 60), { remove: false, upload: false, strength: 60 });
+  assert.deepEqual(mapBgPlan(saved, null, 40), { remove: true, upload: false, strength: null });
+  assert.deepEqual(mapBgPlan(saved, { isNew: true }, 40), { remove: false, upload: true, strength: null });
+  assert.deepEqual(mapBgPlan(undefined, { isNew: true }, 25), { remove: false, upload: true, strength: null });
+  assert.deepEqual(mapBgPlan(undefined, { isNew: true }, 50), { remove: false, upload: true, strength: 50 });
+  assert.equal(mapBgToast(undefined, saved), "Map background added");
+  assert.equal(mapBgToast(saved, saved), "Map background updated");
+  assert.equal(mapBgToast(saved, undefined), "Map background removed");
 });

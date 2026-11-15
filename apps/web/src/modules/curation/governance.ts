@@ -3,8 +3,10 @@ import { CircleDashed, Clock, StickyNote, Tag, User, type LucideIcon } from "luc
 import type { Item, Topic } from "@/modules/knowledge/api";
 import { fold, type Resource } from "@/modules/knowledge/model";
 
+import type { TopicCorrection } from "./api";
+
 /**
- * Knowledge Studio → Review, the To keep right queues (preview `features/governance.js`), and the taxonomy's
+ * Knowledge Studio → Documents → Issues and Quality (preview `features/governance.js`), and the topics'
  * pure helpers: signals over the API. Scope = published documents in shared collections the caller can edit.
  */
 
@@ -18,7 +20,7 @@ const hasIssue = (item: Item, kind: string) => issues(item).some((i) => i.kind =
 
 /** One line above each queue: what it finds and what to do about it (counts live on the queue chooser). */
 export const QUEUE_HINT = {
-  problems: "Approved, but not in front of people yet. Each row shows its fix; select several to publish them together.",
+  problems: "Couldn’t be processed, or changed at the source since it was. Each row shows its fix; select several to process them again together.",
   reverify: "Verification expired or never happened. Verify what’s still right.",
   details: "Documents without a topic, owner or summary are harder to find. Fill in what’s missing.",
   duplicates: "Near-identical documents compete in answers. Compare each pair and keep one.",
@@ -26,7 +28,7 @@ export const QUEUE_HINT = {
 
 /* ═══════════════ Re-verification due ═══════════════ */
 
-/** A document that changed at its source is a publishing state (Review → Publishing problems), not a trust check. */
+/** A document that changed at its source is a publishing state (Documents → Issues), not a trust check. */
 export type ReasonKey = "expired" | "never";
 
 export const REASONS: Readonly<Record<ReasonKey, { label: string; icon: LucideIcon; rank: number }>> = {
@@ -196,4 +198,119 @@ export function distribution(published: readonly Resource[], topics: readonly st
     else m.set(r.base.name, { base: r.base, n: 1 });
   }
   return [...m.values()].sort((a, b) => b.n - a.n);
+}
+
+/* ═══════════════ Topics → Suggestions ═══════════════ */
+
+/** Words that say nothing about a topic on their own (titles are full of them). */
+const PHRASE_STOP = new Set(["the", "and", "for", "with", "from", "about", "into", "guide", "policy", "procedure", "template", "notes", "report", "update", "draft", "final", "sop", "quy trình", "hướng dẫn", "biểu mẫu", "giao dịch", "tài liệu"]);
+
+/**
+ * Candidate keywords in a title (preview `phrasesOf`), in its own spelling, lower-case: two-word phrases, plus single
+ * words in an English title (a Vietnamese syllable alone means little) and acronyms in any title (NAPAS). A pair never
+ * borrows a word from a stop phrase ("giao dịch", "hướng dẫn"): "soát giao" means nothing. Numbers and versions don't count.
+ */
+export function phrasesOf(title: string): string[] {
+  const raw = title.replace(/\.[a-z0-9]{1,5}$/i, "").normalize("NFC");
+  const vi = /[^\u0000-\u007f]/.test(raw.replace(/[—–’“”]/g, ""));
+  const orig = raw.match(/[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*/gu) ?? [];
+  const words = orig.map((w) => w.toLowerCase()).filter((w) => !/^(v?\d+|\d{4})$/.test(w));
+  const used = new Set(words.flatMap((w, i) => (PHRASE_STOP.has(`${w} ${words[i + 1]}`) ? [i, i + 1] : [])));
+  const ok = (w: string, i: number) => w.length >= 3 && !PHRASE_STOP.has(w) && !used.has(i);
+  const pairs = words
+    .slice(1)
+    .map((b, i) => [i, words[i], b] as const)
+    .filter(([i, a, b]) => ok(a, i) && ok(b, i + 1))
+    .map(([, a, b]) => `${a} ${b}`);
+  const singles = vi ? orig.filter((w) => /^[A-Z]{3,}$/.test(w)).map((w) => w.toLowerCase()) : words.filter((w, i) => w.length >= 4 && ok(w, i));
+  return [...new Set([...pairs, ...singles])];
+}
+
+/** A phrase the corrected titles share: `n` titles carry it; `elsewhere` = the other topic it is a keyword or synonym of. */
+export interface PhraseHit {
+  text: string;
+  n: number;
+  elsewhere: string;
+}
+
+export interface CorrectionSuggestion {
+  topic: Topic;
+  corrections: TopicCorrection[];
+  /** The assistant's topics the reviewers removed (topic names). */
+  from: string[];
+  /** Keyword candidates: shared by two or more titles and no topic's keyword yet (at most four). */
+  phrases: PhraseHit[];
+  /** Words in those titles that are another topic's keyword: why the assistant filed them there (at most three). */
+  misled: PhraseHit[];
+}
+
+/** A topic's keywords and synonyms (they count alike when classifying). */
+export const topicSignals = (t: Topic) => [...(t.keywords ?? []), ...(t.synonyms ?? [])];
+
+/**
+ * What open corrections suggest, per active topic reviewers moved documents to (preview `correctionSuggestions`),
+ * biggest group first. A correction without a visible title counts toward its group but gives no phrases.
+ */
+export function correctionSuggestions(corrections: readonly TopicCorrection[], topics: readonly Topic[]): CorrectionSuggestion[] {
+  const leaves = topics.filter((t) => t.kind === "TOPIC" && live(t));
+  const byName = new Map(leaves.map((t) => [t.name ?? "", t]));
+  const by = new Map<string, TopicCorrection[]>();
+  for (const c of corrections) {
+    const from = c.fromTopics ?? [];
+    for (const to of new Set(c.toTopics ?? [])) {
+      if (from.includes(to) || !byName.has(to)) continue;
+      const list = by.get(to);
+      if (list) list.push(c);
+      else by.set(to, [c]);
+    }
+  }
+  /** Folded keyword or synonym → the topics that carry it. */
+  const owners = new Map<string, string[]>();
+  for (const t of leaves) for (const k of new Set(topicSignals(t).map(fold))) owners.set(k, [...(owners.get(k) ?? []), t.name ?? ""]);
+  return [...by]
+    .map(([name, cs]) => {
+      const topic = byName.get(name)!;
+      const own = new Set([...topicSignals(topic), topic.displayName ?? ""].map(fold));
+      const count = new Map<string, number>();
+      for (const c of cs) for (const p of phrasesOf(c.itemDisplayName ?? "")) count.set(p, (count.get(p) ?? 0) + 1);
+      const all = [...count]
+        .filter(([p]) => !own.has(fold(p)))
+        .map(([text, n]) => ({ text, n, elsewhere: owners.get(fold(text))?.find((o) => o !== name) ?? "" }))
+        .sort((a, b) => b.n - a.n || b.text.split(" ").length - a.text.split(" ").length || a.text.localeCompare(b.text));
+      const from = [...new Set(cs.flatMap((c) => (c.fromTopics ?? []).filter((f) => !(c.toTopics ?? []).includes(f))))];
+      return {
+        topic,
+        corrections: cs,
+        from,
+        phrases: all.filter((p) => !p.elsewhere && p.n >= 2).slice(0, 4),
+        misled: all.filter((p) => p.elsewhere).slice(0, 3),
+      };
+    })
+    .sort((a, b) => b.corrections.length - a.corrections.length);
+}
+
+/** The corrections whose titles contain `phrase` (they taught it). */
+export const correctionsWith = (corrections: readonly TopicCorrection[], phrase: string) => corrections.filter((c) => fold(c.itemDisplayName ?? "").includes(fold(phrase)));
+
+/** Documents carrying one topic the assistant applied, for Topics to confirm. */
+export interface ConfirmGroup {
+  topic: Topic;
+  docs: Item[];
+}
+
+/** Assistant-applied topics (`document.assistantTopics`) that are active topics, with the documents carrying them, biggest first. */
+export function confirmGroups(items: readonly Item[], topics: readonly Topic[]): ConfirmGroup[] {
+  const active = new Map(topics.filter(live).map((t) => [t.name ?? "", t]));
+  const by = new Map<string, Item[]>();
+  for (const it of items) {
+    for (const name of new Set(it.document?.assistantTopics ?? [])) {
+      if (!active.has(name)) continue;
+      const list = by.get(name);
+      if (list) list.push(it);
+      else by.set(name, [it]);
+    }
+  }
+  return [...by]
+    .map(([name, docs]) => ({ topic: active.get(name)!, docs }))
+    .sort((a, b) => b.docs.length - a.docs.length || (a.topic.displayName ?? "").localeCompare(b.topic.displayName ?? ""));
 }

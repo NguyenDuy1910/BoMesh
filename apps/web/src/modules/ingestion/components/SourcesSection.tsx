@@ -228,11 +228,11 @@ function SourcesView({
             Resume
           </Button>
         );
-      case "publish":
+      case "process":
         return (
-          <Button size="sm" variant="secondary" onPress={() => void actions.publish([s])}>
+          <Button size="sm" variant="secondary" onPress={() => void actions.process(s)}>
             <Play className="i" aria-hidden />
-            {`Publish ${fmtNum(s.pendingDocumentCount ?? 0)}`}
+            {`Process ${fmtNum(s.pendingDocumentCount ?? 0)}`}
           </Button>
         );
       case "sync":

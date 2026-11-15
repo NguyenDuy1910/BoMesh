@@ -45,20 +45,20 @@ assets/                static files the seeds reference (map-backgrounds/ute-cam
 styles/                tokens → base → components (HeroUI) → layout (app shell, sidebar groups and icon rail, compact header, sidebar sub-rows, section bar) → pages/*
                        (e.g. pages/studio.css: processing strip .proc-strip, filter pills .rq, publication line .cur-pub, Process dialog sections .proc-sec, Process it now .cur-decide__proc,
                        teach checkbox .cur-teach, drawer steps .flow-steps, classification evidence; pages/curation.css: Review workbench, All .cur-all, Issues .cur-prob;
-                       pages/taxonomy.css: Topics tree + detail, corrections .md-learn, threshold .tx-sum__thr, prompt drawer .md-prompt)
+                       pages/taxonomy.css: Topics tree + detail, corrections .md-learn, prompt drawer .md-prompt)
 scripts/core/          util, icons, store (state + per-workspace persistence), theme (personal appearance:
                        accents, named themes, base tint, radius, font → CSS variables), i18n (interface language:
                        localizes rendered nodes from scripts/i18n/<lang>.js; content untouched), workspace (templates, modules,
                        space types, workflows, work-kind registry), catalog (resource model: kinds, topics, trust,
                        permission-filtered search and facets, library, reading lists, governance signals),
                        lifecycle (publication stageOf/publicationOf and PROCESSING states processingOf: not processed → processing → processed · failed · outdated · not supported; inSearch = published and processed; permissions,
-                       classification (keywords, synonyms, rules, examples) with evidence (topicEvidence), auto-classification, re-classification, corrections (recordCorrection, correctionSuggestions), reclassifyPublished, classThreshold,
+                       classification (keywords, synonyms, rules, examples) with evidence (topicEvidence), auto-classification (assistant-applied, no threshold), re-classification, corrections (recordCorrection, correctionSuggestions), reclassifyPublished,
                        proposed topics, decisions, access vocabulary), router (IA and old-address redirects), ui (component builders, pageSections for sidebar section sub-rows, searchField,
                        badge, isQuestion, bareName), overlays (modal, drawer, popover, menu, toast, palette, tooltip), shell (sidebar: Workspace / Your work /
                        Manage groups, per-person collapse, icon rail; topbar() compact header), app (render + events), proto (prototype bar, journeys)
 scripts/data/          mock.js (scoped data store D, Northwind + platform records), finx.js (Finx Workspace),
                        knowledge.js (topics with codes, keywords, synonyms, examples, guidance, rules, import history; bulk uploads seedBulkUpload; resource metadata,
-                       Finx catalog, featured, reading lists, library seeds, classCorrections, classPolicy),
+                       Finx catalog, featured, reading lists, library seeds, classCorrections),
                        contributions.js (submissions in every lifecycle stage, source publishing policies)
 scripts/features/      one IIFE per product area: registers P (pages), A (actions), M (modals),
                        DR (drawers), PO (popovers), MENUS, AFTER hooks and X (cross-module exports);
@@ -68,7 +68,7 @@ scripts/features/      one IIFE per product area: registers P (pages), A (action
                        preview.js is the shared document preview (X.preview.open); Knowledge Studio is
                        curation.js (page, section sub-rows X.studioNav(), setup guide, Documents: All, Review workbench, Issues, Quality, Process dialog, processing strip, document drawer; AFTER.studio rewrites old addresses)
                        + governance.js (Topics → Suggestions X.gov.suggestions() and Documents → Quality X.gov.queue(part)) + masterdata.js (Topics tree,
-                       topic detail, test box, reviewers' corrections for Suggestions, auto-tag threshold, prompt drawer, proposals X.md.proposals(), import/export) + knowledge.js (Collections, /studio/collections/:id:
+                       topic detail, test box, reviewers' corrections for Suggestions, prompt drawer, proposals X.md.proposals(), import/export) + knowledge.js (Collections, /studio/collections/:id:
                        Contents — folder tree, folders, document moves, folders with their own access — Access, Sources, Settings)
                        + documents.js (shared document operations, processing runs processRun / stopProcessRun, the Move picker X.move)
                        + sources.js / connections.js (Sources: sources, sync history, accounts, first sync)

@@ -33,7 +33,7 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 
 import httpx
 from pydantic import ValidationError
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import joinedload
 
@@ -82,9 +82,11 @@ from bomesh.storage import DocumentStorage
 log = logging.getLogger(__name__)
 
 #: Item metadata a connector may not set: processing and storage own them.
-_RESERVED_METADATA = frozenset({"preview", "processing", "storage", "file_name", "purpose"})
+_RESERVED_METADATA = frozenset(
+    {"preview", "cover", "processing", "storage", "file_name", "purpose"}
+)
 #: Item metadata a registration keeps from the existing row.
-_KEPT_METADATA = ("preview", "processing", "file_name", "purpose")
+_KEPT_METADATA = ("preview", "cover", "processing", "file_name", "purpose")
 _PARENT_RELATIONS = frozenset({"child", "attachment"})
 _UNKNOWN_MIME_TYPE = "application/octet-stream"
 
@@ -134,19 +136,43 @@ class SourceSyncService:
         self._pipeline_config = pipeline_config or ConnectorPipelineConfig()
 
     async def begin_scheduled_sync(self, source_id: UUID) -> UUID | None:
-        """Open the RUNNING row of one schedule firing; ``None`` skips the firing silently.
-
-        A firing is skipped when the Source cannot sync now (deleted, paused,
-        reauthorization required, ingestion paused, connector disabled) or a
-        sync of it is already running.
-        """
+        """Open the RUNNING row of one schedule firing; ``None`` skips the firing silently."""
         async with transaction_scope(self._sessions) as session:
             source = await load_source(session, source_id, for_update=True)
-            if source is None or await sync_refusal(session, source) is not None:
+            if source is None:
                 return None
-            if await running_sync(session, source.id) is not None:
-                return None
-            return (await start_sync(session, source, trigger="scheduled")).id
+            return await _open_scheduled_sync(session, source)
+
+    async def fire_due_schedules(self, *, limit: int) -> int:
+        """Open the SCHEDULED sync of each Source whose ``next_sync_at`` is due.
+
+        A due Source fires once however many firings it missed, and its
+        ``next_sync_at`` moves to the first firing after now. Rows another
+        replica is firing are skipped (``SKIP LOCKED``). Returns how many
+        syncs were opened; the worker then runs them like any RUNNING row.
+        """
+        async with transaction_scope(self._sessions) as session:
+            now = await session.scalar(select(func.now()))
+            due = list(
+                await session.scalars(
+                    select(IngestionSource)
+                    .options(joinedload(IngestionSource.integration_connection))
+                    .where(
+                        IngestionSource.next_sync_at <= now,
+                        IngestionSource.paused_at.is_(None),
+                        IngestionSource.deleted_at.is_(None),
+                    )
+                    .order_by(IngestionSource.next_sync_at)
+                    .limit(limit)
+                    .with_for_update(of=IngestionSource, skip_locked=True)
+                )
+            )
+            opened = 0
+            for source in due:
+                if await _open_scheduled_sync(session, source) is not None:
+                    opened += 1
+                refresh_next_sync(source, now=now)
+            return opened
 
     async def sync(self, sync_id: UUID) -> SourceSyncResult | None:
         """Run one RUNNING sync row; ``None`` when it already ended.
@@ -295,6 +321,20 @@ class SourceSyncService:
             credential_encryption_key=self._credential_encryption_key,
             connectors=self._connectors,
         )
+
+
+async def _open_scheduled_sync(session: AsyncSession, source: IngestionSource) -> UUID | None:
+    """The RUNNING row of one firing (the caller locked ``source``); ``None`` skips it.
+
+    A firing is skipped when the Source cannot sync now (deleted, paused,
+    reauthorization required, ingestion paused, connector disabled) or a sync
+    of it is already running.
+    """
+    if await sync_refusal(session, source) is not None:
+        return None
+    if await running_sync(session, source.id) is not None:
+        return None
+    return (await start_sync(session, source, trigger="scheduled")).id
 
 
 def _checkpoint(

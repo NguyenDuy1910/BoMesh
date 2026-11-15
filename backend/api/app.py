@@ -97,12 +97,12 @@ def _operation_id(route: APIRoute) -> str:
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Repair state lost workflows left behind, start the sandbox and the health
-    recorder, close clients at shutdown."""
+    """Mark abandoned operations, start the sandbox and the health recorder,
+    close clients at shutdown. Ingestion repairs belong to the ingestion worker."""
 
     runtime: AppRuntime = app.state.runtime
     started = datetime.now(UTC)
-    reconciling = asyncio.create_task(_reconcile_ingestion(runtime))
+    # [temporal-disabled] reconciling = asyncio.create_task(_reconcile_ingestion(runtime))
     # Single replica: every operation unfinished from before this process lost its worker.
     abandoning = asyncio.create_task(_reconcile_operations(runtime, started))
     # The sandbox never delays startup: until Docker answers, chat runs without it.
@@ -114,19 +114,21 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
-        for task in (reconciling, abandoning, sandbox, recording):
+        # [temporal-disabled] for task in (reconciling, abandoning, sandbox, recording):
+        for task in (abandoning, sandbox, recording):
             task.cancel()
             with suppress(asyncio.CancelledError):
                 await task
         await runtime.aclose()
 
 
-async def _reconcile_ingestion(runtime: AppRuntime) -> None:
-    # Startup must not wait for, or fail on, the database or Temporal.
-    try:
-        await runtime.ingestion_run_service().reconcile()
-    except Exception:  # noqa: BLE001 - best effort; a run's next read repairs it too
-        log.warning("ingestion runs could not be reconciled", exc_info=True)
+# [temporal-disabled] Startup reconciliation of runs/syncs Temporal lost; the ingestion
+# worker recovers runs it claims and releases orphaned Documents at its own startup.
+# async def _reconcile_ingestion(runtime: AppRuntime) -> None:
+#     try:
+#         await runtime.ingestion_run_service().reconcile()
+#     except Exception:  # noqa: BLE001 - best effort; a run's next read repairs it too
+#         log.warning("ingestion runs could not be reconciled", exc_info=True)
 
 
 async def _reconcile_operations(runtime: AppRuntime, started: datetime) -> None:

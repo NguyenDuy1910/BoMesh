@@ -67,7 +67,7 @@ export function isFirstSync(source: Source, syncs: ReadonlyMap<string, Sync>): b
 export const syncedWithIssues = (source: Source) => sourceStatus(source) === "healthy" && source.lastSync?.state === "SUCCEEDED" && (source.lastSync.failedCount ?? 0) > 0;
 
 /** The one visible row action (preview `rowActKind`): the row's fix, else what it's doing, else a quiet Sync now. */
-export type RowActionKind = "reconnect" | "retry" | "resume" | "publish" | "sync" | "";
+export type RowActionKind = "reconnect" | "retry" | "resume" | "process" | "sync" | "";
 
 export function rowActionKind(source: Source, connection: Connection | undefined): RowActionKind {
   const status = sourceStatus(source);
@@ -75,7 +75,7 @@ export function rowActionKind(source: Source, connection: Connection | undefined
   if (status === "reconnect") return "reconnect";
   if (status === "failed") return "retry";
   if (status === "paused") return "resume";
-  if ((source.pendingDocumentCount ?? 0) > 0) return "publish";
+  if ((source.pendingDocumentCount ?? 0) > 0) return "process";
   if (connection?.state === "ACTIVE") return "sync";
   return "";
 }

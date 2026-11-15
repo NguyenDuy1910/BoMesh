@@ -1,6 +1,6 @@
 "use client";
 
-import { api, call, listAll, requestId, resourceId, type Schema } from "@/lib/api/client";
+import { api, call, listAll, resourceId, type Schema } from "@/lib/api/client";
 
 /**
  * Reader API (`/api/v1`, document_viewer.md): passages (citation targets), revisions
@@ -59,14 +59,4 @@ export async function conversationCitations(workspace: string, conversation: str
     }
   }
   return out;
-}
-
-/** Process (or retry) one document: `CreateIngestionRun` with `selector.items` (needs `ingestionRuns.create`). */
-export function processDocument(workspace: string, item: string): Promise<Schema<"IngestionRun">> {
-  return call(
-    api.POST("/api/v1/workspaces/{workspace}/ingestionRuns", {
-      params: { path: { workspace }, query: { requestId: requestId() } },
-      body: { selector: { items: [item.includes("/") ? item : `workspaces/${workspace}/items/${item}`] }, trigger: "MANUAL" },
-    }),
-  );
 }

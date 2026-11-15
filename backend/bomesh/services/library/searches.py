@@ -36,7 +36,7 @@ class SavedSearchService:
     def __init__(self, sessions: SessionFactory, request_hash_secret: bytes) -> None:
         self._sessions = sessions
         self._secret = request_hash_secret
-        self._gate = LibraryGate(sessions)
+        self._gate = LibraryGate()
 
     @classmethod
     def from_runtime(cls, runtime: AppRuntime) -> SavedSearchService:

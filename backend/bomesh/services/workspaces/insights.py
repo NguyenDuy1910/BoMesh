@@ -84,7 +84,7 @@ class InsightService:
         self._sessions = sessions
         self._storage = storage
         self._secret = request_hash_secret
-        self._resolver = WorkspaceResolver(sessions)
+        self._resolver = WorkspaceResolver()
 
     @classmethod
     def from_runtime(cls, runtime: AppRuntime) -> InsightService:

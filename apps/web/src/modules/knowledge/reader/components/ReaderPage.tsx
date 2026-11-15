@@ -35,7 +35,7 @@ import { DocumentViewer } from "./DocumentViewer";
 import { Meta, NotReady, NothingToShow, RAIL_MIN, Rail, RailSkeleton, ReaderHead, SkeletonPage, Unavailable, Updated, useCollapsingHead, useWidth } from "./ReaderParts";
 import { RelatedPane } from "./RelatedPane";
 import { renditionPageCount, RenditionView } from "./RenditionView";
-import { PageImageView } from "./PageImageView";
+import { coverPages, PageImageView } from "./PageImageView";
 import { SelectionToolbar } from "./SelectionToolbar";
 import { SubmissionView } from "./SubmissionView";
 import { useOriginCrumbs } from "./useOriginCrumbs";
@@ -404,7 +404,7 @@ function Reader({ resource: r }: { resource: Resource }) {
               {outdated && canProcess ? (
                 <Button size="sm" variant="secondary" isPending={process.isPending} onPress={() => process.mutate({ item: r.name, title: r.title })}>
                   <RotateCcw className="i" aria-hidden />
-                  {r.isPersonal ? "Update" : "Publish update"}
+                  {r.isPersonal ? "Update" : "Process the update"}
                 </Button>
               ) : null}
             </>
@@ -429,25 +429,33 @@ function Reader({ resource: r }: { resource: Resource }) {
   /* ── Canvas: the document in its native format ── */
   const notRendered = content.error instanceof ApiError && content.error.code === "FAILED_PRECONDITION";
   let canvas: React.ReactNode;
+  // The cover is of the current revision only: page 1 at once while loading, and kept under a not-ready message.
+  const cover = (loading: boolean) => (viewing === current ? coverPages(r.cover, format, { loading }) : null);
   if (!readable) {
     canvas = (
-      <NotReady
-        resource={r}
-        error={doc?.indexingError?.message}
-        canFix={canProcess}
-        fixing={process.isPending}
-        onFix={() => process.mutate({ item: r.name, title: r.title })}
-        onDownload={() => void ops.download(r)}
-      />
+      <>
+        <NotReady
+          resource={r}
+          error={doc?.indexingError?.message}
+          canFix={canProcess}
+          fixing={process.isPending}
+          onFix={() => process.mutate({ item: r.name, title: r.title })}
+          onDownload={() => void ops.download(r)}
+        />
+        {cover(false)}
+      </>
     );
   } else if (content.isPending || rendition.loading) {
-    canvas = <SkeletonPage />;
+    canvas = cover(true) ?? <SkeletonPage />;
   } else if (notRendered) {
     canvas = (
-      <NothingToShow
-        title={viewing === current ? "Nothing to show" : "This version can’t be previewed"}
-        description={viewing === current ? "This document has no readable content yet." : "Download it to view."}
-      />
+      <>
+        <NothingToShow
+          title={viewing === current ? "Nothing to show" : "This version can’t be previewed"}
+          description={viewing === current ? "This document has no readable content yet." : "Download it to view."}
+        />
+        {cover(false)}
+      </>
     );
   } else if (content.isError || rendition.failed) {
     canvas = (
@@ -465,7 +473,7 @@ function Reader({ resource: r }: { resource: Resource }) {
     // The document as it is (document_viewer.md: PDFs keep page images); the rendition isn't downloaded.
     canvas = (
       <DocumentViewer key={viewing} format={PAGED_FORMATS[format] ? format : "pdf"} count={Math.max(assetPages, pageImages.at(-1)?.pageNumber ?? 0)} scrollRef={scrollRef}>
-        <PageImageView pages={pageImages} focusPage={citedPage} />
+        <PageImageView pages={pageImages} focusPage={citedPage} coverUri={viewing === current ? r.cover?.imageUri : undefined} />
       </DocumentViewer>
     );
   } else if (!rd?.blocks.length) {

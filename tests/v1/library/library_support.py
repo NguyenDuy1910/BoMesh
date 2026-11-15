@@ -53,8 +53,8 @@ async def notify(
     return written[0]
 
 
-async def _always(_: object) -> bool:
-    return True
+async def _always(users: frozenset[UUID]) -> frozenset[UUID]:
+    return users
 
 
 async def set_created(sessions: Sessions, notification: Notification, moment: datetime) -> None:

@@ -9,6 +9,7 @@ from uuid import UUID
 from bomesh.db.models import Notification, SavedSearch
 from bomesh.services.kernel.retention import purge_time
 from bomesh.services.knowledge_items.names import item_name
+from bomesh.services.knowledge_items.records import Cover
 from bomesh.services.workspaces.records import member_name
 
 #: ``notifications.subject_type`` → the collection ID of the target's resource name.
@@ -88,7 +89,7 @@ class HomeItem:
     document_type: str | None
     verification_state: str | None
     publish_time: datetime | None
-    thumbnail_uri: str | None
+    cover: Cover | None
 
 
 @dataclass(frozen=True, slots=True)

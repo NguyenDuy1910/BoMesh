@@ -297,8 +297,8 @@ const selCount = uiKey => Object.values(ui(uiKey).sel || {}).filter(Boolean).len
 const selIds = uiKey => Object.entries(ui(uiKey).sel || {}).filter(([, v]) => v).map(([k]) => k);
 function selCheck(uiKey, id, label = 'Select row') { return `<td class="table__cell table__cell--check">${checkbox({ checked: !!ui(uiKey).sel?.[id], act: 'sel-toggle', data: { ui: uiKey, id }, aria: label })}</td>`; }
 function selAllCheck(uiKey, ids) { const n = ids.filter(id => ui(uiKey).sel?.[id]).length; return `<th class="table__column table__column--check">${checkbox({ checked: n && n === ids.length, indeterminate: n && n < ids.length, act: 'sel-all', data: { ui: uiKey, ids: ids.join(',') }, aria: 'Select all' })}</th>`; }
-/** Floating bulk-action bar; render when selCount(uiKey) > 0. */
-function bulkBar(uiKey, actions) { const n = selCount(uiKey); return n ? `<div class="bulk-bar" role="toolbar" aria-label="Bulk actions"><span class="bulk-bar__count">${n} selected</span>${actions}${iconBtn('x', 'Clear selection', { size: 'sm', act: 'sel-clear', data: { ui: uiKey }, cls: 'button--ghost' })}</div>` : ''; }
+/** Floating bulk-action bar; render when selCount(uiKey) > 0. `label` replaces "N selected" (e.g. a selection that is a filter). */
+function bulkBar(uiKey, actions, label = '') { const n = selCount(uiKey); return n ? `<div class="bulk-bar" role="toolbar" aria-label="Bulk actions"><span class="bulk-bar__count">${esc(label || `${n} selected`)}</span>${actions}${iconBtn('x', 'Clear selection', { size: 'sm', act: 'sel-clear', data: { ui: uiKey }, cls: 'button--ghost' })}</div>` : ''; }
 function paginate(rows, uiKey, per = 20) { const u = ui(uiKey); const pages = Math.max(1, Math.ceil(rows.length / per)); u.page = Math.min(u.page || 1, pages); return rows.slice((u.page - 1) * per, u.page * per); }
 /** Pagination footer — only when there is more than one page (the count already lives in the list's header). */
 function pager(total, uiKey, per = 20) {

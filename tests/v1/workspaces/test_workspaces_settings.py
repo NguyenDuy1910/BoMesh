@@ -1,12 +1,15 @@
-"""WorkspaceSettings and WorkspaceAssistant singletons, and their cross-slice reads."""
+"""WorkspaceSettings and WorkspaceAssistant singletons, their cross-slice reads, and the map background."""
 
 from __future__ import annotations
 
+import io
+
 import pytest
+from PIL import Image
 
 from bomesh.services.workspaces.settings import assistant_settings, workspace_settings
 from bomesh.db.models import Tenant
-from harness import ApiClient, World
+from harness import ApiClient, Fakes, World
 from workspaces_support import audit_actions, reason, set_status, ws_path
 
 pytestmark = pytest.mark.asyncio
@@ -190,3 +193,129 @@ async def test_settings_write_in_archived_workspace(client: ApiClient, world: Wo
     blocked = await api.patch(f"{ws_path(workspace)}/assistant", json={"instructions": "x"})
     assert blocked.status_code == 400
     assert reason(blocked) == "WORKSPACE_ARCHIVED"
+
+
+# -- Map background ----------------------------------------------------------------
+
+MAP_PREFIX = "tenants/{workspace}/settings/map-backgrounds/"
+
+
+def _image(fmt: str = "JPEG", size: tuple[int, int] = (1920, 1080)) -> bytes:
+    buffer = io.BytesIO()
+    Image.new("RGB", size, (120, 160, 200)).save(buffer, format=fmt)
+    return buffer.getvalue()
+
+
+async def _upload(api: ApiClient, workspace: Tenant, data: bytes, name: str, mime: str):
+    return await api.post(
+        f"{ws_path(workspace)}/settings:uploadMapBackground", files={"file": (name, data, mime)}
+    )
+
+
+def _map_objects(fakes: Fakes, workspace: Tenant) -> list[str]:
+    prefix = MAP_PREFIX.format(workspace=workspace.id)
+    return [key for key in fakes.storage.objects if key.startswith(prefix)]
+
+
+async def test_upload_map_background_replaces_and_deletes_the_old_image(
+    client: ApiClient, world: World, sessions, fakes: Fakes
+) -> None:
+    owner = await world.make_user()
+    workspace = await world.make_workspace(owner)
+    member = await world.add_member(workspace)
+    api = await client.as_(owner)
+
+    first = await _upload(api, workspace, _image(size=(1600, 900)), "campus.jpg", "image/jpeg")
+
+    assert first.status_code == 200, first.text
+    background = first.json()["branding"]["mapBackground"]
+    assert background["fileName"] == "campus.jpg"
+    assert (background["widthPixels"], background["heightPixels"]) == (1600, 900)
+    assert background["strength"] == 25
+    assert background["updater"] == f"workspaces/{workspace.id}/members/{owner.id}"
+    assert background["updateTime"]
+    [first_key] = _map_objects(fakes, workspace)
+    assert background["imageUri"].startswith(f"https://storage.test/test-bucket/{first_key}")
+    assert fakes.storage.objects[first_key].content_type == "image/jpeg"
+    assert "UploadMapBackground" in await audit_actions(sessions, workspace)
+
+    # Every member reads it, with a signed image URI.
+    read = (await (await client.as_(member)).get(f"{ws_path(workspace)}/settings")).json()
+    assert read["branding"]["mapBackground"]["imageUri"].startswith("https://storage.test/")
+
+    strength = await api.patch(
+        f"{ws_path(workspace)}/settings",
+        params={"updateMask": "branding.mapBackground.strength"},
+        json={"branding": {"mapBackground": {"strength": 60}}},
+    )
+    assert strength.status_code == 200, strength.text
+    assert strength.json()["branding"]["mapBackground"]["strength"] == 60
+
+    second = await _upload(api, workspace, _image("PNG", (800, 450)), "map.png", "image/png")
+
+    assert second.status_code == 200, second.text
+    replaced = second.json()["branding"]["mapBackground"]
+    assert replaced["fileName"] == "map.png"
+    assert replaced["widthPixels"] == 800
+    assert replaced["strength"] == 60  # the strength is kept
+    [second_key] = _map_objects(fakes, workspace)
+    assert second_key != first_key
+    async with sessions.begin() as session:
+        stored = (await session.get(Tenant, workspace.id)).settings["branding"]["map_background"]
+    assert stored["object_key"] == second_key
+    assert stored["size_bytes"] == len(fakes.storage.objects[second_key].data)
+
+
+async def test_remove_map_background_deletes_its_image(
+    client: ApiClient, world: World, sessions, fakes: Fakes
+) -> None:
+    owner = await world.make_user()
+    workspace = await world.make_workspace(owner)
+    api = await client.as_(owner)
+    await _upload(api, workspace, _image("WEBP"), "bg.webp", "image/webp")
+    assert len(_map_objects(fakes, workspace)) == 1
+
+    removed = await api.patch(
+        f"{ws_path(workspace)}/settings", params={"updateMask": "branding.mapBackground"}, json={}
+    )
+
+    assert removed.status_code == 200, removed.text
+    assert "mapBackground" not in (removed.json().get("branding") or {})
+    assert _map_objects(fakes, workspace) == []
+    async with sessions.begin() as session:
+        assert "branding" not in (await session.get(Tenant, workspace.id)).settings
+    no_background = await api.patch(
+        f"{ws_path(workspace)}/settings",
+        params={"updateMask": "branding.mapBackground.strength"},
+        json={"branding": {"mapBackground": {"strength": 40}}},
+    )
+    assert no_background.status_code == 400
+
+
+async def test_upload_map_background_validation_and_permission(
+    client: ApiClient, world: World, fakes: Fakes
+) -> None:
+    owner = await world.make_user()
+    workspace = await world.make_workspace(owner)
+    member = await world.add_member(workspace)
+    api = await client.as_(owner)
+
+    svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>'
+    wrong_type = await _upload(api, workspace, svg, "map.svg", "image/svg+xml")
+    assert wrong_type.status_code == 400
+    assert wrong_type.json()["error"]["status"] == "INVALID_ARGUMENT"
+    gif = io.BytesIO()
+    Image.new("RGB", (10, 10)).save(gif, format="GIF")
+    assert (await _upload(api, workspace, gif.getvalue(), "a.gif", "image/jpeg")).status_code == 400
+    too_big = _image() + b"\0" * (10 * 1024 * 1024)
+    assert (await _upload(api, workspace, too_big, "big.jpg", "image/jpeg")).status_code == 400
+    bad_strength = await api.patch(
+        f"{ws_path(workspace)}/settings",
+        params={"updateMask": "branding.mapBackground.strength"},
+        json={"branding": {"mapBackground": {"strength": 101}}},
+    )
+    assert bad_strength.status_code == 400
+
+    denied = await _upload(await client.as_(member), workspace, _image(), "a.jpg", "image/jpeg")
+    assert denied.status_code == 403
+    assert _map_objects(fakes, workspace) == []

@@ -111,7 +111,7 @@ export function SubmissionView({ resource: r, contribution: c }: { resource: Res
   // One primary: Review (reviewers) or Revise (the contributor, when changes were asked for — it opens the same place as Track).
   const main =
     reviewer && stage === "review" && c ? (
-      <NextLink href={`/studio?tab=review&sel=${resourceId(c.name)}`} className={buttonVariants({ variant: "primary" })}>
+      <NextLink href={`/studio?tab=documents&view=review&sel=${resourceId(c.name)}`} className={buttonVariants({ variant: "primary" })}>
         <CheckCheck className="i" aria-hidden />
         Review
       </NextLink>
@@ -201,7 +201,7 @@ export function SubmissionView({ resource: r, contribution: c }: { resource: Res
   const crumbs =
     mine || !reviewer
       ? [{ label: "Knowledge", href: "/knowledge" }, { label: "My contributions", href: "/contributions" }, { label: r.title }]
-      : [{ label: "Review", href: "/studio?tab=review" }, { label: r.title }];
+      : [{ label: "Documents", href: "/studio?tab=documents&view=review" }, { label: r.title }];
 
   return (
     <div className="rdr rdr--sub">

@@ -33,6 +33,7 @@ export const WORKSPACE_PERMISSIONS = [
   "items.delete",
   "topics.create",
   "topics.update",
+  "topics.accept",
   "sources.list",
   "sources.create",
   "connections.list",
@@ -181,6 +182,21 @@ async function loadWorkspace(queryClient: QueryClient): Promise<Loaded | null> {
 }
 
 export const workspaceQueryKey = ["workspace-context"] as const;
+
+/** Patches the cached workspace context in place (navigation and Home follow a change at once), then refetches it. */
+export function patchWorkspaceContext(qc: QueryClient, patch: { workspace?: Schema<"Workspace">; settings?: Schema<"WorkspaceSettings"> }) {
+  qc.setQueriesData<Loaded | null>({ queryKey: workspaceQueryKey }, (old) => {
+    if (!old) return old;
+    const workspace = patch.workspace ? { ...old.workspace, ...patch.workspace } : old.workspace;
+    return {
+      ...old,
+      workspace,
+      workspaces: old.workspaces.map((w) => (w.name === workspace.name ? workspace : w)),
+      settings: patch.settings ?? old.settings,
+    };
+  });
+  void qc.invalidateQueries({ queryKey: workspaceQueryKey });
+}
 
 /** Loads the active workspace; renders `fallback` states through the render props. */
 export function WorkspaceProvider({

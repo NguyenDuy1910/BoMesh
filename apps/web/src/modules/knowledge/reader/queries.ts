@@ -6,10 +6,11 @@ import { useMemo } from "react";
 import { toast } from "@/components/ui/Toast";
 import { ApiError, errorMessage, resourceId } from "@/lib/api/client";
 import { useWorkspace } from "@/lib/workspace";
+import { createIngestionRun } from "@/modules/curation/api";
 
-import { getItem, getItemContent, listContributions, listReadingListEntries, searchItems, testItemPermissions, type ReadingList } from "../api";
+import { getItem, getItemContent, itemName, listContributions, listReadingListEntries, searchItems, testItemPermissions, type ReadingList } from "../api";
 import { invalidateKnowledge, knowledgeKeys, useReadingLists } from "../queries";
-import { conversationCitations, getPassage, listItemRevisions, processDocument } from "./api";
+import { conversationCitations, getPassage, listItemRevisions } from "./api";
 
 const SETTLING: Readonly<Record<string, true>> = { PENDING: true, RUNNING: true };
 
@@ -87,12 +88,12 @@ export function useCanProcess(item: string, { enabled = true }: { enabled?: bool
   return !!query.data?.includes("ingestionRuns.create");
 }
 
-/** Publish now / Try again / Publish update: one ingestion run for this document. */
+/** Process / Process again / Process the update: one ingestion run for this document (never publishes). */
 export function useProcessDocument() {
   const { id } = useWorkspace();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ item }: { item: string; title: string }) => processDocument(id, item),
+    mutationFn: ({ item }: { item: string; title: string }) => createIngestionRun(id, { selector: { items: [itemName(id, item)] } }),
     onSuccess: (_run, { title }) => {
       invalidateKnowledge(qc, id);
       toast(`Processing “${title}”`, { description: "It will be readable and searchable in a few minutes." });

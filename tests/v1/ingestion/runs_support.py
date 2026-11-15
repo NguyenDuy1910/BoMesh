@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
+from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from bomesh.db.models import (
     Conversation,
@@ -21,7 +25,7 @@ from bomesh.db.models import (
     User,
 )
 from bomesh.services import ARTIFACT_COLLECTION_KIND
-from harness import ApiClient, Sessions, World
+from harness import TEST_DATABASE_URL, ApiClient, Sessions, World
 
 
 @dataclass(slots=True)
@@ -125,10 +129,18 @@ async def document(
     stored: bool = True,
     size_bytes: int = 1024,
     title: str | None = None,
+    document_type: str = "plain_text",
+    source_code: str | None = None,
 ) -> Item:
-    """A DOCUMENT whose original is stored (``contentState`` AVAILABLE) with revision 1."""
+    """A DOCUMENT whose original is stored (``contentState`` AVAILABLE) with revision 1.
+
+    ``source_code`` makes it a document that Source registered (``document.origin.source``).
+    """
     item_id = uuid4()
     storage_key = f"workspaces/{parent.tenant_id}/items/{item_id}/1" if stored else None
+    metadata: dict[str, Any] = {"file_name": title or "file.txt"}
+    if source_code is not None:
+        metadata["source"] = {"source_code": source_code}
     async with sessions.begin() as session:
         item = Item(
             id=item_id,
@@ -136,12 +148,12 @@ async def document(
             item_type="document",
             parent_item_id=parent.id,
             parent_relation="contains" if parent.item_type == "collection" else "child",
-            document_type="plain_text",
+            document_type=document_type,
             title=title or f"doc-{item_id.hex[:6]}.txt",
             mime_type="text/plain",
             size_bytes=size_bytes,
             storage_key=storage_key,
-            metadata_={"file_name": title or "file.txt"},
+            metadata_=metadata,
             status=status,
             publication_state="published" if published else "unpublished",
             index_status=index_status,
@@ -227,3 +239,21 @@ async def pause_ingestion(sessions: Sessions, workspace: Tenant) -> None:
 
 def run_id_of(body: dict[str, Any]) -> UUID:
     return UUID(body["name"].rsplit("/", 1)[-1])
+
+
+@asynccontextmanager
+async def held_lock(*keys: int) -> AsyncIterator[AsyncConnection]:
+    """Session-level advisory locks on a connection of its own: another worker.
+
+    Leaving the block closes the connection, as a worker that dies does.
+    """
+    assert TEST_DATABASE_URL is not None
+    engine = create_async_engine(TEST_DATABASE_URL, poolclass=NullPool)
+    connection = await engine.connect()
+    try:
+        for key in keys:
+            assert await connection.scalar(select(func.pg_try_advisory_lock(key)))
+        yield connection
+    finally:
+        await connection.close()
+        await engine.dispose()

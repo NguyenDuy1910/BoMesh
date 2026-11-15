@@ -1,4 +1,4 @@
-/* Knowledge Studio → Review, the To keep right queues (features/governance.js). The topics live in Taxonomy (styles/pages/studio.css). */
+/* Knowledge Studio → Documents → Issues and Quality (features/governance.js). The topics live in Topics (styles/pages/topics.css). */
 
 .kh-min { min-width: 0; }
 .kh .table__cell--primary { width: 100%; max-width: 0; min-width: 240px; }
@@ -6,7 +6,7 @@
 .kh-reason { white-space: nowrap; }
 .kh-owner { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 220px; }
 
-/* One line above each queue: what it finds and what to do (also above Publishing problems) */
+/* One line above each list: what it finds and what to do (Issues and Quality's parts) */
 .gov-summary { margin: 0 0 16px; font-size: 13px; line-height: 19px; color: var(--muted); }
 
 /* Details: gap chips + topic suggestions */

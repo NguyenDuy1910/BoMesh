@@ -6,10 +6,10 @@ import { useMemo } from "react";
 import { resourceId } from "@/lib/api/client";
 import { useWorkspace } from "@/lib/workspace";
 
-import { listContributions, listItems, quote } from "../api";
+import { listAllItems, listContributions, listItems, quote } from "../api";
 import { knowledgeKeys } from "../queries";
 import { getItemIamPolicy, listAccessRequests, listActiveMembers, listGroups } from "./api";
-import { isOwner, isPendingRequest, type AccessRequest, type Item, type Policy } from "./model";
+import { EMPTY_FOLDERS, folderIndex, isOwner, isPendingRequest, type AccessRequest, type FolderIndex, type Item, type Policy } from "./model";
 
 /**
  * What waits on a collection's reviewers (preview `reviewAlert`): submissions in review, and documents that
@@ -43,6 +43,8 @@ export const basesKeys = {
   requests: (ws: string) => [ws, "requests", "collectionAccess"] as const,
   people: (ws: string) => [ws, "members", "shareable"] as const,
   groups: (ws: string) => [ws, "groups"] as const,
+  folders: (ws: string, root: string) => [ws, "items", "folders", resourceId(root)] as const,
+  folderCount: (ws: string, root: string) => [ws, "items", "folders", resourceId(root), "count"] as const,
 };
 
 /** The base's own IAM policy; owners only (`items.getIamPolicy`). */
@@ -120,4 +122,42 @@ export function useSharePrincipals({ enabled = true }: { enabled?: boolean } = {
   const members = useQuery({ queryKey: basesKeys.people(id), queryFn: () => listActiveMembers(id), enabled, staleTime: 5 * 60_000 });
   const groups = useQuery({ queryKey: basesKeys.groups(id), queryFn: () => listGroups(id), enabled, staleTime: 5 * 60_000 });
   return { members, groups };
+}
+
+const foldersFilter = (root: string) => `itemType = COLLECTION AND ancestors:${quote(root)}`;
+
+function foldersQuery(id: string, root: string) {
+  return {
+    queryKey: basesKeys.folders(id, root),
+    queryFn: async () => folderIndex(root, await listAllItems(id, { filter: foldersFilter(root), orderBy: "displayName" }, 5000)),
+    staleTime: 30_000,
+  };
+}
+
+/** Every folder of a root collection the caller can read (Contents tree, Move picker). */
+export function useFolders(root: string | null | undefined) {
+  const { id } = useWorkspace();
+  const query = useQuery({ ...foldersQuery(id, root ?? ""), enabled: !!root });
+  return { ...query, index: query.data ?? EMPTY_FOLDERS };
+}
+
+/** Folders of several root collections, keyed by root name (only the ones loaded so far). */
+export function useFolderIndexes(roots: readonly string[]): ReadonlyMap<string, FolderIndex> {
+  const { id } = useWorkspace();
+  return useQueries({
+    queries: roots.map((root) => foldersQuery(id, root)),
+    combine: (results) => new Map(results.flatMap((r) => (r.data ? [[r.data.root, r.data] as const] : []))),
+  });
+}
+
+/** How many folders a collection holds (Collections cards); one page of one item, counted by the server. */
+export function useFolderCount(root: string | null | undefined): number {
+  const { id } = useWorkspace();
+  const query = useQuery({
+    queryKey: basesKeys.folderCount(id, root ?? ""),
+    queryFn: async () => (await listItems(id, { filter: foldersFilter(root ?? ""), pageSize: 1, view: "BASIC" })).totalSize ?? 0,
+    enabled: !!root,
+    staleTime: 60_000,
+  });
+  return query.data ?? 0;
 }

@@ -22,7 +22,9 @@ from bomesh.document_index import (
     INDEX_SCHEMA_VERSION,
     ChunkContext,
     ChunkContextGenerator,
+    ClassificationRequest,
     ContextualChunk,
+    DocumentClassification,
     IndexingContext,
     IndexProgress,
     build_contextual_chunks,
@@ -144,20 +146,25 @@ async def build_index_records(
     context: IndexingContext,
     *,
     semantic_contextualizer: ChunkContextGenerator | None = None,
+    classification: ClassificationRequest | None = None,
     progress: IndexProgress | None = None,
-) -> list[_IndexedChunkRecord]:
-    """Contextualize canonical chunks and build deterministic index records."""
+) -> tuple[list[_IndexedChunkRecord], DocumentClassification | None]:
+    """Contextualize canonical chunks and build deterministic index records.
 
-    contextual_chunks = await build_contextual_chunks(
+    The classification is returned to the caller, never written to a payload.
+    """
+
+    contextual_chunks, classified = await build_contextual_chunks(
         chunks,
         item,
         semantic_contextualizer=semantic_contextualizer,
+        classification=classification,
         progress=progress,
     )
     return [
         _IndexedChunkRecord.from_contextual_chunk(chunk, context)
         for chunk in contextual_chunks
-    ]
+    ], classified
 
 
 def _contextual_chunk_from_point(point: object) -> ContextualChunk | None:

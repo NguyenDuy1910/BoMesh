@@ -125,7 +125,7 @@ Table tenants {
   demo boolean [not null, default: false, note: 'set on create']
   status varchar(16) [not null, default: 'active', note: 'creating | active | suspended | archived. creating while the CreateWorkspace operation runs']
   ingestion_paused_at timestamptz [note: 'Workspace.ingestionState is PAUSED while set: no ingestion run and no source sync starts']
-  settings jsonb [not null, default: `{}`, note: 'WorkspaceSettings {modules {spaces, work, requests}, branding {accent_color}, space_types [{key, display_name, icon, enabled}], workflows [{key, enabled}], document_types [{key, display_name}], default_publishing_policy, reverification_duration} plus archive {archived_at, archived_by_user_id}. Read whole with the tenant row; the settings etag is a hash of this document']
+  settings jsonb [not null, default: `{}`, note: 'WorkspaceSettings {modules {spaces, work, requests}, branding {accent_color, map_background {object_key, file_name, size_bytes, width, height, strength, updated_by_user_id, updated_at}}, space_types [{key, display_name, icon, enabled}], workflows [{key, enabled}], document_types [{key, display_name}], default_publishing_policy, reverification_duration} plus archive {archived_at, archived_by_user_id}. map_background.object_key is the Home map image in document storage (tenants/{tenant}/settings/map-backgrounds/…); one image per workspace, read whole with the settings, so no table of its own. Read whole with the tenant row; the settings etag is a hash of this document']
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
   indexes {
@@ -293,7 +293,7 @@ Table operations {
     (user_id, target)
     expires_at
   }
-  Note: 'The Temporal workflow ID is derived from the operation ID; no Temporal state is stored. The method permission is checked on target when the operation is created; reads are own-only. The response is computed from result_name or result_object_key.'
+  Note: 'The method permission is checked on target when the operation is created; reads are own-only. The response is computed from result_name or result_object_key.'
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -312,7 +312,7 @@ Table items {
   size_bytes bigint
   storage_key text [note: 'Durable object key of the current revision (item_revisions); no raw bytes']
   space_id uuid [note: 'collection.space, Collections only. Space.collections, conversation scope spaces and SPACE reading lists resolve through it']
-  metadata jsonb [not null, default: `{}`, note: 'Typed keys only (item_model.md §5). Collection: system_kind (personal_uploads | conversation_artifacts), description, discoverable, accepts_contributions. Document: purpose, file_name, storage, archive, source, preview, summary, language, owner_user_id, verification, merged_into. Topics are item_topics, the space is space_id. Never a run record']
+  metadata jsonb [not null, default: `{}`, note: 'Typed keys only (item_model.md §5). Collection: system_kind (personal_uploads | conversation_artifacts), description, discoverable, accepts_contributions. Document: purpose, file_name, storage, archive, source, preview, cover, summary, language, owner_user_id, verification, merged_into. cover = {version, source (the storage_key it shows), kind (page | slide | sheet | text | image | none), key, width, height | title, lines, cells}, written by the ingestion worker (document_viewer.md "Cover on the Item"). Topics are item_topics, the space is space_id. Never a run record']
   inherit_access boolean [not null, default: true, note: 'Only a Collection may end inheritance; a Document always inherits. A root Collection stores false (it is always an access boundary)']
   status varchar(16) [not null, default: 'pending', note: 'content availability only: pending | ready | failed (Collections: ready). Deletion is deleted_at, never a status value. Artifacts: pending = GENERATING, ready = ACTIVE, failed = FAILED']
   publication_state varchar(16) [note: 'Documents only, not null for them: published | unpublished. Null for Collections. Who in the governing Collection sees the Document; independent of review, content and indexing']
@@ -332,7 +332,7 @@ Table items {
     space_id [note: 'partial WHERE space_id IS NOT NULL']
     payload_dirty_at [note: 'partial WHERE payload_dirty_at IS NOT NULL']
   }
-  Note: 'Only Collections may be roots. Parent and parent_relation are both null or both set; self-parenting is rejected. Collection children are allowed only under Collections. Document children may be Documents (source sync). Database constraints/triggers enforce same-tenant parentage, a live parent, no cycles (also on move), no Document -> Collection, and parent_relation consistent with the parent type, publication_state set exactly for Documents, inherit_access = false on roots, and space_id only on Collections with a space of the same tenant. Only Collections carry role assignments, so only a Collection may set inherit_access to false. Content, publication and index states are independent.'
+  Note: 'Only Collections may be roots. Parent and parent_relation are both null or both set; self-parenting is rejected. Collection children are allowed only under Collections. Document children may be Documents (source sync). Database constraints/triggers enforce same-tenant parentage, a live parent, no cycles (also on move), no Document -> Collection, and parent_relation consistent with the parent type, publication_state set exactly for Documents, inherit_access = false on roots, and space_id only on Collections with a space of the same tenant. Only Collections carry role assignments, so only a Collection may set inherit_access to false. Content, publication and index states are independent. The AFTER trigger trg_items_cover sends pg_notify(bomesh_cover, id) when a Document\'s content becomes ready or its storage_key changes (the ingestion worker produces its cover).'
 }
 
 // Renamed from artifact_revisions. Immutable content versions of every
@@ -407,6 +407,12 @@ Table topics {
   description text
   icon varchar(64)
   color varchar(32)
+  keywords text[] [not null, default: `{}`, note: 'Classification signals (Topic.keywords, synonyms, guidance, examples, rules), read whole with the topic and by CLASSIFYING\'s candidate load']
+  synonyms text[] [not null, default: `{}`]
+  guidance text
+  example_item_ids uuid[] [not null, default: `{}`, note: 'Topic.examples: <= 5 Document Items of the tenant; re-checked for visibility on read']
+  rule_collection_ids uuid[] [not null, default: `{}`, note: 'Topic.rules {collection}: Collection Items whose subtree settles the topic']
+  rule_source_codes text[] [not null, default: `{}`, note: 'Topic.rules {source}: ingestion_sources.code; matched against items.metadata.source.source_code']
   state varchar(16) [not null, default: 'active', note: 'proposed | active | rejected. DELETED is deleted_at']
   created_by_user_id uuid [note: 'Null for a topic the assistant proposed']
   deleted_at timestamptz [note: 'DeleteTopic (only when no item_topics or contribution_topics row uses it) and MergeTopic; :undelete clears']
@@ -424,13 +430,31 @@ Table topics {
 Table item_topics {
   item_id uuid [not null, note: 'A Document Item']
   topic_id uuid [not null, note: 'An active topic of the item tenant']
-  created_by_user_id uuid
+  created_by_user_id uuid [note: 'Null = assistant-applied by an ingestion run\'s CLASSIFYING step, which replaces only null rows; a person\'s tags are never replaced']
   created_at timestamptz [not null]
   indexes {
     (item_id, topic_id) [pk]
     (topic_id, item_id)
   }
-  Note: 'A trigger enforces same tenant and item_type = document. UpdateItem document.topics replaces the set; MergeTopic moves rows to the target topic (deduplicated) in one statement. Filters (document.topics) and facets join this table to the readable hits.'
+  Note: 'A trigger enforces same tenant and item_type = document. UpdateItem document.topics replaces the set (rows become the caller\'s); ConfirmTopicAssignments sets created_by_user_id on null rows; MergeTopic moves rows to the target topic (deduplicated) in one statement. Filters (document.topics, document.assistantTopics) and facets join this table to the readable hits.'
+}
+
+// A person's change of a document's topics away from the assistant's
+// (TopicCorrection); input for keyword suggestions.
+Table topic_corrections {
+  id uuid [pk]
+  tenant_id uuid [not null]
+  item_id uuid [not null, note: 'The Document whose topics changed']
+  from_topic_ids uuid[] [not null, default: `{}`, note: 'The assistant\'s topics the person removed']
+  to_topic_ids uuid[] [not null, default: `{}`, note: 'The topics the person chose that the assistant had not']
+  actor_user_id uuid [not null]
+  state varchar(16) [not null, default: 'open', note: 'open | dismissed']
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  indexes {
+    (tenant_id, state, created_at)
+  }
+  Note: 'Created by ApproveContribution (recordCorrection) and UpdateItem document.topics; a trigger keeps the item in the tenant. itemDisplayName is the item title, shown only when the caller can see the item.'
 }
 
 // Topics an assistant analysis suggested (existing) or proposed (new
@@ -706,15 +730,17 @@ Table external_resources {
 }
 
 // One explicit processing execution over a snapshot of Documents. Manual, API
-// and scheduled triggers all create one; one Temporal workflow orchestrates it.
+// and scheduled triggers all create one; the row is the queue: an ingestion
+// worker owns a queued or running run while it holds the run's session-level
+// advisory lock, and the next worker recovers and resumes it if that worker dies.
 // Adding data (upload, sync) never creates one.
 Table ingestion_runs {
   id uuid [pk]
   tenant_id uuid [not null]
   trigger_type varchar(16) [not null, note: 'manual | api | schedule | platform_retry']
-  scope jsonb [not null, default: `{}`, note: 'IngestionRun.selector as asked: {item_ids (<= 1000), ancestor_item_id, source_id, states}']
+  scope jsonb [not null, default: `{}`, note: 'IngestionRun.selector as asked: {item_ids (<= 1000), filter (AIP-160 text), filter_item_ids (items the filter names; the filter is echoed only to readers of all of them)}. Scheduled runs: a filter on their source and PENDING or OUTDATED']
   status varchar(16) [not null, default: 'queued', note: 'queued | running | succeeded | failed | cancelled. succeeded allows failed tasks; failed means the run itself stopped']
-  configuration jsonb [not null, default: `{}`, note: 'Fixed at creation: processing_version, models, batch_max_items, batch_max_bytes, parallelism']
+  configuration jsonb [not null, default: `{}`, note: 'Fixed at creation: processing_version, models, batch_max_items, batch_max_bytes, parallelism, classification {topics (topic codes), note}']
   item_count int [not null, default: 0]
   retry_of_run_id uuid [note: 'IngestionRun.retryOf; a run of the same tenant']
   error jsonb [note: 'user-safe google.rpc.Status when the run as a whole stopped']
@@ -740,7 +766,7 @@ Table ingestion_run_items {
   batch_number int [note: 'Assigned by the run planner; null until planned']
   phases jsonb [not null, default: `[]`, note: '[{phase, state, started_at, finished_at, done, total}]; IngestionTask.phase is the last entry']
   error jsonb [note: 'user-safe google.rpc.Status why this Document was not processed']
-  error_class varchar(64) [note: 'provider-neutral failure category (timeout, rate_limited, unsupported_format, provider_refused, …); never a raw message']
+  error_class varchar(64) [note: 'provider-neutral failure category (timeout, rate_limited, unsupported_format, provider_refused, interrupted (its worker died mid-task), …); never a raw message']
   revision_number int [note: 'item revision this task processed, recorded at start. A finish whose revision or governing Collection changed meanwhile leaves index_status pending and marks the payload dirty']
   chunk_count int
   started_at timestamptz
@@ -1256,6 +1282,9 @@ Ref: topics.created_by_user_id > users.id
 Ref: item_topics.item_id > items.id
 Ref: item_topics.topic_id > topics.id
 Ref: item_topics.created_by_user_id > users.id
+Ref: topic_corrections.tenant_id > tenants.id
+Ref: topic_corrections.item_id > items.id
+Ref: topic_corrections.actor_user_id > users.id
 Ref: contribution_topics.contribution_id > contributions.id
 Ref: contribution_topics.topic_id > topics.id
 Ref: reading_lists.tenant_id > tenants.id

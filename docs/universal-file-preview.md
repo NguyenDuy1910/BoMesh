@@ -63,7 +63,7 @@ that covers the files this rule lets in.
 ```text
 Upload ──► object storage (RustFS/S3)
              │
-             └─ Ingestion Run (Temporal)
+             └─ Ingestion Run (ingestion worker)
                    │
                    ├─ Docling parse ──► DocumentItem.content ──► chunks ──► Qdrant
                    │                          │

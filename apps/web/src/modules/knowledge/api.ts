@@ -13,6 +13,7 @@ import { handleUnauthenticated, sessionToken } from "@/lib/session";
 
 export type Item = Schema<"Item">;
 export type DocumentFacet = Schema<"DocumentFacet">;
+export type DocumentCover = Schema<"DocumentCover">;
 export type SearchItemsRequest = Schema<"SearchItemsRequest">;
 export type SearchItemsResponse = Schema<"SearchItemsResponse">;
 export type SearchItemsResult = Schema<"SearchItemsResult">;

@@ -18,17 +18,30 @@ from bomesh.db.engine import LazySessionFactory, transaction_scope
 FORWARDED_ATTRIBUTES = ("begin", "kw")
 
 
+@pytest.fixture(autouse=True)
+def engines(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, int]]:
+    """Stub the engine: record the pool sizing each factory asks for."""
+    requested: list[dict[str, int]] = []
+
+    def get_engine(**pool: int) -> object:
+        requested.append(pool)
+        return object()
+
+    monkeypatch.setattr(engine_module, "get_engine", get_engine)
+    return requested
+
+
 def test_engine_is_not_built_until_a_session_is_requested(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("DATABASE_URL", raising=False)
     calls: list[int] = []
 
-    def fail() -> None:
+    def fail(**_: int) -> None:
         calls.append(1)
         raise RuntimeError("DATABASE_URL is required")
 
-    monkeypatch.setattr(engine_module, "get_session_factory", fail)
+    monkeypatch.setattr(engine_module, "get_engine", fail)
     factory = LazySessionFactory()
 
     assert calls == []
@@ -45,7 +58,7 @@ def test_session_maker_attributes_are_forwarded(
 ) -> None:
     sentinel = object()
     real = type("Sessionmaker", (), {attribute: sentinel})()
-    monkeypatch.setattr(engine_module, "get_session_factory", lambda: real)
+    monkeypatch.setattr(engine_module, "get_session_factory", lambda _engine: real)
 
     assert getattr(LazySessionFactory(), attribute) is sentinel
 
@@ -55,7 +68,7 @@ def test_calling_the_factory_opens_a_session_from_the_real_factory(
 ) -> None:
     session = object()
     monkeypatch.setattr(
-        engine_module, "get_session_factory", lambda: lambda **_: session
+        engine_module, "get_session_factory", lambda _engine: lambda **_: session
     )
     factory = LazySessionFactory()
 
@@ -66,7 +79,7 @@ def test_calling_the_factory_opens_a_session_from_the_real_factory(
 def test_the_real_factory_is_built_once(monkeypatch: pytest.MonkeyPatch) -> None:
     built: list[int] = []
 
-    def build() -> object:
+    def build(_engine: object) -> object:
         built.append(1)
         return lambda **_: object()
 
@@ -86,7 +99,7 @@ def test_private_attributes_do_not_resolve_the_engine(
     monkeypatch.setattr(
         engine_module,
         "get_session_factory",
-        lambda: pytest.fail("engine built for a private attribute"),
+        lambda _engine: pytest.fail("engine built for a private attribute"),
     )
 
     with pytest.raises(AttributeError):
@@ -94,19 +107,21 @@ def test_private_attributes_do_not_resolve_the_engine(
 
 
 def test_runtime_hands_services_a_usable_session_factory(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, engines: list[dict[str, int]]
 ) -> None:
     """The runtime's factory must satisfy the surface services call on it."""
 
     real = type("Sessionmaker", (), {attr: object() for attr in FORWARDED_ATTRIBUTES})()
-    monkeypatch.setattr(engine_module, "get_session_factory", lambda: real)
+    monkeypatch.setattr(engine_module, "get_session_factory", lambda _engine: real)
 
     from bomesh.runtime import AppRuntime
+    from config import AppConfig, DatabaseConfig
 
-    sessions = AppRuntime().sessions()
+    sessions = AppRuntime(AppConfig(database=DatabaseConfig(pool_size=7, max_overflow=3))).sessions()
 
     for attribute in FORWARDED_ATTRIBUTES:
         assert getattr(sessions, attribute) is getattr(real, attribute)
+    assert engines == [{"pool_size": 7, "max_overflow": 3}]
 
 
 @pytest.mark.asyncio

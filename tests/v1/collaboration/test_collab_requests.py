@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import event, select, update
 
-from bomesh.db.models import Item, Request, Role, User
+from bomesh.db.models import Item, Notification, Request, Role, User
+from bomesh.iam.authorizer import SpaceRef
 from collab_support import (
     item_name,
     member_name,
@@ -19,7 +21,7 @@ from collab_support import (
     space_path,
     ws_path,
 )
-from harness import ApiClient, Sessions, World
+from harness import ApiClient, Sessions, World, principal
 
 pytestmark = pytest.mark.asyncio
 
@@ -583,3 +585,62 @@ async def test_requests_module_disabled(
     )
     assert reason(response) == "MODULE_DISABLED"
     assert reason(await api.get(f"{ws_path(workspace)}/requests")) == "MODULE_DISABLED"
+
+
+async def test_decider_fan_out_matches_permissions_in_constant_statements(
+    client: ApiClient, world: World, sessions: Sessions
+) -> None:
+    """CreateRequest, CreateRequestMessage and WithdrawRequest notify exactly the
+    deciders who hold ``requests.get``, at a cost independent of the audience."""
+    workspace, space, lead_user, staff_user, requester_user, other_user = await _setup(world)
+    engine = sessions.kw["bind"].sync_engine
+    statements: list[str] = []
+
+    def on_execute(*args: object) -> None:
+        statements.append(str(args[2]))
+
+    async def lifecycle(user: User) -> tuple[list[int], UUID]:
+        api = await client.as_(user)
+        counts: list[int] = []
+        event.listen(engine, "before_cursor_execute", on_execute)
+        try:
+            statements.clear()
+            created = await api.post(
+                f"{ws_path(workspace)}/requests",
+                json={"kind": "QUESTION", "space": space_name(workspace, space), "question": "?"},
+            )
+            counts.append(len(statements))
+            path = path_of(created.json()["name"])
+            for url, body in ((f"{path}/messages", {"text": "More details"}), (f"{path}:withdraw", {})):
+                statements.clear()
+                response = await api.post(url, json=body)
+                counts.append(len(statements))
+                assert response.status_code == 200, response.text
+        finally:
+            event.remove(engine, "before_cursor_execute", on_execute)
+        return counts, UUID(created.json()["uid"])
+
+    small, _ = await lifecycle(requester_user)
+    audience = [await world.add_member(workspace) for _ in range(12)]
+    for user in audience[:8]:
+        await world.grant(user, "roles/spaceStaff", on=space)
+    for user in audience[8:]:
+        await world.grant(user, "roles/spaceMember", on=space)
+    await world.suspend_member(workspace, audience[0])
+    large, request_id = await lifecycle(other_user)
+
+    assert large == small and max(large) <= 25, (small, large)
+    async with sessions.begin() as session:
+        notified = list(
+            await session.scalars(
+                select(Notification.recipient_user_id).where(Notification.subject_id == request_id)
+            )
+        )
+    space_ref = SpaceRef(workspace.id, space.id)
+    expected = [
+        user.id
+        for user in (lead_user, staff_user, requester_user, *audience)
+        if "requests.get" in await world.authorizer().permissions(principal(user), space_ref)
+    ]
+    assert sorted(notified) == sorted(expected * 3)
+    assert audience[0].id not in notified and audience[9].id not in notified

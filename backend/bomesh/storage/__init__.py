@@ -72,7 +72,12 @@ class DocumentStorage(Protocol):
         key: str,
         *,
         expires_seconds: int,
-    ) -> PresignedRequest: ...
+        stable: bool = False,
+    ) -> PresignedRequest:
+        """A GET URL valid ``expires_seconds``. ``stable``: every call in the same
+        ``expires_seconds`` window returns the same URL (so browsers reuse their
+        cached object), still valid at least ``expires_seconds``."""
+        ...
 
     async def head(self, key: str) -> StoredObject: ...
 

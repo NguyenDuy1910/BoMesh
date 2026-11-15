@@ -12,8 +12,8 @@ LOCAL_DATABASE_URL ?= postgresql+asyncpg://bomesh:bomesh@127.0.0.1:5432/bomesh
 LOCAL_QDRANT_URL ?= http://127.0.0.1:6333
 LOCAL_S3_ENDPOINT ?= http://127.0.0.1:9000
 LOCAL_S3_BUCKET ?= bomesh
-LOCAL_TEMPORAL_TARGET ?= 127.0.0.1:7233
-LOCAL_TEMPORAL_UI ?= http://127.0.0.1:8080
+# [temporal-disabled] LOCAL_TEMPORAL_TARGET ?= 127.0.0.1:7233
+# [temporal-disabled] LOCAL_TEMPORAL_UI ?= http://127.0.0.1:8080
 QDRANT_COLLECTION ?= bomesh
 QDRANT_VECTOR_SIZE ?= 1536
 
@@ -38,7 +38,8 @@ MODE ?= debug
 FLUTTER_RUN_FLAGS ?=
 FLUTTER_RUN := $(FLUTTER) run --$(MODE) --no-pub --dart-define-from-file=env/$(APP_ENV).json $(FLUTTER_RUN_FLAGS)
 
-.PHONY: help init reset-all config services storage-migrate-minio _temporal-reset db-init db-seed db-seed-accounts qdrant-init status web-dev web-build web-prod app-deps app-run app-web app-devices _app-env
+# [temporal-disabled] _temporal-reset was listed here.
+.PHONY: help init reset-all config services storage-migrate-minio db-init db-seed db-seed-accounts qdrant-init status web-dev web-build web-prod app-deps app-run app-web app-devices _app-env
 
 help: ## Show available local-development commands.
 	@echo "BoMesh local development"
@@ -51,15 +52,17 @@ init: reset-all ## Initialize the complete local BoMesh environment.
 	@echo "  API:       http://127.0.0.1:8000"
 	@echo "  Qdrant:    $(LOCAL_QDRANT_URL)/dashboard"
 	@echo "  RustFS:    $(LOCAL_S3_ENDPOINT) (console disabled; RUSTFS_CONSOLE_ENABLE=true enables 127.0.0.1:9001)"
-	@echo "  Temporal:  $(LOCAL_TEMPORAL_UI)"
 	@echo "  Tenant ID: $(DEV_TENANT_ID)"
 	@echo "  User ID:   $(DEV_USER_ID)"
 	@echo
 	@echo "Start the local services, API, and ingestion worker with: cd backend && uv run main.py"
 
-reset-all: _temporal-reset db-reset db-seed-accounts qdrant-init status ## Reset all databases and Qdrant, apply the current design, and seed the role-matrix test accounts.
-	@echo "PostgreSQL, Temporal, and Qdrant reset is complete."
+# [temporal-disabled] reset-all also depended on _temporal-reset.
+reset-all: db-reset db-seed-accounts qdrant-init status ## Reset all databases and Qdrant, apply the current design, and seed the role-matrix test accounts.
+	@echo "PostgreSQL and Qdrant reset is complete."
 
+# [temporal-disabled] config also wrote BOMESH_TEMPORAL_TARGET=$(LOCAL_TEMPORAL_TARGET),
+# BOMESH_TEMPORAL_NAMESPACE=default and BOMESH_TEMPORAL_TLS=false into .env.
 config: ## Create the root environment file, enforce local endpoints, and default storage to local RustFS.
 	@set -euo pipefail
 	@if [[ ! -f .env ]]; then cp backend/.env.example .env; fi
@@ -90,9 +93,6 @@ config: ## Create the root environment file, enforce local endpoints, and defaul
 	update_env .env QDRANT_URL "$(LOCAL_QDRANT_URL)"; \
 	update_env .env QDRANT_COLLECTION "$(QDRANT_COLLECTION)"; \
 	update_env .env QDRANT_API_KEY ""; \
-	update_env .env BOMESH_TEMPORAL_TARGET "$(LOCAL_TEMPORAL_TARGET)"; \
-	update_env .env BOMESH_TEMPORAL_NAMESPACE default; \
-	update_env .env BOMESH_TEMPORAL_TLS false; \
 	set_default .env BOMESH_OBJECT_STORAGE_PROVIDER rustfs; \
 	set_default .env BOMESH_OBJECT_STORAGE_BUCKET "$(LOCAL_S3_BUCKET)"; \
 	set_default .env BOMESH_S3_ENDPOINT_URL "$(LOCAL_S3_ENDPOINT)"; \
@@ -124,12 +124,14 @@ config: ## Create the root environment file, enforce local endpoints, and defaul
 	remove_env .env BOMESH_GUEST_SESSION_EXPIRES_IN_SECONDS
 	@echo "Configured the root environment file."
 
-services: config ## Start PostgreSQL, Qdrant, Temporal, and local RustFS unless BOMESH_S3_ENDPOINT_URL names a remote store.
+# [temporal-disabled] services also started temporal temporal-admin-tools temporal-ui
+# and ran temporal-init.
+services: config ## Start PostgreSQL, Qdrant, and local RustFS unless BOMESH_S3_ENDPOINT_URL names a remote store.
 	@set -euo pipefail
 	@s3_endpoint="$(call ROOT_ENV,BOMESH_S3_ENDPOINT_URL)"; \
 	local_storage=""; \
 	if [[ "$$s3_endpoint" == "$(LOCAL_S3_ENDPOINT)" ]]; then local_storage=rustfs; fi; \
-	$(COMPOSE) up -d postgres qdrant $$local_storage temporal temporal-admin-tools temporal-ui
+	$(COMPOSE) up -d postgres qdrant $$local_storage
 	@for attempt in {1..30}; do \
 		if $(COMPOSE) exec -T postgres sh -c 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"' >/dev/null 2>&1; then break; fi; \
 		if [[ $$attempt -eq 30 ]]; then echo "PostgreSQL did not become ready." >&2; exit 1; fi; \
@@ -147,8 +149,7 @@ services: config ## Start PostgreSQL, Qdrant, Temporal, and local RustFS unless 
 		sleep 1; \
 	done; \
 	if [[ "$$s3_endpoint" == "$(LOCAL_S3_ENDPOINT)" ]]; then $(COMPOSE) run --rm rustfs-init >/dev/null; fi
-	@$(COMPOSE) run --rm temporal-init >/dev/null
-	@echo "PostgreSQL, Qdrant, object storage, and Temporal are accepting connections."
+	@echo "PostgreSQL, Qdrant, and object storage are accepting connections."
 
 storage-migrate-minio: services ## Copy the legacy MinIO bucket into RustFS without deleting MinIO objects.
 	@set -euo pipefail
@@ -156,13 +157,14 @@ storage-migrate-minio: services ## Copy the legacy MinIO bucket into RustFS with
 	@$(COMPOSE) --profile minio stop minio >/dev/null
 	@echo "Copied MinIO objects into RustFS; the minio_data volume is unchanged."
 
-_temporal-reset: services
-	@set -euo pipefail
-	@$(COMPOSE) stop temporal-ui temporal-admin-tools temporal >/dev/null
-	@$(COMPOSE) exec -T postgres sh -c 'for database in temporal temporal_visibility; do psql -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d postgres -c "DROP DATABASE IF EXISTS \"$$database\" WITH (FORCE);"; done' >/dev/null
-	@$(COMPOSE) up -d temporal temporal-admin-tools temporal-ui >/dev/null
-	@$(COMPOSE) run --rm temporal-init >/dev/null
-	@echo "Temporal persistence is reset."
+# [temporal-disabled] Temporal persistence reset (Temporal is not used in this phase).
+# _temporal-reset: services
+# 	@set -euo pipefail
+# 	@$(COMPOSE) stop temporal-ui temporal-admin-tools temporal >/dev/null
+# 	@$(COMPOSE) exec -T postgres sh -c 'for database in temporal temporal_visibility; do psql -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d postgres -c "DROP DATABASE IF EXISTS \"$$database\" WITH (FORCE);"; done' >/dev/null
+# 	@$(COMPOSE) up -d temporal temporal-admin-tools temporal-ui >/dev/null
+# 	@$(COMPOSE) run --rm temporal-init >/dev/null
+# 	@echo "Temporal persistence is reset."
 
 db-init: services ## Apply the current database design and the IAM catalog (permissions, predefined roles).
 	@set -euo pipefail

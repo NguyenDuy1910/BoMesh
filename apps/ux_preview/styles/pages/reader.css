@@ -106,6 +106,8 @@
 .doc-sub { font-size: 13px; line-height: 18px; color: var(--muted); }
 .doc-gap { max-width: 816px; margin: 0 auto 20px; padding: 10px; border: 1px dashed var(--border-secondary); border-radius: 4px; text-align: center; font-size: 12px; line-height: 16px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .doc-state { display: grid; place-items: center; min-height: 100%; }
+/* Not processed yet but the cover exists: the message sits above the first page, which stays in view. */
+.doc-state:has(+ .doc-viewer) { min-height: 0; padding: 32px 0 8px; }
 
 /* PDF and Word: white paper with print margins, a running header (PDF) and a page footer — in every theme. */
 .doc-page--pdf, .doc-page--docx { position: relative; max-width: 816px; min-height: 0; aspect-ratio: 8.5 / 11; margin: 0 auto 20px; padding: 72px 80px 64px; border-radius: 2px; background: var(--paper); color: var(--paper-ink); box-shadow: var(--paper-shadow); }
@@ -174,6 +176,9 @@
 .doc-viewer__pct { min-width: 52px; height: 28px; padding: 0 6px; border-radius: var(--radius-lg); font-size: 12px; font-weight: 500; color: var(--foreground); transition: background-color var(--dur-fast); }
 .doc-viewer__pct:hover { background: var(--default); }
 .doc-viewer__pages { zoom: var(--doc-zoom, 1); padding-bottom: 24px; }
+/* Opening: the cover is page 1 at once (`.doc-page--cover`), the next page a sized blank, until the pages arrive. */
+.doc-page.doc-page--blank { background: var(--paper); }
+.doc-page.doc-page--blank:not(.doc-page--slide) { aspect-ratio: 8.5 / 11; }
 /* Web-like files read as one continuous page — no paper, no page breaks. */
 .doc-viewer--flow { max-width: 780px; margin: 0 auto; padding: 16px 8px 48px; }
 .doc-viewer--flow .doc-page { max-width: none; margin: 0; padding: 0; border-radius: 0; background: transparent; box-shadow: none; }

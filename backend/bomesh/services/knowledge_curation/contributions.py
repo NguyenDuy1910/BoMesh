@@ -19,7 +19,7 @@ from collections.abc import Iterable, Sequence
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import ColumnElement, and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh import etag as etags
@@ -57,6 +57,7 @@ from bomesh.services.knowledge_curation.access import (
     is_reviewer,
     readable_clause,
     reviewer_clause,
+    reviewers,
     suggested_collection,
 )
 from bomesh.services.knowledge_curation.analysis import (
@@ -78,6 +79,10 @@ from bomesh.services.knowledge_curation.support import (
     CurationDeps,
     now,
     referenced_item,
+)
+from bomesh.services.knowledge_curation.topic_assignments import (
+    record_topic_correction,
+    suggested_topic_ids,
 )
 from bomesh.services.knowledge_items.documents import set_document_metadata
 from bomesh.services.knowledge_items.indexing import sync_item_payloads
@@ -353,7 +358,7 @@ class ContributionService:
             contribution.decided_at = await now(session)
             await session.flush()
             published_id, dirty = await _apply_approval(session, ctx, contribution, target_id)
-            await set_document_metadata(
+            approved_topic_ids = await set_document_metadata(
                 session,
                 workspace_id,
                 published_id,
@@ -362,6 +367,15 @@ class ContributionService:
                 topics=approval.topic_codes,
                 created_by_user_id=ctx.user_id,
             )
+            if approval.record_correction and approved_topic_ids is not None:
+                await record_topic_correction(
+                    session,
+                    tenant_id=workspace_id,
+                    item_id=published_id,
+                    assistant_topic_ids=await suggested_topic_ids(session, contribution.id),
+                    chosen_topic_ids=approved_topic_ids,
+                    actor_user_id=ctx.user_id,
+                )
             await _event(session, ctx, contribution, "ApproveContribution", "APPROVED", None)
             await _notify_contributor(session, ctx.authorizer, contribution, "approved")
             record = await self._record(session, ctx, contribution, full=True)
@@ -788,8 +802,8 @@ async def _notify_contributor(
     if contributor is None:
         return
 
-    async def is_contributor(principal: Principal) -> bool:
-        return principal.user_id == contributor
+    async def is_contributor(users: frozenset[UUID]) -> frozenset[UUID]:
+        return users & {contributor}
 
     await NotificationPublisher(session, authorizer).publish(
         workspace_id=contribution.tenant_id,
@@ -822,8 +836,8 @@ async def _notify_reviewers(
                 )
     candidates.discard(contribution.contributor_user_id)  # type: ignore[arg-type]
 
-    async def reviews(principal: Principal) -> bool:
-        return await is_reviewer(authorizer, principal, contribution)
+    async def reviews(users: frozenset[UUID]) -> frozenset[UUID]:
+        return await reviewers(authorizer, users, contribution)
 
     await NotificationPublisher(session, authorizer).publish(
         workspace_id=contribution.tenant_id,
@@ -940,32 +954,25 @@ async def source_revision_contribution(
     )
 
 
-async def contribution_readable(
-    session: AsyncSession,
-    authorizer: Authorizer,
-    principal: Principal,
-    workspace_id: UUID,
-    contribution_id: UUID,
-) -> bool:
-    """Whether a notification about the contribution may still be shown to ``principal``.
+async def readable_contributions(
+    authorizer: Authorizer, principal: Principal, workspace_id: UUID
+) -> ColumnElement[bool]:
+    """SQL: contributions whose notifications may still be shown to ``principal``.
 
     The contributor always (until they delete it); a reviewer only while it is
     OPEN and they still hold ``contributions.review`` on its decision collection.
-    A missing or deleted contribution is never readable.
+    A deleted contribution is never readable.
     """
-    contribution = await session.scalar(
-        select(Contribution).where(
-            Contribution.id == contribution_id,
-            Contribution.tenant_id == workspace_id,
-            Contribution.deleted_at.is_(None),
-        )
-    )
-    if contribution is None:
-        return False
-    if contribution.contributor_user_id == principal.user_id:
-        return True
-    return contribution.state in OPEN_CONTRIBUTION_STATES and await is_reviewer(
-        authorizer, principal, contribution
+    return and_(
+        Contribution.tenant_id == workspace_id,
+        Contribution.deleted_at.is_(None),
+        or_(
+            Contribution.contributor_user_id == principal.user_id,
+            and_(
+                Contribution.state.in_(OPEN_CONTRIBUTION_STATES),
+                await reviewer_clause(authorizer, principal, workspace_id),
+            ),
+        ),
     )
 
 
@@ -1010,9 +1017,9 @@ async def member_contributions(
 __all__ = [
     "ContributionService",
     "contribution_etag",
-    "contribution_readable",
     "member_contributions",
     "open_source_contribution",
+    "readable_contributions",
     "review_queue_count",
     "source_revision_contribution",
 ]

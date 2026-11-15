@@ -59,12 +59,13 @@ from bomesh.services.artifacts.support import (
     UNAVAILABLE_TEXT,
     ArtifactDeps,
     artifact_record,
+    artifact_records,
     cell_rows,
     is_text,
     member_space,
     open_artifact,
     render_review,
-    require_audience_reads,
+    require_collection_reads,
     require_etag,
     require_space_reads,
     require_state,
@@ -88,7 +89,6 @@ from bomesh.services.kernel.workspaces import require_module
 from bomesh.services.knowledge_items.items import KnowledgeItemService, create_document
 from bomesh.services.knowledge_items.records import UploadedFile
 from bomesh.services.knowledge_items.summary import get_item_summary
-from bomesh.services.workspaces.members import active_member_ids
 
 MAX_SOURCES = 50
 MAX_MATRIX_SIDE = 20
@@ -342,12 +342,9 @@ class ArtifactResourceService:
             )
             if not query.show_deleted:
                 statement = statement.where(Item.deleted_at.is_(None))
-            rows = (await session.execute(query.apply(statement))).all()
+            rows = [(item, artifact) for item, artifact in await session.execute(query.apply(statement))]
             total = await session.scalar(query.count(statement))
-            records = [
-                await artifact_record(session, ctx, workspace_id, item, artifact, full=full)
-                for item, artifact in rows
-            ]
+            records = await artifact_records(session, ctx, workspace_id, rows, full=full)
         return records, int(total or 0)
 
     # -- Update and lifecycle -------------------------------------------------------------------
@@ -597,14 +594,9 @@ class ArtifactResourceService:
                 raise permission_denied("items.create", ItemRef(workspace_id, collection_id))
             if collection.item_type != "COLLECTION":
                 raise InvalidArgument.for_field("collection", "collection must be a COLLECTION.")
-            sources = await source_ids(session, artifact_id)
-            readers = [
-                user_id
-                for user_id in await active_member_ids(session, workspace_id)
-                if "items.get"
-                in await ctx.authorizer.collection_permissions(Principal(user_id), collection.item_id)
-            ]
-            await require_audience_reads(session, ctx, workspace_id, readers, sources)
+            await require_collection_reads(
+                session, ctx, workspace_id, collection.item_id, await source_ids(session, artifact_id)
+            )
             current = await current_revision(session, artifact_id)
             assert current is not None
             markdown = (
@@ -626,7 +618,7 @@ class ArtifactResourceService:
                 content_type=current.mime_type,
             )
         )
-        record = await create_document(
+        document_id = await create_document(
             KnowledgeItemService.from_runtime(self._deps.runtime),
             ctx,
             workspace_id,
@@ -637,7 +629,7 @@ class ArtifactResourceService:
         )
         async with transaction_scope(self._deps.sessions) as session:
             await self._audit(session, ctx, workspace_id, artifact_id, "PublishArtifact")
-        return f"workspaces/{workspace_id}/items/{record.item_id}"
+        return f"workspaces/{workspace_id}/items/{document_id}"
 
     async def _review_markdown(
         self, session: AsyncSession, ctx: RequestContext, workspace_id: UUID, item: Item, artifact: Artifact

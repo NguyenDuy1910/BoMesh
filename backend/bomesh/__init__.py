@@ -93,10 +93,34 @@ def render_agent_base() -> str:
     return render_prompt("agent_base")
 
 
+def model_json_object(raw_text: str) -> Any:
+    """Parse the JSON object a model wrote, ignoring how it wrapped it.
+
+    Models fence the object, tag the fence with a language, or surround it with
+    a sentence. The content is still theirs; only the wrapping is discarded.
+    """
+
+    normalized = raw_text.strip()
+    if normalized.startswith("```"):
+        fenced = normalized.split("```")
+        if len(fenced) >= 3:
+            body = fenced[1]
+            # Drop an opening language tag such as ```json.
+            normalized = body.split("\n", 1)[1] if "\n" in body else body
+            normalized = normalized.strip()
+    start = normalized.find("{")
+    end = normalized.rfind("}")
+    if start < 0 or end <= start:
+        raise ValueError("model response contains no JSON object")
+    return json.loads(normalized[start : end + 1])
+
+
+
 __all__ = [
     "ModelResponseClient",
     "PromptRenderError",
     "load_prompt",
+    "model_json_object",
     "render_agent_base",
     "render_prompt",
 ]

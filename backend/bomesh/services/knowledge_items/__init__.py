@@ -6,8 +6,8 @@ Services (one per resource, built with ``from_runtime``):
 :class:`~.search.ItemSearchService`. Engines (no authorization; the caller's
 session): :mod:`.item_store` (rows, tree lifecycle, revisions),
 :mod:`.indexing` (processing a document into the index, payload upkeep),
-:mod:`.file_content`, :mod:`.preview`, :mod:`.rendition`, :mod:`.citations`
-and :mod:`.archive_expansion`.
+:mod:`.file_content`, :mod:`.preview`, :mod:`.covers`, :mod:`.rendition`,
+:mod:`.citations` and :mod:`.archive_expansion`.
 
 Cross-domain API (the caller authorizes; session-taking functions run inside
 the caller's transaction):
@@ -38,6 +38,7 @@ the caller's transaction):
   batch visibility for references and space scopes (Collaboration,
   Conversations).
 - :mod:`.content`: ``resolve_page_assets``, ``resolve_rendition`` — signed
-  viewer URLs of a revision's preview manifest (Artifacts snapshots);
-  ``item_thumbnail`` the current revision's first page image (Library Home).
+  viewer URLs of a revision's preview manifest (Artifacts snapshots).
+- :mod:`.covers`: ``resolve_cover`` — ``document.cover`` of a loaded Item
+  (Library Home); ``DocumentCovers`` — producing covers (ingestion worker).
 """

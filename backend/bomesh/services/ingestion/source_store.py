@@ -4,8 +4,8 @@ A Source is one external resource synchronized into one Collection through a
 Connection. Its state is never stored: it is computed from ``paused_at``, the
 connection status and the latest ``ingestion_syncs`` row. Each sync is one
 row; a partial unique index keeps one running sync per Source. The schedule
-(``schedule_cron`` + ``schedule_time_zone``) is fired by Temporal;
-``next_sync_at`` mirrors its next firing for the scheduler scan and the UI.
+(``schedule_cron`` + ``schedule_time_zone``) is the Source's ``next_sync_at``:
+the ingestion worker opens a SCHEDULED sync when it is due, then advances it.
 """
 
 from __future__ import annotations

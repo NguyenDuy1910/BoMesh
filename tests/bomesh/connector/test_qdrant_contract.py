@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from bomesh.connector.protocol import (
@@ -17,9 +19,13 @@ from bomesh.connector.protocol import (
 )
 from bomesh.document_index import (
     INDEX_SCHEMA_VERSION,
+    ClassificationRequest,
     ContextualChunk,
+    DocumentClassification,
     IndexingContext,
     ItemIndex,
+    SemanticContextualizer,
+    TopicCandidate,
     build_contextual_chunks,
 )
 
@@ -100,7 +106,8 @@ def test_indexing_context_normalizes_required_identifiers() -> None:
 async def test_index_projection_is_bounded_and_collection_scoped() -> None:
     document = _document()
     source_chunk = _chunk()
-    contextual = await build_contextual_chunks([source_chunk], document)
+    contextual, classified = await build_contextual_chunks([source_chunk], document)
+    assert classified is None
     assert len(contextual) == 1
     assert isinstance(contextual[0], ContextualChunk)
     assert contextual[0].chunk_text == source_chunk.chunk_text
@@ -174,7 +181,7 @@ async def test_semantic_contextualization_enriches_retrieval_not_evidence() -> N
     contextualizer = _SemanticContextualizer()
     source = _chunk()
 
-    contextual = await build_contextual_chunks(
+    contextual, _ = await build_contextual_chunks(
         [source],
         _document(),
         semantic_contextualizer=contextualizer,  # type: ignore[arg-type]
@@ -193,7 +200,7 @@ async def test_semantic_contextualization_enriches_retrieval_not_evidence() -> N
 async def test_semantic_contextualization_failure_uses_structural_fallback() -> None:
     contextualizer = _SemanticContextualizer(fail=True)
 
-    contextual = await build_contextual_chunks(
+    contextual, _ = await build_contextual_chunks(
         [_chunk()],
         _document(),
         semantic_contextualizer=contextualizer,  # type: ignore[arg-type]
@@ -202,3 +209,140 @@ async def test_semantic_contextualization_failure_uses_structural_fallback() -> 
     assert len(contextualizer.calls) == 1
     assert contextual[0].chunk_text == "connector evidence"
     assert "Explains the approved lending policy." in contextual[0].contextual_text
+
+
+class _ProfileTransport:
+    model = "configured-contextualization-model"
+
+    def __init__(self, profile: str | Exception) -> None:
+        self.profile = profile
+        self.profile_requests: list[dict[str, Any]] = []
+        self.context_prompts: list[str] = []
+
+    async def responses(self, *, input: str, model: str | None = None, **params: Any) -> Any:
+        if "<document_profile_instructions>" not in input:
+            self.context_prompts.append(input)
+            return SimpleNamespace(output_text="The chunk covers lending approvals.")
+        self.profile_requests.append({"input": input, "model": model, **params})
+        if isinstance(self.profile, Exception):
+            raise self.profile
+        return SimpleNamespace(output_text=self.profile)
+
+
+_LENDING = TopicCandidate(
+    id="topic-lending", code="lending", name="Lending", description="Credit products", domain="Retail"
+)
+_REQUEST = ClassificationRequest(
+    candidates=(_LENDING, TopicCandidate(id="topic-hr", code="hr", name="HR")),
+    note="Bank policies",
+)
+
+
+def _unsummarized() -> DocumentItem:
+    return _document().model_copy(update={"metadata": {}})
+
+
+def _chunks() -> list[Chunk]:
+    return [
+        _chunk(),
+        _chunk().model_copy(
+            update={"id": "jira::BANK-42:1", "chunk_index": 1, "chunk_text": "second"}
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_classifying_runs_once_before_contextualizing_and_feeds_the_summary() -> None:
+    transport = _ProfileTransport(
+        '```json\n{"topics": ["lending", "made-up"], "summary": "The retail lending policy."}\n```'
+    )
+    phases: list[tuple[str, int, int]] = []
+
+    contextual, classified = await build_contextual_chunks(
+        _chunks(),
+        _unsummarized(),
+        semantic_contextualizer=SemanticContextualizer(transport, model_name=transport.model),  # type: ignore[arg-type]
+        classification=_REQUEST,
+        progress=lambda phase, done, total: phases.append((phase, done, total)),
+    )
+
+    assert classified == DocumentClassification(
+        topics=(_LENDING,), summary="The retail lending policy."
+    )
+    [request] = transport.profile_requests
+    assert request["model"] == transport.model
+    assert request["temperature"] == 0
+    assert "Bank policies" in request["input"]
+    assert '"code":"lending"' in request["input"]
+    assert "Credit products" in request["input"]
+    assert "Leading canonical chunk excerpts:" in request["input"]
+    assert phases[:3] == [("classifying", 0, 1), ("classifying", 1, 1), ("contextualizing", 0, 2)]
+    assert all("Summary: The retail lending policy." in prompt for prompt in transport.context_prompts)
+    assert all(chunk.context.summary == "The retail lending policy." for chunk in contextual)
+
+
+@pytest.mark.asyncio
+async def test_the_documents_own_summary_wins_over_the_classification_summary() -> None:
+    transport = _ProfileTransport('{"topics": [], "summary": "Model summary."}')
+
+    contextual, classified = await build_contextual_chunks(
+        [_chunk()],
+        _document(),
+        semantic_contextualizer=SemanticContextualizer(transport),  # type: ignore[arg-type]
+        classification=_REQUEST,
+    )
+
+    assert classified == DocumentClassification(topics=(), summary="Model summary.")
+    assert contextual[0].context.summary == "Explains the approved lending policy."
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "profile", ['{"topics": "lending"}', "no json here", RuntimeError("provider down")]
+)
+async def test_a_failed_classification_leaves_indexing_unclassified(
+    profile: str | Exception,
+) -> None:
+    transport = _ProfileTransport(profile)
+
+    contextual, classified = await build_contextual_chunks(
+        _chunks(),
+        _unsummarized(),
+        semantic_contextualizer=SemanticContextualizer(transport),  # type: ignore[arg-type]
+        classification=_REQUEST,
+    )
+
+    assert classified is None
+    assert len(transport.profile_requests) == 1
+    assert len(transport.context_prompts) == 2
+    assert [chunk.context.summary for chunk in contextual] == [None, None]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("classification", "contextualized"),
+    [
+        (None, True),
+        (ClassificationRequest(candidates=()), True),
+        (_REQUEST, False),
+    ],
+)
+async def test_no_candidates_or_no_contextualizer_means_no_classifying(
+    classification: ClassificationRequest | None, contextualized: bool
+) -> None:
+    transport = _ProfileTransport('{"topics": ["lending"], "summary": "x"}')
+    phases: list[str] = []
+
+    _, classified = await build_contextual_chunks(
+        [_chunk()],
+        _document(),
+        semantic_contextualizer=(
+            SemanticContextualizer(transport) if contextualized else None  # type: ignore[arg-type]
+        ),
+        classification=classification,
+        progress=lambda phase, *_: phases.append(phase),
+    )
+
+    assert classified is None
+    assert transport.profile_requests == []
+    assert "classifying" not in phases

@@ -1,11 +1,11 @@
 "use client";
 
 import { buttonVariants } from "@heroui/react";
-import { Pencil } from "lucide-react";
+import { ImageIcon, Pencil } from "lucide-react";
 import NextLink from "next/link";
 import { Fragment, useCallback, useState } from "react";
 
-import { Page, PageHeader, WorkspaceMark } from "@/components/ui";
+import { IconButton, Page, PageHeader, WorkspaceMark } from "@/components/ui";
 import { plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { studioHref } from "@/modules/curation";
@@ -13,6 +13,7 @@ import { ResDot } from "@/modules/knowledge/components/ResourceRow";
 
 import { KnowledgeAtlas, type AtlasStats } from "../atlas/KnowledgeAtlas";
 import { useFreshCount } from "../atlas/queries";
+import { MapBackgroundDialog } from "./MapBackground";
 
 /**
  * /home — the Knowledge Atlas (preview `features/home.js`, docs/HOME.md): the workspace's identity block, then one canvas
@@ -22,6 +23,7 @@ export function HomePage() {
   const ws = useWorkspace();
   const [stats, setStats] = useState<AtlasStats | null>(null);
   const onStats = useCallback((s: AtlasStats) => setStats(s), []);
+  const [bgOpen, setBgOpen] = useState(false);
   const fresh = useFreshCount({ enabled: !!stats?.documents });
   const name = ws.workspace.displayName ?? "";
   const meta = stats?.documents
@@ -45,15 +47,19 @@ export function HomePage() {
           </Fragment>
         ))}
         actions={
-          ws.can("items.create") ? (
-            <NextLink href={studioHref("collections")} className={buttonVariants({ variant: "tertiary", size: "sm" })}>
-              <Pencil className="i" aria-hidden />
-              Edit structure
-            </NextLink>
-          ) : null
+          <>
+            {ws.can("workspaces.updateSettings") ? <IconButton icon={ImageIcon} tip="Map background" size="sm" onPress={() => setBgOpen(true)} /> : null}
+            {ws.can("items.create") ? (
+              <NextLink href={studioHref("collections")} className={buttonVariants({ variant: "tertiary", size: "sm" })}>
+                <Pencil className="i" aria-hidden />
+                Edit structure
+              </NextLink>
+            ) : null}
+          </>
         }
       />
       <KnowledgeAtlas onStats={onStats} />
+      <MapBackgroundDialog isOpen={bgOpen} onClose={() => setBgOpen(false)} />
     </Page>
   );
 }

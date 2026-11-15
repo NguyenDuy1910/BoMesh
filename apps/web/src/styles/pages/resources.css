@@ -49,7 +49,6 @@
 .doc-card:focus-visible { outline: none; box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border), 0 0 0 2px var(--focus); }
 .doc-card__media { position: relative; }
 .doc-card__type { position: absolute; left: 10px; bottom: 10px; display: inline-flex; border-radius: 6px; box-shadow: 0 0 0 2px var(--surface); }
-.doc-card__extent { position: absolute; right: 10px; bottom: 10px; padding: 2px 8px; border-radius: var(--radius-full); background: color-mix(in oklab, var(--surface) 88%, transparent); box-shadow: 0 0 0 1px var(--separator); font-size: 11px; line-height: 16px; color: var(--muted); font-variant-numeric: tabular-nums; }
 /* Secondary actions stay out of the way: shown on hover or keyboard focus, always on touch, and Save stays visible once saved. */
 .doc-card__actions { position: absolute; z-index: 2; top: 8px; right: 8px; display: flex; gap: 2px; padding: 2px; border-radius: var(--radius-lg); background: color-mix(in oklab, var(--surface) 92%, transparent); box-shadow: var(--surface-shadow), 0 0 0 1px var(--separator); opacity: 0; transition: opacity var(--dur-fast); }
 .doc-card:hover .doc-card__actions, .doc-card:focus-within .doc-card__actions, .doc-card__actions:has(.res-save.is-on) { opacity: 1; }
@@ -71,27 +70,41 @@
   .doc-card:hover { transform: none !important; }
 }
 
-/* Preview frame. Sheets and slides: the real first page at 40% (width compensates, so it always fills the frame). */
-.doc-thumb { --thumb-scale: 0.4; position: relative; aspect-ratio: 16 / 9; overflow: hidden; background: var(--surface-secondary); pointer-events: none; user-select: none; }
-/* Text documents: their most useful section, on a page, at a size people can read. */
+/* Cover frame (DocumentFacet.cover): one fixed 16:9 frame, so the grid never shifts while covers load. Images are ≤ 480 px WebPs,
+   lazy and async-decoded, drawn at their own aspect ratio inside the format's shape. */
+.doc-thumb { position: relative; aspect-ratio: 16 / 9; overflow: hidden; background: var(--surface-secondary); pointer-events: none; user-select: none; }
+.doc-cover__img { display: block; width: 100%; height: auto; }
+/* PAGE and TEXT: a portrait paper, top-aligned, its lower part fading into the frame. */
+.doc-cover__paper { position: absolute; top: 14px; left: 50%; width: 56%; aspect-ratio: 8.5 / 11; transform: translateX(-50%); overflow: hidden; border-radius: 3px; background: var(--paper); color: var(--paper-ink); box-shadow: var(--paper-shadow); }
+.doc-thumb--page::after { content: ""; position: absolute; inset: auto 0 0; height: 42%; background: linear-gradient(to bottom, transparent, var(--surface-secondary)); }
+.doc-cover__text { padding: 9% 9% 0; font-size: 7px; line-height: 10px; overflow: hidden; }
+.doc-cover__text p { margin: 0 0 4px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.doc-cover__text .doc-cover__title { margin-bottom: 6px; font-size: 10px; line-height: 13px; font-weight: 700; -webkit-line-clamp: 2; }
+.doc-thumb--text .doc-cover__text { font-family: var(--font-mono, ui-monospace, monospace); }
+/* SLIDE: a 16:9 slide inset in the frame; its title large, a few bullets. */
+.doc-cover__slide { position: absolute; inset: 9px 16px; overflow: hidden; border-radius: 4px; background: var(--paper); color: var(--paper-ink); box-shadow: var(--paper-shadow); }
+.doc-cover__slide .doc-cover__img { width: 100%; height: 100%; object-fit: cover; }
+.doc-cover__slide .doc-cover__text { padding: 7% 8%; font-size: 9px; line-height: 13px; }
+.doc-cover__slide .doc-cover__title { font-size: 14px; line-height: 18px; margin-bottom: 8px; }
+.doc-cover__slide ul { margin: 0; padding-left: 12px; }
+.doc-cover__slide li { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* SHEET: the first sheet's top-left cells, with column letters and row numbers, fading right and down. */
+.doc-thumb--sheet { background: var(--paper); -webkit-mask-image: linear-gradient(to right, #000 80%, transparent), linear-gradient(to bottom, #000 75%, transparent); -webkit-mask-composite: source-in; mask-image: linear-gradient(to right, #000 80%, transparent), linear-gradient(to bottom, #000 75%, transparent); mask-composite: intersect; }
+.doc-thumb--sheet .doc-cover__img { width: 100%; height: 100%; object-fit: cover; object-position: 0 0; }
+.doc-cover__grid { border-collapse: collapse; table-layout: fixed; font-size: 10px; line-height: 14px; color: var(--paper-ink); }
+.doc-cover__grid th, .doc-cover__grid td { max-width: 84px; padding: 3px 6px; border: 1px solid var(--paper-rule); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: left; }
+.doc-cover__grid th { background: var(--surface-secondary); font-size: 9px; font-weight: 500; color: var(--muted); text-align: center; }
+.doc-cover__grid tbody tr:first-child td { font-weight: 600; }
+/* IMAGE: the picture itself, cropped to fill. */
+.doc-thumb--image .doc-cover__img { width: 100%; height: 100%; object-fit: cover; }
+/* Searching, no cover image: the matching passage (SearchItems), on a page, at a size people can read. */
 .doc-thumb--focus { padding: 14px 16px 0; }
 .doc-focus { height: 100%; padding: 12px 14px; border-radius: 10px 10px 0 0; background: var(--surface); box-shadow: 0 0 0 1px var(--separator); font-size: 12px; line-height: 17px; color: var(--foreground); overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, #000 70%, transparent); mask-image: linear-gradient(to bottom, #000 70%, transparent); }
 .doc-focus__head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
 .doc-focus__title { font-size: 12px; line-height: 16px; font-weight: 600; letter-spacing: .01em; text-transform: uppercase; color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .doc-focus__page { flex: none; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .doc-focus p { margin: 0; }
-.doc-focus ul { margin: 0; padding-left: 16px; }
-.doc-focus li + li { margin-top: 3px; }
-.doc-focus li::marker { color: var(--muted); }
-.doc-focus table { width: 100%; border-collapse: collapse; font-size: 11px; line-height: 15px; }
-.doc-focus th, .doc-focus td { padding: 4px 6px; border-bottom: 1px solid var(--separator); text-align: left; vertical-align: top; }
-.doc-focus th { font-weight: 600; color: var(--muted); background: var(--surface-secondary); }
-.doc-thumb__page { position: absolute; left: 14px; top: 14px; width: calc((100% - 28px) / var(--thumb-scale)); transform: scale(var(--thumb-scale)); transform-origin: 0 0; }
-.doc-thumb .doc-page { max-width: none; margin: 0; border-radius: 16px; overflow: hidden; }
-.doc-thumb .doc-page:not(.doc-page--slide) { min-height: 1200px; }
-.doc-thumb--slide .doc-thumb__page { top: 50%; transform: scale(var(--thumb-scale)) translateY(-50%); }
-.doc-thumb .doc-page--sheet .doc-sheet { overflow: hidden; }
-/* No rendition (unsupported or not readable): a calm, typed tile. */
+/* No cover (not made yet, or nothing to show): a calm, typed tile. */
 .doc-thumb--blank { display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-end; gap: 6px; padding: 14px 16px; }
 .doc-thumb--blank .file-icon { margin-bottom: auto; }
 .doc-thumb--blank .doc-thumb__kind { font-size: 12px; line-height: 16px; }

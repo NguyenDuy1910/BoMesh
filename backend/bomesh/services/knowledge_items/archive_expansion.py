@@ -6,7 +6,7 @@ upload record and object a person gets by uploading that file directly —
 registered ``pending`` with its original stored. Expansion happens inside the
 Ingestion Run that processes the archive; the run then takes the members in
 as its own items, so they go through the same core as everything else. This
-module knows nothing of runs or Temporal.
+module knows nothing of runs or the worker executing them.
 
 Children sit directly under the Collection, not under the archive Document:
 retrieval scopes every chunk by its Document's Collection

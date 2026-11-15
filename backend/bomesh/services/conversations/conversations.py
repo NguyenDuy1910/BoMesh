@@ -78,7 +78,7 @@ class ConversationResourceService:
         self._sessions = sessions
         self._secret = request_hash_secret
         self._chat = chat
-        self._resolver = WorkspaceResolver(sessions)
+        self._resolver = WorkspaceResolver()
 
     @classmethod
     def from_runtime(cls, runtime: AppRuntime) -> ConversationResourceService:

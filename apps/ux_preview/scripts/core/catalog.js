@@ -229,7 +229,7 @@ const studioHref = (tab, q = {}) => '/studio?' + new URLSearchParams({ tab, ...q
     sync held back), issues (what couldn't be processed) or quality (part = reverify | details | duplicates). */
 const docsHref = (view = 'all', q = {}) => studioHref('documents', { view, ...q });
 /** Knowledge Studio → Topics: view topics (the tree and a topic's detail; node = a topic) or suggestions (what the
-    pipeline wasn't sure of and what reviewers' corrections suggest). */
+    assistant left for people and what reviewers' corrections suggest). */
 const topicsHref = (view = 'topics', q = {}) => studioHref('topics', { view, ...q });
 const onStudioTab = (tab, view) => S.cur?.r.page === 'studio' && S.cur.query.tab === tab && (!view || (S.cur.query.view || '') === view);
 

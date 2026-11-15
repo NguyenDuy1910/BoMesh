@@ -43,6 +43,7 @@ from bomesh.services.knowledge_items.names import (
 )
 from bomesh.services.knowledge_items.records import (
     ContentRecord,
+    Cover,
     ItemRecord,
     LinkRecord,
     NewCollection,
@@ -103,6 +104,31 @@ class ItemQualityIssue(ProtoMessage):
     related_item: str | None = None
 
 
+class DocumentCover(ProtoMessage):
+    kind: Literal["PAGE", "SLIDE", "SHEET", "TEXT", "IMAGE"]
+    image_uri: str | None = None
+    width_pixels: int | None = None
+    height_pixels: int | None = None
+    title: str | None = None
+    lines: list[str] | None = None
+    cells: list[list[str]] | None = None
+
+
+def cover_message(cover: Cover | None) -> DocumentCover | None:
+    """``DocumentCover`` of a projected cover; empty text fields are omitted."""
+    if cover is None:
+        return None
+    return DocumentCover(
+        kind=cover.kind,  # type: ignore[arg-type]
+        image_uri=cover.image_uri,
+        width_pixels=cover.width_pixels,
+        height_pixels=cover.height_pixels,
+        title=cover.title,
+        lines=list(cover.lines) or None,
+        cells=[list(row) for row in cover.cells] or None,
+    )
+
+
 class DocumentFacet(ProtoMessage):
     file_name: str | None = None
     mime_type: str | None = None
@@ -110,6 +136,8 @@ class DocumentFacet(ProtoMessage):
     purpose: Purpose | None = None
     document_type: str | None = None
     topics: list[str] | None = None
+    #: Output only: the subset of ``topics`` the assistant applied.
+    assistant_topics: list[str] | None = None
     summary: str | None = None
     language_code: str | None = None
     owner: str | None = None
@@ -126,7 +154,7 @@ class DocumentFacet(ProtoMessage):
     origin: ItemOrigin | None = None
     merged_into: str | None = None
     quality_issues: list[ItemQualityIssue] | None = None
-    thumbnail_uri: str | None = None
+    cover: DocumentCover | None = None
     upload_uri: str | None = None
 
 
@@ -231,6 +259,7 @@ def _document(record: ItemRecord) -> DocumentFacet:
         purpose=facet.purpose,  # type: ignore[arg-type]
         document_type=facet.document_type,
         topics=[topic_name(ws, code) for code in facet.topics],
+        assistant_topics=[topic_name(ws, code) for code in facet.assistant_topics],
         summary=facet.summary,
         language_code=facet.language_code,
         owner=member_name(ws, facet.owner_id) if facet.owner_id else None,
@@ -259,7 +288,7 @@ def _document(record: ItemRecord) -> DocumentFacet:
         ),
         merged_into=item_name(ws, facet.merged_into) if facet.merged_into else None,
         quality_issues=[] if facet.editor else None,
-        thumbnail_uri=facet.thumbnail_uri,
+        cover=cover_message(facet.cover),
         upload_uri=facet.upload_uri,
     )
 
@@ -710,18 +739,28 @@ def facet_value_name(workspace_id: UUID, field: str, value: str) -> str:
 REFERENCE_FIELDS = ("parentItem", "ancestors")
 
 
-def item_filters(workspace_id: UUID, processing_version: str) -> FilterSchema:
-    """The AIP-160 fields of ListItems and SearchItems."""
+def item_filters(
+    workspace_id: UUID, processing_version: str, *, field: str = "filter"
+) -> FilterSchema:
+    """The AIP-160 fields of ListItems and SearchItems (and of ingestion selectors).
+
+    ``field`` names the request field in INVALID_ARGUMENT errors.
+    """
 
     def item_reference(name: str) -> UUID | None:
-        return parse_item(name, workspace_id, field="filter") if name else None
+        return parse_item(name, workspace_id, field=field) if name else None
+
+    def topic_reference(name: str) -> str:
+        return parse_topic(name, workspace_id, field=field)
 
     return FilterSchema(
         {
             "name": resource_name(Item.id, item_reference),
             "parentItem": resource_name(Item.parent_item_id, item_reference),
             "ancestors": repeated(
-                resource_name(Item.id, item_reference), has=queries.has_ancestor
+                resource_name(Item.id, item_reference),
+                has=queries.has_ancestor,
+                present=Item.parent_item_id.is_not(None),
             ),
             "itemType": enum(queries.ITEM_TYPE, ("COLLECTION", "DOCUMENT")),
             "displayName": string(Item.title),
@@ -729,12 +768,18 @@ def item_filters(workspace_id: UUID, processing_version: str) -> FilterSchema:
             "document.documentType": string(Item.document_type),
             "document.purpose": enum(queries.PURPOSE, ("KNOWLEDGE", "CONVERSATION_ATTACHMENT")),
             "document.topics": repeated(
-                resource_name(Item.id, lambda name: parse_topic(name, workspace_id, field="filter")),
+                resource_name(Item.id, topic_reference),
                 has=queries.has_topic,
+                present=queries.HAS_TOPICS,
+            ),
+            "document.assistantTopics": repeated(
+                resource_name(Item.id, topic_reference),
+                has=queries.has_assistant_topic,
+                present=queries.HAS_ASSISTANT_TOPICS,
             ),
             "document.owner": resource_name(
                 queries.OWNER_ID,
-                lambda name: str(parse_member_name(name, workspace_id, field="filter")),
+                lambda name: str(parse_member_name(name, workspace_id, field=field)),
             ),
             "document.publicationState": enum(queries.PUBLICATION_STATE, ("PUBLISHED", "UNPUBLISHED")),
             "document.contentState": enum(queries.CONTENT_STATE, ("PENDING", "AVAILABLE", "FAILED")),
@@ -743,13 +788,14 @@ def item_filters(workspace_id: UUID, processing_version: str) -> FilterSchema:
                 ("PENDING", "RUNNING", "SUCCEEDED", "FAILED", "OUTDATED", "UNSUPPORTED"),
             ),
             "document.origin.source": resource_name(
-                queries.SOURCE_CODE, lambda name: parse_source(name, workspace_id, field="filter")
+                queries.SOURCE_CODE, lambda name: parse_source(name, workspace_id, field=field)
             ),
             "document.verification.state": enum(
                 queries.VERIFICATION_STATE, ("VERIFIED", "REVIEW_DUE", "UNVERIFIED")
             ),
             "updateTime": timestamp(Item.updated_at),
-        }
+        },
+        field=field,
     )
 
 
@@ -782,7 +828,11 @@ def referenced_items(filter_text: str | None, workspace_id: UUID) -> frozenset[U
     """Items a filter names (``parentItem``, ``ancestors``): the caller must read them."""
     ids: set[UUID] = set()
     for restriction in restrictions(parse(filter_text)):
-        if restriction.field in REFERENCE_FIELDS and restriction.value.text:
+        if (
+            restriction.field in REFERENCE_FIELDS
+            and restriction.value.text
+            and not restriction.is_presence
+        ):
             ids.add(parse_item(restriction.value.text, workspace_id, field="filter"))
     return frozenset(ids)
 

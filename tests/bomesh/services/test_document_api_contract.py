@@ -17,6 +17,8 @@ from config.env_config import boolean as _environment_boolean
 BACKEND = Path(__file__).resolve().parents[3] / "backend" / "bomesh"
 # Physical deletes of stored bytes and index points: the purge after
 # ``purgeTime`` (item_model.md §7), behind the storage and index adapters.
+# Workspace media without revisions (a replaced map background) are dropped
+# through ``DocumentStorage.delete``, never through these calls.
 PURGE_BOUNDARIES = {
     "storage/aws_s3.py": "delete_object(",
     "document_index/_qdrant.py": ".client.delete(",

@@ -8,10 +8,7 @@ from bomesh.services.knowledge_curation.contributions import (
     member_contributions,
     review_queue_count,
 )
-from bomesh.services.knowledge_curation.reading_lists import (
-    featured_item_ids,
-    reading_list_summaries,
-)
+from bomesh.services.knowledge_curation.reading_lists import home_reading_lists
 from bomesh.services.knowledge_curation.topics import topic_count, topic_summaries
 from bomesh.db.models import ItemTopic
 from bomesh.iam.authorizer import Principal
@@ -49,9 +46,14 @@ async def test_home_summaries_respect_visibility(scene: Scene) -> None:
         assert (summary.code, summary.document_count) == ("people", 1)
         assert [(t.code, t.document_count) for t in summary.top_topics] == [("hiring", 1)]
         assert await topic_count(session, scene.ws.id) == 1
-        [shared] = await reading_list_summaries(session, authorizer, member, scene.ws.id, limit=5)
+        featured, [shared] = await home_reading_lists(
+            session, authorizer, member, scene.ws.id, featured_limit=5, limit=5
+        )
         assert (shared.code, shared.item_count) == ("team", 1)
-        assert await featured_item_ids(session, authorizer, member, scene.ws.id, limit=5) == [readable.id]
+        assert featured == [readable.id]
+        assert await home_reading_lists(
+            session, authorizer, member, scene.ws.id, featured_limit=0, limit=0
+        ) == ([], [])
         [mine] = await member_contributions(session, scene.ws.id, scene.member.id, limit=5)
         assert (str(mine.contribution_id), mine.display_name, mine.state) == (
             contribution["name"].rsplit("/", 1)[1],

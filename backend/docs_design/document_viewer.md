@@ -130,7 +130,8 @@ regenerating one keeps the other when the source has not changed.
   revision (download, "open original", truncated renditions).
 
 No other endpoint serves the rendition; all signed URLs are issued per
-request after the `items.get` check, short-lived. Object storage must allow
+request after the `items.get` check, short-lived (a cover image's within an
+aligned window, below). Object storage must allow
 cross-origin `GET` from the web origin. Local RustFS sends no CORS headers
 until a bucket rule exists; `rustfs-init` applies one
 (`RUSTFS_CORS_ALLOWED_ORIGINS`). An S3/R2 bucket needs the same rule.
@@ -138,12 +139,62 @@ until a bucket rule exists; `rustfs-init` applies one
 ### Cover on the Item
 
 A list must show what a document looks like without reading each document's
-content, so the Item carries `document.thumbnailUri`: the signed first page
-image of the current revision, read from the revision's preview manifest.
-It is output-only, absent for a format with no page images, and reset when
-approval or rollback changes the current revision. A grid of N documents
-therefore costs **one list call**, not N+1: `GetItemContent` stays for reading
-a document, not for drawing its card.
+content, so every Item carries `document.cover` and every Home entry `cover`
+(`DocumentCover`): the shape of the current revision's first page (`kind`)
+and either a small image of it (`imageUri`, `widthPixels`, `heightPixels`) or
+its first text (`title`, `lines[]`, `cells[][]`). A grid of N documents costs
+**one list call** and at most one signed URL per document, not N+1 content
+reads: `GetItemContent` stays for reading a document, not for drawing its
+card. Absent means not produced yet or nothing to show; the client then draws
+the format's typed tile. `imageUri` wins over the text when present.
+
+| Format | `kind` | Cover |
+| --- | --- | --- |
+| PDF | `PAGE` | page 1 rendered (pypdfium2) to a WebP ≤ 480 px wide |
+| PNG, JPEG, WebP, GIF | `IMAGE` | the picture scaled to ≤ 480 px wide (JPEG decoded at reduced scale) |
+| PPTX | `SLIDE` | the package's raster `docProps/thumbnail`, else slide 1's title and text |
+| DOCX | `PAGE` | the package's raster thumbnail, else the first heading and the paragraphs before the first page break |
+| XLSX | `SHEET` | the package's raster thumbnail, else the first sheet's name and top-left 6 × 5 cells |
+| CSV, TSV | `SHEET` | the first 6 × 5 cells |
+| TXT, Markdown, HTML | `TEXT` | the title (first `#` heading, `<title>`/`<h1>`) and first lines |
+| anything else | — | none: the typed tile |
+
+Nothing whole is rasterized and no office suite renders a page: an OOXML
+embedded thumbnail is used as is (EMF/WMF and blank template thumbnails are
+ignored), otherwise the text the package already holds is read with streaming
+XML and stops at the first page. Lines share 480 characters, so a text cover
+stays well under 1 KB; an image above 40 KB is encoded again at a lower
+quality.
+
+**When.** A cover is produced when the content arrives, not when the document
+is processed, so an unprocessed upload has one too. The `items` trigger
+`trg_items_cover` sends `pg_notify('bomesh_cover', item_id)` when a
+DOCUMENT's content becomes available or its current content changes (status
+to `ready`, a new `storage_key`: upload, new revision, approval, rollback).
+The ingestion worker LISTENs on its lock connection, queues the IDs in memory
+(deduplicated, at most 1,000) and produces one cover at a time in one of its
+document slots, so runs keep their throughput; a sweep at start and every ten
+minutes (keyset by ID, pages of 200, one replica at a time) produces what the
+notifications missed and backfills older documents. A cover is bounded:
+originals over 50 MB get none, production stops after 30 s, only page 1 is
+read. A file that cannot be read is recorded as `none` and not retried until
+its content changes. Requests never produce covers.
+
+**Stored.** `items.metadata.cover` (a few hundred bytes): `version`, `source`
+(the `storage_key` it shows), `kind`, and `key`/`width`/`height` of the image
+or `title`/`lines`/`cells`. The image is
+`previews/cover-v1/{sha256(storage_key)}.webp` under the Item's prefix,
+immutable and stored with `Cache-Control: private, max-age=31536000,
+immutable`. A cover whose `source` is not the Item's `storage_key` is ignored
+by reads and produced again; a revision change also drops it from the
+metadata (derived metadata), and writing a cover never changes `updateTime`
+or `etag`.
+
+**Read.** List, Search, GetItem and Home project `cover` from the loaded row:
+no query, one presign per document with an image. Its URL is signed at the
+start of a `BOMESH_PREVIEW_COVER_URL_SECONDS` window (default one hour) and
+valid for two, so every list in the window returns the same URL and the
+browser reuses its cached image.
 
 **No page count is exposed.** It would have to be derived per document, it is
 not a fact anyone acts on, and it exists today only because rasterizing a PDF
@@ -220,6 +271,21 @@ its own pages.
     page images), once per document version, and kept in an in-memory cache
     keyed by `item:version`; stepping between citations of one document never
     downloads it again, and concurrent requests share one fetch.
+  - Opening is cover-first: the quick preview and `/doc/{item}` draw the
+    Item's `cover` as the first page the moment they mount — its image
+    (already in the browser cache from the list), else its text in the
+    format's shape (a page with the title and first lines, a slide, the
+    first sheet's cells) — with a sized blank after it while `GetItemContent`
+    and the page images or the rendition load; a preview opened from a list
+    draws from the listed Item while `GetItem` refreshes it, so `GetItem` and
+    `GetItemContent` run in parallel. The real pages then replace the cover.
+    Without a rendition (not processed, `FAILED_PRECONDITION`) the cover
+    stays under the not-ready message.
+  - Page images are windowed: every page is a box of its exact size
+    (`widthPixels` × `heightPixels`), but only the pages two either side of
+    those in view hold an `<img>`; scrolling away unmounts it. A 50-page PDF
+    keeps 3–5 decoded pages instead of 50 (measured: 3 mounted, ≈ 38 MB of
+    bitmaps at 1600 px, against 50 and ≈ 632 MB when every page stays mounted).
   - Long documents and large sheets render with CSS `content-visibility: auto`
     on blocks and on row groups (100 rows each), so the browser lays out only
     what is on screen without a virtualization library. Tables are CSS grids

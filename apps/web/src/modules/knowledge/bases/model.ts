@@ -36,7 +36,7 @@ export const DESC_MAX = 200;
 /** Knowledge Studio → Collections. */
 export const COLLECTIONS_HREF = "/studio?tab=collections";
 
-/** A collection's management page (`tab` = access | sources | settings). */
+/** A collection's management page (`tab` = contents | access | sources | settings). */
 export const collectionHref = (collection: string | undefined, tab?: string) => `/studio/collections/${resourceId(collection)}${tab ? `?tab=${tab}` : ""}`;
 
 /** Preview `nameError`: required, ≤ 60 characters, unique among live collections (case-insensitive). */
@@ -158,6 +158,74 @@ export function withShares(policy: Policy, principals: readonly string[], role: 
 }
 
 export const ownerCount = (shares: readonly Share[]) => shares.filter((s) => s.role === "owner").length;
+
+/** Policy whose collection-role grants are exactly `shares` (other bindings kept): a folder's own access. */
+export function withExactShares(policy: Policy, shares: readonly Pick<Share, "principal" | "role">[]): Policy {
+  const kept = (policy.bindings ?? []).filter((b) => !roleKey(b.role));
+  const bindings = ROLES.map((role) => ({ role: ROLE_OF[role], members: shares.filter((s) => s.role === role).map((s) => s.principal) })).filter((b) => b.members.length);
+  return { ...policy, bindings: [...kept, ...bindings] };
+}
+
+/* ═══════════════ Folders ═══════════════ */
+
+/**
+ * A collection's folders (nested COLLECTION items; `item_model.md`): the structure Home draws and Contents
+ * manages. Indexed by name with each parent's folders by name.
+ */
+export interface FolderIndex {
+  /** The root collection's name. */
+  root: string;
+  byName: ReadonlyMap<string, Item>;
+  children: ReadonlyMap<string, readonly Item[]>;
+}
+
+export function folderIndex(root: string, folders: readonly Item[]): FolderIndex {
+  const byName = new Map(folders.map((f) => [f.name ?? "", f]));
+  const children = new Map<string, Item[]>();
+  for (const f of folders) {
+    const parent = f.parentItem ?? root;
+    children.set(parent, [...(children.get(parent) ?? []), f]);
+  }
+  for (const list of children.values()) list.sort((a, b) => (a.displayName ?? "").localeCompare(b.displayName ?? ""));
+  return { root, byName, children };
+}
+
+export const EMPTY_FOLDERS: FolderIndex = { root: "", byName: new Map(), children: new Map() };
+
+/** The folders from the top level down to `folder` (inclusive); empty for the collection itself. */
+export function folderPath(index: FolderIndex, folder: string | null | undefined): Item[] {
+  const out: Item[] = [];
+  for (let f = folder ? index.byName.get(folder) : undefined; f; f = index.byName.get(f.parentItem ?? "")) out.unshift(f);
+  return out;
+}
+
+/** `folder` and every folder under it. */
+export function folderSubtree(index: FolderIndex, folder: string): string[] {
+  const out = [folder];
+  for (let i = 0; i < out.length; i++) for (const k of index.children.get(out[i]!) ?? []) out.push(k.name ?? "");
+  return out;
+}
+
+/** A folder with its own access (`inheritAccess = false`): it replaces, never adds to, what's above it. */
+export const hasOwnAccess = (folder: Item | null | undefined) => folder?.collection?.inheritAccess === false;
+
+/** The nearest folder on the path with its own access (it decides who reads `folder`), else null. */
+export const accessFolder = (index: FolderIndex, folder: string | null | undefined) => folderPath(index, folder).reverse().find(hasOwnAccess) ?? null;
+
+/** "Payments › Disputes › Chargebacks" (preview `destLabel` / `where`). */
+export const whereLabel = (collectionName: string, index: FolderIndex, folder: string | null | undefined) =>
+  [collectionName, ...folderPath(index, folder).map((f) => f.displayName)].filter(Boolean).join(" › ");
+
+export const FOLDER_NAME_MAX = 80;
+
+/** Preview `folderNameError`: required, ≤ 80 characters, unique among its siblings (case-insensitive). */
+export function folderNameError(name: string, siblings: readonly Item[], selfName?: string): string {
+  const n = name.trim();
+  if (!n) return "Enter a name.";
+  if (n.length > FOLDER_NAME_MAX) return "Use 80 characters or fewer.";
+  const dup = siblings.find((x) => x.name !== selfName && (x.displayName ?? "").trim().toLowerCase() === n.toLowerCase());
+  return dup ? `“${dup.displayName}” is already here. Choose another name.` : "";
+}
 
 /* ═══════════════ Requests ═══════════════ */
 

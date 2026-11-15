@@ -81,11 +81,11 @@ The top-row title is the section name with the *Demo data* chip and the section'
 
 ### All
 
-The registry. Filters, shown once they would split the list: search, Collection, Publication, Origin (`?src=contrib` for contributions), Type, Topic. Above the table, one row of **processing state pills** with counts (a select on phones): All · Not processed · Processing · Processed · Failed · Outdated · Not supported (`?processing=`).
+The registry. Filters, shown once they would split the list: search, Collection, Publication, Origin (`?src=contrib` for contributions), Type, Topic. Above the table, one row of **processing state pills** without counts (the backend doesn't count documents per state; a select on phones): All · Not processed · Processing · Processed · Failed · Outdated · Not supported (`?processing=`).
 
-Columns: **Name** (collection › folder · origin: the source, the contributor, or the editor who uploaded it) · **Processing state** (a chip and one line — *Search can't find it*, *Reading, classifying, indexing…*, *Searchable · v2*, *Ready to publish*, the error, *The previous version answers*, *Download only*) · **Publication** · **Topics** (and who chose them: *Pipeline · 82 %*, *Suggested · 78 %* for a submission, *Set by a person*) · Updated · a row fix (*Process*, *Process again*, *Process the update*, *Publish*) and ⋯. There is no Visibility column: who can read a document is its collection's (or folder's) audience. Each first sync at scale adds one counted row (*Operations archive · First sync — 2,950 documents held for a decision · Counted, not listed*) with *Open sync*.
+Columns: **Name** (collection › folder · origin: the source, the contributor, or the editor who uploaded it) · **Processing state** (a chip and one line — *Search can't find it*, *Reading, classifying, indexing…*, *Searchable · v2*, *Ready to publish*, the error, *The previous version answers*, *Download only*) · **Publication** · **Topics** (and who chose them: *Assistant*, *Suggested* for a submission, *Set by a person*; no confidence) · Updated · a row fix (*Process*, *Process again*, *Process the update*, *Publish*) and ⋯. There is no Visibility column: who can read a document is its collection's (or folder's) audience. Each first sync at scale adds one counted row (*Operations archive · First sync — 2,950 documents held for a decision · Counted, not listed*) with *Open sync*.
 
-**Bulk bar.** Selecting rows shows "N selected"; with the whole page selected, *Select all {matching}* extends the selection to every document the filters match. Actions: **Process** (opens the Process dialog) · Publish · Unpublish · Archive, each with Undo where it can be undone.
+**Bulk bar.** Selecting rows shows "N selected"; with the whole page selected, *Select all matching* (no number) extends the selection to every document the filters match, and the bar then reads *All matching selected*. Actions: **Process** (opens the Process dialog) · Publish · Unpublish · Archive, each with Undo where it can be undone.
 
 ### Review
 
@@ -107,19 +107,19 @@ Keeping published knowledge healthy, as parts: **Re-verify** (expired or never v
 
 **The Process dialog** asks for one decision and offers one optional input. It never publishes: people review, then publish.
 
-- **Header:** "Process N documents", with a subtitle saying the AI reads each file and suggests topics, plus the estimate ("About X min for N pages; you can keep working").
+- **Header:** "Process N documents" for checked rows, with a subtitle saying the AI reads each file and suggests topics, plus the estimate ("About X min for N pages; you can keep working"). For *Select all matching* (a filter, not a counted list) it reads "Process the matching documents", with no estimate.
 - **Topics:** a segmented control, *All topics* | *Selected*, with one hint line under it ("The AI suggests from all 26 topics." / "…only from these 6 topics.").
   - *Selected* starts from the usual topics of the documents' collection (its listed topics, then those its documents carry most, at most eight), when the selection comes from a single collection.
   - *Use {collection}'s topics* adds them again in one click.
   - Chosen topics show as neutral chips, five at a time with "+N more". *Add topic…* also offers whole domains.
   - *Selected* with no topics shows an inline error when the person tries to process.
 - **Context for the AI** (optional): a quiet *Add* link that opens a two-line field (e.g. "Scanned decisions and notices, 2015–2024").
-- **Layout:** sections are separated by hairlines, with no nested boxes, step list or outcome summary. Footer: *Cancel* · **Process N documents**.
+- **Layout:** sections are separated by hairlines, with no nested boxes, step list or outcome summary. Footer: *Cancel* · **Process N documents** (**Process** for all matching).
 
 Confirming starts one ingestion run with that classification context: `X.processRun(docs, { context: { topics, note } })` in `features/documents.js`.
 
 - Only the chosen topics are candidates (`topicMatches(…, only)`), and the context is read with each title.
-- Topics the pipeline chose before are chosen again within the context; topics a person chose stay.
+- Topics the assistant applied before are picked again within the context; topics a person chose stay.
 - The context stays on each document (`classCtx`), so later topic changes re-check it within the same choices.
 - The drawer's Processed step adds "among N topics chosen for its run · with context for the AI".
 - The toast reads *Processing N documents · Show them*.
@@ -137,7 +137,7 @@ Confirming starts one ingestion run with that classification context: `X.process
 
 `/studio?tab=topics&view=topics|suggestions`. The topics documents are classified under when they are processed.
 
-- **Topics** (`view=topics`, workspace admins only): the domain → topic tree beside an editable detail, the auto-tag threshold, import/export and the classification prompt — described in [DOCUMENT_LIFECYCLE.md](DOCUMENT_LIFECYCLE.md#topics). Saving a topic, importing, or adding a keyword or example re-checks the processed documents the pipeline tagged (`reclassifyPublished(before)`; people's choices stay); only documents whose result changes move. Toast: "Added "đối soát" to Reconciliation · 222 documents re-checked, 1 document changed topic. No re-indexing needed." with one Undo. The **auto-tag threshold** (*Auto-tag at 60 / 70 / 80 / 90 % sure*, `D.classPolicy.threshold`, default 70 %): below it a processed document gets no topic and is listed in Suggestions. **Show the classification prompt** (⋯) opens what processing sends the model, compiled from the topics as they are now: the rules checked first without a model call (source / folder path → topic), then `document_profile.md` (instructions, the threshold, `<taxonomy>`, the `<document>` slot, the JSON output schema), then the `<document_profile>` block; Copy prompt and a token estimate.
+- **Topics** (`view=topics`, workspace admins only): the domain → topic tree beside an editable detail, import/export and the classification prompt — described in [DOCUMENT_LIFECYCLE.md](DOCUMENT_LIFECYCLE.md#topics). Saving a topic, importing, or adding a keyword or example re-checks the processed documents the assistant tagged (`reclassifyPublished(before)`; people's choices stay); only documents whose result changes move. Toast: "Added "đối soát" to Reconciliation · 222 documents re-checked, 1 document changed topic. No re-indexing needed." with one Undo. There is **no classification threshold**: the assistant picks topics among the candidates and they're applied as assistant-applied; a document it gives none is listed in Suggestions. A topic's **Rules** are *Documents in* a collection (its whole subtree) or *Documents from* a source; a document a rule matches gets exactly the matching rules' topics without asking the model. **Show the classification prompt** (⋯) opens what processing sends the model, compiled from the topics as they are now: the rules checked first without a model call (documents in a collection / from a source → topic), then `document_profile.md` (instructions, `<taxonomy>`, the `<document>` slot, the JSON output schema with topic codes and no confidence), then the `<document_profile>` block; Copy prompt and a token estimate.
 
 ### Suggestions
 
@@ -145,15 +145,15 @@ Confirming starts one ingestion run with that classification context: `X.process
 
 - **Topics the assistant proposes** — Accept · Rename · Change domain · Merge into (adds the name as a synonym) · Dismiss; workspace admins decide, others see them read-only.
 - **Keywords from reviewers' corrections** — one card per topic reviewers moved documents to: *Reviewers moved 3 documents to Reconciliation*, where the pipeline had filed them, and **Add as a keyword** chips for phrases two or more of their titles share (`correctionSuggestions()`: two-word phrases, single English words, acronyms; never a fragment of a stop phrase such as "giao dịch"). *Misled by "napas", a keyword of Payments & settlement* names the word that sent them astray. Also *Add as examples* · *Open topic* · *Dismiss*. One correction isn't a pattern: its card offers examples only.
-- **Topics to confirm** — a first sync's topic groups: *Confirm topic* · *Move to another topic…*.
-- **Documents without a topic** — *Add topic*.
+- **Topics to confirm** — a first sync's topic groups (published with the topics the assistant applied, or without one): *Confirm topic* · *Move to another topic…*.
+- **Without a topic** — processed documents the assistant gave no topic: *Add topic*.
 
 ## The 1,000-document flow
 
 1. Documents → All → the **Not processed** pill.
 2. Optionally narrow by Collection, Type or search (e.g. a year).
-3. Select the page checkbox, then **Select all 1,000**.
-4. **Process** → the dialog → *Process 1,000 documents*.
+3. Select the page checkbox, then **Select all matching**.
+4. **Process** → the dialog → *Process the matching documents* → **Process**.
 5. The processing strip shows progress; keep working, *Show them* or *Stop*.
 6. A toast reports the result; failures go to Issues (*See issues*).
 
@@ -205,7 +205,7 @@ Folder access is enforced where everything else is (`canReadFolder` in `core/cat
 | No order | New admins didn't know to load topics before connecting a 100k-file drive | The setup guide: Create collections → Load your topics → Add sources → Check the first sync — in full only in an empty workspace, then one Needs attention row for the next step |
 | Review, Documents and Taxonomy were three sections, then one pipeline page with a stage bar | Workflow names didn't match domain resources; one bar mixed publication and processing; uploads were processed implicitly, so 1,000 uploaded documents couldn't be chosen from | **Documents** (All · Review · Issues · Quality) and **Topics** (Topics · Suggestions), named after resources; publication and processing are two independent states; processing is an explicit run over a selection |
 | A sticky tab bar Review · Documents │ Collections · Taxonomy · Sources | A tab bar doesn't scale as features are added, and repeated the sidebar's job | Sections are sidebar sub-rows of Knowledge Studio, each with its own count |
-| Master data tab with a topic drawer | Topics were a list of keywords; nothing explained or tested classification | Topics: a tree beside an editable detail with synonyms, examples, guidance, rules and a test box ([DOCUMENT_LIFECYCLE.md](DOCUMENT_LIFECYCLE.md#topics)), plus the threshold and the prompt; what corrections suggest is in Suggestions |
+| Master data tab with a topic drawer | Topics were a list of keywords; nothing explained or tested classification | Topics: a tree beside an editable detail with synonyms, examples, guidance, rules and a test box ([DOCUMENT_LIFECYCLE.md](DOCUMENT_LIFECYCLE.md#topics)), plus the prompt; what corrections suggest is in Suggestions |
 | Reviewers' topic changes were lost | The same misfiling repeated on every sync; admins guessed keywords | Corrections are recorded at approval and turned into keyword candidates in Topics → Suggestions |
 | A collection page with Access · Sources · Settings and *View documents* | Its structure (the folders Home draws) couldn't be seen or changed anywhere; editors who don't own a collection got a page with only its sources; Home's *Edit structure* led to cards | Contents first: the folder tree and the open folder's folders and documents, folder create · edit · move · remove, document moves, folders with their own access. Home's inspector has *Edit in Studio* for the box you selected |
 | Move to a collection only, with a flat list | Documents couldn't be filed into a folder; the dialog said access "follows the new collection" without saying what that meant | One destination tree (collection › folders) for documents and folders, with who will see what moves and a warning when it changes |
@@ -244,9 +244,9 @@ The Add source wizard: **App → Account → Content → Destination**. Accounts
 | Review only what's uncertain | Clean, classified files; changed published files republish | New files with a risk flag — personal data, ≥ 0.55 similar to a published document (likely duplicate), a likely new version — as submissions; at scale grouped into batches by reason | Large or mixed sources; the default at scale |
 | Review everything | Nothing until approved | Every new or changed file, one submission each | Small or untrusted feeds (a website, a shared inbox) |
 
-Classification confidence never holds a file back under any policy: a file filed below the auto-tag threshold, or without a topic, is published and listed in Topics → Suggestions. A sync processes what it brings in: the sync is that source's explicit ingestion run.
+Classification never holds a file back under any policy: a file the assistant gives no topic is published and listed in Topics → Suggestions. A sync processes what it brings in: the sync is that source's explicit ingestion run.
 
-**The Sources list** has no alert banners above it. Each row carries its own fix as its one visible row action, in priority: first sync *Pause*/*Resume* · *Cancel* (syncing) · **Reconnect** (account expired) · **Retry** (failed) · *Resume* (paused) · **Publish n** (synced files waiting) · a quiet *Sync now* icon (healthy). There is no *Publish all* bulk action. An expired account no source uses shows in the views control label ("Accounts · n expired").
+**The Sources list** has no alert banners above it. Each row carries its own fix as its one visible row action, in priority: first sync *Pause*/*Resume* · *Cancel* (syncing) · **Reconnect** (account expired) · **Retry** (failed) · *Resume* (paused) · **Process n** (synced documents waiting to be processed: a processing run over them, toast "Processing n documents from {source}"; runs never publish) · a quiet *Sync now* icon (healthy). There is no *Process all* bulk action. An expired account no source uses shows in the views control label ("Accounts · n expired").
 
 ## The 100,000-document walkthrough
 
@@ -276,16 +276,16 @@ flowchart LR
   G -->|clean| I["Indexed<br/>processed by the sync"]
   I --> P["Live · 58,470<br/>searchable as read"]
   G -->|personal data · duplicate · new version| B["Held for a decision · 2,950<br/>in 3 batches<br/>processed by the sync, unpublished"]
-  P --> T["Topics: 52,800 confident<br/>1,860 to confirm · 3,810 no topic"]
+  P --> T["Topics: 52,800 filed<br/>1,860 to confirm · 3,810 no topic"]
 ```
 
 - **Issues by error class, each with its fix**: 120 password-protected (remove the password at the source), 210 scanned without text (OCR is a platform policy), 80 larger than 100 MB.
-- **Classification split** as a stacked bar (confident · to confirm · no topic) with *Confirm topics* → `/studio?tab=topics&view=suggestions`.
+- **Classification split** as a stacked bar (filed under a topic · to confirm · no topic) with *Confirm topics* → `/studio?tab=topics&view=suggestions`.
 - **Held for review**: the open batches by reason with *Open review* → `/studio?tab=documents&view=review`, plus a declined count once batches are declined. Both links close the drawer first.
 - Footer: *Open source* · *Pause / Resume*; a paused run shows a *Paused* chip. Pause toggles run `paused`/`running` and source `paused`/`syncing`, with Undo.
-- **Tick** (prototype): every 3 s, only while the Sources section or a source/run drawer is visible, about rate/20 files are added to read, classified, published and confident topics. Held batches and topics to confirm stay fixed so they keep matching the batches and topic groups. At the end the run completes, the source turns healthy and a toast says so.
+- **Tick** (prototype): every 3 s, only while the Sources section or a source/run drawer is visible, about rate/20 files are added to read, classified, published and filed under a topic. Held batches and topics to confirm stay fixed so they keep matching the batches and topic groups. At the end the run completes, the source turns healthy and a toast says so.
 
-Counters keep one invariant: **classified = published + review + declined**; topics (confident + to confirm + no topic) are counted for published files.
+Counters keep one invariant: **classified = published + review + declined**; topics (filed + to confirm + no topic) are counted for published files.
 
 ### 3. What people decide (minutes, not months)
 
@@ -295,7 +295,7 @@ Counters keep one invariant: **classified = published + review + declined**; top
 
 | Batch | Decisions | Counter change on `run.backfill` (Undo reverses) |
 | --- | --- | --- |
-| 2,140 possible duplicates | *Keep the published ones* (declined) · *Publish them too* | Decline: review −n, declined +n · Approve: review −n, published +n, topics.confident +n |
+| 2,140 possible duplicates | *Keep the published ones* (declined) · *Publish them too* | Decline: review −n, declined +n · Approve: review −n, published +n, topics.filed +n |
 | 610 with personal data | *Keep unpublished* · *Publish anyway…* (dialog naming who would see them; still has Undo) | as above |
 | 200 possible new versions | *Publish as new versions* (replace current) · *Keep current versions* | Replace: review −n, published +n (no topic count, so published ends slightly above the topic sum) · Keep: declined |
 
@@ -303,8 +303,8 @@ Counters keep one invariant: **classified = published + review + declined**; top
 
 | Card | Shows | Actions | Counter change |
 | --- | --- | --- | --- |
-| Topic group (Cards & disputes 940, Reconciliation 520, Payments & settlement 400) | Topic, code, domain, count, confidence range, matched keywords, sample disclosure | *Confirm topic* (secondary) · ⋯ → *Move to another topic…* (same domain first), *Edit topic keywords…* (admins) | topics.confirm −n, topics.confident +n |
-| No topic (3,810) | The assistant's recurring themes with keywords (Merchant onboarding 1,240, Branch operations 980) | *Create topic & tag* (workspace admins): creates the topic under Banking Operations with the next free code and the keywords, or reuses one of that name; then *N still without a topic — add keywords in Topics* | topics.none −n, topics.confident +n |
+| Topic group (Cards & disputes 940, Reconciliation 520, Payments & settlement 400) | Topic, code, domain, count, matched keywords, sample disclosure | *Confirm topic* (secondary) · ⋯ → *Move to another topic…* (same domain first), *Edit topic keywords…* (admins) | topics.confirm −n, topics.filed +n |
+| No topic (3,810) | The assistant's recurring themes with keywords (Merchant onboarding 1,240, Branch operations 980) | *Create topic & tag* (workspace admins): creates the topic under Banking Operations with the next free code and the keywords, or reuses one of that name; then *N still without a topic — add keywords in Topics* | topics.none −n, topics.filed +n |
 
 Every decision writes an audit entry, toasts with Undo, opens the next entry and updates the same counters everywhere (Sources row, run drawer, Review and Suggestions, Knowledge health, and All's counted row for the sync). A topic created this way shows *Unused* in Topics, because usage counts real documents.
 
@@ -337,22 +337,18 @@ Scheduled syncs read only changes and process what they bring in. A changed file
 ## Backend alignment and open decisions
 
 - **Matches `backend/docs_design`:** Source → one target collection; `publishingPolicy` per source; nothing is processed on upload and ingestion runs are explicit, recording tasks per item with error classes; `indexingState` (PENDING / RUNNING / SUCCEEDED / FAILED / OUTDATED / UNSUPPORTED) is the processing state, independent of `publicationState`; approval never starts ingestion; topics are a two-level taxonomy; contextual chunk descriptions (`contextual_rag.md`) are generated per passage.
+- **In the contract (`CreateIngestionRun`):** the Process dialog sends `selector {items[] | filter}` — *Select all matching* sends the ListItems filter the list shows — and `classification {topics[], note}` (empty topics = all); runs never publish; Stop is `:cancel` (what's done stays processed, the rest returns to PENDING); *Process again* is `:retry`, which keeps the classification; *Approve and process* is ApproveContribution, then CreateIngestionRun with the document in `items[]`. The CLASSIFYING step runs inside contextual retrieval (`BOMESH_CONTEXTUALIZATION_MODEL`, `document_profile.md`): rules first, else one model call that picks topics and writes a summary; **no threshold**, assistant-applied topics are `item_topics` rows without a creator (never in the index), people's topics are never replaced.
+- **In the contract (Topics, `api_design.md` §5):** a topic's `keywords[]`, `synonyms[]`, `guidance`, `examples[]` (≤ 5 documents) and `rules[]` (`{collection}` subtree or `{source}`; a matching rule settles the topic without the model); `document.assistantTopics[]` (the *Assistant* label; the rest of `document.topics` is *Set by a person*); ListItems `NOT document.topics:*` (*Without a topic*) and `document.assistantTopics:"…"`; *Topics to confirm* → `topics/{topic}:confirmAssignments {filter}`; *Keywords from reviewers' corrections* → `topicCorrections` (List with `state`/`toTopics:`, `:dismiss`), recorded by ApproveContribution `recordCorrection` (the *Use my change to improve classification* checkbox) and by Edit details replacing the assistant's topics — phrase aggregation stays in the client; Import → `topics:import {rows[], mode MERGE|REPLACE, validateOnly}` (the client parses CSV/XLSX and exports from ListTopics); *Test classification* → `topics:testClassification` (unsaved changes as `topics[]`); *Show the classification prompt* → `topics:compileClassificationPrompt`.
 - **Needs backend design** (the prototype doesn't change `backend/docs_design`):
-  - **Explicit ingestion runs over a selection**: a run created from an explicit item selection or a filter (states, ancestor, type), with a **classification context** (candidate topic ids, empty = all; a free-text note for the classifier), progress (done / failed / total) and Stop (what's done stays processed; the rest returns to PENDING); a run-progress read (the Operation) for the Documents processing strip. Runs never publish.
-  - **Approve and process**: two calls — approve the contribution, then create an ingestion run for it; the preview's default-on *Process it now* maps to that.
-  - **Classify as an ingestion phase**: a `classifying` phase between reading and indexing, one call per document with a new `document_profile.md` prompt (type, summary, topics with confidence, proposed topic, risk flags) compiled from the topics; its type and summary become a `<document_profile>` block in `contextual_rag.md`. Rules checked first (source, folder path, file type) skip the model call.
-  - **Topics in index metadata only**: topic ids stored as filterable payload on each passage, never in its text; a rule change triggers a metadata re-check (re-classify published, pipeline-tagged documents whose result changes; `classifiedBy` = pipeline | person keeps people's choices), not a re-index. The index's freshness records the rules version it was classified with.
-  - **Processing-state aggregation**: counts per `indexingState` (PENDING · RUNNING · SUCCEEDED · FAILED · OUTDATED · UNSUPPORTED) for the caller's collections and the current filter, for All's pills and *Select all matching*.
-  - **Classification corrections**: a resource recording a reviewer's topic change (document, from, to, who, when, status open | used | dismissed), created on approval when the reviewer keeps *Use my change to improve classification*, and by Edit details; a read-only aggregation of shared title phrases per target topic for the admin.
-  - **Classification policy**: the workspace's auto-tag threshold (60–90 %), below which a document is published without a topic and listed for classification.
+  - **Classification output** beyond topics and summary: type, proposed topic and risk flags.
+  - Rules beyond a collection subtree or a source (folder-path or file-type rules) are out of scope by decision: the preview and the contract have only these two kinds.
+  - **No processing-state counts** (decided): the backend has no per-`indexingState` aggregation, so All's pills and *Select all matching* carry no numbers, and the Process dialog says "Process the matching documents" for an all-matching selection ("Process N documents" only for checked rows). The processing strip keeps the run's own counts, which the run exposes.
   - `publishingPolicy` gains `REVIEW_EXCEPTIONS` (*Review only what's uncertain*): publish unless a risk flag is raised; flagged files open SOURCE contributions.
   - Source filters (file types, excluded paths, modified-since) and a validate-only estimate (`sources:estimate` or `validateOnly` on CreateSource).
   - Run stage counters at scale (found, filtered by reason, read, classified, indexed, published, held, declined) and error classes with counts; pause/resume of a run.
   - Held batches: grouping open SOURCE contributions of one run by flag, with bulk approve/reject (`contributions:batchApprove`-style custom methods).
-  - Classification confidence per document and bulk topic confirmation/move; proposals derived from untagged clusters.
-  - Topic `code` and `keywords[]`, import/export of the topics (see DOCUMENT_LIFECYCLE.md).
-  - Topic classification signals beyond keywords: `synonyms[]`, `rules[]` (source · folder path · file type; is/contains), `examples[]` (document ids) and free-text `guidance` for the assistant; import/export columns `synonyms, guidance`.
+  - Moving a first sync's topic group to another topic in bulk; proposals derived from untagged clusters.
   - Contributor-confirmed metadata on `CreateContribution`: the chosen collection plus the confirmed type, topics and summary (`confirmed`, `kbBy: CONTRIBUTOR`), so review shows what the contributor confirmed rather than re-running suggestions.
-  - Studio aggregation: counts per Documents view and Quality part, processing state and Suggestions group, for the caller's collections — for the tabs, the badge and Overview → Knowledge health — one endpoint instead of client-side counting.
+  - Studio aggregation: counts per Documents view and Quality part and per Suggestions group, for the caller's collections — for the tabs, the badge and Overview → Knowledge health — one endpoint instead of client-side counting (not per processing state; see above).
   - Linked documents on a collection (`item_links`) surfaced as a per-collection count.
   - Folder fields the UI uses beyond the hierarchy: a folder's `description` and `level` (Kind) and its sibling `order` (already listed for Home); `inheritAccess = false` with its own IAM policy is in the design.

@@ -22,7 +22,6 @@ import {
   featuredItemIds,
   getContribution,
   getItem,
-  getItemContent,
   getMember,
   getReadingList,
   getSource,
@@ -54,9 +53,8 @@ import {
   type SavedSearch,
   type SearchItemsRequest,
 } from "./api";
-import { glanceOf, toResource, topicNames, type Glance, type ModelContext, type Resource } from "./model";
+import { toResource, topicNames, type ModelContext, type Resource } from "./model";
 import type { Contribution } from "./api";
-import { useRendition } from "./reader/components/useRendition";
 
 /** Query keys. Every key starts with the workspace ID; mutations invalidate by prefix. */
 export const knowledgeKeys = {
@@ -92,7 +90,7 @@ export function invalidateKnowledge(qc: QueryClient, ws: string) {
   void qc.invalidateQueries({ queryKey: knowledgeKeys.contributions(ws) });
 }
 
-/* ═══════════════ Taxonomy, bases and the model ═══════════════ */
+/* ═══════════════ Topics, bases and the model ═══════════════ */
 
 export function useTopics() {
   const { id } = useWorkspace();
@@ -176,10 +174,11 @@ export function useKnowledgeModel(extraCollections?: ReadonlyMap<string, string>
 
 /* ═══════════════ Items ═══════════════ */
 
-export function useItem(item: string | undefined | null) {
+/** GetItem. `placeholder`: the item as a list already has it, shown while the full item loads (not cached). */
+export function useItem(item: string | undefined | null, { placeholder }: { placeholder?: Item } = {}) {
   const { id } = useWorkspace();
   const itemId = resourceId(item);
-  return useQuery({ queryKey: knowledgeKeys.item(id, itemId), queryFn: () => getItem(id, itemId), enabled: !!itemId });
+  return useQuery({ queryKey: knowledgeKeys.item(id, itemId), queryFn: () => getItem(id, itemId), enabled: !!itemId, placeholderData: placeholder });
 }
 
 export interface ItemsByName {
@@ -233,29 +232,6 @@ export function useItemsByName(
     error: query.error,
     refetch: () => void query.refetch(),
   };
-}
-
-/** Reader content of a document (page images, rendition URL). Only requested for readable documents. */
-export function useItemContent(item: string | undefined | null, { enabled = true }: { enabled?: boolean } = {}) {
-  const { id } = useWorkspace();
-  const itemId = resourceId(item);
-  return useQuery({
-    queryKey: [...knowledgeKeys.item(id, itemId), "content"],
-    queryFn: () => getItemContent(id, itemId),
-    enabled: enabled && !!itemId,
-    staleTime: 10 * 60_000,
-    retry: false,
-  });
-}
-
-/** What a card preview shows for a resource (sections, first page image, length); `null` while loading or without content. */
-export function useGlance(resource: Resource, { enabled = true }: { enabled?: boolean } = {}): Glance | null {
-  const content = useItemContent(resource.name, { enabled: enabled && resource.readable });
-  const rendition = useRendition(resource.id, content.data);
-  return useMemo(
-    () => (content.data ? glanceOf(rendition.doc, content.data.pageAssets, resource.format) : null),
-    [content.data, rendition.doc, resource.format],
-  );
 }
 
 export function useListItems(options: ListItemsOptions, { enabled = true }: { enabled?: boolean } = {}) {

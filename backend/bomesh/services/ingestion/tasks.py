@@ -46,6 +46,7 @@ PHASES = {
     "downloading": "FETCHING",
     "expanding": "PARSING",
     "parsing": "PARSING",
+    "classifying": "CLASSIFYING",
     "contextualizing": "CHUNKING",
     "embedding": "EMBEDDING",
     "storing": "INDEXING",
@@ -98,7 +99,7 @@ class IngestionTasks:
 
     def __init__(self, sessions: SessionFactory) -> None:
         self._sessions = sessions
-        self._workspaces = WorkspaceResolver(sessions)
+        self._workspaces = WorkspaceResolver()
 
     @classmethod
     def from_runtime(cls, runtime: AppRuntime) -> IngestionTasks:
@@ -158,7 +159,7 @@ class IngestionTasks:
         if await is_platform_caller(ctx, workspace_id):
             await self._workspaces.open(ctx, WorkspaceRef(workspace_id), permission, write=False)
             return None
-        require_usable(await self._workspaces.get(workspace_id), write=False)
+        require_usable(await self._workspaces.get(ctx, workspace_id), write=False)
         allowed = await ctx.authorizer.allowed_collections(ctx.principal, workspace_id, permission)
         if not allowed:
             raise permission_denied(permission, WorkspaceRef(workspace_id))

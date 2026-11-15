@@ -1,9 +1,9 @@
 "use client";
 
-import { Button, Dropdown, Header, Label } from "@heroui/react";
+import { Button, Dropdown, Header, Label, Separator } from "@heroui/react";
 import { useQueries } from "@tanstack/react-query";
 import { ChevronDown, MoreHorizontal, Tag, type LucideIcon } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { Fragment, useMemo, useState, type ReactNode } from "react";
 
 import { FileIcon, IconButton, toast, type DataTableSort, type RowAction } from "@/components/ui";
 import { errorMessage, resourceId } from "@/lib/api/client";
@@ -14,7 +14,7 @@ import { topicTree, type Resource } from "@/modules/knowledge/model";
 import { knowledgeKeys } from "@/modules/knowledge/queries";
 
 import { useAllTopics, useInvalidateCuration } from "../queries";
-import { toCsv } from "../taxonomy";
+import { toCsv } from "../topicSheet";
 
 /** Saves rows as a CSV file in the browser. */
 export function saveCsv(fileName: string, rows: readonly (readonly string[])[]) {
@@ -26,21 +26,27 @@ export function saveCsv(fileName: string, rows: readonly (readonly string[])[]) 
   URL.revokeObjectURL(url);
 }
 
+/** One ⋯ entry; `separated` starts a new group (a separator above it, as the preview's `{ sep: true }`). */
+export type MenuAction = RowAction & { separated?: boolean };
+
 /** A menu of actions behind an icon button (⋯ by default): the drawer head, rows outside a DataTable. */
-export function ActionsMenu({ actions, label = "More actions", icon = MoreHorizontal }: { actions: readonly RowAction[]; label?: string; icon?: LucideIcon }) {
+export function ActionsMenu({ actions, label = "More actions", icon = MoreHorizontal }: { actions: readonly MenuAction[]; label?: string; icon?: LucideIcon }) {
   if (!actions.length) return null;
   return (
     <Dropdown>
       <IconButton icon={icon} tip={label} size="sm" showTip={false} />
       <Dropdown.Popover placement="bottom end">
         <Dropdown.Menu aria-label={label} onAction={(key) => actions.find((a) => a.id === key)?.onAction()} disabledKeys={actions.filter((a) => a.isDisabled).map((a) => a.id)}>
-          {actions.map((action) => {
+          {actions.map((action, i) => {
             const Icon = action.icon;
             return (
-              <Dropdown.Item key={action.id} id={action.id} textValue={action.label} variant={action.danger ? "danger" : "default"}>
-                {Icon ? <Icon className="i" aria-hidden /> : null}
-                <Label>{action.label}</Label>
-              </Dropdown.Item>
+              <Fragment key={action.id}>
+                {action.separated && i > 0 ? <Separator /> : null}
+                <Dropdown.Item id={action.id} textValue={action.label} variant={action.danger ? "danger" : "default"}>
+                  {Icon ? <Icon className="i" aria-hidden /> : null}
+                  <Label>{action.label}</Label>
+                </Dropdown.Item>
+              </Fragment>
             );
           })}
         </Dropdown.Menu>

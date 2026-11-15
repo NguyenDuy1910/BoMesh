@@ -41,6 +41,21 @@ export function createBase(workspace: string, base: NewBase): Promise<Item> {
   );
 }
 
+/** CreateItem (nested COLLECTION = a folder) under a collection or folder; it reads with its parent's access. */
+export function createFolder(workspace: string, parent: string, folder: { displayName: string; description?: string }): Promise<Item> {
+  return call(
+    api.POST("/api/v1/workspaces/{workspace}/items", {
+      params: { path: { workspace }, query: { requestId: requestId() } },
+      body: {
+        itemType: "COLLECTION",
+        displayName: folder.displayName,
+        parentItem: parent,
+        collection: { description: folder.description || undefined, inheritAccess: true, acceptsContributions: true },
+      },
+    }),
+  );
+}
+
 /* ═══════════════ IAM ═══════════════ */
 
 export function getItemIamPolicy(workspace: string, item: string): Promise<Policy> {

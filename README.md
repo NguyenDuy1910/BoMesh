@@ -101,12 +101,12 @@ make init
 ```
 
 `make init` creates the missing root `.env`, starts PostgreSQL, Qdrant,
-RustFS, and Temporal, creates the private raw-object bucket, rebuilds the local database
-schema, seeds a development administrator, recreates the derived Qdrant
-collection, and registers Temporal Search Attributes.
+and RustFS, creates the private raw-object bucket, rebuilds the local database
+schema, seeds a development administrator, and recreates the derived Qdrant
+collection.
 
 > **Local-development reset:** `make init` intentionally resets the application
-> schema, Temporal persistence, and Qdrant collection. Do not use it against an
+> schema and Qdrant collection. Do not use it against an
 > environment with data you need to retain.
 
 ### 2. Configure model access
@@ -131,6 +131,11 @@ In one terminal:
 cd backend
 uv run python main.py
 ```
+
+`main.py` runs the API and the ingestion worker
+(`python -m bomesh.services.ingestion.worker`, which executes ingestion runs,
+source syncs and schedules with PostgreSQL as the queue). Temporal is disabled
+in this phase ([docs/temporal.md](docs/temporal.md)).
 
 In another, either the development server (HMR, unminified; for editing only):
 
@@ -159,7 +164,6 @@ Open:
 | Health | [http://127.0.0.1:8000/health](http://127.0.0.1:8000/health) |
 | Qdrant dashboard | [http://127.0.0.1:6333/dashboard](http://127.0.0.1:6333/dashboard) |
 | RustFS S3 API | [http://127.0.0.1:9000](http://127.0.0.1:9000) (console disabled by default) |
-| Temporal UI | [http://127.0.0.1:8080](http://127.0.0.1:8080) |
 
 ## Documentation
 
@@ -187,7 +191,7 @@ Useful local targets:
 
 ```bash
 make help        # list all targets
-make services    # start PostgreSQL, Qdrant, RustFS, and Temporal
+make services    # start PostgreSQL, Qdrant, and RustFS
 make reset-all   # reset all databases/Qdrant, apply schema, and seed the admin
 make status      # inspect dependency state and API health
 make db-init     # reset only the local PostgreSQL schema

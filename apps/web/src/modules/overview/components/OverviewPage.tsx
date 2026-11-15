@@ -17,7 +17,7 @@ import { SetupGuide, isFreshWorkspace, setupNext, useSetupSteps } from "./Setup"
 const kpi = (o: WorkspaceOverview | undefined, key: string) => o?.kpis?.find((k) => k.key === key);
 
 /**
- * Overview (preview `P.overview`): what needs me first (operations), then Knowledge health (the Review queues),
+ * Overview (preview `P.overview`): what needs me first (operations), then Knowledge health (Studio → Documents' views),
  * knowledge gaps and how the week went. A workspace with nothing set up gets the setup checklist as the whole page.
  */
 export function OverviewPage() {
@@ -162,7 +162,7 @@ function Kpis({ overview }: { overview: WorkspaceOverview }) {
         value={`${pct(ready, published)}%`}
         meta={`${fmtNum(ready)} of ${fmtNum(published)} published documents`}
         tone={ready < published ? "warning" : "success"}
-        href="/studio?tab=documents"
+        href="/studio?tab=documents&view=all"
       />
       {last}
     </div>

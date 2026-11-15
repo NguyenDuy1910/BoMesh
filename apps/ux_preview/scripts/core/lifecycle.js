@@ -117,15 +117,9 @@ const publicationOf = d => ({ review: 'In review', changes: 'Changes requested',
     says the text is readable). */
 const inSearch = d => stageOf(d) === 'published' && d.status === 'ready';
 
-/* ═══════════════ Classification policy and what reviewers teach it ═══════════════ */
-/** Topics the pipeline is at least this sure of are applied; below it the document is published anyway and its topic
-    waits in Topics → Suggestions. Workspace admins set it on the Topics page. */
-const CLASS_THRESHOLDS = [0.6, 0.7, 0.8, 0.9];
-const classThreshold = () => D.classPolicy?.threshold ?? 0.7;
-/** Topics the pipeline chose (not a person): tagged by the assistant, or synced without anyone touching them. */
+/* ═══════════════ Classification and what reviewers teach it ═══════════════ */
+/** Topics the pipeline chose (not a person): applied by the assistant, or synced without anyone touching them. */
 const topicsByPipeline = d => d.classifiedBy === 'assistant' || (!d.classifiedBy && !d.submission && !!d.source && d.source !== 'upload');
-/** How sure the pipeline was of a topic it chose (deterministic in the prototype). */
-const topicConfidence = (d, topicId) => conf(d.id + topicId, 0.52, 0.96);
 /** Reviewers' corrections to the pipeline's topics: { id, doc, title, from:[ids], to:[ids], by, at, status: open | used |
     dismissed }. They never change the rules by themselves: a workspace admin turns them into keywords or examples. */
 function recordCorrection(d, from, to) {
@@ -178,7 +172,7 @@ const curatedDocs = ({ archived = false } = {}) => D.docs.filter(d => (archived 
 const reviewQueue = () => curatedDocs().filter(d => stageOf(d) === 'review').sort((a, b) => (a.submission?.at || a.updated) - (b.submission?.at || b.updated));
 /** First syncs at scale hold risky files back in batches, one per reason (D.reviewBatches): the open ones in bases the caller reviews. */
 const openBatches = () => (D.reviewBatches || []).filter(b => b.status === 'open' && canReviewKb(kbById(b.kb)));
-/** Published from a first sync but filed with low confidence or without a topic (D.classGroups): the open ones in bases the caller edits. */
+/** A first sync's topics, grouped for people to confirm in bulk (D.classGroups): the open ones in bases the caller edits. */
 const openClassGroups = () => (D.classGroups || []).filter(g => g.status === 'open' && g.n > 0 && canEditKb(kbById(g.kb)));
 /** First syncs at scale in bases the caller reviews (their documents are counted, not listed). */
 const backfillRuns = () => (D.runs || []).filter(r => r.backfill && canReviewKb(kbById(r.kb)));
@@ -186,7 +180,7 @@ const backfillRuns = () => (D.runs || []).filter(r => r.backfill && canReviewKb(
 const activeProcessRun = () => (D.runs || []).find(r => r.kind === 'process' && r.status === 'running') || null;
 /** A run's at-scale counters (run.backfill), the one source of truth every surface reads. */
 const backfillOf = runId => (D.runs || []).find(r => r.id === runId)?.backfill || null;
-/** Move counters of a backfill by a delta ({ review: -n, published: n, 'topics.confident': n }); sign -1 undoes it. */
+/** Move counters of a backfill by a delta ({ review: -n, published: n, 'topics.filed': n }); sign -1 undoes it. */
 function shiftBackfill(runId, delta, sign = 1) {
   const bf = backfillOf(runId); if (!bf) return;
   Object.entries(delta).forEach(([path, n]) => {
@@ -216,32 +210,30 @@ function genericTopicWords() {
   return new Set([...n].filter(([, c]) => c > 1).map(([w]) => w));
 }
 /** Topics (Knowledge Studio → Topics): on each topic a workspace admin keeps keywords and synonyms (the same signal),
-    optional rules on where a file comes from, and example documents. Guidance (t.guidance) is free text the assistant reads
-    with the rest; the mock matcher below doesn't use it. */
+    optional rules on where a document lives or comes from, and example documents. Guidance (t.guidance) is free text the
+    assistant reads with the rest; the mock matcher below doesn't use it. */
 const topicKeywords = t => (t?.keywords || []).map(k => String(k).trim()).filter(Boolean);
 const topicSynonyms = t => (t?.synonyms || []).map(k => String(k).trim()).filter(Boolean);
-/** Rule fields and operators: { field: 'source'|'path'|'type', op: 'is'|'contains', value }. A source value is a source id ('upload' = uploads). */
-const RULE_FIELDS = { source: 'Source', path: 'Folder path', type: 'File type' };
-const RULE_OPS = { is: 'is', contains: 'contains' };
-const topicRules = t => (t?.rules || []).filter(r => r && RULE_FIELDS[r.field] && RULE_OPS[r.op] && String(r.value ?? '').trim());
+/** Rules (the contract's TopicRule, exactly one of two kinds): { field: 'collection', value: kb or folder id } = documents
+    in that collection's subtree; { field: 'source', value: source id } = documents that live source registered (uploads aren't a source). */
+const RULE_FIELDS = { collection: 'Collection', source: 'Source' };
+const topicRules = t => (t?.rules || []).filter(r => r && RULE_FIELDS[r.field] && String(r.value ?? '').trim());
 /** Example documents that represent a topic (published ones only; the caller's access is checked where they're shown). */
 const topicExamples = t => (t?.examples || []).map(docById).filter(d => d && !d.archived && isPublishedStage(d));
-const ruleSourceName = v => (v === 'upload' ? 'Uploaded files' : srcById(v)?.name || v);
-/** What a rule tests on a document: its source (id and name), its path (own path, else the source's folders) or its file type. */
-function ruleValues(field, doc) {
-  const src = doc?.source && srcById(doc.source);
-  if (field === 'source') return [doc?.source, src?.name, doc?.source === 'upload' ? 'Uploaded files' : ''];
-  if (field === 'path') return [doc?.path, ...(src?.scope || [])];
-  return [doc?.type || String(doc?.name || '').split('.').slice(1).pop()];
-}
+const ruleSourceName = v => srcById(v)?.name || v;
+const ruleCollectionName = v => kbById(v)?.name || folderById(v)?.name || v;
+/** A collection rule holds for a document in that collection or anywhere under it; a source rule for a document that
+    source registered (uploads have no source, so no source rule matches them). */
 function ruleMatches(r, doc) {
-  if (!doc) return false;
-  const norm = x => { const s = fold(x).trim(); return r.field === 'type' ? s.replace(/^\./, '') : s; };
-  const v = norm(r.value), vals = ruleValues(r.field, doc).filter(Boolean).map(norm);
-  return !!v && (r.op === 'is' ? vals.some(x => x === v) : vals.some(x => x.includes(v)));
+  if (!doc || !r?.value) return false;
+  if (r.field === 'source') return !!doc.source && doc.source === r.value && !!srcById(r.value);
+  if (r.field !== 'collection') return false;
+  if (doc.kb === r.value) return true;
+  const f = folderById(r.value);
+  return !!f && f.kb === doc.kb && folderSubtree(f.id).includes(doc.folder);
 }
-/** "folder path contains “Chargebacks”" — a rule in words (Topics, Review's evidence). */
-const ruleText = r => `${RULE_FIELDS[r.field].toLowerCase()} ${RULE_OPS[r.op]} “${r.field === 'source' ? ruleSourceName(r.value) : r.value}”`;
+/** "documents in “Chargebacks”" — a rule in words (Topics, Review's evidence, the prompt). */
+const ruleText = r => (r.field === 'source' ? `documents from “${ruleSourceName(r.value)}”` : `documents in “${ruleCollectionName(r.value)}”`);
 /** Title similarity (shared words over all words) — duplicates and topic examples. */
 function titleSim(a, b) {
   const x = titleWords(a), y = titleWords(b); if (!x.size || !y.size) return 0;
@@ -249,12 +241,13 @@ function titleSim(a, b) {
   return i / (x.size + y.size - i);
 }
 const phrase = s => ' ' + fold(s).replace(/[^a-z0-9]+/g, ' ').trim() + ' ';
-/** Topic suggestions from these signals, strongest first: a rule on where the file comes from, keywords or synonyms found
-    in the title or note, distinctive words of the topic name, the topics of similar published documents, a title close to
-    one of the topic's examples, and what the target collection mostly holds. `doc` ({ name, path, type, source }) is
-    needed for rules and examples; without it they don't count. `only` (a Set of topic ids) limits the candidates — a
-    processing run's chosen topics.
-    Returns [{id, score, why:{keywords[], synonyms[], name, similar, example, rule, base}}] (best first, max 3) — `why` is shown to the reviewer. */
+/** Topic suggestions. A rule on where the document lives or comes from settles them: when any topic's rule holds, the
+    document gets exactly those topics and nothing else is weighed (the model isn't asked). Otherwise, strongest first:
+    keywords or synonyms found in the title or note, distinctive words of the topic name, the topics of similar published
+    documents, a title close to one of the topic's examples, and what the target collection mostly holds. `doc`
+    ({ name, kb, folder, source }) is needed for rules and examples; without it they don't count. `only` (a Set of topic
+    ids) limits the candidates — a processing run's chosen topics.
+    Returns [{id, score, why:{keywords[], synonyms[], name, similar, example, rule, base}}] (best first, max 3; every rule hit) — `why` is shown to the reviewer. */
 function topicMatches(text, kb, similar = [], doc = null, only = null) {
   const words = new Set(tokens(text)), stems = new Set([...words].map(w => w.slice(0, 5))), generic = genericTopicWords(), hay = phrase(text);
   const kbDocs = kb ? docsIn(kb.id) : [];
@@ -262,17 +255,19 @@ function topicMatches(text, kb, similar = [], doc = null, only = null) {
   const fromSimilar = new Map();
   similar.forEach(s => res(s.doc).topics.forEach(id => { if ((fromSimilar.get(id)?.sim || 0) < s.sim) fromSimilar.set(id, { sim: s.sim, doc: s.doc.id }); }));
   const leaves = topicTree().flatMap(dm => dm.children).filter(t => !only || only.has(t.id));
+  const none = { keywords: [], synonyms: [], name: false, similar: '', example: '', base: false };
+  const ruled = doc ? leaves.map(t => ({ id: t.id, score: 0, why: { ...none, rule: topicRules(t).find(r => ruleMatches(r, doc)) || null } })).filter(x => x.why.rule) : [];
+  if (ruled.length) return ruled;
   const found = k => phrase(k).trim() && hay.includes(phrase(k));
   const scored = leaves.map(t => {
     const tw = tokens(t.name).filter(w => !generic.has(w)), key = tw.length ? tw : tokens(t.name);
     const hit = key.filter(w => words.has(w) || stems.has(w.slice(0, 5))).length / Math.max(1, key.length);
     const kw = topicKeywords(t).filter(found), syn = topicSynonyms(t).filter(found);
-    const rule = topicRules(t).find(r => ruleMatches(r, doc)) || null;
     const ex = doc ? topicExamples(t).filter(e => e.id !== doc.id).map(e => ({ id: e.id, sim: titleSim(doc.name || text, e.name) })).sort((a, b) => b.sim - a.sim)[0] : null;
     const exSim = ex && ex.sim >= 0.2 ? ex.sim : 0;
     const sim = fromSimilar.get(t.id), base = !!kb?.topics?.includes(t.id) || share(t.id) >= 0.25;
-    const score = (rule ? 1.2 : 0) + Math.min(1.4, (kw.length + syn.length) * 0.8) + (hit >= 0.75 ? hit : 0) + (sim?.sim || 0) * 0.9 + exSim * 0.7 + (kb?.topics?.includes(t.id) ? 0.4 : 0) + share(t.id) * 0.3;
-    return { id: t.id, score, why: { keywords: kw.slice(0, 3), synonyms: syn.slice(0, 3), name: hit >= 0.75, similar: sim && sim.sim >= 0.3 ? sim.doc : '', example: exSim ? ex.id : '', rule, base } };
+    const score = Math.min(1.4, (kw.length + syn.length) * 0.8) + (hit >= 0.75 ? hit : 0) + (sim?.sim || 0) * 0.9 + exSim * 0.7 + (kb?.topics?.includes(t.id) ? 0.4 : 0) + share(t.id) * 0.3;
+    return { id: t.id, score, why: { keywords: kw.slice(0, 3), synonyms: syn.slice(0, 3), name: hit >= 0.75, similar: sim && sim.sim >= 0.3 ? sim.doc : '', example: exSim ? ex.id : '', rule: null, base } };
   }).filter(x => x.score >= 0.5).sort((a, b) => b.score - a.score).slice(0, 3);
   if (scored.length || !kbDocs.length) return scored;
   // Nothing distinctive: fall back to what the destination base mostly holds, with low confidence.
@@ -294,16 +289,17 @@ function topicEvidence(w = {}) {
     w.base && !w.keywords?.length && !w.synonyms?.length && !w.name && !w.rule && 'common in this collection',
   ].filter(Boolean);
 }
-/** How sure the pipeline is of a match (topicMatches): weak evidence stays below 60 %, a rule or several keywords near the top. */
-const matchConf = (d, x) => (x.score < 0.5 ? conf(d.id + x.id, 0.48, 0.6) : Math.round(Math.min(0.97, conf(d.id + x.id, 0.66, 0.88) + (x.score > 1.2 ? 0.07 : 0)) * 100) / 100);
-/** The topics the pipeline applies by itself: matches with real evidence (a rule, keywords, synonyms or the topic's own
-    name) at or above the workspace's threshold, at most two. What it's less sure of is published without a topic and
-    waits in Topics → Suggestions. `ctx` is a processing run's classification context: { topics: [ids] (only these are
-    candidates; empty = all), note (read with the title, as the assistant would read it with the file) }. */
+/** The topics the assistant applies when it classifies (the CLASSIFYING step picks them among the candidates; no
+    confidence score, no threshold): every topic whose rule holds (rules settle it, the model isn't asked); otherwise
+    matches with real evidence (keywords, synonyms or the topic's own name), at most two. A document it gives no topic
+    is published without one and listed in Topics → Suggestions. `ctx` is a processing run's classification context:
+    { topics: [ids] (only these are candidates; empty = all), note (read with the title, as the assistant would read
+    it with the file) }. */
 function pipelineTopics(d, ctx = null) {
   const only = ctx?.topics?.length ? new Set(ctx.topics) : null, text = ctx?.note ? `${d.name} ${ctx.note}` : d.name;
-  return topicMatches(text, kbById(d.kb), similarDocs(d), d, only)
-    .filter(x => (x.why.rule || x.why.keywords.length || x.why.synonyms.length || x.why.name) && matchConf(d, x) >= classThreshold()).slice(0, 2).map(x => x.id);
+  const m = topicMatches(text, kbById(d.kb), similarDocs(d), d, only);
+  if (m.some(x => x.why.rule)) return m.map(x => x.id);
+  return m.filter(x => x.why.keywords.length || x.why.synonyms.length || x.why.name).slice(0, 2).map(x => x.id);
 }
 /** Classify a document nobody chose topics for (sources' syncs, processing runs). With a context, topics the pipeline
     chose before are chosen again within it; topics a person chose always stay. The context stays on the document
@@ -370,8 +366,8 @@ function aiOf(d) {
   const kb = kbById(d.kb), text = [d.name, d.submission?.note, c?.summary, d.summary].filter(Boolean).join(' ');
   const kind = c?.kind || d.kind || inferKind(d);
   const similar = similarDocs(d);
-  const matched = topicMatches(text, kb, similar, d).map(x => ({ id: x.id, why: x.why, conf: matchConf(d, x) }));
-  const topics = c ? c.topics.filter(id => topicById(id)).map(id => { const m = matched.find(x => x.id === id); return { id, why: { ...(m?.why || {}), contributor: true }, conf: m?.conf ?? 1 }; }) : matched;
+  const matched = topicMatches(text, kb, similar, d).map(x => ({ id: x.id, why: x.why }));
+  const topics = c ? c.topics.filter(id => topicById(id)).map(id => { const m = matched.find(x => x.id === id); return { id, why: { ...(m?.why || {}), contributor: true } }; }) : matched;
   const proposed = [];
   PROPOSAL_RULES.forEach(([re, name, parents]) => {
     if (!re.test(text) || (D.topics || []).some(t => fold(t.name) === fold(name))) return;
@@ -451,7 +447,7 @@ function dismissProposal(p) {
 function applyTopicToDocs(ids, topicId) {
   (ids || []).map(docById).filter(Boolean).forEach(d => {
     if (stageOf(d) === 'published') d.topics = [...new Set([...(res(d).topics), topicId])];
-    else if (d.ai) { const was = d.ai.topics.find(t => t.id === topicId); d.ai.topics = [...d.ai.topics.filter(t => t.id !== topicId), { id: topicId, conf: 1, accepted: true, why: was?.why }]; d.ai.proposed = []; }
+    else if (d.ai) { const was = d.ai.topics.find(t => t.id === topicId); d.ai.topics = [...d.ai.topics.filter(t => t.id !== topicId), { id: topicId, accepted: true, why: was?.why }]; d.ai.proposed = []; }
   });
 }
 

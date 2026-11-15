@@ -74,12 +74,12 @@ test("Knowledge Studio sections follow permissions and collection ownership, in 
   assert.deepEqual(ids(studioSections({ can: can([]), managesCollections: false })), []);
   assert.deepEqual(ids(studioSections({ can: can([]), managesCollections: true })), ["collections"]);
   const all = studioSections({ can: can(["contributions.review", "topics.update", "sources.list"]), managesCollections: true });
-  assert.deepEqual(ids(all), ["review", "documents", "collections", "taxonomy", "sources"]);
-  assert.deepEqual(all.map((s) => Boolean(s.gap)), [false, false, true, false, false]);
-  assert.equal(studioLanding(all, {}), "review");
-  assert.equal(studioLanding(all, { review: 2, sources: 1 }), "review");
-  assert.equal(studioLanding(all.slice(2), { sources: 1 }), "sources");
-  assert.equal(studioLanding(all.slice(2), {}), "collections");
+  assert.deepEqual(ids(all), ["documents", "collections", "topics", "sources"]);
+  assert.deepEqual(all.map((s) => Boolean(s.gap)), [false, true, false, false]);
+  assert.equal(studioLanding(all, {}), "documents");
+  assert.equal(studioLanding(all, { documents: 2, sources: 1 }), "documents");
+  assert.equal(studioLanding(all, { documents: 0, sources: 1 }), "sources");
+  assert.equal(studioLanding(all.slice(1), {}), "collections");
 });
 
 test("a section comes from ?tab= and falls back; its title may differ from its label", () => {

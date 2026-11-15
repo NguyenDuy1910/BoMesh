@@ -1,8 +1,8 @@
 /**
  * Workspace settings (preview `features/settings.js`, `core/workspace.js`): identity
- * validation and the workspace setup — template defaults, modules, space types and
- * AI workflows — mapped onto `Workspace` and `WorkspaceSettings`. Pure; covered by
- * `tests/workspace-settings.test.mts`.
+ * validation, the workspace setup — template defaults, modules, space types and
+ * AI workflows — and the Home map background, mapped onto `Workspace` and
+ * `WorkspaceSettings`. Pure; covered by `tests/workspace-settings.test.mts`.
  */
 
 import type { Schema } from "@/lib/api/client";
@@ -170,3 +170,58 @@ export function resetBody(settings: Settings | null | undefined, template: Templ
     workflows: workflowsWith(template.workflows),
   });
 }
+
+/* ── Map background (preview `features/home.js` `home-bg`, docs/HOME.md "Map background") ── */
+
+export type MapBackground = Schema<"MapBackground">;
+
+/** What the dialog accepts, and what it uploads: photos scaled to at most 1920 px wide as JPEG (SVG rasterized). */
+export const MAP_BG = {
+  types: ["image/jpeg", "image/png", "image/webp", "image/svg+xml"],
+  maxBytes: 10 * 1024 * 1024,
+  width: 1920,
+  small: 1200,
+  quality: 0.75,
+  strength: 25,
+} as const;
+
+/** A strength from 0 to 100 (the API default, 25, for anything else). */
+export const strengthOf = (v: unknown): number => {
+  const n = Number(v);
+  return v !== null && v !== undefined && v !== "" && Number.isFinite(n) ? Math.min(100, Math.max(0, Math.round(n))) : MAP_BG.strength;
+};
+
+/** Why a picked file can't be used, in the preview's words; null when it can. */
+export function mapBgFileError(file: { type: string; size: number }): string | null {
+  if (!(MAP_BG.types as readonly string[]).includes(file.type)) return "Use a JPG, PNG, WebP or SVG image.";
+  if (file.size > MAP_BG.maxBytes) return "That image is larger than 10 MB. Choose a smaller one.";
+  return null;
+}
+
+/** Pixel size of the uploaded JPEG: photos shrink to 1920 px wide (never grow); SVG is drawn at 1920 px wide. */
+export function mapBgSize(width: number, height: number, vector: boolean): { w: number; h: number } {
+  const s = vector ? MAP_BG.width / width : Math.min(1, MAP_BG.width / width);
+  return { w: Math.round(width * s), h: Math.round(height * s) };
+}
+
+/** The calls a Save makes: drop the image, upload the new one, then set the strength (null = unchanged). */
+export interface MapBgPlan {
+  remove: boolean;
+  upload: boolean;
+  strength: number | null;
+}
+
+/**
+ * `draft`: null when the dialog has no image, `{ isNew }` for the saved image or a newly picked one.
+ * An upload keeps the saved strength (25 for a first image), so the strength follows it only when it differs.
+ * Null when nothing changed.
+ */
+export function mapBgPlan(saved: MapBackground | undefined, draft: { isNew: boolean } | null, strength: number): MapBgPlan | null {
+  const current = saved ? strengthOf(saved.strength) : null;
+  if (!draft) return saved ? { remove: true, upload: false, strength: null } : null;
+  if (draft.isNew) return { remove: false, upload: true, strength: strength !== (current ?? MAP_BG.strength) ? strength : null };
+  return strength !== current ? { remove: false, upload: false, strength } : null;
+}
+
+export const mapBgToast = (before: MapBackground | undefined, after: MapBackground | undefined) =>
+  after ? (before ? "Map background updated" : "Map background added") : "Map background removed";

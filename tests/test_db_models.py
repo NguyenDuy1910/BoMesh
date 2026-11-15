@@ -76,6 +76,7 @@ EXPECTED_TABLES = {
     "spaces",
     "tenant_memberships",
     "tenants",
+    "topic_corrections",
     "topics",
     "users",
     "workspace_assistant_settings",

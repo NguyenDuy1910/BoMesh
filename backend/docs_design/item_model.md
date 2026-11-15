@@ -116,7 +116,7 @@ base", nested collections are folders, documents are documents.
 **4.2 Canonical hierarchy plus item links (Option B, Documents only).** Every
 Item keeps exactly one canonical parent; that parent alone defines
 `parentItem`, `ancestors`, inherited access, subtree search, conversation
-scope and ingestion `ancestor` selection. An *item link*
+scope and the `ancestors:` filter of ingestion selectors. An *item link*
 (`items/{collection}/links/{document}`, table `item_links`) additionally shows
 a Document inside another Collection, like a Drive shortcut: same Item ID, no
 copied object, no extra embeddings, no grant. Decisions:
@@ -173,7 +173,7 @@ document. Processing remains an explicit Ingestion Run (UI may offer
 approved revisions reuse stored objects, so a purge deletes an object only
 when no revision of a non-purged Item still references its key.
 `items.storage_key`, `mime_type`, `size_bytes` and `metadata.file_name` follow
-the current revision (derived preview metadata is reset on change) so
+the current revision (derived preview and cover metadata is reset on change) so
 ingestion reads every Document the same way; `items.indexed_revision_number`
 names the revision the chunks, passages and citations belong to. Rejected: a
 parallel `document_revisions` table (same shape, duplicate code).
@@ -229,11 +229,13 @@ if they were purged).
 | 18 | `contribution_topics` (new); `suggestions` keeps only confidences and non-topic suggestions | suggested/proposed topics lived in `suggestions` JSON | keep them in JSON: `Topic.evidence`, `inReviewCount`, `:accept` and `:merge` retagging all look up by topic | new table | `ContributionSuggestions.topics`/`proposedTopics`, `Topic.evidence` |
 | 19 | `artifacts`, `artifact_source_items`, `evidence_review_cells` (new), keyed by the Artifact's Item; `item_revisions.author` replaces `conversation_id`/`request_id` | Artifact kind, owner, space, audience, sources and evidence review had no store | everything in `items.metadata`: kind/owner/space/audience are filter and authorization inputs, sources need FKs and the audience check, cells are written concurrently and regenerated one by one; a non-Item artifact table (would duplicate revisions, objects and purge) | new tables; the Item row, revisions and objects stay as before | Artifact (Work kinds), `evidenceReview`, ArtifactRevision `author` |
 | 20 | `code` on `reading_lists` (and the other client-ID resources, `database_architecture.md`) | `readingListId` had no column | use the uuid only (cannot honour client-chosen IDs) | new column, unique per tenant | `readingListId` |
+| 21 | `topics.keywords`, `synonyms`, `guidance`, `example_item_ids`, `rule_collection_ids`, `rule_source_codes` | CLASSIFYING read only a topic's name and description; admins had nowhere to say what recognises a topic | a `topic_signals` table (no identity or lifecycle of its own: always read and written whole with the topic); one `classification` JSONB (untyped; arrays of IDs lose their element type) | empty arrays / null for existing topics | Topic `keywords[]`, `synonyms[]`, `guidance`, `examples[]`, `rules[]`; ImportTopics |
+| 22 | `topic_corrections` (new) | a reviewer's change of the assistant's topics was lost, so nothing could suggest keywords from it | audit log rows (not listable by topic, no state); a column on `item_topics` (a correction outlives the tag set it changed) | new table, same-tenant trigger on the item | TopicCorrection resource |
 
 Kept deliberately: `metadata` JSONB for sparse type-specific attributes
 (collection: `description`, `discoverable`, `accepts_contributions`,
 `system_kind`; document: `purpose`, `file_name`, `storage`, `archive`,
-`source`, `preview`, `summary`, `language`, `owner_user_id`, `verification`,
+`source`, `preview`, `cover`, `summary`, `language`, `owner_user_id`, `verification`,
 `merged_into`; `verification` = `{state, verifier_user_id, verified_at,
 next_review_at}`, `source` = the connector's source identity plus
 `source_code` (the Source's API ID), `path`, `updated_at`), validated by the service and documented here; promote a key
@@ -276,12 +278,12 @@ resource persistence".
    the matching check, per request, short-lived.
 9. Connector-ingested documents inherit from the source's target collection
    like any other document; provider ACLs are not imported.
-10. Ingestion: explicit `items[]` are checked one by one (403); `ancestor`,
-    `source` and `states` silently narrow to collections where the caller holds
-    `ingestionRuns.create`; a selection without `items[]`/`ancestor` excludes
-    personal collections; attachments, artifacts, unsupported and
-    content-pending documents are never selected; tasks are listed only for
-    items readable under 3.
+10. Ingestion: explicit `items[]` are checked one by one (403); the selector
+    `filter` silently narrows to collections where the caller holds
+    `ingestionRuns.create`, and an item it names must be readable (403);
+    personal collections are selected only by `items[]` or an item the filter
+    names; attachments, artifacts, unsupported and content-pending documents
+    are never selected; tasks are listed only for items readable under 3.
 11. A NEW_REVISION contribution targets the governing collection of the
     replaced document (server-set), so only that collection's reviewers can
     change its content.
@@ -330,13 +332,17 @@ or a schedule runs `CreateIngestionRun` when they choose. `:requestChanges`,
 `publication_state` and set `payload_dirty_at`; the payload `published` flag
 follows; index content is kept.
 
-**Ingest.** `CreateIngestionRun {selector {items[], ancestor, source,
-states[]}}` → invariant 10 → one `INSERT … SELECT` snapshot into
-`ingestion_run_items` → Temporal processes; each task records the revision it
-started from; on finish `index_status`, `processed_version` and
-`indexed_revision_number` are written only if the item's current revision and
-governing collection are unchanged (else `pending` + dirty payload); retries
-are new runs over failed tasks.
+**Ingest.** `CreateIngestionRun {selector {items[], filter},
+classification}` → invariant 10 → one `INSERT … SELECT` snapshot into
+`ingestion_run_items` (the filter is the ListItems filter compiled once) →
+an ingestion worker claims the QUEUED run (advisory lock; recovered and resumed
+by another worker if it dies) and processes it; each task records the revision it started from; on
+finish `index_status`, `processed_version`, `indexed_revision_number` and the
+CLASSIFYING step's assistant-applied `item_topics` (`document_contract.md`
+"Processing") are written only if the item's current revision and governing
+collection are unchanged (else `pending` + dirty payload); retries are new runs
+over failed and cancelled tasks with the same classification. Runs never change
+`publication_state`.
 
 **Search and retrieve.** `SearchItems` / agent retrieval → readable and
 editable governing collections from PostgreSQL → Qdrant pre-filter (4.10,

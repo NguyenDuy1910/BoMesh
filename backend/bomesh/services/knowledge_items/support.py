@@ -14,7 +14,7 @@ from sqlalchemy.orm import aliased
 
 from bomesh import etag as etags
 from bomesh.db.engine import SessionFactory
-from bomesh.db.models import Item, ItemLink, ItemRevision, ItemTopic, ItemUpload, Topic
+from bomesh.db.models import Item, ItemLink, ItemTopic, ItemUpload, Topic
 from bomesh.document_index import ItemIndex
 from bomesh.errors import (
     FailedPrecondition,
@@ -30,13 +30,15 @@ from bomesh.services.kernel.workspaces import WorkspaceResolver
 from bomesh.services.knowledge_items.indexing import ItemIngestionService
 from bomesh.services.knowledge_items.item_store import (
     HIDDEN_KINDS,
+    ItemService,
     catalog_visibility,
     has_open_contribution,
     is_personal,
     purpose,
 )
+from bomesh.services.knowledge_items.covers import resolve_cover
 from bomesh.services.knowledge_items.names import item_name
-from bomesh.services.knowledge_items.preview import KnowledgePreview, parse_manifest
+from bomesh.services.knowledge_items.preview import KnowledgePreview
 from bomesh.services.knowledge_items.records import (
     Ancestor,
     CollectionFacet,
@@ -70,6 +72,7 @@ class KnowledgeDeps:
     max_upload_bytes: int
     upload_url_seconds: int
     download_url_seconds: int
+    cover_url_seconds: int
 
     @classmethod
     def from_runtime(cls, runtime: AppRuntime) -> KnowledgeDeps:
@@ -86,11 +89,12 @@ class KnowledgeDeps:
             max_upload_bytes=runtime.config.upload.max_upload_bytes,
             upload_url_seconds=runtime.config.upload.upload_url_seconds,
             download_url_seconds=runtime.config.preview.url_seconds,
+            cover_url_seconds=runtime.config.preview.cover_url_seconds,
         )
 
     @property
     def workspaces(self) -> WorkspaceResolver:
-        return WorkspaceResolver(self.sessions)
+        return WorkspaceResolver()
 
 
 # -- Loading ------------------------------------------------------------------
@@ -512,22 +516,18 @@ class Projector:
         if not items:
             return {}
         ids = [item.id for item in items]
-        revisions = {
-            item_id: int(number)
-            for item_id, number in await self._session.execute(
-                select(ItemRevision.item_id, func.max(ItemRevision.revision_number))
-                .where(ItemRevision.item_id.in_(ids), ItemRevision.deleted_at.is_(None))
-                .group_by(ItemRevision.item_id)
-            )
-        }
+        revisions = await ItemService(self._session).current_revision_numbers(ids)
         topics: dict[UUID, list[str]] = {}
-        for item_id, code in await self._session.execute(
-            select(ItemTopic.item_id, Topic.code)
+        assistant_topics: dict[UUID, list[str]] = {}
+        for item_id, code, by_assistant in await self._session.execute(
+            select(ItemTopic.item_id, Topic.code, ItemTopic.created_by_user_id.is_(None))
             .join(Topic, ItemTopic.topic_id == Topic.id)
             .where(ItemTopic.item_id.in_(ids))
             .order_by(ItemTopic.item_id, Topic.code)
         ):
             topics.setdefault(item_id, []).append(code)
+            if by_assistant:
+                assistant_topics.setdefault(item_id, []).append(code)
         uploaders = await self._uploaders([item.id for item in items if _awaits_upload(item)])
         if self._processing_version is None:
             self._processing_version = self._deps.processing_version()
@@ -542,6 +542,7 @@ class Projector:
                 purpose=purpose(item).upper(),
                 document_type=item.document_type,
                 topics=tuple(topics.get(item.id, ())),
+                assistant_topics=tuple(assistant_topics.get(item.id, ())),
                 summary=_text(item.metadata_.get("summary")),
                 language_code=_text(item.metadata_.get("language")),
                 owner_id=_uuid(item.metadata_.get("owner_user_id")),
@@ -558,8 +559,8 @@ class Projector:
                     if uploaders.get(item.id) == self._ctx.user_id
                     else None
                 ),
-                thumbnail_uri=thumbnail_uri(
-                    self._deps.preview, item, expires_seconds=self._deps.download_url_seconds
+                cover=resolve_cover(
+                    self._deps.storage, item, expires_seconds=self._deps.cover_url_seconds
                 ),
                 editor=EDIT in held[(item.id, item.deleted_at is not None)],
             )
@@ -605,21 +606,6 @@ LINK_TARGET = aliased(Item, name="link_target")
 LINK_MERGED = aliased(Item, name="link_merged")
 #: The display name a link shows: its merge-resolved target's.
 LINK_TARGET_TITLE = func.coalesce(LINK_MERGED.title, LINK_TARGET.title)
-
-
-def thumbnail_uri(preview: KnowledgePreview, item: Item, *, expires_seconds: int) -> str | None:
-    """The signed first page image of the current revision (``document.thumbnailUri``).
-
-    ``None`` for a collection, a DELETED item, or a revision without page images.
-    """
-    if item.item_type != "document" or item.deleted_at is not None:
-        return None
-    manifest = parse_manifest(item.metadata_.get("preview"))
-    if manifest is None:
-        return None
-    assets = preview.resolve_assets(item, manifest, expires_seconds=expires_seconds)
-    first = min(assets, key=lambda asset: asset.page or 0, default=None)
-    return first.url if first is not None else None
 
 
 def visible_links(visibility: ItemVisibility, collection_id: UUID | None = None) -> Any:
@@ -699,7 +685,6 @@ __all__ = [
     "origin",
     "require_document",
     "require_no_open_contribution",
-    "thumbnail_uri",
     "verification",
     "visible_links",
 ]

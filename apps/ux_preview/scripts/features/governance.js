@@ -1,7 +1,7 @@
 /* Knowledge Studio → Topics → Suggestions and Documents → Quality (bodies rendered by curation.js).
-   Suggestions: what the pipeline wasn't sure of and what people taught it — topics the assistant proposes (workspace
+   Suggestions: what the assistant left for people and what people taught it — topics the assistant proposes (workspace
    admins decide; others see them read-only), keywords from reviewers' corrections (admins; features/masterdata.js), first
-   syncs' topic groups to confirm (published, but filed with low confidence or without a topic; D.classGroups) and processed
+   syncs' topic groups to confirm (published with the topics the assistant applied, or without one; D.classGroups) and processed
    documents without a topic. Quality: re-verification cycles, missing owner or summary, possible duplicates.
    Scope: published documents in the collections the caller can edit (admins: all).
    Exports: X.gov = { counts(), suggestions(), suggestionCount(), queue(part) }, X.khReview().
@@ -74,12 +74,12 @@
   function suggestions() {
     const props = X.md?.proposals?.() || '', learn = canManageTaxonomy() ? X.md?.learn?.() || '' : '';
     const groups = openClassGroups(), loose = detailItems(scope(), ['topic']);
-    if (!props && !learn && !groups.length && !loose.length) return emptyState({ icon: 'tag', tone: 'success', title: 'No suggestions', desc: 'Topics the pipeline wasn’t sure of, new topics it proposes and keywords from reviewers’ corrections show up here.', boxed: true });
+    if (!props && !learn && !groups.length && !loose.length) return emptyState({ icon: 'tag', tone: 'success', title: 'No suggestions', desc: 'Documents the assistant gave no topic, new topics it proposes and keywords from reviewers’ corrections show up here.', boxed: true });
     const parts = [
       props && section('New topics the assistant proposes', props, { desc: esc('Documents keep mentioning them and no topic covers them. Accepting adds the topic and tags those documents.') }),
       learn && section('Keywords from reviewers’ corrections', learn, { desc: esc('When reviewers move documents to another topic, the words their titles share are keyword candidates. Nothing changes until you add one.') }),
-      groups.length && section('Topics to confirm', tabConfirm(groups), { desc: esc('Published by a first sync below the confidence threshold, or without a topic. Confirm in bulk.') }),
-      loose.length && section('Without a topic', tabDetails(loose, 'khTopicless'), { desc: esc('Processed, but no topic matched well enough.') }),
+      groups.length && section('Topics to confirm', tabConfirm(groups), { desc: esc('A first sync published these with the topics the assistant applied, or without one. Confirm in bulk.') }),
+      loose.length && section('Without a topic', tabDetails(loose, 'khTopicless'), { desc: esc('Processed, but the assistant gave them no topic.') }),
     ].filter(Boolean);
     return `<div class="kh gov gov--classify">${parts.join('')}</div>`;
   }
@@ -349,10 +349,9 @@
     toast('Marked as not duplicates', { action: { label: 'Undo', run: () => { D.dupDismissed = (D.dupDismissed || []).filter(k => k !== key); refresh(); } } });
   }
 
-  /* ── Topics to confirm: what a first sync published with a low-confidence topic or none, decided per group ──
+  /* ── Topics to confirm: what a first sync published with the topic the assistant applied, or none, decided per group ──
      Every decision moves the run's counters (run.backfill.topics), the one source of truth Sources and the run read. */
   const groupById = id => (D.classGroups || []).find(g => g.id === id);
-  const confRange = ([a, b] = []) => (a == null ? '' : `${Math.round(a * 100)}–${Math.round(b * 100)}% confidence`);
   const sampleDisclosure = g => disclosure({
     path: `cgSample.${g.id}`, title: 'Sample documents', summary: esc(`${(g.sample || []).length} of ${plural(g.n, 'document')}`),
     body: `<ul class="cg-sample">${(g.sample || []).map(name => `<li class="cg-sample__row">${fileIcon(name.split('.').pop(), 'sm')}<span class="truncate" translate="no" data-tip="${esc(name)}">${esc(name)}</span></li>`).join('')}</ul>`,
@@ -360,7 +359,7 @@
   const SEP = '<span aria-hidden="true"> · </span>';
   function topicCard(g) {
     const t = topicById(g.topic), dm = t && topicById(t.parent);
-    const meta = [plural(g.n, 'document'), confRange(g.conf), g.keywords?.length && `matched ${g.keywords.map(k => `“${k}”`).join(', ')}`].filter(Boolean);
+    const meta = [plural(g.n, 'document'), g.keywords?.length && `matched ${g.keywords.map(k => `“${k}”`).join(', ')}`].filter(Boolean);
     return `<section class="cg-card" aria-label="${esc(t?.name || 'Topic')}">
       <div class="cg-card__head">${itemIcon('tag', 'accent')}
         <div class="cg-card__main"><div class="cg-card__title"><span class="medium" translate="no">${esc(t?.name || 'Untitled topic')}</span>${t?.code ? `<span class="md-code md-code--domain" translate="no">${esc(t.code)}</span>` : ''}${dm ? `<span class="t-sm muted" translate="no">${esc(dm.name)}</span>` : ''}</div>
@@ -368,7 +367,7 @@
         <div class="cg-card__acts">${btn('Confirm topic', { v: 'secondary', size: 'sm', icon: 'check', act: 'cg-confirm', data: { id: g.id } })}${iconBtn('more', 'More actions', { size: 'sm', menu: 'cg-more', data: { id: g.id } })}</div>
       </div>${sampleDisclosure(g)}</section>`;
   }
-  /** No topic matched: the assistant's proposals (an admin creates the topic and tags them in one go), then what's left. */
+  /** Without a topic: the assistant's proposals (an admin creates the topic and tags them in one go), then what's left. */
   function noneCard(g) {
     const admin = canManageTaxonomy(), props = g.proposals || [];
     const left = Math.max(0, g.n - props.reduce((s, p) => s + p[1], 0));
@@ -381,17 +380,17 @@
       : '<span class="muted">A workspace admin can add keywords to the topics.</span>'}</div>` : '';
     return `<section class="cg-card cg-card--none" aria-label="No topic">
       <div class="cg-card__head">${itemIcon('help', 'warning')}<div class="cg-card__main"><div class="cg-card__title"><span class="medium">No topic</span></div>
-        <div class="cg-card__meta"><span>${esc(plural(g.n, 'document'))}</span>${SEP}<span>No topic matched</span></div></div></div>
+        <div class="cg-card__meta"><span>${esc(plural(g.n, 'document'))}</span></div></div></div>
       ${props.length ? `<div class="cg-props"><div class="t-label">The assistant suggests</div><ul class="cg-prop-list">${rows}</ul></div>` : ''}${rest}${sampleDisclosure(g)}</section>`;
   }
   function tabConfirm(groups) {
     if (!groups.length) return emptyState({ icon: 'tag', tone: 'success', title: 'Every topic is confirmed', desc: 'Documents from first syncs are filed where people browse them.', boxed: true });
     return `<div class="cg-list">${groups.filter(g => g.topic).map(topicCard).join('')}${groups.filter(g => !g.topic).map(noneCard).join('')}</div>`;
   }
-  /** Confirm the suggested topic, or move the group to another one: the documents count as confidently filed. */
+  /** Confirm the topic, or move the group to another one: the documents count as filed. */
   function settleGroup(id, status, to) {
     const g = groupById(id); if (!g || g.status !== 'open' || !g.topic || !canEditKb(kbById(g.kb))) return;
-    const delta = { 'topics.confirm': -g.n, 'topics.confident': g.n }, from = g.topic;
+    const delta = { 'topics.confirm': -g.n, 'topics.filed': g.n }, from = g.topic;
     g.status = status; if (to) g.movedTo = to; g.decided = { by: me().id, at: Date.now() };
     shiftBackfill(g.run, delta);
     audit(status === 'moved' ? 'Moved documents to another topic' : 'Confirmed a topic for documents', `${topicName(to || from)} → ${plural(g.n, 'document')}`);
@@ -433,7 +432,7 @@
     const same = (D.topics || []).find(t => t.parent && !t.archived && fold(t.name) === fold(name));
     const t = same || { id: uid('t'), name, parent: dm.id, code: nextTopicCode(dm), keywords: [...keywords] };
     if (!same) (D.topics ??= []).push(t);
-    const delta = { 'topics.none': -n, 'topics.confident': n };
+    const delta = { 'topics.none': -n, 'topics.filed': n };
     g.proposals.splice(i, 1); g.n -= n; shiftBackfill(g.run, delta);
     audit(same ? 'Tagged documents with a topic' : 'Created a topic and tagged documents', `${t.name}${t.code ? ` (${t.code})` : ''} → ${plural(n, 'document')}`);
     refresh();

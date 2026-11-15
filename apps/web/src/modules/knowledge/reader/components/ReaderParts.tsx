@@ -273,7 +273,7 @@ export function NotReady({ resource: r, error, canFix, fixing, onFix, onDownload
         />,
       );
     default:
-      return box(<EmptyState icon={Clock} title="Waiting to be processed" description="This document isn’t readable yet." actions={fix(r.isPersonal ? "Make searchable" : "Publish now", Play)} />);
+      return box(<EmptyState icon={Clock} title="Waiting to be processed" description="This document isn’t readable yet." actions={fix(r.isPersonal ? "Make searchable" : "Process", Play)} />);
   }
 }
 

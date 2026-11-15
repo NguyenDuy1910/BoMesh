@@ -62,6 +62,7 @@ from api.dto.ingestion.runs import (
     SummarizeIngestionRunsResponse,
     ingestion_run_message,
     ingestion_task_message,
+    run_classification,
     run_selector,
     summary_window,
     workspace_summary_message,
@@ -82,7 +83,7 @@ from api.dto.ingestion.sources import (
     sync_filters,
     sync_message,
 )
-from api.v1.deps import Context, service
+from api.v1.deps import Context, Runtime, service
 from api.v1.listing import ListParams, list_query
 from bomesh.errors import ServiceError
 from bomesh.services.ingestion.common import (
@@ -617,6 +618,7 @@ async def create_ingestion_run(
     body: IngestionRunMessage,
     ctx: Context,
     runs: Runs,
+    runtime: Runtime,
     request_id: Annotated[UUID | None, Query(alias="requestId")] = None,
     validate_only: Annotated[bool, Query(alias="validateOnly")] = False,
 ) -> IngestionRunMessage:
@@ -624,7 +626,12 @@ async def create_ingestion_run(
     record = await runs.create(
         ctx,
         workspace_id,
-        run_selector(body.selector, workspace_id=workspace_id),
+        run_selector(
+            body.selector,
+            workspace_id=workspace_id,
+            processing_version=runtime.processing_version(),
+        ),
+        classification=run_classification(body.classification, workspace_id=workspace_id),
         trigger=body.trigger or "MANUAL",
         request_id=request_id,
         validate_only=validate_only,

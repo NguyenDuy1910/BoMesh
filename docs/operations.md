@@ -10,7 +10,7 @@ boundaries that must be configured explicitly in deployment. Start with
 | --- | --- |
 | `backend/.env.example` | Complete backend configuration template used to create the ignored root `.env`. |
 | `apps/web/.env.example` | Browser-only public-variable reference for deployments that inject WebUI configuration through the build. |
-| `deployment/compose.yml` | Local PostgreSQL, Qdrant, RustFS, and Temporal topology (legacy MinIO behind the `minio` profile). Optional Compose overrides go in ignored `deployment/.env`; `make` targets pass the RustFS keys from the root `.env`. |
+| `deployment/compose.yml` | Local PostgreSQL, Qdrant, and RustFS topology (legacy MinIO behind the `minio` profile; the Temporal services are commented out while Temporal is disabled). Optional Compose overrides go in ignored `deployment/.env`; `make` targets pass the RustFS keys from the root `.env`. |
 
 Do not commit credentials, encryption keys, signed object URLs, or deployment
 environment files.
@@ -34,6 +34,21 @@ coordinates for citation provenance. No Docling layout, OCR, table, or tokenizer
 model is loaded locally. Health reports each dependency separately so a missing
 key is visible as an unhealthy required service instead of a silent fallback.
 
+## Database connections
+
+```dotenv
+DATABASE_URL=postgresql+asyncpg://bomesh:bomesh@127.0.0.1:5432/bomesh
+BOMESH_DB_POOL_SIZE=20      # connections each process (API, worker) keeps open
+BOMESH_DB_MAX_OVERFLOW=20   # extra connections opened under load, closed when idle
+```
+
+A request holds at most two pooled connections at once (its Authorizer's read
+connection and one transaction), so size `pool_size + max_overflow` to at
+least twice the requests one API process serves concurrently, and keep the sum
+over all API and worker processes under PostgreSQL's `max_connections`.
+Connections run with `jit = off` and are pinged on checkout, so a connection
+cut while idle is replaced instead of failing a request.
+
 ## Document index configuration
 
 ```dotenv
@@ -44,12 +59,37 @@ QDRANT_PREFER_GRPC=false
 
 BOMESH_CONTEXTUALIZATION_ENABLED=false
 BOMESH_CONTEXTUALIZATION_MODEL=
+# reasoning.effort of contextualization and classification calls (unset = none;
+# empty = omit). A reasoning model otherwise spends their small output budget.
+BOMESH_CONTEXTUALIZATION_REASONING_EFFORT=none
 BOMESH_HYBRID_CANDIDATE_LIMIT=20
 ```
 
 The local Qdrant collection has one dense vector named `content` and one sparse
 BM25 vector named `content_bm25`. It is derived state and can be recreated with
 `make qdrant-init`.
+
+## Ingestion worker
+
+Runs, source syncs, due schedules and index upkeep execute in the ingestion
+worker, `cd backend && uv run python -m bomesh.services.ingestion.worker`: the
+API's code and image, deployed as its own container and scaled on its own.
+PostgreSQL is the queue; there is no other orchestration service. SIGTERM
+stops it gracefully: it gives back the documents in flight for another
+replica.
+
+```dotenv
+BOMESH_INGESTION_MAX_CONCURRENT_RUNS=2        # runs (and syncs) per worker
+BOMESH_INGESTION_MAX_CONCURRENT_DOCUMENTS=4   # documents processed at once per worker
+BOMESH_INGESTION_POLL_SECONDS=2
+BOMESH_INGESTION_GRACEFUL_SHUTDOWN_SECONDS=30
+# Direct PostgreSQL connection holding the worker's advisory locks; required
+# when DATABASE_URL goes through a transaction-pooling pgbouncer.
+BOMESH_INGESTION_LOCK_DATABASE_URL=
+```
+
+Batching per run stays `BOMESH_INGESTION_BATCH_MAX_ITEMS`,
+`BOMESH_INGESTION_BATCH_MAX_BYTES` and `BOMESH_INGESTION_RUN_PARALLELISM`.
 
 ## Object storage
 
@@ -208,6 +248,12 @@ remains authoritative. Bound rendering with `BOMESH_PREVIEW_MAX_SOURCE_BYTES`,
 `BOMESH_PREVIEW_WEBP_QUALITY`. Preview URLs are signed at read time and use
 `BOMESH_PREVIEW_URL_SECONDS`.
 
+The ingestion worker also writes one immutable cover WebP per document
+content (`previews/cover-v1/…`, at most 480 px wide) when the content arrives;
+originals over 50 MB get none. Cover URLs are signed with a timestamp aligned
+to a `BOMESH_PREVIEW_COVER_URL_SECONDS` window (default 3600), so a list
+returns the same URL for the whole window and browsers reuse the cached image.
+
 ## Identity and credentials
 
 ```dotenv
@@ -276,8 +322,8 @@ npm --prefix apps/web run typecheck
 npm --prefix apps/web run build
 ```
 
-`make reset-all` is the complete local data reset. It clears application and
-Temporal persistence, reapplies the current SQLAlchemy database design, seeds
+`make reset-all` is the complete local data reset. It clears application
+persistence, reapplies the current SQLAlchemy database design, seeds
 the local administrator, and recreates the Qdrant collection while retaining
 raw RustFS objects.
 

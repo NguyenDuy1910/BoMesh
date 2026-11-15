@@ -323,6 +323,29 @@
     return `<div class="doc-viewer doc-viewer--${f}">${withBar ? bar : ''}<div class="doc-viewer__pages" style="--doc-zoom:${zoom}" translate="no">${pages}</div></div>`;
   }
   const skelPage = () => `<div class="doc-page" aria-busy="true" aria-label="Loading"><div class="stack gap-12"><span class="skeleton skeleton--title" style="width:55%"></span>${[92, 86, 95, 70, 0, 40, 90, 84, 60].map(w => w ? `<span class="skeleton skeleton--line" style="width:${w}%"></span>` : '<span style="height:12px"></span>').join('')}</div></div>`;
+  /** The cover the list already had (no extra request), drawn as the document's first page at reading size: its image, else its text in
+      the format's shape — a page with the title and first lines, a slide with its title and bullets, the first sheet's top-left cells.
+      While the pages load (`loading`), a paged document gets a sized blank after it, so nothing moves when the pages arrive; page images
+      then load lazily (the web client mounts only the pages two either side of the one in view). Not processed (`loading: false`): the
+      cover stays under the not-ready message. No cover → a skeleton page while loading, else nothing. */
+  function coverPages(doc, { loading = true } = {}) {
+    const c = X.res?.cover(doc), f = X.docFormat?.(doc);
+    if (!c || c.kind === 'IMAGE') return loading ? skelPage() : '';
+    const busy = loading ? ' aria-busy="true" aria-label="Loading"' : '';
+    const head = c.title ? `<h2>${esc(c.title)}</h2>` : '';
+    let page, cls;
+    if (c.image?.html) { cls = c.image.cls; page = c.image.html; }
+    else if (c.kind === 'SHEET') {
+      const cols = Math.max(...c.cells.map(r => r.length));
+      cls = 'doc-page--sheet';
+      page = `<div class="doc-sheet"><table><thead><tr><th class="doc-sheet__rn"></th>${'ABCDE'.slice(0, cols).split('').map(x => `<th>${x}</th>`).join('')}</tr></thead><tbody>${c.cells.map((r, i) => `<tr${i ? '' : ' class="doc-sheet__hdr"'}><td class="doc-sheet__rn">${i + 1}</td>${Array.from({ length: cols }, (_, j) => `<td>${esc(r[j] || '')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+    } else if (c.kind === 'SLIDE') { cls = 'doc-page--slide'; page = head + (c.lines.length ? `<ul>${c.lines.slice(0, 5).map(l => `<li>${esc(l)}</li>`).join('')}</ul>` : ''); }
+    else { cls = 'doc-page--' + f; page = head + c.lines.map(l => `<p>${esc(l)}</p>`).join(''); }
+    const first = `<div class="${cx('doc-page doc-page--cover', cls)}">${page}</div>`;
+    if (f === 'sheet') return `<div class="doc-viewer doc-viewer--sheet"${busy} translate="no">${first}</div>`;
+    if (!PAGED.includes(f)) return `<article class="doc-viewer doc-viewer--flow doc-viewer--${f}"${busy} translate="no">${first}</article>`;
+    return `<div class="doc-viewer doc-viewer--${f}"><div class="doc-viewer__pages"${busy} translate="no">${first}${loading ? `<div class="${cx('doc-page doc-page--blank', cls)}"></div>` : ''}</div></div>`;
+  }
   const railSkel = () => `<div class="stack gap-12">${[80, 64, 92, 50].map(w => `<span class="skeleton skeleton--line" style="width:${w}%"></span>`).join('')}</div>`;
   function notAvailable() {
     crumbs([{ label: 'Knowledge', to: '/knowledge' }, { label: 'Not available' }]);
@@ -369,7 +392,7 @@
 
     const canvas = gate({
       ok: () => (m ? viewerHtml(m, u) : `<div class="doc-state">${emptyState({ icon: 'file', title: 'This file can’t be previewed', desc: 'Download it to view.', actions: btn('Download', { icon: 'download', act: 'doc-dl', data: { id: doc.id } }) })}</div>`),
-      loading: skelPage,
+      loading: () => coverPages(doc),
       empty: () => `<div class="doc-state">${emptyState({ icon: 'file', title: 'Nothing to show', desc: 'This document has no readable content yet.' })}</div>`,
       error: () => errorState({ title: 'This document didn’t load' }),
     });
@@ -452,8 +475,9 @@
 
     /* Canvas */
     const canvas = gate({
-      ok: () => (readable ? viewerHtml(m, u) : notReady(doc, kb, edit)),
-      loading: skelPage,
+      // Not processed yet: the not-ready message, then the cover (made when the content arrived) so the document is still recognisable.
+      ok: () => (readable ? viewerHtml(m, u) : notReady(doc, kb, edit) + coverPages(doc, { loading: false })),
+      loading: () => coverPages(doc),
       empty: () => `<div class="doc-state">${emptyState({ icon: 'file', title: 'Nothing to show', desc: 'This document has no readable content yet.' })}</div>`,
       error: () => errorState({ title: 'This document didn’t load' }),
     });
@@ -562,6 +586,7 @@
     needles: (doc, query, m) => needles(doc, query, m),
     injectQuote: (m, quote, page) => injectQuote(m, quote, page),
     markHits: (root, list) => markHits(root, list),
+    coverPages,
   };
   /** Submission preview ⋯: its details and history, and the file. */
   MENUS['rdr-sub-more'] = el => {

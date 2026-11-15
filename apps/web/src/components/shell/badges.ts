@@ -67,7 +67,7 @@ export function useNavBadges(): NavCounts {
   const has = (s: string) => sections.some((x) => x.id === s);
 
   const requests = useRequestsBadge();
-  const review = useCount("review", has("review"), async () =>
+  const review = useCount("review", has("documents"), async () =>
     (await call(api.GET("/api/v1/workspaces/{workspace}/contributions", { params: { path, query: { pageSize: 1, filter: 'state = "IN_REVIEW"' } } })))
       .totalSize ?? 0,
   );
@@ -77,7 +77,7 @@ export function useNavBadges(): NavCounts {
   const accounts = useCount("connections", has("sources") && can("connections.list"), async () =>
     (await call(api.GET("/api/v1/workspaces/{workspace}/connections", { params: { path, query: { pageSize: 1, filter: FAILING } } }))).totalSize ?? 0,
   );
-  const proposed = useCount("topics", has("taxonomy"), async () =>
+  const proposed = useCount("topics", has("topics"), async () =>
     (await call(api.GET("/api/v1/workspaces/{workspace}/topics", { params: { path, query: { pageSize: 1, filter: 'state = "PROPOSED"' } } }))).totalSize ?? 0,
   );
   // Access requests: workspace admins decide them in People › Access requests; a collection owner in Studio › Collections.
@@ -101,14 +101,14 @@ export function useNavBadges(): NavCounts {
   const sourceProblems = (sources ?? 0) + (accounts ?? 0);
   const ownerRequests = admin ? 0 : (access ?? 0);
   const studio = {
-    review: count(review),
+    documents: count(review),
     collections: count(ownerRequests),
-    taxonomy: count(proposed),
+    topics: count(proposed),
     sources: count(sourceProblems, "danger"),
   };
-  // The Studio row carries the landing section's count: decisions to publish, else broken sources, else access requests.
-  const landing = studioLanding(sections, { review, sources: sourceProblems });
-  const studioRow = landing === "review" ? studio.review : landing === "sources" ? studio.sources : studio.collections;
+  // The Studio row carries the landing section's count: decisions in Documents, else broken sources, else access requests.
+  const landing = studioLanding(sections, { documents: review, sources: sourceProblems });
+  const studioRow = landing === "documents" ? studio.documents : landing === "sources" ? studio.sources : studio.collections;
 
   return {
     rows: {

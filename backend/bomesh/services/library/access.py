@@ -7,7 +7,6 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bomesh.db.engine import SessionFactory
 from bomesh.errors import PermissionDenied
 from bomesh.iam.authorizer import ItemRef, WorkspaceRef, permission_denied
 from bomesh.services.kernel.context import RequestContext
@@ -31,8 +30,8 @@ class Owner:
 class LibraryGate:
     """``permission`` on the workspace, then the caller must be ``{member}`` (or ``me``)."""
 
-    def __init__(self, sessions: SessionFactory) -> None:
-        self._resolver = WorkspaceResolver(sessions)
+    def __init__(self) -> None:
+        self._resolver = WorkspaceResolver()
 
     async def open(
         self,

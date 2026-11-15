@@ -33,7 +33,7 @@ export const names = (list: readonly string[]) => (list.length <= 2 ? list.join(
 
 /**
  * Needs attention (preview `attention()`): each item names a problem once and links to the one place its fix
- * lives. Knowledge work (submissions, publishing problems, quality checks) is counted in Knowledge health instead.
+ * lives. Knowledge work (submissions, issues, quality checks) is counted in Knowledge health instead.
  * `extra` is the next unfinished setup step. `items` is undefined while the lists load.
  */
 export function useAttention(overview: WorkspaceOverview | undefined, extra: Attn | null): Attn[] | undefined {

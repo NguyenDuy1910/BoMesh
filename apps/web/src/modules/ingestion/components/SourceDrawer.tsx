@@ -116,7 +116,7 @@ function SourceSheet({
     </Dropdown>
   ) : null;
 
-  // One primary: the state's fix (Reconnect when expired, Publish when files wait), else Sync now.
+  // One primary: the state's fix (Reconnect when expired, Process when files wait), else Sync now.
   let footer = null;
   if (manage) {
     const syncNow = (primary: boolean) => (
@@ -135,9 +135,9 @@ function SourceSheet({
       footer = (
         <>
           {syncNow(false)}
-          <Button variant="primary" onPress={() => void actions.publish([source])}>
+          <Button variant="primary" onPress={() => void actions.process(source)}>
             <Play className="i" aria-hidden />
-            {`Publish ${fmtNum(waiting)}`}
+            {`Process ${fmtNum(waiting)}`}
           </Button>
         </>
       );
@@ -226,8 +226,8 @@ function Summary({
       </Card>
     );
   }
-  // The fix (Publish) is the footer's primary; the alert only explains.
-  if (!top && waiting) top = <Callout tone="accent" title={`${plural(waiting, "document")} waiting to publish`} description="They synced into the collection but aren’t searchable yet." />;
+  // The fix (Process) is the footer's primary; the alert only explains.
+  if (!top && waiting) top = <Callout tone="accent" title={`${plural(waiting, "document")} waiting to be processed`} description="They synced into the collection but aren’t searchable yet." />;
   // Files that couldn't be read are their own problem, shown beside any other note.
   let issues = null;
   if (syncedWithIssues(source)) {
@@ -328,7 +328,7 @@ function ReviewLine({ source }: { source: Source }) {
     <div className="row gap-8 wrap mt-12">
       <span className="t-sm muted">{`${plural(inReview, "file")} from this source waiting in review`}</span>
       {can("contributions.review") ? (
-        <LinkButton href="/studio?tab=review&queue=submissions" icon={ArrowUpRight}>
+        <LinkButton href="/studio?tab=documents&view=review" icon={ArrowUpRight}>
           Open review
         </LinkButton>
       ) : null}

@@ -27,6 +27,7 @@ import { invalidateKnowledge, useContributionTargets, useItem, useKnowledgeModel
 import type { ContributeOptions } from "./contribute-store";
 import { KnowledgeModal } from "./KnowledgeModal";
 import { useWhoCanSeeCollection } from "./ResourceDetails";
+import { TopicPicker } from "./TopicPicker";
 
 /* ═══════════════ Files ═══════════════ */
 
@@ -103,7 +104,7 @@ interface CheckFileProps {
 /** One file's details as an editable form (preview `checkFile`). */
 function CheckFile({ entry: x, meta: m, many, touched, busy, onChange }: CheckFileProps) {
   const { settings } = useWorkspace();
-  const { ctx, topics } = useKnowledgeModel();
+  const { topics } = useKnowledgeModel();
   const targets = useContributionTargets();
   const target = targets.data.find((t) => t.name === m.kb);
   const who = useWhoCanSeeCollection(target ? { id: resourceId(target.name), displayName: target.displayName } : null);
@@ -114,9 +115,7 @@ function CheckFile({ entry: x, meta: m, many, touched, busy, onChange }: CheckFi
     ? configured.map((t) => [t.key ?? "", t.displayName ?? t.key ?? ""])
     : Object.entries(RESOURCE_KINDS).map(([key, k]) => [key, k.label]);
   if (!kinds.some(([k]) => k === m.kind)) kinds.push([m.kind, RESOURCE_KINDS[m.kind]?.label ?? m.kind]);
-  const addable = topicTree(topics).flatMap((d) => d.children.filter((t) => !m.topics.includes(t.name ?? "")).map((t) => [t.name ?? "", `${d.displayName} · ${t.displayName}`] as const));
   const WhoIcon = who.icon;
-  const topicsId = `ctb-topics-${x.id}`;
 
   return (
     <section className="ctb-check" aria-label={`Details for ${x.file.name}`}>
@@ -176,52 +175,15 @@ function CheckFile({ entry: x, meta: m, many, touched, busy, onChange }: CheckFi
         </Select>
       </div>
       <div className="field">
-        <span className="label" id={topicsId}>
-          Topics
-        </span>
-        <div className="ctb-topics-edit" role="group" aria-labelledby={topicsId}>
-          {m.topics.length ? (
-            m.topics.map((t) => {
-              const name = ctx.topicNames?.get(t) ?? "Untitled topic";
-              return (
-                <span key={t} className="ctb-topic">
-                  <span className="truncate" translate="no">
-                    {name}
-                  </span>
-                  <button type="button" className="ctb-topic__x" aria-label={`Remove ${name}`} disabled={busy} onClick={() => onChange({ topics: m.topics.filter((x) => x !== t) })}>
-                    <X className="i i-xs" aria-hidden />
-                  </button>
-                </span>
-              );
-            })
-          ) : (
-            <span className="t-sm muted">{addable.length ? "None yet. Add one if you know it." : "This workspace has no topics yet."}</span>
-          )}
-          {addable.length ? (
-            <Select
-              aria-label="Add topic"
-              className="ctb-topic-add"
-              placeholder="Add topic…"
-              value={null}
-              isDisabled={busy}
-              onChange={(v) => v && onChange({ topics: [...m.topics, String(v)] })}
-            >
-              <Select.Trigger>
-                <Select.Value />
-                <Select.Indicator />
-              </Select.Trigger>
-              <Select.Popover>
-                <ListBox>
-                  {addable.map(([name, label]) => (
-                    <ListBox.Item key={name} id={name} textValue={label}>
-                      {label}
-                    </ListBox.Item>
-                  ))}
-                </ListBox>
-              </Select.Popover>
-            </Select>
-          ) : null}
-        </div>
+        <span className="label">Topics</span>
+        <TopicPicker
+          value={m.topics}
+          onChange={(next) => onChange({ topics: next })}
+          topics={topics}
+          label="Topics"
+          empty={topicTree(topics).length ? "No clear topic. Add one if you know it." : "This workspace has no topics yet."}
+          isDisabled={busy}
+        />
       </div>
       <Select value={m.kb || "suggest"} onChange={(v) => onChange({ kb: v === "suggest" ? "" : String(v) })} isDisabled={busy}>
         <Label>Collection</Label>
@@ -280,7 +242,7 @@ export interface ContributeDialogProps extends ContributeOptions {
  * uploads each file into the member's PERSONAL collection with what they confirmed, then opens a contribution
  * for review. Upload to My files and Submit a new version (one file, required "What changed?") are one step.
  */
-export function ContributeDialog({ isOpen, onClose, mode, collection, item }: ContributeDialogProps) {
+export function ContributeDialog({ isOpen, onClose, mode, collection, folder, item }: ContributeDialogProps) {
   const { id: ws, can, member } = useWorkspace();
   const router = useRouter();
   const qc = useQueryClient();
@@ -382,7 +344,7 @@ export function ContributeDialog({ isOpen, onClose, mode, collection, item }: Co
             contribution = await createContribution(ws, {
               kind: item ? "NEW_REVISION" : "NEW_DOCUMENT",
               item: doc.name,
-              targetCollection: item ? undefined : m?.kb || undefined,
+              targetCollection: item ? undefined : (m?.kb && m.kb === preset && folder ? `workspaces/${ws}/items/${resourceId(folder)}` : m?.kb) || undefined,
               replacesItem: item ? `workspaces/${ws}/items/${resourceId(item)}` : undefined,
               note: note.trim() || undefined,
               changeSummary: item ? note.trim() : undefined,
@@ -423,7 +385,7 @@ export function ContributeDialog({ isOpen, onClose, mode, collection, item }: Co
     const open = uploaded.length === 1 ? uploaded[0].contribution?.name : "";
     toast(message, {
       action: can("contributions.review")
-        ? { label: "Review now", onPress: () => router.push("/studio?tab=review") }
+        ? { label: "Review now", onPress: () => router.push("/studio?tab=documents&view=review") }
         : { label: "Open", onPress: () => router.push(contributionHref(open)) },
     });
   }

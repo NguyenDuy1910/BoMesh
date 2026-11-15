@@ -1,5 +1,6 @@
 "use client";
 
+import type { Item } from "../api";
 import { createOverlayStore } from "../components/dialog-store";
 
 /**
@@ -32,6 +33,9 @@ export interface PreviewCitation {
 export interface PreviewRequest {
   /** Item name or bare ID. Ignored when `citations` is given (the list names its own items). */
   item?: string;
+  /** `item` as the opening list already has it: the preview draws at once (title, cover as page 1) and
+   *  starts reading the content while GetItem refreshes it. */
+  listed?: Item;
   /** Search text to highlight and step through. */
   q?: string;
   page?: number;

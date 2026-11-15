@@ -5,6 +5,10 @@ Engines: :mod:`.run_engine` (Ingestion Run state), :mod:`.source_store` and
 :mod:`.source_sync` (Source rows and their syncs), :mod:`.connection_store`,
 :mod:`.credentials` and :mod:`.oauth_flow` (integration connections).
 
+Process: :mod:`.worker` (``python -m bomesh.services.ingestion.worker``) claims
+runs and syncs from PostgreSQL with advisory locks, fires due schedules and
+runs index upkeep; :mod:`.executor` executes one run.
+
 Cross-domain API (light modules):
 
 - :mod:`.names`: ``source_name(ws, code)``, ``parse_source(name, ws, *, field)``,

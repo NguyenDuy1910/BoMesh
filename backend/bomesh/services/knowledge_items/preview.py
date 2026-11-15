@@ -337,7 +337,7 @@ class KnowledgePreview:
     ) -> list[ResolvedPreviewAsset]:
         """Short-lived URLs of a manifest's page images, after the caller was authorized."""
 
-        expected_prefix = _preview_prefix(document)
+        expected_prefix = preview_prefix(document)
         assets: list[ResolvedPreviewAsset] = []
         for asset in manifest.assets:
             if not asset.key.startswith(expected_prefix):
@@ -385,7 +385,7 @@ class KnowledgePreview:
         *,
         expires_seconds: int,
     ) -> ResolvedRendition | None:
-        if not rendition.key.startswith(_preview_prefix(document)):
+        if not rendition.key.startswith(preview_prefix(document)):
             log.warning("ignored document rendition outside its Item prefix")
             return None
         try:
@@ -419,7 +419,7 @@ class KnowledgePreview:
             if built.block_count == 0:
                 return None
             key = (
-                f"{_preview_prefix(document)}{DOCUMENT_RENDITION_VERSION}/"
+                f"{preview_prefix(document)}{DOCUMENT_RENDITION_VERSION}/"
                 f"{source_version}/document.json.gz"
             )
             persisted = await asyncio.to_thread(
@@ -558,12 +558,13 @@ def _preview_key(
         else f"asset-{position:04d}.webp"
     )
     return (
-        f"{_preview_prefix(document)}{PREVIEW_RENDERER_VERSION}/"
+        f"{preview_prefix(document)}{PREVIEW_RENDERER_VERSION}/"
         f"{source_version}/{name}"
     )
 
 
-def _preview_prefix(document: Item) -> str:
+def preview_prefix(document: Item) -> str:
+    """Where an Item's derived objects (pages, rendition, cover) live."""
     tenant_id = _text(getattr(document, "tenant_id", None)) or "unscoped"
     item_id = _text(getattr(document, "id", None))
     if item_id is None:
@@ -582,4 +583,4 @@ def _text(value: object) -> str | None:
     return normalized or None
 
 
-__all__ = ["KnowledgePreview", "parse_manifest"]
+__all__ = ["KnowledgePreview", "parse_manifest", "preview_prefix"]

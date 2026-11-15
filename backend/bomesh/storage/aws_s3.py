@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import boto3
+import botocore.auth
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
@@ -23,6 +25,26 @@ _NOT_FOUND_CODES = frozenset({"404", "NoSuchKey", "NotFound"})
 _AWS_S3_PROVIDER = "aws_s3"
 _CLOUDFLARE_R2_PROVIDER = "cloudflare_r2"
 _RUSTFS_PROVIDER = "rustfs"
+
+#: The SigV4 signing time of the current presign; ``None`` signs at the current time.
+_SIGNING_TIME: ContextVar[datetime | None] = ContextVar("bomesh_s3_signing_time", default=None)
+_botocore_now = botocore.auth.get_current_datetime
+
+
+def _signing_clock(remove_tzinfo: bool = True) -> datetime:
+    """botocore's SigV4 clock, overridable per presign (``presign_download(stable=True)``).
+
+    botocore takes the signing time from this module function and offers no
+    parameter for it; a context variable keeps the override to the one call
+    that sets it, so every other signature stays at the current time.
+    """
+    fixed = _SIGNING_TIME.get()
+    if fixed is None:
+        return _botocore_now(remove_tzinfo)
+    return fixed.replace(tzinfo=None) if remove_tzinfo else fixed
+
+
+botocore.auth.get_current_datetime = _signing_clock  # type: ignore[assignment]
 
 
 @dataclass(frozen=True, slots=True)
@@ -287,23 +309,35 @@ class S3DocumentStorage:
         key: str,
         *,
         expires_seconds: int,
+        stable: bool = False,
     ) -> PresignedRequest:
         normalized_key = _object_key(key)
         expires_seconds = _expiry(expires_seconds)
+        signed_at: datetime | None = None
+        lifetime = expires_seconds
+        if stable:
+            # Sign at the start of the current window, valid for two windows:
+            # one URL per window, always valid at least ``expires_seconds``.
+            window = int(datetime.now(UTC).timestamp()) // expires_seconds * expires_seconds
+            signed_at = datetime.fromtimestamp(window, UTC)
+            lifetime = min(2 * expires_seconds, 604_800)
+        token = _SIGNING_TIME.set(signed_at)
         try:
             url = self._signer.generate_presigned_url(
                 "get_object",
                 Params={"Bucket": self._bucket, "Key": normalized_key},
-                ExpiresIn=expires_seconds,
+                ExpiresIn=lifetime,
                 HttpMethod="GET",
             )
         except (BotoCoreError, ClientError) as exc:
             raise ObjectStorageError("S3 download URL generation failed") from exc
+        finally:
+            _SIGNING_TIME.reset(token)
         return PresignedRequest(
             url=url,
             method="GET",
             headers={},
-            expires_at=datetime.now(UTC) + timedelta(seconds=expires_seconds),
+            expires_at=(signed_at or datetime.now(UTC)) + timedelta(seconds=lifetime),
         )
 
     async def head(self, key: str) -> StoredObject:

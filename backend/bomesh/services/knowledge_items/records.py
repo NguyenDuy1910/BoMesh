@@ -53,6 +53,20 @@ class Origin:
 
 
 @dataclass(frozen=True, slots=True)
+class Cover:
+    """``DocumentCover``: what the current revision's first page looks like."""
+
+    #: ``PAGE``, ``SLIDE``, ``SHEET``, ``TEXT`` or ``IMAGE``.
+    kind: str
+    image_uri: str | None = None
+    width_pixels: int | None = None
+    height_pixels: int | None = None
+    title: str | None = None
+    lines: tuple[str, ...] = ()
+    cells: tuple[tuple[str, ...], ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class DocumentFacet:
     file_name: str | None
     mime_type: str | None
@@ -60,6 +74,8 @@ class DocumentFacet:
     purpose: str
     document_type: str | None
     topics: tuple[str, ...]
+    #: The subset of ``topics`` the assistant applied (``item_topics.created_by_user_id`` NULL).
+    assistant_topics: tuple[str, ...]
     summary: str | None
     language_code: str | None
     owner_id: UUID | None
@@ -72,7 +88,7 @@ class DocumentFacet:
     origin: Origin | None
     merged_into: UUID | None
     upload_uri: str | None
-    thumbnail_uri: str | None
+    cover: Cover | None
     editor: bool
 
 
@@ -291,7 +307,7 @@ def _plain(value: object) -> dict[str, Any] | None:
 
 @dataclass(frozen=True, slots=True)
 class UploadedFile:
-    """The ``file`` part of CreateItemMedia."""
+    """A multipart ``file`` part (CreateItemMedia, UploadMapBackground)."""
 
     data: bytes
     file_name: str | None

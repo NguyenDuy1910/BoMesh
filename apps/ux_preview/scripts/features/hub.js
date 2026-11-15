@@ -166,11 +166,9 @@
   function results(p, r) {
     const page = paginate(r.rows, 'cat', PER).map(x => x.doc), data = p.q ? { q: p.q } : undefined;
     if (p.view === 'list') return `<div class="cat-results">${X.res.rows(page, () => ({ q: p.q, act: 'cat-select', data }))}</div>${r.total > PER ? pager(r.total, 'cat', PER) : ''}`;
-    // Templated renditions make different documents preview the same section: those cards fall back to their type tile.
-    const keys = page.map(d => X.res.previewKey(d, p.q)), seen = new Map();
-    keys.forEach(k => k && seen.set(k, (seen.get(k) || 0) + 1));
+    // Cards draw from the list's own data (each document's cover): no content read per card.
     const hide = sharedContext(page);
-    const cards = page.map((d, i) => X.res.card(d, { act: 'cat-select', data, q: p.q, hide, plain: seen.get(keys[i]) > 1 })).join('');
+    const cards = page.map(d => X.res.card(d, { act: 'cat-select', data, q: p.q, hide })).join('');
     return `<div class="cat-results"><div class="cat-cards">${cards}</div></div>${r.total > PER ? pager(r.total, 'cat', PER) : ''}`;
   }
   /** Landing only: reading lists curated for you (shared with the workspace or your spaces). Yours are in My library → My reading lists.

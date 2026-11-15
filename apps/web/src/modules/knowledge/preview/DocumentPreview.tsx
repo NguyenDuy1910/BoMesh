@@ -19,7 +19,7 @@ import { readerHref } from "../reader/links";
 import { documentMarks, NO_MARKS, renditionText, searchNeedles } from "../reader/marks";
 import { DocumentViewer } from "../reader/components/DocumentViewer";
 import { renditionPageCount, RenditionView } from "../reader/components/RenditionView";
-import { PageImageView } from "../reader/components/PageImageView";
+import { coverPages, PageImageView } from "../reader/components/PageImageView";
 import { useRendition } from "../reader/components/useRendition";
 import { useReaderContent, usePassages } from "../reader/queries";
 import { useItem, useKnowledgeModel } from "../queries";
@@ -95,21 +95,35 @@ function PreviewDocument({ show, resource: r, hit, onTotal }: { show: Showing; r
   }, [focusHit, rd, pageImages.length, show.page, marks]);
 
   const format = docFormat({ ext: r.ext, mime: r.mime });
+  // No rendition (not processed yet, or it failed): the message, then the cover made when the content arrived.
+  const coverBelow = coverPages(r.cover, format, { loading: false });
   const none = (
-    <div className="pv-none" ref={scroll}>
-      <FileIcon type={r.ext} mime={r.mime} name={r.fileName} size="lg" />
-      <p className="pv-none__title">There’s no preview for this file yet</p>
-      {r.summary ? (
-        <p className="pv-none__about" translate="no">
-          {r.summary}
-        </p>
-      ) : null}
-      <p className="pv-none__hint">Open it to read or download it.</p>
+    <div ref={scroll}>
+      <div className="pv-none">
+        {coverBelow ? null : <FileIcon type={r.ext} mime={r.mime} name={r.fileName} size="lg" />}
+        <p className="pv-none__title">There’s no preview for this file yet</p>
+        {r.summary ? (
+          <p className="pv-none__about" translate="no">
+            {r.summary}
+          </p>
+        ) : null}
+        <p className="pv-none__hint">Open it to read or download it.</p>
+      </div>
+      {coverBelow ? <div className={`pv-doc pv-doc--${format}`}>{coverBelow}</div> : null}
     </div>
   );
 
   if (!r.readable) return none;
   if (content.isPending || rendition.loading) {
+    // Cover first: the card's cover is the first page (or slide, or sheet) at once while the pages or rendition load.
+    const cover = coverPages(r.cover, format);
+    if (cover) {
+      return (
+        <div className={`pv-doc pv-doc--${format}`} ref={scroll}>
+          {cover}
+        </div>
+      );
+    }
     return (
       <div className="pv-doc" ref={scroll} aria-busy="true" aria-label="Loading">
         <span className="skeleton block" style={{ height: 420, borderRadius: "var(--radius-lg)" }} />
@@ -121,7 +135,7 @@ function PreviewDocument({ show, resource: r, hit, onTotal }: { show: Showing; r
     return (
       <div className="pv-doc pv-doc--pdf" ref={scroll}>
         <DocumentViewer format={PAGED_FORMATS[format] ? format : "pdf"} count={assetPages} bar={false}>
-          <PageImageView pages={pageImages} focusPage={show.page ?? 0} />
+          <PageImageView pages={pageImages} focusPage={show.page ?? 0} coverUri={r.cover?.imageUri} />
         </DocumentViewer>
       </div>
     );
@@ -269,7 +283,9 @@ export function DocumentPreview({ request, onClose }: { request: PreviewRequest;
 
   const show = showing(request, index);
   const itemId = resourceId(show?.item ?? "");
-  const item = useItem(itemId || null);
+  // Opened from a list: draw from the listed item at once (title, cover as page 1) while GetItem loads.
+  const listed = !citations.length && request.listed && resourceId(request.listed.name) === itemId ? request.listed : undefined;
+  const item = useItem(itemId || null, { placeholder: listed });
   const { toResource } = useKnowledgeModel();
   const r = item.data ? toResource(item.data) : null;
 

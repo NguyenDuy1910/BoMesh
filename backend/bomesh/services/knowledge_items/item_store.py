@@ -60,7 +60,7 @@ ARCHIVE_DOCUMENT_TYPE = "archive"
 ARCHIVE_MIME_TYPES = frozenset({"application/zip", "application/x-zip-compressed"})
 
 #: Metadata derived from the current revision's object; reset when it changes.
-_DERIVED_METADATA_KEYS = ("preview", "processing")
+_DERIVED_METADATA_KEYS = ("preview", "cover", "processing")
 
 
 # -- Identity -----------------------------------------------------------------
@@ -586,6 +586,18 @@ class ItemService:
             .limit(1)
         )
 
+    async def current_revision_numbers(self, item_ids: Iterable[UUID]) -> dict[UUID, int]:
+        """The :meth:`current_revision` number of each item that has one, in one query."""
+        ids = list(dict.fromkeys(item_ids))
+        if not ids:
+            return {}
+        rows = await self._session.execute(
+            select(ItemRevision.item_id, func.max(ItemRevision.revision_number))
+            .where(ItemRevision.item_id.in_(ids), ItemRevision.deleted_at.is_(None))
+            .group_by(ItemRevision.item_id)
+        )
+        return {item_id: int(number) for item_id, number in rows}
+
     async def revision(self, item_id: UUID, number: int) -> ItemRevision | None:
         return await self._session.scalar(
             select(ItemRevision).where(
@@ -613,8 +625,8 @@ class ItemService:
         """Append revision n+1 and make it current (``item_model.md`` §4.8).
 
         The object is reused, never copied. ``storage_key``, ``mime_type``,
-        ``size_bytes`` and ``metadata.file_name`` follow it, derived preview
-        metadata is reset and the document waits for an Ingestion Run (one
+        ``size_bytes`` and ``metadata.file_name`` follow it, derived metadata
+        (preview, cover) is reset and the document waits for an Ingestion Run (one
         that is never processed, such as an artifact, stays ``unsupported``).
         ``author`` is set for artifact revisions only.
         """

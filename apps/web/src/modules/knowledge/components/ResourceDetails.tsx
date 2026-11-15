@@ -9,6 +9,7 @@ import { api, call, resourceId } from "@/lib/api/client";
 import { fmtDate } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 
+import { accessFolder, type FolderIndex, type Item } from "../bases/model";
 import { catalogHref, languageName, TRUST, type Resource } from "../model";
 import { useItem, useItemSpaces, useKnowledgeModel, useMember } from "../queries";
 import { useSourceApp, SourceIcon } from "./SourceIcon";
@@ -35,6 +36,13 @@ export function useWhoCanSeeCollection(collection: { id: string; displayName?: s
   if (policy.data) return { icon: Lock, label: "Only people with access" };
   const name = collection?.displayName || base.data?.displayName;
   return { icon: Lock, label: name ? `People with access to ${name}` : "People with access" };
+}
+
+/** Who reads what's in a collection or one of its folders (preview `whoCanSee(kb, folder)`): the nearest folder with its own access decides, else the collection. */
+export function useWhoCanSeeAt(collection: Item | undefined, index: FolderIndex | undefined, folder: string | null | undefined): { icon: LucideIcon; label: string } {
+  const base = useWhoCanSeeCollection(collection ? { id: resourceId(collection.name), displayName: collection.displayName } : null);
+  const own = index && folder ? accessFolder(index, folder) : null;
+  return own ? { icon: Lock, label: `Only people added to ${own.displayName}` } : base;
 }
 
 /** Who can read a document: the audience of its collection. */

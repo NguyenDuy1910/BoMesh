@@ -5,7 +5,7 @@
 catalog and predefined roles. Its fixtures:
 
 - ``sessions``: ``async_sessionmaker`` bound to the schema;
-- ``fakes``: the :class:`Fakes` the runtime uses (storage, index, workflows, ...);
+- ``fakes``: the :class:`Fakes` the runtime uses (storage, index, providers, ...);
 - ``runtime``: :func:`build_runtime` — an ``AppRuntime`` with :func:`harness_config`;
 - ``app``: ``create_app(runtime)``; ``client``: an anonymous :class:`ApiClient`;
 - ``world``: the :class:`World` factories.
@@ -79,7 +79,6 @@ from fakes import (
     FakeEmbedder,
     FakeIndexBackend,
     FakeObjectStorage,
-    FakeWorkflows,
     fake_connection_providers,
 )
 from native_responses import ScriptedResponsesTransport
@@ -130,7 +129,6 @@ class Fakes:
     storage: FakeObjectStorage = field(default_factory=FakeObjectStorage)
     index_backend: FakeIndexBackend = field(default_factory=FakeIndexBackend)
     embedder: FakeEmbedder = field(default_factory=FakeEmbedder)
-    workflows: FakeWorkflows = field(default_factory=FakeWorkflows)
     providers: ConnectionProviderRegistry = field(default_factory=fake_connection_providers)
     #: Replace before the first ``runtime.agent()`` call to script the model.
     agent: ScriptedResponsesTransport = field(
@@ -144,7 +142,6 @@ def build_runtime(sessions: Sessions, fakes: Fakes, config: AppConfig | None = N
     runtime._session_factory = sessions
     runtime._storage = fakes.storage
     runtime._index = ItemIndex(backend=fakes.index_backend, embedder=fakes.embedder)  # type: ignore[arg-type]
-    runtime._workflows = fakes.workflows  # type: ignore[assignment]
     runtime._connection_providers = fakes.providers
     runtime._agent_transport = fakes.agent  # type: ignore[assignment]
     return runtime

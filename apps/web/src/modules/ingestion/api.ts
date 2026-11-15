@@ -170,12 +170,15 @@ export function createSync(workspace: string, source: string): Promise<Sync> {
 
 /* ═══════════════ Processing (ingestion runs) ═══════════════ */
 
-/** Publish what a source left waiting (PENDING or OUTDATED documents it registered). */
-export function publishWaiting(workspace: string, source: string): Promise<IngestionRun> {
+/** Process what a source left waiting (PENDING or OUTDATED documents it registered); never publishes. */
+export function processWaiting(workspace: string, source: string): Promise<IngestionRun> {
   return call(
     api.POST("/api/v1/workspaces/{workspace}/ingestionRuns", {
       params: { path: { workspace }, query: { requestId: requestId() } },
-      body: { trigger: "MANUAL", selector: { source, states: ["PENDING", "OUTDATED"] } },
+      body: {
+        trigger: "MANUAL",
+        selector: { filter: `document.origin.source = "${source}" AND (document.indexingState = PENDING OR document.indexingState = OUTDATED)` },
+      },
     }),
   );
 }

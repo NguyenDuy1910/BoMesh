@@ -11,6 +11,7 @@ from api.aip.fieldmask import MutableFields
 from api.aip.filtering import FilterSchema
 from api.aip.messages import ProtoMessage, Timestamp
 from api.aip.ordering import OrderSchema
+from api.dto.knowledge_items import DocumentCover, cover_message
 from bomesh.db.models import Notification, RecentItem, SavedItem, SavedSearch
 from bomesh.services.knowledge_curation.records import (
     contribution_name,
@@ -209,7 +210,7 @@ class MemberHomeItem(ProtoMessage):
     collection: str | None = None
     document_type: str | None = None
     publish_time: Timestamp | None = None
-    thumbnail_uri: str | None = None
+    cover: DocumentCover | None = None
     verification_state: VerificationState | None = None
 
 
@@ -304,7 +305,7 @@ def _home_item(card: HomeItem) -> MemberHomeItem:
         document_type=card.document_type,
         verification_state=card.verification_state,  # type: ignore[arg-type]
         publish_time=card.publish_time,
-        thumbnail_uri=card.thumbnail_uri,
+        cover=cover_message(card.cover),
     )
 
 

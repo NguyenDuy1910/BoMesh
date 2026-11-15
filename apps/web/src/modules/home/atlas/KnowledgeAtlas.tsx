@@ -33,6 +33,7 @@ import { BaseMark } from "@/modules/knowledge/bases/components/BaseMark";
 import { RequestAccessCta } from "@/modules/knowledge/bases/components/RequestAccessDialog";
 import { catalogHref } from "@/modules/knowledge/model";
 
+import { MapBackdrop } from "../components/MapBackground";
 import { DocGroup, DocRow, levelIcon, NearViewContext, OrgNode, SearchDoc, WorkspaceNode } from "./AtlasNodes";
 import { edgePath, LEVELS, layoutAtlas, levelOf, relatedTo, type AtlasCollection, type AtlasLayout, type AtlasNode } from "./layout";
 import { narrowTree, queryWords, wordHits } from "./match";
@@ -227,13 +228,16 @@ export function KnowledgeAtlas({ onStats }: { onStats?: (s: AtlasStats) => void 
   if (!tree.roots.length && !tree.locked.length) return <EmptyAtlas />;
 
   const dimOf = (id: string) => !!related && !related.has(id);
+  // The workspace's map background: fixed behind the viewport (never pans or zooms), under a wash in the theme's colours.
+  const bg = ws.settings?.branding?.mapBackground;
 
   return (
     <AtlasDocsContext.Provider value={docsModel}>
       <div
-        className={clsx("atlas", `is-${view.band}`, related && "has-sel")}
+        className={clsx("atlas", `is-${view.band}`, related && "has-sel", bg?.imageUri && "has-bg")}
         onKeyDown={(e) => e.key === "Escape" && sel && (setSel(""), viewport.current?.focus())}
       >
+        {bg?.imageUri ? <MapBackdrop src={bg.imageUri} strength={bg.strength} /> : null}
         <div
           ref={viewportRef}
           className="atlas__viewport"

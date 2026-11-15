@@ -144,11 +144,11 @@ export function eventLine(c: Contribution, ctx: ContributionContext): string {
     case "merged":
       return `Published as a new version · ${fmtDate(c.decision?.decideTime ?? e.at)}`;
     case "publishing":
-      return `Approved${by} · publishing now`;
+      return `Approved${by} · being processed`;
     case "queued":
-      return `Approved${by} · waiting to publish`;
+      return `Approved${by} · not processed yet`;
     case "failed":
-      return `Approved${by} · couldn’t publish`;
+      return `Approved${by} · processing failed`;
     case "analyzing":
       return `${e.kind === "resubmitted" ? "Resubmitted" : "Submitted"} · ${relLow(e.at)} · the assistant is reading it`;
   }
@@ -203,9 +203,9 @@ function tail(c: Contribution, ctx: TimelineContext): TimelineStep | null {
     case "changes":
       return { icon: Pencil, tone: "", title: ctx.mine ? "Waiting for your revision" : "Waiting for a revision", next: true };
     case "queued":
-      return { icon: Clock, tone: "", title: "Waiting to publish", next: true };
+      return { icon: Clock, tone: "", title: "Waiting to be processed", desc: "A reviewer chooses when it’s processed. Until then search and the assistant can’t use it.", next: true };
     case "publishing":
-      return { icon: LoaderCircle, tone: "accent", title: "Publishing", desc: "It will be searchable in a few minutes.", live: true };
+      return { icon: LoaderCircle, tone: "accent", title: "Processing", desc: "It will be searchable in a few minutes.", live: true };
     case "published":
     case "update":
       return { icon: CircleCheck, tone: "success", title: "Published", desc: `Searchable in ${kb}.`, at: ctx.published?.updateTime };
@@ -220,7 +220,7 @@ function tail(c: Contribution, ctx: TimelineContext): TimelineStep | null {
         at: c.decision?.decideTime,
       };
     case "failed":
-      return { icon: CircleAlert, tone: "danger", title: "Couldn’t publish", desc: "The reviewers have been told." };
+      return { icon: CircleAlert, tone: "danger", title: "Processing failed", desc: "The reviewers have been told." };
     default:
       return null;
   }
@@ -274,7 +274,7 @@ export function progressSteps(c: Contribution, ctx: TimelineContext): ProgressSt
   };
   const analyzed: Omit<ProgressStep, "label"> =
     k === "analyzing"
-      ? { state: "current", busy: true, text: "Reading the file and matching it against the taxonomy…" }
+      ? { state: "current", busy: true, text: "Reading the file and matching it against the topics…" }
       : {
           state: "done",
           text: ctx.confirmed
@@ -298,13 +298,13 @@ export function progressSteps(c: Contribution, ctx: TimelineContext): ProgressSt
       : { state: "done", text: `Approved${byOf(ok)}`, at: ok?.at };
   const searchable = audience ? `Searchable · ${audience}` : "Searchable";
   const PUB: Partial<Record<LifecycleKey, Omit<ProgressStep, "label">>> = {
-    queued: { state: "current", text: "Waiting to publish" },
-    publishing: { state: "current", busy: true, text: "Making it searchable…" },
+    queued: { state: "current", text: "Published · waiting to be processed" },
+    publishing: { state: "current", busy: true, text: "Processing, so search can find it…" },
     published: { state: "done", text: searchable, at: ctx.published?.updateTime },
     update: { state: "done", text: searchable, at: ctx.published?.updateTime },
     stored: { state: "done", text: "Stored · people can download it; this file type can’t be searched" },
     merged: { state: "done", text: "Published as a new version", at: c.decision?.decideTime },
-    failed: { state: "issue", text: "Couldn’t publish · the reviewers have been told" },
+    failed: { state: "issue", text: "Processing failed · the reviewers have been told" },
     unpublished: { state: "issue", text: "Unpublished" },
     rejected: { state: "skipped", text: "Won’t be published" },
   };

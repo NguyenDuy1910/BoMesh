@@ -620,14 +620,14 @@
         guidance: 'Use for card disputes, chargebacks, scheme timelines, card replacement and PINs.\nNot for merchant fees (Pricing & fees) or payment cut-offs (Payments & settlement).',
         synonyms: ['card complaint', 'reason code', 'cardholder dispute'],
         examples: ['fx-ops-dispute', 'SOP — Chargeback evidence pack.pdf', 'Dispute reason codes — Visa & Mastercard.xlsx'],
-        rules: [{ field: 'path', op: 'contains', value: 'Chargebacks' }],
+        rules: [{ field: 'collection', value: 'f-fx-ops-cb' }],
       },
       't-pci': {
         desc: 'The Payment Card Industry Data Security Standard at Finx: scope, controls, evidence and the yearly assessment.',
         guidance: 'Use for anything about protecting cardholder data and the PCI DSS assessment.\nNot for general security policies (Information security) unless they define PCI scope.',
         synonyms: ['card data security', 'cardholder data environment'],
         examples: ['fx-sec-pci', 'fx-sec-scope', 'PCI DSS — Requirement 8 implementation notes.md'],
-        rules: [{ field: 'source', op: 'is', value: 'src-fx-sec' }],
+        rules: [{ field: 'collection', value: 'f-fx-sec-pcidss' }],
       },
       't-kyc': {
         desc: 'Knowing who the customer is: identity checks when an account opens, eKYC exceptions, AML screening and account closure.',
@@ -651,13 +651,13 @@
         guidance: 'Use for decision records and design reviews.\nNot for how-to guides on one tool (Developer tooling, Cloud & infrastructure).',
         synonyms: ['architecture decision record', 'design decision'],
         examples: ['fx-eng-adr027', 'fx-eng-adr031'],
-        rules: [{ field: 'path', op: 'contains', value: 'Architecture decisions' }],
+        rules: [{ field: 'collection', value: 'f-fx-eng-adr' }],
       },
       't-incident': {
         desc: 'Declaring, running and learning from incidents: severity levels, communication, SBV notification and postmortems.',
         synonyms: ['outage', 'post-incident review'],
         examples: ['fx-sec-incident', 'fx-pay-postmortem', 'fx-eng-sev'],
-        rules: [{ field: 'path', op: 'contains', value: 'postmortems' }],
+        rules: [{ field: 'collection', value: 'f-fx-pay-pm' }],
       },
       't-privacy': {
         desc: 'Protecting customers’ personal data: Decree 13 obligations, masking, consent and access to PII.',

@@ -12,8 +12,6 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from bomesh.connector.protocol import CitationInfo
 from bomesh.db.engine import transaction_scope
 from bomesh.db.models import Item
@@ -33,11 +31,7 @@ from bomesh.services.knowledge_items.records import (
     PassageRecord,
     Rendition,
 )
-from bomesh.services.knowledge_items.support import (
-    KnowledgeDeps,
-    load_content_source,
-    thumbnail_uri,
-)
+from bomesh.services.knowledge_items.support import KnowledgeDeps, load_content_source
 
 #: The rendition format version clients cache by (``document-v1`` → 1).
 RENDITION_FORMAT_VERSION = int(DOCUMENT_RENDITION_VERSION.rsplit("v", 1)[1])
@@ -200,20 +194,6 @@ def resolve_page_assets(
     )
 
 
-async def item_thumbnail(
-    session: AsyncSession,
-    preview: KnowledgePreview,
-    item_id: UUID,
-    *,
-    expires_seconds: int,
-) -> str | None:
-    """:func:`thumbnail_uri` of ``item_id``; the caller has already authorized it."""
-    item = await session.get(Item, item_id)
-    if item is None:
-        return None
-    return thumbnail_uri(preview, item, expires_seconds=expires_seconds)
-
-
 def resolve_rendition(
     preview: KnowledgePreview, item: Item, manifest: PreviewManifest, *, expires_seconds: int
 ) -> Rendition | None:
@@ -247,7 +227,6 @@ def _boxes(citation: CitationInfo) -> tuple[BoundingBox, ...]:
 __all__ = [
     "RENDITION_FORMAT_VERSION",
     "ItemContentService",
-    "item_thumbnail",
     "resolve_page_assets",
     "resolve_rendition",
 ]

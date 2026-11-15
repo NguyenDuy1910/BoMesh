@@ -1,4 +1,6 @@
-"""Shared contracts and configuration for Temporal orchestration.
+"""Disabled in this phase; not wired (see ``bomesh.services.ingestion.worker``; grep ``[temporal-disabled]``).
+
+Shared contracts and configuration for Temporal orchestration.
 
 Three workflows run on the ingestion task queue. ``IngestionRunWorkflow``
 processes one Ingestion Run's snapshot of Documents in bounded batches;

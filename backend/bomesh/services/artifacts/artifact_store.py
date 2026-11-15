@@ -462,13 +462,23 @@ async def create_artifact(
 
 
 async def source_ids(session: AsyncSession, artifact_id: UUID) -> list[UUID]:
-    return list(
-        await session.scalars(
-            select(ArtifactSourceItem.item_id)
-            .where(ArtifactSourceItem.artifact_item_id == artifact_id)
-            .order_by(ArtifactSourceItem.position)
+    return (await source_ids_of(session, (artifact_id,)))[artifact_id]
+
+
+async def source_ids_of(
+    session: AsyncSession, artifact_ids: Iterable[UUID]
+) -> dict[UUID, list[UUID]]:
+    """The sources of each artifact in position order, in one query (every id has a key)."""
+    result: dict[UUID, list[UUID]] = {artifact_id: [] for artifact_id in artifact_ids}
+    if result:
+        rows = await session.execute(
+            select(ArtifactSourceItem.artifact_item_id, ArtifactSourceItem.item_id)
+            .where(ArtifactSourceItem.artifact_item_id.in_(list(result)))
+            .order_by(ArtifactSourceItem.artifact_item_id, ArtifactSourceItem.position)
         )
-    )
+        for artifact_id, item_id in rows:
+            result[artifact_id].append(item_id)
+    return result
 
 
 async def add_sources(session: AsyncSession, artifact: Artifact, items: Sequence[UUID]) -> None:
@@ -554,6 +564,10 @@ async def current_revision(session: AsyncSession, item_id: UUID) -> ItemRevision
     return await ItemService(session).current_revision(item_id)
 
 
+async def current_revision_numbers(session: AsyncSession, item_ids: Iterable[UUID]) -> dict[UUID, int]:
+    return await ItemService(session).current_revision_numbers(item_ids)
+
+
 async def live_revision(session: AsyncSession, item_id: UUID, number: int) -> ItemRevision | None:
     return await ItemService(session).revision(item_id, number)
 
@@ -561,11 +575,20 @@ async def live_revision(session: AsyncSession, item_id: UUID, number: int) -> It
 
 
 async def cells(session: AsyncSession, artifact_id: UUID) -> list[EvidenceReviewCell]:
-    return list(
-        await session.scalars(
-            select(EvidenceReviewCell).where(EvidenceReviewCell.artifact_item_id == artifact_id)
-        )
-    )
+    return (await cells_of(session, (artifact_id,)))[artifact_id]
+
+
+async def cells_of(
+    session: AsyncSession, artifact_ids: Iterable[UUID]
+) -> dict[UUID, list[EvidenceReviewCell]]:
+    """The matrix cells of each artifact, in one query (every id has a key)."""
+    result: dict[UUID, list[EvidenceReviewCell]] = {artifact_id: [] for artifact_id in artifact_ids}
+    if result:
+        for cell in await session.scalars(
+            select(EvidenceReviewCell).where(EvidenceReviewCell.artifact_item_id.in_(list(result)))
+        ):
+            result[cell.artifact_item_id].append(cell)
+    return result
 
 
 def matrix_keys(artifact: Artifact) -> list[tuple[str, str]]:
@@ -773,9 +796,11 @@ __all__ = [
     "artifact_name",
     "artifact_state",
     "cells",
+    "cells_of",
     "count_live_revisions",
     "create_artifact",
     "current_revision",
+    "current_revision_numbers",
     "delete_newest_revision",
     "drop_cells_outside",
     "live_revision",
@@ -790,6 +815,7 @@ __all__ = [
     "revision_document",
     "set_item",
     "source_ids",
+    "source_ids_of",
     "stored_file_name",
     "touch",
 ]

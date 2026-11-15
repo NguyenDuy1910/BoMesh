@@ -54,7 +54,7 @@ from bomesh.services.knowledge_items.archive_expansion import ArchiveExpansionSe
 from bomesh.services.knowledge_items.file_content import StoredFileContentService
 from bomesh.services.knowledge_items.indexing import ItemIngestionService
 from bomesh.services.knowledge_items.preview import KnowledgePreview
-from bomesh.services.workflow.service import TemporalWorkflowService
+# [temporal-disabled] from bomesh.services.workflow.service import TemporalWorkflowService
 from bomesh.storage import S3DocumentStorage
 from config import AppConfig, get_config
 
@@ -68,7 +68,7 @@ class AppRuntime:
         self._storage: Any | None = None
         self._index: ItemIndex | None = None
         self._preview: KnowledgePreview | None = None
-        self._workflows: TemporalWorkflowService | None = None
+        # [temporal-disabled] self._workflows: TemporalWorkflowService | None = None
         self._ingestion: ItemIngestionService | None = None
         self._conversations: ConversationService | None = None
         self._artifacts: ArtifactService | None = None
@@ -109,7 +109,7 @@ class AppRuntime:
 
         return IngestionRunService(
             self.sessions(),
-            workflows=self.workflow_service(),
+            # [temporal-disabled] workflows=self.workflow_service(),
             processing_signature=lambda: self.item_index().current_processing_signature(),
             run_config=self._config.ingestion_run,
         )
@@ -212,7 +212,10 @@ class AppRuntime:
 
     def sessions(self) -> SessionFactory:
         if self._session_factory is None:
-            self._session_factory = LazySessionFactory()
+            database = self._config.database
+            self._session_factory = LazySessionFactory(
+                pool_size=database.pool_size, max_overflow=database.max_overflow
+            )
         return self._session_factory
 
     def jwt_token_service(self) -> JwtTokenService:
@@ -235,10 +238,10 @@ class AppRuntime:
             )
         return self._google_identity
 
-    def workflow_service(self) -> TemporalWorkflowService:
-        if self._workflows is None:
-            self._workflows = TemporalWorkflowService()
-        return self._workflows
+    # [temporal-disabled] def workflow_service(self) -> TemporalWorkflowService:
+    #     if self._workflows is None:
+    #         self._workflows = TemporalWorkflowService()
+    #     return self._workflows
 
     def conversation_service(self) -> ConversationService:
         if self._conversations is None:
@@ -282,6 +285,7 @@ class AppRuntime:
                 contextualizer = SemanticContextualizer(
                     self._contextualization_transport,
                     model_name=self._config.model.contextualization_model,
+                    reasoning_effort=self._config.model.contextualization_reasoning_effort,
                 )
             self._index = ItemIndex(
                 embedder=OpenRouterTransport(

@@ -8,33 +8,67 @@ unpublished ones); ListTopics sorts on that same per-caller count.
 ``inReviewCount`` is for reviewers only. Document tags are ``item_topics``:
 KnowledgeItems writes a document's set (``tag_document``, validated by
 :func:`resolve_active_topics`); this slice only retags them on merge.
+
+A TOPIC's classification signals (keywords, synonyms, guidance, examples,
+rules) feed CLASSIFYING: :func:`classification_candidates` is the one
+candidate load of ingestion runs, TestTopicClassification and the compiled
+prompt.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+import math
+import re
+from collections import Counter
+from collections.abc import Collection, Mapping, Sequence
 from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
     ColumnElement,
+    Select,
     Uuid,
+    and_,
     delete,
     distinct,
     func,
     literal,
+    or_,
     select,
+    tuple_,
     update,
 )
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from bomesh import etag as etags
 from bomesh.db.engine import transaction_scope
-from bomesh.db.models import Contribution, ContributionTopic, Item, ItemTopic, Topic
+from bomesh.db.models import (
+    Contribution,
+    ContributionTopic,
+    IngestionSource,
+    Item,
+    ItemTopic,
+    Topic,
+)
 from bomesh.db.models.knowledge import OPEN_CONTRIBUTION_STATES
-from bomesh.errors import AlreadyExists, FailedPrecondition, InvalidArgument, NotFound
-from bomesh.iam.authorizer import Authorizer, Principal, WorkspaceRef, permission_denied
+from bomesh.document_index import ClassificationRequest, TopicCandidate, classification_prompt
+from bomesh.errors import (
+    AlreadyExists,
+    FailedPrecondition,
+    InvalidArgument,
+    NotFound,
+    Unavailable,
+)
+from bomesh.iam.authorizer import (
+    Authorizer,
+    ItemRef,
+    Principal,
+    WorkspaceRef,
+    item_ancestry,
+    permission_denied,
+)
 from bomesh.iam.visibility import item_visibility
 from bomesh.services.kernel.audit import Audit
 from bomesh.services.kernel.context import RequestContext
@@ -48,15 +82,33 @@ from bomesh.services.knowledge_curation.access import (
 )
 from bomesh.services.knowledge_curation.queries import DOCUMENT_COUNT
 from bomesh.services.knowledge_curation.records import (
+    SIGNAL_PATHS,
+    TopicClassificationPrompt,
+    TopicClassificationTest,
     TopicDomainSummary,
     TopicDraft,
+    TopicImportResult,
+    TopicImportRow,
     TopicRecord,
+    TopicRule,
+    TopicSignals,
     TopicSummary,
     topic_name,
 )
-from bomesh.services.knowledge_curation.support import CurationDeps, now
+from bomesh.services.knowledge_curation.support import CurationDeps, now, referenced_item
 
 ACCEPT = "topics.accept"
+MAX_TERMS = 50
+MAX_TERM_LENGTH = 100
+MAX_GUIDANCE = 2000
+MAX_EXAMPLES = 5
+MAX_RULES = 20
+MAX_DISPLAY_NAME = 255
+_TOPIC_ID = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
+#: Placeholders of the compiled prompt (CompileTopicClassificationPrompt).
+_PROMPT_NOTE = "[the run's note for the assistant]"
+_PROMPT_TITLE = "[document title]"
+_PROMPT_DOCUMENT = "[document metadata and leading excerpts, up to 12,000 characters]"
 
 
 class TopicService:
@@ -80,6 +132,10 @@ class TopicService:
         await self._open(ctx, workspace_id, "topics.create", write=True)
         if draft.kind == "domain" and draft.parent_code is not None:
             raise InvalidArgument.for_field("parentTopic", "A DOMAIN has no parentTopic.")
+        if draft.kind == "domain" and draft.signals != TopicSignals():
+            raise InvalidArgument.for_field(
+                "keywords", "A DOMAIN has no keywords, synonyms, guidance, examples or rules."
+            )
         async with transaction_scope(self._deps.sessions) as session:
             idempotency = Idempotency(session, self._deps.request_hash_secret)
             key = None
@@ -99,6 +155,9 @@ class TopicService:
             if await _find(session, workspace_id, code) is not None:
                 raise AlreadyExists(f"Topic '{topic_name(workspace_id, code)}' already exists.")
             parent_id = await _parent_id(session, workspace_id, draft.parent_code)
+            signals = await _validated_signals(
+                session, ctx, workspace_id, draft.kind, _signal_values(draft.signals)
+            )
             topic = Topic(
                 tenant_id=workspace_id,
                 code=code,
@@ -111,6 +170,7 @@ class TopicService:
                 state="active",
                 created_by_user_id=ctx.user_id,
             )
+            _set_signals(topic, signals)
             session.add(topic)
             await session.flush()
             name = topic_name(workspace_id, code)
@@ -140,7 +200,10 @@ class TopicService:
         if not await self._may_accept(ctx, workspace_id):
             statement = statement.where(Topic.state == "active")
         visible = await _visible_documents(ctx.authorizer, ctx.principal, workspace_id)
-        counted = statement.add_columns(_document_count(visible).label(DOCUMENT_COUNT.name))
+        tagged = _tagged_counts(visible).subquery("topic_document_counts")
+        counted = statement.outerjoin(tagged, tagged.c.topic_id == Topic.id).add_columns(
+            func.coalesce(tagged.c.document_count, 0).label(DOCUMENT_COUNT.name)
+        )
         async with transaction_scope(self._deps.sessions) as session:
             total = int(await session.scalar(query.count(statement)) or 0)
             topics = list(await session.scalars(query.apply(counted)))
@@ -155,7 +218,8 @@ class TopicService:
         *,
         etag: str | None,
     ) -> TopicRecord:
-        """UpdateTopic: ``changes`` keyed by mask path (``displayName``, ``parentTopic``, ...)."""
+        """UpdateTopic: ``changes`` keyed by mask path (``displayName``, ``parentTopic``,
+        ``keywords``, ...; ``examples`` are item IDs, ``rules`` :class:`TopicRule`)."""
         await self._open(ctx, workspace_id, "topics.update", write=True)
         async with transaction_scope(self._deps.sessions) as session:
             topic = await _load(session, workspace_id, code, for_update=True)
@@ -177,6 +241,19 @@ class TopicService:
                         if topic.kind == "domain" and value:
                             raise InvalidArgument.for_field("parentTopic", "A DOMAIN has no parentTopic.")
                         topic.parent_topic_id = await _parent_id(session, workspace_id, value)
+            signal_changes = {path: changes[path] for path in SIGNAL_PATHS if path in changes}
+            if signal_changes:
+                _set_signals(
+                    topic,
+                    await _validated_signals(
+                        session,
+                        ctx,
+                        workspace_id,
+                        topic.kind,
+                        signal_changes,
+                        current=_topic_signals(topic),
+                    ),
+                )
             await session.flush()
             await _audit(session, ctx, topic, "UpdateTopic")
             return await self._record(session, ctx, topic)
@@ -287,6 +364,201 @@ class TopicService:
             await _audit(session, ctx, topic, "MergeTopic")
             return await self._record(session, ctx, topic)
 
+    async def import_topics(
+        self,
+        ctx: RequestContext,
+        workspace_id: UUID,
+        rows: Sequence[TopicImportRow],
+        *,
+        replace: bool,
+        validate_only: bool,
+    ) -> TopicImportResult:
+        """ImportTopics: create and update topics from rows in one transaction.
+
+        A row that cannot apply is skipped with its reason. REPLACE also
+        archives the ACTIVE topics missing from the rows, unless in use. The
+        outcome is computed in memory; ``validateOnly`` stops there (no write,
+        no row lock), a real import then writes it in a few set-based statements.
+        """
+        await self._open(ctx, workspace_id, "topics.update", write=True)
+        granted = await ctx.authorizer.workspace_permissions(ctx.principal, workspace_id)
+        async with transaction_scope(self._deps.sessions) as session:
+            statement = select(Topic).where(Topic.tenant_id == workspace_id)
+            if not validate_only:
+                statement = statement.with_for_update()
+            existing = {topic.code: topic for topic in await session.scalars(statement)}
+            planned, skipped, named = _plan_import(rows, existing)
+            if any(row.code not in existing for _, row, _ in planned) and "topics.create" not in granted:
+                raise permission_denied("topics.create", WorkspaceRef(workspace_id))
+            codes = {topic.id: topic.code for topic in existing.values()}
+            # The parent code of every live topic once the import applied.
+            parents = {
+                code: codes.get(topic.parent_topic_id) if topic.parent_topic_id else None
+                for code, topic in existing.items()
+                if topic.deleted_at is None
+            }
+            new: list[tuple[TopicImportRow, str]] = []
+            changes: dict[str, dict[str, Any]] = {}
+            created: list[str] = []
+            updated: list[str] = []
+            unchanged = 0
+            for _, row, kind in planned:
+                topic = existing.get(row.code)
+                if topic is None:
+                    new.append((row, kind))
+                    created.append(topic_name(workspace_id, row.code))
+                elif changed := _import_changes(topic, row, parents[row.code]):
+                    changes[row.code] = changed
+                    updated.append(topic_name(workspace_id, row.code))
+                else:
+                    unchanged += 1
+                if topic is None or row.parent_code is not None:
+                    parents[row.code] = row.parent_code
+            archived: list[Topic] = []
+            if replace:
+                # Topics before domains: a domain is in use while it has live topics.
+                missing = sorted(
+                    (
+                        topic
+                        for topic in existing.values()
+                        if topic.code not in named
+                        and topic.state == "active"
+                        and topic.deleted_at is None
+                    ),
+                    key=lambda topic: (topic.kind == "domain", topic.code),
+                )
+                tagged = await _tagged(session, [topic.id for topic in missing])
+                children = Counter(parent for parent in parents.values() if parent is not None)
+                for topic in missing:
+                    if topic.id in tagged or children[topic.code]:
+                        unchanged += 1
+                        continue
+                    if "topics.delete" not in granted:
+                        raise permission_denied("topics.delete", WorkspaceRef(workspace_id))
+                    archived.append(topic)
+                    if (parent := parents.pop(topic.code)) is not None:
+                        children[parent] -= 1
+            if not validate_only:
+                await _apply_import(session, ctx, workspace_id, existing, new, changes, archived)
+                if created or updated or archived:
+                    await Audit(session).record(
+                        ctx,
+                        workspace_id=workspace_id,
+                        category="knowledge",
+                        action="ImportTopics",
+                        target=f"workspaces/{workspace_id}",
+                    )
+            return TopicImportResult(
+                created=tuple(created),
+                updated=tuple(updated),
+                archived=tuple(topic_name(workspace_id, topic.code) for topic in archived),
+                unchanged_count=unchanged,
+                skipped=tuple(skipped),
+            )
+
+    async def test_classification(
+        self,
+        ctx: RequestContext,
+        workspace_id: UUID,
+        *,
+        title: str,
+        text: str,
+        collection_id: UUID | None,
+        source_code: str | None,
+        overrides: Mapping[str, Mapping[str, Any]],
+    ) -> TopicClassificationTest:
+        """TestTopicClassification: CLASSIFYING of a sample, with unsaved topic changes.
+
+        ``overrides`` maps a topic code to changes keyed like UpdateTopic's
+        (``displayName``, ``description`` and the signal paths).
+        """
+        await self._open(ctx, workspace_id, "topics.update", write=False)
+        async with transaction_scope(self._deps.sessions) as session:
+            changed: dict[str, tuple[str, str | None, TopicSignals]] = {}
+            if overrides:
+                topics = {
+                    topic.code: topic
+                    for topic in await session.scalars(
+                        select(Topic).where(
+                            Topic.tenant_id == workspace_id,
+                            Topic.code.in_(list(overrides)),
+                            Topic.state == "active",
+                            Topic.deleted_at.is_(None),
+                        )
+                    )
+                }
+                for code, values in overrides.items():
+                    topic = topics.get(code)
+                    if topic is None:
+                        raise InvalidArgument.for_field(
+                            "topics", f"'{topic_name(workspace_id, code)}' is not an ACTIVE topic."
+                        )
+                    changed[code] = (
+                        values.get("displayName") or topic.display_name,
+                        values["description"] if "description" in values else topic.description,
+                        await _validated_signals(
+                            session,
+                            ctx,
+                            workspace_id,
+                            topic.kind,
+                            {path: values[path] for path in SIGNAL_PATHS if path in values},
+                            current=_topic_signals(topic),
+                        ),
+                    )
+            candidates = await classification_candidates(session, workspace_id, overrides=changed)
+            ancestors: tuple[str, ...] = ()
+            if collection_id is not None:
+                collection = await referenced_item(session, ctx, workspace_id, collection_id)
+                if collection.item_type != "collection":
+                    raise InvalidArgument.for_field("collection", "collection must be a COLLECTION item.")
+                ancestors = tuple(
+                    str(node.item_id) for node in await item_ancestry(session, collection_id)
+                )
+        if not candidates:
+            return TopicClassificationTest(results=(), summary=None)
+        request = ClassificationRequest(candidates).for_document(ancestors, source_code)
+        try:
+            classified = await self._deps.index.classify_sample(
+                title=title, text=text, request=request
+            )
+        except Exception as exc:  # noqa: BLE001 - the provider's failure is not the caller's
+            raise Unavailable("The classification model did not answer; try again.") from exc
+        if classified is None:
+            raise FailedPrecondition(
+                "No rule matches and the contextualization model is not configured."
+            )
+        reason = "rule" if request.settled else "assistant"
+        return TopicClassificationTest(
+            results=tuple((topic.code, reason) for topic in classified.topics),
+            summary=classified.summary,
+        )
+
+    async def compile_classification_prompt(
+        self, ctx: RequestContext, workspace_id: UUID
+    ) -> TopicClassificationPrompt:
+        """CompileTopicClassificationPrompt: the ``document_profile`` prompt over every
+        ACTIVE topic with placeholders, and the rules checked before it."""
+        await self._open(ctx, workspace_id, "topics.update", write=False)
+        async with transaction_scope(self._deps.sessions) as session:
+            candidates = await classification_candidates(session, workspace_id)
+        prompt = classification_prompt(
+            ClassificationRequest(candidates, note=_PROMPT_NOTE),
+            title=_PROMPT_TITLE,
+            document_context=_PROMPT_DOCUMENT,
+        )
+        rules = tuple(
+            (candidate.code, rule)
+            for candidate in candidates
+            for rule in (
+                *(TopicRule(collection_id=UUID(item)) for item in candidate.rule_collections),
+                *(TopicRule(source_code=source) for source in candidate.rule_sources),
+            )
+        )
+        # About four characters per token; the provider's tokenizer decides.
+        return TopicClassificationPrompt(
+            prompt=prompt, rules=rules, estimated_tokens=math.ceil(len(prompt) / 4)
+        )
+
     # -- Internals -----------------------------------------------------------------
 
     async def _open(self, ctx: RequestContext, workspace_id: UUID, permission: str, *, write: bool) -> None:
@@ -374,6 +646,17 @@ async def topic_records(
         )
         in_review = {topic_id: int(count) for topic_id, count in reviewed}
     counts = await document_counts(session, authorizer, principal, workspace_id, ids)
+    example_ids = {example for topic in topics for example in topic.example_item_ids}
+    visible_examples: set[UUID] = set()
+    if example_ids:
+        visible_examples = set(
+            await session.scalars(
+                select(Item.id).where(
+                    Item.id.in_(example_ids),
+                    await _visible_documents(authorizer, principal, workspace_id),
+                )
+            )
+        )
     return [
         TopicRecord(
             workspace_id=workspace_id,
@@ -385,6 +668,7 @@ async def topic_records(
             parent_code=parents.get(topic.parent_topic_id) if topic.parent_topic_id else None,
             icon=topic.icon,
             color=topic.color,
+            signals=_topic_signals(topic, visible=visible_examples),
             state=_state(topic),
             evidence=tuple(evidence.get(topic.id, ())),
             document_count=counts.get(topic.id, 0),
@@ -411,23 +695,18 @@ async def document_counts(
         return {}
     visible = await _visible_documents(authorizer, principal, workspace_id)
     rows = await session.execute(
-        select(ItemTopic.topic_id, func.count())
-        .join(Item, Item.id == ItemTopic.item_id)
-        .where(ItemTopic.topic_id.in_(topic_ids), visible)
-        .group_by(ItemTopic.topic_id)
+        _tagged_counts(visible).where(ItemTopic.topic_id.in_(topic_ids))
     )
     return {topic_id: int(count) for topic_id, count in rows}
 
 
-def _document_count(visible: ColumnElement[bool]) -> Any:
-    """Correlated count of the visible documents tagged with the outer ``Topic``."""
+def _tagged_counts(visible: ColumnElement[bool]) -> Select[tuple[UUID, int]]:
+    """``(topic_id, document_count)`` of the visible documents tagged with each topic."""
     return (
-        select(func.count())
-        .select_from(ItemTopic)
+        select(ItemTopic.topic_id, func.count().label("document_count"))
         .join(Item, Item.id == ItemTopic.item_id)
-        .where(ItemTopic.topic_id == Topic.id, visible)
-        .correlate(Topic)
-        .scalar_subquery()
+        .where(visible)
+        .group_by(ItemTopic.topic_id)
     )
 
 
@@ -440,6 +719,319 @@ async def _visible_documents(
 
 def _state(topic: Topic) -> str:
     return "deleted" if topic.deleted_at is not None else topic.state
+
+
+# -- Classification signals ------------------------------------------------------------
+
+
+def _topic_signals(topic: Topic, *, visible: Collection[UUID] | None = None) -> TopicSignals:
+    """``topic``'s stored signals; ``visible`` narrows the examples to what a caller sees."""
+    return TopicSignals(
+        keywords=tuple(topic.keywords),
+        synonyms=tuple(topic.synonyms),
+        guidance=topic.guidance,
+        example_ids=tuple(
+            example
+            for example in topic.example_item_ids
+            if visible is None or example in visible
+        ),
+        rules=(
+            *(TopicRule(collection_id=collection) for collection in topic.rule_collection_ids),
+            *(TopicRule(source_code=source) for source in topic.rule_source_codes),
+        ),
+    )
+
+
+def _signal_values(signals: TopicSignals) -> dict[str, Any]:
+    """``signals`` keyed by mask path, as UpdateTopic changes."""
+    return {
+        "keywords": signals.keywords,
+        "synonyms": signals.synonyms,
+        "guidance": signals.guidance,
+        "examples": signals.example_ids,
+        "rules": signals.rules,
+    }
+
+
+def _set_signals(topic: Topic, signals: TopicSignals) -> None:
+    topic.keywords = list(signals.keywords)
+    topic.synonyms = list(signals.synonyms)
+    topic.guidance = signals.guidance
+    topic.example_item_ids = list(signals.example_ids)
+    topic.rule_collection_ids = [
+        rule.collection_id for rule in signals.rules if rule.collection_id is not None
+    ]
+    topic.rule_source_codes = [
+        rule.source_code for rule in signals.rules if rule.source_code is not None
+    ]
+
+
+def _terms(values: Sequence[str] | None, field: str) -> tuple[str, ...]:
+    """Trimmed, non-empty terms without case-insensitive repeats, within the limits."""
+    terms: dict[str, str] = {}
+    for value in values or ():
+        term = value.strip()
+        if term:
+            terms.setdefault(term.casefold(), term)
+    if len(terms) > MAX_TERMS:
+        raise InvalidArgument.for_field(field, f"At most {MAX_TERMS} {field} are allowed.")
+    if any(len(term) > MAX_TERM_LENGTH for term in terms.values()):
+        raise InvalidArgument.for_field(
+            field, f"Each of {field} is at most {MAX_TERM_LENGTH} characters."
+        )
+    return tuple(terms.values())
+
+
+def _guidance(value: str | None) -> str | None:
+    guidance = value.strip() if value else ""
+    if len(guidance) > MAX_GUIDANCE:
+        raise InvalidArgument.for_field("guidance", f"guidance is at most {MAX_GUIDANCE} characters.")
+    return guidance or None
+
+
+async def _validated_signals(
+    session: AsyncSession,
+    ctx: RequestContext,
+    workspace_id: UUID,
+    kind: str,
+    values: Mapping[str, Any],
+    *,
+    current: TopicSignals = TopicSignals(),
+) -> TopicSignals:
+    """``current`` with the signal paths in ``values`` validated and applied.
+
+    Examples must be documents and rule collections collections the caller can
+    see (else PERMISSION_DENIED, as for any referenced item); rule sources must
+    be live sources of the workspace. A DOMAIN has no signals.
+    """
+    examples = (
+        tuple(dict.fromkeys(values["examples"] or ())) if "examples" in values else current.example_ids
+    )
+    rules = tuple(dict.fromkeys(values["rules"] or ())) if "rules" in values else current.rules
+    if len(examples) > MAX_EXAMPLES:
+        raise InvalidArgument.for_field("examples", f"At most {MAX_EXAMPLES} examples are allowed.")
+    if len(rules) > MAX_RULES:
+        raise InvalidArgument.for_field("rules", f"At most {MAX_RULES} rules are allowed.")
+    signals = TopicSignals(
+        keywords=_terms(values["keywords"], "keywords") if "keywords" in values else current.keywords,
+        synonyms=_terms(values["synonyms"], "synonyms") if "synonyms" in values else current.synonyms,
+        guidance=_guidance(values["guidance"]) if "guidance" in values else current.guidance,
+        example_ids=examples,
+        rules=rules,
+    )
+    if kind == "domain" and signals != TopicSignals():
+        raise InvalidArgument.for_field(
+            next(iter(values), "keywords"),
+            "A DOMAIN has no keywords, synonyms, guidance, examples or rules.",
+        )
+    new_examples = examples if "examples" in values else ()
+    new_collections = tuple(
+        rule.collection_id for rule in rules if "rules" in values and rule.collection_id is not None
+    )
+    if new_examples or new_collections:
+        kinds = dict(
+            (
+                await session.execute(
+                    select(Item.id, Item.item_type).where(
+                        Item.id.in_([*new_examples, *new_collections]),
+                        await _visible_documents(ctx.authorizer, ctx.principal, workspace_id),
+                    )
+                )
+            )
+            .tuples()
+            .all()
+        )
+        for item_id in (*new_examples, *new_collections):
+            if item_id not in kinds:
+                raise permission_denied("items.get", ItemRef(workspace_id, item_id))
+        if any(kinds[item_id] != "document" for item_id in new_examples):
+            raise InvalidArgument.for_field("examples", "Every example must be a DOCUMENT item.")
+        if any(kinds[item_id] != "collection" for item_id in new_collections):
+            raise InvalidArgument.for_field("rules", "A collection rule names a COLLECTION item.")
+    sources = {rule.source_code for rule in rules if "rules" in values and rule.source_code}
+    if sources:
+        live = set(
+            await session.scalars(
+                select(IngestionSource.code).where(
+                    IngestionSource.tenant_id == workspace_id,
+                    IngestionSource.code.in_(sources),
+                    IngestionSource.deleted_at.is_(None),
+                )
+            )
+        )
+        if missing := sorted(sources - live):
+            raise InvalidArgument.for_field(
+                "rules", f"'{missing[0]}' is not a source of this workspace."
+            )
+    return signals
+
+
+# -- Import ------------------------------------------------------------------------------
+
+
+def _plan_import(
+    rows: Sequence[TopicImportRow], existing: Mapping[str, Topic]
+) -> tuple[list[tuple[int, TopicImportRow, str]], list[tuple[int, str]], set[str]]:
+    """The rows that apply as ``(position, normalized row, kind)``, domains first;
+    the skipped ``(position, reason)``; and every code the rows name (REPLACE keeps them)."""
+    normalized: list[tuple[int, TopicImportRow]] = []
+    skipped: list[tuple[int, str]] = []
+    named: set[str] = set()
+    for position, row in enumerate(rows, start=1):
+        code = row.code.strip().lower()
+        parent = (row.parent_code or "").strip().lower() or None
+        name = row.name.strip()
+        if not _TOPIC_ID.match(code):
+            skipped.append((position, f"'{row.code}' is not a valid topic code."))
+            continue
+        if code in named:
+            skipped.append((position, f"The code '{code}' is in an earlier row."))
+            continue
+        named.add(code)
+        if not name or len(name) > MAX_DISPLAY_NAME:
+            skipped.append((position, f"The name is required (at most {MAX_DISPLAY_NAME} characters)."))
+            continue
+        try:
+            keywords = _terms(row.keywords, "keywords") if row.keywords is not None else None
+            synonyms = _terms(row.synonyms, "synonyms") if row.synonyms is not None else None
+            guidance = _guidance(row.guidance) if row.guidance is not None else None
+        except InvalidArgument as exc:
+            skipped.append((position, exc.message))
+            continue
+        normalized.append(
+            (
+                position,
+                TopicImportRow(
+                    code=code,
+                    name=name,
+                    parent_code=parent,
+                    description=row.description.strip() if row.description is not None else None,
+                    keywords=keywords,
+                    synonyms=synonyms,
+                    guidance=guidance,
+                ),
+            )
+        )
+    # Live domains, then the domain rows that apply: a topic row's parent is one of them.
+    domains = {
+        code
+        for code, topic in existing.items()
+        if topic.kind == "domain" and topic.state == "active" and topic.deleted_at is None
+    }
+    planned: list[tuple[int, TopicImportRow, str]] = []
+    kinds = {
+        position: (
+            existing[row.code].kind
+            if row.code in existing
+            else ("topic" if row.parent_code else "domain")
+        )
+        for position, row in normalized
+    }
+    for position, row in sorted(normalized, key=lambda entry: kinds[entry[0]] != "domain"):
+        topic = existing.get(row.code)
+        kind = kinds[position]
+        reason = None
+        if topic is not None and topic.deleted_at is not None:
+            reason = "The topic is archived; restore it first."
+        elif topic is not None and topic.state != "active":
+            reason = "The topic is not ACTIVE."
+        elif kind == "domain" and row.parent_code:
+            reason = "A domain has no parent."
+        elif row.parent_code and row.parent_code not in domains:
+            reason = f"The parent '{row.parent_code}' is not a domain."
+        elif kind == "domain" and (row.keywords or row.synonyms or row.guidance):
+            reason = "A domain has no keywords, synonyms or guidance."
+        if reason is not None:
+            skipped.append((position, reason))
+            continue
+        planned.append((position, row, kind))
+        if kind == "domain":
+            domains.add(row.code)
+    return planned, sorted(skipped), named
+
+
+def _import_changes(topic: Topic, row: TopicImportRow, parent_code: str | None) -> dict[str, Any]:
+    """The row's present columns that differ from ``topic``, by attribute; the parent
+    compares by code (``topic``'s is ``parent_code``) under the key ``parent_code``."""
+    wanted: dict[str, Any] = {"display_name": row.name}
+    if row.parent_code is not None:
+        wanted["parent_code"] = row.parent_code
+    if row.description is not None:
+        wanted["description"] = row.description or None
+    if row.keywords is not None:
+        wanted["keywords"] = list(row.keywords)
+    if row.synonyms is not None:
+        wanted["synonyms"] = list(row.synonyms)
+    if row.guidance is not None:
+        wanted["guidance"] = row.guidance
+    return {
+        key: value
+        for key, value in wanted.items()
+        if (parent_code if key == "parent_code" else getattr(topic, key)) != value
+    }
+
+
+async def _apply_import(
+    session: AsyncSession,
+    ctx: RequestContext,
+    workspace_id: UUID,
+    existing: Mapping[str, Topic],
+    new: Sequence[tuple[TopicImportRow, str]],
+    changes: Mapping[str, Mapping[str, Any]],
+    archived: Sequence[Topic],
+) -> None:
+    """Write an import's outcome: new domains, then new topics (one multi-row
+    INSERT each, their parents resolved by code), then the updates and archives."""
+    ids = {code: topic.id for code, topic in existing.items()}
+    for kind in ("domain", "topic"):
+        values = [
+            {
+                "tenant_id": workspace_id,
+                "code": row.code,
+                "kind": kind,
+                "parent_topic_id": ids[row.parent_code] if row.parent_code else None,
+                "display_name": row.name,
+                "description": row.description,
+                "keywords": list(row.keywords or ()),
+                "synonyms": list(row.synonyms or ()),
+                "guidance": row.guidance,
+                "state": "active",
+                "created_by_user_id": ctx.user_id,
+            }
+            for row, row_kind in new
+            if row_kind == kind
+        ]
+        if values:
+            inserted = await session.execute(insert(Topic).returning(Topic.code, Topic.id), values)
+            ids.update(inserted.tuples().all())
+    for code, changed in changes.items():
+        topic = existing[code]
+        for key, value in changed.items():
+            if key == "parent_code":
+                topic.parent_topic_id = ids[value]
+            else:
+                setattr(topic, key, value)
+    if archived:
+        removed_at = await now(session)
+        for topic in archived:
+            topic.deleted_at = removed_at
+    await session.flush()
+
+
+async def _tagged(session: AsyncSession, topic_ids: Sequence[UUID]) -> frozenset[UUID]:
+    """The topics of ``topic_ids`` tagging a document or a contribution (see :func:`_in_use`)."""
+    if not topic_ids:
+        return frozenset()
+    return frozenset(
+        await session.scalars(
+            select(ItemTopic.topic_id)
+            .where(ItemTopic.topic_id.in_(topic_ids))
+            .union(
+                select(ContributionTopic.topic_id).where(ContributionTopic.topic_id.in_(topic_ids))
+            )
+        )
+    )
+
 
 
 # -- Engine --------------------------------------------------------------------------
@@ -470,6 +1062,86 @@ async def resolve_active_topics(
             field, f"'{topic_name(workspace_id, missing[0])}' is not an ACTIVE topic."
         )
     return topics
+
+
+async def classification_candidates(
+    session: AsyncSession,
+    workspace_id: UUID,
+    codes: Sequence[str] = (),
+    *,
+    overrides: Mapping[str, tuple[str, str | None, TopicSignals]] | None = None,
+) -> tuple[TopicCandidate, ...]:
+    """CLASSIFYING's candidates, with their signals and example titles, in two queries.
+
+    ``codes`` are a run's topics, a DOMAIN standing for its ACTIVE topics (or
+    itself when it has none); none = every ACTIVE topic. A domain whose topics
+    are candidates is not one itself: documents are filed under topics.
+    ``overrides`` replace a topic's ``(displayName, description, signals)``
+    (TestTopicClassification).
+    """
+    domain = aliased(Topic)
+    query = (
+        select(Topic, domain.display_name)
+        .outerjoin(domain, domain.id == Topic.parent_topic_id)
+        .where(
+            Topic.tenant_id == workspace_id,
+            Topic.state == "active",
+            Topic.deleted_at.is_(None),
+        )
+        .order_by(Topic.code)
+    )
+    if codes:
+        query = query.where(
+            or_(
+                Topic.code.in_(codes),
+                and_(
+                    domain.code.in_(codes),
+                    domain.state == "active",
+                    domain.deleted_at.is_(None),
+                ),
+            )
+        )
+    found = list((await session.execute(query)).tuples())
+    parents = {topic.parent_topic_id for topic, _ in found if topic.parent_topic_id}
+    rows = [
+        (topic, domain_name, *(overrides or {}).get(
+            topic.code, (topic.display_name, topic.description, _topic_signals(topic))
+        ))
+        for topic, domain_name in found
+        if topic.id not in parents
+    ]
+    example_ids = {example for *_, signals in rows for example in signals.example_ids}
+    titles: dict[UUID, str] = {}
+    if example_ids:
+        titles = dict(
+            (
+                await session.execute(
+                    select(Item.id, Item.title).where(
+                        Item.id.in_(example_ids), Item.deleted_at.is_(None)
+                    )
+                )
+            )
+            .tuples()
+            .all()
+        )
+    return tuple(
+        TopicCandidate(
+            id=str(topic.id),
+            code=topic.code,
+            name=name,
+            description=description,
+            domain=domain_name,
+            keywords=signals.keywords,
+            synonyms=signals.synonyms,
+            guidance=signals.guidance,
+            examples=tuple(titles[e] for e in signals.example_ids if titles.get(e)),
+            rule_collections=tuple(
+                str(rule.collection_id) for rule in signals.rules if rule.collection_id
+            ),
+            rule_sources=tuple(rule.source_code for rule in signals.rules if rule.source_code),
+        )
+        for topic, domain_name, name, description, signals in rows
+    )
 
 
 async def _retag(session: AsyncSession, source_id: UUID, target_id: UUID) -> None:
@@ -561,6 +1233,14 @@ def _fingerprint(draft: TopicDraft, topic_id: str | None) -> dict[str, Any]:
         "parentTopic": draft.parent_code,
         "icon": draft.icon,
         "color": draft.color,
+        "keywords": list(draft.signals.keywords),
+        "synonyms": list(draft.signals.synonyms),
+        "guidance": draft.signals.guidance,
+        "examples": [str(example) for example in draft.signals.example_ids],
+        "rules": [
+            [str(rule.collection_id) if rule.collection_id else None, rule.source_code]
+            for rule in draft.signals.rules
+        ],
     }
 
 
@@ -588,38 +1268,43 @@ async def topic_summaries(
     """ACTIVE domains with their top ACTIVE topics; counts are documents the caller can see.
 
     A domain's count is the distinct documents tagged with it or any of its topics.
+    Two statements: the topics, then every topic and domain count in one
+    ``GROUPING SETS`` query.
     """
     live = (Topic.tenant_id == workspace_id) & (Topic.state == "active") & Topic.deleted_at.is_(None)
-    domains = list(await session.scalars(select(Topic).where(live, Topic.kind == "domain")))
-    if not domains:
-        return []
-    children = list(
+    live_domains = select(Topic.id).where(live, Topic.kind == "domain")
+    topics = list(
         await session.scalars(
-            select(Topic).where(live, Topic.parent_topic_id.in_([d.id for d in domains]))
-        )
-    )
-    counts = await document_counts(session, authorizer, principal, workspace_id, [t.id for t in children])
-    visible = await _visible_documents(authorizer, principal, workspace_id)
-    domain_ids = [domain.id for domain in domains]
-    domain_of = func.coalesce(Topic.parent_topic_id, Topic.id)
-    totals = dict(
-        (
-            await session.execute(
-                select(domain_of, func.count(distinct(ItemTopic.item_id)))
-                .select_from(ItemTopic)
-                .join(Topic, Topic.id == ItemTopic.topic_id)
-                .join(Item, Item.id == ItemTopic.item_id)
-                .where(
-                    live,
-                    Topic.id.in_(domain_ids) | Topic.parent_topic_id.in_(domain_ids),
-                    visible,
-                )
-                .group_by(domain_of)
+            select(Topic).where(
+                live, or_(Topic.kind == "domain", Topic.parent_topic_id.in_(live_domains))
             )
         )
-        .tuples()
-        .all()
     )
+    domains = [topic for topic in topics if topic.kind == "domain"]
+    if not domains:
+        return []
+    domain_ids = [domain.id for domain in domains]
+    children = [topic for topic in topics if topic.parent_topic_id in frozenset(domain_ids)]
+    domain_of = func.coalesce(Topic.parent_topic_id, Topic.id)
+    rows = await session.execute(
+        select(ItemTopic.topic_id, domain_of, func.count(distinct(ItemTopic.item_id)))
+        .select_from(ItemTopic)
+        .join(Topic, Topic.id == ItemTopic.topic_id)
+        .join(Item, Item.id == ItemTopic.item_id)
+        .where(
+            live,
+            Topic.id.in_(domain_ids) | Topic.parent_topic_id.in_(domain_ids),
+            await _visible_documents(authorizer, principal, workspace_id),
+        )
+        .group_by(func.grouping_sets(tuple_(ItemTopic.topic_id), tuple_(domain_of)))
+    )
+    counts: dict[UUID, int] = {}
+    totals: dict[UUID, int] = {}
+    for topic_id, domain_id, count in rows.tuples():
+        if domain_id is None:
+            counts[topic_id] = int(count)
+        else:
+            totals[domain_id] = int(count)
     summaries = []
     for domain in domains:
         top = sorted(
@@ -654,6 +1339,7 @@ async def topic_count(session: AsyncSession, workspace_id: UUID) -> int:
 
 __all__ = [
     "TopicService",
+    "classification_candidates",
     "document_counts",
     "resolve_active_topics",
     "topic_count",

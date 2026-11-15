@@ -16,7 +16,8 @@ import { useKnowledgeModel, useMemberNames } from "@/modules/knowledge/queries";
 
 import { approveContribution, createIngestionRun, rejectContribution, requestContributionChanges } from "../../api";
 import { flushDecisions, holdDecision, useHeldDecisions } from "../../decisions";
-import { FLAG_META, flagsOf, hasFlag, isAnalyzing, lastEvent, MANY, QUEUE_FILTER_FN, QUEUE_FILTERS, studioHref, suggestedKind, targetOf, type QueueFilter } from "../../model";
+import { isUnprocessable } from "../../lifecycle";
+import { docsHref, FLAG_META, flagsOf, hasFlag, isAnalyzing, lastEvent, MANY, QUEUE_FILTER_FN, QUEUE_FILTERS, suggestedKind, targetOf, type QueueFilter } from "../../model";
 import { useAllTopics, useInvalidateCuration, useReviewableBases, useReviewQueue, type Submission } from "../../queries";
 import { CompareDrawer } from "../CompareDrawer";
 import { DecideDialog, type DecideRequest } from "../DecideDialog";
@@ -106,8 +107,8 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
   const setSel = useCallback(
     (id: string) => {
       const next = new URLSearchParams(params.toString());
-      next.set("tab", "review");
-      next.set("queue", "submissions");
+      next.set("tab", "documents");
+      next.set("view", "review");
       if (id) next.set("sel", id);
       else next.delete("sel");
       router.replace(`${pathname}?${next.toString()}`, { scroll: false });
@@ -167,6 +168,8 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
       topics: [...(c.suggestions?.topics ?? [])],
       kb: c.kind === "NEW_REVISION" ? (c.targetCollection ?? "") : targetOf(c),
       summary: c.suggestions?.summary ?? "",
+      process: true,
+      teach: true,
       initial: { kind },
     };
   };
@@ -196,6 +199,9 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
     });
   };
 
+  /** Processed now unless the reviewer unticked Process it now (images and archives never are); then it waits as Not processed in All. */
+  const processes = (v: SubView, d: Draft) => d.process && !isUnprocessable(v.fileName, v.mime);
+
   const approveOne = async (v: SubView, d: Draft) => {
     const c = v.sub.contribution;
     const revision = c.kind === "NEW_REVISION";
@@ -205,12 +211,17 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
       documentType: d.kind,
       topics: d.topics,
       summary: d.summary.trim() || undefined,
+      // The server records a correction only when the topics differ from the assistant's.
+      recordCorrection: d.teach,
     });
-    // Approval never processes; publishing is an explicit run on the published document.
+    // Approval publishes; processing is its own run on the published document.
     const target = revision ? c.replacesItem : v.sub.item?.name;
-    if (target) {
-      await createIngestionRun(ws, [target]).catch(() =>
-        toast(`Approved “${v.title}”, but publishing didn’t start. Use Publish now in Documents.`, { tone: "warning", action: { label: "Open Documents", onPress: () => router.push(studioHref("documents", { life: "attention" })) } }),
+    if (target && processes(v, d)) {
+      await createIngestionRun(ws, { selector: { items: [target] } }).catch(() =>
+        toast(`Published “${v.title}”, but processing didn’t start. Process it from All when you’re ready.`, {
+          tone: "warning",
+          action: { label: "Open Documents", onPress: () => router.push(docsHref("all", { processing: "pending" })) },
+        }),
       );
     }
   };
@@ -219,7 +230,8 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
     const d = draftOf(v);
     if (!d) return;
     const c = v.sub.contribution;
-    const msg = c.kind === "NEW_REVISION" ? `Approved. “${v.title}” is publishing as a new version.` : `Approved “${v.title}”. Publishing to ${baseNames.get(d.kb) || "its collection"}.`;
+    const after = processes(v, d) ? "Processing it now." : "Not processed yet: process it from All when you’re ready.";
+    const msg = c.kind === "NEW_REVISION" ? `Published “${v.title}” as a new version. ${after}` : `Published “${v.title}” to ${baseNames.get(d.kb) || "its collection"}. ${after}`;
     run([v], (x) => approveOne(x, d), msg);
   };
 
@@ -237,7 +249,9 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
       return;
     }
     const decisions = new Map(ok.map((v) => [v.name, draftOf(v)!]));
-    run(ok, (x) => approveOne(x, decisions.get(x.name)!), `Approved ${plural(ok.length, "document")}${skipped ? ` · skipped ${skipped}` : ""}`);
+    const processing = ok.filter((v) => processes(v, decisions.get(v.name)!)).length;
+    const after = processing === ok.length ? " and started processing them" : processing ? ` · processing ${processing} of them` : " · not processed yet: process them from All when you’re ready";
+    run(ok, (x) => approveOne(x, decisions.get(x.name)!), `Published ${plural(ok.length, "document")}${after}${skipped ? ` · skipped ${skipped}` : ""}`);
     // Keep the skipped ones selected so they're easy to find.
     setSelected(new Set([...personal, ...busy, ...noBase].map((v) => v.name)));
   };
@@ -341,7 +355,7 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
                   <Checkbox.Control>
                     <Checkbox.Indicator />
                   </Checkbox.Control>
-                  <span className="checkbox__label">{n === ids.length ? "All selected" : `Select all ${fmtNum(ids.length)}`}</span>
+                  <span className="checkbox__label">{n === ids.length ? "All selected" : "Select all"}</span>
                 </Checkbox.Content>
               </Checkbox>
             </div>
@@ -380,7 +394,7 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
               bases={bases.data.filter((b) => b.collection?.acceptsContributions !== false || b.name === curDraft?.kb).map((b) => ({ name: b.name ?? "", displayName: b.displayName ?? "" }))}
               baseNames={baseNames}
               memberNames={memberNames}
-              canManageTaxonomy={can("topics.update")}
+              canManageTopics={can("topics.update")}
               onStep={step}
               onBack={() => setSel("")}
               onApprove={() => approve(cur)}

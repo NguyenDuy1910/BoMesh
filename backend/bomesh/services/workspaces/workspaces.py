@@ -60,7 +60,7 @@ class WorkspaceService:
     def __init__(self, sessions: SessionFactory, request_hash_secret: bytes) -> None:
         self._sessions = sessions
         self._secret = request_hash_secret
-        self._resolver = WorkspaceResolver(sessions)
+        self._resolver = WorkspaceResolver()
 
     @classmethod
     def from_runtime(cls, runtime: AppRuntime) -> WorkspaceService:
@@ -346,10 +346,16 @@ def _records() -> Select[tuple[Tenant, int]]:
 
 
 async def _record(session: AsyncSession, workspace_id: UUID) -> WorkspaceRecord | None:
-    row = (await session.execute(_records().where(Tenant.id == workspace_id))).first()
+    # populate_existing: a write earlier in the session reads back its stored values.
+    row = (
+        await session.execute(
+            _records()
+            .where(Tenant.id == workspace_id)
+            .execution_options(populate_existing=True)
+        )
+    ).first()
     if row is None:
         return None
-    await session.refresh(row[0])
     return WorkspaceRecord(row[0], row[1])
 
 

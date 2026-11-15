@@ -212,13 +212,13 @@
     setTimeout(() => { docs.forEach(d => { if (D.docs.includes(d) && d.status === 'pending') d.status = 'processing'; }); rerender(true); }, 1200);
     setTimeout(() => { docs.forEach(d => { if (D.docs.includes(d) && d.status === 'processing') { d.status = 'ready'; d.error = ''; d.updated = Date.now(); } }); rerender(true); }, 4200);
   }
-  /** Published documents from this source that are waiting to be (re)published. Submissions in review don't count. */
+  /** Published documents from this source that are waiting to be (re)processed. Submissions in review don't count. */
   const waitingDocs = s => D.docs.filter(d => d.source === s.id && !d.archived && stageOf(d) === 'published' && ['pending', 'outdated'].includes(d.status));
   A['src-process'] = el => {
     const s = srcById(el.dataset.id); const docs = s ? waitingDocs(s) : [];
-    if (!docs.length) { toast('Nothing waiting to publish', { tone: 'accent' }); return; }
-    processDocs(docs); audit('Started publishing', s.name);
-    toast(`Publishing ${plural(docs.length, 'document')} from ${s.name}`); rerender(true);
+    if (!docs.length) { toast('Nothing waiting to be processed', { tone: 'accent' }); return; }
+    processDocs(docs); audit('Started processing', s.name);
+    toast(`Processing ${plural(docs.length, 'document')} from ${s.name}`); rerender(true);
   };
   /** A synced file that waits for a reviewer: a submission with no person behind it (via 'sync'). versionOf marks a changed file. */
   function syncSubmission(src, name, { versionOf } = {}) {
@@ -258,7 +258,7 @@
           // No reviewer on this path, so the assistant classifies the file against the taxonomy itself.
           const d = mkDoc(src.kb, uid('d'), docName(src.app), { source: src.id, addedBy: src.name, updated: Date.now(), status: 'pending' });
           // 'Review only what's uncertain': possible personal data or a near-copy of a published document waits for a reviewer.
-          // Classification confidence never holds a file back (low-confidence topics surface in Topics → Suggestions instead).
+          // Classification never holds a file back (what the assistant gives no topic surfaces in Topics → Suggestions instead).
           if (pol === 'uncertain' && (PERSONAL_RE.test([d.name, d.summary].filter(Boolean).join(' ')) || similarDocs(d).some(x => x.sim >= 0.55))) { toReview.push(syncSubmission(src, d.name)); continue; }
           D.docs.push(d); autoClassify(d); affected.push(d);
         }
@@ -311,7 +311,7 @@
   /* ── First sync at scale ── */
   /** Starts a first sync of a large source as a backfill: counted per pipeline stage, nothing is created file by file. */
   function startBackfill(src, est) {
-    const b = { found: est.N, filtered: est.out, filteredBy: est.why.map(([l, n]) => [l, n]), read: 0, classified: 0, published: 0, review: 0, failed: 0, rate: BF_RATE, topics: { confident: 0, confirm: 0, none: 0 }, issues: [] };
+    const b = { found: est.N, filtered: est.out, filteredBy: est.why.map(([l, n]) => [l, n]), read: 0, classified: 0, published: 0, review: 0, failed: 0, rate: BF_RATE, topics: { filed: 0, confirm: 0, none: 0 }, issues: [] };
     const run = { id: newRunId(), source: src.id, srcName: src.name, app: src.app, kb: src.kb, trigger: 'First sync', status: 'running', started: Date.now(), counts: { total: est.K, ok: 0, failed: 0, skipped: 0 }, by: me().name, backfill: b };
     D.runs.unshift(run);
     src.status = 'syncing'; src.progress = { done: 0, total: est.K }; src.runId = run.id; src.next = null;
@@ -335,7 +335,7 @@
     toast(`${s?.name || runName(r)}: first sync finished · ${fmtNum(b.published)} published${b.review ? ` · ${fmtNum(b.review)} held for review` : ''}`, { tone: 'success', action: { label: 'View', run: () => openDrawer('src-run', { id: r.id }) } });
   }
   /* A gentle tick while someone watches (Sources tab, or the source / run drawer): about rate/20 files every 3 s are
-     read, classified with a confident topic and published. Review and the to-confirm groups stay as they are, so
+     read, filed under a topic and published. Review and the to-confirm groups stay as they are, so
      review = Σ open review batches and topics.confirm = Σ class groups keep holding. */
   const bfWatched = r => onStudioTab('sources') || (S.drawer?.name === 'src-run' && S.drawer.props?.id === r.id) || (S.drawer?.name === 'src-source' && S.drawer.props?.id === r.source);
   function bfTick() {
@@ -346,7 +346,7 @@
       const b = r.backfill, s = srcById(r.source);
       if (!s) return;
       const k = Math.min(bfLeft(b), Math.max(1, Math.round(b.rate / 20)));
-      b.read += k; b.classified += k; b.published += k; b.topics.confident += k;
+      b.read += k; b.classified += k; b.published += k; b.topics.filed += k;
       r.counts.ok = b.classified; s.progress = { done: b.classified, total: r.counts.total };
       if (!bfLeft(b)) bfFinish(r, s);
       moved = true;
@@ -400,7 +400,7 @@
     boot();
     const view = VIEWS.some(([v]) => v === query.view) ? query.view : 'sources';
     const live = S.pageState === 'live' && !S.navLoading;
-    // Problems are fixed on their own row (Reconnect, Retry, Publish n), not in banners above the list; an expired account
+    // Problems are fixed on their own row (Reconnect, Retry, Process n), not in banners above the list; an expired account
     // shows on the Accounts view, whose label says so.
     const expired = live ? D.accounts.filter(a => a.status === 'expired').length : 0;
     const counts = { sources: live ? fmtNum(D.sources.length) : '', accounts: expired ? `${fmtNum(expired)} expired` : live ? fmtNum(D.accounts.length) : '' };
@@ -438,7 +438,7 @@
     const b = r.backfill;
     return `<div class="src-syncing">${statusChip(s)}<span class="src-syncing__bar" data-tip="${esc(`${fmtNum(b.read)} of ${plural(bfTotal(b), 'file')} read`)}">${progress(bfPct(b), r.status === 'paused' ? 'warning' : '', 'First sync progress')}<span class="num t-xs muted">${fmtCompact(b.read)}/${fmtCompact(bfTotal(b))}</span></span></div>`;
   }
-  /** The one visible row action: the row's fix when it has one (Reconnect, Retry, Publish n), else what it's doing (Pause a
+  /** The one visible row action: the row's fix when it has one (Reconnect, Retry, Process n), else what it's doing (Pause a
       first sync, Cancel a sync, Resume), else Sync now as a quiet icon on hover or focus. A first sync pauses rather than cancels. */
   function rowActKind(s) {
     if (bfRun(s)) return 'bf';
@@ -446,7 +446,7 @@
     if (s.status === 'reconnect') return 'reconnect';
     if (s.status === 'failed') return 'retry';
     if (s.status === 'paused') return 'resume';
-    if (waitingDocs(s).length) return 'publish';
+    if (waitingDocs(s).length) return 'process';
     if (s.status === 'healthy' && accById(s.account)?.status === 'connected') return 'sync';
     return '';
   }
@@ -457,14 +457,14 @@
     if (k === 'reconnect') return btn('Reconnect', { size: 'sm', icon: 'log-in', act: 'acc-reconnect', data: { id: s.account } });
     if (k === 'retry') return btn('Retry', { size: 'sm', icon: 'refresh', act: 'src-sync', data: { id: s.id } });
     if (k === 'resume') return btn('Resume', { size: 'sm', icon: 'play', act: 'src-pause', data: { id: s.id } });
-    if (k === 'publish') return btn(`Publish ${fmtNum(waitingDocs(s).length)}`, { size: 'sm', icon: 'play', act: 'src-process', data: { id: s.id } });
+    if (k === 'process') return btn(`Process ${fmtNum(waitingDocs(s).length)}`, { size: 'sm', icon: 'play', act: 'src-process', data: { id: s.id } });
     if (k === 'sync') return iconBtn('refresh', 'Sync now', { size: 'sm', act: 'src-sync', data: { id: s.id }, cls: 'src-quiet' });
     return '';
   }
   /** Under the base: the publishing policy, or — when files are waiting — that plainly. */
   function policyNote(s) {
     const n = waitingDocs(s).length;
-    if (n && s.status !== 'syncing') return `<span class="cell-sub src-policy src-policy--waiting">${ic('clock', 'i-xs')}<span class="truncate">${esc(`${n} waiting to publish`)}</span></span>`;
+    if (n && s.status !== 'syncing') return `<span class="cell-sub src-policy src-policy--waiting">${ic('clock', 'i-xs')}<span class="truncate">${esc(`${n} waiting to be processed`)}</span></span>`;
     const p = POLICY[policyOf(s)]; return `<span class="cell-sub src-policy src-policy--${policyOf(s)}" data-tip="${esc(p.desc)}">${ic(p.icon, 'i-xs')}<span class="truncate">${esc(p.short)}</span></span>`;
   }
   function srcRow(s) {
@@ -611,8 +611,8 @@
       top = `<div class="card card--secondary src-live"><div class="row between gap-12"><span class="medium">Syncing · ${p.done} of ${plural(p.total, 'document')}</span>${btn('Cancel', { v: 'ghost', size: 'sm', act: 'src-cancel', data: { id: s.id } })}</div>${progress(p.done / Math.max(1, p.total) * 100, '', 'Sync progress')}</div>`;
     }
     const waiting = waitingDocs(s).length;
-    // The fix (Publish) is the footer's primary; the alert only explains.
-    if (!top && waiting) top = alertBox('accent', `${plural(waiting, 'document')} waiting to publish`, 'They synced into the collection but aren’t searchable yet.');
+    // The fix (Process) is the footer's primary; the alert only explains.
+    if (!top && waiting) top = alertBox('accent', `${plural(waiting, 'document')} waiting to be processed`, 'They synced into the collection but aren’t searchable yet.');
     // Files that couldn't be read are their own problem, shown beside any other note.
     if (srcState(s) === 'partial' && !['reconnect', 'failed', 'syncing'].includes(s.status)) {
       const run = runsOf(s.id).find(r => r.status === 'partial');
@@ -652,7 +652,7 @@
       : sec('New and changed files', policyForm(s, false), '', 'src-policy');
     const runs = runsOf(s.id).slice(0, 5);
     const recent = sec('Recent syncs', runs.length ? list(runs.map(r => item({ title: esc(fmtDateTime(r.started)), desc: esc(deltaText(r)), trail: runStatus(r), act: 'src-run-open', data: { id: r.id } }))) : '<p class="muted">No syncs yet.</p>', runs.length ? btn('View all', { v: 'ghost', size: 'sm', act: 'src-history', data: { id: s.id } }) : '');
-    // One primary: the state's fix (Reconnect when expired, Publish when files wait), else Sync now.
+    // One primary: the state's fix (Reconnect when expired, Process when files wait), else Sync now.
     let foot = '';
     if (canM) {
       const waiting = waitingDocs(s).length;
@@ -660,7 +660,7 @@
       if (bf) foot = bf.status === 'paused' ? btn('Resume first sync', { v: 'primary', icon: 'play', act: 'src-bf-toggle', data: { id: s.id } }) : btn('Pause first sync', { icon: 'pause', act: 'src-bf-toggle', data: { id: s.id } });
       else if (syncing) foot = btn('Cancel sync', { icon: 'stop', act: 'src-cancel', data: { id: s.id } });
       else if (s.status === 'reconnect') foot = btn('Reconnect', { v: 'primary', icon: 'log-in', act: 'acc-reconnect', data: { id: s.account } });
-      else if (waiting) foot = btn('Sync now', { icon: 'refresh', act: 'src-sync', data: { id: s.id }, disabled: !acc, tip: acc ? '' : 'Choose an account first' }) + btn(`Publish ${fmtNum(waiting)}`, { v: 'primary', icon: 'play', act: 'src-process', data: { id: s.id } });
+      else if (waiting) foot = btn('Sync now', { icon: 'refresh', act: 'src-sync', data: { id: s.id }, disabled: !acc, tip: acc ? '' : 'Choose an account first' }) + btn(`Process ${fmtNum(waiting)}`, { v: 'primary', icon: 'play', act: 'src-process', data: { id: s.id } });
       else foot = btn(paused ? 'Resume' : 'Pause', { icon: paused ? 'play' : 'pause', act: 'src-pause', data: { id: s.id } }) + btn('Sync now', { v: 'primary', icon: 'refresh', act: 'src-sync', data: { id: s.id }, disabled: !acc, tip: acc ? '' : 'Choose an account first' });
     }
     return {
@@ -708,7 +708,7 @@
   A['src-run-open'] = el => { boot(); const r = runById(el.dataset.id); if (r) openDrawer('src-run', { id: r.id }); };
   /** A link out of a drawer (Review, Quality) closes it, so the destination is what people see. */
   A['src-leave'] = el => { S.drawer = null; go(el.dataset.to); };
-  /** What the sync did with the files it read: published (trusted sources), sent to review, or still waiting to publish. */
+  /** What the sync did with the files it read: published (trusted sources), sent to review, or still waiting to be processed. */
   function outcomeNote(r) {
     const c = r.counts, s = srcById(r.source);
     let o = r.outcome;
@@ -716,7 +716,7 @@
       const latest = s && runsOf(s.id).find(x => x.status !== 'running') === r, wait = latest ? waitingDocs(s).length : 0;
       o = s && policyOf(s) === 'review' ? { review: c.ok } : { published: Math.max(0, c.ok - wait), waiting: Math.min(wait, c.ok) };
     }
-    return [o.published && `${o.published} published`, o.waiting && `${o.waiting} waiting to publish`, o.review && `${o.review} sent to review`].filter(Boolean).join(' · ') || 'Nothing to add';
+    return [o.published && `${o.published} published`, o.waiting && `${o.waiting} waiting to be processed`, o.review && `${o.review} sent to review`].filter(Boolean).join(' · ') || 'Nothing to add';
   }
   function runSteps(r) {
     const c = r.counts, el = r.status === 'running' ? Date.now() - r.started : (r.dur || 0), kb = kbById(r.kb);
@@ -745,7 +745,7 @@
       { label: 'Read', st: done && b.failed ? 'warn' : st, spin: live, n: `${fmtNum(b.read)} / ${fmtNum(tot)}`, pct: pct(b.read, tot),
         note: b.failed ? `${fmtNum(b.failed)} couldn’t be read · see Issues` : 'Text, tables and structure' },
       { label: 'Classified', st, n: fmtNum(b.classified), pct: pct(b.classified, tot),
-        note: `Against your topics · ${fmtNum(b.topics.confident)} with a confident topic` },
+        note: `Against your topics · ${fmtNum(b.topics.filed)} filed under a topic` },
       { label: 'Decided', st, n: fmtNum(gate), pct: pct(gate, tot),
         note: [POLICY[pol].label, b.review && `${fmtNum(b.review)} held for review`, b.declined && `${fmtNum(b.declined)} declined`].filter(Boolean).join(' · ') },
       { label: 'Indexed', st, n: fmtNum(b.published), pct: pct(b.published, tot), note: 'What it published, searchable as soon as it’s indexed' },
@@ -762,8 +762,8 @@
     const head = `<section class="drawer__section"><div class="row gap-8 wrap mb-16">${runStatus(r)}</div>
       <div class="card card--secondary src-live"><div class="row between gap-12"><span class="medium">${esc(`${fmtNum(b.read)} of ${plural(tot, 'file')} read`)}</span><span class="num t-sm muted">${bfPct(b)}%</span></div>${progress(bfPct(b), paused ? 'warning' : live ? '' : 'success', 'First sync progress')}<div class="bf-meta">${pace.map(x => `<span>${esc(x)}</span>`).join(' · ')}</div></div></section>`;
     const issues = (b.issues || []).length ? sec('Issues', list(b.issues.map(([, label, n, fix]) => item({ lead: itemIcon('alert', 'warning', 'sm'), title: esc(label), desc: esc(fix), meta: `<span class="num">${fmtNum(n)}</span>` })))) : '';
-    const T = b.topics, sum = Math.max(1, T.confident + T.confirm + T.none);
-    const parts = [['confident', 'Confident topic', T.confident], ['confirm', 'Topic to confirm', T.confirm], ['none', 'No topic yet', T.none]];
+    const T = b.topics, sum = Math.max(1, T.filed + T.confirm + T.none);
+    const parts = [['filed', 'Filed under a topic', T.filed], ['confirm', 'Topic to confirm', T.confirm], ['none', 'No topic yet', T.none]];
     const split = `<div class="bf-split" role="img" aria-label="${esc(parts.map(([, l, n]) => `${l} ${fmtNum(n)}`).join(', '))}">${parts.map(([k, , n]) => n ? `<span class="bf-split__seg bf-split__seg--${k}" style="width:${(n / sum * 100).toFixed(2)}%"></span>` : '').join('')}</div>
       <ul class="bf-legend">${parts.map(([k, l, n]) => `<li><span class="bf-legend__dot bf-split__seg--${k}" aria-hidden="true"></span><span class="grow">${esc(l)}</span><span class="num">${fmtNum(n)}</span></li>`).join('')}</ul>
       <p class="description mt-8">Published either way. Confirming a topic only changes where people browse a document.</p>`;

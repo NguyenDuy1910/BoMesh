@@ -43,11 +43,20 @@ External work runs between separate database operation scopes.
 Internal `begin_nested()` calls are savepoints inside the current
 `transaction_scope`, not alternate session lifecycles.
 
-PostgreSQL advisory-lock workflows use `advisory_lock_scope` as the one
+PostgreSQL advisory-lock workflows use `advisory_lock_scope` as the first
 intentional exception: it owns one autocommit connection for the lock lifetime,
 performs no application transaction on that connection, and releases the lock
 before releasing the connection. Atomic state changes still use
 `transaction_scope` inside the lock.
+
+The request `Authorizer` is the second exception. Inside an API endpoint
+(`Authorizer.keep_connection`, held by the `Context` dependency until the
+endpoint function returns) its permission and membership lookups share one
+lazily opened autocommit connection: every lookup is one read statement with
+its own snapshot, so it sees what was committed before it ran and never the
+uncommitted writes of the request's own `transaction_scope`; no transaction,
+snapshot or lock is held between lookups. Outside an endpoint each lookup runs
+in its own `transaction_scope`.
 
 ### Relationship keys
 
@@ -157,6 +166,17 @@ their transaction; the Qdrant payload update runs after commit and a
 scheduled job retries dirty rows, so the index converges without an outbox
 table.
 
+A Document's cover (`document_viewer.md` "Cover on the Item") is derived
+metadata, `items.metadata.cover`, never a table or column: it is produced
+once per content, read with the row it belongs to, and kept small (a few
+hundred bytes). Its producer is told through the one non-validating trigger,
+`trg_items_cover` (AFTER INSERT/UPDATE OF `status`, `storage_key`), which
+sends `pg_notify('bomesh_cover', item_id)` when a Document's content becomes
+available or changes. A notification is delivered on commit and only to a
+listening worker; the worker's sweep (a keyset scan of the primary key for
+covers whose `source` is not the row's `storage_key`) is the durable
+catch-up, so no outbox or queue table is needed and no index is added.
+
 ### Knowledge inventory vs ingestion execution
 
 ```text
@@ -184,9 +204,26 @@ appended to the same run.
 state; run items are history, and the Document's latest run item supplies the
 error and run shown next to it. Each run item records the `revision_number`
 it started from; a finish whose revision or governing Collection changed
-meanwhile writes `pending` and marks the payload dirty. Temporal orchestrates
-runs and keeps no state the product reads. The `conversation_artifacts`
+meanwhile writes `pending` and marks the payload dirty. The `conversation_artifacts`
 system collection and conversation attachments are never selected.
+
+PostgreSQL is the queue; no orchestration state lives anywhere else. The
+ingestion worker (`python -m bomesh.services.ingestion.worker`: the API's
+code, its own process and container, scaled on its own) claims a
+`queued`/`running` run by taking the run's session-level advisory lock on one
+dedicated connection; that connection must reach PostgreSQL directly, not
+through transaction pooling. A worker that dies closes the connection, so
+PostgreSQL frees the lock and the next worker to take it recovers the run:
+tasks left `running` fail as `interrupted` (their Documents return to
+`pending`), queued tasks are planned again, and the run resumes. A graceful
+shutdown instead returns the tasks in flight to `queued`. A cancel is a
+status write: a run no worker holds is settled at once, an owned one by its
+worker within seconds. A worker that loses its lock connection stops its runs
+at once, and every run write re-checks, in its own transaction and with the
+run row locked, that the worker's connection still holds the run's lock, so a
+stale worker never overwrites the one recovering the run. No lease or
+heartbeat column is needed. A `running` `ingestion_syncs` row is claimed the
+same way.
 
 ### Provider-neutral ingestion
 
@@ -211,7 +248,9 @@ latest row is `Source.lastSync` and decides `FAILED`, and a partial unique
 index allows one running sync per source. `Source.state` is otherwise
 computed from `paused_at` and the connection state, so it cannot drift from
 them. `schedule_cron`/`schedule_time_zone` hold the schedule and
-`next_sync_at` drives the scheduler scan.
+`next_sync_at` is its next firing: the worker scans due sources
+(`FOR UPDATE SKIP LOCKED`), opens a `scheduled` sync and advances
+`next_sync_at`, so missed firings fire once.
 `ingestion_sources.publishing_policy` (`auto_publish | review_first`) decides
 whether synced Documents are published directly or enter as contributions.
 
@@ -283,8 +322,9 @@ a tombstone, not physical removal.
 ### API resource persistence
 
 Every API resource in `openapi.yaml` has a home in `design.dbml`. Item-side
-changes (`items.space_id`, topics, artifacts) are justified in
-`item_model.md` §5 rows 16–20; the rest is justified here.
+changes (`items.space_id`, topics and their classification signals, topic
+corrections, artifacts) are justified in `item_model.md` §5 rows 16–22; the
+rest is justified here.
 
 | Addition | Limitation it removes | Alternatives rejected |
 | --- | --- | --- |
@@ -358,7 +398,7 @@ not silently rewrite existing IDs or mix multiple generators for one entity.
 
 UUIDv7 adoption requires one shared generator at the composition boundary,
 worker support, model defaults, and verification across PostgreSQL,
-Temporal, object storage, and Qdrant. Until that work is scheduled, keep UUID
+object storage, and Qdrant. Until that work is scheduled, keep UUID
 type and stable application-generated IDs; do not add string IDs or sequences
 just to approximate UUIDv7.
 

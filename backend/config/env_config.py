@@ -14,6 +14,7 @@ from functools import lru_cache
 from typing import Literal, cast, get_args
 
 from bomesh.agent.protocol import ReasoningEffort
+from bomesh.db.engine import DEFAULT_MAX_OVERFLOW, DEFAULT_POOL_SIZE
 from bomesh.services import (
     DEFAULT_MAX_UPLOAD_BYTES,
     DEFAULT_PREVIEW_MAX_DIMENSION,
@@ -159,6 +160,33 @@ class ServerConfig:
             port=integer("BOMESH_PORT", default=8000),
             log_level=text("BOMESH_LOG_LEVEL", "INFO").upper(),
             web_origins=origin_list("BOMESH_WEB_ORIGINS"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class DatabaseConfig:
+    """The connection pool of this process's engine (``DATABASE_URL`` names the server).
+
+    The API and the ingestion worker each own one pool of ``pool_size`` kept
+    connections plus up to ``max_overflow`` more under load; together they must
+    fit PostgreSQL's ``max_connections``. A request holds at most two pooled
+    connections at once.
+    """
+
+    pool_size: int = DEFAULT_POOL_SIZE
+    max_overflow: int = DEFAULT_MAX_OVERFLOW
+
+    def __post_init__(self) -> None:
+        if self.pool_size < 1 or self.max_overflow < 0:
+            raise RuntimeError(
+                "BOMESH_DB_POOL_SIZE must be at least one and BOMESH_DB_MAX_OVERFLOW not negative"
+            )
+
+    @classmethod
+    def from_environment(cls) -> DatabaseConfig:
+        return cls(
+            pool_size=integer("BOMESH_DB_POOL_SIZE", default=DEFAULT_POOL_SIZE),
+            max_overflow=integer("BOMESH_DB_MAX_OVERFLOW", default=DEFAULT_MAX_OVERFLOW),
         )
 
 
@@ -358,6 +386,9 @@ class ModelConfig:
     embedding_model: str | None = None
     contextualization_enabled: bool = True
     contextualization_model: str | None = None
+    #: ``reasoning.effort`` of contextualization and classification calls;
+    #: ``None`` omits it. Default ``none``: their output budgets are small.
+    contextualization_reasoning_effort: str | None = "none"
     reranker_model: str | None = None
     #: Vision model that transcribes scanned PDF pages; unset leaves them unread.
     docling_model: str | None = None
@@ -398,6 +429,9 @@ class ModelConfig:
                 "BOMESH_CONTEXTUALIZATION_ENABLED", default=True
             ),
             contextualization_model=optional_text("BOMESH_CONTEXTUALIZATION_MODEL"),
+            contextualization_reasoning_effort=_reasoning_effort(
+                "BOMESH_CONTEXTUALIZATION_REASONING_EFFORT"
+            ),
             reranker_model=optional_text("BOMESH_RERANKER_MODEL"),
             docling_model=optional_text("BOMESH_DOCLING_MODEL"),
         )
@@ -659,6 +693,8 @@ class PreviewConfig:
     max_dimension: int = DEFAULT_PREVIEW_MAX_DIMENSION
     webp_quality: int = DEFAULT_PREVIEW_WEBP_QUALITY
     url_seconds: int = 300
+    #: Lifetime and signing window of ``document.cover.imageUri`` (stable within it).
+    cover_url_seconds: int = 3600
 
     @classmethod
     def from_environment(cls) -> PreviewConfig:
@@ -679,34 +715,76 @@ class PreviewConfig:
                 default=DEFAULT_PREVIEW_WEBP_QUALITY,
             ),
             url_seconds=integer("BOMESH_PREVIEW_URL_SECONDS", default=300),
+            cover_url_seconds=integer("BOMESH_PREVIEW_COVER_URL_SECONDS", default=3600),
         )
 
 
-@dataclass(frozen=True, slots=True)
-class WorkerConfig:
-    """Concurrency limits applied to the Temporal ingestion worker."""
+# [temporal-disabled] The Temporal worker's limits, verbatim (also restore the
+# ``worker`` field of AppConfig and the ``WorkerConfig`` exports).
+# @dataclass(frozen=True, slots=True)
+# class WorkerConfig:
+#     """Concurrency limits applied to the Temporal ingestion worker."""
+#
+#     max_concurrent_activities: int = 4
+#     activity_rate_limit: float | None = None
+#     graceful_shutdown_seconds: int = 30
+#
+#     def __post_init__(self) -> None:
+#         if self.max_concurrent_activities < 1:
+#             raise RuntimeError(
+#                 "BOMESH_TEMPORAL_MAX_CONCURRENT_ACTIVITIES must be at least one"
+#             )
+#         if self.activity_rate_limit is not None and self.activity_rate_limit <= 0:
+#             raise ValueError("Temporal Activity rate limit must be positive")
+#
+#     @classmethod
+#     def from_environment(cls) -> WorkerConfig:
+#         return cls(
+#             max_concurrent_activities=integer(
+#                 "BOMESH_TEMPORAL_MAX_CONCURRENT_ACTIVITIES", default=4
+#             ),
+#             activity_rate_limit=optional_number(
+#                 "BOMESH_TEMPORAL_ACTIVITY_RATE_LIMIT"
+#             ),
+#         )
 
-    max_concurrent_activities: int = 4
-    activity_rate_limit: float | None = None
+
+@dataclass(frozen=True, slots=True)
+class IngestionWorkerConfig:
+    """The ingestion worker process (``python -m bomesh.services.ingestion.worker``).
+
+    A worker executes at most ``max_concurrent_runs`` runs (and as many
+    syncs) and ``max_concurrent_documents`` Documents at once, looks for work
+    every ``poll_seconds``, and on SIGTERM gives back what it runs within
+    ``graceful_shutdown_seconds``. ``lock_database_url`` is the direct
+    PostgreSQL connection that holds its advisory locks (it must bypass a
+    transaction-pooling pgbouncer); ``None`` uses ``DATABASE_URL``.
+    """
+
+    max_concurrent_runs: int = 2
+    max_concurrent_documents: int = 4
+    poll_seconds: float = 2.0
     graceful_shutdown_seconds: int = 30
+    lock_database_url: str | None = None
 
     def __post_init__(self) -> None:
-        if self.max_concurrent_activities < 1:
-            raise RuntimeError(
-                "BOMESH_TEMPORAL_MAX_CONCURRENT_ACTIVITIES must be at least one"
-            )
-        if self.activity_rate_limit is not None and self.activity_rate_limit <= 0:
-            raise ValueError("Temporal Activity rate limit must be positive")
+        if min(self.max_concurrent_runs, self.max_concurrent_documents) < 1:
+            raise RuntimeError("ingestion worker concurrency limits must be at least one")
+        if self.poll_seconds <= 0 or self.graceful_shutdown_seconds < 0:
+            raise RuntimeError("ingestion worker intervals must be positive")
 
     @classmethod
-    def from_environment(cls) -> WorkerConfig:
+    def from_environment(cls) -> IngestionWorkerConfig:
         return cls(
-            max_concurrent_activities=integer(
-                "BOMESH_TEMPORAL_MAX_CONCURRENT_ACTIVITIES", default=4
+            max_concurrent_runs=_positive_integer("BOMESH_INGESTION_MAX_CONCURRENT_RUNS", default=2),
+            max_concurrent_documents=_positive_integer(
+                "BOMESH_INGESTION_MAX_CONCURRENT_DOCUMENTS", default=4
             ),
-            activity_rate_limit=optional_number(
-                "BOMESH_TEMPORAL_ACTIVITY_RATE_LIMIT"
+            poll_seconds=optional_number("BOMESH_INGESTION_POLL_SECONDS") or 2.0,
+            graceful_shutdown_seconds=integer(
+                "BOMESH_INGESTION_GRACEFUL_SHUTDOWN_SECONDS", default=30
             ),
+            lock_database_url=optional_text("BOMESH_INGESTION_LOCK_DATABASE_URL"),
         )
 
 
@@ -896,6 +974,7 @@ class AppConfig:
     """Every setting the application reads, resolved at one boundary."""
 
     server: ServerConfig = field(default_factory=ServerConfig)
+    database: DatabaseConfig = field(default_factory=DatabaseConfig)
     identity: IdentityConfig = field(default_factory=IdentityConfig)
     object_storage: ObjectStorageConfig = field(default_factory=ObjectStorageConfig)
     vector_index: VectorIndexConfig = field(default_factory=VectorIndexConfig)
@@ -908,7 +987,8 @@ class AppConfig:
     preview: PreviewConfig = field(default_factory=PreviewConfig)
     integration: IntegrationConfig = field(default_factory=IntegrationConfig)
     observability: ObservabilityConfig = field(default_factory=ObservabilityConfig)
-    worker: WorkerConfig = field(default_factory=WorkerConfig)
+    # [temporal-disabled] worker: WorkerConfig = field(default_factory=WorkerConfig)
+    ingestion_worker: IngestionWorkerConfig = field(default_factory=IngestionWorkerConfig)
     ingestion_run: IngestionRunConfig = field(default_factory=IngestionRunConfig)
     ingestion_policy: IngestionPolicyConfig = field(default_factory=IngestionPolicyConfig)
 
@@ -918,6 +998,7 @@ class AppConfig:
 
         return cls(
             server=ServerConfig.from_environment(),
+            database=DatabaseConfig.from_environment(),
             identity=IdentityConfig.from_environment(),
             object_storage=ObjectStorageConfig.from_environment(),
             vector_index=VectorIndexConfig.from_environment(),
@@ -930,7 +1011,8 @@ class AppConfig:
             preview=PreviewConfig.from_environment(),
             integration=IntegrationConfig.from_environment(),
             observability=ObservabilityConfig.from_environment(),
-            worker=WorkerConfig.from_environment(),
+            # [temporal-disabled] worker=WorkerConfig.from_environment(),
+            ingestion_worker=IngestionWorkerConfig.from_environment(),
             ingestion_run=IngestionRunConfig.from_environment(),
             ingestion_policy=IngestionPolicyConfig.from_environment(),
         )
@@ -958,9 +1040,11 @@ __all__ = [
     "AgentRuntimeConfig",
     "AppConfig",
     "ArtifactConfig",
+    "DatabaseConfig",
     "IdentityConfig",
     "IngestionPolicyConfig",
     "IngestionRunConfig",
+    "IngestionWorkerConfig",
     "IntegrationConfig",
     "IntegrationOAuthConfig",
     "ModelConfig",
@@ -973,7 +1057,7 @@ __all__ = [
     "ServerConfig",
     "UploadConfig",
     "VectorIndexConfig",
-    "WorkerConfig",
+    # [temporal-disabled] "WorkerConfig",
     "boolean",
     "email_set",
     "get_config",

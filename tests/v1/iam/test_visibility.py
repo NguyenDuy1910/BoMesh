@@ -12,8 +12,9 @@ from typing import Any
 from uuid import UUID
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import case, select, update
 from sqlalchemy.exc import DBAPIError
+from sqlalchemy.orm import aliased
 
 from bomesh.db.models import Item, User
 from bomesh.errors import FailedPrecondition, NotFound, PermissionDenied
@@ -24,7 +25,9 @@ from bomesh.iam.visibility import (
     is_visible,
     item_visibility,
     require_visible_item,
+    visible_to,
 )
+from bomesh.services.conversations.citations import unreadable_items
 from harness import WORKSPACE_MEMBERS, World, principal
 
 pytestmark = pytest.mark.asyncio
@@ -189,6 +192,78 @@ async def test_items_undelete_holders_resolve_through_the_deleted_cohort(world: 
     }
 
 
+async def test_the_visible_set_answers_like_the_per_item_rule_in_every_statement_shape(
+    world: World,
+) -> None:
+    """``clause()`` probes one materialized set of visible ids. As a WHERE filter, as a
+    per-row CASE (ListItems' ordering) and over an alias in the same statement it admits
+    exactly what ``require_visible_item`` admits item by item, live and with showDeleted."""
+    admin = await world.make_user()
+    workspace = await world.make_workspace(admin)
+    owner, editor, viewer, outsider = [await world.add_member(workspace) for _ in range(4)]
+    handbook = await world.make_collection(
+        workspace,
+        grants={
+            owner: "roles/collectionOwner",
+            editor: "roles/collectionEditor",
+            viewer: "roles/collectionViewer",
+        },
+    )
+    published = await world.make_document(handbook)
+    draft = await world.make_document(handbook, published=False)
+    attachment = await world.make_document(draft)
+    nested_draft = await world.make_document(attachment, published=False)
+    sealed = await world.make_collection(workspace, handbook, inherit_access=False)
+    sealed_document = await world.make_document(sealed)
+    archive = await world.make_collection(workspace, handbook)
+    old = await world.make_document(archive)
+    old_draft = await world.make_document(archive, published=False)
+    uploads = await world.make_collection(workspace, personal_for=viewer)
+    upload = await world.make_document(uploads, published=False)
+    private = await world.make_collection(workspace, grants={outsider: "roles/collectionViewer"})
+    private_document = await world.make_document(private)
+    await world.delete(archive)
+    items = [
+        handbook, published, draft, attachment, nested_draft, sealed, sealed_document,
+        archive, old, old_draft, uploads, upload, private, private_document,
+    ]
+
+    for show_deleted in (False, True):
+        for user in (admin, owner, editor, viewer, outsider):
+            visibility = await item_visibility(
+                world.authorizer(), principal(user), workspace.id, show_deleted=show_deleted
+            )
+            visible = visibility.clause()
+            other = aliased(Item)
+            async with world.sessions() as session:
+                probed = dict(
+                    (
+                        await session.execute(
+                            select(Item.id, case((visible, True), else_=False)).where(
+                                Item.tenant_id == workspace.id
+                            )
+                        )
+                    )
+                    .tuples()
+                    .all()
+                )
+                filtered = set(
+                    await session.scalars(
+                        select(Item.id).where(
+                            visible,
+                            Item.id.in_(select(other.id).where(visibility.clause(other))),
+                        )
+                    )
+                )
+            for item in items:
+                expected = await _readable(world, user, item, include_deleted=show_deleted)
+                assert probed[item.id] == expected == (item.id in filtered), (
+                    show_deleted,
+                    user.email,
+                    item.title,
+                )
+
+
 async def test_a_personal_collection_is_seen_by_its_owner_and_workspace_admins(
     world: World,
 ) -> None:
@@ -297,3 +372,78 @@ async def test_a_reviewer_reads_an_open_candidate_only_through_the_exception(
     # Lists never include a candidate the reviewer cannot otherwise read.
     assert await _listed(world, reviewer, workspace.id) == {target.id}
     assert (await _get(world, contributor, candidate)).id == candidate.id
+
+
+async def test_the_audience_check_answers_like_the_per_item_rule_for_every_member(
+    world: World,
+) -> None:
+    """``visible_to`` (and ``unreadable_items`` built on it) decide a whole audience in
+    a constant number of queries; for every (user, item) of a mixed fixture they answer
+    exactly like ``is_visible``, which never applies the reviewer exception."""
+    admin = await world.make_user()
+    workspace = await world.make_workspace(admin)
+    owner, editor, viewer, grouped, plain, suspended = [
+        await world.add_member(workspace) for _ in range(6)
+    ]
+    outsider = await world.make_user()
+    team = await world.make_group(workspace, [grouped])
+    handbook = await world.make_collection(
+        workspace,
+        grants={
+            owner: "roles/collectionOwner",
+            editor: "roles/collectionEditor",
+            viewer: "roles/collectionViewer",
+            suspended: "roles/collectionViewer",
+            team: "roles/collectionViewer",
+        },
+    )
+    published = await world.make_document(handbook)
+    draft = await world.make_document(handbook, published=False)
+    attachment = await world.make_document(draft)
+    sealed = await world.make_collection(
+        workspace, handbook, inherit_access=False, grants={editor: "roles/collectionViewer"}
+    )
+    sealed_document = await world.make_document(sealed)
+    open_root = await world.make_collection(
+        workspace, grants={WORKSPACE_MEMBERS: "roles/collectionViewer"}
+    )
+    open_draft = await world.make_document(open_root, published=False)
+    locked = await world.make_collection(workspace, title="Board")
+    async with world.sessions.begin() as session:
+        await session.execute(
+            update(Item).where(Item.id == locked.id).values(metadata_={"discoverable": True})
+        )
+    locked_document = await world.make_document(locked)
+    archive = await world.make_collection(workspace, handbook)
+    old = await world.make_document(archive)
+    await world.delete(archive)
+    uploads = await world.make_collection(workspace, personal_for=plain)
+    candidate = await world.make_document(uploads, published=False)
+    await world.make_contribution(candidate, contributor=plain, target=handbook)
+    other = await world.make_workspace(await world.make_user())
+    foreign = await world.make_collection(other, grants={WORKSPACE_MEMBERS: "roles/collectionViewer"})
+    await world.suspend_member(workspace, suspended)
+    users = [admin, owner, editor, viewer, grouped, plain, suspended, outsider]
+    items = [
+        handbook, published, draft, attachment, sealed, sealed_document, open_root, open_draft,
+        locked, locked_document, archive, old, uploads, candidate, foreign,
+    ]
+    refs = [ItemRef(workspace.id, item.id) for item in items]
+
+    readers = await visible_to(world.authorizer(), [user.id for user in users], refs)
+
+    expected = {
+        ref: {user.id for user in users if await is_visible(world.authorizer(), principal(user), ref)}
+        for ref in refs
+    }
+    assert {ref: set(value) for ref, value in readers.items()} == expected
+    assert expected[ItemRef(workspace.id, published.id)] == {
+        admin.id, owner.id, editor.id, viewer.id, grouped.id,
+    }
+    for audience in ([viewer, grouped], [editor], [owner, plain], users, []):
+        blocked = await unreadable_items(
+            world.authorizer(), workspace.id, [user.id for user in audience], [i.id for i in items]
+        )
+        assert blocked == {
+            ref.item_id for ref in refs if not {user.id for user in audience} <= expected[ref]
+        }, [user.email for user in audience]

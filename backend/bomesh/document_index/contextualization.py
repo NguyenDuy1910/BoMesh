@@ -18,7 +18,9 @@ from bomesh.connector.protocol import (
 from bomesh.document_index import (
     ChunkContext,
     ChunkContextGenerator,
+    ClassificationRequest,
     ContextualChunk,
+    DocumentClassification,
     IndexProgress,
 )
 
@@ -99,13 +101,51 @@ async def build_contextual_chunks(
     item: DocumentItem,
     *,
     semantic_contextualizer: ChunkContextGenerator | None = None,
+    classification: ClassificationRequest | None = None,
     progress: IndexProgress | None = None,
-) -> list[ContextualChunk]:
-    """Build retrieval text without modifying canonical evidence or citations."""
+) -> tuple[list[ContextualChunk], DocumentClassification | None]:
+    """Build retrieval text without modifying canonical evidence or citations.
+
+    With a contextualizer and a ``classification`` that has candidates, the
+    Document is first classified (the CLASSIFYING step); its summary stands in
+    for a missing item summary in every chunk's context. Returns the chunks
+    and the classification, ``None`` when none was made or it failed.
+    """
 
     validated = _validate_chunks(chunks, item)
     chunk_builder = ContextualChunkBuilder()
     summary = _metadata_scalar(item.metadata, "summary")
+    classified = None
+    if (
+        semantic_contextualizer is not None
+        and classification is not None
+        and classification.candidates
+    ):
+        if progress is not None:
+            progress("classifying", 0, 1)
+        if classification.settled:
+            # A matching rule settles the topics; the model is not asked.
+            classified = DocumentClassification(topics=classification.settled)
+        else:
+            try:
+                classified = await semantic_contextualizer.classify(
+                    document_context=_document_context(
+                        item, validated, target=None, summary=summary
+                    ),
+                    request=classification,
+                    title=item.title,
+                )
+            except Exception as exc:  # noqa: BLE001 - classification is best effort
+                log.warning(
+                    "document classification failed for item %s; "
+                    "indexing it unclassified: %s",
+                    item.id,
+                    type(exc).__name__,
+                )
+        if progress is not None:
+            progress("classifying", 1, 1)
+        if summary is None and classified is not None:
+            summary = classified.summary
     total = len(validated)
     finished = 0
     if progress is not None:
@@ -144,7 +184,7 @@ async def build_contextual_chunks(
 
     # ``gather`` keeps the chunks' order whatever order the calls finish in.
     contexts = await asyncio.gather(*(describe(chunk) for chunk in validated))
-    return [
+    contextual = [
         chunk_builder.contextualize(
             chunk,
             title=item.title,
@@ -157,16 +197,18 @@ async def build_contextual_chunks(
         )
         for chunk, semantic_context in zip(validated, contexts, strict=True)
     ]
+    return contextual, classified
 
 
 def _document_context(
     item: DocumentItem,
     chunks: Sequence[Chunk],
     *,
-    target: Chunk,
+    target: Chunk | None,
     summary: str | None,
 ) -> str:
-    """Build bounded metadata and target-relevant canonical chunk context."""
+    """Build bounded metadata and canonical chunk context: the chunks nearest
+    ``target`` (excluded), or the leading chunks for the whole document."""
 
     metadata = [f"Document: {item.title or item.id}"]
     kind = (
@@ -188,17 +230,26 @@ def _document_context(
         "\n".join(metadata),
         _DOCUMENT_CONTEXT_METADATA_MAX_CHARACTERS,
     )
-    lines = [metadata_text, "Relevant canonical chunk excerpts (target excluded):"]
+    lines = [
+        metadata_text,
+        "Leading canonical chunk excerpts:"
+        if target is None
+        else "Relevant canonical chunk excerpts (target excluded):",
+    ]
     remaining = _DOCUMENT_CONTEXT_MAX_CHARACTERS - sum(
         _prompt_text_length(line) + 1 for line in lines
     )
-    candidates = sorted(
-        (chunk for chunk in chunks if chunk.id != target.id),
-        key=lambda chunk: (
-            chunk.section_path != target.section_path,
-            abs(chunk.chunk_index - target.chunk_index),
-            chunk.chunk_index,
-        ),
+    candidates = (
+        sorted(chunks, key=lambda chunk: chunk.chunk_index)
+        if target is None
+        else sorted(
+            (chunk for chunk in chunks if chunk.id != target.id),
+            key=lambda chunk: (
+                chunk.section_path != target.section_path,
+                abs(chunk.chunk_index - target.chunk_index),
+                chunk.chunk_index,
+            ),
+        )
     )
     for chunk in candidates:
         if remaining <= 0:
@@ -209,6 +260,22 @@ def _document_context(
         bounded = _prompt_text_prefix(excerpt, remaining)
         lines.append(bounded)
         remaining -= _prompt_text_length(bounded) + 1
+    return "\n".join(lines)
+
+
+def sample_document_context(title: str, text: str) -> str:
+    """The bounded document context of a sample (TestTopicClassification): the
+    same shape and budget CLASSIFYING reads for a processed document."""
+
+    lines = [
+        _prompt_text_prefix(f"Document: {title}", _DOCUMENT_CONTEXT_METADATA_MAX_CHARACTERS),
+        "Leading canonical chunk excerpts:",
+    ]
+    remaining = _DOCUMENT_CONTEXT_MAX_CHARACTERS - sum(
+        _prompt_text_length(line) + 1 for line in lines
+    )
+    if text.strip():
+        lines.append(_prompt_text_prefix(text.strip(), remaining))
     return "\n".join(lines)
 
 
@@ -266,4 +333,5 @@ def _metadata_scalar(metadata: dict[str, str | list[str]], key: str) -> str | No
 __all__ = [
     "ContextualChunkBuilder",
     "build_contextual_chunks",
+    "sample_document_context",
 ]

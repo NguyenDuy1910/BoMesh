@@ -17,7 +17,7 @@ from bomesh.db.models import (
     IngestionSync,
     Item,
 )
-from harness import ApiClient, Fakes, Sessions, World
+from harness import ApiClient, Sessions, World
 from sources_support import (
     Scene,
     build_scene,
@@ -52,9 +52,7 @@ async def scene(client: ApiClient, world: World, sessions: Sessions) -> Scene:
 # -- CreateSource -------------------------------------------------------------------
 
 
-async def test_create_source_starts_the_creation_sync(
-    scene: Scene, sessions: Sessions, fakes: Fakes
-) -> None:
+async def test_create_source_starts_the_creation_sync(scene: Scene, sessions: Sessions) -> None:
     response = await scene.as_admin.post(
         sources_url(scene.workspace),
         params={"sourceId": "policies"},
@@ -89,10 +87,8 @@ async def test_create_source_starts_the_creation_sync(
         "running",
         scene.admin.id,
     )
-    assert fakes.workflows.called("start_source_sync") == [
-        {"source_id": str(source.id), "tenant_id": str(scene.workspace.id), "sync_id": str(sync.id)}
-    ]
-    assert fakes.workflows.called("upsert_schedule") == []
+    # The RUNNING row is the queue: an ingestion worker claims and runs it.
+    assert source.next_sync_at is None
     async with sessions() as session:
         audited = await session.scalar(
             select(func.count())
@@ -102,8 +98,8 @@ async def test_create_source_starts_the_creation_sync(
     assert audited == 1
 
 
-async def test_create_source_with_a_schedule_creates_the_temporal_schedule(
-    scene: Scene, sessions: Sessions, fakes: Fakes
+async def test_create_source_with_a_schedule_sets_its_next_sync(
+    scene: Scene, sessions: Sessions
 ) -> None:
     body = await create_source(scene.as_admin, scene, "nightly", schedule=SCHEDULE)
 
@@ -111,13 +107,6 @@ async def test_create_source_with_a_schedule_creates_the_temporal_schedule(
     source = await source_row(sessions, scene.workspace, "nightly")
     assert source.next_sync_at is not None and source.next_sync_at > datetime.now(UTC)
     assert source.next_sync_at.astimezone(UTC).hour in {4, 5}  # 06:00 in Berlin
-    [call] = fakes.workflows.called("upsert_schedule")
-    assert call["source_id"] == str(source.id)
-    assert call["values"] == {
-        "cron_expression": "0 6 * * 1-5",
-        "timezone": "Europe/Berlin",
-        "enabled": True,
-    }
 
 
 async def test_create_source_defaults_to_the_workspace_publishing_policy(
@@ -133,7 +122,7 @@ async def test_create_source_defaults_to_the_workspace_publishing_policy(
 
 
 async def test_create_source_validate_only_stores_and_starts_nothing(
-    scene: Scene, sessions: Sessions, fakes: Fakes
+    scene: Scene, sessions: Sessions
 ) -> None:
     response = await scene.as_admin.post(
         sources_url(scene.workspace),
@@ -146,11 +135,11 @@ async def test_create_source_validate_only_stores_and_starts_nothing(
     assert response.json()["state"] == "ACTIVE"
     async with sessions() as session:
         assert await session.scalar(select(func.count()).select_from(IngestionSource)) == 0
-    assert fakes.workflows.calls == []
+        assert await session.scalar(select(func.count()).select_from(IngestionSync)) == 0
 
 
 async def test_create_source_request_id_replays_the_first_result(
-    scene: Scene, sessions: Sessions, fakes: Fakes
+    scene: Scene, sessions: Sessions
 ) -> None:
     request_id = str(uuid4())
     body = source_body(scene, resource_id="NINE")
@@ -171,13 +160,13 @@ async def test_create_source_request_id_replays_the_first_result(
     assert again.json()["name"] == first.json()["name"]
     async with sessions() as session:
         assert await session.scalar(select(func.count()).select_from(IngestionSource)) == 1
-    assert len(fakes.workflows.called("start_source_sync")) == 1
+        assert await session.scalar(select(func.count()).select_from(IngestionSync)) == 1
     assert other.status_code == 400
     assert reason(other) == "REQUEST_ID_REUSED"
 
 
 async def test_create_source_while_ingestion_is_paused_starts_no_sync(
-    scene: Scene, sessions: Sessions, fakes: Fakes
+    scene: Scene, sessions: Sessions
 ) -> None:
     await pause_ingestion(sessions, scene.workspace)
 
@@ -186,7 +175,6 @@ async def test_create_source_while_ingestion_is_paused_starts_no_sync(
     assert "lastSync" not in body
     source = await source_row(sessions, scene.workspace, "quiet")
     assert await syncs_of(sessions, source.id) == []
-    assert fakes.workflows.called("start_source_sync") == []
 
 
 async def test_create_source_conflicts(scene: Scene) -> None:
@@ -287,7 +275,7 @@ async def test_create_source_needs_an_active_connection_and_connector(
 
 
 async def test_get_source_computes_counts_and_state(
-    scene: Scene, sessions: Sessions, fakes: Fakes, runtime: object
+    scene: Scene, sessions: Sessions, runtime: object
 ) -> None:
     created = await create_source(scene.as_admin, scene, "counted", publishingPolicy="REVIEW_FIRST")
     source = await source_row(sessions, scene.workspace, "counted")
@@ -334,7 +322,7 @@ async def test_get_source_computes_counts_and_state(
     assert got.json()["inReviewCount"] == 2
     assert got.json()["etag"] == created["etag"]
 
-    await end_sync(sessions, fakes.workflows, source.id, failed=True)
+    await end_sync(sessions, source.id, failed=True)
     assert (await scene.as_admin.get(source_url(scene.workspace, "counted"))).json()[
         "state"
     ] == "FAILED"
@@ -356,7 +344,7 @@ async def test_get_source_403_and_404(scene: Scene) -> None:
 
 
 async def test_list_sources_pages_filters_and_orders(
-    scene: Scene, sessions: Sessions, fakes: Fakes
+    scene: Scene, sessions: Sessions
 ) -> None:
     await create_source(scene.as_admin, scene, "alpha", displayName="Alpha")
     await create_source(scene.as_admin, scene, "bravo", displayName="Bravo")
@@ -364,7 +352,7 @@ async def test_list_sources_pages_filters_and_orders(
         scene.as_admin, scene, "charlie", displayName="Charlie", publishingPolicy="REVIEW_FIRST"
     )
     bravo = await source_row(sessions, scene.workspace, "bravo")
-    await end_sync(sessions, fakes.workflows, bravo.id)
+    await end_sync(sessions, bravo.id)
     paused = await scene.as_admin.post(source_url(scene.workspace, "bravo", "pause"), json={})
     assert paused.status_code == 200, paused.text
     url = sources_url(scene.workspace)
@@ -396,7 +384,7 @@ async def test_list_sources_pages_filters_and_orders(
 
 
 async def test_attention_badge_total_size_counts_every_match(
-    scene: Scene, sessions: Sessions, fakes: Fakes
+    scene: Scene, sessions: Sessions
 ) -> None:
     """The shell badge: ``pageSize=1`` + a state filter; ``totalSize`` counts all matches."""
     other = await make_connection(sessions, scene.workspace, "other-drive")
@@ -405,7 +393,7 @@ async def test_attention_badge_total_size_counts_every_match(
     await create_source(scene.as_admin, scene, "reauth", connection=other)
     for code, failed in (("fine", False), ("failed-a", True), ("failed-b", True), ("paused", False)):
         source = await source_row(sessions, scene.workspace, code)
-        await end_sync(sessions, fakes.workflows, source.id, failed=failed)
+        await end_sync(sessions, source.id, failed=failed)
     paused = await scene.as_admin.post(source_url(scene.workspace, "paused", "pause"), json={})
     assert paused.status_code == 200, paused.text
     async with sessions.begin() as session:  # PAUSED wins over a failed latest sync
@@ -428,7 +416,7 @@ async def test_attention_badge_total_size_counts_every_match(
 
 
 async def test_update_source_mutable_fields_and_schedule(
-    scene: Scene, sessions: Sessions, fakes: Fakes
+    scene: Scene, sessions: Sessions
 ) -> None:
     await create_source(scene.as_admin, scene, "editable")
     source = await source_row(sessions, scene.workspace, "editable")
@@ -471,10 +459,6 @@ async def test_update_source_mutable_fields_and_schedule(
     stored = await source_row(sessions, scene.workspace, "editable")
     assert stored.sync_checkpoint is None
     assert stored.next_sync_at is None
-    assert [call["values"]["cron_expression"] for call in fakes.workflows.called("upsert_schedule")] == [
-        "0 6 * * 1-5"
-    ]
-    assert fakes.workflows.called("delete_schedule") == [{"source_id": str(source.id)}]
 
 
 async def test_update_source_rejects_immutable_fields_and_stale_etags(scene: Scene) -> None:
@@ -528,7 +512,7 @@ async def test_update_source_to_auto_publish_needs_items_publish(scene: Scene) -
 
 
 async def test_delete_source_tombstones_it_and_keeps_its_items(
-    scene: Scene, sessions: Sessions, fakes: Fakes
+    scene: Scene, sessions: Sessions
 ) -> None:
     created = await create_source(scene.as_admin, scene, "gone", schedule=SCHEDULE)
     source = await source_row(sessions, scene.workspace, "gone")
@@ -550,11 +534,13 @@ async def test_delete_source_tombstones_it_and_keeps_its_items(
     assert (stale.status_code, status(stale)) == (409, "ABORTED")
     assert (deleted.status_code, deleted.json()) == (200, {})
     assert after.status_code == 404 and again.status_code == 404
-    assert fakes.workflows.called("delete_schedule") == [{"source_id": str(source.id)}]
     async with sessions() as session:
         document = await session.get(Item, scene.document.id)
+        tombstone = await session.get(IngestionSource, source.id)
         listed = await scene.as_admin.get(sources_url(scene.workspace))
     assert document is not None and document.deleted_at is None
+    # Its schedule never fires again.
+    assert tombstone is not None and tombstone.next_sync_at is None
     assert listed.json()["sources"] == [] or "sources" not in listed.json()
 
 
@@ -562,10 +548,9 @@ async def test_delete_source_tombstones_it_and_keeps_its_items(
 
 
 async def test_pause_and_resume_follow_the_state_machine(
-    scene: Scene, sessions: Sessions, fakes: Fakes
+    scene: Scene, sessions: Sessions
 ) -> None:
     created = await create_source(scene.as_admin, scene, "toggled", schedule=SCHEDULE)
-    source = await source_row(sessions, scene.workspace, "toggled")
     url = source_url(scene.workspace, "toggled")
 
     resume_active = await scene.as_admin.post(f"{url}:resume", json={})
@@ -580,14 +565,11 @@ async def test_pause_and_resume_follow_the_state_machine(
     assert (paused_again.status_code, status(paused_again)) == (400, "FAILED_PRECONDITION")
     assert member.status_code == 403
     assert (await source_row(sessions, scene.workspace, "toggled")).next_sync_at is None
-    assert fakes.workflows.called("pause_schedule") == [{"source_id": str(source.id)}]
-    assert fakes.workflows.schedules[str(source.id)]["paused"] is True
 
     resumed = await scene.as_admin.post(f"{url}:resume", json={"etag": paused.json()["etag"]})
 
     assert resumed.status_code == 200 and resumed.json()["state"] == "ACTIVE"
     assert (await source_row(sessions, scene.workspace, "toggled")).next_sync_at is not None
-    assert fakes.workflows.called("resume_schedule") == [{"source_id": str(source.id)}]
 
 
 async def test_resume_refuses_while_the_connection_needs_reauthorization(
@@ -606,11 +588,11 @@ async def test_resume_refuses_while_the_connection_needs_reauthorization(
 
 
 async def test_a_failed_source_cannot_be_paused(
-    scene: Scene, sessions: Sessions, fakes: Fakes
+    scene: Scene, sessions: Sessions
 ) -> None:
     await create_source(scene.as_admin, scene, "broken")
     source = await source_row(sessions, scene.workspace, "broken")
-    await end_sync(sessions, fakes.workflows, source.id, failed=True)
+    await end_sync(sessions, source.id, failed=True)
 
     response = await scene.as_admin.post(source_url(scene.workspace, "broken", "pause"), json={})
 

@@ -68,6 +68,7 @@ const SPECIAL: Record<string, string> = {
   SetSpaceIamPolicy: "Changed space roles",
   UpdateWorkspace: "Changed the workspace name or address",
   UpdateWorkspaceSettings: "Changed the workspace setup",
+  UploadMapBackground: "Changed the Home map background",
   UpdateWorkspaceAssistant: "Updated assistant setup",
   ArchiveWorkspace: "Archived the workspace",
   CreateIngestionRun: "Started processing documents",

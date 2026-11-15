@@ -64,7 +64,7 @@ class _Holder:
 class WorkspaceIamService:
     def __init__(self, sessions: SessionFactory) -> None:
         self._sessions = sessions
-        self._resolver = WorkspaceResolver(sessions)
+        self._resolver = WorkspaceResolver()
 
     @classmethod
     def from_runtime(cls, runtime: AppRuntime) -> WorkspaceIamService:

@@ -39,7 +39,7 @@ class CurationDeps:
 
     @property
     def workspaces(self) -> WorkspaceResolver:
-        return WorkspaceResolver(self.sessions)
+        return WorkspaceResolver()
 
 
 async def now(session: AsyncSession) -> datetime:

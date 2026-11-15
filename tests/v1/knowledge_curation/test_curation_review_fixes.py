@@ -8,10 +8,10 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import update
+from sqlalchemy import select, update
 
-from bomesh.services.knowledge_curation.contributions import contribution_readable
-from bomesh.db.models import ItemTopic, ReadingList, Topic
+from bomesh.services.knowledge_curation.contributions import readable_contributions
+from bomesh.db.models import Contribution, ItemTopic, ReadingList, Topic
 from bomesh.iam.authorizer import Principal
 from curation_support import OWNER, Scene, error_reason, item_name
 
@@ -104,7 +104,7 @@ async def test_approve_with_an_unknown_topic_is_invalid_and_changes_nothing(scen
     assert (await scene.item(candidate.id)).parent_item_id == scene.personal.id
 
 
-# -- #8 contribution_readable ----------------------------------------------------------
+# -- #8 readable_contributions ---------------------------------------------------------
 
 
 async def test_contribution_readable_follows_role_state_and_revokes(scene: Scene) -> None:
@@ -112,10 +112,10 @@ async def test_contribution_readable_follows_role_state_and_revokes(scene: Scene
     authorizer = scene.world.authorizer
 
     async def readable(user: Any, contribution_id: UUID | None = None) -> bool:
+        rule = await readable_contributions(authorizer(), Principal(user.id), scene.ws.id)
         async with scene.sessions() as session:
-            return await contribution_readable(
-                session, authorizer(), Principal(user.id), scene.ws.id, contribution_id or _id(body)
-            )
+            readable_ids = set(await session.scalars(select(Contribution.id).where(rule)))
+        return (contribution_id or _id(body)) in readable_ids
 
     assert await readable(scene.member)
     assert await readable(scene.reviewer)

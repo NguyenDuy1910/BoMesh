@@ -25,7 +25,7 @@ import { SortMenu } from "../../library/components/parts";
 import { fold } from "../../model";
 import { useKnowledgeBases } from "../../queries";
 import { accessInfo, collectionHref, generalAccessOf, isEditor, isLocked, isPendingRequest, isPersonal, type AccessKey, type Item, type Policy } from "../model";
-import { useAccessRequests, useBasePolicies } from "../queries";
+import { useAccessRequests, useBasePolicies, useFolderCount } from "../queries";
 import { BaseMark } from "./BaseMark";
 import { CreateCollectionDialog } from "./CreateCollectionDialog";
 import { AccessChip, SpaceChip, useBaseSpace } from "./parts";
@@ -167,6 +167,7 @@ function CollectionCard({ collection, policy, requests }: { collection: Item; po
   const space = useBaseSpace(collection);
   const access: AccessKey | null = generalAccessOf(collection, policy);
   const linked = collection.collection?.linkCount ?? 0;
+  const folders = useFolderCount(collection.name);
   return (
     <Card<"a"> className="card--action kb-card" render={(props) => <NextLink {...props} href={collectionHref(collection.name)} />}>
       <div className="kb-card__top">
@@ -188,6 +189,7 @@ function CollectionCard({ collection, policy, requests }: { collection: Item; po
         <span className="row gap-4">
           <Files className="i i-sm" aria-hidden />
           {plural(collection.collection?.documentCount ?? 0, "document")}
+          {folders ? <span className="muted">{` · ${plural(folders, "folder")}`}</span> : null}
           {linked ? (
             <Tip content="Documents from other collections shown here without a copy">
               <span className="muted">{` · ${fmtNum(linked)} linked`}</span>

@@ -374,7 +374,7 @@
     // Confirmed before submitting: the contributor's own choices, not the assistant's guesses.
     const head = `<h3 class="ctb-sec__title">${ai.confirmed ? (isMine(d) ? 'What you confirmed' : 'Confirmed by the contributor') : 'What the assistant suggested'}</h3>`;
     if (ai.status === 'analyzing') return `<section>${head}<div class="ctb-reading">${spinner('sm')}<span>Reading the file…</span></div></section>`;
-    const topics = [...ai.topics.map(t => chip(topicName(t.id), { size: 'sm' }) + (t.why?.contributor ? '' : pctOf(t.conf, d))), ...(ai.proposed || []).map(proposalById).filter(Boolean).map(p => chip(p.name, { size: 'sm', tone: 'accent', icon: 'plus', tip: 'Proposed new topic. A workspace admin decides whether to add it.' }))];
+    const topics = [...ai.topics.map(t => chip(topicName(t.id), { size: 'sm' })), ...(ai.proposed || []).map(proposalById).filter(Boolean).map(p => chip(p.name, { size: 'sm', tone: 'accent', icon: 'plus', tip: 'Proposed new topic. A workspace admin decides whether to add it.' }))];
     const kbBy = ai.kb.by === 'ai' ? 'Suggested by the assistant' : `Chosen by ${isMine(d) ? 'you' : contributorName(d)}`;
     const flags = (ai.flags || []).length ? `<ul class="ctb-flags">${ai.flags.map(f => `<li>${ic(f.type === 'personal' ? 'shield' : f.type === 'format' ? 'file' : 'git-compare', 'i-sm')}<span>${esc(f.text)}</span></li>`).join('')}</ul>` : '';
     return `<section>${head}${kv([

@@ -1,6 +1,6 @@
 "use client";
 
-import { Archive, Check, Download, EyeOff, FileText, Folder, Pencil, Play, Plug, RefreshCw, RotateCcw, Upload, type LucideIcon } from "lucide-react";
+import { Archive, Check, Download, Eye, EyeOff, FileText, Folder, Pencil, Play, Plug, RefreshCw, RotateCcw, Upload, type LucideIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo } from "react";
 
@@ -14,17 +14,17 @@ import { openEditDetails, openMoveItems } from "@/modules/knowledge/components/d
 import { useDocumentOperations } from "@/modules/knowledge/operations";
 
 import { createIngestionRun } from "../api";
-import { canArchiveRow, canPublishRow, canUnpublishRow, isLocked, isRowFix, opsFor, reviewQueueHref, studioHref, type DocOp, type DocRow } from "../model";
+import { canArchiveRow, canPublishRow, canUnpublishRow, docsHref, isRowFix, opsFor, studioHref, type DocOp, type DocRow } from "../model";
 import { useInvalidateCuration } from "../queries";
 
 export const OP_META: Readonly<Record<DocOp, { label: string; icon: LucideIcon; danger?: boolean }>> = {
   review: { label: "Review", icon: Check },
-  publish: { label: "Publish now", icon: Play },
-  retry: { label: "Retry", icon: RotateCcw },
+  process: { label: "Process", icon: Play },
+  retry: { label: "Process again", icon: RotateCcw },
   replace: { label: "Replace file", icon: Upload },
-  update: { label: "Publish update", icon: RefreshCw },
+  update: { label: "Process the update", icon: RefreshCw },
   source: { label: "Open source", icon: Plug },
-  republish: { label: "Publish again", icon: Upload },
+  republish: { label: "Publish", icon: Eye },
   unpublish: { label: "Unpublish", icon: EyeOff },
   edit: { label: "Edit details…", icon: Pencil },
   move: { label: "Move to…", icon: Folder },
@@ -34,7 +34,7 @@ export const OP_META: Readonly<Record<DocOp, { label: string; icon: LucideIcon; 
 };
 
 export interface DocOps {
-  /** Publish (or retry, or publish the update of) rows; password-protected files are skipped and said so. */
+  /** Publish unpublished rows (readers see them at once; what isn't processed stays out of search until it is). */
   bulkPublish: (rows: DocRow[], done?: () => void) => Promise<void>;
   /** Unpublishing is reversible: it happens at once, with Undo (no confirmation). */
   unpublish: (rows: DocRow[], done?: () => void) => Promise<void>;
@@ -60,33 +60,37 @@ export function useDocOps(): DocOps {
     const names = (rows: DocRow[]) => rows.flatMap((r) => (r.item?.name ? [r.item.name] : []));
     const ref = (r: DocRow) => ({ name: r.item?.name ?? "", title: r.title, fileName: r.fileName, etag: r.item?.etag });
 
-    /** Unpublished documents go back to readers; anything not yet searchable is processed (an ingestion run). */
-    async function publishRows(rows: DocRow[]) {
-      const again = rows.filter((r) => r.lifecycle === "unpublished");
-      await Promise.all(again.map((r) => publishItem(ws, r.item!.name!)));
-      const toProcess = rows.filter((r) => r.lifecycle !== "unpublished" || r.item?.document?.indexingState !== "SUCCEEDED");
-      if (names(toProcess).length) await createIngestionRun(ws, names(toProcess));
-    }
-
-    async function process(rows: DocRow[], msg: string) {
+    /** Publish: readers see them at once (with Undo); what isn't processed yet stays out of search until it is. */
+    async function publish(rows: DocRow[], done?: () => void) {
+      const list = rows.filter(canPublishRow);
+      if (!list.length) {
+        toast("None of these are unpublished", { tone: "danger" });
+        return;
+      }
       try {
-        await publishRows(rows);
+        await Promise.all(list.map((r) => publishItem(ws, r.item!.name!)));
+        done?.();
         invalidate();
-        toast(msg, { tone: "accent" });
+        const raw = list.filter((r) => r.processing !== "ready").length;
+        const one = list.length === 1;
+        const msg = one
+          ? `Published “${list[0].title}”${raw ? " · not processed yet, so search can’t find it" : ""}`
+          : `Published ${plural(list.length, "document")}${raw ? ` · ${raw} not processed yet, so search can’t find them` : ""}`;
+        toast(msg, { undo: () => void Promise.all(list.map((r) => unpublishItem(ws, r.item!.name!))).then(invalidate, fail) });
       } catch (error) {
         fail(error);
       }
     }
 
-    async function bulkPublish(rows: DocRow[], done?: () => void) {
-      const ok = rows.filter(canPublishRow);
-      const skipped = rows.length - ok.length;
-      if (!ok.length) {
-        toast(rows.some((r) => isLocked(r.item)) ? "Password-protected files can’t be published. Replace them or remove the password at the source." : "None of these need publishing", { tone: "danger" });
-        return;
+    /** Process: one ingestion run over the rows. It never publishes. */
+    async function process(rows: DocRow[], msg: string) {
+      try {
+        await createIngestionRun(ws, { selector: { items: names(rows) } });
+        invalidate();
+        toast(msg, { tone: "accent" });
+      } catch (error) {
+        fail(error);
       }
-      done?.();
-      await process(ok, `Publishing ${plural(ok.length, "document")}${skipped ? ` · ${skipped} skipped` : ""}`);
     }
 
     async function unpublish(rows: DocRow[], done?: () => void) {
@@ -129,17 +133,17 @@ export function useDocOps(): DocOps {
       switch (op) {
         case "review":
           after?.();
-          router.push(reviewQueueHref("submissions", { sel: resourceId(r.contribution?.name) }));
+          router.push(docsHref("review", { sel: resourceId(r.contribution?.name) }));
           return;
-        case "publish":
-          void process([r], `Publishing ${r.title}`);
+        case "process":
+          void process([r], `Processing ${r.title}`);
           return;
         case "retry":
-          void process([r], `Publishing ${r.title} again`);
+          void process([r], `Processing ${r.title} again`);
           return;
         case "update":
-          // Changed at its source: republish from the source (never a file picker for synced documents).
-          void process([r], `Publishing the update to ${r.title}`);
+          // Changed at its source: process the source's version (never a file picker for synced documents).
+          void process([r], `Processing the update to ${r.title}`);
           return;
         case "source":
           after?.();
@@ -149,13 +153,7 @@ export function useDocOps(): DocOps {
           openContribute({ item: r.item?.name });
           return;
         case "republish":
-          void publishRows([r]).then(() => {
-            invalidate();
-            toast(`Publishing “${r.title}” again`, {
-              tone: "accent",
-              undo: () => void unpublishItem(ws, r.item!.name!).then(invalidate, fail),
-            });
-          }, fail);
+          void publish([r]);
           return;
         case "unpublish":
           void unpublish([r]);
@@ -186,6 +184,6 @@ export function useDocOps(): DocOps {
       return [...(shown ? [] : [main]), ...more, ...tail].map(item);
     }
 
-    return { bulkPublish, unpublish, archive, run, menu };
+    return { bulkPublish: publish, unpublish, archive, run, menu };
   }, [ws, can, router, docs, invalidate]);
 }

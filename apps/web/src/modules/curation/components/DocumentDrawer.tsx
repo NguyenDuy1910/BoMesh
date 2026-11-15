@@ -27,10 +27,11 @@ import { resourceId } from "@/lib/api/client";
 import { fmtDateTime, fmtSize, plural, rel } from "@/lib/format";
 import { LifecycleChip } from "@/modules/knowledge/components/LifecycleChip";
 import { ResourceDetails } from "@/modules/knowledge/components/ResourceDetails";
-import { kindMeta, type LifecycleKey } from "@/modules/knowledge/model";
+import { kindMeta } from "@/modules/knowledge/model";
 import { useKnowledgeModel, useMemberNames, useSource } from "@/modules/knowledge/queries";
 
-import { isLocked, opsFor, versionOf, type DocRow } from "../model";
+import { inSearch, changedAtSource } from "../lifecycle";
+import { isLocked, opsFor, processOp, versionOf, type DocOp, type DocRow } from "../model";
 import { useCollectionAudience } from "../queries";
 import { CurationDrawer } from "./CurationDrawer";
 import { ActionsMenu, TopicMenu, useApplyTopic } from "./shared";
@@ -46,8 +47,9 @@ const EVENTS: Readonly<Record<string, [LucideIcon, string, Tone | undefined]>> =
 };
 
 /**
- * One document (preview `DR['cur-doc']`): the lifecycle chip and its one note, where it is in the flow
- * (Received → Classified → Reviewed → Published), History, Details; the state's fix in the footer.
+ * One document (preview `DR['cur-doc']`): the lifecycle chip and its one note, its progress (Received → Reviewed →
+ * Published → Processed → Searchable: publication and processing are independent, Searchable needs both), History,
+ * Details; the state's fix in the footer.
  */
 export function DocumentDrawer({ row, onClose, contributorName }: { row: DocRow | null; onClose: () => void; contributorName: string }) {
   const ops = useDocOps();
@@ -77,7 +79,7 @@ export function DocumentDrawer({ row, onClose, contributorName }: { row: DocRow 
         </Button>
       }
     >
-      <DrawerBody row={row} contributorName={contributorName} />
+      <DrawerBody row={row} contributorName={contributorName} onRun={(op) => ops.run(op, row, onClose)} />
     </CurationDrawer>
   );
 }
@@ -100,7 +102,7 @@ const STEP_ICON: Readonly<Record<Step["state"], [LucideIcon, string]>> = {
 };
 const STEP_SR: Readonly<Record<Step["state"], string>> = { done: "Done", current: "In progress", issue: "Needs attention", skipped: "Skipped", todo: "Not yet" };
 
-function DrawerBody({ row, contributorName }: { row: DocRow; contributorName: string }) {
+function DrawerBody({ row, contributorName, onRun }: { row: DocRow; contributorName: string; onRun: (op: DocOp) => void }) {
   const { toResource, ctx } = useKnowledgeModel();
   const applyTopic = useApplyTopic();
   const c = row.contribution;
@@ -117,42 +119,41 @@ function DrawerBody({ row, contributorName }: { row: DocRow; contributorName: st
   const synced = !!row.source;
   const locked = isLocked(row.item);
   const resource = row.item ? toResource(row.item) : null;
-  const published = !!row.item && row.item.document?.publicationState === "PUBLISHED" && !["analyzing", "review", "changes", "rejected", "withdrawn"].includes(k);
+  const published = !!row.item && row.publication === "published";
 
   // The chip names the state; one note says why and what fixes it (never a second title repeating the chip).
   const fixHint = locked ? (synced ? " Remove the password at the source, then sync again." : " Replace the file with a copy without a password.") : "";
   const note =
-    k === "failed" ? (
-      <Callout tone="danger" description={(indexError || "Publishing stopped partway. Try again.") + (indexError && /remove the password|copy without|sync again|try again/i.test(indexError) ? "" : fixHint)} />
+    row.processing === "failed" ? (
+      <Callout tone="danger" description={(indexError || "Processing stopped partway. Try again.") + (indexError && /remove the password|copy without|sync again|try again/i.test(indexError) ? "" : fixHint)} />
     ) : (k === "changes" || k === "rejected") && lastNote?.message ? (
       <blockquote className="cur-tl__text">
         “<span translate="no">{lastNote.message}</span>” — {memberNames.get(lastNote.actor ?? "") || "A reviewer"}
       </blockquote>
     ) : null;
 
-  /* ── Progress: Received → Classified → Reviewed → Published ── */
-  const open = k === "analyzing" || k === "review" || k === "changes";
+  /* ── Progress: Received → Reviewed → Published → Processed → Searchable ── */
+  const open = row.publication === "review" || row.publication === "changes";
   const kind = kindMeta(row.kind, ctx.documentTypes).label;
   const topicNames = row.topics.map((t) => ctx.topicNames?.get(t) ?? "").filter(Boolean);
-  const canTag = !!resource && published && resource.editable;
+  const canTag = !!resource && !open && resource.editable;
   const who = audience?.label ?? "Readers of its collection";
+  const opButton = (op: DocOp | undefined) => {
+    if (!op) return undefined;
+    const { label, icon: Icon } = OP_META[op];
+    return (
+      <Button size="sm" variant="secondary" onPress={() => onRun(op)}>
+        <Icon className="i" aria-hidden />
+        {label}
+      </Button>
+    );
+  };
   const received: Step = {
     label: "Received",
     state: "done",
     at: c?.createTime || row.item?.createTime,
     text: c?.origin === "MEMBER" ? `Contributed by ${contributorName || "a member"}` : synced ? `Synced from ${sourceName}` : `Uploaded by ${memberNames.get(row.item?.creator ?? "") || "an editor"}`,
   };
-  const classified: Step =
-    k === "analyzing"
-      ? { label: "Classified", state: "current", busy: true, text: "Matching it against the taxonomy…" }
-      : topicNames.length
-        ? { label: "Classified", state: "done", text: `${kind} · ${topicNames.join(", ")}${open ? " · suggested, the reviewer confirms" : ""}` }
-        : {
-            label: "Classified",
-            state: "issue",
-            text: `${kind} · no topic yet`,
-            action: canTag ? <TopicMenu label="Add topic" variant="tertiary" chevron onPick={(t) => void applyTopic([resource!], t)} /> : undefined,
-          };
   const approved = ev("APPROVED");
   const reviewed: Step =
     k === "analyzing" || k === "review"
@@ -164,19 +165,53 @@ function DrawerBody({ row, contributorName }: { row: DocRow; contributorName: st
           : approved
             ? { label: "Reviewed", state: "done", text: `Approved${by(approved)}`, at: approved.createTime }
             : { label: "Reviewed", state: "skipped", text: synced ? `Not needed: ${sourceName} publishes automatically` : "Not needed: added by an editor of the collection" };
-  const PUB: Partial<Record<LifecycleKey, Omit<Step, "label">>> = {
-    queued: { state: "issue", text: "Waiting to publish" },
-    publishing: { state: "current", busy: true, text: "Making it searchable…" },
-    published: { state: "done", text: `Searchable · ${who}` },
-    stored: { state: "done", text: "Stored · this file type can’t be searched" },
-    failed: { state: "issue", text: "Couldn’t publish" },
-    update: { state: "issue", text: "Changed at the source · answers use the previous version" },
-    unpublished: { state: "issue", text: "Unpublished · out of search and answers" },
-    merged: { state: "done", text: "Published as a new version" },
-    rejected: { state: "skipped", text: "Won’t be published" },
+  const publishedStep: Step =
+    k === "merged"
+      ? { label: "Published", state: "done", text: "Published as a new version of another document" }
+      : row.publication === "published"
+        ? { label: "Published", state: "done", text: who }
+        : row.publication === "unpublished"
+          ? { label: "Published", state: "issue", text: "Unpublished · readers don’t see it", action: resource?.editable ? opButton("republish") : undefined }
+          : row.publication === "rejected"
+            ? { label: "Published", state: "skipped", text: "Won’t be published" }
+            : { label: "Published", state: "todo", text: `After approval · ${who} will see it` };
+  // Processed: read → classified → indexed, in one line, with what the pipeline chose.
+  const indexed = versionOf(row.item?.document?.indexedRevision) ?? versionOf(row.item?.document?.revision) ?? 1;
+  const fix = processOp(row);
+  const procBtn = opButton(fix === "process" || fix === "retry" || fix === "update" ? fix : undefined);
+  const what = `v${indexed} · ${kind} · ${topicNames.length ? topicNames.join(", ") : "no topic yet"}`;
+  const PROCESSED: Readonly<Record<DocRow["processing"], Omit<Step, "label">>> = {
+    pending: { state: "todo", text: "Not processed yet: search and the assistant can’t use it", action: procBtn },
+    processing: { state: "current", busy: true, text: "Reading, classifying and indexing…" },
+    ready: {
+      state: "done",
+      text: what,
+      action: !topicNames.length && canTag ? <TopicMenu label="Add topic" variant="tertiary" chevron onPick={(t) => void applyTopic([resource!], t)} /> : undefined,
+    },
+    failed: { state: "issue", text: indexError || "Processing stopped partway", action: procBtn },
+    outdated: {
+      state: "issue",
+      text: `${changedAtSource(row.item) ? "Changed at the source" : "Processed with earlier settings"} · v${indexed} still answers until it’s processed again`,
+      action: procBtn,
+    },
+    unsupported: { state: "skipped", text: "This file type can’t be processed" },
   };
-  const publishedStep: Step = { label: "Published", ...(PUB[k] ?? { state: "todo", text: `After approval · ${who} will see it` }) };
-  const steps = [received, classified, reviewed, publishedStep];
+  const processedStep: Step = {
+    label: "Processed",
+    ...(open || row.publication === "rejected" || k === "merged" ? { state: "todo", text: open ? "After approval, unless the reviewer processes it later" : "Not processed" } : PROCESSED[row.processing]),
+  };
+  const searchable: Step = {
+    label: "Searchable",
+    ...(inSearch(row)
+      ? { state: "done", text: `In search and answers for ${who}` }
+      : row.publication === "published" && row.processing === "outdated"
+        ? { state: "done", text: `Answers use v${indexed} until it’s processed again` }
+        : {
+            state: "todo",
+            text: row.publication === "published" ? "Once it’s processed" : row.publication === "unpublished" && row.processing === "ready" ? "Once it’s published" : "Once it’s published and processed",
+          }),
+  };
+  const steps = [received, reviewed, publishedStep, processedStep, searchable];
 
   /* ── History ── */
   const timeline: { icon: LucideIcon; tone?: Tone; label: string; by?: string; text?: string; at: string }[] = events.length
@@ -186,8 +221,8 @@ function DrawerBody({ row, contributorName }: { row: DocRow; contributorName: st
         return { icon, tone, label, by: actor, text: e.message, at: e.createTime ?? "" };
       })
     : [synced ? { icon: RefreshCw, label: `Synced from ${sourceName}`, at: row.item?.createTime ?? row.updated } : { icon: Upload, label: "Added", by: memberNames.get(row.item?.creator ?? "") ?? "", at: row.item?.createTime ?? row.updated }];
-  if (k === "unpublished") timeline.push({ icon: EyeOff, label: "Unpublished", at: row.item?.updateTime ?? "" });
-  if (k === "published" && events.length) timeline.push({ icon: CircleCheck, tone: "success", label: "Published", at: row.item?.updateTime ?? row.updated });
+  if (row.publication === "unpublished") timeline.push({ icon: EyeOff, label: "Unpublished", at: row.item?.updateTime ?? "" });
+  if (published && k !== "merged" && events.length) timeline.push({ icon: CircleCheck, tone: "success", label: "Published", at: row.item?.updateTime ?? row.updated });
 
   return (
     <>

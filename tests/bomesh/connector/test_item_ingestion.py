@@ -119,12 +119,14 @@ async def test_item_ingestion_owns_the_source_neutral_indexing_sequence(
             chunks: Any,
             *,
             context: IndexingContext,
+            classification: Any = None,
             progress: Any = None,
-        ) -> int:
+        ) -> tuple[int, None]:
             assert len(chunks) == 1
             assert context.connector_key == "file"
+            assert classification is None
             events.append("vectors")
-            return len(chunks)
+            return len(chunks), None
 
     monkeypatch.setattr(item_ingestion, "ItemService", Items)
     monkeypatch.setattr(item_ingestion, "CitationService", Citations)

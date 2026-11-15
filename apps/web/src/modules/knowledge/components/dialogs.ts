@@ -8,7 +8,7 @@ export type KnowledgeDialog =
   | { kind: "addToList"; items: string[] }
   | { kind: "edit"; item: string }
   | { kind: "link"; item: string }
-  | { kind: "move"; items: string[]; from?: string }
+  | { kind: "move"; items: string[]; from?: string; folder?: boolean }
   | { kind: "readingList"; list?: ReadingList; items?: string[] };
 
 export const knowledgeDialogs = createOverlayStore<KnowledgeDialog>();
@@ -19,7 +19,9 @@ export const openAddToReadingList = (items: string | string[]) => knowledgeDialo
 export const openEditDetails = (item: string) => knowledgeDialogs.open({ kind: "edit", item });
 /** Link to spaces (show in a space's materials). Space leads/staff. */
 export const openLinkToSpaces = (item: string) => knowledgeDialogs.open({ kind: "link", item });
-/** Move documents to another collection the caller can edit. `from` = current parent (for Undo). */
+/** Move documents to a collection or folder the caller can edit. `from` = current parent (for Undo). */
 export const openMoveItems = (items: string[], from?: string) => knowledgeDialogs.open({ kind: "move", items, from });
+/** Move a folder, with everything in it, inside its collection. */
+export const openMoveFolder = (folder: string, from?: string) => knowledgeDialogs.open({ kind: "move", items: [folder], from, folder: true });
 /** New reading list (optionally with resources) or edit an existing one (preview `col-new` / `col-edit`). */
 export const openReadingListEditor = (options: { list?: ReadingList; items?: string[] } = {}) => knowledgeDialogs.open({ kind: "readingList", ...options });

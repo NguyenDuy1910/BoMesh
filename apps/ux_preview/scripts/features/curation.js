@@ -162,7 +162,7 @@
       { id: 'collections', done: kbs.length > 0, title: 'Create collections', desc: 'Where documents live and who can read them. Make one per access boundary — a team, a function, the whole company.', cta: 'New collection', act: 'kb-create' },
       { id: 'taxonomy', done: !!(D.masterImports || []).length || (leaves.length && keyed / leaves.length >= 0.8), title: 'Load your topics', desc: 'The domains and topics documents are filed under, with the words that recognise them. Import them before the first sync, so every document is classified when it’s processed.', cta: 'Import topics', act: 'md-import' },
       { id: 'sources', done: D.sources.length > 0, title: 'Add sources', desc: 'Pick the folders, the collection they land in, how often they sync and how documents are published.', cta: 'Add source', act: 'src-connect' },
-      { id: 'sync', done: synced, title: 'Check the first sync', desc: 'Watch it read, classify, index and publish. Decide what it held back, confirm the topics it wasn’t sure of, then let the schedule take over.', cta: 'Open Sources', href: studioHref('sources') },
+      { id: 'sync', done: synced, title: 'Check the first sync', desc: 'Watch it read, classify, index and publish. Decide what it held back, confirm its topics, then let the schedule take over.', cta: 'Open Sources', href: studioHref('sources') },
     ];
   }
   /** The full checklist, only for a workspace with nothing set up yet (Overview's empty state; force: the prototype's Empty
@@ -238,10 +238,10 @@
     return contextBar(tabs(items, view, BASE, { act: 'doc-view', label: 'Documents views' }));
   }
   A['doc-view'] = el => setQuery({ view: el.dataset.value, sel: '', part: '' });
-  /** One row of filter pills with counts (a select on phones): [id, label, count, tone]. */
+  /** One row of filter pills (a select on phones): [id, label]. */
   function pillRow(items, cur, act, label) {
-    const pill = ([id, l, n, tone]) => `<button type="button" class="${cx('rq__pill', n && tone && 'rq__pill--' + tone)}" aria-pressed="${id === cur}" data-act="${act}" data-value="${id}">${esc(l)}${n ? `<span class="rq__n num">${fmtNum(n)}</span>` : ''}</button>`;
-    const opts = items.map(([id, l, n]) => `<option value="${id}" ${id === cur ? 'selected' : ''}>${esc(n ? `${l} · ${fmtNum(n)}` : l)}</option>`).join('');
+    const pill = ([id, l]) => `<button type="button" class="rq__pill" aria-pressed="${id === cur}" data-act="${act}" data-value="${id}">${esc(l)}</button>`;
+    const opts = items.map(([id, l]) => `<option value="${id}" ${id === cur ? 'selected' : ''}>${esc(l)}</option>`).join('');
     return `<div class="rq"><div class="rq__groups"><div class="rq__pills" role="group" aria-label="${esc(label)}">${items.map(pill).join('')}</div></div><select class="select select--sm rq__select" data-change="${act}" aria-label="${esc(label)}">${opts}</select></div>`;
   }
   /** A processing run in flight: how far it is, with Show them and Stop (a run left in flight by a reload picks up here). */
@@ -428,7 +428,7 @@
     // Topics: suggestions toggle on/off; reviewers may add any existing topic.
     const sugg = ai.topics, extra = f.topics.filter(id => !sugg.some(t => t.id === id));
     const tchip = (id, on, badge) => `<button type="button" class="cur-topic" aria-pressed="${on}" data-act="cur-topic" data-id="${d.id}" data-topic="${id}">${ic(on ? 'check' : 'plus', 'i-xs')}<span>${esc(topicName(id))}</span>${badge}</button>`;
-    const chipsHtml = [...sugg.map(t => tchip(t.id, f.topics.includes(t.id), t.accepted ? '<span class="cur-conf cur-conf--new">New</span>' : t.why?.contributor ? '' : confBadge(t.conf))), ...extra.map(id => tchip(id, true, '<span class="cur-conf cur-conf--edited">Added</span>'))].join('');
+    const chipsHtml = [...sugg.map(t => tchip(t.id, f.topics.includes(t.id), t.accepted ? '<span class="cur-conf cur-conf--new">New</span>' : '')), ...extra.map(id => tchip(id, true, '<span class="cur-conf cur-conf--edited">Added</span>'))].join('');
     const addOpts = [['', 'Add topic…'], ...topicTree().flatMap(dm => dm.children.filter(t => !f.topics.includes(t.id)).map(t => [t.id, `${dm.name} · ${t.name}`]))];
     const why = sugg.filter(t => f.topics.includes(t.id) && whyText(t)).map(t => `<li><span class="medium" translate="no">${esc(topicName(t.id))}</span><span class="muted" aria-hidden="true"> — </span><span class="muted">${esc(whyText(t))}</span></li>`).join('');
     // A changed topic teaches the rules (recorded as a correction; a workspace admin turns corrections into keywords).
@@ -501,7 +501,7 @@
   /** How a decision moves the run's counters (run.backfill). Declined documents stay unpublished; new versions replace, so they don't add topics. */
   const BATCH_DELTA = {
     declined: n => ({ review: -n, declined: n }),
-    approved: n => ({ review: -n, published: n, 'topics.confident': n }),
+    approved: n => ({ review: -n, published: n, 'topics.filed': n }),
     replaced: n => ({ review: -n, published: n }),
   };
   const batchById = id => (D.reviewBatches || []).find(b => b.id === id);
@@ -819,16 +819,12 @@
   /** Every filter but processing (the pill row is the processing filter). */
   const facetMatch = (d, u) => (!u.kb || d.kb === u.kb) && (!u.pub || pubKey(d) === u.pub) && (!u.src || originKey(d) === u.src) && (!u.kind || resKind(d) === u.kind) && (!u.topic || resTopics(d).includes(u.topic)) && matchesQ(AK, d.name, contributorName(d), kbById(d.kb)?.name);
   function allRows(u) {
-    const docs = curatedDocs(), pool = docs.filter(d => facetMatch(d, u));
-    const rows = pool.filter(d => !u.proc || procKey(d) === u.proc);
-    return { docs, pool, rows: applySort(rows, AK, SORTERS) };
+    const docs = curatedDocs(), rows = docs.filter(d => facetMatch(d, u) && (!u.proc || procKey(d) === u.proc));
+    return { docs, rows: applySort(rows, AK, SORTERS) };
   }
-  /** The processing pills: All, then each state with its count (Not processed accent, Failed danger), hiding empty ones. */
-  function procPills(pool, cur) {
-    const n = Object.fromEntries(PROCESSING_ORDER.map(k => [k, 0]));
-    pool.forEach(d => { const k = procKey(d); if (k) n[k]++; });
-    const tone = { pending: 'accent', failed: 'danger' };
-    const items = [['', 'All', pool.length, ''], ...PROCESSING_ORDER.filter(k => n[k] || k === cur).map(k => [k, PROCESSING[k].label, n[k], tone[k] || ''])];
+  /** The processing pills: All, then every state, without counts (the backend doesn't count documents per state). */
+  function procPills(cur) {
+    const items = [['', 'All'], ...PROCESSING_ORDER.map(k => [k, PROCESSING[k].label])];
     return pillRow(items, cur, 'cur-proc-filter', 'Processing state');
   }
   A['cur-proc-filter'] = el => { const v = el.tagName === 'SELECT' ? el.value : el.dataset.value; const u = ui(AK); u.proc = u.proc === v ? '' : v; u.page = 1; u.sel = {}; refresh(); };
@@ -845,16 +841,14 @@
     const st = stageOf(d), icon = { published: 'eye', unpublished: 'eye-off', review: 'clock', changes: 'pencil', rejected: 'x-circle', merged: 'history' }[st] || 'eye';
     return `<span class="${cx('cur-pub', 'cur-pub--' + st)}">${ic(icon, 'i-xs')}<span class="truncate">${esc(publicationOf(d))}</span></span>`;
   }
-  /** Its topics and who chose them: the pipeline (with how sure it was), a person, or a suggestion still in review. */
+  /** Its topics and who chose them: the assistant, a person, or a suggestion still in review. */
   function topicCell(d) {
     const inReview = ['review', 'changes'].includes(stageOf(d)), ai = inReview && d.ai?.status === 'done' ? d.ai : null;
     const ids = ai ? ai.topics.map(t => t.id) : d.topics || [];
     if (d.error && (d.status === 'failed' || inReview)) return `<span class="cur-topic-cell is-none">${esc('Not classified: no text to read')}</span>`;
     if (!ids.length) return `<span class="cur-topic-cell is-none">${esc(inReview ? 'Classifying…' : procKey(d) === 'pending' ? 'Classified when processed' : 'No topic')}</span>`;
-    const p = ai ? Math.round((ai.topics[0].conf || 0) * 100) : topicsByPipeline(d) ? Math.round(topicConfidence(d, ids[0]) * 100) : null;
-    const by = ai ? `Suggested · ${p}%` : p != null ? `Pipeline · ${p}%` : 'Set by a person';
-    const tone = p == null ? '' : p >= 80 ? 'hi' : p >= Math.round(classThreshold() * 100) ? 'mid' : 'lo';
-    return `<div class="stack gap-2 cur-topic-cell"><span class="truncate" translate="no">${esc(ids.map(topicName).join(', '))}</span><span class="${cx('cell-sub', tone && 'cur-by--' + tone)}">${esc(by)}</span></div>`;
+    const by = ai ? 'Suggested' : topicsByPipeline(d) ? 'Assistant' : 'Set by a person';
+    return `<div class="stack gap-2 cur-topic-cell"><span class="truncate" translate="no">${esc(ids.map(topicName).join(', '))}</span><span class="cell-sub">${esc(by)}</span></div>`;
   }
   function allRow(d) {
     const on = !!ui(AK).sel?.[d.id];
@@ -875,7 +869,7 @@
       loading: () => skelRows(8),
       empty,
       ok: () => {
-        const { docs, pool, rows } = allRows(u);
+        const { docs, rows } = allRows(u);
         if (!docs.length) return empty();
         const live = new Set(docs.map(d => d.id));
         u.sel = Object.fromEntries(Object.entries(u.sel || {}).filter(([id, on]) => on && live.has(id)));
@@ -889,13 +883,14 @@
         const toolbar = `<div class="toolbar cur-toolbar">${searchField({ uiKey: AK, placeholder: 'Search documents' })}
           <div class="cur-filters--wide">${wide}</div><div class="cur-filters--narrow">${narrow}</div>
           <div class="toolbar__end cur-sortmenu">${btn(sortLabel, { v: 'ghost', size: 'sm', icon: 'sort', menu: 'cur-sort', aria: `aria-label="Sort: ${esc(sortLabel)}"` })}</div></div>${chips}`;
-        const pills = procPills(pool, u.proc);
+        const pills = procPills(u.proc);
         if (!rows.length) return toolbar + pills + noMatches(AK, FACETS, 'documents');
         const pageRows = paginate(rows, AK, PER);
         // Selecting the whole page offers the whole filtered list (the way to pick 1,000 documents to process at once).
-        const nSel = selCount(AK), allPage = pageRows.every(d => u.sel?.[d.id]);
-        const more = nSel && allPage && nSel < rows.length ? linkBtn(`Select all ${fmtNum(rows.length)}`, { act: 'cur-sel-matching' }) : '';
-        const bulk = bulkBar(AK, more + btn('Process', { v: 'secondary', size: 'sm', icon: 'play', act: 'cur-bulk-process' }) + btn('Publish', { v: 'ghost', size: 'sm', icon: 'eye', act: 'cur-bulk-publish' }) + btn('Unpublish', { v: 'ghost', size: 'sm', icon: 'eye-off', act: 'cur-bulk-unpublish' }) + btn('Archive', { v: 'ghost', size: 'sm', icon: 'archive', act: 'cur-bulk-archive' }));
+        // No number: the backend doesn't count what a filter matches, so "all matching" is a filter, not a list.
+        const nSel = selCount(AK), allPage = pageRows.every(d => u.sel?.[d.id]), all = allMatching(u, rows);
+        const more = nSel && allPage && !all && nSel < rows.length ? linkBtn('Select all matching', { act: 'cur-sel-matching' }) : '';
+        const bulk = bulkBar(AK, more + btn('Process', { v: 'secondary', size: 'sm', icon: 'play', act: 'cur-bulk-process' }) + btn('Publish', { v: 'ghost', size: 'sm', icon: 'eye', act: 'cur-bulk-publish' }) + btn('Unpublish', { v: 'ghost', size: 'sm', icon: 'eye-off', act: 'cur-bulk-unpublish' }) + btn('Archive', { v: 'ghost', size: 'sm', icon: 'archive', act: 'cur-bulk-archive' }), all ? 'All matching selected' : '');
         // Processing and publication are separate columns: either can be where a document stopped. No Visibility column:
         // who can read a document is its collection's (or folder's) audience.
         const head = `${selAllCheck(AK, pageRows.map(d => d.id))}${sortHead('Name', 'name', AK)}${th('Processing state')}${th('Publication', 'table__column--hide-sm')}${th('Topics', 'table__column--hide-sm')}${sortHead('Updated', 'updated', AK)}${th('<span class="sr-only">Actions</span>', 'table__column--actions')}`;
@@ -903,7 +898,9 @@
       },
     });
   }
-  A['cur-sel-matching'] = () => { const u = ui(AK); u.sel = Object.fromEntries(allRows(u).rows.map(d => [d.id, true])); refresh(); };
+  A['cur-sel-matching'] = () => { const u = ui(AK); u.sel = Object.fromEntries(allRows(u).rows.map(d => [d.id, true])); u.allMatching = true; refresh(); };
+  /** "All matching" holds while every matching document is still selected (unchecking one makes it an explicit list). */
+  const allMatching = (u, rows) => !!u.allMatching && rows.length > 0 && selCount(AK) === rows.length && rows.every(d => u.sel?.[d.id]);
   /** Facets Documents offers, only when they'd split it (or one is in use): [{ key, label, opts }]. */
   function allFacets(docs, u) {
     const kbs = queueKbs(docs);
@@ -948,9 +945,9 @@
   A['cur-bulk-publish'] = () => bulkPublish(AK);
   /** Process what's selected: one dialog that says what will happen, then one processing run. */
   function processSelected(key) {
-    const docs = selectedIn(key);
+    const docs = selectedIn(key), all = key === AK && allMatching(ui(AK), allRows(ui(AK)).rows);
     if (!docs.some(canProcess)) { toast(docs.some(d => d.status === 'processing') ? 'These are being processed already' : docs.some(d => UNPROCESSABLE.includes(d.type)) ? 'Images and archives can’t be processed.' : 'None of these can be processed', { tone: 'danger' }); return; }
-    openModal('cur-process', { key, ids: docs.map(d => d.id) });
+    openModal('cur-process', { key, ids: docs.map(d => d.id), all });
   }
   A['cur-bulk-process'] = () => processSelected(AK);
   /** A collection's usual topics: the ones it lists, then those its documents carry most (at most eight). */
@@ -964,7 +961,7 @@
   const procKbs = ids => [...new Set(ids.map(docById).filter(canProcess).map(d => d.kb))].map(kbById).filter(kb => kb && kbTopicIds(kb).length);
   /** The Process dialog: one decision (which topics the AI may suggest), one optional input (context) and the action.
       Processing never publishes: people review, then publish. */
-  M['cur-process'] = ({ ids }) => {
+  M['cur-process'] = ({ ids, all }) => {
     const todo = ids.map(docById).filter(canProcess), n = todo.length;
     const f = ui('curProcess', PROC_DEFAULT()), pages = todo.reduce((s, d) => s + (d.pages || 1), 0), mins = Math.max(1, Math.round(pages / 120));
     const leaves = topicTree().flatMap(dm => dm.children), chosen = f.scope === 'chosen';
@@ -983,11 +980,13 @@
     const open = f.noteOpen || !!f.note;
     const context = sec('Context for the AI', open ? '' : linkBtn('Add', { act: 'cur-proc-note' }),
       open ? textarea({ id: 'cur-proc-note', bind: 'curProcess.note', value: f.note, rows: 2, placeholder: 'e.g. Scanned decisions and notices, 2015–2024', attrs: 'maxlength="300" aria-label="Context for the AI"' }) : '', true);
+    // All matching is a filter (no count in the API): no number, and no time estimate built on one.
+    const title = all ? 'Process the matching documents' : `Process ${plural(n, 'document')}`;
     return {
-      size: 'md', icon: 'play', title: `Process ${plural(n, 'document')}`,
-      desc: esc(`The AI reads each file and suggests topics. About ${mins} min for ${fmtNum(pages)} pages; you can keep working.`),
+      size: 'md', icon: 'play', title,
+      desc: esc(all ? 'The AI reads each file and suggests topics. You can keep working.' : `The AI reads each file and suggests topics. About ${mins} min for ${fmtNum(pages)} pages; you can keep working.`),
       body: `<div class="proc">${topics}${context}</div>`,
-      foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn(`Process ${plural(n, 'document')}`, { v: 'primary', icon: 'play', act: 'cur-process-go' }),
+      foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn(all ? 'Process' : `Process ${plural(n, 'document')}`, { v: 'primary', icon: 'play', act: 'cur-process-go' }),
     };
   };
   /** Selected starts from what the documents' collection usually holds, when only one collection is involved. */
@@ -1016,7 +1015,7 @@
     const { key, ids } = S.modal.props, f = ui('curProcess'), docs = ids.map(docById).filter(canProcess);
     if (f.scope === 'chosen' && !f.topics.length) { f.tried = true; refreshLayer(); requestAnimationFrame(() => $('#cur-proc-add')?.focus()); return; }
     const note = f.note.trim(), context = f.scope === 'chosen' || note ? { topics: f.scope === 'chosen' ? [...f.topics] : [], note } : null;
-    closeModal(); ui(key).sel = {};
+    closeModal(); ui(key).sel = {}; ui(key).allMatching = false;
     const run = X.processRun(docs, { context });
     Object.assign(f, PROC_DEFAULT());
     if (run) toast(`Processing ${plural(run.total, 'document')}`, { tone: 'accent', action: { label: 'Show them', run: () => A['cur-show-processing']() } });
@@ -1117,8 +1116,7 @@
           : st === 'rejected' ? { state: 'skipped', text: 'Won’t be published' } : { state: 'todo', text: `After approval · ${who} will see it` };
     // Processed: read → classified → indexed, in one line, with what the pipeline chose.
     const v = res(d).version, p = processingOf(d), topics = res(d).topics;
-    const pct = topics.length && topicsByPipeline(d) ? Math.round(topicConfidence(d, topics[0]) * 100) : null;
-    const what = topics.length ? `${kindMeta(res(d).kind).label} · ${topics.map(topicName).join(', ')}${pct != null ? ` (${pct}%)` : ''}` : 'no topic found';
+    const what = topics.length ? `${kindMeta(res(d).kind).label} · ${topics.map(topicName).join(', ')}` : 'no topic found';
     const procBtn = canProcess(d) && canReviewKb(kb) ? btn(p === 'pending' ? 'Process' : 'Process again', { v: 'secondary', size: 'sm', icon: 'play', act: 'cur-op', data: { id: d.id, op: p === 'pending' ? 'process' : 'retry' } }) : '';
     const processed = open || st === 'rejected' || st === 'merged' ? { state: 'todo', text: open ? 'After approval, unless the reviewer processes it later' : 'Not processed' }
       : d.reclassifying ? { state: 'current', busy: true, text: 'Classifying again with the changed topics…' }

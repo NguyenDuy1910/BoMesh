@@ -1,5 +1,13 @@
 # Temporal runtime
 
+> **Disabled in this phase.** Temporal is not started or wired: runs, syncs,
+> schedules and index upkeep execute in the ingestion worker
+> (`python -m bomesh.services.ingestion.worker`) with PostgreSQL as the queue
+> (see [Connectors and indexing](connectors-and-indexing.md) and
+> `backend/docs_design/database_architecture.md`). The code is kept under
+> `bomesh.services.workflow`; `grep -rn "\[temporal-disabled\]"` lists every
+> call site to restore. The rest of this page describes that disabled setup.
+
 BoMesh uses Temporal only to orchestrate two kinds of execution. PostgreSQL is
 the single store of their state; nothing reads Temporal visibility, and no
 custom Search Attributes are registered.

@@ -190,12 +190,12 @@ seedWorkspace('ws-finx', () => {
     { id: 'run-fx-413', source: 'src-fx-prod', kb: 'kb-fx-prod', trigger: 'Scheduled', status: 'completed', started: P(3, 4), dur: 305e3, counts: { total: 3, ok: 3, failed: 0, skipped: 0 }, by: 'Schedule' },
     /* The archive's first sync. `backfill` holds the pipeline at scale (never simulated file by file):
        found → filtered out → read → classified → published | held for review; failed by error class.
-       Classified = published + review. Of published: confident topics, topics to confirm (classGroups), no topic. */
+       Classified = published + review. Of published: filed under a topic, topics to confirm (classGroups), no topic. */
     { id: 'run-fx-419', source: 'src-fx-archive', kb: 'kb-fx-ops', trigger: 'First sync', status: 'running', started: P(0, 9), counts: { total: 96410, ok: 61420, failed: 410, skipped: 0 }, by: 'Võ Thị Lan',
       backfill: {
         found: 100240, filtered: 3830, filteredBy: [['Images and videos', 2900], ['Not changed since 2018', 930]],
         read: 61830, classified: 61420, published: 58470, review: 2950, failed: 410, rate: 118,
-        topics: { confident: 52800, confirm: 1860, none: 3810 },
+        topics: { filed: 52800, confirm: 1860, none: 3810 },
         issues: [['password', 'Password-protected', 120, 'Remove the password at the source, then sync again.'], ['scanned', 'Scanned pages without text', 210, 'Text recognition (OCR) is off in the platform policy.'], ['large', 'Larger than 100 MB', 80, 'Split the file at the source, or ask for a higher limit.']],
       } },
   ];
@@ -214,12 +214,13 @@ seedWorkspace('ws-finx', () => {
       note: 'Newer than a published document with the same name: they could replace it.',
       sample: ['Payment Cut-off Times & Settlement Windows (2025).pdf', 'Dispute Handling Procedure — rev 4.docx', 'Daily Reconciliation — 2025 update.docx', 'QR settlement procedure — v3.pdf', 'Card limit changes — 2025.docx'] },
   ];
-  /* Published from the archive, but filed with low confidence or not at all: confirmed in bulk in Knowledge Studio →
-     Topics → Suggestions. They are already readable; this is about where people browse them. */
+  /* Published from the archive: the topics the assistant applied, grouped for people to confirm in bulk, and what it gave
+     no topic. Decided in Knowledge Studio → Topics → Suggestions. They are already readable; this is about where people
+     browse them. */
   D.classGroups = [
-    { id: 'cg-fx-cards', run: 'run-fx-419', kb: 'kb-fx-ops', topic: 't-cards', n: 940, conf: [0.58, 0.79], keywords: ['chargeback', 'dispute'], status: 'open', sample: ['Branch guide — handling card complaints.pdf', 'Visa dispute timelines 2022.docx', 'Refund vs chargeback FAQ.docx', 'Card scheme fee notes.xlsx', 'Merchant dispute escalation.pdf'] },
-    { id: 'cg-fx-recon', run: 'run-fx-419', kb: 'kb-fx-ops', topic: 't-recon', n: 520, conf: [0.55, 0.77], keywords: ['matching', 'break'], status: 'open', sample: ['End-of-day matching — branches.pdf', 'Suspense account breaks 2021.xlsx', 'GL vs core matching notes.docx', 'Nostro matching guide.pdf', 'Breaks ageing report template.xlsx'] },
-    { id: 'cg-fx-pay', run: 'run-fx-419', kb: 'kb-fx-ops', topic: 't-payments', n: 400, conf: [0.52, 0.74], keywords: ['settlement', 'cut-off'], status: 'open', sample: ['Holiday settlement calendar 2023.xlsx', 'Interbank transfer limits memo.pdf', 'Same-day settlement pilot.docx', 'Batch file formats.pdf', 'Cut-off exceptions — Tet.docx'] },
+    { id: 'cg-fx-cards', run: 'run-fx-419', kb: 'kb-fx-ops', topic: 't-cards', n: 940, keywords: ['chargeback', 'dispute'], status: 'open', sample: ['Branch guide — handling card complaints.pdf', 'Visa dispute timelines 2022.docx', 'Refund vs chargeback FAQ.docx', 'Card scheme fee notes.xlsx', 'Merchant dispute escalation.pdf'] },
+    { id: 'cg-fx-recon', run: 'run-fx-419', kb: 'kb-fx-ops', topic: 't-recon', n: 520, keywords: ['matching', 'break'], status: 'open', sample: ['End-of-day matching — branches.pdf', 'Suspense account breaks 2021.xlsx', 'GL vs core matching notes.docx', 'Nostro matching guide.pdf', 'Breaks ageing report template.xlsx'] },
+    { id: 'cg-fx-pay', run: 'run-fx-419', kb: 'kb-fx-ops', topic: 't-payments', n: 400, keywords: ['settlement', 'cut-off'], status: 'open', sample: ['Holiday settlement calendar 2023.xlsx', 'Interbank transfer limits memo.pdf', 'Same-day settlement pilot.docx', 'Batch file formats.pdf', 'Cut-off exceptions — Tet.docx'] },
     { id: 'cg-fx-none', run: 'run-fx-419', kb: 'kb-fx-ops', topic: null, n: 3810, status: 'open',
       proposals: [['Merchant onboarding', 1240, ['merchant onboarding', 'mid', 'merchant agreement']], ['Branch operations', 980, ['branch', 'cash count', 'teller']]],
       sample: ['Merchant onboarding checklist 2020.pdf', 'Teller shift handover.docx', 'Branch opening hours — Tet.pdf', 'MID request form.xlsx', 'Cash count procedure — branches.pdf'] },

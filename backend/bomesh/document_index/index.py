@@ -12,11 +12,14 @@ from bomesh.document_index import (
     DEFAULT_HYBRID_CANDIDATE_LIMIT,
     INDEX_SCHEMA_VERSION,
     ChunkContextGenerator,
+    ClassificationRequest,
     ContextualChunk,
+    DocumentClassification,
     EmbeddingService,
     IndexingContext,
     IndexProgress,
     ItemPayloadState,
+    sample_document_context,
 )
 from bomesh.document_index._qdrant import _QdrantBackend
 from bomesh.document_index.payload import (
@@ -74,16 +77,22 @@ class ItemIndex:
         chunks: Sequence[Chunk],
         *,
         context: IndexingContext,
+        classification: ClassificationRequest | None = None,
         progress: IndexProgress | None = None,
-    ) -> int:
-        """Contextualize, embed, and replace all indexed content for one Item."""
+    ) -> tuple[int, DocumentClassification | None]:
+        """Classify, contextualize, embed, and replace all indexed content for one Item.
+
+        Returns the chunk count and the classification (``None`` when none was
+        asked for, no contextualizer is configured, or it failed).
+        """
 
         embedder = self._require_embedder()
-        records = await build_index_records(
+        records, classified = await build_index_records(
             chunks,
             item,
             context,
             semantic_contextualizer=self._semantic_contextualizer,
+            classification=classification,
             progress=progress,
         )
         texts = [record.payload.contextual_text for record in records]
@@ -109,7 +118,7 @@ class ItemIndex:
         )
         if progress is not None:
             progress("storing", len(records), len(records))
-        return len(records)
+        return len(records), classified
 
     async def search_item_content(
         self,
@@ -217,6 +226,23 @@ class ItemIndex:
             close = getattr(dependency, "aclose", None)
             if close is not None:
                 await close()
+
+    async def classify_sample(
+        self, *, title: str, text: str, request: ClassificationRequest
+    ) -> DocumentClassification | None:
+        """CLASSIFYING of a sample document, exactly as processing does it:
+        settled rules first, else one call to the contextualization model.
+        ``None`` when the model is needed but contextualization is not configured."""
+
+        if request.settled:
+            return DocumentClassification(topics=request.settled)
+        if self._semantic_contextualizer is None:
+            return None
+        return await self._semantic_contextualizer.classify(
+            document_context=sample_document_context(title, text),
+            request=request,
+            title=title,
+        )
 
     def current_processing_signature(self) -> dict[str, Any]:
         """Report this index's own embedding/contextualization/schema versions.

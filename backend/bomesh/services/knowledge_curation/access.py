@@ -7,13 +7,14 @@ collection; when that is empty too, the workspace (tenant-wide holders).
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy import ColumnElement, Uuid, cast, false, func, or_
 
 from bomesh.db.models import Contribution
-from bomesh.iam.authorizer import Authorizer, Principal
+from bomesh.iam.authorizer import Authorizer, ItemRef, Principal, Resource, WorkspaceRef
 
 REVIEW = "contributions.review"
 
@@ -77,6 +78,22 @@ async def is_reviewer(
     )
 
 
+async def reviewers(
+    authorizer: Authorizer, user_ids: Iterable[UUID], contribution: Contribution
+) -> frozenset[UUID]:
+    """The users among ``user_ids`` for whom :func:`is_reviewer` holds (fan-out)."""
+    users = frozenset(user_ids)
+    workspace = WorkspaceRef(contribution.tenant_id)
+    collection_id = contribution.target_item_id or suggested_collection(contribution)
+    refs: list[Resource] = [workspace]
+    if collection_id is not None:
+        refs.append(ItemRef(contribution.tenant_id, collection_id))
+    held = await authorizer.holders_permissions(users, refs)
+    return frozenset(
+        user_id for user_id in users if any(REVIEW in held[ref][user_id] for ref in refs)
+    )
+
+
 __all__ = [
     "REVIEW",
     "decision_collection",
@@ -84,5 +101,6 @@ __all__ = [
     "is_reviewer",
     "readable_clause",
     "reviewer_clause",
+    "reviewers",
     "suggested_collection",
 ]

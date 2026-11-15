@@ -1,6 +1,6 @@
 "use client";
 
-import { Button, Spinner, TextArea, TextField } from "@heroui/react";
+import { Button, Checkbox, Spinner, TextArea, TextField } from "@heroui/react";
 import {
   ArrowLeft,
   Check,
@@ -22,7 +22,7 @@ import NextLink from "next/link";
 import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 
-import { EmptyState, FileIcon, IconButton, LinkButton as TextLink, toast } from "@/components/ui";
+import { EmptyState, FileIcon, IconButton, LinkButton as TextLink, Tip, toast } from "@/components/ui";
 import { errorMessage, resourceId } from "@/lib/api/client";
 import { rel } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
@@ -31,7 +31,8 @@ import { LifecycleChip } from "@/modules/knowledge/components/LifecycleChip";
 import { RESOURCE_KINDS, topicTree } from "@/modules/knowledge/model";
 import { useItem } from "@/modules/knowledge/queries";
 
-import { hasFlag, lastEvent, studioHref, versionOf, type Flag } from "../../model";
+import { isUnprocessable } from "../../lifecycle";
+import { hasFlag, lastEvent, topicsHref, versionOf, type Flag } from "../../model";
 import { useCollectionAudience } from "../../queries";
 import { FirstPageCanvas, useFirstPage } from "../FirstPage";
 import { ConfBadge, PlainSelect, SourceName } from "../parts";
@@ -112,7 +113,7 @@ export interface InspectorProps {
   bases: readonly { name: string; displayName: string }[];
   baseNames: ReadonlyMap<string, string>;
   memberNames: ReadonlyMap<string, string>;
-  canManageTaxonomy: boolean;
+  canManageTopics: boolean;
   onStep: (dir: 1 | -1) => void;
   onBack: () => void;
   onApprove: () => void;
@@ -307,7 +308,7 @@ function Classification(p: InspectorProps) {
     return section(
       <div className="cur-analyzing">
         <Spinner size="sm" />
-        <span>Reading the file and matching it against your taxonomy…</span>
+        <span>Reading the file and matching it against your topics…</span>
       </div>,
     );
   }
@@ -325,8 +326,23 @@ function Classification(p: InspectorProps) {
   const extra = draft.topics.filter((t) => !sugg.includes(t));
   const toggle = (t: string) => setDraft({ topics: draft.topics.includes(t) ? draft.topics.filter((x) => x !== t) : [...draft.topics, t] });
   const addOpts = topicTree(p.topics).flatMap((dm) => dm.children.filter((t) => !draft.topics.includes(t.name ?? "")).map((t) => [t.name ?? "", `${dm.displayName} · ${t.displayName}`] as const));
+  // A changed topic teaches classification: approval records it as a correction; a workspace admin turns corrections into keywords.
+  const changed = draft.topics.length !== sugg.length || draft.topics.some((t) => !sugg.includes(t));
+  const teach = changed ? (
+    <div className="cur-teach">
+      <Checkbox isSelected={draft.teach} onChange={(teach) => setDraft({ teach })}>
+        <Checkbox.Content>
+          <Checkbox.Control>
+            <Checkbox.Indicator />
+          </Checkbox.Control>
+          <span className="checkbox__label">Use my change to improve classification</span>
+        </Checkbox.Content>
+      </Checkbox>
+      <span className="cur-teach__hint">{p.canManageTopics ? "You’ll find it in Topics → Suggestions." : "Workspace admins see it in Topics → Suggestions."}</span>
+    </div>
+  ) : null;
 
-  // Proposed new topics are decided in one place, Knowledge Studio → Taxonomy; publishing never waits for them.
+  // Proposed new topics are decided in one place, Knowledge Studio → Topics → Suggestions; publishing never waits for them.
   const proposed = (s.proposedTopics ?? [])
     .map((ref) => p.topics.find((t) => t.state === "PROPOSED" && (t.name === ref || t.displayName === ref))?.displayName ?? (p.topics.some((t) => t.name === ref) ? "" : ref))
     .filter(Boolean);
@@ -342,7 +358,7 @@ function Classification(p: InspectorProps) {
       <SugRow label="Type" badge={typeBadge}>
         <PlainSelect label="Type" value={draft.kind} options={kinds} onChange={(kind) => setDraft({ kind })} />
       </SugRow>
-      <SugRow label="Topics">
+      <SugRow label="Topics" foot={teach}>
         <div className="cur-topics">
           {sugg.map((t) => (
             <TopicChip key={t} on={draft.topics.includes(t)} name={topicName.get(t) ?? "Topic"} onPress={() => toggle(t)} badge={<ConfBadge value={s.topicsConfidence} />} />
@@ -378,9 +394,9 @@ function Classification(p: InspectorProps) {
             ))}
             <br />
             <span>You can publish without it.</span>{" "}
-            {p.canManageTaxonomy ? (
-              <NextLink className="link" href={studioHref("taxonomy", { node: "__proposed" })}>
-                Decide in Taxonomy
+            {p.canManageTopics ? (
+              <NextLink className="link" href={topicsHref("suggestions")}>
+                Decide in Topics → Suggestions
               </NextLink>
             ) : (
               <span>A workspace admin decides.</span>
@@ -432,7 +448,8 @@ function TopicChip({ on, name, onPress, badge }: { on: boolean; name: string; on
 
 /* ── Decision footer ── */
 
-function DecisionBar({ view: v, draft, baseNames, onApprove, onChanges, onDecline }: InspectorProps) {
+/** Preview `cur-decide`: where it publishes, Process it now (default on; never for images and archives), the decisions. */
+function DecisionBar({ view: v, draft, setDraft, baseNames, onApprove, onChanges, onDecline }: InspectorProps) {
   const c = v.sub.contribution;
   const replaces = useItem(c.kind === "NEW_REVISION" ? c.replacesItem : null).data;
   const audience = useCollectionAudience(draft?.kb);
@@ -449,6 +466,20 @@ function DecisionBar({ view: v, draft, baseNames, onApprove, onChanges, onDeclin
       <span className="cur-decide__hint truncate" title={hint}>
         {hint}
       </span>
+      {draft && !isUnprocessable(v.fileName, v.mime) ? (
+        <Tip content="Read, classify and index it so search and the assistant can use it.">
+          <span className="cur-decide__proc">
+            <Checkbox isSelected={draft.process} onChange={(process) => setDraft({ process })}>
+              <Checkbox.Content>
+                <Checkbox.Control>
+                  <Checkbox.Indicator />
+                </Checkbox.Control>
+                <span className="checkbox__label">Process it now</span>
+              </Checkbox.Content>
+            </Checkbox>
+          </span>
+        </Tip>
+      ) : null}
       <div className="cur-decide__btns">
         <Button variant="ghost" onPress={onDecline}>
           Decline

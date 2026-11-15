@@ -22,8 +22,8 @@ import {
   sectionOf,
   sectionPath,
   settingsSections,
+  studioAddress,
   studioLanding,
-  STUDIO_ALIASES,
   yourWorkNav,
   type NavItem,
   type NavSections,
@@ -248,8 +248,8 @@ function WorkspaceNav({ route, rail }: { route: RouteInfo; rail: boolean }) {
     if (kind === "library") return markSections(library, pathname, tab, "saved", ownList ? "lists" : undefined);
     if (kind === "studio") {
       const s = badges.sections.studio;
-      const landing = studioLanding(studio, { review: s.review?.n, sources: s.sources?.n });
-      const t = (tab && STUDIO_ALIASES[tab]) || tab;
+      const landing = studioLanding(studio, { documents: s.documents?.n, sources: s.sources?.n });
+      const t = pathname === "/studio" ? (studioAddress(Object.fromEntries(params))?.tab ?? tab) : tab;
       const collection = pathname.startsWith("/studio/collections/") ? "collections" : undefined;
       return markSections(studio, pathname, t, landing, collection).map((r) => ({ ...r, count: s[r.id] }));
     }

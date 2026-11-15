@@ -80,8 +80,8 @@ request, so the document is returned `AVAILABLE` with no `uploadUri`.
 Both bindings call one creation use-case. `purpose` (`KNOWLEDGE`,
 `CONVERSATION_ATTACHMENT`) is business intent, not transport choice, and does
 not decide how content is processed: every knowledge-format document is
-processed by the same core (parse → chunk → contextualize → embed → index →
-cite) when an Ingestion Run includes it, so retrieval reads one
+processed by the same core (parse → chunk → classify → contextualize → embed
+→ index → cite) when an Ingestion Run includes it, so retrieval reads one
 representation however the document entered.
 
 New documents are `PUBLISHED` (an editor is adding them); contributors put
@@ -103,7 +103,7 @@ backend; leading rows whose only text is one cell merged across columns (a
 title, a notes line) become text before the table, so the first real row is
 the column header chunks repeat. PDFium is not thread-safe: BoMesh and
 Docling share one process-wide lock (Docling's `pypdfium2_lock`) for every
-PDFium call; concurrent Activities in a worker parse other formats in
+PDFium call; concurrent documents in a worker parse other formats in
 parallel. The same parse also yields the document's whole-document
 rendition, read by the document viewer; see `document_viewer.md`.
 
@@ -134,11 +134,50 @@ Publishing, approving a contribution or rolling back a revision never starts
 one either. A `CONVERSATION_ATTACHMENT` needs no run to be usable in chat:
 the agent reads its stored original directly.
 
-For local development, `backend/main.py` starts the existing Compose services
-and runs the ingestion Temporal worker alongside the API. The worker stops
-with the API; shared Compose infrastructure remains running. Deployed API and
-worker processes remain independently deployable; no API contract depends on
-this local bootstrap.
+Runs and syncs execute in the ingestion worker
+(`python -m bomesh.services.ingestion.worker`), a process of its own with the
+API's code; PostgreSQL is its queue (`database_architecture.md`). For local
+development, `backend/main.py` starts the existing Compose services and runs
+the worker alongside the API. The worker stops with the API; shared Compose
+infrastructure remains running. Deployed API and worker processes remain
+independently deployable and scaled; no API contract depends on this local
+bootstrap.
+
+## Processing
+
+A run task reports `FETCHING`, `PARSING` (parse and chunk), `CLASSIFYING`,
+`CHUNKING` (contextual retrieval text per chunk), `EMBEDDING` and `INDEXING`.
+`CLASSIFYING` belongs to contextual retrieval and uses the same configured
+contextualization model (`BOMESH_CONTEXTUALIZATION_MODEL`, with reasoning off
+by default: `BOMESH_CONTEXTUALIZATION_REASONING_EFFORT`); it runs only when
+contextualization is enabled and the run has candidate topics. The run's
+`classification` is resolved once into candidates (its topics, a DOMAIN
+standing for its ACTIVE topics, or for itself when it has none; none = every
+ACTIVE topic; a domain is never a candidate beside its own topics), each
+with its classification signals (`keywords`, `synonyms`, `guidance`, the
+titles of its `examples`, its `rules`), and the note. Rules are checked first:
+when a candidate's rule matches the document (an ancestor collection, or the
+source that registered it), the document gets exactly the matching
+candidates and the model is not called. Otherwise one model call reads the
+title, a bounded excerpt (metadata and leading chunks, ~12k characters), the
+candidates with their signals and the note, and returns the codes that apply
+(possibly none; there is no confidence threshold) and a one- or two-sentence
+summary. Codes outside the candidates are dropped. The summary situates every
+chunk when the document has no summary of its own; it is not stored. Topics
+never enter the index payload or chunk text. TestTopicClassification runs
+this same step on a sample (`api_design.md` §5 Topic).
+
+When the index is recorded current (unchanged revision and governing
+collection), the chosen topics replace the document's assistant-applied
+`item_topics` rows (`created_by_user_id` NULL); rows a person applied are
+never touched, and a topic a person already applied stays theirs. Readers
+see the assistant's rows as `document.assistantTopics`;
+ConfirmTopicAssignments or a person's UpdateItem `document.topics` makes them
+a person's (the latter, when it replaces them, records a TopicCorrection).
+Classification is best effort: a provider error or an unreadable answer is
+logged, the document is indexed without classification and its topics are
+unchanged. It never changes `publicationState` and is not part of the
+processing version.
 
 ## States
 

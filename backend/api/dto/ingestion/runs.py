@@ -12,23 +12,21 @@ from api.aip import filtering
 from api.aip.filtering import FilterSchema, Operator
 from api.aip.messages import ProtoMessage, Timestamp
 from api.aip.ordering import OrderSchema
+from api.dto.knowledge_items import item_filters, referenced_items
 from bomesh.db.models import IngestionRun, IngestionRunItem
-from bomesh.services.ingestion.common import parse_child_name, run_name, task_name
-from bomesh.services.ingestion.names import source_name
-from bomesh.services.ingestion.runs import (
-    IngestionRunRecord,
-    RunSelector,
-    WorkspaceIngestionSummary,
-)
+from bomesh.services.ingestion.common import run_name, task_name
+from bomesh.services.ingestion.run_engine import RunClassification, RunSelection
+from bomesh.services.ingestion.runs import IngestionRunRecord, WorkspaceIngestionSummary
 from bomesh.services.ingestion.tasks import IngestionTaskRecord, TaskPhase
 from bomesh.services.kernel.workspaces import workspace_name
+from bomesh.services.knowledge_curation.records import parse_topic, topic_name
 from bomesh.services.knowledge_items.names import item_name, parse_item, revision_name
 
 IndexingState = Literal["PENDING", "RUNNING", "SUCCEEDED", "FAILED", "OUTDATED", "UNSUPPORTED"]
 RunTrigger = Literal["MANUAL", "API", "SCHEDULE", "PLATFORM_RETRY"]
 RunState = Literal["QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED"]
 TaskPhaseName = Literal[
-    "QUEUED", "FETCHING", "PARSING", "OCR", "CHUNKING", "EMBEDDING", "INDEXING", "PUBLISHING"
+    "QUEUED", "FETCHING", "PARSING", "OCR", "CLASSIFYING", "CHUNKING", "EMBEDDING", "INDEXING"
 ]
 PhaseState = Literal["PENDING", "RUNNING", "SUCCEEDED", "FAILED", "SKIPPED"]
 
@@ -38,9 +36,12 @@ _TRIGGERS = ("MANUAL", "API", "SCHEDULE", "PLATFORM_RETRY")
 
 class IngestionRunSelectorMessage(ProtoMessage):
     items: list[str] | None = None
-    ancestor: str | None = None
-    source: str | None = None
-    states: list[IndexingState] | None = None
+    filter: str | None = None
+
+
+class IngestionRunClassificationMessage(ProtoMessage):
+    topics: list[str] | None = None
+    note: str | None = None
 
 
 class IngestionRunCountsMessage(ProtoMessage):
@@ -53,10 +54,11 @@ class IngestionRunCountsMessage(ProtoMessage):
 
 
 class IngestionRunMessage(ProtoMessage):
-    """``IngestionRun``; on create only ``selector`` and ``trigger`` are read."""
+    """``IngestionRun``; on create only ``selector``, ``classification`` and ``trigger`` are read."""
 
     name: str | None = None
     selector: IngestionRunSelectorMessage | None = None
+    classification: IngestionRunClassificationMessage | None = None
     trigger: RunTrigger | None = None
     state: RunState | None = None
     counts: IngestionRunCountsMessage | None = None
@@ -125,32 +127,43 @@ class SummarizeIngestionRunsResponse(ProtoMessage):
 
 
 def run_selector(
-    message: IngestionRunSelectorMessage | None, *, workspace_id: UUID
-) -> RunSelector | None:
-    """The selector with its references parsed; malformed names are INVALID_ARGUMENT."""
+    message: IngestionRunSelectorMessage | None, *, workspace_id: UUID, processing_version: str
+) -> RunSelection | None:
+    """The selector with its items parsed and its filter compiled (the ListItems grammar).
+
+    Malformed names, filters and unknown filter fields are INVALID_ARGUMENT.
+    """
     if message is None:
         return None
-    return RunSelector(
+    text = (message.filter or "").strip() or None
+    node = filtering.parse(text, field="selector.filter")
+    where = (
+        item_filters(workspace_id, processing_version, field="selector.filter").compile(node)
+        if node is not None
+        else None
+    )
+    return RunSelection(
         items=tuple(
-            parse_item(item, workspace_id, field="selector.items")
-            for item in message.items or ()
+            parse_item(item, workspace_id, field="selector.items") for item in message.items or ()
         ),
-        ancestor=(
-            parse_item(message.ancestor, workspace_id, field="selector.ancestor")
-            if message.ancestor
-            else None
+        filter=text,
+        filter_items=referenced_items(text, workspace_id),
+        where=where,
+    )
+
+
+def run_classification(
+    message: IngestionRunClassificationMessage | None, *, workspace_id: UUID
+) -> RunClassification | None:
+    """The classification with its topic names parsed to codes."""
+    if message is None:
+        return None
+    return RunClassification(
+        topics=tuple(
+            parse_topic(name, workspace_id, field="classification.topics")
+            for name in message.topics or ()
         ),
-        source=(
-            parse_child_name(
-                message.source,
-                workspace_id=workspace_id,
-                collection="sources",
-                field="selector.source",
-            )
-            if message.source
-            else None
-        ),
-        states=tuple(message.states or ()),
+        note=message.note,
     )
 
 
@@ -161,6 +174,15 @@ def ingestion_run_message(record: IngestionRunRecord) -> IngestionRunMessage:
         selector=(
             _selector_message(record.selector, workspace_id=record.workspace_id)
             if record.selector is not None
+            else None
+        ),
+        classification=(
+            IngestionRunClassificationMessage(
+                topics=[topic_name(record.workspace_id, code) for code in record.classification.topics]
+                or None,
+                note=record.classification.note,
+            )
+            if record.classification is not None
             else None
         ),
         trigger=record.trigger.upper(),  # type: ignore[arg-type]
@@ -231,13 +253,11 @@ def summary_window(filter: str | None) -> tuple[ColumnElement[bool], datetime | 
 
 
 def _selector_message(
-    selector: RunSelector, *, workspace_id: UUID
+    selector: RunSelection, *, workspace_id: UUID
 ) -> IngestionRunSelectorMessage:
     return IngestionRunSelectorMessage(
         items=[item_name(workspace_id, item) for item in selector.items] or None,
-        ancestor=item_name(workspace_id, selector.ancestor) if selector.ancestor else None,
-        source=source_name(workspace_id, selector.source) if selector.source else None,
-        states=list(selector.states) or None,  # type: ignore[arg-type]
+        filter=selector.filter,
     )
 
 
@@ -300,6 +320,7 @@ __all__ = [
     "SummarizeIngestionRunsResponse",
     "ingestion_run_message",
     "ingestion_task_message",
+    "run_classification",
     "run_selector",
     "summary_window",
     "workspace_summary_message",

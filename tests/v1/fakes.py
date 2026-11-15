@@ -7,7 +7,8 @@ size limits), and records what it was asked so tests can assert on it:
 - :class:`FakeObjectStorage` — ``bomesh.storage.aws_s3.S3DocumentStorage``;
 - :class:`FakeIndexBackend` — the backend of a real ``ItemIndex`` (Qdrant);
 - :class:`FakeEmbedder` — the ``EmbeddingService`` of an ``ItemIndex``;
-- :class:`FakeWorkflows` — ``bomesh.services.workflow.service.TemporalWorkflowService``;
+- :class:`FakeWorkflows` — ``bomesh.services.workflow.service.TemporalWorkflowService``
+  ([temporal-disabled]: not wired into the harness while Temporal is disabled);
 - :class:`FakeAtlassian` + :func:`fake_connection_providers` — the Atlassian
   OAuth/Confluence HTTP endpoints behind a real ``AtlassianConnectionProvider``.
 
@@ -50,6 +51,7 @@ class FakeObject:
     data: bytes
     content_type: str | None
     etag: str
+    cache_control: str | None = None
 
 
 class FakeObjectStorage:
@@ -59,6 +61,8 @@ class FakeObjectStorage:
         self._bucket = bucket
         self._provider = provider
         self.objects: dict[str, FakeObject] = {}
+        #: Keys presigned for download, in call order.
+        self.presigned: list[str] = []
         self.closed = False
 
     @property
@@ -80,7 +84,9 @@ class FakeObjectStorage:
     ) -> StoredObject:
         if not data:
             raise ValueError("object storage bytes must not be empty")
-        stored = FakeObject(bytes(data), content_type, hashlib.md5(data).hexdigest())
+        stored = FakeObject(
+            bytes(data), content_type, hashlib.md5(data).hexdigest(), cache_control
+        )
         self.objects[_object_key(key)] = stored
         return StoredObject(
             size_bytes=len(data), content_type=content_type, etag=stored.etag
@@ -104,7 +110,10 @@ class FakeObjectStorage:
             expires_at=datetime.now(UTC) + timedelta(seconds=_expiry(expires_seconds)),
         )
 
-    def presign_download(self, key: str, *, expires_seconds: int) -> PresignedRequest:
+    def presign_download(
+        self, key: str, *, expires_seconds: int, stable: bool = False
+    ) -> PresignedRequest:
+        self.presigned.append(key)
         return PresignedRequest(
             url=self._url(key, expires_seconds),
             method="GET",

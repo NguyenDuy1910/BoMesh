@@ -56,6 +56,7 @@ from bomesh.db.models.knowledge import (
     ReadingList,
     ReadingListEntry,
     Topic,
+    TopicCorrection,
 )
 from bomesh.db.models.operations import (
     Operation,
@@ -142,6 +143,7 @@ __all__ = [
     "Tenant",
     "TenantMembership",
     "Topic",
+    "TopicCorrection",
     "User",
     "WorkspaceAssistantSettings",
 ]

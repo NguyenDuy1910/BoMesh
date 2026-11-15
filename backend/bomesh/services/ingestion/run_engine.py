@@ -4,23 +4,25 @@ Adding data only registers Documents (``pending``) and stores their originals.
 Processing happens when someone — a person, an API client, the platform
 console or a Source's schedule — creates an Ingestion Run. A run snapshots its
 Documents into ``ingestion_run_items`` when it is created
-(:meth:`IngestionRunService.snapshot`), so later uploads never join it, and
-starts one Temporal workflow (:meth:`IngestionRunService.launch`) that
-processes them in bounded batches. Postgres holds every run and task state;
-Temporal only orchestrates. Authorization is the caller's: this engine takes
-the set of collections a run may draw from.
+(:meth:`IngestionRunService.snapshot`), so later uploads never join it. The
+QUEUED row is the queue: an ingestion worker
+(``bomesh.services.ingestion.worker``) owns a run while it holds the run's
+session-level advisory lock (:func:`run_lock_key`) and processes it in bounded
+batches; a run whose worker died is recovered (:meth:`IngestionRunService.recover`)
+and resumed by the next worker that takes the lock. Authorization is the
+caller's: this engine takes the set of collections a run may draw from.
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Collection, Mapping, Sequence
-from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
-from sqlalchemy import Select, and_, exists, func, literal, or_, select, update
+from sqlalchemy import Select, and_, case, exists, func, literal, or_, select, text, update
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,19 +33,20 @@ from bomesh.db.models import (
     ExternalResource,
     IngestionRun,
     IngestionRunItem,
-    IngestionSync,
+    IngestionSource,
     Item,
     ItemRevision,
     ItemUpload,
     MessageItem,
     Tenant,
 )
-from bomesh.errors import StatusCode, Unavailable
+from bomesh.errors import StatusCode
 from bomesh.iam.policy import PERSONAL_KIND
 from bomesh.services import current_processing_version
+from bomesh.services.ingestion.names import source_name
 from bomesh.services.knowledge_items.indexing import INTERRUPTED_MESSAGE
 from bomesh.services.knowledge_items.item_store import HIDDEN_KINDS, ItemService
-from bomesh.services.workflow.service import TemporalWorkflowService
+# [temporal-disabled] from bomesh.services.workflow.service import TemporalWorkflowService
 from config import IngestionRunConfig
 
 log = logging.getLogger(__name__)
@@ -51,8 +54,6 @@ log = logging.getLogger(__name__)
 ACTIVE_RUN_STATUSES = ("queued", "running")
 TERMINAL_ITEM_STATUSES = frozenset({"succeeded", "failed", "cancelled"})
 RETRYABLE_ITEM_STATUSES = ("failed", "cancelled")
-#: ``IndexingState`` values a selector may name.
-INDEXING_STATES = ("PENDING", "RUNNING", "SUCCEEDED", "FAILED", "OUTDATED", "UNSUPPORTED")
 #: What a Source's schedule processes after each sync.
 SCHEDULED_STATES = ("PENDING", "OUTDATED")
 
@@ -63,71 +64,109 @@ UNSUPPORTED_FORMAT = "unsupported_format"
 INTERRUPTED = "interrupted"
 INTERNAL = "internal"
 
-START_FAILED_MESSAGE = "Processing could not be started. Try again in a moment."
 STOPPED_MESSAGE = "Processing stopped unexpectedly."
-SYNC_STOPPED_MESSAGE = "The sync stopped unexpectedly."
 REMOVED_MESSAGE = "The document was removed before it was processed."
 RUN_ENDED_MESSAGE = "The run ended before this document was processed."
-#: An open run or sync older than this is checked against Temporal.
-STALE_AFTER = timedelta(minutes=2)
+# [temporal-disabled] Temporal-only constants (re-enabling also needs the imports
+# ``timedelta``, ``Unavailable`` and ``IngestionSync`` back):
+# START_FAILED_MESSAGE = "Processing could not be started. Try again in a moment."
+# SYNC_STOPPED_MESSAGE = "The sync stopped unexpectedly."
+# #: An open run or sync older than this is checked against Temporal.
+# STALE_AFTER = timedelta(minutes=2)
 
 
 @dataclass(frozen=True, slots=True)
 class RunSelection:
-    """The Documents a run asks for; set fields narrow each other.
+    """The Documents a run asks for (``IngestionRunSelector``); set fields narrow each other.
 
-    ``items`` exactly those Documents, ``ancestor`` a collection's whole
-    subtree, ``source_id`` what a Source registered, ``states`` their
-    ``IndexingState``. Unset fields do not narrow.
+    ``items`` exactly those Documents; ``filter`` the AIP-160 document filter
+    as asked, ``filter_items`` the items it names and ``where`` its condition
+    on ``Item``, compiled once at creation and never stored. Unset fields do
+    not narrow.
     """
 
     items: tuple[UUID, ...] = ()
-    ancestor: UUID | None = None
-    source_id: UUID | None = None
-    states: tuple[str, ...] = ()
+    filter: str | None = None
+    filter_items: frozenset[UUID] = frozenset()
+    where: Any = field(default=None, compare=False)
+
+    @property
+    def is_empty(self) -> bool:
+        return not (self.items or self.filter)
 
     @property
     def excludes_personal(self) -> bool:
-        """Personal collections are their owners' own unless named by item or ancestor."""
-        return not self.items and self.ancestor is None
+        """Personal collections are their owners' own unless named by item or by the filter."""
+        return not self.items and not self.filter_items
 
     def scope(self) -> dict[str, Any]:
         """``ingestion_runs.scope``: the selector as asked for (``design.dbml``)."""
         scope: dict[str, Any] = {}
         if self.items:
             scope["item_ids"] = [str(item) for item in self.items]
-        if self.ancestor is not None:
-            scope["ancestor_item_id"] = str(self.ancestor)
-        if self.source_id is not None:
-            scope["source_id"] = str(self.source_id)
-        if self.states:
-            scope["states"] = list(self.states)
+        if self.filter:
+            scope["filter"] = self.filter
+        if self.filter_items:
+            scope["filter_item_ids"] = sorted(str(item) for item in self.filter_items)
         return scope
 
     @classmethod
     def from_scope(cls, scope: Mapping[str, Any]) -> RunSelection:
-        ancestor, source_id = scope.get("ancestor_item_id"), scope.get("source_id")
         return cls(
             items=tuple(UUID(item) for item in scope.get("item_ids") or ()),
-            ancestor=UUID(ancestor) if ancestor else None,
-            source_id=UUID(source_id) if source_id else None,
-            states=tuple(scope.get("states") or ()),
+            filter=scope.get("filter"),
+            filter_items=frozenset(UUID(item) for item in scope.get("filter_item_ids") or ()),
         )
 
 
+@dataclass(frozen=True, slots=True)
+class RunClassification:
+    """``IngestionRun.classification``: candidate topic codes (none = every ACTIVE topic), a note."""
+
+    topics: tuple[str, ...] = ()
+    note: str | None = None
+
+    def configuration(self) -> dict[str, Any]:
+        """``ingestion_runs.configuration.classification``."""
+        return {"topics": list(self.topics), "note": self.note}
+
+    @classmethod
+    def from_configuration(cls, configuration: Mapping[str, Any]) -> RunClassification | None:
+        stored = configuration.get("classification")
+        if not stored:
+            return None
+        return cls(topics=tuple(stored.get("topics") or ()), note=stored.get("note"))
+
+
+@dataclass(frozen=True, slots=True)
+class LockClaim:
+    """A worker's claim of a run: advisory lock ``key`` held by backend ``pid``.
+
+    ``pid`` is the claim's generation: a lock connection opened again is a new
+    backend, so a claim made on a lost connection never validates again.
+    """
+
+    key: int
+    pid: int
+
+
+class OwnershipLost(RuntimeError):
+    """The worker's lock connection no longer holds the run's lock: it must not write."""
+
+
 class IngestionRunService:
-    """Snapshot runs, start and stop their workflows, and record what they do."""
+    """Snapshot runs, settle them, and record what the ingestion worker does with them."""
 
     def __init__(
         self,
         session_factory: SessionFactory,
         *,
-        workflows: TemporalWorkflowService,
+        # [temporal-disabled] workflows: TemporalWorkflowService,
         processing_signature: Callable[[], Mapping[str, Any]],
         run_config: IngestionRunConfig,
     ) -> None:
         self._session_factory = session_factory
-        self._workflows = workflows
+        # [temporal-disabled] self._workflows = workflows
         self._processing_signature = processing_signature
         self._run_config = run_config
 
@@ -143,6 +182,7 @@ class IngestionRunService:
         trigger: str,
         created_by_user_id: UUID | None,
         retry_of_run_id: UUID | None = None,
+        classification: RunClassification | None = None,
     ) -> IngestionRun:
         """Create a QUEUED run in ``session`` holding the selected Documents.
 
@@ -151,7 +191,8 @@ class IngestionRunService:
         conversation attachments, assistant artifacts, unsupported Documents,
         Documents whose content is not available, Documents another active run
         holds and, when :attr:`RunSelection.excludes_personal`, Documents of
-        personal collections. The run's ``scope`` records ``selection``.
+        personal collections. The run's ``scope`` records ``selection`` and its
+        ``configuration`` the ``classification``.
         """
 
         # Selection and snapshot are serialized per workspace, so two runs
@@ -166,7 +207,7 @@ class IngestionRunService:
             scope=selection.scope(),
             retry_of_run_id=retry_of_run_id,
             status="queued",
-            configuration=self._configuration(signature, version),
+            configuration=self._configuration(signature, version, classification),
             item_count=0,
             created_by_user_id=created_by_user_id,
         )
@@ -181,7 +222,7 @@ class IngestionRunService:
                 .outerjoin(ItemUpload, ItemUpload.item_id == Item.id)
                 .where(
                     Item.id.in_(_documents_under(roots, workspace_id=workspace_id)),
-                    *_narrowing(selection, version),
+                    *_narrowing(selection),
                     *_candidate(workspace_id),
                 ),
             )
@@ -191,25 +232,36 @@ class IngestionRunService:
         await session.refresh(run)
         return run
 
-    async def launch(self, run_id: UUID, workspace_id: UUID, *, item_count: int) -> None:
-        """Start a snapshotted run; an empty run succeeds at once.
+    async def launch(self, run_id: UUID, *, item_count: int) -> None:
+        """Hand a snapshotted run to the workers; an empty run succeeds at once.
 
-        A workflow that cannot start fails the run and raises UNAVAILABLE.
+        The QUEUED row is the queue: an ingestion worker claims it.
         """
 
         if item_count == 0:
             await self.finish(run_id, outcome="succeeded")
-            return
-        try:
-            await self._workflows.start_run(run_id, workspace_id)
-        except Exception as exc:  # noqa: BLE001 - any start failure is reported the same way
-            log.warning("ingestion run workflow could not start run_id=%s", run_id, exc_info=exc)
-            await self.finish(
-                run_id,
-                outcome="failed",
-                error=_status(StatusCode.UNAVAILABLE, START_FAILED_MESSAGE),
-            )
-            raise Unavailable(START_FAILED_MESSAGE) from exc
+
+    # [temporal-disabled] The Temporal launch, verbatim. Re-enabling restores the
+    # ``workspace_id`` argument (callers: runs.py create/retry, create_scheduled_run).
+    # async def launch(self, run_id: UUID, workspace_id: UUID, *, item_count: int) -> None:
+    #     """Start a snapshotted run; an empty run succeeds at once.
+    #
+    #     A workflow that cannot start fails the run and raises UNAVAILABLE.
+    #     """
+    #
+    #     if item_count == 0:
+    #         await self.finish(run_id, outcome="succeeded")
+    #         return
+    #     try:
+    #         await self._workflows.start_run(run_id, workspace_id)
+    #     except Exception as exc:  # noqa: BLE001 - any start failure is reported the same way
+    #         log.warning("ingestion run workflow could not start run_id=%s", run_id, exc_info=exc)
+    #         await self.finish(
+    #             run_id,
+    #             outcome="failed",
+    #             error=_status(StatusCode.UNAVAILABLE, START_FAILED_MESSAGE),
+    #         )
+    #         raise Unavailable(START_FAILED_MESSAGE) from exc
 
     async def create_scheduled_run(self, workspace_id: UUID, source_id: UUID) -> UUID | None:
         """Process what a Source left pending or outdated (trigger SCHEDULE).
@@ -218,7 +270,6 @@ class IngestionRunService:
         now (ingestion paused, workspace not ACTIVE): a schedule skips silently.
         """
 
-        selection = RunSelection(source_id=source_id, states=SCHEDULED_STATES)
         async with transaction_scope(self._session_factory) as session:
             workspace = await session.get(Tenant, workspace_id)
             if (
@@ -227,6 +278,18 @@ class IngestionRunService:
                 or workspace.ingestion_paused_at is not None
             ):
                 return None
+            source_code = await session.scalar(
+                select(IngestionSource.code).where(IngestionSource.id == source_id)
+            )
+            if source_code is None:
+                return None
+            version = current_processing_version(dict(self._processing_signature()))
+            states = " OR ".join(f"document.indexingState = {state}" for state in SCHEDULED_STATES)
+            selection = RunSelection(
+                filter=f'document.origin.source = "{source_name(workspace_id, source_code)}"'
+                f" AND ({states})",
+                where=and_(_registered_by(source_id), _state_filter(SCHEDULED_STATES, version)),
+            )
             # A schedule that selects nothing leaves no run behind.
             savepoint = await session.begin_nested()
             run = await self.snapshot(
@@ -241,7 +304,8 @@ class IngestionRunService:
                 await savepoint.rollback()
                 return None
             run_id, item_count = run.id, run.item_count
-        await self.launch(run_id, workspace_id, item_count=item_count)
+        # [temporal-disabled] await self.launch(run_id, workspace_id, item_count=item_count)
+        await self.launch(run_id, item_count=item_count)
         return run_id
 
     # -- Cancelling ----------------------------------------------------------
@@ -257,40 +321,106 @@ class IngestionRunService:
         )
 
     async def stop(self, run_id: UUID) -> None:
-        """Ask the cancelled run's workflow to stop; without one, settle the run now.
+        """Settle a cancelled run no worker executes; an owning worker settles its own.
 
-        The task each batch is processing stops and its Document waits again.
+        A worker holds the run's advisory lock while it executes the run: it
+        sees the cancel within seconds, stops the Document each batch is
+        processing (that Document waits again) and finishes the run.
         """
 
-        try:
-            requested = await self._workflows.cancel_run(run_id)
-        except Exception:  # noqa: BLE001 - the batches also stop on their own
-            log.warning("ingestion run cancel request failed run_id=%s", run_id, exc_info=True)
-            requested = True
-        if not requested:
-            await self.finish(run_id, outcome="cancelled")
+        async with transaction_scope(self._session_factory) as session:
+            unowned = await session.scalar(
+                select(func.pg_try_advisory_xact_lock(run_lock_key(run_id)))
+            )
+            if unowned:
+                await _finish_run(session, run_id, outcome="cancelled", error=None)
 
-    # -- Reading ---------------------------------------------------------------
+    # [temporal-disabled] The Temporal stop, verbatim.
+    # async def stop(self, run_id: UUID) -> None:
+    #     """Ask the cancelled run's workflow to stop; without one, settle the run now.
+    #
+    #     The task each batch is processing stops and its Document waits again.
+    #     """
+    #
+    #     try:
+    #         requested = await self._workflows.cancel_run(run_id)
+    #     except Exception:  # noqa: BLE001 - the batches also stop on their own
+    #         log.warning("ingestion run cancel request failed run_id=%s", run_id, exc_info=True)
+    #         requested = True
+    #     if not requested:
+    #         await self.finish(run_id, outcome="cancelled")
+    #
+    # -- Reading (Temporal) -------------------------------------------------------
+    #
+    # async def refresh(self, run: IngestionRun) -> bool:
+    #     """End an open run whose workflow Temporal lost; ``True`` when it changed."""
+    #
+    #     if run.status not in ACTIVE_RUN_STATUSES or not _is_stale(run.updated_at):
+    #         return False
+    #     if not await self._workflow_is_lost(run.id):
+    #         return False
+    #     await self._stop_lost_run(run.id)
+    #     return True
 
-    async def refresh(self, run: IngestionRun) -> bool:
-        """End an open run whose workflow Temporal lost; ``True`` when it changed."""
+    # -- Execution (called by the ingestion worker) ----------------------------
+    #
+    # Every write below takes ``owner``: the worker's claim of the run. With an
+    # owner, the write commits only while that claim's lock connection still
+    # holds the run's advisory lock (checked in the same transaction, with the
+    # run row locked so a recovering worker waits for it); otherwise it raises
+    # :class:`OwnershipLost` and writes nothing. ``None`` (tests) skips the check.
 
-        if run.status not in ACTIVE_RUN_STATUSES or not _is_stale(run.updated_at):
-            return False
-        if not await self._workflow_is_lost(run.id):
-            return False
-        await self._stop_lost_run(run.id)
-        return True
+    async def status(self, run_id: UUID) -> str | None:
+        """The run's status (``None`` when it is gone): how a worker sees a cancel."""
 
-    # -- Execution (called by the run's Activities) ---------------------------
+        async with transaction_scope(self._session_factory) as session:
+            return await session.scalar(select(IngestionRun.status).where(IngestionRun.id == run_id))
 
-    async def start(self, run_id: UUID) -> tuple[bool, int]:
+    async def recover(
+        self, run_id: UUID, *, owner: LockClaim | None = None
+    ) -> tuple[IngestionRun, int] | None:
+        """Take over a claimed run whatever its previous worker left behind.
+
+        Called by the worker that just acquired the run's lock, so every task
+        still ``running`` belongs to a worker that died: it fails as
+        ``interrupted`` and its Document waits again. Queued tasks lose their
+        batch and are planned afresh. Returns the run and the first batch
+        number not used yet (``None`` when the run is gone).
+        """
+
+        async with transaction_scope(self._session_factory) as session:
+            run = await session.get(IngestionRun, run_id, with_for_update=True)
+            if run is None:
+                return None
+            await _require_owner(session, owner)
+            # Numbers already used stay used, so new batches never repeat one.
+            highest = await session.scalar(
+                select(func.max(IngestionRunItem.batch_number)).where(
+                    IngestionRunItem.run_id == run_id
+                )
+            )
+            await _release_tasks(session, run_id, interrupted="failed")
+            return run, 0 if highest is None else int(highest) + 1
+
+    async def requeue(self, run_id: UUID, *, owner: LockClaim | None = None) -> None:
+        """Give back a run a worker stops executing (shutdown): nothing it ran is lost.
+
+        Interrupted tasks are queued again and their Documents wait again;
+        queued tasks lose their batch. The next worker resumes the run.
+        """
+
+        async with transaction_scope(self._session_factory) as session:
+            await _lock_run(session, run_id, owner)
+            await _release_tasks(session, run_id, interrupted="queued")
+
+    async def start(self, run_id: UUID, *, owner: LockClaim | None = None) -> tuple[bool, int]:
         """Mark the run running; ``(still active, batches allowed at once)``."""
 
         async with transaction_scope(self._session_factory) as session:
             run = await session.get(IngestionRun, run_id, with_for_update=True)
             if run is None:
                 return False, 1
+            await _require_owner(session, owner)
             if run.status == "queued":
                 run.status = "running"
                 run.started_at = _now()
@@ -298,13 +428,19 @@ class IngestionRunService:
             return run.status == "running", max(1, parallelism)
 
     async def plan_batches(
-        self, run_id: UUID, *, first_batch_number: int, max_batches: int
+        self,
+        run_id: UUID,
+        *,
+        first_batch_number: int,
+        max_batches: int,
+        owner: LockClaim | None = None,
     ) -> list[tuple[int, list[UUID]]]:
         """The run's next batches, numbered from ``first_batch_number``.
 
         Idempotent: batches already planned at or after that number are
         returned as they are. Otherwise queued Documents not yet in a batch
-        are packed, smallest first, up to the run's item and byte limits; a
+        are packed, smallest first, up to the run's item and byte limits (a
+        short tail is spread evenly over ``max_batches``); a
         file larger than the byte limit is a batch of its own. Empty when
         nothing is left to plan or the run stopped.
         """
@@ -315,6 +451,7 @@ class IngestionRunService:
             run = await session.get(IngestionRun, run_id, with_for_update=True)
             if run is None or run.status != "running":
                 return []
+            await _require_owner(session, owner)
             planned = (
                 await session.execute(
                     select(IngestionRunItem.batch_number, IngestionRunItem.item_id)
@@ -351,7 +488,10 @@ class IngestionRunService:
                     .limit(max_batches * max_items)
                 )
             ).all()
-            batches = _pack(unplanned, max_items=max_items, max_bytes=max_bytes, max_batches=max_batches)
+            # A short tail is spread over every batch this call may plan, so
+            # a small run uses the run's parallelism instead of one serial batch.
+            per_batch = min(max_items, max(1, -(-len(unplanned) // max_batches)))
+            batches = _pack(unplanned, max_items=per_batch, max_bytes=max_bytes, max_batches=max_batches)
             highest = await session.scalar(
                 select(func.max(IngestionRunItem.batch_number)).where(
                     IngestionRunItem.run_id == run_id
@@ -359,18 +499,32 @@ class IngestionRunService:
             )
             first = max(first_batch_number, -1 if highest is None else int(highest) + 1)
             numbered = [(first + offset, batch) for offset, batch in enumerate(batches)]
-            for number, item_ids in numbered:
+            if numbered:
+                # One statement plans every batch of this call.
                 await session.execute(
                     update(IngestionRunItem)
                     .where(
                         IngestionRunItem.run_id == run_id,
-                        IngestionRunItem.item_id.in_(item_ids),
+                        IngestionRunItem.item_id.in_(
+                            [item_id for _, item_ids in numbered for item_id in item_ids]
+                        ),
                     )
-                    .values(batch_number=number)
+                    .values(
+                        batch_number=case(
+                            {
+                                item_id: number
+                                for number, item_ids in numbered
+                                for item_id in item_ids
+                            },
+                            value=IngestionRunItem.item_id,
+                        )
+                    )
                 )
             return numbered
 
-    async def claim_item(self, run_id: UUID, item_id: UUID) -> bool:
+    async def claim_item(
+        self, run_id: UUID, item_id: UUID, *, owner: LockClaim | None = None
+    ) -> bool:
         """Start one Document of a running run; ``False`` when it must not be processed.
 
         The task records the Document's newest live revision it starts from.
@@ -379,6 +533,7 @@ class IngestionRunService:
         """
 
         async with transaction_scope(self._session_factory) as session:
+            await _lock_run(session, run_id, owner)
             row = (
                 await session.execute(
                     select(IngestionRunItem, IngestionRun.status, Item.deleted_at)
@@ -417,9 +572,15 @@ class IngestionRunService:
             return True
 
     async def record_item_phases(
-        self, run_id: UUID, item_id: UUID, phases: Sequence[Mapping[str, Any]]
+        self,
+        run_id: UUID,
+        item_id: UUID,
+        phases: Sequence[Mapping[str, Any]],
+        *,
+        owner: LockClaim | None = None,
     ) -> None:
         async with transaction_scope(self._session_factory) as session:
+            await _lock_run(session, run_id, owner)
             await session.execute(
                 update(IngestionRunItem)
                 .where(
@@ -440,21 +601,24 @@ class IngestionRunService:
         error: str | None = None,
         error_class: str | None = None,
         chunk_count: int | None = None,
+        owner: LockClaim | None = None,
     ) -> None:
-        """Finish one Document in the run: succeeded, failed, or cancelled.
+        """Finish one running Document in the run: succeeded, failed, or cancelled.
 
         A failed Document carries its user-safe ``error`` and provider-neutral
         ``error_class``. A cancelled Document was interrupted mid-processing
-        and waits again.
+        and waits again. A task no longer ``running`` (settled meanwhile) is
+        left as it is.
         """
 
         if status not in TERMINAL_ITEM_STATUSES:
             raise ValueError("unsupported run item outcome")
         async with transaction_scope(self._session_factory) as session:
+            await _lock_run(session, run_id, owner)
             run_item = await session.get(
                 IngestionRunItem, (run_id, item_id), with_for_update=True
             )
-            if run_item is None:
+            if run_item is None or run_item.status != "running":
                 return
             run_item.status = status
             run_item.error = (
@@ -467,7 +631,9 @@ class IngestionRunService:
             if status == "cancelled":
                 await _release_documents(session, [item_id], to="pending")
 
-    async def append_items(self, run_id: UUID, item_ids: Sequence[UUID]) -> int:
+    async def append_items(
+        self, run_id: UUID, item_ids: Sequence[UUID], *, owner: LockClaim | None = None
+    ) -> int:
         """Take Documents found while running (an archive's members) into the run.
 
         Only processable Documents no other active run holds join; the run's
@@ -480,6 +646,7 @@ class IngestionRunService:
             run = await session.get(IngestionRun, run_id, with_for_update=True)
             if run is None or run.status not in ACTIVE_RUN_STATUSES:
                 return 0
+            await _require_owner(session, owner)
             before = run.item_count
             await session.execute(
                 pg_insert(IngestionRunItem)
@@ -495,10 +662,13 @@ class IngestionRunService:
             run.item_count = await _item_count(session, run_id)
             return run.item_count - before
 
-    async def fail_batch(self, run_id: UUID, batch_number: int) -> None:
+    async def fail_batch(
+        self, run_id: UUID, batch_number: int, *, owner: LockClaim | None = None
+    ) -> None:
         """A batch that kept failing: its unfinished Documents fail, the run goes on."""
 
         async with transaction_scope(self._session_factory) as session:
+            await _lock_run(session, run_id, owner)
             unfinished = list(
                 await session.scalars(
                     select(IngestionRunItem)
@@ -522,78 +692,35 @@ class IngestionRunService:
             await _release_documents(session, interrupted, to="failed")
 
     async def finish(
-        self, run_id: UUID, *, outcome: str, error: Mapping[str, Any] | None = None
+        self,
+        run_id: UUID,
+        *,
+        outcome: str,
+        error: Mapping[str, Any] | None = None,
+        owner: LockClaim | None = None,
     ) -> None:
         """Record how the run ended and settle every Document it did not finish.
 
-        Idempotent, and never overrides a run already finished (a cancel that
-        arrived first stays a cancel). Queued Documents are cancelled; Documents
-        interrupted mid-processing go back to pending. ``error`` is the
-        google.rpc.Status of a failed run.
+        Only an active run (or a cancelled one not settled yet) is finished; a
+        finished run is left as it is, so a cancel that arrived first stays a
+        cancel. Queued Documents are cancelled; Documents interrupted
+        mid-processing go back to pending. ``error`` is the google.rpc.Status
+        of a failed run.
         """
 
         if outcome not in TERMINAL_ITEM_STATUSES:
             raise ValueError("unsupported run outcome")
         async with transaction_scope(self._session_factory) as session:
-            run = await session.get(IngestionRun, run_id, with_for_update=True)
-            if run is None:
-                return
-            if run.status in ACTIVE_RUN_STATUSES:
-                run.status = outcome
-                if outcome == "failed":
-                    run.error = dict(error or _status(StatusCode.INTERNAL, STOPPED_MESSAGE))
-            if run.finished_at is None:
-                run.finished_at = _now()
-            if run.status == "cancelled":
-                await _settle_items(session, run_id, queued_error=None)
-            elif run.status == "failed":
-                await _settle_items(session, run_id, queued_error=run.error)
-            else:
-                await _settle_items(
-                    session,
-                    run_id,
-                    queued_error=_status(StatusCode.CANCELLED, RUN_ENDED_MESSAGE),
-                )
+            await _finish_run(session, run_id, outcome=outcome, error=error, owner=owner)
 
-    # -- Reconciliation --------------------------------------------------------
+    # -- Repair ------------------------------------------------------------------
 
-    async def reconcile(self) -> None:
-        """Repair state a lost workflow left behind; safe to call any time.
+    async def release_orphaned_documents(self) -> None:
+        """Documents left ``processing`` outside any active run wait again.
 
-        A run or sync still open in Postgres whose execution Temporal no longer
-        has (or has closed) ends as failed; Documents left processing outside
-        any active run wait again. Nothing is concluded while Temporal cannot
-        be reached.
+        Safe at any time: a Document an active run holds is never touched.
         """
 
-        cutoff = _now() - STALE_AFTER
-        async with transaction_scope(self._session_factory) as session:
-            run_ids = list(
-                await session.scalars(
-                    select(IngestionRun.id).where(
-                        IngestionRun.status.in_(ACTIVE_RUN_STATUSES),
-                        IngestionRun.updated_at < cutoff,
-                    )
-                )
-            )
-            lost_sync_sources = list(
-                await session.scalars(
-                    select(IngestionSync.ingestion_source_id).where(
-                        IngestionSync.status == "running",
-                        IngestionSync.started_at < cutoff,
-                    )
-                )
-            )
-        try:
-            for run_id in run_ids:
-                if not await self._workflows.run_is_open(run_id):
-                    await self._stop_lost_run(run_id)
-            for source_id in lost_sync_sources:
-                if not await self._workflows.source_sync_is_open(source_id):
-                    await self._fail_lost_sync(source_id)
-        except Exception:  # noqa: BLE001 - an unreachable Temporal proves nothing
-            log.warning("ingestion reconciliation skipped: Temporal unavailable", exc_info=True)
-            return
         async with transaction_scope(self._session_factory) as session:
             orphaned = list(
                 await session.scalars(
@@ -607,11 +734,93 @@ class IngestionRunService:
             )
             await _release_documents(session, orphaned, to="pending")
 
+    # [temporal-disabled] The Temporal reconciliation, verbatim (called at API and
+    # worker startup): runs/syncs whose Temporal execution was lost ended FAILED.
+    # async def reconcile(self) -> None:
+    #     """Repair state a lost workflow left behind; safe to call any time.
+    #
+    #     A run or sync still open in Postgres whose execution Temporal no longer
+    #     has (or has closed) ends as failed; Documents left processing outside
+    #     any active run wait again. Nothing is concluded while Temporal cannot
+    #     be reached.
+    #     """
+    #
+    #     cutoff = _now() - STALE_AFTER
+    #     async with transaction_scope(self._session_factory) as session:
+    #         run_ids = list(
+    #             await session.scalars(
+    #                 select(IngestionRun.id).where(
+    #                     IngestionRun.status.in_(ACTIVE_RUN_STATUSES),
+    #                     IngestionRun.updated_at < cutoff,
+    #                 )
+    #             )
+    #         )
+    #         lost_sync_sources = list(
+    #             await session.scalars(
+    #                 select(IngestionSync.ingestion_source_id).where(
+    #                     IngestionSync.status == "running",
+    #                     IngestionSync.started_at < cutoff,
+    #                 )
+    #             )
+    #         )
+    #     try:
+    #         for run_id in run_ids:
+    #             if not await self._workflows.run_is_open(run_id):
+    #                 await self._stop_lost_run(run_id)
+    #         for source_id in lost_sync_sources:
+    #             if not await self._workflows.source_sync_is_open(source_id):
+    #                 await self._fail_lost_sync(source_id)
+    #     except Exception:  # noqa: BLE001 - an unreachable Temporal proves nothing
+    #         log.warning("ingestion reconciliation skipped: Temporal unavailable", exc_info=True)
+    #         return
+    #     await self.release_orphaned_documents()
+    #
+    # async def _workflow_is_lost(self, run_id: UUID) -> bool:
+    #     try:
+    #         return not await self._workflows.run_is_open(run_id)
+    #     except Exception:  # noqa: BLE001 - an unreachable Temporal proves nothing
+    #         log.warning("ingestion run state check failed run_id=%s", run_id, exc_info=True)
+    #         return False
+    #
+    # async def _stop_lost_run(self, run_id: UUID) -> None:
+    #     """A run whose workflow is gone: failed, and nothing it held stays waiting on it."""
+    #
+    #     async with transaction_scope(self._session_factory) as session:
+    #         run = await session.get(IngestionRun, run_id, with_for_update=True)
+    #         if run is None or run.status not in ACTIVE_RUN_STATUSES:
+    #             return
+    #         run.status = "failed"
+    #         run.error = _status(StatusCode.INTERNAL, STOPPED_MESSAGE)
+    #         run.finished_at = run.finished_at or _now()
+    #         await _settle_items(session, run_id, queued_error=None)
+    #     log.warning("ingestion run stopped without its workflow run_id=%s", run_id)
+    #
+    # async def _fail_lost_sync(self, source_id: UUID) -> None:
+    #     async with transaction_scope(self._session_factory) as session:
+    #         await session.execute(
+    #             update(IngestionSync)
+    #             .where(
+    #                 IngestionSync.ingestion_source_id == source_id,
+    #                 IngestionSync.status == "running",
+    #             )
+    #             .values(
+    #                 status="failed",
+    #                 error=_status(StatusCode.INTERNAL, SYNC_STOPPED_MESSAGE),
+    #                 finished_at=_now(),
+    #             )
+    #         )
+    #     log.warning("source sync stopped without its workflow source_id=%s", source_id)
+
     # -- Internals ---------------------------------------------------------------
 
-    def _configuration(self, signature: Mapping[str, Any], version: str) -> dict[str, Any]:
+    def _configuration(
+        self,
+        signature: Mapping[str, Any],
+        version: str,
+        classification: RunClassification | None,
+    ) -> dict[str, Any]:
         config = self._run_config
-        return {
+        configuration: dict[str, Any] = {
             "processing_version": version,
             "embedding_model": signature.get("embedding_model"),
             "contextualization_model": (
@@ -623,42 +832,9 @@ class IngestionRunService:
             "batch_max_bytes": config.batch_max_bytes,
             "parallelism": config.parallelism,
         }
-
-    async def _workflow_is_lost(self, run_id: UUID) -> bool:
-        try:
-            return not await self._workflows.run_is_open(run_id)
-        except Exception:  # noqa: BLE001 - an unreachable Temporal proves nothing
-            log.warning("ingestion run state check failed run_id=%s", run_id, exc_info=True)
-            return False
-
-    async def _stop_lost_run(self, run_id: UUID) -> None:
-        """A run whose workflow is gone: failed, and nothing it held stays waiting on it."""
-
-        async with transaction_scope(self._session_factory) as session:
-            run = await session.get(IngestionRun, run_id, with_for_update=True)
-            if run is None or run.status not in ACTIVE_RUN_STATUSES:
-                return
-            run.status = "failed"
-            run.error = _status(StatusCode.INTERNAL, STOPPED_MESSAGE)
-            run.finished_at = run.finished_at or _now()
-            await _settle_items(session, run_id, queued_error=None)
-        log.warning("ingestion run stopped without its workflow run_id=%s", run_id)
-
-    async def _fail_lost_sync(self, source_id: UUID) -> None:
-        async with transaction_scope(self._session_factory) as session:
-            await session.execute(
-                update(IngestionSync)
-                .where(
-                    IngestionSync.ingestion_source_id == source_id,
-                    IngestionSync.status == "running",
-                )
-                .values(
-                    status="failed",
-                    error=_status(StatusCode.INTERNAL, SYNC_STOPPED_MESSAGE),
-                    finished_at=_now(),
-                )
-            )
-        log.warning("source sync stopped without its workflow source_id=%s", source_id)
+        if classification is not None:
+            configuration["classification"] = classification.configuration()
+        return configuration
 
 
 # -- Selection (SQL) -------------------------------------------------------------
@@ -702,8 +878,6 @@ async def _roots(
     roots = set(
         await live_collections(session, workspace_id) if collections is None else collections
     )
-    if selection.ancestor is not None:
-        roots &= set(await _collection_tree(session, selection.ancestor))
     excluded_kinds = list(HIDDEN_KINDS)
     if selection.excludes_personal:
         excluded_kinds.append(PERSONAL_KIND)
@@ -717,22 +891,24 @@ async def _roots(
     return roots - set(excluded)
 
 
-def _narrowing(selection: RunSelection, version: str) -> list[Any]:
+def _narrowing(selection: RunSelection) -> list[Any]:
     conditions: list[Any] = []
     if selection.items:
         conditions.append(Item.id.in_(selection.items))
-    if selection.source_id is not None:
-        conditions.append(
-            Item.id.in_(
-                select(ExternalResource.item_id).where(
-                    ExternalResource.ingestion_source_id == selection.source_id,
-                    ExternalResource.deleted_at.is_(None),
-                )
-            )
-        )
-    if selection.states:
-        conditions.append(_state_filter(selection.states, version))
+    if selection.where is not None:
+        conditions.append(selection.where)
     return conditions
+
+
+def _registered_by(source_id: UUID) -> Any:
+    """Documents a Source registered and still tracks."""
+
+    return Item.id.in_(
+        select(ExternalResource.item_id).where(
+            ExternalResource.ingestion_source_id == source_id,
+            ExternalResource.deleted_at.is_(None),
+        )
+    )
 
 
 def _in_active_run(item_id: Any, *, except_run_id: UUID | None = None) -> Any:
@@ -846,24 +1022,6 @@ def _governing_collections(document_ids: Sequence[UUID], *, workspace_id: UUID) 
     )
 
 
-async def _collection_tree(session: AsyncSession, collection_id: UUID) -> list[UUID]:
-    tree = (
-        select(Item.id.label("item_id"))
-        .where(Item.id == collection_id, Item.item_type == "collection")
-        .cte("collection_tree", recursive=True)
-    )
-    child = aliased(Item)
-    tree = tree.union_all(
-        select(child.id)
-        .join(tree, child.parent_item_id == tree.c.item_id)
-        .where(
-            child.item_type == "collection",
-            child.deleted_at.is_(None),
-        )
-    )
-    return list(await session.scalars(select(tree.c.item_id)))
-
-
 def _pack(
     candidates: Sequence[Any], *, max_items: int, max_bytes: int, max_batches: int
 ) -> list[list[UUID]]:
@@ -897,6 +1055,115 @@ async def _item_count(session: AsyncSession, run_id: UUID) -> int:
         )
         or 0
     )
+
+
+async def _lock_run(session: AsyncSession, run_id: UUID, owner: LockClaim | None) -> None:
+    """Share-lock the run row (a recovering worker waits), then require ``owner``'s claim."""
+
+    if owner is None:
+        return
+    await session.execute(
+        select(IngestionRun.id).where(IngestionRun.id == run_id).with_for_update(read=True)
+    )
+    await _require_owner(session, owner)
+
+
+async def _require_owner(session: AsyncSession, owner: LockClaim | None) -> None:
+    """Raise :class:`OwnershipLost` unless ``owner``'s connection still holds its lock.
+
+    The caller holds the run row lock, so the claim cannot change hands before
+    this transaction commits: a worker that takes the lock over recovers the
+    run only after it.
+    """
+
+    if owner is None:
+        return
+    held = await session.scalar(
+        text(
+            "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND granted"
+            " AND pid = :pid AND classid = CAST(:high AS oid)"
+            " AND objid = CAST(:low AS oid) AND objsubid = 1)"
+        ),
+        {"pid": owner.pid, "high": (owner.key >> 32) & 0xFFFFFFFF, "low": owner.key & 0xFFFFFFFF},
+    )
+    if not held:
+        raise OwnershipLost(f"this worker no longer holds lock {owner.key}")
+
+
+async def _finish_run(
+    session: AsyncSession,
+    run_id: UUID,
+    *,
+    outcome: str,
+    error: Mapping[str, Any] | None,
+    owner: LockClaim | None = None,
+) -> None:
+    """:meth:`IngestionRunService.finish` inside the caller's transaction."""
+
+    run = await session.get(IngestionRun, run_id, with_for_update=True)
+    if run is None:
+        return
+    await _require_owner(session, owner)
+    if run.status not in ACTIVE_RUN_STATUSES and run.finished_at is not None:
+        return
+    if run.status in ACTIVE_RUN_STATUSES:
+        run.status = outcome
+        if outcome == "failed":
+            run.error = dict(error or _status(StatusCode.INTERNAL, STOPPED_MESSAGE))
+    run.finished_at = _now()
+    if run.status == "cancelled":
+        await _settle_items(session, run_id, queued_error=None)
+    elif run.status == "failed":
+        await _settle_items(session, run_id, queued_error=run.error)
+    else:
+        await _settle_items(
+            session,
+            run_id,
+            queued_error=_status(StatusCode.CANCELLED, RUN_ENDED_MESSAGE),
+        )
+
+
+async def _release_tasks(session: AsyncSession, run_id: UUID, *, interrupted: str) -> None:
+    """Free a run's tasks from the worker that executed it; their Documents wait again.
+
+    ``interrupted`` is what a ``running`` task becomes: ``failed`` (its worker
+    died: ``interrupted``) or ``queued`` (its worker gave it back). Queued tasks
+    lose their batch so the next worker plans them afresh.
+    """
+
+    values: dict[str, Any] = (
+        {
+            "status": "failed",
+            "error": _status(StatusCode.ABORTED, INTERRUPTED_MESSAGE),
+            "error_class": INTERRUPTED,
+            "finished_at": _now(),
+        }
+        if interrupted == "failed"
+        else {
+            "status": "queued",
+            "batch_number": None,
+            "started_at": None,
+            "phases": [],
+        }
+    )
+    released = list(
+        await session.scalars(
+            update(IngestionRunItem)
+            .where(IngestionRunItem.run_id == run_id, IngestionRunItem.status == "running")
+            .values(**values)
+            .returning(IngestionRunItem.item_id)
+        )
+    )
+    await session.execute(
+        update(IngestionRunItem)
+        .where(
+            IngestionRunItem.run_id == run_id,
+            IngestionRunItem.status == "queued",
+            IngestionRunItem.batch_number.is_not(None),
+        )
+        .values(batch_number=None)
+    )
+    await _release_documents(session, released, to="pending")
 
 
 async def _settle_items(
@@ -961,13 +1228,26 @@ async def _release_documents(session: AsyncSession, item_ids: Sequence[UUID], *,
             await items.mark_index_failed(item_id)
 
 
-def _workspace_lock_key(workspace_id: UUID) -> int:
-    digest = uuid5(NAMESPACE_URL, f"bomesh:ingestion-run-selection:{workspace_id}")
+def advisory_lock_key(namespace: str, value: UUID | str) -> int:
+    """A PostgreSQL advisory lock key (signed int64) for ``value`` in ``namespace``."""
+
+    digest = uuid5(NAMESPACE_URL, f"bomesh:{namespace}:{value}")
     return int.from_bytes(digest.bytes[:8], byteorder="big", signed=True)
 
 
-def _is_stale(updated_at: datetime | None) -> bool:
-    return updated_at is None or updated_at < _now() - STALE_AFTER
+def run_lock_key(run_id: UUID) -> int:
+    """The lock an ingestion worker holds (session level) while it executes the run."""
+
+    return advisory_lock_key("ingestion-run", run_id)
+
+
+def _workspace_lock_key(workspace_id: UUID) -> int:
+    return advisory_lock_key("ingestion-run-selection", workspace_id)
+
+
+# [temporal-disabled] Used by the Temporal ``refresh``/``reconcile`` only.
+# def _is_stale(updated_at: datetime | None) -> bool:
+#     return updated_at is None or updated_at < _now() - STALE_AFTER
 
 
 def _now() -> datetime:
@@ -983,17 +1263,20 @@ def _status(code: StatusCode, message: str) -> dict[str, Any]:
 __all__ = [
     "ACTIVE_RUN_STATUSES",
     "CONTENT_UNAVAILABLE",
-    "INDEXING_STATES",
     "INTERNAL",
     "INTERRUPTED",
     "PROVIDER_REFUSED",
     "RETRYABLE_ITEM_STATUSES",
     "SCHEDULED_STATES",
-    "START_FAILED_MESSAGE",
     "STOPPED_MESSAGE",
     "UNSUPPORTED_FORMAT",
     "IngestionRunService",
+    "LockClaim",
+    "OwnershipLost",
+    "RunClassification",
     "RunSelection",
+    "advisory_lock_key",
     "governing_collections",
     "live_collections",
+    "run_lock_key",
 ]

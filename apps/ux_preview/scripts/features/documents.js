@@ -45,7 +45,7 @@
   /* ── Processing (simulated): Not processed → Processing → Processed | Failed. Publication is separate. ── */
   const stillLocked = d => /password/i.test(d.error || '');
   const own = d => !!kbById(d.kb)?.personal;
-  /** One document read, classified and indexed: the pipeline applies the topics it's sure of when nobody chose any,
+  /** One document read, classified and indexed: the assistant applies the topics it picks when nobody chose any,
       within the run's classification context (`ctx`) when it has one. */
   function finishOne(d, ctx = null) {
     delete d.fresh;

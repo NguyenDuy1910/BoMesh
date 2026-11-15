@@ -185,7 +185,8 @@ export function BrowsePage() {
   const views = useSavedSearches();
   const allBases = useKnowledgeBases({ showLocked: true });
   const { toResource } = useKnowledgeModel();
-  const label = useFacetLabel({ owners: (p.filters.owner ?? []).map((o) => `workspaces/${ws}/members/${o}`), sources: (p.filters.src ?? []).filter((s) => s !== "upload") });
+  // Owner chips are labelled by the catalog's facets (the search names owners), so no owner is looked up here.
+  const label = useFacetLabel({ sources: (p.filters.src ?? []).filter((s) => s !== "upload") });
 
   const apply = (next: BrowseParams) => router.replace(browseHref(next), { scroll: false });
 
@@ -259,6 +260,7 @@ export function BrowsePage() {
     const item = r.item?.name ?? r.id;
     openDocumentPreview({
       item,
+      listed: r.item,
       q: p.q,
       passages: passage?.passage ? [passage.passage] : undefined,
       // No resolvable passage name: show the snippet the search returned, so the match is still visible.

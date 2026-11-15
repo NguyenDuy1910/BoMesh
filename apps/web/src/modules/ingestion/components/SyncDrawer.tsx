@@ -57,7 +57,7 @@ function syncSteps(sync: Sync, source: Source | undefined, app: string): Step[] 
     : review && isReviewFirst(source)
       ? `${plural(review, "document")} in review`
       : waiting
-        ? `${plural(waiting, "document")} waiting to publish`
+        ? `${plural(waiting, "document")} waiting to be processed`
         : `${fmtNum(t.added + t.updated)} ready for questions`;
   return [
     { label: "Find changes", state: "done", note: `Found ${plural(changed + t.failed, "changed document")}` },

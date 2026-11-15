@@ -4,8 +4,7 @@ The method permission is checked on ``target`` (the resource name the
 operation acts on) by the starting service; reads are own-only and served by
 the Operations interface, which renders ``response`` from
 ``result_name``/``result_object_key`` with the ``@type`` named in
-:data:`OPERATION_TYPES` (``x-operation-info`` of ``openapi.yaml``). The
-Temporal workflow ID, if any, is derived from the operation ID.
+:data:`OPERATION_TYPES` (``x-operation-info`` of ``openapi.yaml``).
 
 The interface owning a verb registers its hooks in :data:`OPERATION_HANDLERS`
 from the module that defines them (``artifacts.artifacts``,

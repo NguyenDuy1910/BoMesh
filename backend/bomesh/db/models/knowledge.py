@@ -32,12 +32,15 @@ from bomesh.db.models.base import (
     one_of,
     text_array,
     timestamp,
+    uuid_array,
     uuid_fk,
 )
 
 ITEM_TYPES = ("collection", "document")
 ITEM_STATUSES = ("pending", "ready", "failed")
-PARENT_RELATIONS = ("contains", "child", "attachment")
+#: The relations of an Item under a Document (the tree trigger reserves them for it).
+DOCUMENT_CHILD_RELATIONS = ("child", "attachment")
+PARENT_RELATIONS = ("contains", *DOCUMENT_CHILD_RELATIONS)
 PUBLICATION_STATES = ("published", "unpublished")
 INDEX_STATUSES = ("pending", "processing", "ready", "failed", "unsupported")
 REVISION_AUTHORS = ("assistant", "user")
@@ -56,6 +59,7 @@ OPEN_CONTRIBUTION_STATES = ("analyzing", "in_review", "changes_requested")
 TOPIC_KINDS = ("domain", "topic")
 TOPIC_STATES = ("proposed", "active", "rejected")
 CONTRIBUTION_TOPIC_RELATIONS = ("suggested", "proposed")
+TOPIC_CORRECTION_STATES = ("open", "dismissed")
 READING_LIST_KINDS = ("standard", "featured")
 READING_LIST_AUDIENCES = ("private", "space", "workspace")
 
@@ -319,6 +323,12 @@ class Topic(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     description: Mapped[str | None] = mapped_column(Text)
     icon: Mapped[str | None] = mapped_column(String(64))
     color: Mapped[str | None] = mapped_column(String(32))
+    keywords: Mapped[list[str]] = text_array()
+    synonyms: Mapped[list[str]] = text_array()
+    guidance: Mapped[str | None] = mapped_column(Text)
+    example_item_ids: Mapped[list[UUID]] = uuid_array()
+    rule_collection_ids: Mapped[list[UUID]] = uuid_array()
+    rule_source_codes: Mapped[list[str]] = text_array()
     state: Mapped[str] = choice("active")
     created_by_user_id: Mapped[UUID | None] = uuid_fk("users.id")
     deleted_at: Mapped[datetime | None] = timestamp()
@@ -334,6 +344,25 @@ class ItemTopic(Base):
     topic_id: Mapped[UUID] = uuid_fk("topics.id", primary_key=True)
     created_by_user_id: Mapped[UUID | None] = uuid_fk("users.id")
     created_at: Mapped[datetime] = created_now()
+
+
+class TopicCorrection(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """A person's change of a Document's topics away from the assistant's."""
+
+    __tablename__ = "topic_corrections"
+    __table_args__ = (
+        Index(None, "tenant_id", "state", "created_at"),
+        CheckConstraint(
+            one_of("state", TOPIC_CORRECTION_STATES), name="topic_correction_state_is_valid"
+        ),
+    )
+
+    tenant_id: Mapped[UUID] = uuid_fk("tenants.id", nullable=False)
+    item_id: Mapped[UUID] = uuid_fk("items.id", nullable=False)
+    from_topic_ids: Mapped[list[UUID]] = uuid_array()
+    to_topic_ids: Mapped[list[UUID]] = uuid_array()
+    actor_user_id: Mapped[UUID] = uuid_fk("users.id", nullable=False)
+    state: Mapped[str] = choice("open")
 
 
 class ContributionTopic(Base):

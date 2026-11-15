@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol, TypeAlias, runtime_checkable
 
@@ -66,10 +66,65 @@ class IndexingContext(BaseModel):
         return value or None
 
 
-#: ``(phase, done, total)`` while one Item is indexed: ``contextualizing`` and
-#: ``embedding`` count chunks, ``storing`` reports the whole write. It is an
-#: observer only; it must not raise or block.
+#: ``(phase, done, total)`` while one Item is indexed: ``classifying`` (``0/1``
+#: then ``1/1``, only when a classification is asked for and a contextualizer is
+#: configured), ``contextualizing`` and ``embedding`` count chunks, ``storing``
+#: reports the whole write. It is an observer only; it must not raise or block.
 IndexProgress: TypeAlias = Callable[[str, int, int], None]
+
+
+@dataclass(frozen=True, slots=True)
+class TopicCandidate:
+    """One topic a Document may be classified under (a ``topics`` row) and its signals."""
+
+    id: str
+    code: str
+    name: str
+    description: str | None = None
+    #: Display name of the domain the topic belongs to; ``None`` for a domain.
+    domain: str | None = None
+    keywords: tuple[str, ...] = ()
+    synonyms: tuple[str, ...] = ()
+    guidance: str | None = None
+    #: Titles of the topic's example documents.
+    examples: tuple[str, ...] = ()
+    #: Rules: Collection Item IDs whose subtree, and source codes whose
+    #: documents, get this topic without asking the model.
+    rule_collections: tuple[str, ...] = ()
+    rule_sources: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ClassificationRequest:
+    """CLASSIFYING input: the candidate topics, the run's note and, for one
+    document, the candidates its rules settle (then the model is not asked)."""
+
+    candidates: tuple[TopicCandidate, ...]
+    note: str | None = None
+    settled: tuple[TopicCandidate, ...] = ()
+
+    def for_document(
+        self, collection_ids: Collection[str], source: str | None
+    ) -> ClassificationRequest:
+        """This request for a document in ``collection_ids`` (its ancestors) from
+        ``source``: every candidate with a matching rule settles it."""
+
+        settled = tuple(
+            candidate
+            for candidate in self.candidates
+            if any(collection in collection_ids for collection in candidate.rule_collections)
+            or (source is not None and source in candidate.rule_sources)
+        )
+        return ClassificationRequest(self.candidates, self.note, settled)
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentClassification:
+    """What CLASSIFYING chose for one Document: the candidates that apply
+    (possibly none) and a one- or two-sentence summary."""
+
+    topics: tuple[TopicCandidate, ...] = ()
+    summary: str | None = None
 
 
 @runtime_checkable
@@ -87,6 +142,14 @@ class ChunkContextGenerator(Protocol):
         title: str | None = None,
         section_path: Sequence[str] = (),
     ) -> str | None: ...
+
+    async def classify(
+        self,
+        *,
+        document_context: str,
+        request: ClassificationRequest,
+        title: str | None = None,
+    ) -> DocumentClassification: ...
 
 
 class ChunkContext(BaseModel):
@@ -124,8 +187,9 @@ class ContextualChunk(BaseModel):
 from .contextualization import (
     ContextualChunkBuilder,
     build_contextual_chunks,
+    sample_document_context,
 )
-from .semantic_contextualizer import SemanticContextualizer
+from .semantic_contextualizer import SemanticContextualizer, classification_prompt
 
 class EmbeddingRejectedError(RuntimeError):
     """The embedding provider refused the request itself, not the moment.
@@ -201,8 +265,10 @@ __all__ = [
     "SPARSE_VECTOR_NAME",
     "ChunkContext",
     "ChunkContextGenerator",
+    "ClassificationRequest",
     "ContextualChunk",
     "ContextualChunkBuilder",
+    "DocumentClassification",
     "EmbeddingRejectedError",
     "EmbeddingService",
     "IndexProgress",
@@ -211,5 +277,8 @@ __all__ = [
     "ItemPayloadState",
     "ItemIndex",
     "SemanticContextualizer",
+    "TopicCandidate",
     "build_contextual_chunks",
+    "classification_prompt",
+    "sample_document_context",
 ]

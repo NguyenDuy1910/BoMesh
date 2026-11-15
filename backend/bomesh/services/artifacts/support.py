@@ -10,7 +10,7 @@ Readability of sources and citations is re-checked on every read.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
@@ -21,15 +21,18 @@ from bomesh import etag as etags
 from bomesh.db.engine import SessionFactory, transaction_scope
 from bomesh.db.models import Artifact, EvidenceReviewCell, Item, ItemRevision
 from bomesh.errors import FailedPrecondition, NotFound, PermissionDenied
+from bomesh.iam.authorizer import ItemRef
+from bomesh.iam.visibility import visible_to
 from bomesh.services.artifacts.artifact_store import (
     ArtifactService,
     artifact_name,
     artifact_state,
-    cells,
-    current_revision,
+    cells_of,
+    current_revision_numbers,
     load_artifact,
     matrix_keys,
     source_ids,
+    source_ids_of,
 )
 from bomesh.services.artifacts.records import (
     ArtifactRecord,
@@ -44,7 +47,7 @@ from bomesh.services.collaboration.membership import (
     space_id_for_code,
     space_member_ids,
 )
-from bomesh.services.conversations.citations import render_citations, unreadable_items
+from bomesh.services.conversations.citations import citation_record, unreadable_items
 from bomesh.services.conversations.records import StoredCitation
 from bomesh.services.conversations.references import conversation_codes
 from bomesh.services.kernel.context import RequestContext
@@ -56,6 +59,7 @@ from bomesh.services.knowledge_items.content import (
 )
 from bomesh.services.knowledge_items.records import PageAsset
 from bomesh.services.knowledge_items.summary import ItemSummary, get_item_summaries
+from bomesh.services.workspaces.members import active_member_ids
 
 if TYPE_CHECKING:
     from bomesh.runtime import AppRuntime
@@ -80,7 +84,7 @@ class ArtifactDeps:
             runtime=runtime,
             sessions=sessions,
             engine=runtime.artifact_service(),
-            workspaces=WorkspaceResolver(sessions),
+            workspaces=WorkspaceResolver(),
             request_hash_secret=runtime.request_hash_secret(),
         )
 
@@ -167,19 +171,11 @@ async def member_space(
     return space_id
 
 
-async def require_audience_reads(
-    session: AsyncSession,
-    ctx: RequestContext,
-    workspace_id: UUID,
-    readers: Iterable[UUID],
-    sources: Sequence[UUID],
-) -> None:
-    """AUDIENCE_CANNOT_READ_SOURCES unless every reader can read every source now."""
-    if sources and await unreadable_items(ctx.authorizer, workspace_id, readers, sources):
-        raise FailedPrecondition(
-            "Some members of the audience cannot read every source of this artifact.",
-            reason=AUDIENCE_CANNOT_READ_SOURCES,
-        )
+def _audience_cannot_read() -> FailedPrecondition:
+    return FailedPrecondition(
+        "Some members of the audience cannot read every source of this artifact.",
+        reason=AUDIENCE_CANNOT_READ_SOURCES,
+    )
 
 
 async def require_space_reads(
@@ -189,8 +185,35 @@ async def require_space_reads(
     space_id: UUID,
     sources: Sequence[UUID],
 ) -> None:
-    readers = await space_member_ids(session, workspace_id, space_id)
-    await require_audience_reads(session, ctx, workspace_id, readers, sources)
+    """AUDIENCE_CANNOT_READ_SOURCES unless every member of the space can read every source now."""
+    if sources and await unreadable_items(
+        ctx.authorizer, workspace_id, await space_member_ids(session, workspace_id, space_id), sources
+    ):
+        raise _audience_cannot_read()
+
+
+async def require_collection_reads(
+    session: AsyncSession,
+    ctx: RequestContext,
+    workspace_id: UUID,
+    collection_id: UUID,
+    sources: Sequence[UUID],
+) -> None:
+    """AUDIENCE_CANNOT_READ_SOURCES unless every ACTIVE member who reads the live
+    collection ``collection_id`` can read every source now.
+
+    Readers of the collection and their reads of the sources come from one
+    set-based computation (:func:`visible_to`), constant in the member count.
+    """
+    if not sources:
+        return
+    destination = ItemRef(workspace_id, collection_id)
+    refs = [ItemRef(workspace_id, source) for source in sources]
+    visible = await visible_to(
+        ctx.authorizer, await active_member_ids(session, workspace_id), [destination, *refs]
+    )
+    if any(not visible[destination] <= visible[ref] for ref in refs):
+        raise _audience_cannot_read()
 
 
 # -- Per-reader records ------------------------------------------------------------------------
@@ -226,18 +249,39 @@ async def render_review(
     stored_cells: Sequence[tuple[str, str, str, str | None, tuple[StoredCitation, ...]]] | None,
 ) -> EvidenceReviewRecord:
     """The matrix for the caller: cells and the synthesis citing what they cannot read are withheld."""
+    readable = (
+        await get_item_summaries(
+            session, ctx.authorizer, ctx.principal, workspace_id, _review_citations(review, stored_cells)
+        )
+        if stored_cells is not None
+        else {}
+    )
+    return _review_record(workspace_id, review, stored_cells, readable)
+
+
+def _review_citations(
+    review: dict[str, Any],
+    stored_cells: Sequence[tuple[str, str, str, str | None, tuple[StoredCitation, ...]]],
+) -> list[UUID]:
+    """Every item the cells and the synthesis cite."""
+    return [
+        *(c.item_id for *_, citations in stored_cells for c in citations),
+        *(c.item_id for c in stored_citations(review.get("synthesis_citations"))),
+    ]
+
+
+def _review_record(
+    workspace_id: UUID,
+    review: dict[str, Any],
+    stored_cells: Sequence[tuple[str, str, str, str | None, tuple[StoredCitation, ...]]] | None,
+    readable: Mapping[UUID, ItemSummary],
+) -> EvidenceReviewRecord:
+    """:func:`render_review` given ``readable``: the caller's ``get_item_summaries``
+    over (at least) :func:`_review_citations`."""
     options, criteria = review_entries(review.get("options")), review_entries(review.get("criteria"))
     if stored_cells is None:
         return EvidenceReviewRecord(options, criteria, None, None, None)
     synthesis_citations = stored_citations(review.get("synthesis_citations"))
-    cited = [c.item_id for *_, citations in stored_cells for c in citations]
-    readable = await get_item_summaries(
-        session,
-        ctx.authorizer,
-        ctx.principal,
-        workspace_id,
-        [*cited, *(c.item_id for c in synthesis_citations)],
-    )
     rendered: list[CellRecord] = []
     for option, criterion, state, summary, citations in stored_cells:
         if any(c.item_id not in readable for c in citations):
@@ -250,11 +294,7 @@ async def render_review(
                 available=True,
                 state=state.upper(),
                 summary=summary,
-                citations=tuple(
-                    await render_citations(
-                        session, ctx.authorizer, ctx.principal, workspace_id, citations
-                    )
-                ),
+                citations=tuple(citation_record(workspace_id, c, readable) for c in citations),
             )
         )
     synthesis = review.get("synthesis")
@@ -307,46 +347,95 @@ async def artifact_record(
     full: bool = True,
 ) -> ArtifactRecord:
     """The Artifact as the caller may see it now."""
-    readable, hidden = await readable_sources(session, ctx, workspace_id, artifact)
-    review = None
-    if artifact.evidence_review is not None:
-        stored = cell_rows(artifact, await cells(session, artifact.item_id)) if full else None
-        review = await render_review(session, ctx, workspace_id, artifact.evidence_review, stored)
-    current = await current_revision(session, item.id)
-    spaces = await space_codes(session, [artifact.space_id]) if artifact.space_id else {}
-    conversations = (
-        await conversation_codes(session, [artifact.conversation_id])
-        if artifact.conversation_id
+    return (await artifact_records(session, ctx, workspace_id, [(item, artifact)], full=full))[0]
+
+
+async def artifact_records(
+    session: AsyncSession,
+    ctx: RequestContext,
+    workspace_id: UUID,
+    rows: Sequence[tuple[Item, Artifact]],
+    *,
+    full: bool = True,
+) -> list[ArtifactRecord]:
+    """:func:`artifact_record` of each row, in a number of queries constant in ``rows``."""
+    ids = [item.id for item, _ in rows]
+    sources = await source_ids_of(session, ids)
+    stored = (
+        await cells_of(
+            session, [a.item_id for _, a in rows if a.evidence_review is not None]
+        )
+        if full
         else {}
     )
-    return ArtifactRecord(
-        workspace_id=workspace_id,
-        artifact_id=item.id,
-        display_name=item.title,
-        kind=artifact.kind.upper(),  # type: ignore[arg-type]
-        mime_type=item.mime_type,
-        owner_id=artifact.owner_user_id,
-        conversation=(
-            f"workspaces/{workspace_id}/conversations/{conversations[artifact.conversation_id]}"
-            if artifact.conversation_id in conversations
-            else None
-        ),
-        space=(
-            f"workspaces/{workspace_id}/spaces/{spaces[artifact.space_id]}"
-            if artifact.space_id in spaces
-            else None
-        ),
-        audience=artifact.audience.upper(),  # type: ignore[arg-type]
-        source_items=tuple(dict.fromkeys(summary.item_id for summary in readable)),
-        hidden_source_count=hidden,
-        evidence_review=review,
-        state=artifact_state(item),  # type: ignore[arg-type]
-        revision=current.revision_number if current is not None else None,
-        create_time=artifact.created_at,
-        update_time=artifact.updated_at,
-        delete_time=item.deleted_at,
-        purge_time=purge_time(item.deleted_at),
+    matrices = {
+        artifact.item_id: cell_rows(artifact, stored[artifact.item_id])
+        for _, artifact in rows
+        if artifact.item_id in stored
+    }
+    readable = await get_item_summaries(
+        session,
+        ctx.authorizer,
+        ctx.principal,
+        workspace_id,
+        [
+            *(value for values in sources.values() for value in values),
+            *(
+                value
+                for _, artifact in rows
+                if artifact.item_id in matrices
+                for value in _review_citations(artifact.evidence_review or {}, matrices[artifact.item_id])
+            ),
+        ],
     )
+    revisions = await current_revision_numbers(session, ids)
+    spaces = await space_codes(session, (a.space_id for _, a in rows if a.space_id))
+    conversations = await conversation_codes(
+        session, (a.conversation_id for _, a in rows if a.conversation_id)
+    )
+    records: list[ArtifactRecord] = []
+    for item, artifact in rows:
+        shown = [readable[value] for value in sources[item.id] if value in readable]
+        records.append(
+            ArtifactRecord(
+                workspace_id=workspace_id,
+                artifact_id=item.id,
+                display_name=item.title,
+                kind=artifact.kind.upper(),  # type: ignore[arg-type]
+                mime_type=item.mime_type,
+                owner_id=artifact.owner_user_id,
+                conversation=(
+                    f"workspaces/{workspace_id}/conversations/{conversations[artifact.conversation_id]}"
+                    if artifact.conversation_id in conversations
+                    else None
+                ),
+                space=(
+                    f"workspaces/{workspace_id}/spaces/{spaces[artifact.space_id]}"
+                    if artifact.space_id in spaces
+                    else None
+                ),
+                audience=artifact.audience.upper(),  # type: ignore[arg-type]
+                source_items=tuple(dict.fromkeys(summary.item_id for summary in shown)),
+                hidden_source_count=len(sources[item.id]) - len(shown),
+                evidence_review=(
+                    _review_record(
+                        workspace_id,
+                        artifact.evidence_review,
+                        matrices.get(artifact.item_id),
+                        readable,
+                    )
+                    if artifact.evidence_review is not None
+                    else None
+                ),
+                state=artifact_state(item),  # type: ignore[arg-type]
+                revision=revisions.get(item.id),
+                create_time=artifact.created_at,
+                update_time=artifact.updated_at,
+                delete_time=item.deleted_at,
+                purge_time=purge_time(item.deleted_at),
+            )
+        )
+    return records
 
 
 async def withheld(
@@ -452,6 +541,7 @@ __all__ = [
     "UNAVAILABLE_TEXT",
     "ArtifactDeps",
     "artifact_record",
+    "artifact_records",
     "cell_rows",
     "etag_of",
     "is_space_reader",
@@ -460,7 +550,7 @@ __all__ = [
     "open_artifact",
     "readable_sources",
     "render_review",
-    "require_audience_reads",
+    "require_collection_reads",
     "require_etag",
     "require_space_reads",
     "require_state",

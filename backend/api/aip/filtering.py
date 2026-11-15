@@ -3,6 +3,10 @@
 Supported subset:
 
 - comparisons ``= != < <= > >=`` and the has operator ``:`` on repeated fields;
+- the presence test ``field:*``: a repeated field has at least one value, any
+  other field is set (not null);
+- the wildcard ``*`` in a string field's ``=``/``!=`` value (case-insensitive;
+  ``%`` and ``_`` are literal);
 - ``AND``, ``OR``, ``NOT``, ``-`` and parentheses (``OR`` binds tighter than
   ``AND``, and juxtaposed terms are ANDed, as in AIP-160);
 - string (quoted), number, ``true``/``false``, ``null`` and RFC 3339 timestamp
@@ -20,7 +24,7 @@ from datetime import UTC, datetime
 from enum import Enum, StrEnum
 from typing import Any
 
-from sqlalchemy import ColumnElement, any_, literal, true
+from sqlalchemy import ColumnElement, any_, func, literal, true
 from sqlalchemy import and_ as sql_and
 from sqlalchemy import not_ as sql_not
 from sqlalchemy import or_ as sql_or
@@ -42,11 +46,13 @@ _TOKEN = re.compile(
     | (?P<lparen>\()
     | (?P<rparen>\))
     | (?P<minus>-)
-    | (?P<word>[A-Za-z0-9_][A-Za-z0-9_.\-]*)
+    | (?P<word>[A-Za-z0-9_*][A-Za-z0-9_.\-*]*)
     """,
     re.VERBOSE,
 )
 _KEYWORDS = frozenset({"AND", "OR", "NOT"})
+#: The AIP-160 wildcard: ``field:*`` tests presence, ``*`` in a string value matches any run.
+_WILDCARD = "*"
 
 
 class Operator(StrEnum):
@@ -84,6 +90,15 @@ class Restriction:
     operator: Operator
     value: Value
 
+    @property
+    def is_presence(self) -> bool:
+        """``field:*``: the field has a value; ``value`` names nothing."""
+        return (
+            self.operator is Operator.HAS
+            and not self.value.quoted
+            and self.value.text == _WILDCARD
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class And:
@@ -104,7 +119,10 @@ type Node = Restriction | And | Or | Not
 
 
 def restrictions(node: Node | None) -> Iterator[Restriction]:
-    """Every comparison in ``node``, e.g. to authorize the resource names a filter names."""
+    """Every comparison in ``node``, e.g. to authorize the resource names a filter names.
+
+    A presence test (:attr:`Restriction.is_presence`) names no resource: skip it.
+    """
     if node is None:
         return
     if isinstance(node, Restriction):
@@ -293,7 +311,10 @@ class FilterField:
 
     ``expression`` is the column (or SQL expression) the path reads. A repeated
     field only supports ``:``; ``has`` builds its condition from the converted
-    element value and defaults to ``value = ANY(expression)``.
+    element value and defaults to ``value = ANY(expression)``. ``present`` is the
+    condition of ``field:*``; it defaults to a non-empty ``expression`` array for a
+    repeated field without ``has`` and to ``expression IS NOT NULL`` for any other
+    field (a repeated field with ``has`` and no ``present`` rejects ``:*``).
     """
 
     expression: ColumnElement[Any]
@@ -302,6 +323,7 @@ class FilterField:
     converter: Callable[[str], Any] | None = None
     repeated: bool = False
     has: HasCompiler | None = None
+    present: ColumnElement[bool] | None = None
 
 
 def string(expression: ColumnElement[Any]) -> FilterField:
@@ -335,8 +357,13 @@ def resource_name(
     return FilterField(expression, FieldType.RESOURCE_NAME, converter=converter)
 
 
-def repeated(element: FilterField, *, has: HasCompiler | None = None) -> FilterField:
-    """A repeated field of ``element``'s type, filtered with ``field:value``."""
+def repeated(
+    element: FilterField,
+    *,
+    has: HasCompiler | None = None,
+    present: ColumnElement[bool] | None = None,
+) -> FilterField:
+    """A repeated field of ``element``'s type, filtered with ``field:value`` and ``field:*``."""
     return FilterField(
         element.expression,
         element.type,
@@ -344,6 +371,7 @@ def repeated(element: FilterField, *, has: HasCompiler | None = None) -> FilterF
         converter=element.converter,
         repeated=True,
         has=has,
+        present=present,
     )
 
 
@@ -384,6 +412,8 @@ class FilterSchema:
                 f"unknown filter field {restriction.field!r}; allowed: {allowed}"
             )
         operator, raw = restriction.operator, restriction.value
+        if restriction.is_presence:
+            return self._present(spec, restriction.field)
         if spec.repeated:
             if operator is not Operator.HAS:
                 raise self._error(
@@ -395,16 +425,31 @@ class FilterSchema:
             return literal(value) == any_(spec.expression)
         if operator is Operator.HAS:
             raise self._error(
-                f"':' applies only to repeated fields, not {restriction.field}"
+                f"':' applies only to repeated fields (or ':*'), not {restriction.field}"
             )
         if raw.is_null:
             return self._null(spec, restriction.field, operator)
+        if spec.type is FieldType.STRING and operator in _EQUALITY and _WILDCARD in raw.text:
+            matches = spec.expression.ilike(_like_pattern(raw.text), escape="\\")
+            if operator is Operator.EQ:
+                return matches
+            # Like '!=', an unset (NULL) field differs from every pattern.
+            return sql_or(spec.expression.is_(None), sql_not(matches))
         if operator in _ORDERING and spec.type not in _ORDERED_TYPES:
             raise self._error(f"{restriction.field} only supports '=' and '!='")
         value = self._convert(spec, restriction.field, raw)
         if value is None:
             return self._null(spec, restriction.field, operator)
         return _COMPARE[operator](spec.expression, value)
+
+    def _present(self, spec: FilterField, path: str) -> ColumnElement[bool]:
+        if spec.present is not None:
+            return spec.present
+        if not spec.repeated:
+            return spec.expression.is_not(None)
+        if spec.has is None:
+            return func.coalesce(func.cardinality(spec.expression), 0) > 0
+        raise self._error(f"{path} does not support the presence test ':*'")
 
     def _null(
         self, spec: FilterField, path: str, operator: Operator
@@ -446,6 +491,12 @@ _COMPARE: Mapping[
     Operator.GT: lambda column, value: column > value,
     Operator.GE: lambda column, value: column >= value,
 }
+
+
+def _like_pattern(text: str) -> str:
+    """``text`` as an ILIKE pattern (escape ``\\``): ``*`` is the only wildcard."""
+    escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return escaped.replace(_WILDCARD, "%")
 
 
 def _to_string(_: FilterField, value: Value) -> str:
