@@ -185,9 +185,9 @@
     const hit = toks.length ? matchPassage(d, q) : null;
     if (hit) return `<div class="doc-thumb doc-thumb--focus" aria-hidden="true" inert><div class="doc-focus"><div class="doc-focus__head"><span class="doc-focus__title">${esc(hit.heading || kindMeta(res(d).kind).label)}</span>${hit.where ? `<span class="doc-focus__page">${esc(hit.where)}</span>` : ''}</div><p>${hit.html}</p></div></div>`;
     if (c) return coverHtml(c);
-    // The tile names the format and kind only: the card's title and summary sit right below it.
-    const k = kindMeta(res(d).kind), tone = FMT_TONE[formatOf(d)[0]] || 'default';
-    return `<div class="doc-thumb doc-thumb--blank doc-thumb--${tone}" aria-hidden="true">${fileIcon(d.type, 'lg')}<span class="doc-thumb__kind">${ic(k.icon, 'i-xs')}${esc(k.label)}</span></div>`;
+    // No cover: the format's tile on its tone; the card's head names the type and title right below.
+    const tone = FMT_TONE[formatOf(d)[0]] || 'default';
+    return `<div class="doc-thumb doc-thumb--blank doc-thumb--${tone}" aria-hidden="true">${fileIcon(d.type, 'lg')}</div>`;
   }
   /** The passage that best matches a query: { where: "Page 2", heading, html }. */
   function matchPassage(d, q) {
@@ -203,21 +203,25 @@
     if (t.state === 'verified') return `<span class="doc-card__ok" data-tip="${esc(t.note)}">${ic('shield-check', 'i-sm')}<span class="sr-only">Verified</span></span>`;
     return t.state === 'review' ? chip(t.label, { tone: t.tone, icon: t.icon, size: 'sm', tip: t.note }) : '';
   }
-  /** Document card (Knowledge grid): recognise a document and judge it without opening it. Its cover, the title, one line on what it is
-      for, its type and where it lives, and trust only when it matters. Save and ⋯ appear on hover/focus (always on touch).
+  /** Document card (Knowledge grid): a compact tile to recognise a document and judge it without opening it — the top of its first
+      page, its type and title, one line on what it is for, then its purpose (when someone set one), where it lives and how fresh;
+      indexing and trust only when they matter. Save and ⋯ appear on hover/focus (always on touch).
       opts: act + data (what selecting the card does, e.g. a quick preview), q (highlight, matching passage when there is no cover image),
       hide (['kb', 'topic']: context every card in the set shares, so it isn't repeated). */
   function card(d, { act, data, q = '', hide = [] }) {
-    const r = res(d), toks = tokens(q), k = kindMeta(r.kind), topic = r.topics[0];
+    const r = res(d), toks = tokens(q), topic = r.topics[0];
     const where = !hide.includes('topic') && topic ? topicName(topic) : !hide.includes('kb') ? r.kb?.name || '' : '';
-    const about = blurb(d), shown = !!cover(d) || !!(toks.length && matchPassage(d, q));
+    // The format is the icon already: name the type only when it says what the document is for ("Policy", "Guide").
+    const purpose = r.kind !== 'reference' ? kindMeta(r.kind).label : '';
+    const about = blurb(d);
+    const meta = [purpose, where].filter(Boolean).map(esc).join(DOT);
     return `<article class="doc-card" role="button" tabindex="0" data-act="${act}" ${dataAttrs({ id: d.id, ...(data || {}) })}>
-      <div class="doc-card__media">${preview(d, { q })}${shown ? `<span class="doc-card__type">${fileIcon(d.type, 'sm')}</span>` : ''}
+      <div class="doc-card__media">${preview(d, { q })}
         <div class="doc-card__actions">${saveBtn(d)}${moreBtn(d)}</div></div>
       <div class="doc-card__body">
-        <h3 class="doc-card__title">${markTokens(docTitle(d), toks)}</h3>
+        <div class="doc-card__head">${fileIcon(d.type, 'sm')}<h3 class="doc-card__title">${markTokens(docTitle(d), toks)}</h3></div>
         ${about ? `<p class="doc-card__about">${markTokens(about, toks)}</p>` : ''}
-        <div class="doc-card__meta"><span class="doc-card__kind">${ic(k.icon, 'i-xs')}<span class="truncate">${esc(k.label)}${where ? DOT + esc(where) : ''}</span></span>${statusChip(d)}${trustMark(d)}</div>
+        <div class="doc-card__meta">${meta ? `<span class="doc-card__where truncate">${meta}</span>` : ''}<span class="doc-card__when" data-tip="Updated ${esc(fmtDate(d.updated))}">${esc(rel(d.updated))}</span>${statusChip(d)}${trustMark(d)}</div>
       </div>
     </article>`;
   }

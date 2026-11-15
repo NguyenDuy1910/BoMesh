@@ -62,7 +62,8 @@
 .cat-chip__k { font-weight: 400; opacity: .75; flex: none; }
 .cat-chip .i { flex: none; }
 .cat-results { min-width: 0; }
-.cat-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px 16px; }
+/* Compact document tiles: as many columns as fit at ≥ 216 px; two on phones. */
+.cat-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(216px, 1fr)); gap: 16px 14px; }
 .cat-locked { display: flex; align-items: center; gap: 8px; width: fit-content; margin-top: 20px; padding: 6px 10px; border-radius: var(--radius-lg); background: transparent; font-size: 13px; color: var(--muted); cursor: pointer; transition: background-color var(--dur-fast), color var(--dur-fast); }
 .cat-locked:hover { background: var(--default-soft); color: var(--foreground); }
 .cat-locked:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
@@ -70,7 +71,7 @@
 /* Skeletons */
 .cat-skel-search { display: block; height: 48px; border-radius: var(--radius-2xl); }
 .cat-skel-pill { display: block; flex: none; height: 32px; border-radius: var(--radius-full); }
-.cat-skel-media { display: block; aspect-ratio: 16 / 9; border-radius: 0; }
+.cat-skel-media { display: block; aspect-ratio: 16 / 10; border-radius: 0; }
 
 /* ───── Filter popovers (rendered in the overlay layer, so not scoped to .cat) ───── */
 .cat-pop { display: flex; flex-direction: column; gap: 1px; min-width: 0; font-size: 13px; }
@@ -130,5 +131,5 @@
   .cat-bar .cat-views, .cat-bar .cat-sort { height: 40px; }
   .cat-bar .cat-views > span, .cat-bar .cat-sort > span, .cat-bar .cat-sort > .i:last-of-type, .cat-bar .cat-views > .i:last-of-type { display: none; }
   .cat-chips { margin-left: 0; flex-basis: 100%; order: 3; }
-  .cat-cards { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .cat-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 10px; }
 }

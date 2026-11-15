@@ -4,9 +4,10 @@ import { useState, type ReactNode } from "react";
 
 import { FileIcon } from "@/components/ui/FileIcon";
 import { StatusChip } from "@/components/ui/StatusChip";
+import { fmtDate, rel } from "@/lib/format";
 
 import type { DocumentCover } from "../api";
-import { clip, FORMAT_TONE, indexStatusOf, type Resource } from "../model";
+import { clip, FORMAT_TONE, FORMATS, indexStatusOf, type Resource } from "../model";
 import { openDocumentPreview } from "../preview/store";
 import { useKnowledgeModel } from "../queries";
 import { HighlightText } from "./HighlightText";
@@ -29,10 +30,12 @@ export interface ResourceCardProps {
 }
 
 /**
- * Document card (preview `X.res.card`; DESIGN_SYSTEM "Document card"): recognise a document and judge it
- * without opening it — its cover, the title, one line on what it's for, type · topic (or collection), and
- * trust only when it matters. Everything comes with the list item: a card never reads the document's
- * content. Save and ⋯ appear on hover/focus (always on touch). The whole card opens the preview, Enter/Space too.
+ * Document card (preview `X.res.card`; DESIGN_SYSTEM "Document card"): a compact tile to recognise a document
+ * and judge it without opening it — the top of its first page, its type and title, one line on what it's for,
+ * then its purpose (only when someone set one: the format is the icon already), where it lives and how fresh;
+ * indexing and trust only when they matter. Everything comes with the list item: a card never reads the
+ * document's content. Save and ⋯ appear on hover/focus (always on touch). The whole card opens the preview,
+ * Enter/Space too.
  */
 export function ResourceCard({ resource: r, q = "", passage, hide = [], onOpen, from }: ResourceCardProps) {
   const { ctx } = useKnowledgeModel();
@@ -40,8 +43,8 @@ export function ResourceCard({ resource: r, q = "", passage, hide = [], onOpen, 
   const topic = r.topics[0];
   const byTopic = !hide.includes("topic") && !!topic;
   const where = byTopic ? (ctx.topicNames?.get(topic) ?? "") : !hide.includes("kb") ? (r.base?.displayName ?? "") : "";
+  const purpose = r.typeLabel !== FORMATS[r.format].label ? r.typeLabel : "";
   const status = indexStatusOf(r);
-  const KindIcon = r.kindMeta.icon;
   // An unreachable cover image (storage host down, expired link) falls back like a missing one; remembered per URL
   // so re-renders don't retry it.
   const [broken, setBroken] = useState<string | null>(null);
@@ -50,38 +53,36 @@ export function ResourceCard({ resource: r, q = "", passage, hide = [], onOpen, 
     <article className="doc-card" role="button" tabIndex={0} aria-label={r.title} onClick={open} onKeyDown={onActivateKey(open)}>
       <div className="doc-card__media">
         {preview ?? <TypeTile resource={r} />}
-        {preview ? (
-          <span className="doc-card__type">
-            <FileIcon type={r.ext} mime={r.mime} size="sm" />
-          </span>
-        ) : null}
         <div className="doc-card__actions" onClick={stop} onKeyDown={stop}>
           <SaveButton resource={r} />
           <ResourceMenu resource={r} q={q} />
         </div>
       </div>
       <div className="doc-card__body">
-        <h3 className="doc-card__title" title={r.fileName || r.title} translate="no">
-          <HighlightText text={r.title} q={q} />
-        </h3>
+        <div className="doc-card__head">
+          <FileIcon type={r.ext} mime={r.mime} size="sm" />
+          <h3 className="doc-card__title" title={r.fileName || r.title} translate="no">
+            <HighlightText text={r.title} q={q} />
+          </h3>
+        </div>
         {r.summary ? (
-          <p className="doc-card__about" translate="no">
+          <p className="doc-card__about" title={r.summary} translate="no">
             <HighlightText text={r.summary} q={q} />
           </p>
         ) : null}
         <div className="doc-card__meta">
-          <span className="doc-card__kind">
-            <KindIcon className="i i-xs" aria-hidden />
-            <span className="truncate">
-              {r.typeLabel}
-              {where ? (
-                <>
-                  <ResDot />
-                  <span translate={!byTopic && r.base?.personal ? undefined : "no"}>{where}</span>
-                </>
-              ) : null}
+          {purpose || where ? (
+            <span className="doc-card__where truncate">
+              {purpose}
+              {purpose && where ? <ResDot /> : null}
+              {where ? <span translate={!byTopic && r.base?.personal ? undefined : "no"}>{where}</span> : null}
             </span>
-          </span>
+          ) : null}
+          {r.updated ? (
+            <time className="doc-card__when" dateTime={r.updated} title={`Updated ${fmtDate(r.updated)}`}>
+              {rel(r.updated)}
+            </time>
+          ) : null}
           {status ? <StatusChip kind="doc" value={status} size="sm" /> : null}
           <TrustMark resource={r} />
         </div>
@@ -212,17 +213,12 @@ function coverView(c: DocumentCover, image: string | undefined, onBroken: (url: 
   );
 }
 
-/** No cover (not made yet, or nothing to show): a tinted tile naming the format and kind only — the title sits right below. */
+/** No cover (not made yet, or nothing to show): the format's tile, centred on its tone — the card's head names the type and title. */
 function TypeTile({ resource: r }: { resource: Resource }) {
   const tone = FORMAT_TONE[r.format] ?? "default";
-  const KindIcon = r.kindMeta.icon;
   return (
     <div className={`doc-thumb doc-thumb--blank doc-thumb--${tone}`} aria-hidden>
       <FileIcon type={r.ext} mime={r.mime} size="lg" />
-      <span className="doc-thumb__kind">
-        <KindIcon className="i i-xs" aria-hidden />
-        {r.typeLabel}
-      </span>
     </div>
   );
 }
