@@ -197,6 +197,10 @@ async def test_agent_retriever_rechecks_hits_and_scopes_subtrees(
     evidence = await retriever.search(["dental benefits"], limit=5, ctx=context)
 
     assert {item.item_id for item in evidence} == {str(visible.id)}
+    # What the found-document card shows comes with the same re-check: the parent collection and the item's facts.
+    facts = evidence[0].document
+    assert facts is not None
+    assert (facts.collection_title, facts.mime_type, facts.updated_at) == ("Benefits", visible.mime_type, visible.updated_at)
 
 
 async def test_retrieve_passages_applies_the_callers_visibility(

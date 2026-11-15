@@ -249,20 +249,34 @@ the same with every model provider; no provider container or file API is used.
   argument) and its `function_call_output` (the JSON above) are the one
   canonical shell record for the model, the web and the Flutter client; no
   container id or host path ever appears in them. While a turn works, the web
-  chat shows a timeline above the answer: each finished step, the documents a
-  search found (`tool_completed.sources`, a quiet chip list that opens the
-  preview at the found passage) as soon as it ends, and a live row naming the
-  tool that runs or "Thinking" when none does; a later search adds its own
-  row. Afterwards the timeline folds into one line — "Searched your knowledge
-  · Ran 3 commands, 1 failed · Created 2 files · 26s" — that opens it again;
+  chat shows one flow above the answer, in output order — say, do, say,
+  answer: the model's short commentary (assistant text written before a tool
+  call, or `phase: commentary`) as notes; each finished action, a search with
+  its query and the documents it found as cards (`tool_completed.sources`,
+  opening the preview at the found passage) as soon as it ends; a live row
+  naming the action that runs, or "Thinking" when none does. A later search
+  adds its own note, action and cards. Cited documents' cards carry the
+  answer's source numbers. Afterwards the flow folds into one line —
+  "Searched your knowledge · Ran code · Created a file" — that opens it again;
   each command shows its code on request, its output, and a failing command's
   last error line. An output that is not that JSON (a tool error) reads as one
-  failed run with its message.
+  failed run with its message. No counts or timings are shown or sent
+  (documents, passages, collections, seconds): the flow names what was done
+  and found, and nothing is aggregated to draw it.
+- **Notes, not stored.** The base instructions ask the model to say in a
+  sentence what it will do before a tool call and, when results lead to more
+  work, what it found and what comes next. Only the final answer is stored
+  (`final_answer_text`); notes live in the stream.
 - **Found documents are facts, not context.** `tool_completed.sources` lists
-  the documents of a tool's `Evidence` (item, title, ≤3 passage names, ≤8
-  documents, no text). Retrieval returns only what the caller can read, so
-  the list never reveals more than the answer could cite; it is transient
-  (not stored with the message).
+  the documents of a tool's `Evidence`, ≤8, in result order: item, title,
+  `mime_type`, `file_name`, `collection` (the parent collection's name),
+  `update_time`, and the best passage's `page` and `excerpt` (one line, ≤220
+  characters) plus ≤3 passage names. The document facts come from the
+  retrieval re-check itself (`ReadScope.recheck` returns them with the
+  visibility answer, one primary-key query), so a search adds no round trip.
+  Retrieval returns only what the caller can read, so a card never reveals
+  more than the answer could cite; the list is transient (not stored with the
+  message).
 - **File cards survive a reload.** The answer text that follows an export
   carries a `bomesh:artifact` annotation per saved revision (agent
   `ArtifactProjection`, beside `CitationProjection`), so web and mobile

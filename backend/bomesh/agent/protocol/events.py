@@ -232,10 +232,17 @@ class ToolProgressEvent(ToolStartedEvent):
 
 
 class ToolSource(ProtocolModel):
-    """One document a tool found, as the reader may open it."""
+    """One document a tool found, as the reader sees it on a card: what it is, where it lives, how fresh, and the
+    passage that matched best (its page and a short excerpt) plus the names of its found passages."""
 
     item: str = Field(min_length=1)
     title: str = ""
+    mime_type: str | None = None
+    file_name: str | None = None
+    collection: str | None = None
+    update_time: str | None = None
+    page: int | None = Field(default=None, ge=1)
+    excerpt: str | None = None
     passages: list[str] = Field(default_factory=list)
 
 
@@ -243,14 +250,13 @@ class ToolCompletedEvent(ToolStartedEvent):
     """The terminal outcome from one real tool execution.
 
     ``sources`` are the documents a retrieval tool returned (each readable by
-    the caller, in result order, with the found passages), so a client shows
-    what was found as soon as the search ends, before the answer.
+    the caller, in result order), so a client shows what was found as soon as
+    the search ends, before the answer. No counts or timings: clients name what
+    was done and found.
     """
 
     type: Literal["tool_completed"] = "tool_completed"
     status: Literal["completed", "failed", "timeout", "skipped"]
-    result_count: int | None = Field(default=None, ge=0)
-    duration_ms: int = Field(ge=0)
     sources: list[ToolSource] = Field(default_factory=list)
 
 

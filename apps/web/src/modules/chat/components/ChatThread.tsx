@@ -49,6 +49,8 @@ const QUICK_SHEET = ["Sort by largest amount", "Add a total row", "Add a status 
 const QUICK_DOC = ["Make it shorter", "More formal tone", "Add an at-a-glance table"];
 
 const RETRY_SUFFIX: Record<RetryMode, string> = { again: "", all: "", ...RETRY_MODIFIER };
+/** Space above a question brought to the top of the thread. */
+const PIN_GAP = 16;
 
 function ThreadSkeleton() {
   return (
@@ -95,12 +97,16 @@ export function ChatThread({ id }: { id: string }) {
   const sharingOpened = useOpened(sharing);
   const feedbackOpened = useOpened(commentFor != null);
   const scroller = useRef<HTMLDivElement>(null);
-  const stick = useRef(true);
+  const tail = useRef<HTMLDivElement>(null);
+  /* Scrolling (preview `fitTail`/`pinQuestion`): opening a conversation shows its latest turn; sending, retrying or
+     editing brings the question to the top and the answer grows below it — the thread never scrolls by itself while
+     the assistant works. `turn`: a turn was sent in this view, so its question stays reachable at the top (room under
+     it, `tail`); `pin`: bring it there on the next layout; `shown`: the conversation this view has scrolled into. */
+  const scrolling = useRef({ shown: "", turn: false, pin: false });
 
   useEffect(() => {
     setPanel(null);
     setEditing(null);
-    stick.current = true;
   }, [id]);
 
   const conv = conversation.data;
@@ -110,6 +116,8 @@ export function ChatThread({ id }: { id: string }) {
   const rows = useMemo(() => buildThread(messages.data ?? [], live), [messages.data, live, live?.turn]);
   const streamingHere = streamingIn === id;
   const busy = !!streamingIn;
+  const error = conversation.error ?? messages.error;
+  const loading = conversation.isPending || (messages.isPending && !live);
   const shareSummary = useShareSummary(id, { enabled: !!conv });
 
   /* The file the composer edits: the open panel's file, unless its chip was removed (preview `editTarget`). */
@@ -131,15 +139,25 @@ export function ChatThread({ id }: { id: string }) {
     return true;
   };
 
-  /* Keep the newest text in view while streaming, unless the reader scrolled up. */
   useLayoutEffect(() => {
     const el = scroller.current;
-    if (el && stick.current) el.scrollTop = el.scrollHeight;
+    const room = tail.current;
+    if (!el || !room || loading || error) return;
+    const s = scrolling.current;
+    if (s.shown !== id) {
+      // Opened on a turn just sent (from AI Chat's composer): its question at the top; otherwise the latest turn.
+      s.shown = id;
+      s.turn = s.pin = streamingHere;
+      if (!s.turn) el.scrollTop = el.scrollHeight;
+    }
+    const question = s.turn ? [...el.querySelectorAll<HTMLElement>(".chat-msg--user")].at(-1) : undefined;
+    room.style.height = `${question ? Math.max(0, el.clientHeight - (room.getBoundingClientRect().top - question.getBoundingClientRect().top) - PIN_GAP) : 0}px`;
+    if (s.pin && question) {
+      s.pin = false;
+      const top = el.scrollTop + question.getBoundingClientRect().top - el.getBoundingClientRect().top - PIN_GAP;
+      el.scrollTo({ top, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    }
   });
-  const onScroll = () => {
-    const el = scroller.current;
-    if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-  };
 
   /* ─── Sending ─── */
   const send = useCallback(
@@ -149,7 +167,7 @@ export function ChatThread({ id }: { id: string }) {
         return false;
       }
       dismissTurn(id);
-      stick.current = true;
+      scrolling.current.turn = scrolling.current.pin = true;
       return sendTurn(queryClient, { workspace: ws, conversation: id, ...input });
     },
     [streamingIn, id, queryClient, ws],
@@ -313,8 +331,6 @@ export function ChatThread({ id }: { id: string }) {
     );
   }
 
-  const error = conversation.error ?? messages.error;
-  const loading = conversation.isPending || (messages.isPending && !live);
   const shareButton = (
     <Button variant="ghost" size="sm" onPress={() => setSharing(true)}>
       {shareSummary ? <Users className="i" aria-hidden /> : <Share className="i" aria-hidden />}
@@ -366,7 +382,7 @@ export function ChatThread({ id }: { id: string }) {
       />
       <div className="split__main chat-main chat-drop" {...drop.dropProps}>
         {drop.overlay}
-        <div className="chat-scroll" id="chat-scroll" ref={scroller} onScroll={onScroll}>
+        <div className="chat-scroll" id="chat-scroll" ref={scroller}>
           {loading ? (
             <ThreadSkeleton />
           ) : error ? (
@@ -425,6 +441,7 @@ export function ChatThread({ id }: { id: string }) {
                   );
                 })}
               </div>
+              <div className="chat-tail" ref={tail} aria-hidden />
             </>
           )}
         </div>

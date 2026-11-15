@@ -12,7 +12,7 @@ import remend, { type RemendOptions } from "remend";
 
 import { CITATION_NUMBER_PROP, rehypeCitationMarkers } from "../citation-markers";
 import { sourceLookup } from "../citations";
-import { RevealPacer, revealLength, splitStreamingMarkdown } from "../streaming-markdown";
+import { RevealPacer, rehypeCaret, revealLength, splitStreamingMarkdown } from "../streaming-markdown";
 import type { AnswerSource } from "../turn";
 import { CitationMarker } from "./CitationMarker";
 
@@ -164,29 +164,6 @@ function useRevealedText(text: string, streaming: boolean): string {
 }
 
 /* ═══════════════ Rendering ═══════════════ */
-
-interface HastNode {
-  type: string;
-  tagName?: string;
-  properties?: Record<string, unknown>;
-  children?: HastNode[];
-}
-
-const CARET_HOSTS = new Set(["p", "li", "td", "th", "h4", "blockquote"]);
-
-/** Rehype plugin: the writing caret at the end of the last text block (preview `.chat-caret`). */
-function rehypeCaret() {
-  return (tree: HastNode) => {
-    let host: HastNode = tree;
-    for (;;) {
-      const last = [...(host.children ?? [])].reverse().find((c) => c.type === "element");
-      if (!last || last.tagName === "pre" || last.tagName === "code") break;
-      host = last;
-      if (CARET_HOSTS.has(last.tagName ?? "") && !(last.children ?? []).some((c) => c.type === "element" && ["ul", "ol", "p"].includes(c.tagName ?? ""))) break;
-    }
-    host.children = [...(host.children ?? []), { type: "element", tagName: "span", properties: { className: ["chat-caret"], ariaHidden: "true" }, children: [] }];
-  };
-}
 
 const REMARK = [remarkGfm, remarkMath];
 const REHYPE = [rehypeKatex, rehypeCitationMarkers];

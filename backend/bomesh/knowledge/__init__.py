@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Protocol, runtime_checkable
 
 from bomesh.connector.protocol import CitationInfo, SourceIdentity
@@ -23,17 +24,29 @@ class RetrievalContext(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class DocumentFacts:
+    """What a reader sees about a found document besides its passage, read with the re-check."""
+
+    mime_type: str | None = None
+    file_name: str | None = None
+    updated_at: datetime | None = None
+    #: Display name of the collection the document lives in (its parent).
+    collection_title: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class ReadScope:
     """What one caller may retrieve: the index pre-filter and the hit re-check.
 
     ``readable`` and ``editable`` are collection IDs (published points of
     readable collections, and every point of editable ones); ``recheck``
-    returns the subset of item IDs the visibility rule admits right now.
+    returns the item IDs the visibility rule admits right now, each with its
+    :class:`DocumentFacts` (read in the same query, so no extra round trip).
     """
 
     readable: tuple[str, ...]
     editable: tuple[str, ...]
-    recheck: Callable[[Sequence[str]], Awaitable[frozenset[str]]]
+    recheck: Callable[[Sequence[str]], Awaitable[Mapping[str, DocumentFacts]]]
 
 
 class ReadAccess(Protocol):
@@ -58,6 +71,7 @@ class Evidence:
     contextual_text: str | None = None
     relevance_score: float | None = None
     rerank_score: float | None = None
+    document: DocumentFacts | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +130,7 @@ from .semantic_reranker import SemanticReranker
 __all__ = [
     "CitationResolver",
     "ContextBuilder",
+    "DocumentFacts",
     "Evidence",
     "EvidenceContext",
     "EvidenceContextBuilder",

@@ -63,15 +63,15 @@ function docFromAnswer(title, text) {
   a.revs[0].at = ago(3 * HOUR);
   m4.artifacts = [{ id: a.id, rev: 1 }]; delete m4.artifact;
   m4.work = [
-    { k: 'search', label: 'Searched Finance & Procurement', d: '1 relevant file' },
-    { k: 'prepare', label: 'Opened Pending reimbursements Q3.xlsx in a secure workspace', d: '1 sheet' },
-    { k: 'code', label: 'Ran 2 commands', runs: [
+    { k: 'search', label: 'Searched Finance & Procurement' },
+    { k: 'prepare', label: 'Opened Pending reimbursements Q3.xlsx in a secure workspace' },
+    { k: 'code', label: 'Ran code', runs: [
       { cmd: 'import pandas as pd\ndf = pd.read_csv("pending-reimb-q3/Claims.csv")\nbig = df[df["Amount (USD)"] > 500]\nprint(len(big), big["Amount (USD)"].sum())', out: '14 18940', exit: 0 },
       { cmd: 'big.groupby("Department")["Amount (USD)"].agg(["count", "sum"]).to_excel("claims_over_500_q3.xlsx")', out: 'Saved claims_over_500_q3.xlsx', exit: 0 },
     ] },
     { k: 'export', label: 'Created claims_over_500_q3.xlsx', d: 'Version 1' },
   ];
-  delete m4.activity; m4.dur = 14; m4.state = 'done';
+  delete m4.activity; m4.state = 'done';
 })();
 /** Older saved messages may carry a plain `artifact`; turn it into a versioned file. */
 function migrate(conv, m) {
@@ -133,7 +133,7 @@ function plan(q, conv, files, mod, edit) {
   if (mod === 'shorter' && !base.noResults) text = text.split('\n\n').slice(0, 2).join('\n\n');
   if (mod === 'detail' && !base.noResults) text += '\n\nIn more detail: the documents above are the current versions. If your situation is unusual, the document owner listed in each one can confirm the details.';
   const seen = new Set();
-  const work = (base.activity || []).filter(s => s.kind !== 'code').map(s => ({ k: s.kind, label: s.label, d: s.detail })).filter(s => { if (s.k !== 'read') return true; if (seen.has(s.label)) return false; seen.add(s.label); return true; });
+  const work = C().flowOf(q, base).filter(s => s.k !== 'code').filter(s => { if (s.k !== 'read') return true; if (seen.has(s.label)) return false; seen.add(s.label); return true; });
   const sheetFile = files.find(f => ['xlsx', 'csv'].includes(f.type));
   let apply = null;
   if (!base.noResults && sheetOk && (base.artifact || sheetFile || SHEET_RX.test(q))) {
@@ -141,7 +141,7 @@ function plan(q, conv, files, mod, edit) {
     const title = claims ? 'Claims over $500 — Q3' : sheetFile ? `${sheetFile.name.replace(/\.[^.]+$/, '')} — reviewed` : C().makeTitle(q).replace(/…$/, '');
     const file = slug(title) + '.xlsx';
     work.push({ k: 'prepare', label: 'Started a secure workspace', d: 'Python · no internet' },
-      { k: 'code', label: 'Ran 2 commands', runs: claims ? [
+      { k: 'code', label: 'Ran code', runs: claims ? [
         { cmd: 'import pandas as pd\ndf = pd.read_csv("pending-reimb-q3/Claims.csv")\nbig = df[df["Amount (USD)"] > 500]\nprint(len(big), big["Amount (USD)"].sum())', out: '14 18940', exit: 0 },
         { cmd: `big.groupby("Department")["Amount (USD)"].agg(["count", "sum"]).to_excel("${file}")`, out: `Saved ${file}`, exit: 0 },
       ] : [

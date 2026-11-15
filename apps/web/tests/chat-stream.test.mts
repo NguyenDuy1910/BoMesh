@@ -66,30 +66,53 @@ test("created names the assistant message; deltas build the answer", () => {
   assert.equal(turn.status, "streaming");
 });
 
-test("text written before a tool call is not the answer; steps follow the tools", () => {
+test("text written before a tool call is a note in the flow, in order; the answer is what follows the last call", () => {
   const turn = run([
-    { type: "response.output_item.added", output_index: 0, item: { type: "message", role: "assistant", content: [{ type: "output_text", text: "Let me search." }] } },
-    { type: "response.output_item.added", output_index: 1, item: { type: "function_call", call_id: "c1", name: "knowledge_search", arguments: "" } },
+    { type: "response.output_item.added", output_index: 0, item: { type: "message", role: "assistant", content: [{ type: "output_text", text: "I’ll look through the HR policies." }] } },
+    { type: "response.output_item.done", output_index: 0, item: { type: "message", role: "assistant", content: [{ type: "output_text", text: "I’ll look through the HR policies." }] } },
+    { type: "response.output_item.added", output_index: 1, item: { type: "function_call", call_id: "c1", name: "knowledge_search", arguments: '{"queries":["parental leave"]}' } },
     { type: "tool_started", call_id: "c1", tool_name: "knowledge_search" },
   ]);
   assert.equal(turn.text, "");
-  assert.deepEqual(turn.steps.map((s) => [s.kind, s.label, s.live]), [["search", "Searching your knowledge", true]]);
+  assert.deepEqual(turn.steps.map((s) => [s.kind, s.text ?? s.label, s.live]), [
+    ["note", "I’ll look through the HR policies.", false],
+    ["search", "Searching your knowledge", true],
+  ]);
+  assert.equal(turn.steps[1]!.query, "parental leave");
 
   const done = run([
-    { type: "tool_completed", call_id: "c1", tool_name: "knowledge_search", status: "completed", result_count: 7, duration_ms: 900 },
+    { type: "tool_completed", call_id: "c1", tool_name: "knowledge_search", status: "completed" },
     { type: "response.output_item.done", output_index: 2, item: { type: "function_call_output", call_id: "c1", output: "…" } },
-    { type: "response.output_text.delta", output_index: 3, content_index: 0, delta: "Answer" },
+    { type: "response.output_item.added", output_index: 3, item: { type: "message", role: "assistant", content: [{ type: "output_text", text: "The policy covers it; I’ll read it." }] } },
+    { type: "response.output_item.added", output_index: 4, item: { type: "function_call", call_id: "c2", name: "read_resource", arguments: "" } },
+    { type: "response.output_item.done", output_index: 5, item: { type: "function_call_output", call_id: "c2", output: "…" } },
+    { type: "response.output_text.delta", output_index: 6, content_index: 0, delta: "Answer" },
   ], turn);
   assert.equal(done.text, "Answer");
-  assert.deepEqual(done.steps.map((s) => [s.label, s.detail, s.live]), [["Searched your knowledge", "7 relevant passages", false]]);
+  // Notes and actions interleave in output order; no counts or timings on any step.
+  assert.deepEqual(done.steps.map((s) => [s.kind, s.text ?? s.label, s.detail]), [
+    ["note", "I’ll look through the HR policies.", undefined],
+    ["search", "Searched your knowledge", undefined],
+    ["note", "The policy covers it; I’ll read it.", undefined],
+    ["read", "Read a document", undefined],
+  ]);
+});
+
+test("a note being written is live until its item is done", () => {
+  const turn = run([
+    { type: "response.output_item.added", output_index: 0, item: { type: "message", role: "assistant", phase: "commentary", content: [] } },
+    { type: "response.output_text.delta", output_index: 0, content_index: 0, delta: "Checking the handbook" },
+  ]);
+  assert.equal(turn.text, "", "commentary is never the answer");
+  assert.deepEqual(turn.steps.map((s) => [s.kind, s.live]), [["note", true]]);
 });
 
 test("a finished search shows what it found before the answer starts", () => {
-  const found = [{ item: "workspaces/w1/items/doc-a", title: "Leave policy", passages: ["workspaces/w1/items/doc-a/passages/p1"] }];
+  const found = [{ item: "workspaces/w1/items/doc-a", title: "Leave policy", mime_type: "application/pdf", collection: "HR", update_time: "2026-11-01T00:00:00Z", page: 4, excerpt: "Employees get 20 days.", passages: ["workspaces/w1/items/doc-a/passages/p1"] }];
   const turn = run([
     { type: "response.output_item.added", output_index: 0, item: { type: "function_call", call_id: "c1", name: "knowledge_search", arguments: "" } },
     { type: "tool_started", call_id: "c1", tool_name: "knowledge_search" },
-    { type: "tool_completed", call_id: "c1", tool_name: "knowledge_search", status: "completed", result_count: 3, duration_ms: 400, sources: found },
+    { type: "tool_completed", call_id: "c1", tool_name: "knowledge_search", status: "completed", sources: found },
   ]);
   assert.equal(turn.text, "");
   assert.deepEqual(turn.steps.map((s) => [s.live, s.sources]), [[false, found]]);

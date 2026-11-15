@@ -7,7 +7,24 @@
    plugs in through X.chatFiles; the conversation list and its ⋯ menu are conversations.js. */
 
 let run = null;    // active stream: { conv, msg, stop }
-let stick = true;  // keep the thread pinned to the bottom while streaming
+/* Scrolling: opening a conversation shows its latest turn; sending (or retrying, or editing) brings the question to the
+   top and the answer grows below it — the thread never scrolls by itself while the assistant works. `turn` = a turn was
+   sent in this view (its question stays reachable at the top: room under it, `#chat-tail`); `pin` = bring it there. */
+let turn = false, pin = false;
+const PIN_GAP = 16;
+const lastQuestion = sc => [...sc.querySelectorAll('.chat-msg--user')].at(-1);
+/** Room under the last question, so it can sit at the top while its answer is still short. */
+function fitTail(sc) {
+  const tail = sc.querySelector('#chat-tail'); if (!tail) return;
+  const q = turn && lastQuestion(sc);
+  const h = q ? Math.max(0, sc.clientHeight - (tail.getBoundingClientRect().top - q.getBoundingClientRect().top) - PIN_GAP) : 0;
+  tail.style.height = h + 'px'; cui().tail = h;
+}
+function pinQuestion(sc) {
+  const q = lastQuestion(sc); if (!q) return;
+  const top = sc.scrollTop + q.getBoundingClientRect().top - sc.getBoundingClientRect().top - PIN_GAP;
+  sc.scrollTo({ top, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+}
 const cui = () => { const u = ui('chat', { panel: null, open: {}, edit: null, editText: '' }); u.open ??= {}; return u; };
 /** Composer state per place: 'home', 'proj:<project id>' or a conversation id (drafts never leak between threads). */
 function composer(key) { const all = ui('composer'); const c = (all[key] ??= { draft: '', files: [], scope: [], space: null, off: [] }); c.draft ??= ''; c.files ??= []; c.scope ??= []; c.space ??= null; c.off ??= []; return c; }
@@ -168,7 +185,7 @@ function dueSoon() {
     ? `Here’s what’s coming up in the next 7 days:\n\n${items.map(line).join('\n')}` + (soon ? `\n\nStart with **${mdText(soon.title)}** — it’s ${relFuture(soon.at).replace(/^in /, 'due in ')}.` : '')
     : 'Nothing is due in the next 7 days across your spaces.';
   const next = items.filter(i => i.action?.label && i.action.label !== 'Open' && (i.action.act || i.action.href)).slice(0, 2).map(i => ({ label: i.action.label, act: i.action.act, data: i.action.data, href: i.action.act ? undefined : i.action.href }));
-  return { text, citations: [], activity: [{ kind: 'search', label: 'Checked the calendars of your spaces', detail: plural(items.length, 'item') }], next, files: false };
+  return { text, citations: [], activity: [{ kind: 'search', label: 'Checked the calendars of your spaces' }], next, files: false };
 }
 /** Teaching teams and admins: what people asked lately, and what the knowledge couldn't answer. */
 function askedLately(q) {
@@ -186,7 +203,7 @@ function askedLately(q) {
   if (gaps.length) parts.push(`**Questions the knowledge couldn’t answer**\n${gaps.slice(0, 5).map(g => `- “${mdText(g.q)}” — asked ${plural(g.n, 'time')} · ${mdText(g.why)}`).join('\n')}`);
   const next = [hasModule('requests') && qs.length ? { label: 'Open the question queue', href: '/requests?tab=queue' } : null, isAdmin() && gaps.length ? { label: 'Review knowledge gaps', href: '/overview' } : null].filter(Boolean);
   return { text: parts.length ? parts.join('\n\n') : 'No questions came in this week, and nothing went unanswered.', citations: [],
-    activity: [{ kind: 'search', label: 'Checked questions sent to your spaces', detail: plural(qs.length, 'question') }, { kind: 'search', label: 'Checked unanswered questions', detail: plural(gaps.length, 'gap') }], next, files: false };
+    activity: [{ kind: 'search', label: 'Checked questions sent to your spaces' }, { kind: 'search', label: 'Checked unanswered questions' }], next, files: false };
 }
 const FINX_TOPICS = [
   { k: /(people|team|staff) (ask|asked)|asked (most|about)|common questions|questions (about|did|people)|confus/i, when: () => isAdmin() || mySpaces().some(s => isSpaceStaff(s)), live: askedLately },
@@ -258,7 +275,7 @@ function answer(q, scope = [], fileNames = [], space = null) {
   const ctx = { q, p: me().profile || null };
   const files = t?.files ?? table?.files;
   let text, cites, artifact = null; const extra = [];
-  if (t?.from) { const src = CANON[t.from]; text = src.text; cites = src.citations; artifact = src.artifact || null; if (t.from === 'c2') extra.push({ kind: 'code', label: 'Analyzed the spreadsheet', detail: '2 steps' }); }
+  if (t?.from) { const src = CANON[t.from]; text = src.text; cites = src.citations; artifact = src.artifact || null; if (t.from === 'c2') extra.push({ kind: 'code', label: 'Analyzed the spreadsheet' }); }
   else if (t && !t.none) { text = typeof t.text === 'function' ? t.text(ctx) : t.text; cites = t.cites.map((c, i) => ({ n: i + 1, ...c })); }
   else if (!t) {
     const words = (q.toLowerCase().match(/[a-z]{4,}/g) || []).filter(w => !STOP.has(w));
@@ -276,9 +293,10 @@ function answer(q, scope = [], fileNames = [], space = null) {
   const topicKbs = [...new Set((cites || []).map(c => docById(c.doc)?.kb))];
   const searched = readable.filter(k => inScope(k.id)).sort((a, b) => (topicKbs.includes(b.id) - topicKbs.includes(a.id)) || (!!a.personal - !!b.personal));
   const names = searched.map(k => k.name);
-  const searchLabel = names.length <= 2 ? names.join(' and ') : `${names[0]}, ${names[1]} and ${names.length - 2} more`;
+  // Named only when the person narrowed the search to one or two collections; never a count.
+  const scopeName = scope.length && names.length && names.length <= 2 ? names.join(' and ') : 'your knowledge';
   const noRes = restricted => {
-    const r = { text: 'I couldn’t find this in the knowledge you can access.', citations: [], activity: [{ kind: 'search', label: `Searched ${plural(searched.length, 'collection')}`, detail: 'No relevant passages' }], noResults: { scoped: scope.length > 0, restricted: restricted || lockedExists }, files };
+    const r = { text: 'I couldn’t find this in the knowledge you can access.', citations: [], activity: [{ kind: 'search', label: `Searched ${scopeName}` }], noResults: { scoped: scope.length > 0, restricted: restricted || lockedExists }, files };
     // Not covered where the caller searched: offer who can answer; unscoped misses become a knowledge gap.
     if (!restricted && hasModule('requests')) { const n = askNext(q, scope, space); r.next = n.length ? n : null; if (!scope.length) r.gap = { q: q.trim(), kb: null }; }
     return r;
@@ -291,23 +309,47 @@ function answer(q, scope = [], fileNames = [], space = null) {
   if (!pr.citations.length || !pr.text) return noRes(permDropped);
   pr.citations.forEach(c => { const d = docById(c.doc); c.page = Math.max(1, Math.min(c.page, d.pages)); });
   const readDocs = [...new Set(pr.citations.map(c => c.doc))].map(docById);
+  // A search finds more than the answer ends up citing: the closest neighbours in the same collections.
+  const nearby = D.docs.filter(d => !readDocs.includes(d) && !d.archived && d.status === 'ready' && canDoc(d) && readDocs.some(r => r.kb === d.kb)).sort((a, b) => b.updated - a.updated).slice(0, 2);
   const activity = [
-    { kind: 'search', label: `Searched ${names.length <= 2 && names.length ? searchLabel : plural(searched.length, 'collection')}`, detail: `${pr.citations.length * 3 + 1} relevant passages`, docs: readDocs.map(d => d.id) },
+    { kind: 'search', label: `Searched ${scopeName}`, docs: [...readDocs, ...nearby].map(d => d.id) },
     ...fileNames.map(f => ({ kind: 'read', label: `Read ${f}`, detail: 'your attachment' })),
-    ...readDocs.map(d => ({ kind: 'read', label: `Read ${d.name}`, detail: plural(pr.citations.filter(c => c.doc === d.id).length, 'passage') })),
+    ...readDocs.map(d => ({ kind: 'read', label: `Read ${d.name}`, doc: d.id })),
     ...extra,
   ];
   const next = (t?.next?.(ctx) || []).filter(Boolean);
   return { text: pr.text, citations: pr.citations, activity, artifact: flags.every(f => f.ok) ? artifact : null, partial: permDropped, next: next.length ? next : null, gap: t?.gap || null, lowConf: !!t?.gap, files };
 }
-/** A planned activity as a work step; a search keeps the documents it found (`docs`). */
-const workStep = s => ({ k: s.kind, label: s.label, d: s.detail, ...(s.docs?.length ? { docs: s.docs } : {}) });
+/** A planned activity as a work step; a search keeps the documents it found (`docs`), a read the one it read (`doc`). */
+const workStep = s => ({ k: s.kind, label: s.label, d: s.detail, ...(s.docs?.length ? { docs: s.docs } : {}), ...(s.doc ? { doc: s.doc } : {}) });
+const stemName = name => String(name || '').replace(/\.[^.]+$/, '');
+const shortQuery = q => { const s = String(q || '').trim().replace(/\s+/g, ' '); return s.length > 60 ? s.slice(0, 57).trimEnd() + '…' : s; };
+/**
+ * The work as the assistant tells it, in order: a short note before it searches, what the search found (each document
+ * with where it lives and the matching passage), a note on what it will read, the reads — then the answer. The notes
+ * are the model's commentary (what it is doing and why), never its hidden reasoning or the tools' internals.
+ */
+function flowOf(q, a) {
+  const steps = a.activity.map(workStep);
+  const at = steps.findIndex(s => s.k === 'search' && /^Searched /.test(s.label));
+  if (at < 0) return steps;
+  const search = steps[at], scope = search.label.replace(/^Searched /, '');
+  const hits = {};
+  (a.citations || []).forEach(c => { hits[c.doc] ??= { page: c.page, quote: c.quote }; });
+  Object.assign(search, { q: shortQuery(q), hits });
+  const found = search.docs || [], reads = steps.filter(s => s.k === 'read' && s.doc).length;
+  const before = { k: 'note', text: `I’ll look through ${scope} for this.` };
+  const after = found.length
+    ? { k: 'note', text: `${stemName(docById(found[0])?.name)} looks most relevant. ${reads > 1 ? 'I’ll read the closest matches' : 'I’ll read it'} before answering.` }
+    : { k: 'note', text: `Nothing in ${scope} covers this, so I won’t guess.` };
+  return [...steps.slice(0, at), before, search, after, ...steps.slice(at + 1)];
+}
 /** Seeded conversations without messages get their first answer the first time they are opened. */
 function ensureSeed(conv) {
   if (conv.messages.length) return;
   const q = SEED[conv.id] || conv.title;
   const a = answer(q, conv.scope || [], [], conv.space || null);
-  conv.messages.push({ id: uid('m'), role: 'user', text: q }, { id: uid('m'), role: 'assistant', q, text: a.text, citations: a.citations, work: a.activity.map(workStep), noResults: a.noResults || null, partial: a.partial, next: a.next || null, lowConf: !!a.lowConf, state: 'done', dur: 4 });
+  conv.messages.push({ id: uid('m'), role: 'user', text: q }, { id: uid('m'), role: 'assistant', q, text: a.text, citations: a.citations, work: flowOf(q, a), noResults: a.noResults || null, partial: a.partial, next: a.next || null, lowConf: !!a.lowConf, state: 'done' });
 }
 function lastLine(conv) {
   const a = [...conv.messages].reverse().find(m => m.role === 'assistant'); if (!a) return '';
@@ -437,57 +479,99 @@ const STEP_IC = { search: 'search', read: 'file-text', prepare: 'server', code: 
 /** What a running step says (its stored label is the past tense shown once it finished). */
 const LIVE_LABEL = { search: 'Searching your knowledge', read: 'Reading a document', code: 'Running code', prepare: 'Preparing a file', export: 'Saving a file' };
 const THINK = '<span class="chat-think" aria-hidden="true"><i></i><i></i></span>';
+const CARET = '<span class="chat-caret" aria-hidden="true"></span>';
+/** Documents a search shows before "Show more". */
+const FOUND_SHOWN = 3;
+function liveLabel(s) {
+  if (s.k === 'search' && /^Searched /.test(s.label)) return s.label.replace(/^Searched /, 'Searching ');
+  if (s.k === 'read' && s.doc) return `Reading ${stemName(docById(s.doc)?.name)}`;
+  return LIVE_LABEL[s.k] || s.label;
+}
+/** The folded flow in one line: what was done, never how many. */
 function stepsSummary(m) {
-  const steps = (m.work || []).filter(s => !s.live); const parts = [];
+  const steps = (m.work || []).filter(s => !s.live && s.k !== 'note'); const parts = [];
   const search = steps.find(s => s.k === 'search'); if (search) parts.push(clean(search.label));
-  const reads = steps.filter(s => s.k === 'read').length; if (reads) parts.push(`Read ${plural(reads, 'document')}`);
+  const reads = steps.filter(s => s.k === 'read');
+  if (reads.length) parts.push(reads.length === 1 && reads[0].doc ? `Read ${stemName(docById(reads[0].doc)?.name)}` : 'Read the closest matches');
   const runs = steps.flatMap(s => s.runs || []);
-  if (runs.length) { const bad = runs.filter(r => r.exit).length; parts.push(runs.length === 1 && !bad ? 'Ran code' : `Ran ${plural(runs.length, 'command')}${bad ? `, ${bad} failed` : ''}`); }
-  const made = (m.artifacts || []).filter(r => r.rev <= 1).length, upd = (m.artifacts || []).length - made;
-  if (made) parts.push(`Created ${plural(made, 'file')}`);
-  if (upd) parts.push(`Updated ${plural(upd, 'file')}`);
+  if (runs.length) parts.push(runs.some(r => r.exit) ? 'Code hit an error' : 'Ran code');
+  const arts = m.artifacts || [];
+  if (arts.length) parts.push(arts.some(r => r.rev <= 1) ? 'Created a file' : 'Updated a file');
   if (!parts.length && steps[0]) parts.push(clean(steps[0].label));
-  if (m.dur) parts.push(`${m.dur}s`);
   return parts.join(' · ');
 }
-/** What a search found, as quiet document chips that open the preview (only documents this person can open). */
-function foundHtml(s) {
-  const docs = (s.docs || []).map(docById).filter(d => d && canDoc(d));
-  return docs.length ? `<div class="chat-found" role="list" aria-label="Found">${docs.map((d, i) => `<button type="button" role="listitem" class="chat-found__doc" style="--i:${i}" data-act="doc-preview" data-id="${d.id}">${ic('file-text', 'i-xs')}<span class="truncate">${esc(d.name.replace(/\.[^.]+$/, ''))}</span></button>`).join('')}</div>` : '';
+/** A one-time entrance although paint() re-renders: a negative delay resumes the animation where it stands (a later
+    start waits). Older content renders still. */
+function appear(at) {
+  const age = Date.now() - (at || 0);
+  return at && age < 900 ? { cls: ' is-fresh', style: ` style="animation-delay:${-age}ms"` } : { cls: '', style: '' };
 }
-/** Finished steps (with what each found) and, while working, the live row last. */
-function stepsList(m, live = null) {
+/** One found document: what it is, where it lives, how fresh, and the passage that matched. Once the answer cites it,
+    its source number. Opens the preview at that passage. */
+function docCard(m, s, id, i) {
+  const d = docById(id); if (!d || !canDoc(d)) return '';
+  const hit = s.hits?.[id], ns = visCites(m).filter(c => c.doc === id).map(c => c.n);
+  const where = folderById(docFolder(d))?.name || kbById(d.kb)?.name;
+  const meta = [where, rel(d.updated)].filter(Boolean).join(' · ');
+  const f = appear(s.at && s.at + i * 70);
+  const badges = ns.length ? `<span class="chat-doc__ns" aria-label="${ns.length > 1 ? 'Sources' : 'Source'} ${ns.join(', ')}">${ns.map(n => `<span class="chat-doc__n">${n}</span>`).join('')}</span>` : '';
+  return `<button type="button" role="listitem" class="chat-doc${f.cls}"${f.style} data-act="doc-preview" data-id="${d.id}"${hit ? ` data-page="${hit.page}" data-quote="${esc(hit.quote || '')}"` : ''}>${fileIcon(d.type, 'sm')}<span class="chat-doc__head"><span class="chat-doc__title truncate" translate="no">${esc(stemName(d.name))}</span><span class="chat-doc__meta truncate">${esc(meta)}</span>${badges}</span>${hit?.quote ? `<span class="chat-doc__quote" translate="no"><b>p. ${hit.page}</b> · ${esc(hit.quote)}</span>` : ''}</button>`;
+}
+function foundHtml(m, s, si) {
+  const ids = (s.docs || []).filter(id => canDoc(docById(id))); if (!ids.length) return '';
+  const key = `${m.id}:found:${si}`, all = !!cui().open[key], shown = all ? ids : ids.slice(0, FOUND_SHOWN);
+  const more = ids.length > FOUND_SHOWN ? `<div class="chat-docs__more">${linkBtn(all ? 'Show less' : 'Show more', { act: 'chat-docs-more', data: { k: key, msg: m.id } })}</div>` : '';
+  return `<div class="chat-docs" role="list" aria-label="Found documents">${shown.map((id, i) => docCard(m, s, id, i)).join('')}</div>${more}`;
+}
+/** One action of the flow: icon, what it did, and what it found or ran. */
+function actionRow(m, s, si) {
   const u = cui();
-  const rows = (m.work || []).map((s, si) => {
-    if (s.live) return '';
-    const runs = (s.runs || []).map((r, ri) => {
-      const key = `${m.id}:run:${si}:${ri}`, show = !!u.open[key];
-      const lastErr = r.exit ? String(r.out || '').trim().split('\n').filter(Boolean).at(-1) : '';
-      return `<div class="chat-run"><div class="chat-run__head">${ic('terminal', 'i-xs')}<span>Command ${ri + 1}</span>${linkBtn(show ? 'Hide code' : 'Show code', { act: 'chat-run', data: { k: key } })}<span class="grow"></span>${chip(r.exit ? `Failed · exit ${r.exit}` : 'OK', { tone: r.exit ? 'danger' : 'success', size: 'sm', variant: r.exit ? 'soft' : 'tertiary' })}</div>${show ? `<pre class="chat-run__code">${esc(r.cmd)}</pre>${r.out ? `<pre class="${cx('chat-run__out', r.err && 'is-err')}">${esc(r.out)}</pre>` : ''}` : lastErr ? `<pre class="chat-run__out is-err">${esc(lastErr)}</pre>` : ''}</div>`;
-    }).join('');
-    return `<li class="${cx('chat-step', s.bad && 'is-bad')}">${ic(STEP_IC[s.k] || 'check', 'i-sm')}<div class="grow"><span>${esc(clean(s.label))}</span>${s.d ? ` <span class="muted">· ${esc(s.d)}</span>` : ''}${foundHtml(s)}${runs}</div></li>`;
+  const runs = (s.runs || []).map((r, ri) => {
+    const key = `${m.id}:run:${si}:${ri}`, show = !!u.open[key];
+    const lastErr = r.exit ? String(r.out || '').trim().split('\n').filter(Boolean).at(-1) : '';
+    return `<div class="chat-run"><div class="chat-run__head">${ic('terminal', 'i-xs')}<span>Command ${ri + 1}</span>${linkBtn(show ? 'Hide code' : 'Show code', { act: 'chat-run', data: { k: key } })}<span class="grow"></span>${chip(r.exit ? `Failed · exit ${r.exit}` : 'OK', { tone: r.exit ? 'danger' : 'success', size: 'sm', variant: r.exit ? 'soft' : 'tertiary' })}</div>${show ? `<pre class="chat-run__code">${esc(r.cmd)}</pre>${r.out ? `<pre class="${cx('chat-run__out', r.err && 'is-err')}">${esc(r.out)}</pre>` : ''}` : lastErr ? `<pre class="chat-run__out is-err">${esc(lastErr)}</pre>` : ''}</div>`;
   }).join('');
-  const liveRow = live ? `<li class="chat-step is-live" role="status" aria-live="polite">${THINK}<span class="chat-steps__label truncate">${esc(live)}</span></li>` : '';
-  return `<ol class="chat-steps__list" aria-label="Steps">${rows}${liveRow}</ol>`;
+  const read = s.k === 'read' && s.doc ? docById(s.doc) : null;
+  const label = read && canDoc(read)
+    ? `Read <button type="button" class="chat-doc-link" data-act="doc-preview" data-id="${read.id}" translate="no">${esc(stemName(read.name))}</button>`
+    : esc(clean(s.label));
+  const detail = s.k === 'search' && s.q ? `“${esc(s.q)}”` : s.d ? esc(s.d) : '';
+  return `<li class="${cx('chat-step', s.bad && 'is-bad')}">${ic(STEP_IC[s.k] || 'check', 'i-sm')}<div class="grow"><span>${label}</span>${detail ? ` <span class="muted">· ${detail}</span>` : ''}${s.k === 'search' ? foundHtml(m, s, si) : ''}${runs}</div></li>`;
+}
+/** The flow in order — notes, finished actions with what they found — and, while working, the live row last. */
+function stepsList(m, live = null) {
+  const rows = (m.work || []).map((s, si) => {
+    if (s.k === 'note') {
+      const f = appear(s.at);
+      return `<li class="chat-step chat-step--note${f.cls}"${f.style}><p translate="no">${esc(s.text)}${s.live ? CARET : ''}</p></li>`;
+    }
+    return s.live ? '' : actionRow(m, s, si);
+  }).join('');
+  const liveRow = live ? `<li class="chat-step is-live" role="status" aria-live="polite">${THINK}<span class="chat-steps__label truncate">${esc(live.label)}</span>${live.q ? `<span class="chat-steps__q truncate" translate="no">“${esc(live.q)}”</span>` : ''}</li>` : '';
+  return `<ol class="chat-steps__list" aria-label="How the answer is being found">${rows}${liveRow}</ol>`;
 }
 /**
- * How the answer is being found, as it happens: each finished step shows what it found (a search lists its documents
- * at once), the live row last names the tool that runs right now or says "Thinking" (it never claims a search that
- * isn't happening), and the answer streams below. Answers written in this session keep the timeline open; it folds
- * into one summary line. With "Show how answers were found" off, only the live line shows.
+ * How the answer is found, as one flow above it: the assistant says what it will do (a note), does it (a search shows
+ * the documents it found as cards, a read names the document), says what it found and what comes next, and then
+ * answers. The live row last names the action that runs right now or says "Thinking" (never a search that isn't
+ * happening); a note being written needs none. Answers written in this session keep the flow open; it folds into
+ * one summary line. With "Show how answers were found" off, only the live line shows.
  */
 function stepsHtml(m) {
   const work = m.work || [], streaming = m.state === 'streaming';
   const cur = [...work].reverse().find(s => s.live);
-  const live = streaming && m.phase === 'work' ? clean(cur ? LIVE_LABEL[cur.k] || cur.label : 'Thinking') : null;
-  const liveLine = live ? `<span class="chat-steps__live" role="status" aria-live="polite">${THINK}<span class="chat-steps__label truncate">${esc(live)}</span></span>` : '';
-  const done = work.some(s => !s.live);
-  if (!prefShowSteps() || (streaming && !done)) return liveLine ? `<div class="chat-steps">${liveLine}</div>` : '';
+  const live = streaming && m.phase === 'work' && cur?.k !== 'note'
+    ? (cur ? { label: clean(liveLabel(cur)), q: cur.k === 'search' ? cur.q : '' } : { label: 'Thinking' })
+    : null;
+  const liveLine = live ? `<span class="chat-steps__live" role="status" aria-live="polite">${THINK}<span class="chat-steps__label truncate">${esc(live.label)}</span></span>` : '';
+  const shown = work.some(s => !s.live || s.k === 'note');
+  if (!prefShowSteps() || (streaming && !shown)) return liveLine ? `<div class="chat-steps">${liveLine}</div>` : '';
   if (streaming) return `<div class="chat-steps">${stepsList(m, live)}</div>`;
   if (!work.length) return '';
   const open = !!cui().open[m.id];
   return `<div class="chat-steps"><button type="button" class="chat-steps__toggle" data-act="chat-steps" data-msg="${m.id}" aria-expanded="${open}">${ic(open ? 'chevron-down' : 'chevron-right', 'i-sm')}<span class="truncate">${esc(stepsSummary(m) || 'How this answer was found')}</span></button>${open ? stepsList(m) : ''}</div>`;
 }
+A['chat-docs-more'] = el => { const u = cui(); u.open[el.dataset.k] = !u.open[el.dataset.k]; const { m } = findMsg(el.dataset.msg); m ? paint(m) : refresh(); };
 /* Next steps an answer suggests: actions, not documents — their own labelled row of secondary buttons, apart from the quiet source chips. */
 const NEXT_IC = { 'rq-new': 'send', 'rq-ask-staff': 'message' };
 const nextIcon = n => n.act === 'work-start' ? (WORKFLOWS[n.data?.workflow]?.icon || 'sparkles') : NEXT_IC[n.act] || 'arrow-right';
@@ -560,7 +644,7 @@ function sourcesHtml(m, vis) {
 function paint(m) {
   const el = document.getElementById('msg-' + m.id); if (!el) return;
   const { conv } = findMsg(m.id); el.innerHTML = aiInner(conv, m);
-  const sc = $('#chat-scroll'); if (sc && stick) sc.scrollTop = sc.scrollHeight;
+  const sc = $('#chat-scroll'); if (sc) fitTail(sc);
 }
 /** A reload mid-stream leaves 'streaming' messages behind; show them as stopped. */
 function settleStale(conv) { conv.messages.forEach(m => { if (m.state === 'streaming' && run?.msg !== m.id) { m.state = 'stopped'; m.phase = null; (m.work || []).forEach(s => (s.live = false)); } }); }
@@ -625,7 +709,7 @@ P.chatThread = ({ params }) => {
   pageHeader({ title: conv.title, actions: `<span class="chat-top-actions">${btn(conv.share ? 'Shared' : 'Share', { v: 'ghost', size: 'sm', icon: conv.share ? 'users' : 'share', act: 'chat-share', data: { id: conv.id }, tip: conv.share ? shareSummary(conv) : '' })}${iconBtn('more', 'More', { size: 'sm', menu: 'chat-more', data: { id: conv.id } })}</span>` });
   const u = cui(); const panel = u.panel?.conv === conv.id ? u.panel : null;
   const streaming = run?.conv === conv.id;
-  const ok = () => `<div class="chat-thread">${conv.messages.map(m => m.role === 'user' ? userHtml(m) : `<div class="chat-msg chat-msg--ai" id="msg-${m.id}">${aiInner(conv, m)}</div>`).join('')}</div>`;
+  const ok = () => `<div class="chat-thread">${conv.messages.map(m => m.role === 'user' ? userHtml(m) : `<div class="chat-msg chat-msg--ai" id="msg-${m.id}">${aiInner(conv, m)}</div>`).join('')}</div><div class="chat-tail" id="chat-tail" aria-hidden="true" style="height:${turn ? u.tail || 0 : 0}px"></div>`;
   const side = panel?.kind === 'file' ? X.chatFiles?.panel(conv, panel) || '' : '';
   return `<div class="split chat-split">
     <div class="split__main chat-main chat-drop" data-drop="${conv.id}">
@@ -638,22 +722,24 @@ AFTER.chatThread = ({ params, changed }) => {
   if (changed) { u.edit = null; if (u.panel && u.panel.conv !== params.id) { u.panel = null; refresh(); return; } }
   const sc = $('#chat-scroll');
   if (sc) {
-    if (changed || stick) sc.scrollTop = sc.scrollHeight;
-    if (changed) stick = true;
-    sc.onscroll = () => { stick = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 80; };
+    // Opened: the latest turn; opened on a turn just sent (from AI Chat's composer): its question at the top.
+    if (changed) { turn = pin = run?.conv === params.id; if (!turn) u.tail = 0; }
+    fitTail(sc);
+    if (pin) { pin = false; pinQuestion(sc); }
+    else if (changed) sc.scrollTop = sc.scrollHeight;
   }
   X.chatFiles?.after?.();
   afterComposer(changed);
 };
 
 /* ═══════════════ Sending & streaming ═══════════════ */
-const SNAP = ['text', 'citations', 'work', 'artifacts', 'noResults', 'partial', 'next', 'lowConf', 'feedback', 'reason', 'dur', 'state'];
+const SNAP = ['text', 'citations', 'work', 'artifacts', 'noResults', 'partial', 'next', 'lowConf', 'feedback', 'reason', 'state'];
 const snap = m => Object.fromEntries(SNAP.map(k => [k, clone(m[k] ?? null)]));
 function basicPlan(q, conv, files, mod) {
   const a = answer(q, conv.scope || [], files.map(f => f.name), conv.space || null);
   let text = a.text;
   if (mod === 'shorter' && !a.noResults) text = text.split('\n\n').slice(0, 2).join('\n\n');
-  return { text, citations: a.citations, noResults: a.noResults || null, partial: a.partial, next: a.next || null, gap: a.gap || null, lowConf: !!a.lowConf, work: a.activity.map(workStep) };
+  return { text, citations: a.citations, noResults: a.noResults || null, partial: a.partial, next: a.next || null, gap: a.gap || null, lowConf: !!a.lowConf, work: flowOf(q, a) };
 }
 async function stream(conv, am, fail) {
   const r = run = { conv: conv.id, msg: am.id, stop: false };
@@ -662,21 +748,38 @@ async function stream(conv, am, fail) {
   if (am.text && ['done', 'stopped'].includes(am.state || 'done')) am.variants ??= [snap(am)];
   const plan = (X.chatFiles?.plan || basicPlan)(am.q, conv, files, am.mod, am.edit); am.mod = null;
   delete am.activity; delete am.artifact;
-  Object.assign(am, { text: '', citations: [], work: [], artifacts: [], noResults: null, partial: false, next: null, lowConf: false, feedback: null, reason: null, state: 'streaming', phase: 'work', t0: Date.now() });
+  Object.assign(am, { text: '', citations: [], work: [], artifacts: [], noResults: null, partial: false, next: null, lowConf: false, feedback: null, reason: null, state: 'streaming', phase: 'work' });
   // Written in front of the reader: its timeline stays open afterwards (no fold, no jump when it finishes).
   if (prefShowSteps()) cui().open[am.id] = true;
   refresh();
   const alive = () => D.convs.includes(conv) && !r.stop;
+  // The model reads the question before it says anything.
+  await sleep(450);
   for (const st of plan.work) {
     if (!alive()) return end(r, am, 'stopped');
+    if (st.k === 'note') {
+      // A note streams like the answer, word by word.
+      const step = { ...st, text: '', live: true, at: Date.now() }; am.work.push(step);
+      const words = st.text.split(/(\s+)/);
+      for (let i = 0; i < words.length; i += 2) {
+        if (!alive()) return end(r, am, 'stopped');
+        step.text = words.slice(0, i + 1).join(''); paint(am);
+        await sleep(30);
+      }
+      step.live = false; paint(am);
+      await sleep(250);
+      continue;
+    }
     const step = { ...st, live: true, runs: st.runs ? [] : undefined }; am.work.push(step); paint(am);
     if (st.runs) for (const x of st.runs) {
       await sleep(600); if (!alive()) return end(r, am, 'stopped');
       if (fail) { step.runs.push({ cmd: x.cmd, out: 'The secure workspace stopped responding.', exit: 1, err: true }); step.label = 'Code hit an error'; step.bad = true; step.live = false; paint(am); return end(r, am, 'error'); }
       step.runs.push(x); paint(am);
     }
-    await sleep(st.k === 'search' ? 900 : st.k === 'code' ? 300 : 500);
-    step.live = false; paint(am);
+    await sleep(st.k === 'search' ? 1100 : st.k === 'code' ? 300 : 600);
+    // Done: what it found shows at once, the cards one after another.
+    Object.assign(step, { live: false, at: Date.now() }); paint(am);
+    if (st.docs?.length) await sleep(Math.min(st.docs.length, FOUND_SHOWN) * 90 + 350);
   }
   // The model reads what the tools returned (or, with no tools, just the question) before it writes.
   await sleep(plan.work.length ? 300 : 700);
@@ -697,13 +800,13 @@ async function stream(conv, am, fail) {
   if (am.variants) am.variants[am.vi] = snap(am);
   X.chatFiles?.afterStream?.(am, plan);
 }
-function end(r, am, st) { am.dur = Math.max(2, Math.round((Date.now() - (am.t0 || Date.now())) / 1000)); am.state = st; am.phase = null; (am.work || []).forEach(s => (s.live = false)); if (run === r) run = null; refresh(); }
+function end(r, am, st) { am.state = st; am.phase = null; (am.work || []).forEach(s => (s.live = false)); if (run === r) run = null; refresh(); }
 /** Add a user turn to a conversation and stream the answer. edit: the id of an open file the question asks to change. */
 function ask(conv, q, files = [], { edit = null } = {}) {
   conv.at = Date.now();
   conv.messages.push({ id: uid('m'), role: 'user', text: q, files, ...(edit ? { edit } : {}) });
   const am = { id: uid('m'), role: 'assistant', q, text: '', citations: [], state: 'streaming', phase: 'work', ...(edit ? { edit } : {}) };
-  conv.messages.push(am); stick = true;
+  conv.messages.push(am); turn = pin = true;
   const fail = S.pageState === 'error';
   if (S.cur?.path !== '/chat/' + conv.id) go('/chat/' + conv.id);
   stream(conv, am, fail);
@@ -737,7 +840,7 @@ A['chat-stop'] = () => { if (run) run.stop = true; };
 function retry(msgId, mod) {
   if (run) return; const { conv, m } = findMsg(msgId); if (!m) return;
   m.q ??= conv.messages[conv.messages.indexOf(m) - 1]?.text || conv.title;
-  m.mod = mod; stick = true; stream(conv, m, S.pageState === 'error');
+  m.mod = mod; turn = pin = true; stream(conv, m, S.pageState === 'error');
 }
 A['chat-retry'] = el => retry(el.dataset.msg, null);
 A['chat-unscope'] = el => { const { conv } = findMsg(el.dataset.msg); if (!conv || run) return; conv.scope = []; conv.space = null; retry(el.dataset.msg, null); };
@@ -783,7 +886,7 @@ A['chat-edit-save'] = () => {
     m.text = t; u.edit = null;
     let am = conv.messages[i + 1];
     if (!am || am.role !== 'assistant') { am = { id: uid('m'), role: 'assistant' }; conv.messages.splice(i + 1, 0, am); }
-    conv.messages.length = i + 2; am.q = t; am.text = ''; am.variants = null; am.vi = null; stick = true; conv.at = Date.now();
+    conv.messages.length = i + 2; am.q = t; am.text = ''; am.variants = null; am.vi = null; turn = pin = true; conv.at = Date.now();
     stream(conv, am, S.pageState === 'error');
   };
   if (later > 0) confirmAction({ title: 'Edit and resend?', icon: 'pencil', body: `The ${plural(later, 'later message')} in this conversation will be removed. Files the assistant made stay available.`, confirm: 'Edit and resend', delay: 0, onConfirm: resend });
@@ -1008,6 +1111,6 @@ window.addEventListener('hashchange', () => setTimeout(() => (tourAt != null ? t
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && tourAt != null && !S.modal && !S.menu && !S.palette) { e.stopPropagation(); tourDone(); } }, true);
 
 /* Internal API shared with chat-files.js and conversations.js */
-X.chat = { findMsg, answer, plain, makeTitle, cui, composer, composerKey, composerHtml, composerFiles, afterComposer, canDoc, visCites, normFile, mineKb, isMine, paint, focusComposer, ensureSeed, lastLine, ask, CLAIMS,
+X.chat = { findMsg, answer, flowOf, plain, makeTitle, cui, composer, composerKey, composerHtml, composerFiles, afterComposer, canDoc, visCites, normFile, mineKb, isMine, paint, focusComposer, ensureSeed, lastLine, ask, CLAIMS,
   busy: () => !!run, streamingIn: id => run?.conv === id, stopIfIn: id => { if (run?.conv === id) run.stop = true; } };
 })();

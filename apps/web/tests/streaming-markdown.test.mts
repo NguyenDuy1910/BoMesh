@@ -1,11 +1,35 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+
 import {
   RevealPacer,
+  rehypeCaret,
   revealLength,
   splitStreamingMarkdown,
 } from "../src/modules/chat/streaming-markdown.ts";
+
+/** The answer's Markdown with the writing caret, as the chat renders it while streaming. */
+const withCaret = (markdown: string) => renderToStaticMarkup(createElement(Markdown, { remarkPlugins: [remarkGfm], rehypePlugins: [rehypeCaret] }, markdown));
+const CARET = '<span class="chat-caret" aria-hidden="true"></span>';
+
+test("the caret never goes inside a void element and sits at the very end of the text", () => {
+  // A hard line break, a rule, a task checkbox: React refuses children on void elements.
+  assert.ok(withCaret("Line one  \nline two").endsWith(`line two${CARET}</p>`));
+  assert.ok(withCaret("Text\n\n---").endsWith(`<hr/>${CARET}`));
+  assert.ok(withCaret("- [ ] task").includes(`task${CARET}</li>`));
+  // After the last words, not inside an earlier bold run.
+  assert.ok(withCaret("a **b** c").endsWith(`c${CARET}</p>`));
+  assert.ok(withCaret("ends **bold**").endsWith(`</strong>${CARET}</p>`));
+  // Into the last cell and the last item, never into code.
+  assert.ok(withCaret("| a |\n|---|\n| b |").includes(`b${CARET}</td>`));
+  assert.ok(withCaret("- one\n- two").includes(`two${CARET}</li>`));
+  assert.ok(withCaret("```\ncode\n```").endsWith(`</pre>${CARET}`));
+});
 
 const FRAME = 16;
 

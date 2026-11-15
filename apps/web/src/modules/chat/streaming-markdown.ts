@@ -71,6 +71,46 @@ export function revealLength(text: string, position: number, shown: number): num
   return boundary > shown || at - shown <= MAX_WORD ? Math.max(boundary, shown) : at;
 }
 
+/** Hast as the caret plugin sees it. */
+export interface CaretNode {
+  type: string;
+  tagName?: string;
+  value?: string;
+  properties?: Record<string, unknown>;
+  children?: CaretNode[];
+}
+
+/** Blocks the caret enters to reach the end of the text. Anything else that ends the text — an inline run (bold, a
+ *  link, a citation), code, math, or a void element (`hr`, `br`, `img`, a task checkbox) — keeps the caret after it. */
+const CARET_DESCEND = new Set(["p", "li", "blockquote", "td", "th", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "table", "thead", "tbody", "tfoot", "tr", "section"]);
+/** Containers a `<span>` may not be a child of: the caret is left out instead of nesting invalid markup. */
+const CARET_NO_SPAN = new Set(["ul", "ol", "table", "thead", "tbody", "tfoot", "tr"]);
+
+/** Rehype plugin: the writing caret at the very end of the text (preview `.chat-caret`). */
+export function rehypeCaret() {
+  return (tree: CaretNode) => {
+    let host = tree;
+    for (;;) {
+      const last = lastContent(host);
+      if (last?.type !== "element" || !CARET_DESCEND.has(last.tagName ?? "")) break;
+      host = last;
+    }
+    if (CARET_NO_SPAN.has(host.tagName ?? "")) return;
+    host.children = [...(host.children ?? []), { type: "element", tagName: "span", properties: { className: ["chat-caret"], ariaHidden: "true" }, children: [] }];
+  };
+}
+
+/** The last child that shows something (the whitespace between block elements is not content). */
+function lastContent(node: CaretNode): CaretNode | undefined {
+  const children = node.children ?? [];
+  for (let index = children.length - 1; index >= 0; index -= 1) {
+    const child = children[index]!;
+    if (child.type === "comment" || (child.type === "text" && !child.value?.trim())) continue;
+    return child;
+  }
+  return undefined;
+}
+
 const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/;
 const LIST_MARKER = /^ {0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/;
 // A reference definition resolves links and footnotes anywhere in the same

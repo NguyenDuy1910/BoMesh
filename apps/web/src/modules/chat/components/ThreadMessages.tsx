@@ -19,7 +19,7 @@ import {
   ThumbsUp,
   X,
 } from "lucide-react";
-import { memo, useEffect, useRef, useState, type Key } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type Key } from "react";
 
 import { Callout } from "@/components/ui/Callout";
 import { FileIcon } from "@/components/ui/FileIcon";
@@ -171,7 +171,8 @@ export const Answer = memo(function Answer(props: AnswerProps) {
   const answerRef = useRef<HTMLDivElement>(null);
   const streaming = shown.state === "streaming";
   const visible = shown.sources.filter((s) => s.available);
-  const seconds = answer.finishedAt && answer.startedAt ? Math.max(1, Math.round((answer.finishedAt - answer.startedAt) / 1000)) : undefined;
+  // Each cited document's source numbers, so the cards in the flow and the answer point at each other.
+  const cited = useMemo(() => new Map(shown.sources.filter((s) => s.available).map((s) => [s.item, [s.n, ...(s.aliases ?? [])]])), [shown.sources]);
   const askAll = `Ask again in all of ${workspace.displayName ?? "the workspace"}`;
 
   // Built only from knowledge this person can't read: show nothing of it.
@@ -297,7 +298,7 @@ export const Answer = memo(function Answer(props: AnswerProps) {
   return (
     <div className="chat-msg chat-msg--ai" id={`msg-${answer.key}`} ref={answerRef}>
       {index === attempts.length - 1 ? (
-        <WorkSteps steps={answer.steps} streaming={streaming} working={streaming && !shown.text} show={showSteps} files={shown.artifacts.length} seconds={seconds} onOpenSource={onOpenSource} />
+        <WorkSteps steps={answer.steps} streaming={streaming} working={streaming && !shown.text} show={showSteps} files={shown.artifacts.length > 0} cited={cited} onOpenSource={onOpenSource} />
       ) : null}
       {shown.text || streaming ? <AnswerMarkdown text={shown.text} sources={shown.sources} streaming={streaming && !!shown.text} activeN={activeCite} onCite={cite} /> : null}
       {shown.state === "INTERRUPTED" ? (

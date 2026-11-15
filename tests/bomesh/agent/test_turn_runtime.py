@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from dataclasses import fields
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -35,6 +36,7 @@ from bomesh.agent import (
     UserTurn,
 )
 from bomesh.agent.models import AgentContext, ConversationMessage, ToolOutput
+from bomesh.connector.protocol import CitationInfo
 from bomesh.agent.protocol import (
     FunctionCallItem,
     FunctionCallOutputItem,
@@ -52,7 +54,7 @@ from bomesh.agent.tools import (
 from bomesh.agent.tools.read_resource import ReadResource
 from bomesh.agent.tools.run_shell import RunShell
 from bomesh.agent.turn import run_turn
-from bomesh.knowledge import Evidence
+from bomesh.knowledge import DocumentFacts, Evidence
 
 
 class Lookup(ToolExecutor):
@@ -342,13 +344,17 @@ async def test_turn_recaptures_step_and_returns_to_model_after_a_tool() -> None:
 
 
 class FindingLookup(Lookup):
-    """A search whose evidence spans documents, one of them twice."""
+    """A search whose evidence spans documents, one of them twice (its best passage first)."""
 
     async def handle(self, invocation: ToolInvocation) -> ToolOutput:
-        hits = [("doc-a", "c1", "Leave policy"), ("doc-b", "c2", "Handbook"), ("doc-a", "c3", "Leave policy")]
+        facts = DocumentFacts(mime_type="application/pdf", file_name="leave.pdf", updated_at=datetime(2026, 11, 1, tzinfo=UTC), collection_title="HR")
+        hits = [("doc-a", "c1", "Leave policy", 4, "Employees  get\n20 days " + "of leave " * 40), ("doc-b", "c2", "Handbook", None, "Welcome."), ("doc-a", "c3", "Leave policy", 9, "Carry-over.")]
         return ToolOutput(
             content="found",
-            evidence=[Evidence(id=chunk, item_id=item, chunk_id=chunk, title=title, content="text") for item, chunk, title in hits],
+            evidence=[
+                Evidence(id=chunk, item_id=item, chunk_id=chunk, title=title, content=text, citation=CitationInfo(page_start=page), document=facts if item == "doc-a" else None)
+                for item, chunk, title, page, text in hits
+            ],
         )
 
 
@@ -366,10 +372,16 @@ async def test_a_finished_search_reports_the_documents_it_found_before_the_answe
     events = [event async for event in run_turn(_session(transport, registry), _turn(_context()))]
 
     done = next(event for event in events if event.type == "tool_completed")
-    assert [(s.item, s.title, s.passages) for s in done.sources] == [
-        ("workspaces/tenant/items/doc-a", "Leave policy", ["workspaces/tenant/items/doc-a/passages/c1", "workspaces/tenant/items/doc-a/passages/c3"]),
-        ("workspaces/tenant/items/doc-b", "Handbook", ["workspaces/tenant/items/doc-b/passages/c2"]),
-    ]
+    a, b = done.sources
+    assert (a.item, a.title, a.mime_type, a.file_name, a.collection, a.update_time, a.page) == (
+        "workspaces/tenant/items/doc-a", "Leave policy", "application/pdf", "leave.pdf", "HR", "2026-11-01T00:00:00+00:00", 4,
+    )
+    assert a.passages == ["workspaces/tenant/items/doc-a/passages/c1", "workspaces/tenant/items/doc-a/passages/c3"]
+    # One line, cut on a word, short enough for a card.
+    assert a.excerpt.startswith("Employees get 20 days of leave") and a.excerpt.endswith("…") and len(a.excerpt) <= 221
+    assert (b.item, b.excerpt, b.page, b.collection) == ("workspaces/tenant/items/doc-b", "Welcome.", None, None)
+    # Facts, not metrics.
+    assert set(done.model_dump(exclude_none=True)) == {"type", "sequence_number", "call_id", "tool_name", "status", "sources"}
     first_text = next(i for i, event in enumerate(events) if event.type == "response.output_text.delta")
     assert events.index(done) < first_text
 

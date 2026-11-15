@@ -14,7 +14,7 @@ import logging
 from collections.abc import Sequence
 from hashlib import sha256
 from bomesh.document_index import ContextualChunk, ItemContentIndex
-from bomesh.knowledge import Evidence, ReadAccess, Reranker, RetrievalContext
+from bomesh.knowledge import DocumentFacts, Evidence, ReadAccess, Reranker, RetrievalContext
 
 log = logging.getLogger(__name__)
 
@@ -68,12 +68,12 @@ class ItemKnowledgeRetriever:
         )
         if not chunks:
             return []
-        visible = await scope.recheck([chunk.item_id for chunk in chunks])
-        allowed = [chunk for chunk in chunks if chunk.item_id in visible]
+        facts = await scope.recheck([chunk.item_id for chunk in chunks])
+        allowed = [chunk for chunk in chunks if chunk.item_id in facts]
         if not allowed:
             return []
         ranked = await self._rank(allowed, queries=normalized_queries, limit=limit)
-        return [_evidence_from_chunk(chunk) for chunk in ranked]
+        return [_evidence_from_chunk(chunk, facts[chunk.item_id]) for chunk in ranked]
 
     async def _rank(
         self,
@@ -138,7 +138,7 @@ def source_reference(item_id: str, chunk_id: str) -> str:
     return f"source-{digest[:8]}"
 
 
-def _evidence_from_chunk(chunk: ContextualChunk) -> Evidence:
+def _evidence_from_chunk(chunk: ContextualChunk, document: DocumentFacts) -> Evidence:
     return Evidence(
         id=source_reference(chunk.item_id, chunk.id),
         item_id=chunk.item_id,
@@ -152,6 +152,7 @@ def _evidence_from_chunk(chunk: ContextualChunk) -> Evidence:
         contextual_text=chunk.contextual_text,
         relevance_score=chunk.relevance_score,
         rerank_score=chunk.rerank_score,
+        document=document,
     )
 
 
