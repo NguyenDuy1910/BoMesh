@@ -122,7 +122,7 @@ function plan(q, conv, files, mod, edit) {
   if (target) {
     const instr = q.replace(/^Update “[^”]+”:\s*/, '');
     const t = transform(target, instr); const next = target.revs.length + 1;
-    return { text: `Done — **${target.title}** is now on version ${next}. ${t.summary}. Every earlier version stays in History.`, citations: [], noResults: null, partial: false, searchLabel: 'the files in this conversation',
+    return { text: `Done — **${target.title}** is now on version ${next}. ${t.summary}. Every earlier version stays in History.`, citations: [], noResults: null, partial: false,
       work: [{ k: 'prepare', label: 'Reused the files already open in this conversation' }, { k: 'code', label: 'Ran code', runs: [{ cmd: KIND(target.type) === 'sheet' ? `df = pd.read_excel("${target.file}")\n# ${instr}\ndf.to_excel("${target.file}", index=False)` : `doc = Document("${target.file}")\n# ${instr}\ndoc.save("${target.file}")`, out: `Saved ${target.file}`, exit: 0 }] }, { k: 'export', label: `Updated ${target.file}`, d: `Version ${next}` }],
       apply: () => { const r = addRev(target, { ...t.rev, summary: t.summary }); return [{ id: target.id, rev: r.n }]; }, editOf: target.id };
   }
@@ -160,7 +160,7 @@ function plan(q, conv, files, mod, edit) {
     text += `\n\nI also saved this as **${title}** — a Word document you can edit and share.`;
     apply = () => [{ id: newArt({ conv: conv.id, title, file, type: 'docx', rev: { html, summary: 'First version' }, sources: base.citations.map(c => c.doc) }).id, rev: 1 }];
   }
-  return { text, citations: base.citations, noResults: base.noResults || null, partial: base.partial, next: base.next || null, gap: base.gap || null, lowConf: !!base.lowConf, searchLabel: base.searchLabel, work, apply };
+  return { text, citations: base.citations, noResults: base.noResults || null, partial: base.partial, next: base.next || null, gap: base.gap || null, lowConf: !!base.lowConf, work, apply };
 }
 function afterStream(am, pl) {
   if (am.state !== 'done' || !am.artifacts?.length) return;

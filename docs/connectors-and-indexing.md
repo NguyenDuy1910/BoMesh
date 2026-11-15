@@ -96,8 +96,8 @@ Docling → chunks → ItemIndex → ready (semantic retrieval)
 ```
 
 `items.status` describes the durable resource lifecycle. Documents additionally
-carry `items.index_status`, their one processing state, and
-`items.processed_version`. A parsing or indexing failure therefore does not make
+carry `item_index_states.index_status`, their one processing state, and
+`item_index_states.processed_version`. A parsing or indexing failure therefore does not make
 an already-stored original file unavailable, and a ready Document whose
 processing configuration changed shows as outdated until a run re-processes it.
 

@@ -293,5 +293,4 @@ def test_document_states_match_the_schema_design() -> None:
 
     content = {"pending": "PENDING", "ready": "AVAILABLE", "failed": "FAILED"}
     assert {content[v] for v in values("status")} == set(schemas["ContentState"]["enum"])
-    assert {v.upper() for v in values("publication_state")} == set(schemas["PublicationState"]["enum"])
     assert {v.upper() for v in values("item_type")} == set(schemas["ItemType"]["enum"])

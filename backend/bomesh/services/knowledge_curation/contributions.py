@@ -419,7 +419,7 @@ class ContributionService:
             if draft.replaces_id is None:
                 raise InvalidArgument.for_field("replacesItem", "NEW_REVISION needs replacesItem.")
             replaced = await referenced_item(session, ctx, workspace_id, draft.replaces_id)
-            if replaced.item_type != "document" or replaced.publication_state != "published":
+            if replaced.item_type != "document" or not replaced.is_published:
                 raise InvalidArgument.for_field(
                     "replacesItem", "replacesItem must be a published DOCUMENT."
                 )

@@ -286,7 +286,9 @@ def _summary(item: Item, *, merged_from: UUID | None) -> ItemSummary:
         display_name=item.title,
         parent_id=item.parent_item_id,
         mime_type=item.mime_type,
-        publication_state=item.publication_state.upper() if item.publication_state else None,
+        publication_state=None
+        if item.is_published is None
+        else ("PUBLISHED" if item.is_published else "UNPUBLISHED"),
     )
 
 

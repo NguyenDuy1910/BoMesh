@@ -18,6 +18,7 @@ from sqlalchemy import ColumnElement, and_, func, literal, or_, select, text, up
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
+from sqlalchemy.orm.attributes import set_committed_value
 
 from bomesh.connector.file import FinxFileExtensions
 from bomesh.db.models import (
@@ -25,6 +26,7 @@ from bomesh.db.models import (
     Contribution,
     Conversation,
     Item,
+    ItemIndexState,
     ItemLink,
     ItemRevision,
     ItemUpload,
@@ -61,6 +63,8 @@ ARCHIVE_MIME_TYPES = frozenset({"application/zip", "application/x-zip-compressed
 
 #: Metadata derived from the current revision's object; reset when it changes.
 _DERIVED_METADATA_KEYS = ("preview", "cover", "processing")
+#: The read-only ``Item`` views of ``ItemIndexState`` that ``set_index_state`` writes.
+_INDEX_VIEWS = frozenset({"index_status", "processed_version", "indexed_revision_number"})
 
 
 # -- Identity -----------------------------------------------------------------
@@ -403,12 +407,12 @@ class ItemService:
             mime_type=mime_type,
             metadata_={**dict(metadata or {}), "file_name": file_name},
             status="pending",
-            publication_state="published",
-            index_status="unsupported",
+            is_published=True,
             created_by_user_id=owner_id,
         )
         self._session.add(item)
         await self._session.flush()
+        await self.set_index_state((item,), index_status="unsupported")
         await self._session.refresh(item)
         return item
 
@@ -500,8 +504,7 @@ class ItemService:
             "storage_key": revision_object_key(workspace_id, identifier, 1),
             "metadata_": {**dict(metadata or {}), "file_name": file_name, "purpose": purpose},
             "status": "pending",
-            "publication_state": "published" if published else "unpublished",
-            "index_status": "pending",
+            "is_published": published,
             "created_by_user_id": created_by_user_id,
         }
         await self._session.execute(
@@ -546,7 +549,7 @@ class ItemService:
         item.size_bytes = size_bytes
         if storage_metadata:
             item.metadata_ = {**item.metadata_, "storage": dict(storage_metadata)}
-        item.index_status = "pending" if processable else "unsupported"
+        await self.set_index_state((item,), index_status="pending" if processable else "unsupported")
         if await self.current_revision(item.id) is None:
             assert item.storage_key is not None and item.mime_type is not None
             self._session.add(
@@ -667,7 +670,7 @@ class ItemService:
         }
         item.metadata_ = {**metadata, "file_name": name}
         if item.index_status != "unsupported":
-            item.index_status = "pending"
+            await self.set_index_state((item,), index_status="pending")
         await self._session.flush()
         await self._session.refresh(item, attribute_names=["updated_at"])
         return revision
@@ -799,8 +802,9 @@ class ItemService:
         await self._session.execute(
             update(Item)
             .where(Item.id.in_(ids))
-            .values(deleted_at=now, payload_dirty_at=now, updated_at=now)
+            .values(deleted_at=now, updated_at=now)
         )
+        await self.mark_payload_dirty(ids, now)
         await self._session.execute(
             update(ItemLink)
             .where(ItemLink.collection_item_id.in_(ids), ItemLink.deleted_at.is_(None))
@@ -823,11 +827,11 @@ class ItemService:
             .where(Item.id.in_(ids))
             .values(
                 deleted_at=None,
-                payload_dirty_at=now,
                 updated_at=now,
                 metadata_=Item.metadata_.op("-")(literal("merged_into")),
             )
         )
+        await self.mark_payload_dirty(ids, now)
         restorable = await self._session.scalars(
             select(ItemLink).where(
                 ItemLink.collection_item_id.in_(ids), ItemLink.deleted_at == stamp
@@ -858,7 +862,7 @@ class ItemService:
         if destination is None:
             item.inherit_access = False
         if item.item_type == "document" and destination is not None and is_personal(destination):
-            item.publication_state = "published"
+            item.is_published = True
         if destination is not None:
             link = await self.live_link(destination.id, item.id)
             if link is not None:
@@ -874,16 +878,14 @@ class ItemService:
                     )
                 )
             )
-            await self._session.execute(
-                update(Item).where(Item.id.in_(moved)).values(payload_dirty_at=now)
-            )
+            await self.mark_payload_dirty(moved, now)
         await self._session.flush()
         await self._session.refresh(item)
         return moved
 
     async def set_publication(self, item: Item, *, published: bool) -> None:
-        item.publication_state = "published" if published else "unpublished"
-        item.payload_dirty_at = await self._now()
+        item.is_published = published
+        await self.mark_payload_dirty((item.id,), await self._now())
         await self._session.flush()
         await self._session.refresh(item, attribute_names=["updated_at"])
 
@@ -924,11 +926,35 @@ class ItemService:
         processed_version: str,
         indexed_revision_number: int | None = None,
     ) -> Item:
-        item = await self._set_index_status(item_id, "ready")
-        item.processed_version = processed_version
-        item.indexed_revision_number = indexed_revision_number
-        await self._session.flush()
-        return item
+        return await self._set_index_status(
+            item_id,
+            "ready",
+            processed_version=processed_version,
+            indexed_revision_number=indexed_revision_number,
+        )
+
+    async def set_index_state(self, items: Sequence[Item], **values: str | int | None) -> None:
+        """Write the documents' :class:`ItemIndexState` (never their ``items`` row, so
+        neither ``updated_at`` nor the etag moves) and keep their loaded views current."""
+        assert values.keys() <= _INDEX_VIEWS, values.keys() - _INDEX_VIEWS
+        if not items:
+            return
+        await self._session.execute(
+            update(ItemIndexState)
+            .where(ItemIndexState.item_id.in_([item.id for item in items]))
+            .values(**values)
+        )
+        for item in items:
+            for key, value in values.items():
+                set_committed_value(item, key, value)
+
+    async def mark_payload_dirty(self, item_ids: Iterable[UUID], at: Any) -> None:
+        """The Qdrant payload of these documents must be re-applied (collections are skipped)."""
+        await self._session.execute(
+            update(ItemIndexState)
+            .where(ItemIndexState.item_id.in_(list(item_ids)))
+            .values(payload_dirty_at=at)
+        )
 
     async def mark_index_failed(self, item_id: UUID) -> Item:
         return await self._set_index_status(item_id, "failed")
@@ -996,7 +1022,9 @@ class ItemService:
 
     # -- Internals ------------------------------------------------------------
 
-    async def _set_index_status(self, item_id: UUID, status: str) -> Item:
+    async def _set_index_status(
+        self, item_id: UUID, status: str, **values: str | int | None
+    ) -> Item:
         if status not in INDEX_STATUSES:
             raise ValueError(f"unsupported index status: {status}")
         item = await self._get_internal(item_id)
@@ -1004,8 +1032,7 @@ class ItemService:
             raise InvalidDocumentStateError("cannot update a deleted item")
         if item.item_type != "document":
             raise InvalidDocumentStateError("only documents have an index lifecycle")
-        item.index_status = status
-        await self._session.flush()
+        await self.set_index_state((item,), index_status=status, **values)
         return item
 
     async def _get_internal(self, item_id: UUID) -> Item:

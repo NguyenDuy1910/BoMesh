@@ -248,13 +248,21 @@ the same with every model provider; no provider container or file API is used.
 - **Clients see what ran.** The `run_shell` `function_call` (its `commands`
   argument) and its `function_call_output` (the JSON above) are the one
   canonical shell record for the model, the web and the Flutter client; no
-  container id or host path ever appears in them. The web chat folds a turn's
-  work into one line above the answer — "Worked for 26s · Searched HR
-  Policies · Ran 3 commands, 1 failed · Created 2 files" — that opens into a
-  timeline of searches, reads and shell runs; each command shows its code on
-  request, its output, and a failing command's last error line. An output
-  that is not that JSON (a tool error) reads as one failed run with its
-  message.
+  container id or host path ever appears in them. While a turn works, the web
+  chat shows a timeline above the answer: each finished step, the documents a
+  search found (`tool_completed.sources`, a quiet chip list that opens the
+  preview at the found passage) as soon as it ends, and a live row naming the
+  tool that runs or "Thinking" when none does; a later search adds its own
+  row. Afterwards the timeline folds into one line — "Searched your knowledge
+  · Ran 3 commands, 1 failed · Created 2 files · 26s" — that opens it again;
+  each command shows its code on request, its output, and a failing command's
+  last error line. An output that is not that JSON (a tool error) reads as one
+  failed run with its message.
+- **Found documents are facts, not context.** `tool_completed.sources` lists
+  the documents of a tool's `Evidence` (item, title, ≤3 passage names, ≤8
+  documents, no text). Retrieval returns only what the caller can read, so
+  the list never reveals more than the answer could cite; it is transient
+  (not stored with the message).
 - **File cards survive a reload.** The answer text that follows an export
   carries a `bomesh:artifact` annotation per saved revision (agent
   `ArtifactProjection`, beside `CitationProjection`), so web and mobile

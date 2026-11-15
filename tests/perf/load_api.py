@@ -2002,7 +2002,7 @@ async def cmd_setup(args: argparse.Namespace) -> None:
         rows = (await connection.execute(text(
             "SELECT i.id, max(r.revision_number) FROM items i JOIN item_revisions r ON r.item_id = i.id "
             "WHERE i.tenant_id = :ws AND i.item_type = 'document' AND i.deleted_at IS NULL AND i.status = 'ready' "
-            "AND i.publication_state = 'published' GROUP BY i.id HAVING count(*) >= 2 ORDER BY i.id LIMIT 20"),
+            "AND i.is_published = true GROUP BY i.id HAVING count(*) >= 2 ORDER BY i.id LIMIT 20"),
             {"ws": dataset.workspace})).all()
     await engine.dispose()
     for item_id, revisions in rows:

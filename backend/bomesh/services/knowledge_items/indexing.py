@@ -22,7 +22,7 @@ from sqlalchemy.orm import joinedload
 
 from bomesh.connector.protocol import Chunk, DocumentItem
 from bomesh.db.engine import advisory_lock_scope, transaction_scope
-from bomesh.db.models import Item
+from bomesh.db.models import Item, ItemIndexState
 from bomesh.document_index import (
     ClassificationRequest,
     DocumentClassification,
@@ -221,7 +221,7 @@ class ItemIngestionService:
                     ),
                     document_type=document.document_type or "plain_text",
                     connector_key=canonical.item.source.provider.value,
-                    published=document.publication_state == "published",
+                    published=bool(document.is_published),
                 ),
                 processed_version=self.processing_version(),
                 revision_number=started.revision_number,
@@ -312,9 +312,9 @@ class ItemIngestionService:
         async with transaction_scope(self._session_factory) as session:
             dirty = list(
                 await session.scalars(
-                    select(Item.id)
-                    .where(Item.payload_dirty_at.is_not(None))
-                    .order_by(Item.payload_dirty_at)
+                    select(ItemIndexState.item_id)
+                    .where(ItemIndexState.payload_dirty_at.is_not(None))
+                    .order_by(ItemIndexState.payload_dirty_at)
                     .limit(limit)
                 )
             )
@@ -322,10 +322,11 @@ class ItemIngestionService:
 
     async def _sync_payload(self, item_id: UUID) -> int:
         async with transaction_scope(self._session_factory) as session:
+            index_state = await session.get(ItemIndexState, item_id)
             item = await session.get(Item, item_id)
-            if item is None or item.payload_dirty_at is None:
+            if item is None or index_state is None or index_state.payload_dirty_at is None:
                 return 0
-            marked = item.payload_dirty_at
+            marked = index_state.payload_dirty_at
             path = await item_ancestry(session, item.id)
             state = None
             if item.item_type == "document":
@@ -335,7 +336,7 @@ class ItemIngestionService:
                 if collection_id is not None:
                     state = ItemPayloadState(
                         collection_item_id=str(collection_id),
-                        published=item.publication_state == "published",
+                        published=bool(item.is_published),
                         is_deleted=any(node.deleted_at is not None for node in path),
                     )
             tenant_id = str(item.tenant_id)
@@ -344,7 +345,7 @@ class ItemIngestionService:
             await self._index.apply_item_payload(str(item_id), tenant_id=tenant_id, state=state)
             reindex = (
                 not state.is_deleted
-                and item.index_status == "ready"
+                and index_state.index_status == "ready"
                 and await self._index.count_item_content(str(item_id), tenant_id=tenant_id)
                 == 0
             )
@@ -354,8 +355,8 @@ class ItemIngestionService:
                 # The points were purged: undelete restores search by a new run.
                 values["index_status"] = "pending"
             result = await session.execute(
-                update(Item)
-                .where(Item.id == item_id, Item.payload_dirty_at == marked)
+                update(ItemIndexState)
+                .where(ItemIndexState.item_id == item_id, ItemIndexState.payload_dirty_at == marked)
                 .values(**values)
             )
         return int(result.rowcount or 0)
@@ -417,22 +418,20 @@ class ItemIngestionService:
         item = await session.get(Item, item_id, with_for_update=True, populate_existing=True)
         if item is None:
             return
+        items = ItemService(session)
         if item.deleted_at is not None:
             # Deleted while indexing: the points just written are live; the
             # payload sync tombstones them.
-            item.payload_dirty_at = func.now()
-            await session.flush()
+            await items.mark_payload_dirty((item_id,), func.now())
             return
-        items = ItemService(session)
         current = await items.current_revision(item_id)
         unchanged = (
             (current.revision_number if current is not None else None) == revision_number
             and str(await _governing_collection(session, item_id)) == context.collection_item_id
         )
         if not unchanged:
-            item.index_status = "pending"
-            item.payload_dirty_at = func.now()
-            await session.flush()
+            await items.set_index_state((item,), index_status="pending")
+            await items.mark_payload_dirty((item_id,), func.now())
             return
         await items.mark_index_ready(
             item_id,
@@ -443,9 +442,8 @@ class ItemIngestionService:
             await apply_assistant_topics(
                 session, item_id, [UUID(topic.id) for topic in classified.topics]
             )
-        if (item.publication_state == "published") != context.published:
-            item.payload_dirty_at = func.now()
-            await session.flush()
+        if bool(item.is_published) != context.published:
+            await items.mark_payload_dirty((item_id,), func.now())
 
     async def _record_failure(self, item_id: UUID) -> None:
         """A run failed: the document is FAILED; deleted meanwhile, its points are re-tombstoned."""
@@ -454,10 +452,10 @@ class ItemIngestionService:
             item = await session.get(Item, item_id, with_for_update=True, populate_existing=True)
             if item is None:
                 return
-            item.index_status = "failed"
+            items = ItemService(session)
+            await items.set_index_state((item,), index_status="failed")
             if item.deleted_at is not None:
-                item.payload_dirty_at = func.now()
-            await session.flush()
+                await items.mark_payload_dirty((item_id,), func.now())
 
     async def _persist_preview(
         self,

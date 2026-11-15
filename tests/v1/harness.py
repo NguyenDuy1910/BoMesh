@@ -472,8 +472,7 @@ class World:
                 title=title or f"Document {uuid4().hex[:6]}",
                 mime_type="application/pdf" if document_type == "pdf" else None,
                 status="ready",
-                publication_state="published" if published else "unpublished",
-                index_status="pending",
+                is_published=published,
                 created_by_user_id=creator.id if creator is not None else None,
             )
             session.add(item)

@@ -84,6 +84,20 @@ test("text written before a tool call is not the answer; steps follow the tools"
   assert.deepEqual(done.steps.map((s) => [s.label, s.detail, s.live]), [["Searched your knowledge", "7 relevant passages", false]]);
 });
 
+test("a finished search shows what it found before the answer starts", () => {
+  const found = [{ item: "workspaces/w1/items/doc-a", title: "Leave policy", passages: ["workspaces/w1/items/doc-a/passages/p1"] }];
+  const turn = run([
+    { type: "response.output_item.added", output_index: 0, item: { type: "function_call", call_id: "c1", name: "knowledge_search", arguments: "" } },
+    { type: "tool_started", call_id: "c1", tool_name: "knowledge_search" },
+    { type: "tool_completed", call_id: "c1", tool_name: "knowledge_search", status: "completed", result_count: 3, duration_ms: 400, sources: found },
+  ]);
+  assert.equal(turn.text, "");
+  assert.deepEqual(turn.steps.map((s) => [s.live, s.sources]), [[false, found]]);
+
+  const live = run([{ type: "response.output_item.added", output_index: 0, item: { type: "function_call", call_id: "c1", name: "knowledge_search", arguments: "" } }]);
+  assert.equal(live.steps[0]!.sources, undefined, "nothing is listed while the search runs");
+});
+
 test("citation annotations group passages under one number per document", () => {
   const turn = run([
     { type: "response.created", response: { metadata: { message: msg } } },

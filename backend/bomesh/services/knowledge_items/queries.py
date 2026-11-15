@@ -20,7 +20,10 @@ CONTENT_STATE: ColumnElement[Any] = case(
     (Item.status == "failed", "FAILED"),
     else_="PENDING",
 )
-PUBLICATION_STATE: ColumnElement[Any] = func.upper(Item.publication_state)
+PUBLICATION_STATE: ColumnElement[Any] = case(
+    (Item.is_published, "PUBLISHED"),
+    (Item.is_published.is_(False), "UNPUBLISHED"),
+)
 ITEM_TYPE: ColumnElement[Any] = func.upper(Item.item_type)
 PURPOSE: ColumnElement[Any] = func.upper(
     func.coalesce(Item.metadata_["purpose"].astext, "knowledge")

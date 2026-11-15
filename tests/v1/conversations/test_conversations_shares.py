@@ -123,7 +123,7 @@ async def test_people_share_is_refiltered_for_every_reader(chat: Chat) -> None:
     ]
     async with transaction_scope(chat.sessions) as session:
         await session.execute(
-            update(Item).where(Item.id == chat.policy.id).values(publication_state="unpublished")
+            update(Item).where(Item.id == chat.policy.id).values(is_published=False)
         )
     owner_view = await (await chat.api()).get(url)
     assert owner_view.json()["snapshot"]["messages"][1] == {"role": "ASSISTANT", "available": False}

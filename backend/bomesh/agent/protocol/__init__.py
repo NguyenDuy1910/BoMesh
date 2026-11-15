@@ -136,6 +136,7 @@ from bomesh.agent.protocol.events import (  # noqa: E402
     RuntimeActivityEvent,
     StreamEventBase,
     ToolCompletedEvent,
+    ToolSource,
     ToolProgressEvent,
     ToolStartedEvent,
 )
@@ -219,6 +220,7 @@ __all__ = [
     "StreamEventBase",
     "SummaryText",
     "ToolCompletedEvent",
+    "ToolSource",
     "ToolProgressEvent",
     "ToolStartedEvent",
     "Tool",

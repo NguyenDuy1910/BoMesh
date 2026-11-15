@@ -124,7 +124,7 @@ class ItemNode:
     inherit_access: bool
     deleted_at: datetime | None
     system_kind: str | None
-    publication_state: str | None
+    is_published: bool | None
 
 
 def permission_denied(permission: str, resource: Resource) -> PermissionDenied:
@@ -816,7 +816,7 @@ async def item_ancestries(
             Item.inherit_access,
             Item.deleted_at,
             Item.metadata_["system_kind"].astext.label("system_kind"),
-            Item.publication_state,
+            Item.is_published,
             literal(0).label("depth"),
         )
         .where(Item.id.in_(ids))
@@ -833,7 +833,7 @@ async def item_ancestries(
             parent.c.inherit_access,
             parent.c.deleted_at,
             parent.c.metadata["system_kind"].astext,
-            parent.c.publication_state,
+            parent.c.is_published,
             path.c.depth + 1,
         ).where(parent.c.id == path.c.parent_item_id)
     )
@@ -848,7 +848,7 @@ async def item_ancestries(
                 inherit_access=row.inherit_access,
                 deleted_at=row.deleted_at,
                 system_kind=row.system_kind,
-                publication_state=row.publication_state,
+                is_published=row.is_published,
             )
         )
     return {item_id: tuple(nodes) for item_id, nodes in paths.items()}

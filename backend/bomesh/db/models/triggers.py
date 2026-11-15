@@ -226,6 +226,34 @@ END;
 """,
     ),
     _Trigger(
+        table="item_index_states",
+        name="document",
+        events="INSERT OR UPDATE OF item_id",
+        body="""
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM items WHERE id = NEW.item_id AND item_type = 'document') THEN
+    RAISE EXCEPTION 'only Document Items have an index state';
+  END IF;
+  RETURN NEW;
+END;
+""",
+    ),
+    # Every Document has exactly one index state, created with it (pending).
+    _Trigger(
+        table="items",
+        name="index_state",
+        timing="AFTER",
+        events="INSERT",
+        when="NEW.item_type = 'document'",
+        function="bomesh_create_item_index_state",
+        body="""
+BEGIN
+  INSERT INTO item_index_states (item_id) VALUES (NEW.id);
+  RETURN NULL;
+END;
+""",
+    ),
+    _Trigger(
         table="contributions",
         name="references",
         events=(

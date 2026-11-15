@@ -124,12 +124,12 @@ class ItemVisibility:
                 Item.item_type == "document",
                 Item.parent_item_id.in_(readable),
                 state(Item.deleted_at),
-                or_(Item.publication_state == "published", Item.parent_item_id.in_(editable)),
+                or_(Item.is_published, Item.parent_item_id.in_(editable)),
             ),
             select(nested.c.item_id.label("id")).where(
                 state(nested.c.deleted_at),
                 or_(
-                    nested.c.publication_state == "published",
+                    nested.c.is_published,
                     nested.c.collection_id.in_(editable),
                 ),
             ),
@@ -172,7 +172,7 @@ async def is_visible(
         return False
     held = await authorizer.collection_permissions(principal, ref.item_id)
     node = path[0]
-    return _readable(node.item_type, node.publication_state == "published", held)
+    return _readable(node.item_type, bool(node.is_published), held)
 
 
 async def visible_to(
@@ -190,7 +190,7 @@ async def visible_to(
             user_id
             for user_id, permissions in held[ref].items()
             if path
-            and _readable(path[0].item_type, path[0].publication_state == "published", permissions)
+            and _readable(path[0].item_type, bool(path[0].is_published), permissions)
         )
     return result
 
@@ -228,7 +228,7 @@ async def require_visible_item(
             held = await authorizer.collection_permissions(
                 principal, item.id, include_deleted=not live
             )
-            published = item.publication_state == "published"
+            published = bool(item.is_published)
             visible = _readable(item.item_type, published, held) and (
                 live or RESTORE in held
             )
@@ -322,7 +322,7 @@ def _nested_documents(
         select(
             child.c.id.label("item_id"),
             top.c.parent_item_id.label("collection_id"),
-            child.c.publication_state.label("publication_state"),
+            child.c.is_published.label("is_published"),
             child.c.deleted_at.label("deleted_at"),
         )
         .join_from(child, top, child.c.parent_item_id == top.c.id)
@@ -340,7 +340,7 @@ def _nested_documents(
         select(
             deeper.c.id,
             nested.c.collection_id,
-            deeper.c.publication_state,
+            deeper.c.is_published,
             deeper.c.deleted_at,
         ).where(deeper.c.parent_item_id == nested.c.item_id, below(deeper))
     )

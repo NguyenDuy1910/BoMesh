@@ -280,9 +280,9 @@ async def test_approve_moves_publishes_tags_and_never_ingests(scene: Scene) -> N
     assert approved.json()["state"] == "APPROVED"
     assert approved.json()["decision"]["reviewer"].endswith(str(scene.reviewer.id))
     item = await scene.item(candidate.id)
-    assert (item.parent_item_id, item.publication_state, item.document_type) == (
+    assert (item.parent_item_id, item.is_published, item.document_type) == (
         scene.kb.id,
-        "published",
+        True,
         "policy",
     )
     assert item.metadata_["summary"] == "The handbook"

@@ -164,7 +164,7 @@ async def index(
             parent_item_id=str(row.parent_item_id),
             document_type=row.document_type or "plain_text",
             connector_key="file",
-            published=row.publication_state == "published",
+            published=row.is_published,
         ),
         processed_version=runtime.processing_version(),
         revision_number=revision.revision_number if revision is not None else None,

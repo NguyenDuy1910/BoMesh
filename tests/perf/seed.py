@@ -20,7 +20,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import Table, insert, select, text
+from sqlalchemy import Table, bindparam, insert, select, text, update
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from bomesh.db.models import Base
@@ -187,6 +187,19 @@ class _Seeder:
         self.d.counts[table] = self.d.counts.get(table, 0) + len(rows)
         if table != "tenants":
             self.codes.update({str(row["id"]): row["code"] for row in rows if "code" in row and "id" in row})
+
+    async def set_index_states(self, rows: Sequence[dict[str, Any]]) -> None:
+        """Set the index state of seeded documents (``item_id`` plus the columns to set);
+        the ``items`` insert trigger already created each state row as ``pending``."""
+        states = _table("item_index_states")
+        statement = update(states).where(states.c.item_id == bindparam("state_item_id"))
+        shapes: dict[tuple[str, ...], list[dict[str, Any]]] = {}
+        for row in rows:
+            params = {key: value for key, value in row.items() if key != "item_id"}
+            shapes.setdefault(tuple(sorted(params)), []).append({"state_item_id": row["item_id"], **params})
+        for group in shapes.values():
+            for start in range(0, len(group), _BATCH):
+                await self.c.execute(statement, group[start : start + _BATCH])
 
     # -- phases --------------------------------------------------------------
 
@@ -391,6 +404,7 @@ class _Seeder:
     async def documents(self) -> None:
         s, ws = self.s, self.ws
         items, revisions, item_topics, uploads = [], [], [], []
+        index_states_rows: list[dict[str, Any]] = []
         self.document_ids: list[UUID] = []
         self.published: list[UUID] = []
         placement = self.leaf_ids + self.collection_ids
@@ -418,13 +432,16 @@ class _Seeder:
                 "mime_type": "application/pdf", "size_bytes": 1000 + n,
                 "storage_key": revision_object_key(ws, did, revision_count) if revision_count else None,
                 "metadata": meta, "inherit_access": True, "status": status,
-                "publication_state": "published" if published else "unpublished",
-                "index_status": "pending" if status != "ready" else index_states[n % len(index_states)],
-                "indexed_revision_number": revision_count if status == "ready" and n % 10 < 6 else None,
+                "is_published": bool(published),
                 "created_by_user_id": self.active_members[n % len(self.active_members)],
                 "created_at": created, "updated_at": updated,
                 "deleted_at": self.ago(20) if n % 50 == 11 else None,
             })
+            index_status = "pending" if status != "ready" else index_states[n % len(index_states)]
+            indexed_revision = revision_count if status == "ready" and n % 10 < 6 else None
+            if (index_status, indexed_revision) != ("pending", None):
+                index_states_rows.append({"item_id": did, "index_status": index_status,
+                                          "indexed_revision_number": indexed_revision})
             self.document_ids.append(did)
             if n % 50 == 11:
                 self.d.deleted_documents.append(str(did))
@@ -443,6 +460,7 @@ class _Seeder:
             for topic in self.r.sample(self.topic_ids, n % 4):
                 item_topics.append({"item_id": did, "topic_id": topic, "created_by_user_id": None})
         await self.put("items", items)
+        await self.set_index_states(index_states_rows)
         await self.put("item_revisions", revisions)
         await self.put("item_topics", item_topics)
         await self.put("item_uploads", uploads)
@@ -484,8 +502,8 @@ class _Seeder:
                           "parent_item_id": self.personal[uid], "parent_relation": "contains",
                           "document_type": "pdf", "title": f"Contribution {k:04d}", "mime_type": "application/pdf",
                           "size_bytes": 2048, "metadata": {"file_name": f"contrib-{k}.pdf"},
-                          "inherit_access": True, "status": "ready", "publication_state": "unpublished",
-                          "index_status": "pending", "created_by_user_id": uid})
+                          "inherit_access": True, "status": "ready", "is_published": False,
+                          "created_by_user_id": uid})
             replaces = self.published[k % len(self.published)] if k % 5 == 4 else None
             cid = uuid4()
             decided = state in ("approved", "rejected")
@@ -710,8 +728,7 @@ class _Seeder:
                           "document_type": "markdown", "title": f"Artifact {k}", "mime_type": "text/markdown",
                           "storage_key": revision_object_key(ws, aid, 1),
                           "metadata": {"file_name": f"artifact-{k}.md"}, "inherit_access": True,
-                          "status": "ready", "publication_state": "published", "index_status": "unsupported",
-                          "created_by_user_id": self.admin})
+                          "status": "ready", "is_published": True, "created_by_user_id": self.admin})
             arts.append({"item_id": aid, "kind": "draft", "owner_user_id": self.admin,
                          "conversation_id": UUID(self.d.conversations[k % len(self.d.conversations)]),
                          "audience": "private"})
@@ -720,6 +737,7 @@ class _Seeder:
                          "size_bytes": 64, "author": "assistant"})
             self.d.artifacts.append(str(aid))
         await self.put("items", items)
+        await self.set_index_states([{"item_id": row["id"], "index_status": "unsupported"} for row in items])
         await self.put("artifacts", arts)
         await self.put("item_revisions", revs)
 

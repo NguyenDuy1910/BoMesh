@@ -12,7 +12,8 @@ import type { AnswerSource, WorkStep } from "./turn";
 export type AnswerState = "streaming" | "COMPLETED" | "INTERRUPTED" | "FAILED";
 
 export interface AnswerView {
-  /** Row key / DOM id suffix: the message ID, or `live`. */
+  /** Row key / DOM id suffix: the message ID (the live answer takes it as soon as the server names it, so the stored
+   *  copy replacing it is the same row and nothing re-mounts), else `live`. */
   key: string;
   /** Assistant message name, once known. */
   message?: string;
@@ -44,6 +45,7 @@ export type ThreadRow =
   | { kind: "unanswered"; key: string; question: string; text: string };
 
 const idOf = (name?: string) => name?.slice(name.lastIndexOf("/") + 1) ?? "";
+const NO_FILES: SentFile[] = [];
 
 /** What Retry → More detail / Shorter adds to the question it resends (preview `m.mod`). */
 export const RETRY_MODIFIER = { detail: "\n\nMore detail, please.", shorter: "\n\nShorter, please." } as const;
@@ -58,7 +60,19 @@ export function questionOf(text: string): string {
   }
 }
 
+/** Stored answers by message object: a refetch or feedback replaces the object, so the view is rebuilt exactly then and
+ *  unchanged answers keep their identity while another one streams (their rows skip re-rendering). */
+const storedViews = new WeakMap<Message, { question: Message | undefined; view: AnswerView }>();
+
 export function storedAnswer(m: Message, question: Message | undefined): AnswerView {
+  const cached = storedViews.get(m);
+  if (cached && cached.question === question) return cached.view;
+  const view = storedView(m, question);
+  storedViews.set(m, { question, view });
+  return view;
+}
+
+function storedView(m: Message, question: Message | undefined): AnswerView {
   const text = m.text ?? "";
   const work = workOfAnswer(m.name);
   return {
@@ -83,7 +97,7 @@ export function storedAnswer(m: Message, question: Message | undefined): AnswerV
 export function liveAnswer(live: LiveTurn, question: Message | undefined): AnswerView {
   const t = live.turn;
   return {
-    key: "live",
+    key: t.message ? idOf(t.message) : "live",
     message: t.message,
     question: question?.name,
     questionText: questionOf(live.question),
@@ -117,7 +131,7 @@ export function buildThread(messages: readonly Message[], live: LiveTurn | undef
     if (m.role === "USER") {
       const next = stored[i + 1];
       const answered = next?.role === "ASSISTANT";
-      rows.push({ kind: "user", key: idOf(m.name), message: m.name, text: questionOf(m.text ?? ""), files: answered ? filesOfAnswer(next!.name) : [] });
+      rows.push({ kind: "user", key: idOf(m.name), message: m.name, text: questionOf(m.text ?? ""), files: answered ? filesOfAnswer(next!.name) : NO_FILES });
       if (!answered && !(live && i === stored.length - 1)) rows.push({ kind: "unanswered", key: `${idOf(m.name)}-open`, question: m.name ?? "", text: m.text ?? "" });
     } else {
       const prev = stored[i - 1];

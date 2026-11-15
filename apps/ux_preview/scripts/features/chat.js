@@ -168,7 +168,7 @@ function dueSoon() {
     ? `Here’s what’s coming up in the next 7 days:\n\n${items.map(line).join('\n')}` + (soon ? `\n\nStart with **${mdText(soon.title)}** — it’s ${relFuture(soon.at).replace(/^in /, 'due in ')}.` : '')
     : 'Nothing is due in the next 7 days across your spaces.';
   const next = items.filter(i => i.action?.label && i.action.label !== 'Open' && (i.action.act || i.action.href)).slice(0, 2).map(i => ({ label: i.action.label, act: i.action.act, data: i.action.data, href: i.action.act ? undefined : i.action.href }));
-  return { text, citations: [], searchLabel: 'your calendars', activity: [{ kind: 'search', label: 'Checked the calendars of your spaces', detail: plural(items.length, 'item') }], next, files: false };
+  return { text, citations: [], activity: [{ kind: 'search', label: 'Checked the calendars of your spaces', detail: plural(items.length, 'item') }], next, files: false };
 }
 /** Teaching teams and admins: what people asked lately, and what the knowledge couldn't answer. */
 function askedLately(q) {
@@ -185,7 +185,7 @@ function askedLately(q) {
   if (qs.length) parts.push(`**Sent to your spaces this week**\n${qs.slice(0, 5).map(r => `- [“${mdText(r.fields.question)}”](/requests/${r.id}) — ${actorName(r.requester)}, ${rel(r.created).toLowerCase()}${r.status === 'completed' ? ' · answered' : ''}`).join('\n')}`);
   if (gaps.length) parts.push(`**Questions the knowledge couldn’t answer**\n${gaps.slice(0, 5).map(g => `- “${mdText(g.q)}” — asked ${plural(g.n, 'time')} · ${mdText(g.why)}`).join('\n')}`);
   const next = [hasModule('requests') && qs.length ? { label: 'Open the question queue', href: '/requests?tab=queue' } : null, isAdmin() && gaps.length ? { label: 'Review knowledge gaps', href: '/overview' } : null].filter(Boolean);
-  return { text: parts.length ? parts.join('\n\n') : 'No questions came in this week, and nothing went unanswered.', citations: [], searchLabel: 'questions sent to your spaces',
+  return { text: parts.length ? parts.join('\n\n') : 'No questions came in this week, and nothing went unanswered.', citations: [],
     activity: [{ kind: 'search', label: 'Checked questions sent to your spaces', detail: plural(qs.length, 'question') }, { kind: 'search', label: 'Checked unanswered questions', detail: plural(gaps.length, 'gap') }], next, files: false };
 }
 const FINX_TOPICS = [
@@ -237,6 +237,15 @@ function prune(text, cites, keep) {
   const lines = text.split('\n').filter(l => [...l.matchAll(/\[(\d+)\]/g)].map(x => +x[1]).every(n => map[n]));
   return { text: lines.join('\n').replace(/\n{3,}/g, '\n\n').trim().replace(/\[(\d+)\]/g, (_, n) => `[${map[n]}]`), citations: cites.filter((_, i) => keep[i]).map(c => ({ ...c, n: map[c.n] })) };
 }
+/** Greetings, thanks and questions about the assistant itself need no knowledge: the answer comes without a search step
+    (the model decides; the live line says "Thinking" until it writes). */
+const SMALL_TALK = /^\s*(hi|hello|hey|thanks?|thank you|cảm ơn|xin chào|chào( bạn)?|who are you|what('?s| is) your name|what can you do|bạn (là ai|tên (là )?gì)( vậy)?|bạn làm được gì)\b[\s!?.]*$/i;
+function smallTalk(q) {
+  if (!SMALL_TALK.test(q)) return null;
+  const text = /thank|cảm ơn/i.test(q) ? 'You’re welcome. Ask me anything else about your work.'
+    : `I’m the ${curWs().name} assistant. I answer from the knowledge you can access and cite the documents I use. Ask me about a policy, a process or a document.`;
+  return { text, citations: [], activity: [], files: false };
+}
 function answer(q, scope = [], fileNames = [], space = null) {
   const readable = visibleKbs().filter(canReadKb);
   const inScope = id => !scope.length || scope.includes(id);
@@ -244,6 +253,8 @@ function answer(q, scope = [], fileNames = [], space = null) {
   const table = TOPIC_TABLES[S.ws];
   const t = (table?.topics || TOPICS).find(x => x.k.test(q) && (!x.when || x.when()));
   if (t?.live) return t.live(q);
+  const chat = !fileNames.length && smallTalk(q);
+  if (chat) return chat;
   const ctx = { q, p: me().profile || null };
   const files = t?.files ?? table?.files;
   let text, cites, artifact = null; const extra = [];
@@ -267,7 +278,7 @@ function answer(q, scope = [], fileNames = [], space = null) {
   const names = searched.map(k => k.name);
   const searchLabel = names.length <= 2 ? names.join(' and ') : `${names[0]}, ${names[1]} and ${names.length - 2} more`;
   const noRes = restricted => {
-    const r = { text: 'I couldn’t find this in the knowledge you can access.', citations: [], searchLabel, activity: [{ kind: 'search', label: `Searched ${plural(searched.length, 'collection')}`, detail: 'No relevant passages' }], noResults: { scoped: scope.length > 0, restricted: restricted || lockedExists }, files };
+    const r = { text: 'I couldn’t find this in the knowledge you can access.', citations: [], activity: [{ kind: 'search', label: `Searched ${plural(searched.length, 'collection')}`, detail: 'No relevant passages' }], noResults: { scoped: scope.length > 0, restricted: restricted || lockedExists }, files };
     // Not covered where the caller searched: offer who can answer; unscoped misses become a knowledge gap.
     if (!restricted && hasModule('requests')) { const n = askNext(q, scope, space); r.next = n.length ? n : null; if (!scope.length) r.gap = { q: q.trim(), kb: null }; }
     return r;
@@ -281,20 +292,22 @@ function answer(q, scope = [], fileNames = [], space = null) {
   pr.citations.forEach(c => { const d = docById(c.doc); c.page = Math.max(1, Math.min(c.page, d.pages)); });
   const readDocs = [...new Set(pr.citations.map(c => c.doc))].map(docById);
   const activity = [
-    { kind: 'search', label: `Searched ${names.length <= 2 && names.length ? searchLabel : plural(searched.length, 'collection')}`, detail: `${pr.citations.length * 3 + 1} relevant passages` },
+    { kind: 'search', label: `Searched ${names.length <= 2 && names.length ? searchLabel : plural(searched.length, 'collection')}`, detail: `${pr.citations.length * 3 + 1} relevant passages`, docs: readDocs.map(d => d.id) },
     ...fileNames.map(f => ({ kind: 'read', label: `Read ${f}`, detail: 'your attachment' })),
     ...readDocs.map(d => ({ kind: 'read', label: `Read ${d.name}`, detail: plural(pr.citations.filter(c => c.doc === d.id).length, 'passage') })),
     ...extra,
   ];
   const next = (t?.next?.(ctx) || []).filter(Boolean);
-  return { text: pr.text, citations: pr.citations, activity, artifact: flags.every(f => f.ok) ? artifact : null, searchLabel, partial: permDropped, next: next.length ? next : null, gap: t?.gap || null, lowConf: !!t?.gap, files };
+  return { text: pr.text, citations: pr.citations, activity, artifact: flags.every(f => f.ok) ? artifact : null, partial: permDropped, next: next.length ? next : null, gap: t?.gap || null, lowConf: !!t?.gap, files };
 }
+/** A planned activity as a work step; a search keeps the documents it found (`docs`). */
+const workStep = s => ({ k: s.kind, label: s.label, d: s.detail, ...(s.docs?.length ? { docs: s.docs } : {}) });
 /** Seeded conversations without messages get their first answer the first time they are opened. */
 function ensureSeed(conv) {
   if (conv.messages.length) return;
   const q = SEED[conv.id] || conv.title;
   const a = answer(q, conv.scope || [], [], conv.space || null);
-  conv.messages.push({ id: uid('m'), role: 'user', text: q }, { id: uid('m'), role: 'assistant', q, text: a.text, citations: a.citations, work: a.activity.map(s => ({ k: s.kind, label: s.label, d: s.detail })), noResults: a.noResults || null, partial: a.partial, next: a.next || null, lowConf: !!a.lowConf, state: 'done', dur: 4 });
+  conv.messages.push({ id: uid('m'), role: 'user', text: q }, { id: uid('m'), role: 'assistant', q, text: a.text, citations: a.citations, work: a.activity.map(workStep), noResults: a.noResults || null, partial: a.partial, next: a.next || null, lowConf: !!a.lowConf, state: 'done', dur: 4 });
 }
 function lastLine(conv) {
   const a = [...conv.messages].reverse().find(m => m.role === 'assistant'); if (!a) return '';
@@ -421,6 +434,9 @@ function userHtml(m) {
   return `<div class="chat-msg chat-msg--user" id="msg-${m.id}"><div class="chat-user">${filesRow}<div class="chat-bubble">${esc(m.text)}</div><div class="chat-user__actions">${iconBtn('copy', 'Copy', { size: 'sm', act: 'copy', data: { text: m.text, msg: 'Copied' } })}${iconBtn('pencil', 'Edit', { size: 'sm', act: 'chat-edit', data: { msg: m.id } })}</div></div></div>`;
 }
 const STEP_IC = { search: 'search', read: 'file-text', prepare: 'server', code: 'terminal', export: 'file', edit: 'pencil' };
+/** What a running step says (its stored label is the past tense shown once it finished). */
+const LIVE_LABEL = { search: 'Searching your knowledge', read: 'Reading a document', code: 'Running code', prepare: 'Preparing a file', export: 'Saving a file' };
+const THINK = '<span class="chat-think" aria-hidden="true"><i></i><i></i></span>';
 function stepsSummary(m) {
   const steps = (m.work || []).filter(s => !s.live); const parts = [];
   const search = steps.find(s => s.k === 'search'); if (search) parts.push(clean(search.label));
@@ -434,24 +450,41 @@ function stepsSummary(m) {
   if (m.dur) parts.push(`${m.dur}s`);
   return parts.join(' · ');
 }
-function stepsList(m) {
+/** What a search found, as quiet document chips that open the preview (only documents this person can open). */
+function foundHtml(s) {
+  const docs = (s.docs || []).map(docById).filter(d => d && canDoc(d));
+  return docs.length ? `<div class="chat-found" role="list" aria-label="Found">${docs.map((d, i) => `<button type="button" role="listitem" class="chat-found__doc" style="--i:${i}" data-act="doc-preview" data-id="${d.id}">${ic('file-text', 'i-xs')}<span class="truncate">${esc(d.name.replace(/\.[^.]+$/, ''))}</span></button>`).join('')}</div>` : '';
+}
+/** Finished steps (with what each found) and, while working, the live row last. */
+function stepsList(m, live = null) {
   const u = cui();
-  return `<ol class="chat-steps__list" aria-label="Steps">${(m.work || []).map((s, si) => {
+  const rows = (m.work || []).map((s, si) => {
+    if (s.live) return '';
     const runs = (s.runs || []).map((r, ri) => {
       const key = `${m.id}:run:${si}:${ri}`, show = !!u.open[key];
       const lastErr = r.exit ? String(r.out || '').trim().split('\n').filter(Boolean).at(-1) : '';
       return `<div class="chat-run"><div class="chat-run__head">${ic('terminal', 'i-xs')}<span>Command ${ri + 1}</span>${linkBtn(show ? 'Hide code' : 'Show code', { act: 'chat-run', data: { k: key } })}<span class="grow"></span>${chip(r.exit ? `Failed · exit ${r.exit}` : 'OK', { tone: r.exit ? 'danger' : 'success', size: 'sm', variant: r.exit ? 'soft' : 'tertiary' })}</div>${show ? `<pre class="chat-run__code">${esc(r.cmd)}</pre>${r.out ? `<pre class="${cx('chat-run__out', r.err && 'is-err')}">${esc(r.out)}</pre>` : ''}` : lastErr ? `<pre class="chat-run__out is-err">${esc(lastErr)}</pre>` : ''}</div>`;
     }).join('');
-    return `<li class="${cx('chat-step', s.live && 'is-live', s.bad && 'is-bad')}">${s.live ? spinner('sm') : ic(STEP_IC[s.k] || 'check', 'i-sm')}<div class="grow"><span>${esc(clean(s.label))}</span>${s.d ? ` <span class="muted">· ${esc(s.d)}</span>` : ''}${runs}</div></li>`;
-  }).join('')}</ol>`;
+    return `<li class="${cx('chat-step', s.bad && 'is-bad')}">${ic(STEP_IC[s.k] || 'check', 'i-sm')}<div class="grow"><span>${esc(clean(s.label))}</span>${s.d ? ` <span class="muted">· ${esc(s.d)}</span>` : ''}${foundHtml(s)}${runs}</div></li>`;
+  }).join('');
+  const liveRow = live ? `<li class="chat-step is-live" role="status" aria-live="polite">${THINK}<span class="chat-steps__label truncate">${esc(live)}</span></li>` : '';
+  return `<ol class="chat-steps__list" aria-label="Steps">${rows}${liveRow}</ol>`;
 }
+/**
+ * How the answer is being found, as it happens: each finished step shows what it found (a search lists its documents
+ * at once), the live row last names the tool that runs right now or says "Thinking" (it never claims a search that
+ * isn't happening), and the answer streams below. Answers written in this session keep the timeline open; it folds
+ * into one summary line. With "Show how answers were found" off, only the live line shows.
+ */
 function stepsHtml(m) {
-  const work = m.work || [];
-  if (m.state === 'streaming' && m.phase === 'work') {
-    const cur = [...work].reverse().find(s => s.live);
-    return `<div class="chat-steps"><span class="chat-steps__live" role="status" aria-live="polite">${spinner('sm')}<span class="truncate">${esc(clean(cur?.label || `Searching ${m.searching || 'your knowledge'}`))}…</span></span>${prefShowSteps() && work.length ? stepsList(m) : ''}</div>`;
-  }
-  if (!prefShowSteps() || !work.length) return '';
+  const work = m.work || [], streaming = m.state === 'streaming';
+  const cur = [...work].reverse().find(s => s.live);
+  const live = streaming && m.phase === 'work' ? clean(cur ? LIVE_LABEL[cur.k] || cur.label : 'Thinking') : null;
+  const liveLine = live ? `<span class="chat-steps__live" role="status" aria-live="polite">${THINK}<span class="chat-steps__label truncate">${esc(live)}</span></span>` : '';
+  const done = work.some(s => !s.live);
+  if (!prefShowSteps() || (streaming && !done)) return liveLine ? `<div class="chat-steps">${liveLine}</div>` : '';
+  if (streaming) return `<div class="chat-steps">${stepsList(m, live)}</div>`;
+  if (!work.length) return '';
   const open = !!cui().open[m.id];
   return `<div class="chat-steps"><button type="button" class="chat-steps__toggle" data-act="chat-steps" data-msg="${m.id}" aria-expanded="${open}">${ic(open ? 'chevron-down' : 'chevron-right', 'i-sm')}<span class="truncate">${esc(stepsSummary(m) || 'How this answer was found')}</span></button>${open ? stepsList(m) : ''}</div>`;
 }
@@ -481,7 +514,7 @@ A['chat-next'] = el => {
 
 function aiInner(conv, m) {
   X.chatFiles?.migrate(conv, m);
-  if (m.activity?.length && !m.work) { m.work = m.activity.map(s => ({ k: s.kind, label: s.label, d: s.detail })); delete m.activity; }
+  if (m.activity?.length && !m.work) { m.work = m.activity.map(workStep); delete m.activity; }
   const all = m.citations || [], vis = visCites(m), visN = new Set(vis.map(c => c.n));
   // Built only from knowledge this person can't read: show nothing of it.
   if (all.length && !vis.length && m.state !== 'streaming') {
@@ -620,7 +653,7 @@ function basicPlan(q, conv, files, mod) {
   const a = answer(q, conv.scope || [], files.map(f => f.name), conv.space || null);
   let text = a.text;
   if (mod === 'shorter' && !a.noResults) text = text.split('\n\n').slice(0, 2).join('\n\n');
-  return { text, citations: a.citations, noResults: a.noResults || null, partial: a.partial, next: a.next || null, gap: a.gap || null, lowConf: !!a.lowConf, searchLabel: a.searchLabel, work: a.activity.map(s => ({ k: s.kind, label: s.label, d: s.detail })) };
+  return { text, citations: a.citations, noResults: a.noResults || null, partial: a.partial, next: a.next || null, gap: a.gap || null, lowConf: !!a.lowConf, work: a.activity.map(workStep) };
 }
 async function stream(conv, am, fail) {
   const r = run = { conv: conv.id, msg: am.id, stop: false };
@@ -629,7 +662,9 @@ async function stream(conv, am, fail) {
   if (am.text && ['done', 'stopped'].includes(am.state || 'done')) am.variants ??= [snap(am)];
   const plan = (X.chatFiles?.plan || basicPlan)(am.q, conv, files, am.mod, am.edit); am.mod = null;
   delete am.activity; delete am.artifact;
-  Object.assign(am, { text: '', citations: [], work: [], artifacts: [], noResults: null, partial: false, next: null, lowConf: false, feedback: null, reason: null, state: 'streaming', phase: 'work', searching: plan.searchLabel, t0: Date.now() });
+  Object.assign(am, { text: '', citations: [], work: [], artifacts: [], noResults: null, partial: false, next: null, lowConf: false, feedback: null, reason: null, state: 'streaming', phase: 'work', t0: Date.now() });
+  // Written in front of the reader: its timeline stays open afterwards (no fold, no jump when it finishes).
+  if (prefShowSteps()) cui().open[am.id] = true;
   refresh();
   const alive = () => D.convs.includes(conv) && !r.stop;
   for (const st of plan.work) {
@@ -643,6 +678,8 @@ async function stream(conv, am, fail) {
     await sleep(st.k === 'search' ? 900 : st.k === 'code' ? 300 : 500);
     step.live = false; paint(am);
   }
+  // The model reads what the tools returned (or, with no tools, just the question) before it writes.
+  await sleep(plan.work.length ? 300 : 700);
   if (!alive()) return end(r, am, 'stopped');
   Object.assign(am, { phase: 'write', citations: plan.citations });
   const parts = (plan.text || '').split(/(\s+)/), failAt = fail ? Math.floor(parts.length * 0.45) : Infinity;

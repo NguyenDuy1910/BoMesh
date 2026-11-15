@@ -17,7 +17,7 @@ from bomesh.identity import PERSISTED_IDENTITY_NAMESPACE
 import httpx
 import pytest
 import pytest_asyncio
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from bomesh.connector import ConnectorDefinition
 from bomesh.connector.base import BaseSourceConnector
@@ -47,6 +47,7 @@ from bomesh.db.models import (
     IngestionSource,
     IngestionSync,
     Item,
+    ItemIndexState,
     ItemRevision,
 )
 from bomesh.services.knowledge_items.citations import CitationService
@@ -304,8 +305,11 @@ async def _mark_processed(engine: Engine, item_id: UUID) -> None:
     async with engine.sessions.begin() as session:
         item = await session.get(Item, item_id)
         assert item is not None
-        item.index_status = "ready"
-        item.processed_version = "pv-1"
+        await session.execute(
+            update(ItemIndexState)
+            .where(ItemIndexState.item_id == item_id)
+            .values(index_status="ready", processed_version="pv-1")
+        )
         item.metadata_ = {**item.metadata_, "preview": {"pages": 1}}
 
 
@@ -325,7 +329,7 @@ async def test_a_sync_registers_new_files_as_pending_documents_and_processes_not
     )
     for external_id, document in documents.items():
         assert document.parent_item_id == engine.collection_id
-        assert (document.publication_state, document.index_status) == ("published", "pending")
+        assert (document.is_published, document.index_status) == (True, "pending")
         assert document.storage_key is not None
         assert engine.storage.objects[document.storage_key].data == engine.state.files[external_id][1]
         assert document.metadata_["file_name"] == f"{external_id}.txt"
@@ -464,9 +468,9 @@ async def test_review_first_new_file_lands_unpublished_with_a_source_contributio
     await engine.sync()
 
     document = (await engine.documents())["a"]
-    assert (document.parent_item_id, document.publication_state) == (
+    assert (document.parent_item_id, document.is_published) == (
         engine.collection_id,
-        "unpublished",
+        False,
     )
     [contribution] = await engine.contributions()
     assert (
@@ -518,7 +522,7 @@ async def test_review_first_changed_published_file_opens_one_candidate_per_versi
     assert engine.state.fetched[len(fetched) :] == ["a"]  # only v3
     still = (await engine.documents())["a"]
     assert still.id == published.id
-    assert (still.publication_state, still.storage_key) == ("published", published.storage_key)
+    assert (still.is_published, still.storage_key) == (True, published.storage_key)
     contributions = await engine.contributions()
     assert [(c.kind, c.external_version, c.replaces_item_id) for c in contributions] == [
         ("new_revision", "v2", published.id),
@@ -527,9 +531,9 @@ async def test_review_first_changed_published_file_opens_one_candidate_per_versi
     async with engine.sessions() as session:
         candidate = await session.get(Item, contributions[0].item_id)
     assert candidate is not None and candidate.id != published.id
-    assert (candidate.parent_item_id, candidate.publication_state) == (
+    assert (candidate.parent_item_id, candidate.is_published) == (
         engine.collection_id,
-        "unpublished",
+        False,
     )
     assert engine.storage.objects[candidate.storage_key].data == b"alpha v2"
     assert contributions[0].target_item_id == engine.collection_id

@@ -489,7 +489,7 @@ class Projector:
             .where(
                 tree.c.id != tree.c.root_id,
                 Item.item_type == "document",
-                Item.publication_state == "published",
+                Item.is_published,
                 visible,
             )
             .group_by(tree.c.root_id)
@@ -547,7 +547,7 @@ class Projector:
                 language_code=_text(item.metadata_.get("language")),
                 owner_id=_uuid(item.metadata_.get("owner_user_id")),
                 content_state=_CONTENT_STATES.get(item.status, "PENDING"),
-                publication_state=(item.publication_state or "published").upper(),
+                publication_state="UNPUBLISHED" if item.is_published is False else "PUBLISHED",
                 indexing_state=indexing_state(item, self._processing_version),
                 revision=revisions.get(item.id),
                 indexed_revision=item.indexed_revision_number,

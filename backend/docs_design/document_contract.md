@@ -188,10 +188,10 @@ Document state is four independent fields, never collapsed
 | --- | --- | --- | --- |
 | `state` | `ACTIVE`, `DELETED` | `items.deleted_at` | DeleteItem / UndeleteItem |
 | `document.contentState` | `PENDING`, `AVAILABLE`, `FAILED` | `items.status` | upload completion |
-| `document.publicationState` | `PUBLISHED`, `UNPUBLISHED` | `items.publication_state` | PublishItem / UnpublishItem, contribution approval, source policy |
-| `document.indexingState` | `PENDING`, `RUNNING`, `SUCCEEDED`, `FAILED`, `OUTDATED`, `UNSUPPORTED` | `items.index_status` + `processed_version` | ingestion runs only |
+| `document.publicationState` | `PUBLISHED`, `UNPUBLISHED` | `items.is_published` | PublishItem / UnpublishItem, contribution approval, source policy |
+| `document.indexingState` | `PENDING`, `RUNNING`, `SUCCEEDED`, `FAILED`, `OUTDATED`, `UNSUPPORTED` | `item_index_states.index_status` + `processed_version` | ingestion runs only |
 
-Internal `items.status`, `items.index_status` and `item_uploads.status` keep
+Internal `items.status`, `item_index_states.index_status` and `item_uploads.status` keep
 storage-oriented values; mapping belongs at the `backend/api` boundary and
 must not leak them.
 

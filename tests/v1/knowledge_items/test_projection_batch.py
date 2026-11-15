@@ -59,8 +59,7 @@ def _document(parent: Item, title: str, *, published: bool = True, status: str =
         mime_type="application/pdf",
         status=status,
         storage_key=f"objects/{title}",
-        publication_state="published" if published else "unpublished",
-        index_status="pending",
+        is_published=published,
     )
 
 

@@ -3,20 +3,22 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
+    select,
     text,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship, validates
 
 from bomesh.db.models.base import (
     Base,
@@ -41,7 +43,6 @@ ITEM_STATUSES = ("pending", "ready", "failed")
 #: The relations of an Item under a Document (the tree trigger reserves them for it).
 DOCUMENT_CHILD_RELATIONS = ("child", "attachment")
 PARENT_RELATIONS = ("contains", *DOCUMENT_CHILD_RELATIONS)
-PUBLICATION_STATES = ("published", "unpublished")
 INDEX_STATUSES = ("pending", "processing", "ready", "failed", "unsupported")
 REVISION_AUTHORS = ("assistant", "user")
 UPLOAD_STATUSES = ("pending", "available", "failed")
@@ -68,7 +69,11 @@ class Item(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """One Collection or Document of the unified Item tree.
 
     Content (``status``), publication, indexing and deletion (``deleted_at``)
-    are independent. Cross-row tree rules live in ``triggers``.
+    are independent. Cross-row tree rules live in ``triggers``. A Document's
+    indexing state lives in :class:`ItemIndexState`, so processing never
+    writes this row (nor its ``updated_at`` / etag); ``index_status``,
+    ``processed_version`` and ``indexed_revision_number`` are read-only views
+    of it.
     """
 
     __tablename__ = "items"
@@ -83,11 +88,6 @@ class Item(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             postgresql_where=text("deleted_at IS NULL"),
         ),
         Index(None, "space_id", postgresql_where=text("space_id IS NOT NULL")),
-        Index(
-            None,
-            "payload_dirty_at",
-            postgresql_where=text("payload_dirty_at IS NOT NULL"),
-        ),
         CheckConstraint(one_of("item_type", ITEM_TYPES), name="item_type_is_valid"),
         CheckConstraint(
             "(item_type = 'document') = (document_type IS NOT NULL)",
@@ -115,24 +115,8 @@ class Item(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name="collection_is_ready",
         ),
         CheckConstraint(
-            "(item_type = 'document') = (publication_state IS NOT NULL)",
+            "(item_type = 'document') = (is_published IS NOT NULL)",
             name="item_publication_matches_type",
-        ),
-        CheckConstraint(
-            one_of("publication_state", PUBLICATION_STATES, nullable=True),
-            name="item_publication_state_is_valid",
-        ),
-        CheckConstraint(
-            one_of("index_status", INDEX_STATUSES, nullable=True),
-            name="item_index_status_is_valid",
-        ),
-        CheckConstraint(
-            "(item_type = 'document') = (index_status IS NOT NULL)",
-            name="item_index_status_matches_type",
-        ),
-        CheckConstraint(
-            "item_type = 'document' OR indexed_revision_number IS NULL",
-            name="item_indexed_revision_matches_type",
         ),
         CheckConstraint("size_bytes IS NULL OR size_bytes >= 0", name="item_size_is_valid"),
         # Only a Collection holds grants, so only a Collection may end
@@ -164,9 +148,39 @@ class Item(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     metadata_: Mapped[JsonObject] = json_object("metadata")
     inherit_access: Mapped[bool] = flag(True)
     status: Mapped[str] = choice("pending")
-    publication_state: Mapped[str | None] = mapped_column(String(16))
+    #: Documents only: whether readers without edit rights see it (NULL for collections).
+    is_published: Mapped[bool | None] = mapped_column(Boolean)
+    if TYPE_CHECKING:
+        index_status: Mapped[str | None]
+        processed_version: Mapped[str | None]
+        indexed_revision_number: Mapped[int | None]
+    created_by_user_id: Mapped[UUID | None] = uuid_fk("users.id")
+    #: The tombstone; a subtree delete stamps one value on the whole cohort.
+    deleted_at: Mapped[datetime | None] = timestamp()
+
+    upload: Mapped[ItemUpload | None] = relationship(back_populates="item", uselist=False)
+
+    @validates("index_status", "processed_version", "indexed_revision_number")
+    def _read_only(self, key: str, value: object) -> object:
+        raise AttributeError(f"Item.{key} is read-only; write ItemIndexState")
+
+
+class ItemIndexState(Base):
+    """The indexing state of one Document (1:1, created by a trigger with the Document).
+
+    Kept off ``items`` because the ingestion pipeline and the payload sync
+    write it several times per run; ``items`` changes only with what people do.
+    """
+
+    __tablename__ = "item_index_states"
+    __table_args__ = (
+        Index(None, "payload_dirty_at", postgresql_where=text("payload_dirty_at IS NOT NULL")),
+        CheckConstraint(one_of("index_status", INDEX_STATUSES), name="index_status_is_valid"),
+    )
+
+    item_id: Mapped[UUID] = uuid_fk("items.id", primary_key=True)
     #: Only an Ingestion Run moves a Document past ``pending``.
-    index_status: Mapped[str | None] = mapped_column(String(16))
+    index_status: Mapped[str] = choice("pending")
     #: ``processing_version()`` the current index was built with; ready with
     #: a different current version reads as outdated.
     processed_version: Mapped[str | None] = mapped_column(Text)
@@ -174,11 +188,26 @@ class Item(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     #: Set with a move, (un)publish or (un)delete; cleared once the Qdrant
     #: payload has been re-applied.
     payload_dirty_at: Mapped[datetime | None] = timestamp()
-    created_by_user_id: Mapped[UUID | None] = uuid_fk("users.id")
-    #: The tombstone; a subtree delete stamps one value on the whole cohort.
-    deleted_at: Mapped[datetime | None] = timestamp()
 
-    upload: Mapped[ItemUpload | None] = relationship(back_populates="item", uselist=False)
+
+def _index_view(column: Any) -> Any:
+    """A read-only ``Item`` attribute over its :class:`ItemIndexState` (NULL for collections).
+
+    Flushing the ``items`` row never changes it, so it is not expired on flush
+    (``ItemService.set_index_state`` keeps loaded values current).
+    """
+    return column_property(
+        select(column)
+        .where(ItemIndexState.item_id == Item.__table__.c.id)
+        .correlate_except(ItemIndexState)
+        .scalar_subquery(),
+        expire_on_flush=False,
+    )
+
+
+Item.index_status = _index_view(ItemIndexState.index_status)  # type: ignore[misc]
+Item.processed_version = _index_view(ItemIndexState.processed_version)  # type: ignore[misc]
+Item.indexed_revision_number = _index_view(ItemIndexState.indexed_revision_number)  # type: ignore[misc]
 
 
 class ItemRevision(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):

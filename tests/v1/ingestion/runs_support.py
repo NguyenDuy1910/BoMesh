@@ -18,6 +18,7 @@ from bomesh.db.models import (
     IngestionRun,
     IngestionRunItem,
     Item,
+    ItemIndexState,
     ItemRevision,
     Message,
     MessageItem,
@@ -155,12 +156,16 @@ async def document(
             storage_key=storage_key,
             metadata_=metadata,
             status=status,
-            publication_state="published" if published else "unpublished",
-            index_status=index_status,
-            processed_version=processed_version,
+            is_published=published,
         )
         session.add(item)
         await session.flush()
+        if (index_status, processed_version) != ("pending", None):
+            await session.execute(
+                update(ItemIndexState)
+                .where(ItemIndexState.item_id == item_id)
+                .values(index_status=index_status, processed_version=processed_version)
+            )
         if storage_key is not None:
             session.add(
                 ItemRevision(
@@ -171,6 +176,7 @@ async def document(
                     size_bytes=size_bytes,
                 )
             )
+        await session.refresh(item)
     return item
 
 

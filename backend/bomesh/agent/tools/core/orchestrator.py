@@ -188,6 +188,7 @@ class ToolOrchestrator:
                 "status": observation.status,
                 "result_count": observation.result_count,
                 "duration_ms": observation.duration_ms,
+                "sources": _found_sources(output, invocation.agent_context.tenant_id),
             },
         )
         return index, observation
@@ -198,6 +199,27 @@ class ToolOrchestrator:
 
         declared = getattr(executor.spec(), "timeout_seconds", None)
         return declared if declared is not None else self._timeout_seconds
+
+
+#: What a completed tool reports as found: enough for a quiet list, never the passages' text.
+_MAX_SOURCES = 8
+_MAX_SOURCE_PASSAGES = 3
+
+
+def _found_sources(result: ToolResult, workspace_id: str) -> list[dict[str, Any]]:
+    """The documents of ``result.evidence`` in result order, each with its passage names."""
+
+    found: dict[str, dict[str, Any]] = {}
+    for evidence in result.evidence:
+        item = f"workspaces/{workspace_id}/items/{evidence.item_id}"
+        source = found.get(item)
+        if source is None:
+            if len(found) == _MAX_SOURCES:
+                continue
+            source = found[item] = {"item": item, "title": evidence.title, "passages": []}
+        if len(source["passages"]) < _MAX_SOURCE_PASSAGES:
+            source["passages"].append(f"{item}/passages/{evidence.chunk_id}")
+    return list(found.values())
 
 
 def _decoded_arguments(call: ToolCall) -> dict[str, Any] | None:

@@ -93,12 +93,39 @@
 /* Work steps */
 .chat-steps { margin-bottom: 8px; font-size: 13px; line-height: 18px; color: var(--muted); }
 .chat-steps__toggle, .chat-steps__live { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 28px; padding: 4px 8px 4px 4px; margin-left: -4px; border-radius: var(--radius-lg); color: var(--muted); }
+/* The live line (and the live row of the timeline): two orbiting dots and a gradient label that sweeps (no spinner).
+   The pair follows the theme: the accent and a cooler, lighter partner of it. Reduced motion: still dots, a solid
+   accent label. */
+.chat-steps__live, .chat-step.is-live { --think-a: oklch(calc(var(--accent-l) + 14%) calc(var(--accent-c) * 0.7) calc(var(--accent-h) - 85)); --think-b: var(--accent); }
+.chat-steps__live { gap: 10px; font-size: 14px; }
+.chat-think { --d: 11px; position: relative; flex: none; width: calc(var(--d) * 1.82); height: var(--d); }
+.chat-think i { position: absolute; top: 0; left: 0; width: var(--d); height: var(--d); border-radius: 50%; background: var(--think-a); animation: chat-orbit 1.2s cubic-bezier(.45, 0, .55, 1) infinite; }
+.chat-think i + i { background: var(--think-b); animation-delay: -.6s; }
+@keyframes chat-orbit {
+  0% { transform: translateX(0) scale(1); z-index: 1; }
+  25% { transform: translateX(calc(var(--d) * .41)) scale(1.12); z-index: 2; }
+  50% { transform: translateX(calc(var(--d) * .82)) scale(1); z-index: 2; }
+  75% { transform: translateX(calc(var(--d) * .41)) scale(.88); z-index: 1; }
+  100% { transform: translateX(0) scale(1); z-index: 1; }
+}
+.chat-steps__label { font-weight: 600; letter-spacing: -.005em; background: linear-gradient(90deg, var(--think-a), var(--think-b) 50%, var(--think-a)) 0 0 / 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: chat-sweep 2.4s linear infinite; }
+@keyframes chat-sweep { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .chat-think i { animation: none; }
+  .chat-think i + i { transform: translateX(calc(var(--d) * .82)); }
+  .chat-steps__label { animation: none; background: none; color: var(--accent); }
+}
 .chat-steps__toggle:hover { background: var(--default-soft); color: var(--foreground); }
-.chat-steps__list { list-style: none; margin: 6px 0 4px 7px; padding: 2px 0 2px 16px; border-left: 1px solid var(--separator); display: flex; flex-direction: column; gap: 8px; }
+.chat-steps__list { list-style: none; margin: 6px 0 4px 7px; padding: 2px 0 2px 16px; border-left: 1px solid var(--separator); display: flex; flex-direction: column; gap: 10px; }
 .chat-step { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
-.chat-step > .i, .chat-step > .spinner { margin-top: 2px; }
-.chat-step.is-live { color: var(--foreground); }
+.chat-step > .i { margin-top: 2px; }
+.chat-step > .chat-think { --d: 8px; margin: 5px 1px 0 1px; }
 .chat-step.is-bad { color: var(--danger-soft-foreground); }
+/* What a search found: quiet document chips under the step, each opening the preview. */
+.chat-found { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.chat-found__doc { display: inline-flex; align-items: center; gap: 6px; max-width: 280px; min-height: 26px; padding: 2px 10px 2px 8px; border: 1px solid var(--separator); border-radius: 999px; background: var(--surface); color: var(--foreground); font: inherit; font-size: 12px; line-height: 18px; cursor: pointer; }
+.chat-found__doc > .i { flex: none; color: var(--muted); }
+.chat-found__doc:hover { background: var(--default-soft); border-color: transparent; }
 .chat-run { margin-top: 6px; padding: 6px 10px; border-radius: var(--radius-lg); background: var(--surface-secondary); }
 .chat-run__head { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .chat-run__head .link-button { font-size: 12px; }

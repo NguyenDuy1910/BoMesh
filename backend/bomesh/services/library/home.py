@@ -449,7 +449,7 @@ class _Composer:
     def _published_documents(self) -> ColumnElement[bool]:
         return and_(
             Item.item_type == "document",
-            Item.publication_state == "published",
+            Item.is_published,
             self._visibility.clause(),
         )
 
@@ -460,7 +460,7 @@ class _Composer:
                 select(
                     func.count().filter(Item.item_type == "collection"),
                     func.count().filter(
-                        and_(Item.item_type == "document", Item.publication_state == "published")
+                        and_(Item.item_type == "document", Item.is_published)
                     ),
                 ).where(self._visibility.clause())
             )

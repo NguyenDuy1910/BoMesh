@@ -510,7 +510,7 @@ async def _register_document(
     if document.deleted_at is not None:
         cohort = await items.deleted_cohort(document)
         await items.restore_cohort(cohort, document.deleted_at)
-    if content_changed and review_first and document.publication_state == "published":
+    if content_changed and review_first and document.is_published:
         proposed = await _propose_revision(
             session, source, document, item, content, connector_key
         )

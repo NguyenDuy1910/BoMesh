@@ -137,11 +137,23 @@ Document state is independent columns that clients never collapse:
   Collections `ready`). Deletion is only `deleted_at`: a subtree delete
   stamps one `deleted_at` on the Item and its live descendants, and undelete
   restores exactly that cohort.
-- `publication_state` (`published | unpublished`, Documents only) decides
-  whether readers without edit rights see the Document.
-- `index_status` (`pending | processing | ready | failed | unsupported`) plus
-  `processed_version` (the processing configuration the index was built with)
-  and `indexed_revision_number` (the revision the chunks belong to).
+- `is_published` (boolean, Documents only, null for Collections) decides
+  whether readers without edit rights see the Document. One axis with two
+  values is a boolean; an axis with more values (`status`, `index_status`) is
+  one `varchar` with a CHECK, never one boolean per value.
+- The indexing state is `item_index_states`, one row per Document created
+  with it by the AFTER INSERT trigger `trg_items_index_state`:
+  `index_status` (`pending | processing | ready | failed | unsupported`),
+  `processed_version` (the processing configuration the index was built
+  with), `indexed_revision_number` (the revision the chunks belong to) and
+  `payload_dirty_at`. It is off `items` because an Ingestion Run writes it
+  several times per Document per run and the payload sync clears it: on
+  `items` every such write was a new row version that also moved
+  `updated_at`, so processing changed `updateTime`, the etag ("Recently
+  updated" order, ABORTED edits) and rewrote the wide row. `items` changes
+  only with what people do. The ORM reads it through read-only `Item`
+  attributes (correlated scalar subqueries on the primary key), so a page
+  of Items stays one statement.
 
 The API maps these to `state`, `document.contentState`,
 `document.publicationState` and `document.indexingState`, where `OUTDATED` is
@@ -161,7 +173,7 @@ without changing its canonical parent or granting access. `reading_lists`,
 are references outside the tree; every read re-checks access to the
 referenced Item.
 
-Move, publish, unpublish, delete and undelete set `items.payload_dirty_at` in
+Move, publish, unpublish, delete and undelete set `item_index_states.payload_dirty_at` in
 their transaction; the Qdrant payload update runs after commit and a
 scheduled job retries dirty rows, so the index converges without an outbox
 table.
@@ -180,7 +192,7 @@ catch-up, so no outbox or queue table is needed and no index is added.
 ### Knowledge inventory vs ingestion execution
 
 ```text
-upload / archive upload / source sync  ->  Item (index_status = pending) + item_revisions
+upload / archive upload / source sync  ->  Item (+ item_index_states pending) + item_revisions
 Ingestion Run (manual | api | schedule | platform_retry) -> ingestion_run_items -> processed index
 ```
 
@@ -200,7 +212,7 @@ executes wait for a later run. An archive is the one exception that grows a
 run: processing it unpacks its members into new pending Documents, which are
 appended to the same run.
 
-`items.index_status` stays the one source of truth for a Document's processing
+`item_index_states.index_status` stays the one source of truth for a Document's processing
 state; run items are history, and the Document's latest run item supplies the
 error and run shown next to it. Each run item records the `revision_number`
 it started from; a finish whose revision or governing Collection changed
@@ -431,7 +443,7 @@ Indexes follow known access paths, not every foreign key:
 - conversations by tenant/code and tenant/owner with recency
 - items by tenant/status and parent; live children by
   `(tenant_id, parent_item_id) WHERE deleted_at IS NULL`; dirty payloads by
-  `payload_dirty_at WHERE payload_dirty_at IS NOT NULL`
+  `item_index_states (payload_dirty_at) WHERE payload_dirty_at IS NOT NULL`
 - item revisions by Item/revision number; contributions by target/status and
   contributor; item links by container and target; reading-list entries by
   list/position; saved/recent items and saved searches by user/recency;

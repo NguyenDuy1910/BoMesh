@@ -1,13 +1,12 @@
 "use client";
 
-import { Spinner } from "@heroui/react";
 import clsx from "clsx";
 import { Check, ChevronDown, ChevronRight, File, FileText, Search, Server, Terminal, type LucideIcon } from "lucide-react";
 import { useState } from "react";
 
 import { StatusChip } from "@/components/ui/StatusChip";
 
-import type { StepKind, WorkStep } from "../turn";
+import type { FoundSource, StepKind, WorkStep } from "../turn";
 
 const STEP_ICON: Record<StepKind, LucideIcon> = { search: Search, read: FileText, prepare: Server, code: Terminal, export: File, tool: Check };
 
@@ -31,18 +30,44 @@ function summary(steps: readonly WorkStep[], files: number, seconds?: number): s
   return parts.join(" · ");
 }
 
-function StepList({ steps }: { steps: readonly WorkStep[] }) {
+/** Two orbiting dots: the assistant is working (no spinner). */
+function Thinking() {
+  return (
+    <span className="chat-think" aria-hidden>
+      <i />
+      <i />
+    </span>
+  );
+}
+
+/** What a step found, as quiet document chips that open the preview at the found passage (preview `foundHtml`). */
+function Found({ sources, onOpen }: { sources: readonly FoundSource[]; onOpen?: (source: FoundSource) => void }) {
+  return (
+    <div className="chat-found" role="list" aria-label="Found">
+      {sources.map((s) => (
+        <button key={s.item} type="button" role="listitem" className="chat-found__doc" translate="no" onClick={() => onOpen?.(s)}>
+          <FileText className="i i-xs" aria-hidden />
+          <span className="truncate">{s.title || "Untitled document"}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Finished steps, each with what it found, and while working the live row last (preview `stepsList`). */
+function StepList({ steps, live, onOpenSource }: { steps: readonly WorkStep[]; live: string | null; onOpenSource?: (source: FoundSource) => void }) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   return (
     <ol className="chat-steps__list" aria-label="Steps">
       {steps.map((s) => {
         const Icon = STEP_ICON[s.kind];
         return (
-          <li key={s.id} className={clsx("chat-step", s.live && "is-live", s.bad && "is-bad")}>
-            {s.live ? <Spinner size="sm" /> : <Icon className="i i-sm" aria-hidden />}
+          <li key={s.id} className={clsx("chat-step", s.bad && "is-bad")}>
+            <Icon className="i i-sm" aria-hidden />
             <div className="grow">
               <span>{s.label}</span>
               {s.detail ? <span className="muted"> · {s.detail}</span> : null}
+              {s.sources?.length ? <Found sources={s.sources} onOpen={onOpenSource} /> : null}
               {(s.runs ?? []).map((r, ri) => {
                 const key = `${s.id}:${ri}`;
                 const show = !!open[key];
@@ -73,38 +98,68 @@ function StepList({ steps }: { steps: readonly WorkStep[] }) {
           </li>
         );
       })}
+      {live ? (
+        <li className="chat-step is-live" role="status" aria-live="polite">
+          <Thinking />
+          <span className="chat-steps__label truncate">{live}</span>
+        </li>
+      ) : null}
     </ol>
   );
 }
 
+export interface WorkStepsProps {
+  steps: readonly WorkStep[];
+  /** The answer is being written. */
+  streaming: boolean;
+  /** Nothing of the answer is on screen yet: the live row shows. */
+  working: boolean;
+  /** "Show how answers were found". */
+  show: boolean;
+  files?: number;
+  seconds?: number;
+  onOpenSource?: (source: FoundSource) => void;
+}
+
 /**
- * How the answer was found (preview `stepsHtml`). While working: a live line
- * with the current step; once written: a collapsed summary that opens into the
- * timeline. Hidden entirely when "Show how answers were found" is off, except
- * the live line, which is the only sign the assistant is working.
+ * How the answer is being found, as it happens (preview `stepsHtml`): each
+ * finished step shows what it found (a search lists its documents at once),
+ * the live row last names the tool that runs right now or says "Thinking"
+ * (it never claims a search that isn't happening), and the answer streams
+ * below. An answer written in front of the reader keeps its timeline open
+ * (nothing folds or jumps when it finishes); stored answers show one summary
+ * line that opens it. With "Show how answers were found" off, only the live
+ * line shows.
  */
-export function WorkSteps({ steps, working, show, files = 0, seconds }: { steps: readonly WorkStep[]; working: boolean; show: boolean; files?: number; seconds?: number }) {
-  const [open, setOpen] = useState(false);
-  if (working) {
-    const current = [...steps].reverse().find((s) => s.live);
-    return (
+export function WorkSteps({ steps, streaming, working, show, files = 0, seconds, onOpenSource }: WorkStepsProps) {
+  const [open, setOpen] = useState(streaming);
+  const live = working ? ([...steps].reverse().find((s) => s.live)?.label ?? "Thinking") : null;
+  const done = steps.filter((s) => !s.live);
+  if (!show || (streaming && !done.length)) {
+    return live ? (
       <div className="chat-steps">
         <span className="chat-steps__live" role="status" aria-live="polite">
-          <Spinner size="sm" />
-          <span className="truncate">{current?.label ?? "Searching your knowledge"}…</span>
+          <Thinking />
+          <span className="chat-steps__label truncate">{live}</span>
         </span>
-        {show && steps.length ? <StepList steps={steps} /> : null}
+      </div>
+    ) : null;
+  }
+  if (streaming) {
+    return (
+      <div className="chat-steps">
+        <StepList steps={done} live={live} onOpenSource={onOpenSource} />
       </div>
     );
   }
-  if (!show || !steps.length) return null;
+  if (!steps.length) return null;
   return (
     <div className="chat-steps">
       <button type="button" className="chat-steps__toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
         {open ? <ChevronDown className="i i-sm" aria-hidden /> : <ChevronRight className="i i-sm" aria-hidden />}
         <span className="truncate">{summary(steps, files, seconds) || "How this answer was found"}</span>
       </button>
-      {open ? <StepList steps={steps} /> : null}
+      {open ? <StepList steps={done} live={null} onOpenSource={onOpenSource} /> : null}
     </div>
   );
 }

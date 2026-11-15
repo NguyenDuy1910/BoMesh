@@ -28,6 +28,7 @@ import { chatKeys, submitFeedback, updateConversation, type ConversationScope, t
 import { useConversation, useMessages, useShareSummary } from "../queries";
 import { dismissTurn, sendTurn, sentFiles, stopTurn, useLiveTurn, useStreamingConversation, type AnswerAttempt, type SentFile } from "../runtime";
 import { buildThread, RETRY_MODIFIER, type AnswerView } from "../thread";
+import type { FoundSource } from "../turn";
 import { Composer, useDraft } from "./Composer";
 import { Answer, UserMessage, type RetryMode } from "./ThreadMessages";
 
@@ -267,6 +268,31 @@ export function ChatThread({ id }: { id: string }) {
       ? [{ label: "Projects", href: "/projects" }, { label: project.displayName, href: `/project/${project.id}` }]
       : [{ label: "AI Chat", href: "/chat" }];
 
+  /* Row handlers keep one identity for the page's life, so memoized rows skip the live answer's per-frame renders;
+     each call reaches the latest render's state through `latest`. */
+  const latest = useRef<{ rows: typeof rows; stored: Message[] | undefined; openCite: typeof openCite; openFile: typeof openFile; onRetry: typeof onRetry; onFeedback: typeof onFeedback; onEditSave: typeof onEditSave } | null>(null);
+  useLayoutEffect(() => {
+    latest.current = { rows, stored: messages.data, openCite, openFile, onRetry, onFeedback, onEditSave };
+  });
+  const rowHandlers = useMemo(
+    () => ({
+      cite: (n: number, answer: AnswerView) => void latest.current?.openCite(n, answer),
+      openFile: (artifact: string) => void latest.current?.openFile(artifact),
+      retry: (answer: AnswerView, mode: RetryMode) => void latest.current?.onRetry(answer, mode),
+      feedback: (message: string, rating: "HELPFUL" | "UNHELPFUL" | null, reason?: string) => void latest.current?.onFeedback(message, rating, reason),
+      cancelEdit: () => setEditing(null),
+      openSource: (source: FoundSource) => openDocumentPreview({ item: source.item, passages: source.passages, from: id }),
+      saveEdit: (key: string, text: string) => {
+        const now = latest.current;
+        const index = now ? now.rows.findIndex((r) => r.kind === "user" && r.key === key) : -1;
+        const row = now?.rows[index];
+        if (!now || row?.kind !== "user") return;
+        void now.onEditSave(now.stored?.find((m) => m.name === row.message), text, index, row.files);
+      },
+    }),
+    [id],
+  );
+
   const unavailable = conversation.error instanceof ApiError && conversation.error.isNotFound;
   if (unavailable || conv?.deleteTime) {
     return (
@@ -361,9 +387,9 @@ export function ChatThread({ id }: { id: string }) {
                         files={row.files}
                         canEdit={!!stored && !busy}
                         editing={editing === row.key}
-                        onEdit={() => setEditing(row.key)}
-                        onCancel={() => setEditing(null)}
-                        onSave={(text) => void onEditSave(stored, text, i, row.files)}
+                        onEdit={setEditing}
+                        onCancel={rowHandlers.cancelEdit}
+                        onSave={rowHandlers.saveEdit}
                       />
                     );
                   }
@@ -389,11 +415,12 @@ export function ChatThread({ id }: { id: string }) {
                       scoped={scoped}
                       activeCite={null}
                       activeArtifact={panel?.kind === "file" ? panel.artifact : null}
-                      onCite={(n, answer) => void openCite(n, answer)}
-                      onOpenArtifact={(name) => void openFile(name)}
-                      onRetry={(answer, mode) => void onRetry(answer, mode)}
-                      onFeedback={(message, rating, reason) => void onFeedback(message, rating, reason)}
+                      onCite={rowHandlers.cite}
+                      onOpenArtifact={rowHandlers.openFile}
+                      onRetry={rowHandlers.retry}
+                      onFeedback={rowHandlers.feedback}
                       onFeedbackComment={setCommentFor}
+                      onOpenSource={rowHandlers.openSource}
                     />
                   );
                 })}

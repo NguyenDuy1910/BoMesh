@@ -16,6 +16,7 @@ from bomesh.db.models import (
     IngestionSource,
     IngestionSync,
     Item,
+    ItemIndexState,
 )
 from harness import ApiClient, Sessions, World
 from sources_support import (
@@ -292,12 +293,15 @@ async def test_get_source_computes_counts_and_state(
                 document_type="pdf",
                 title=f"Synced {index}",
                 status="ready",
-                publication_state="unpublished",
-                index_status=index_status,
-                processed_version=version,
+                is_published=False,
             )
             session.add(document)
             await session.flush()
+            await session.execute(
+                update(ItemIndexState)
+                .where(ItemIndexState.item_id == document.id)
+                .values(index_status=index_status, processed_version=version)
+            )
             session.add(
                 ExternalResource(
                     item_id=document.id, ingestion_source_id=source.id, external_id=f"f{index}"

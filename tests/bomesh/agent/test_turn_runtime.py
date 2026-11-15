@@ -52,6 +52,7 @@ from bomesh.agent.tools import (
 from bomesh.agent.tools.read_resource import ReadResource
 from bomesh.agent.tools.run_shell import RunShell
 from bomesh.agent.turn import run_turn
+from bomesh.knowledge import Evidence
 
 
 class Lookup(ToolExecutor):
@@ -338,6 +339,39 @@ async def test_turn_recaptures_step_and_returns_to_model_after_a_tool() -> None:
     assert activities[0].tool_name == "knowledge_search"
     assert activities[1].status == "completed"
     assert events[-1].type == "response.completed"
+
+
+class FindingLookup(Lookup):
+    """A search whose evidence spans documents, one of them twice."""
+
+    async def handle(self, invocation: ToolInvocation) -> ToolOutput:
+        hits = [("doc-a", "c1", "Leave policy"), ("doc-b", "c2", "Handbook"), ("doc-a", "c3", "Leave policy")]
+        return ToolOutput(
+            content="found",
+            evidence=[Evidence(id=chunk, item_id=item, chunk_id=chunk, title=title, content="text") for item, chunk, title in hits],
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_finished_search_reports_the_documents_it_found_before_the_answer() -> None:
+    transport = ScriptedResponsesTransport(
+        [
+            [*created("resp_a"), *function_call(item_id="fc_1", output_index=0, call_id="call_1", name="knowledge_search", argument_deltas=['{"query":"leave"}']), *completed("resp_a")],
+            [*created("resp_b"), *message(item_id="msg_1", output_index=0, deltas=["Leave is 20 days."], phase="final_answer"), *completed("resp_b")],
+        ]
+    )
+    registry = ToolRegistry()
+    registry.register(FindingLookup())
+
+    events = [event async for event in run_turn(_session(transport, registry), _turn(_context()))]
+
+    done = next(event for event in events if event.type == "tool_completed")
+    assert [(s.item, s.title, s.passages) for s in done.sources] == [
+        ("workspaces/tenant/items/doc-a", "Leave policy", ["workspaces/tenant/items/doc-a/passages/c1", "workspaces/tenant/items/doc-a/passages/c3"]),
+        ("workspaces/tenant/items/doc-b", "Handbook", ["workspaces/tenant/items/doc-b/passages/c2"]),
+    ]
+    first_text = next(i for i, event in enumerate(events) if event.type == "response.output_text.delta")
+    assert events.index(done) < first_text
 
 
 @pytest.mark.asyncio

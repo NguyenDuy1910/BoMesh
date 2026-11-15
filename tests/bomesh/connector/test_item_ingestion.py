@@ -193,8 +193,7 @@ def _document(
         mime_type=content_type,
         size_bytes=size_bytes,
         status=status,
-        publication_state="published",
-        index_status="pending",
+        is_published=True,
         metadata_={"file_name": "sample"},
     )
     document.upload = ItemUpload(

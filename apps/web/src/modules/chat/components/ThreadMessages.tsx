@@ -19,7 +19,7 @@ import {
   ThumbsUp,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState, type Key } from "react";
+import { memo, useEffect, useRef, useState, type Key } from "react";
 
 import { Callout } from "@/components/ui/Callout";
 import { FileIcon } from "@/components/ui/FileIcon";
@@ -32,7 +32,7 @@ import { useItem } from "@/modules/knowledge/queries";
 import { copyRich, copyText, downloadPdf, downloadWord } from "../download";
 import type { SentFile } from "../runtime";
 import type { AnswerView } from "../thread";
-import type { AnswerSource } from "../turn";
+import type { AnswerSource, FoundSource } from "../turn";
 import { AnswerMarkdown } from "./AnswerMarkdown";
 import { WorkSteps } from "./WorkSteps";
 
@@ -45,12 +45,13 @@ export interface UserMessageProps {
   /** Editing is offered for stored questions while nothing streams. */
   canEdit: boolean;
   editing: boolean;
-  onEdit: () => void;
+  onEdit: (id: string) => void;
   onCancel: () => void;
-  onSave: (text: string) => void;
+  onSave: (id: string, text: string) => void;
 }
 
-export function UserMessage({ id, text, files, canEdit, editing, onEdit, onCancel, onSave }: UserMessageProps) {
+/** A question. Memoized: while an answer streams, the questions above it don't re-render. */
+export const UserMessage = memo(function UserMessage({ id, text, files, canEdit, editing, onEdit, onCancel, onSave }: UserMessageProps) {
   const [draft, setDraft] = useState(text);
   const input = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
@@ -88,7 +89,7 @@ export function UserMessage({ id, text, files, canEdit, editing, onEdit, onCance
               if (e.key === "Escape") onCancel();
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
-                if (draft.trim()) onSave(draft.trim());
+                if (draft.trim()) onSave(id, draft.trim());
               }
             }}
           />
@@ -97,7 +98,7 @@ export function UserMessage({ id, text, files, canEdit, editing, onEdit, onCance
             <Button size="sm" variant="ghost" onPress={onCancel}>
               Cancel
             </Button>
-            <Button size="sm" variant="primary" isDisabled={!draft.trim()} onPress={() => onSave(draft.trim())}>
+            <Button size="sm" variant="primary" isDisabled={!draft.trim()} onPress={() => onSave(id, draft.trim())}>
               Send
             </Button>
           </div>
@@ -114,12 +115,12 @@ export function UserMessage({ id, text, files, canEdit, editing, onEdit, onCance
         </div>
         <div className="chat-user__actions">
           <IconButton icon={Copy} tip="Copy" size="sm" onPress={() => void copyText(text)} />
-          {canEdit ? <IconButton icon={Pencil} tip="Edit" size="sm" onPress={onEdit} /> : null}
+          {canEdit ? <IconButton icon={Pencil} tip="Edit" size="sm" onPress={() => onEdit(id)} /> : null}
         </div>
       </div>
     </div>
   );
-}
+});
 
 /* ═══════════════ Answer ═══════════════ */
 
@@ -144,6 +145,8 @@ export interface AnswerProps {
   onRetry: (answer: AnswerView, mode: RetryMode) => void;
   onFeedback: (message: string, rating: "HELPFUL" | "UNHELPFUL" | null, reason?: string) => void;
   onFeedbackComment: (message: string) => void;
+  /** A document a step found (opens the preview at the found passage). */
+  onOpenSource: (source: FoundSource) => void;
 }
 
 interface Shown {
@@ -156,9 +159,10 @@ interface Shown {
   reason?: string;
 }
 
-/** One answer (preview `aiInner`): steps, text with markers, states, files, sources, actions. */
-export function Answer(props: AnswerProps) {
-  const { answer, title, showSteps, busy, scoped, activeCite, activeArtifact, onCite, onOpenArtifact, onRetry, onFeedback, onFeedbackComment } = props;
+/** One answer (preview `aiInner`): steps, text with markers, states, files, sources, actions. Memoized: settled answers
+ *  skip the per-frame renders of the one that streams. */
+export const Answer = memo(function Answer(props: AnswerProps) {
+  const { answer, title, showSteps, busy, scoped, activeCite, activeArtifact, onCite, onOpenArtifact, onRetry, onFeedback, onFeedbackComment, onOpenSource } = props;
   const { workspace } = useWorkspace();
   const attempts: Shown[] = [...answer.earlier, answer];
   const [index, setIndex] = useState(attempts.length - 1);
@@ -292,7 +296,9 @@ export function Answer(props: AnswerProps) {
 
   return (
     <div className="chat-msg chat-msg--ai" id={`msg-${answer.key}`} ref={answerRef}>
-      {index === attempts.length - 1 ? <WorkSteps steps={answer.steps} working={streaming && !shown.text} show={showSteps} files={shown.artifacts.length} seconds={seconds} /> : null}
+      {index === attempts.length - 1 ? (
+        <WorkSteps steps={answer.steps} streaming={streaming} working={streaming && !shown.text} show={showSteps} files={shown.artifacts.length} seconds={seconds} onOpenSource={onOpenSource} />
+      ) : null}
       {shown.text || streaming ? <AnswerMarkdown text={shown.text} sources={shown.sources} streaming={streaming && !!shown.text} activeN={activeCite} onCite={cite} /> : null}
       {shown.state === "INTERRUPTED" ? (
         <div className="chat-stopped">
@@ -359,7 +365,7 @@ export function Answer(props: AnswerProps) {
       ) : null}
     </div>
   );
-}
+});
 
 /** One chip per cited document (preview `sourcesHtml`): its numbers open the matching passages. */
 function SourceChip({ source: s, active, onPress }: { source: AnswerSource; active: boolean; onPress: () => void }) {

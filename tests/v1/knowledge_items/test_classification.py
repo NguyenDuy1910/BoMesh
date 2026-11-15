@@ -132,7 +132,7 @@ async def test_classification_replaces_assistant_topics_and_keeps_a_persons(
     assert await _tags(world, document) == {"lending": None, "hr": admin.id}
     row = await knowledge.row(document)
     assert row.index_status == "ready"
-    assert row.publication_state == "unpublished"
+    assert row.is_published is False
 
 
 @pytest.mark.parametrize("profile", ["not json at all", RuntimeError("provider down")])

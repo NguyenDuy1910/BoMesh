@@ -912,7 +912,7 @@ class KnowledgeItemService:
             )
             check_etag(item, etag)
             require_document(item, error=FailedPrecondition)
-            if item.publication_state != "published":
+            if not item.is_published:
                 raise FailedPrecondition("Only a PUBLISHED document can be verified.")
             now = await session.scalar(select(func.now()))
             assert now is not None
@@ -1136,7 +1136,7 @@ async def publish_item(session: AsyncSession, workspace_id: UUID, item_id: UUID)
     """Publish a document (contribution approval); returns dirty payloads."""
     item = await _row(session, workspace_id, item_id, for_update=True)
     require_document(item, error=FailedPrecondition)
-    if item.publication_state != "published":
+    if not item.is_published:
         await ItemService(session).set_publication(item, published=True)
     return (item.id,)
 
@@ -1256,7 +1256,7 @@ async def _check_publishable(session: AsyncSession, item: Item, *, published: bo
     collection = await governing_collection(session, item)
     if collection is None or is_personal(collection):
         raise FailedPrecondition("Documents in a PERSONAL collection are not published.")
-    current = item.publication_state == "published"
+    current = bool(item.is_published)
     if current == published:
         raise FailedPrecondition(
             "The document is already " + ("PUBLISHED." if published else "UNPUBLISHED.")

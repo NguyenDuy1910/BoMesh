@@ -187,6 +187,7 @@ def _runtime_activity_event(update: ToolProgress) -> AgentStreamEvent:
                 if isinstance(duration_ms, int) and duration_ms >= 0
                 else 0
             ),
+            sources=update.data.get("sources") or [],
         )
     return ToolProgressEvent(
         call_id=update.call_id,

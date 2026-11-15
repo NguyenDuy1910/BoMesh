@@ -42,6 +42,7 @@ EXPECTED_TABLES = {
     "ingestion_syncs",
     "integration_connections",
     "integration_credentials",
+    "item_index_states",
     "item_links",
     "item_revisions",
     "item_topics",

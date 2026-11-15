@@ -40,7 +40,7 @@ class IndexingContext(BaseModel):
     parent_item_id: str | None = None
     document_type: str = Field(min_length=1)
     connector_key: str = Field(min_length=1)
-    #: ``items.publication_state == published``; readers without
+    #: ``items.is_published``; readers without
     #: ``items.update`` on the collection never get unpublished points.
     published: bool = True
 

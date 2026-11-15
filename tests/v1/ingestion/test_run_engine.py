@@ -22,6 +22,7 @@ from bomesh.db.models import (
     IngestionSource,
     IntegrationConnection,
     Item,
+    ItemIndexState,
     Tenant,
 )
 from bomesh.document_index import EmbeddingRejectedError
@@ -595,7 +596,9 @@ async def test_the_maintenance_passes_reconcile_payloads_and_purge_deleted_items
     fakes.storage.put_bytes(b"bytes", expired.storage_key, content_type="text/plain")
     async with sessions.begin() as session:
         await session.execute(
-            update(Item).where(Item.id == dirty).values(payload_dirty_at=datetime.now(UTC))
+            update(ItemIndexState)
+            .where(ItemIndexState.item_id == dirty)
+            .values(payload_dirty_at=datetime.now(UTC))
         )
         await session.execute(
             update(Item)
@@ -610,5 +613,6 @@ async def test_the_maintenance_passes_reconcile_payloads_and_purge_deleted_items
     assert cleaned == 1 and purged == 1
     assert fakes.storage.objects == {}
     async with sessions.begin() as session:
-        assert await session.scalar(select(Item.payload_dirty_at).where(Item.id == dirty)) is None
+        dirty_at = select(ItemIndexState.payload_dirty_at).where(ItemIndexState.item_id == dirty)
+        assert await session.scalar(dirty_at) is None
     assert await purge_deleted_items(runtime.sessions(), index, storage, limit=100) == 0

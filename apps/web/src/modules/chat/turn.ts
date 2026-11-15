@@ -79,7 +79,7 @@ export type StreamEvent =
   | { type: "response.function_call_arguments.done"; output_index: number; arguments: string }
   | { type: "tool_started"; call_id: string; tool_name: string }
   | { type: "tool_progress"; call_id: string; tool_name: string; data?: Record<string, unknown> }
-  | { type: "tool_completed"; call_id: string; tool_name: string; status: "completed" | "failed" | "timeout" | "skipped"; result_count?: number | null; duration_ms?: number }
+  | { type: "tool_completed"; call_id: string; tool_name: string; status: "completed" | "failed" | "timeout" | "skipped"; result_count?: number | null; duration_ms?: number; sources?: FoundSource[] }
   | { type: "error"; error: { message?: string; code?: string } };
 
 /* ═══════════════ Client model ═══════════════ */
@@ -113,6 +113,13 @@ export interface ShellRun {
 
 export type StepKind = "search" | "read" | "prepare" | "code" | "export" | "tool";
 
+/** A document a tool found (`tool_completed.sources`): readable by the caller, with the found passages. */
+export interface FoundSource {
+  item: string;
+  title?: string;
+  passages?: string[];
+}
+
 export interface WorkStep {
   id: string;
   tool: string;
@@ -122,6 +129,8 @@ export interface WorkStep {
   live: boolean;
   bad?: boolean;
   runs?: ShellRun[];
+  /** What the step found, as soon as it finished (a search's documents). */
+  sources?: FoundSource[];
 }
 
 export type TurnStatus = "streaming" | "completed" | "interrupted" | "failed";
@@ -167,6 +176,7 @@ interface ToolFact {
   tool: string;
   state: "active" | "completed" | "failed" | "timeout" | "skipped";
   resultCount?: number;
+  sources?: FoundSource[];
 }
 
 export function emptyTurn(startedAt = Date.now()): Turn {
@@ -228,12 +238,12 @@ export function reduceTurn(turn: Turn, event: StreamEvent, now = Date.now()): Tu
       let artifacts = turn.artifacts;
       const ref = e.data?.artifact as WireAnnotation["artifact"] | undefined;
       if (ref?.id) artifacts = addArtifact(artifacts, artifactName(turn.message, ref.id));
-      return derive({ ...turn, artifacts, tools: { ...turn.tools, [e.call_id]: { tool: e.tool_name, state: fact?.state ?? "active", resultCount: fact?.resultCount } } });
+      return derive({ ...turn, artifacts, tools: { ...turn.tools, [e.call_id]: { ...fact, tool: e.tool_name, state: fact?.state ?? "active" } } });
     }
     case "tool_completed": {
       const e = event;
       const resultCount = typeof e.result_count === "number" ? e.result_count : undefined;
-      return derive({ ...turn, tools: { ...turn.tools, [e.call_id]: { tool: e.tool_name, state: e.status, resultCount } } });
+      return derive({ ...turn, tools: { ...turn.tools, [e.call_id]: { tool: e.tool_name, state: e.status, resultCount, ...(e.sources?.length ? { sources: e.sources } : {}) } } });
     }
     case "response.completed":
       return settle(derive(turn), "completed", now);
@@ -415,7 +425,8 @@ function step(id: string, tool: string, fact: ToolFact | undefined, output: stri
   if (fact?.state === "timeout") detail = "Timed out";
   else if (fact?.state === "failed") detail = "Failed";
   else if (kind === "search" && typeof fact?.resultCount === "number") detail = fact.resultCount ? plural(fact.resultCount, "relevant passage") : "No relevant passages";
-  const s: WorkStep = { id, tool, kind, label: live ? liveLabel : doneLabel, live, ...(detail ? { detail } : {}), ...(bad ? { bad } : {}) };
+  const sources = !live && fact?.sources?.length ? fact.sources : undefined;
+  const s: WorkStep = { id, tool, kind, label: live ? liveLabel : doneLabel, live, ...(detail ? { detail } : {}), ...(bad ? { bad } : {}), ...(sources ? { sources } : {}) };
   if (kind === "code") {
     s.runs = shellRuns(args, output);
     if (s.runs.some((r) => r.exit !== 0)) {
