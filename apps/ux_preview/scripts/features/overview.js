@@ -63,20 +63,21 @@
   }
 
   /* ── Knowledge health: one row of metrics, each opening its view in Knowledge Studio ── */
-  /** [label, value, href, tone when non-zero, tip]. What keeps documents from people first, then what keeps them right. */
+  /** [label, value, href, tone when non-zero, tip]. What keeps documents from people first (in the order work flows:
+      Processing, then Review), then what keeps them right (All, filtered by quality). */
   function healthMetrics() {
     const c = X.reviewQueues?.() || {};
     if (!('review' in c)) return [];
     const ids = new Set(managedKbs().map(k => k.id));
     const pub = D.docs.filter(d => !d.archived && ids.has(d.kb) && stageOf(d) === 'published' && d.status === 'ready');
     const verified = pub.filter(d => trustOf(d).state === 'verified').length;
+    const part = ['reverify', 'details', 'duplicates'].find(k => c.parts[k]) || 'reverify';
     return [
-      ['Waiting for review', fmtNum(c.review), docsHref('review'), c.review && 'accent', 'Submissions and what syncs held back, waiting for a decision'],
-      ['Issues', fmtNum(c.issues), docsHref('issues'), c.issues && 'danger', 'Couldn’t be processed, or changed at the source since it was'],
-      ['Not processed', fmtNum(c.pending), docsHref('all', { processing: 'pending' }), c.pending && 'warning', 'Documents nobody has processed yet: search and the assistant can’t use them'],
+      ['Processing', fmtNum(c.processing), docsHref('processing'), c.waiting && 'warning', 'Not processed, failed or changed at the source: search and the assistant can’t use them, and submissions wait to be classified for review'],
+      ['Review', fmtNum(c.review), docsHref('review'), c.review && 'accent', 'Processed submissions, new versions and what syncs held back, waiting for a decision'],
       ['Topic suggestions', fmtNum(c.suggestions), topicsHref('suggestions'), c.suggestions && 'warning', 'Topics to confirm, documents without a topic and new topics the assistant proposes'],
-      ['Quality', fmtNum(c.quality), docsHref('quality'), c.quality && 'warning', 'Re-verification due, missing owner or summary, possible duplicates'],
-      ['Verified', pub.length ? `${pct(verified, pub.length)}%` : '—', docsHref('quality', { part: 'reverify' }), pub.length ? 'share' : '', `${fmtNum(verified)} of ${fmtNum(pub.length)} published documents are verified`],
+      ['Quality', fmtNum(c.quality), docsHref('all', { quality: part }), c.quality && 'warning', 'Re-verification due, missing owner or summary, possible duplicates'],
+      ['Verified', pub.length ? `${pct(verified, pub.length)}%` : '—', docsHref('all', { quality: 'reverify' }), pub.length ? 'share' : '', `${fmtNum(verified)} of ${fmtNum(pub.length)} published documents are verified`],
     ];
   }
   function healthHtml(metrics) {

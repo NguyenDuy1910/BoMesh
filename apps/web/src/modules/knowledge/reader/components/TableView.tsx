@@ -13,8 +13,6 @@ import { Marked } from "./Marked";
 import { CutNotice, SkeletonPage } from "./ReaderParts";
 import { useRepresentationBody, type ViewerProps } from "./viewer";
 
-/** Rows of the first sheet shown as a first page (the review pane). */
-const FIRST_PAGE_ROWS = 50;
 const NUMERIC = /^-?[\d.,\s]+%?$/;
 
 const readTable = async (response: Response) => parseTablePayload(await response.json());
@@ -25,7 +23,7 @@ const readTable = async (response: Response) => parseTablePayload(await response
  * sheet tabs, a formula bar for the selected cell, and the cells holding a cited row or a search word
  * marked. A sheet cut at the engine's bounds says so and offers the original.
  */
-export function TableView({ fileKey, representation, refresh, first, highlight, focusHit, onMarks, onDownload }: ViewerProps) {
+export function TableView({ fileKey, representation, refresh, highlight, focusHit, onMarks, onDownload }: ViewerProps) {
   const body = useRepresentationBody({ fileKey, representation, refresh }, readTable);
   const payload = body.data;
   const passages = highlight?.passages;
@@ -46,7 +44,7 @@ export function TableView({ fileKey, representation, refresh, first, highlight, 
 
   if (body.isPending) return <SkeletonPage />;
   if (body.isError) return <ErrorState title="This file didn’t load" error={body.error} onRetry={() => void body.refetch()} />;
-  const sheets = first ? payload!.sheets.slice(0, 1) : payload!.sheets;
+  const sheets = payload!.sheets;
   const index = Math.min(active, sheets.length - 1);
   const sheet = sheets[index];
   if (!sheet || (!sheet.rows.length && sheets.length === 1)) {
@@ -56,15 +54,14 @@ export function TableView({ fileKey, representation, refresh, first, highlight, 
       </div>
     );
   }
-  const shown: TableSheet = first ? { ...sheet, rows: sheet.rows.slice(0, FIRST_PAGE_ROWS) } : sheet;
-  const notice = first ? null : sheetNotice(sheet);
+  const notice = sheetNotice(sheet);
 
   const select = (e: MouseEvent<HTMLDivElement>) => {
     const el = (e.target as Element).closest<HTMLElement>(".doc-grid__cell[data-c]");
     if (!el) return;
     const r = Number(el.dataset.r);
     const c = Number(el.dataset.c);
-    setCell({ ref: `${columnLetter(c)}${r + 1}`, value: shown.rows[r]?.[c] ?? "" });
+    setCell({ ref: `${columnLetter(c)}${r + 1}`, value: sheet.rows[r]?.[c] ?? "" });
   };
 
   return (
@@ -75,11 +72,11 @@ export function TableView({ fileKey, representation, refresh, first, highlight, 
           fx
         </span>
         <span className="doc-fx__val" translate="no">
-          {cell ? cell.value : (shown.rows[0]?.[0] ?? "")}
+          {cell ? cell.value : (sheet.rows[0]?.[0] ?? "")}
         </span>
       </div>
       <div className="doc-page doc-page--sheet" data-page={1} translate="no">
-        <SheetGrid key={`${fileKey}:${index}`} sheet={shown} sheetIndex={index} cells={marks.cells} focusHit={focusHit} onSelect={select} />
+        <SheetGrid key={`${fileKey}:${index}`} sheet={sheet} sheetIndex={index} cells={marks.cells} focusHit={focusHit} onSelect={select} />
         {sheets.length > 1 ? (
           <div className="doc-sheet__tabs" role="tablist" aria-label="Sheets">
             {sheets.map((s, i) => (
@@ -104,7 +101,7 @@ export function TableView({ fileKey, representation, refresh, first, highlight, 
         <CutNotice onDownload={onDownload}>{`Showing the first ${fmtNum(notice.shown)} of ${fmtNum(notice.total)} rows — download for the rest.`}</CutNotice>
       ) : notice?.cut === "columns" ? (
         <CutNotice onDownload={onDownload}>{`Showing the first ${fmtNum(notice.shown)} of ${fmtNum(notice.total)} columns — download for the rest.`}</CutNotice>
-      ) : notice || (representation.truncated && !first) ? (
+      ) : notice || representation.truncated ? (
         <CutNotice onDownload={onDownload}>Showing part of this file — download for the rest.</CutNotice>
       ) : null}
     </div>

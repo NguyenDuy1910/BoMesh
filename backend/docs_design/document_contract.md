@@ -132,7 +132,8 @@ whichever collection they land in. Processing is a separate, explicit
 `CreateIngestionRun` (`api_design.md` §6), started by a person, an API client
 or a Source schedule; a person may start one right after uploading.
 Publishing, approving a contribution or rolling back a revision never starts
-one either. A `CONVERSATION_ATTACHMENT` needs no run to be usable in chat:
+one either: a submission is processed before it is reviewed, so the reviewer
+decides on the assistant's classification (`item_model.md` 4.7). A `CONVERSATION_ATTACHMENT` needs no run to be usable in chat:
 the agent reads its stored original directly.
 
 Runs and syncs execute in the ingestion worker

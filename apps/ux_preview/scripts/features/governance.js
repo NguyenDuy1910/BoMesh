@@ -1,4 +1,4 @@
-/* Knowledge Studio → Topics → Suggestions and Documents → Quality (bodies rendered by curation.js).
+/* Knowledge Studio → Topics → Suggestions and Documents → All's Quality filter (bodies rendered by curation.js).
    Suggestions: what the assistant left for people and what people taught it — topics the assistant proposes (workspace
    admins decide; others see them read-only), keywords from reviewers' corrections (admins; features/masterdata.js), first
    syncs' topic groups to confirm (published with the topics the assistant applied, or without one; D.classGroups) and processed
@@ -26,7 +26,7 @@
     never: { label: 'Never verified', icon: 'circle-dashed', rank: 1 },
   };
   /** { d, reason, note, due } when a document needs its owner to re-verify it, else null.
-      A document that changed at its source is a processing state (fix: Process the update in Documents → Issues), not a trust check. */
+      A document that changed at its source is a processing state (fix: Process the update in Documents → Processing), not a trust check. */
   function reviewItem(d) {
     if (d.status === 'outdated') return null;
     const t = trustOf(d);
@@ -44,8 +44,8 @@
 
   X.khReview = () => (can('knowledge.manage') ? reviewItems() : []);
 
-  /* ═══════════════ Topics → Suggestions and Documents → Quality ═══════════════ */
-  /** One line above each Quality list: what it finds and what to do about it (counts live on its tabs). */
+  /* ═══════════════ Topics → Suggestions and Documents → All's Quality filter ═══════════════ */
+  /** One line above each Quality list: what it finds and what to do about it (counts live on its pills). */
   const HINT = {
     reverify: 'Verification expired or never happened. Verify what’s still right, or ask the owner to check.',
     details: 'Documents without an owner or a summary are harder to trust. Fill in what’s missing.',
@@ -58,7 +58,7 @@
     const pool = scope();
     return { confirm: openClassGroups().reduce((s, g) => s + g.n, 0), notopic: detailItems(pool, ['topic']).length, reverify: reviewItems(pool).length, details: detailItems(pool).length, duplicates: duplicateCandidates().length };
   }
-  /** One Quality list (the page owns the tabs). */
+  /** One Quality list (All's Quality filter owns the pills). */
   function queue(id) {
     const pool = scope();
     const body = id === 'reverify' ? tabReview(reviewItems(pool)) : id === 'details' ? tabDetails(detailItems(pool)) : tabDups(duplicateCandidates());

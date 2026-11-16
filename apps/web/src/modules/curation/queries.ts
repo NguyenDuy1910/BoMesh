@@ -25,7 +25,7 @@ import {
 } from "./api";
 import { useHeldDecisions } from "./decisions";
 import { detailEntries, duplicatePairs, inScope, reviewEntries } from "./governance";
-import { isIssue } from "./lifecycle";
+import { isCandidate, processingOf, readyToReview, toProcess } from "./lifecycle";
 import type { DocCounts } from "./model";
 
 /** Query keys live under the knowledge prefixes so `invalidateKnowledge` refreshes them too. */
@@ -132,7 +132,7 @@ export function useCuratedItems({ enabled = true }: { enabled?: boolean } = {}) 
   return { ...query, data, isPending: query.isPending || bases.isPending };
 }
 
-/** Curated documents as resources: `pool` = published ones in scope (Documents → Quality), `visible` = every curated one by name. */
+/** Curated documents as resources: `pool` = published ones in scope (All's Quality lists), `visible` = every curated one by name. */
 export function useCurationPool({ enabled = true }: { enabled?: boolean } = {}) {
   const items = useCuratedItems({ enabled });
   const { toResource } = useKnowledgeModel();
@@ -144,10 +144,31 @@ export function useCurationPool({ enabled = true }: { enabled?: boolean } = {}) 
   return { ...items, data };
 }
 
-/** Documents → Issues: documents that couldn't be processed or changed since they were, minus the ones still in review. */
-export function problemItems(items: readonly Item[], inReview: ReadonlySet<string>): Item[] {
-  return items.filter((it) => !inReview.has(it.name ?? "") && isIssue({ item: it }));
+/** Review: open submissions ready to decide (a new document once processed, or a format that can't be; every new version). */
+export const reviewReady = (queue: readonly Submission[]) => queue.filter((s) => readyToReview(s.contribution, s.item));
+
+/** One row of Documents → Processing: a document, or a new document's submission with its candidate. */
+export interface ProcessingEntry {
+  item: Item;
+  /** The open NEW_DOCUMENT contribution, for a submission. */
+  contribution: Contribution | null;
 }
+
+/**
+ * Documents → Processing (preview `processingQueue`): new documents' submissions not processed yet, first, then curated
+ * documents that aren't processed for their current revision (`toProcess`). A document an open submission holds is
+ * listed through its submission only (or not at all, for a new version). `decided`: contribution names with a decision
+ * in its Undo window (left out).
+ */
+export function processingQueue(items: readonly Item[], queue: readonly Submission[], decided: ReadonlySet<string> = new Set()): ProcessingEntry[] {
+  const held = new Set(queue.flatMap((s) => (s.contribution.item ? [s.contribution.item] : [])));
+  const subs = queue.flatMap((s) => (s.item && !decided.has(s.contribution.name ?? "") && isCandidate(s.contribution) && toProcess({ item: s.item, contribution: s.contribution }) ? [{ item: s.item, contribution: s.contribution }] : []));
+  const docs = items.filter((it) => !held.has(it.name ?? "") && toProcess({ item: it })).map((item) => ({ item, contribution: null }));
+  return [...subs, ...docs];
+}
+
+/** A Processing entry that waits on the caller: a submission (its contributor waits), a failure or a change at the source. */
+export const waitsOnCaller = (e: ProcessingEntry) => !!e.contribution || ["failed", "outdated"].includes(processingOf(e));
 
 /** Every contribution the caller can see (history for the document drawer, decided submissions). */
 export function useAllContributions({ enabled = true }: { enabled?: boolean } = {}) {
@@ -244,14 +265,17 @@ export function useDocCounts(): { data?: DocCountsData; isPending: boolean } {
   const data = useMemo<DocCountsData | undefined>(() => {
     if (!enabled || !queue.data || !curated.data) return undefined;
     const open = queue.data.filter((s) => !held.has(s.contribution.name ?? ""));
-    const inReview = new Set(queue.data.flatMap((s) => (s.contribution.item ? [s.contribution.item] : [])));
     const { pool, visible, all } = curated.data;
+    const proc = processingQueue(
+      all.map((r) => r.item),
+      queue.data,
+      held,
+    );
     return {
-      review: open.length,
-      issues: problemItems(
-        all.map((r) => r.item),
-        inReview,
-      ).length,
+      review: reviewReady(open).length,
+      processing: proc.length,
+      waiting: proc.filter(waitsOnCaller).length,
+      submissions: proc.filter((e) => e.contribution).length,
       reverify: reviewEntries(pool).length,
       details: detailEntries(pool).length,
       duplicates: duplicatePairs(pool, visible).length,

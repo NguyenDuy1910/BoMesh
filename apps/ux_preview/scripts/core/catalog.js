@@ -226,8 +226,9 @@ const kbManageHref = (kb, tab = '') => '/studio/collections/' + kb.id + (tab ? '
 const kbContentsHref = (kb, folder = '') => '/studio/collections/' + kb.id + '?' + new URLSearchParams({ tab: 'contents', ...(folder ? { folder } : {}) });
 /** Knowledge Studio addresses: a tab, optionally with a view (Sources: sources | history | accounts) and more query. */
 const studioHref = (tab, q = {}) => '/studio?' + new URLSearchParams({ tab, ...q });
-/** Knowledge Studio → Documents: view all (the registry; processing = a processing state), review (submissions and what a
-    sync held back), issues (what couldn't be processed) or quality (part = reverify | details | duplicates). */
+/** Knowledge Studio → Documents: view all (the registry; processing = a processing state, quality = reverify | details |
+    duplicates), processing (what isn't processed yet; state = pending | processing | failed | outdated) or review
+    (processed submissions, new versions and what a sync held back). */
 const docsHref = (view = 'all', q = {}) => studioHref('documents', { view, ...q });
 /** Knowledge Studio → Topics: view topics (the tree and a topic's detail; node = a topic) or suggestions (what the
     assistant left for people and what reviewers' corrections suggest). */

@@ -401,7 +401,7 @@ Table contributions {
     (ingestion_source_id, state)
     item_id [unique, note: 'Partial while state in (analyzing, in_review, changes_requested) and deleted_at is null: one open contribution per candidate']
   }
-  Note: 'Approval moves/publishes the candidate or appends a revision of replaces_item_id in one transaction, and copies the approved topics into item_topics. It never starts an Ingestion Run. Timeline events are audit_logs rows (resource_type contribution). audienceSummary is computed. Same-tenant references are trigger-checked.'
+  Note: 'Approval moves/publishes the candidate or appends a revision of replaces_item_id in one transaction, and copies the approved topics into item_topics. A NEW_DOCUMENT candidate is processed before approval (its run refreshes suggestions); approval never starts an Ingestion Run. Timeline events are audit_logs rows (resource_type contribution). audienceSummary is computed. Same-tenant references are trigger-checked.'
 }
 
 // The workspace taxonomy (DOMAIN and TOPIC). Documents reference topics

@@ -4,7 +4,9 @@ State machine: ANALYZING → IN_REVIEW (system analysis); IN_REVIEW → APPROVED
 CHANGES_REQUESTED | REJECTED | WITHDRAWN; CHANGES_REQUESTED → ANALYZING
 (resubmit) | WITHDRAWN. Approval moves/publishes the candidate or appends a
 revision of the replaced document in one transaction and never starts an
-ingestion run. While a contribution is open its candidate is frozen; that
+ingestion run: a NEW_DOCUMENT candidate is processed before it is decided
+(``CANDIDATE_NOT_PROCESSED``), and that run refreshes the contribution's
+suggested topics and summary. While a contribution is open its candidate is frozen; that
 check lives once, in the item engine (``has_open_contribution``).
 
 Visibility: the contributor, and holders of ``contributions.review`` on the
@@ -98,6 +100,9 @@ PUBLISH = "items.publish"
 CLOSED_DELETABLE = ("rejected", "withdrawn")
 REVIEWED_KIND = "contribution_reviewed"
 SUBMITTED_KIND = "contribution_submitted"
+#: ``index_status`` of a processed candidate: ``ready`` (indexingState SUCCEEDED or
+#: OUTDATED) or ``unsupported`` (a format processing cannot read).
+PROCESSED_INDEX_STATUSES = ("ready", "unsupported")
 
 
 class ContributionService:
@@ -352,6 +357,8 @@ class ContributionService:
             candidate = await session.get(Item, contribution.item_id)
             assert candidate is not None
             _require_available(candidate)
+            if contribution.kind == "new_document":
+                _require_processed(candidate)
             contribution.state = "approved"
             contribution.target_item_id = target_id
             contribution.decided_by_user_id = ctx.user_id
@@ -720,6 +727,16 @@ def _require_available(candidate: Item) -> None:
     ):
         raise FailedPrecondition(
             "The candidate must be an ACTIVE document with contentState AVAILABLE."
+        )
+
+
+def _require_processed(candidate: Item) -> None:
+    """Processing comes before review: indexingState SUCCEEDED, OUTDATED or UNSUPPORTED."""
+    if candidate.index_status not in PROCESSED_INDEX_STATUSES:
+        raise FailedPrecondition(
+            "Process the candidate before deciding it: its indexingState must be "
+            "SUCCEEDED, OUTDATED or UNSUPPORTED.",
+            reason="CANDIDATE_NOT_PROCESSED",
         )
 
 

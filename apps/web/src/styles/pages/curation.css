@@ -52,7 +52,7 @@
 .cur-pane__meta { flex: none; font-size: 12px; color: var(--muted); }
 .cur-pane__scroll { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 24px; background: var(--surface-secondary); }
 .cur-pane__scroll:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
-.cur-pane .doc-page { max-width: 760px; margin: 0 auto; padding: 40px 48px; font-size: 14px; line-height: 1.7; }
+.cur-pane .doc-page { max-width: 760px; margin: 0 auto 16px; padding: 40px 48px; font-size: 14px; line-height: 1.7; }
 .cur-pane .doc-page--slide { aspect-ratio: auto; }
 .cur-pane .doc-page--sheet { padding: 0; }
 /* A batch has no document to read: queue | a wide inspector (why, sample, decision). */

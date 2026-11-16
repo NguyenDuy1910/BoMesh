@@ -2,7 +2,9 @@
 
 Selection rules (``item_model.md`` §6 invariant 10): explicit ``items[]`` are
 checked one by one (each needs ``ingestionRuns.create`` on its governing
-collection and must be visible, else PERMISSION_DENIED); the ``filter``
+collection and must be visible, else PERMISSION_DENIED — the candidate of an
+open NEW_DOCUMENT contribution also passes for its deciders, holders of
+``contributions.review`` on its deciding collection, §4.7); the ``filter``
 silently narrows to the collections where the caller holds
 ``ingestionRuns.create`` — every live collection for a holder at the
 workspace (or, for platform callers, platform) scope — and every item it
@@ -25,7 +27,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, func, select, true
+from sqlalchemy import ColumnElement, func, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh.db.engine import SessionFactory, transaction_scope
@@ -52,6 +54,10 @@ from bomesh.services.kernel.workspaces import (
     WorkspaceResolver,
     require_usable,
     workspace_name,
+)
+from bomesh.services.knowledge_curation.access import (
+    is_reviewer,
+    open_new_document_contributions,
 )
 from bomesh.services.knowledge_curation.records import topic_name
 from bomesh.services.knowledge_items.item_store import catalog_visibility
@@ -153,11 +159,15 @@ class IngestionRuns:
 
         Nothing selected is an empty run that succeeds at once.
         """
-        collections = await self._processable_collections(ctx, workspace_id)
+        named = selector is not None and bool(selector.items)
+        collections = await self._processable_collections(
+            ctx, workspace_id, required=not named
+        )
         await self._open_for_processing(ctx, workspace_id)
         platform = await is_platform_caller(ctx, workspace_id)
         db_trigger = _requested_trigger(trigger, platform=platform)
-        selection = await self._resolve(ctx, workspace_id, selector, collections)
+        selection, reviewed = await self._resolve(ctx, workspace_id, selector, collections)
+        collections = collections | reviewed
         classification = await self._classification(workspace_id, classification)
         visibility = await self._visibility(ctx, workspace_id)
         request = {
@@ -430,12 +440,13 @@ class IngestionRuns:
     # -- Internals ---------------------------------------------------------------
 
     async def _processable_collections(
-        self, ctx: RequestContext, workspace_id: UUID
+        self, ctx: RequestContext, workspace_id: UUID, *, required: bool = True
     ) -> frozenset[UUID]:
         """Collections where the caller holds ``ingestionRuns.create``.
 
-        PERMISSION_DENIED unless held at the workspace or platform scope or on
-        at least one collection.
+        When ``required``, PERMISSION_DENIED unless held at the workspace or
+        platform scope or on at least one collection; a selector naming items
+        checks each one instead (:meth:`_check_items`).
         """
         authorizer, principal = ctx.authorizer, ctx.principal
         workspace_wide = CREATE in await authorizer.permissions(
@@ -448,7 +459,7 @@ class IngestionRuns:
                 collections = await live_collections(session, workspace_id)
         else:
             collections = frozenset()
-        if not workspace_wide and not collections:
+        if required and not workspace_wide and not collections:
             raise permission_denied(CREATE, WorkspaceRef(workspace_id))
         return collections
 
@@ -464,8 +475,9 @@ class IngestionRuns:
         workspace_id: UUID,
         selector: RunSelection | None,
         collections: frozenset[UUID],
-    ) -> RunSelection:
-        """Validate the selector and check the items it names; the engine selection."""
+    ) -> tuple[RunSelection, frozenset[UUID]]:
+        """Validate the selector and check the items it names: the engine selection and
+        the governing collections of the contribution candidates their deciders named."""
         if selector is None or selector.is_empty:
             raise InvalidArgument.for_field(
                 "selector", "A selector with items or a filter is required."
@@ -475,12 +487,12 @@ class IngestionRuns:
             raise InvalidArgument.for_field(
                 "selector.items", f"At most {MAX_SELECTED_ITEMS} items can be selected."
             )
-        await self._check_items(ctx, workspace_id, items, collections)
+        reviewed = await self._check_items(ctx, workspace_id, items, collections)
         if selector.filter_items:
             async with transaction_scope(self._sessions) as session:
                 for item in selector.filter_items:
                     await load_referenced(session, ctx, workspace_id, item, permission="items.get")
-        return replace(selector, items=items)
+        return replace(selector, items=items), reviewed
 
     async def _check_items(
         self,
@@ -488,19 +500,32 @@ class IngestionRuns:
         workspace_id: UUID,
         items: Sequence[UUID],
         collections: frozenset[UUID],
-    ) -> None:
-        """Each explicit item: visible (else 403), a DOCUMENT (else 400), processable (else 403)."""
+    ) -> frozenset[UUID]:
+        """Each explicit item: visible (else 403), a DOCUMENT (else 400), processable (else 403).
+
+        The candidate of an open NEW_DOCUMENT contribution is visible and
+        processable for its deciders (``contributions.review`` on the deciding
+        collection); returns the governing collections of those candidates, which
+        the run then draws them from.
+        """
         if not items:
-            return
+            return frozenset()
         async with transaction_scope(self._sessions) as session:
             visibility = await catalog_visibility(
                 session, ctx.authorizer, ctx.principal, workspace_id
             )
+            candidates = await open_new_document_contributions(session, workspace_id, items)
+            decided = {
+                item
+                for item, contribution in candidates.items()
+                if await is_reviewer(ctx.authorizer, ctx.principal, contribution)
+            }
             types = dict(
                 (
                     await session.execute(
                         select(Item.id, Item.item_type).where(
-                            Item.id.in_(items), visibility.clause(Item)
+                            Item.id.in_(items),
+                            or_(visibility.clause(Item), Item.id.in_(decided)),
                         )
                     )
                 ).all()
@@ -508,6 +533,7 @@ class IngestionRuns:
             governing = await governing_collections(
                 session, workspace_id, [item for item in items if types.get(item) == "document"]
             )
+        reviewed: set[UUID] = set()
         for item in items:
             ref = ItemRef(workspace_id, item)
             if item not in types:
@@ -516,8 +542,13 @@ class IngestionRuns:
                 raise InvalidArgument.for_field(
                     "selector.items", f"'{ref.name}' is not a DOCUMENT item."
                 )
-            if governing.get(item) not in collections:
+            collection = governing.get(item)
+            if collection in collections:
+                continue
+            if item not in decided or collection is None:
                 raise permission_denied(CREATE, ref)
+            reviewed.add(collection)
+        return frozenset(reviewed)
 
     async def _classification(
         self, workspace_id: UUID, classification: RunClassification | None

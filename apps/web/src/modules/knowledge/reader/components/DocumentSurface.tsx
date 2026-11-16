@@ -50,13 +50,13 @@ export interface SurfaceMarks {
   searchable: boolean;
 }
 
-export type SurfaceVariant = "reader" | "preview" | "first";
+export type SurfaceVariant = "reader" | "preview" | "pane";
 
 export interface DocumentSurfaceProps {
   document: SurfaceDocument;
   /** Revision number to show; the current revision when empty. */
   revision?: string;
-  /** `reader`: the viewer bar (page, zoom); `preview`: the quick preview; `first`: the first page only (review). */
+  /** `reader`: the viewer bar (page, zoom); `preview`: the quick preview; `pane`: the review pane (no bar, the pane says the pages). */
   variant?: SurfaceVariant;
   /** The element that scrolls the document (default: the nearest scrolling ancestor). */
   scrollRef?: RefObject<HTMLElement | null>;
@@ -79,7 +79,7 @@ const SEARCHABLE: Readonly<Partial<Record<Viewer, true>>> = { pdf: true, table: 
  * only on its `state` and the representation's `kind` — READY draws one of six viewers (PDF, image,
  * table, text, media, archive) given the representation's URL; PREPARING shows the cover as page 1 and
  * polls; UNAVAILABLE says why and offers the original. Used by the Reader, the quick preview, the
- * submission view and the review's first page. Nothing here depends on processing: cited passages and
+ * submission view and the review pane. Nothing here depends on processing: cited passages and
  * `?q=` are marked when the caller passes them (processed documents only).
  */
 export function DocumentSurface({ document: d, revision, variant = "reader", scrollRef, highlight, focusHit = -1, page, onMarks, onPages, onDownload }: DocumentSurfaceProps) {
@@ -130,7 +130,7 @@ export function DocumentSurface({ document: d, revision, variant = "reader", scr
     const where = mark ? undefined : focusHit >= 0 && focusPage ? focusPage : page;
     const target = mark ?? (where ? root.querySelector<HTMLElement>(`[data-page="${where}"]`) : null);
     if (!target) {
-      if (first.current && variant === "preview") sc.scrollTop = 0;
+      if (first.current && variant !== "reader") sc.scrollTop = 0;
       return;
     }
     const top = sc.scrollTop + target.getBoundingClientRect().top - sc.getBoundingClientRect().top - (mark ? sc.clientHeight / 3 : 24);
@@ -143,7 +143,7 @@ export function DocumentSurface({ document: d, revision, variant = "reader", scr
   const unavailable = (title: string, description: string, download: ReactNode) => (
     <>
       <NothingToShow title={title} description={description} actions={download} />
-      {variant === "first" ? null : coverPages(cover, format, { loading: false })}
+      {variant === "pane" ? null : coverPages(cover, format, { loading: false })}
     </>
   );
   const downloadButton = (
@@ -190,7 +190,6 @@ export function DocumentSurface({ document: d, revision, variant = "reader", scr
       fileKey,
       representation: view.representation,
       refresh: preview.refresh,
-      first: variant === "first",
       highlight,
       focusHit,
       onMarks: onViewerMarks,

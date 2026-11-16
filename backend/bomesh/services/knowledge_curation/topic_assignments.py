@@ -16,11 +16,19 @@ from collections.abc import Collection, Sequence
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, select, update
+from sqlalchemy import ColumnElement, Uuid, delete, func, literal, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh.db.engine import transaction_scope
-from bomesh.db.models import ContributionTopic, Item, ItemTopic, Topic, TopicCorrection
+from bomesh.db.models import (
+    Contribution,
+    ContributionTopic,
+    Item,
+    ItemTopic,
+    Topic,
+    TopicCorrection,
+)
 from bomesh.errors import FailedPrecondition, NotFound
 from bomesh.iam.authorizer import WorkspaceRef, permission_denied
 from bomesh.iam.visibility import ItemVisibility, item_visibility
@@ -37,6 +45,10 @@ from bomesh.services.knowledge_curation.support import CurationDeps, referenced_
 
 MANAGE = "topics.update"
 _ACCEPT = "topics.accept"
+#: The suggestions CLASSIFYING replaces: topics and summary, and their confidences.
+_CLASSIFIED_SUGGESTIONS = frozenset(
+    {"topics_confidence", "proposed_topics_confidence", "summary", "summary_confidence"}
+)
 
 
 class TopicAssignmentService:
@@ -250,6 +262,48 @@ async def suggested_topic_ids(session: AsyncSession, contribution_id: UUID) -> t
     )
 
 
+async def replace_classified_suggestions(
+    session: AsyncSession,
+    contribution: Contribution,
+    topic_ids: Collection[UUID],
+    summary: str | None,
+) -> None:
+    """Processing classified the candidate: its topics and summary replace the
+    contribution's suggested ones, without confidences (``item_model.md`` §4.7).
+
+    Only ACTIVE topics are kept; the contribution's ``etag`` changes.
+    """
+    await session.execute(
+        delete(ContributionTopic).where(
+            ContributionTopic.contribution_id == contribution.id,
+            ContributionTopic.relation == "suggested",
+        )
+    )
+    if topic_ids:
+        await session.execute(
+            pg_insert(ContributionTopic)
+            .from_select(
+                ["contribution_id", "topic_id", "relation"],
+                select(literal(contribution.id, Uuid), Topic.id, literal("suggested")).where(
+                    Topic.id.in_(list(topic_ids)),
+                    Topic.state == "active",
+                    Topic.deleted_at.is_(None),
+                ),
+            )
+            .on_conflict_do_nothing()
+        )
+    suggestions = {
+        key: value
+        for key, value in (contribution.suggestions or {}).items()
+        if key not in _CLASSIFIED_SUGGESTIONS
+    }
+    if summary:
+        suggestions["summary"] = summary
+    contribution.suggestions = suggestions
+    contribution.updated_at = func.now()
+    await session.flush()
+
+
 async def record_topic_correction(
     session: AsyncSession,
     *,
@@ -286,5 +340,5 @@ __all__ = [
     "assistant_topic_ids",
     "correction_records",
     "record_topic_correction",
-    "suggested_topic_ids",
+    "replace_classified_suggestions",
 ]

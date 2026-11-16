@@ -1,6 +1,6 @@
-/* Knowledge Studio → Review and Library (features/curation.js): the review workbench (queue | document |
-   inspector, each pane scrolling on its own), assistant suggestions with confidence badges, the decision
-   footer, the Library and Publishing problems tables, compare and the document history. Prefix: cur-.
+/* Knowledge Studio → Documents (features/curation.js): the Review workbench (queue | document | inspector, each pane
+   scrolling on its own), assistant suggestions with confidence badges, the decision footer, the All and Processing
+   tables, All's Quality filter, compare and the document history. Prefix: cur-.
    Tokens only. */
 
 /* ───── Review: the workbench — three panes at viewport height, each scrolling on its own ───── */
@@ -52,7 +52,7 @@
 .cur-pane__meta { flex: none; font-size: 12px; color: var(--muted); }
 .cur-pane__scroll { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 24px; background: var(--surface-secondary); }
 .cur-pane__scroll:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
-.cur-pane .doc-page { max-width: 760px; margin: 0 auto; padding: 40px 48px; font-size: 14px; line-height: 1.7; }
+.cur-pane .doc-page { max-width: 760px; margin: 0 auto 16px; padding: 40px 48px; font-size: 14px; line-height: 1.7; }
 .cur-pane .doc-page--slide { aspect-ratio: auto; }
 .cur-pane .doc-page--sheet { padding: 0; }
 /* A batch has no document to read: queue | a wide inspector (why, sample, decision). */
@@ -70,7 +70,8 @@
 .cur-insp__sec { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
 .cur-insp__sec + .cur-insp__sec { border-top: 1px solid var(--separator); }
 .cur-insp__h { font-size: 13px; line-height: 18px; font-weight: 600; }
-.cur-insp__sub { margin: -8px 0 0; font-size: 12px; line-height: 17px; color: var(--muted); }
+.cur-insp__sub { display: flex; align-items: flex-start; gap: 4px; margin: -8px 0 0; font-size: 12px; line-height: 17px; color: var(--muted); }
+.cur-insp__sub > .i { flex: none; margin-top: 2px; color: var(--accent); }
 .cur-insp__text { margin: 0; font-size: 13px; line-height: 20px; }
 
 .cur-note { margin: 0; padding: 8px 12px; border-left: 3px solid var(--accent); border-radius: 0 var(--radius-lg) var(--radius-lg) 0; background: var(--surface-secondary); }
@@ -177,26 +178,31 @@
 .cur-cmp__text { margin: 0; font-size: 13px; line-height: 20px; color: var(--muted); }
 .cur-cmp .kv { font-size: 13px; grid-template-columns: minmax(84px, max-content) minmax(0, 1fr); gap: 8px 16px; }
 
-/* ───── All documents, Problems and history ───── */
+/* ───── All, Processing and history ───── */
 .cur-nowrap { white-space: nowrap; }
-.cur-origin { min-width: 0; max-width: 100%; }
-.cur-origin > .app-icon { flex: none; }
+/* A submission in Processing (or All): marked as one, then its contributor → the collection it's for. */
+.cur-subm { display: inline-flex; align-items: center; gap: 4px; font-weight: 500; color: var(--accent-soft-foreground); }
+.cur-subm > .i { flex: none; }
 @container app (min-width: 680px) {
-  .cur-all .table__content, .cur-prob .table__content { table-layout: fixed; width: 100%; }
-  .cur-all .table__column:nth-child(1), .cur-prob .table__column:nth-child(1) { width: 48px; }
+  .cur-all .table__content, .cur-proc .table__content { table-layout: fixed; width: 100%; }
+  .cur-all .table__column:nth-child(1), .cur-proc .table__column:nth-child(1) { width: 48px; }
   /* All: Name · Processing · Publication · Topics · Updated · actions (wide enough for the longest fix: Process the update + ⋯) */
   .cur-all .table__column:nth-child(3) { width: 176px; }
   .cur-all .table__column:nth-child(4) { width: 144px; }
   .cur-all .table__column:nth-child(5) { width: 18%; }
   .cur-all .table__column:nth-child(6) { width: 104px; }
   .cur-all .table__column:nth-child(7) { width: 176px; }
-  /* Issues: Name · Issue · Origin · Updated · fix */
-  .cur-prob .table__column:nth-child(3) { width: 28%; }
-  .cur-prob .table__column:nth-child(4) { width: 16%; }
-  .cur-prob .table__column:nth-child(5) { width: 104px; }
-  .cur-prob .table__column:nth-child(6) { width: 168px; }
-  .cur-all .table__cell--actions > .row, .cur-prob .table__cell--actions > .row { justify-content: flex-end; }
+  /* Processing: Name · State · Updated · fix */
+  .cur-proc .table__column:nth-child(3) { width: 30%; }
+  .cur-proc .table__column:nth-child(4) { width: 104px; }
+  .cur-proc .table__column:nth-child(5) { width: 176px; }
+  .cur-all .table__cell--actions > .row, .cur-proc .table__cell--actions > .row { justify-content: flex-end; }
 }
+/* All's Quality filter: the three lists as pills (with their counts), and the way back to every document. */
+.cur-quality { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; }
+.cur-quality > .rq { flex: 0 1 auto; }
+.cur-quality > .button { margin-bottom: 12px; }
+.cur-qbtn .badge { margin-left: 2px; }
 /* Column headers sort on wide screens; the menu only stands in when rows stack. */
 @container app (min-width: 761px) { .cur-sortmenu { display: none; } }
 .cur-tl { display: flex; flex-direction: column; gap: 14px; margin: 0; padding: 0; list-style: none; }
@@ -243,14 +249,13 @@
   /* All: Publication and Topics give way (Name, Processing and the row's fix stay). */
   .cur-all .table__column:nth-child(4), .cur-all .table__cell:nth-child(4), .cur-all .table__column:nth-child(5), .cur-all .table__cell:nth-child(5) { display: none; }
   .cur-all .table__column:nth-child(7) { width: 144px; }
-  .cur-prob .table__column:nth-child(4), .cur-prob .table__cell:nth-child(4) { display: none; }
-  .cur-all .table__column:nth-child(6), .cur-prob .table__column:nth-child(5) { width: 88px; }
+  .cur-all .table__column:nth-child(6), .cur-proc .table__column:nth-child(4) { width: 88px; }
 }
 @container app (max-width: 760px) {
   .cur-detail__nav .t-xs { display: none; }
   .cur-cmp { grid-template-columns: minmax(0, 1fr); }
   /* All as cards: name, then processing and updated, then the row's fix at the end of that line. */
-  .cur-all .table--stack .table__cell--actions { order: 4; margin-left: auto; }
+  .cur-all .table--stack .table__cell--actions, .cur-proc .table--stack .table__cell--actions { order: 4; margin-left: auto; }
 }
 /* Phones: the queue alone; picking an item opens the inspector full width with Back, the page scrolls, the decision floats. */
 @container app (max-width: 679px) {

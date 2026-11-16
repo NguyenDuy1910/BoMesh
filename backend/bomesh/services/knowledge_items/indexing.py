@@ -40,6 +40,13 @@ from bomesh.services import (
     StoredFileContent,
     current_processing_version,
 )
+from bomesh.services.knowledge_curation.access import (
+    deciding_collection,
+    open_new_document_contributions,
+)
+from bomesh.services.knowledge_curation.topic_assignments import (
+    replace_classified_suggestions,
+)
 from bomesh.services.knowledge_curation.topics import classification_candidates
 from bomesh.services.knowledge_items.citations import CitationService
 from bomesh.services.knowledge_items.documents import apply_assistant_topics
@@ -177,7 +184,10 @@ class ItemIngestionService:
         and its original to be stored. ``classification`` is the run's
         :meth:`classification_request`; a candidate whose rule matches the
         Document (an ancestor collection, its source) settles its topics. The
-        index (and the topics CLASSIFYING chose) is recorded only if the
+        candidate of an open NEW_DOCUMENT contribution matches collection rules
+        where it is headed (target, else suggested collection) and its
+        classification replaces the contribution's suggested topics and summary.
+        The index (and what CLASSIFYING chose) is recorded only if the
         revision and governing collection did not change meanwhile; otherwise
         the Document waits for another run and its payload is re-applied.
         Returns the chunk count. A content problem raises
@@ -391,11 +401,20 @@ class ItemIngestionService:
             if collection_id is None:
                 raise DocumentUnavailableError("the document is not in a collection")
             revision = await ItemService(session).current_revision(document.id)
+            # The candidate of an open NEW_DOCUMENT contribution is classified
+            # where it is headed, not in the contributor's PERSONAL collection.
+            contribution = (
+                await open_new_document_contributions(session, tenant_id, [document.id])
+            ).get(document.id)
+            decision = deciding_collection(contribution) if contribution is not None else None
+            placement = (
+                await item_ancestry(session, decision) if decision is not None else path[1:]
+            )
             return _ProcessingStart(
                 document=document,
                 collection_id=collection_id,
                 revision_number=revision.revision_number if revision is not None else None,
-                ancestor_ids=tuple(str(node.item_id) for node in path[1:]),
+                ancestor_ids=tuple(str(node.item_id) for node in placement),
             )
 
     @staticmethod
@@ -408,8 +427,9 @@ class ItemIngestionService:
         revision_number: int | None,
         classified: DocumentClassification | None = None,
     ) -> None:
-        """Mark the index current and apply the classified topics, unless the
-        content or placement moved on meanwhile."""
+        """Mark the index current and apply the classified topics (and an open
+        NEW_DOCUMENT contribution's suggestions), unless the content or
+        placement moved on meanwhile."""
 
         item = await session.get(Item, item_id, with_for_update=True, populate_existing=True)
         if item is None:
@@ -438,6 +458,16 @@ class ItemIngestionService:
             await apply_assistant_topics(
                 session, item_id, [UUID(topic.id) for topic in classified.topics]
             )
+            contribution = (
+                await open_new_document_contributions(session, item.tenant_id, [item_id])
+            ).get(item_id)
+            if contribution is not None:
+                await replace_classified_suggestions(
+                    session,
+                    contribution,
+                    [UUID(topic.id) for topic in classified.topics],
+                    classified.summary,
+                )
         if bool(item.is_published) != context.published:
             await items.mark_payload_dirty((item_id,), func.now())
 
@@ -473,7 +503,9 @@ class _ProcessingStart:
     document: Item
     collection_id: UUID
     revision_number: int | None
-    #: Every ancestor Item ID, for CLASSIFYING's collection rules.
+    #: CLASSIFYING's collection rules match these Item IDs: the Document's
+    #: ancestors, or for an open NEW_DOCUMENT contribution's candidate its
+    #: deciding collection and that collection's ancestors.
     ancestor_ids: tuple[str, ...]
 
 

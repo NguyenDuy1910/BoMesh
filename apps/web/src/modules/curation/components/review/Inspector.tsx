@@ -22,28 +22,33 @@ import { useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
 
 import { EmptyState, FileIcon, IconButton, LinkButton as TextLink, Tip } from "@/components/ui";
-import { resourceId } from "@/lib/api/client";
-import { rel } from "@/lib/format";
+import { toast } from "@/components/ui/Toast";
+import { errorMessage, resourceId } from "@/lib/api/client";
+import { plural, rel } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
-import type { Topic } from "@/modules/knowledge/api";
+import { downloadItem, type Topic } from "@/modules/knowledge/api";
 import { LifecycleChip } from "@/modules/knowledge/components/LifecycleChip";
 import { RESOURCE_KINDS, topicTree } from "@/modules/knowledge/model";
 import { useItem } from "@/modules/knowledge/queries";
+import { DocumentSurface } from "@/modules/knowledge/reader/components/DocumentSurface";
 
 import { isUnprocessable } from "../../lifecycle";
 import { lastEvent, topicsHref, versionOf, type Flag } from "../../model";
 import { useCollectionAudience } from "../../queries";
-import { FirstPage } from "../FirstPage";
 import { ConfBadge, PlainSelect, SourceName } from "../parts";
 import type { Draft, SubView } from "./types";
 
 const relLow = (at: string) => rel(at).replace(/^(Just now|Yesterday)$/, (m) => m.toLowerCase());
 
-/** The document itself, in its own pane (preview `docPane`): the first page at reading size, scrolling on its own. */
+/**
+ * The document itself, in its own pane (preview `docPane`): every page at reading size, scrolling on its own, so the
+ * reviewer skims the whole file here; Open full preview adds zoom, find and the side panel.
+ */
 export function DocPane({ view: v }: { view: SubView }) {
+  const { id: ws } = useWorkspace();
   const item = v.sub.item;
   const [counted, setCounted] = useState<{ item: string; pages: number }>();
-  const pages = counted && counted.item === item?.name ? counted.pages : 1;
+  const pages = counted && counted.item === item?.name ? counted.pages : 0;
   return (
     <section className="cur-pane" aria-label="Preview">
       <header className="cur-pane__bar">
@@ -53,7 +58,7 @@ export function DocPane({ view: v }: { view: SubView }) {
         </span>
         {item ? (
           <>
-            <span className="cur-pane__meta num">{`Page 1 of ${pages}`}</span>
+            {pages ? <span className="cur-pane__meta num">{plural(pages, "page")}</span> : null}
             <TextLink href={`/doc/${resourceId(item.name)}`} icon={ExternalLink}>
               Open full preview
             </TextLink>
@@ -62,7 +67,15 @@ export function DocPane({ view: v }: { view: SubView }) {
       </header>
       <div className="cur-pane__scroll" tabIndex={0}>
         {item ? (
-          <FirstPage key={item.name} item={item} onPages={(n) => setCounted({ item: item.name ?? "", pages: n })} />
+          <DocumentSurface
+            key={item.name}
+            document={{ id: resourceId(item.name), cover: item.document?.cover }}
+            variant="pane"
+            onPages={(n) => setCounted({ item: item.name ?? "", pages: n })}
+            onDownload={() =>
+              void downloadItem(ws, item.name ?? "", item.document?.fileName || item.displayName || "document").catch((e: unknown) => toast(errorMessage(e), { tone: "danger" }))
+            }
+          />
         ) : (
           <EmptyState icon={FileGlyph} compact title="No preview yet" />
         )}

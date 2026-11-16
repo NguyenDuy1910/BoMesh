@@ -220,7 +220,9 @@
     processDocs(docs); audit('Started processing', s.name);
     toast(`Processing ${plural(docs.length, 'document')} from ${s.name}`); rerender(true);
   };
-  /** A synced file that waits for a reviewer: a submission with no person behind it (via 'sync'). versionOf marks a changed file. */
+  /** A synced file that waits for a reviewer: a submission with no person behind it (via 'sync'). versionOf marks a changed
+      file. A sync never processes: a new document's submission waits in Documents → Processing like a member's, and moves
+      to Review once processed; a new version is processed once it's approved. */
   function syncSubmission(src, name, { versionOf } = {}) {
     const at = Date.now();
     const d = mkDoc(src.kb, uid('d'), name, { source: src.id, addedBy: src.name, updated: at, status: 'pending' });

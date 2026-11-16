@@ -6,6 +6,7 @@ threshold); they replace only earlier assistant-applied ``item_topics`` rows.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any
 
@@ -23,7 +24,15 @@ from bomesh.connector.protocol import (
     SourceProvider,
 )
 from bomesh.db.engine import transaction_scope
-from bomesh.db.models import Item, ItemTopic, Tenant, Topic
+from bomesh.db.models import (
+    Contribution,
+    ContributionTopic,
+    Item,
+    ItemTopic,
+    Tenant,
+    Topic,
+    User,
+)
 from bomesh.document_index import ItemIndex, SemanticContextualizer
 from bomesh.runtime import AppRuntime
 from bomesh.services.ingestion.run_engine import RunClassification
@@ -259,3 +268,157 @@ async def test_a_matching_rule_settles_topics_without_asking_the_model(
     assert transport.profile_prompts == []
     assert "classifying" in phases
     assert await _tags(world, document) == {"chargebacks": None}
+
+
+# -- The candidate of an open NEW_DOCUMENT contribution (processing before review) --
+
+_RULE_SUGGESTIONS = {
+    "document_type": "pdf",
+    "document_type_confidence": 0.9,
+    "topics_confidence": 0.6,
+    "summary": "From the rules.",
+    "summary_confidence": 0.4,
+}
+
+
+@dataclass
+class _Submission:
+    workspace: Tenant
+    kb: Item
+    candidate: Item
+    contribution: Contribution
+    stale: Topic
+
+
+async def _submission(world: World, *, target: bool = True) -> _Submission:
+    """A member's candidate in their PERSONAL collection, under review for ``kb``
+    (its target, or with ``target=False`` the suggested collection); the rule
+    analysis suggested ``stale``."""
+    admin = await world.make_user()
+    workspace = await world.make_workspace(admin)
+    member: User = await world.add_member(workspace)
+    kb = await world.make_collection(workspace, title="Handbook")
+    personal = await world.make_collection(workspace, personal_for=member)
+    candidate = await world.make_document(personal, title="Dispute 42", creator=member)
+    stale = await _topic(world, workspace, "stale")
+    async with transaction_scope(world.sessions) as session:
+        row = await session.get(Item, candidate.id)
+        assert row is not None
+        row.storage_key = f"objects/{candidate.id}"
+        contribution = Contribution(
+            tenant_id=workspace.id,
+            item_id=candidate.id,
+            kind="new_document",
+            origin="member",
+            contributor_user_id=member.id,
+            target_item_id=kb.id if target else None,
+            suggestions=(
+                _RULE_SUGGESTIONS if target else {**_RULE_SUGGESTIONS, "collection_id": str(kb.id)}
+            ),
+            state="in_review",
+        )
+        session.add(contribution)
+        await session.flush()
+        session.add(
+            ContributionTopic(contribution_id=contribution.id, topic_id=stale.id, relation="suggested")
+        )
+    return _Submission(workspace, kb, candidate, contribution, stale)
+
+
+async def _suggested(world: World, contribution: Contribution) -> tuple[set[str], Contribution]:
+    async with transaction_scope(world.sessions) as session:
+        codes = set(
+            await session.scalars(
+                select(Topic.code)
+                .join(ContributionTopic, ContributionTopic.topic_id == Topic.id)
+                .where(
+                    ContributionTopic.contribution_id == contribution.id,
+                    ContributionTopic.relation == "suggested",
+                )
+            )
+        )
+        row = await session.get(Contribution, contribution.id)
+        assert row is not None
+        return codes, row
+
+
+async def _process_candidate(
+    runtime: AppRuntime, knowledge: Knowledge, submission: _Submission
+) -> None:
+    ingestion = ItemIngestionService(
+        knowledge.sessions, index=runtime.item_index(), content=_Content()  # type: ignore[arg-type]
+    )
+    request = await ingestion.classification_request(submission.workspace.id, None)
+    await ingestion.process_document(
+        submission.candidate.id, tenant_id=submission.workspace.id, classification=request
+    )
+
+
+async def test_processing_an_open_candidate_replaces_its_contribution_suggestions(
+    runtime: AppRuntime, fakes: Fakes, world: World, knowledge: Knowledge
+) -> None:
+    submission = await _submission(world)
+    await _topic(world, submission.workspace, "lending")
+    transport = _ProfileTransport(
+        '{"topics": ["lending"], "summary": "The retail lending dispute."}'
+    )
+    _classifying(runtime, fakes, transport)
+    _, before = await _suggested(world, submission.contribution)
+
+    await _process_candidate(runtime, knowledge, submission)
+
+    codes, after = await _suggested(world, submission.contribution)
+    assert len(transport.profile_prompts) == 1
+    assert codes == {"lending"}
+    # Confidences are cleared: the run chose, there is no score.
+    assert after.suggestions == {
+        "document_type": "pdf",
+        "document_type_confidence": 0.9,
+        "summary": "The retail lending dispute.",
+    }
+    assert after.updated_at > before.updated_at
+    assert after.state == "in_review"
+    assert (await knowledge.row(submission.candidate)).index_status == "ready"
+
+
+@pytest.mark.parametrize("target", [True, False], ids=["target", "suggested"])
+async def test_an_open_candidate_matches_rules_where_it_is_headed(
+    runtime: AppRuntime, fakes: Fakes, world: World, knowledge: Knowledge, target: bool
+) -> None:
+    submission = await _submission(world, target=target)
+    async with transaction_scope(world.sessions) as session:
+        session.add(
+            Topic(
+                tenant_id=submission.workspace.id,
+                code="chargebacks",
+                kind="topic",
+                display_name="Chargebacks",
+                rule_collection_ids=[submission.kb.id],
+            )
+        )
+    transport = _ProfileTransport('{"topics": ["stale"], "summary": "Should not be asked."}')
+    _classifying(runtime, fakes, transport)
+
+    await _process_candidate(runtime, knowledge, submission)
+
+    codes, after = await _suggested(world, submission.contribution)
+    assert transport.profile_prompts == []
+    assert codes == {"chargebacks"}
+    assert await _tags(world, submission.candidate) == {"chargebacks": None}
+    assert "topics_confidence" not in after.suggestions
+
+
+async def test_a_failed_classification_keeps_the_rule_suggestions(
+    runtime: AppRuntime, fakes: Fakes, world: World, knowledge: Knowledge
+) -> None:
+    submission = await _submission(world)
+    _classifying(runtime, fakes, _ProfileTransport(RuntimeError("provider down")))
+    before_codes, before = await _suggested(world, submission.contribution)
+
+    await _process_candidate(runtime, knowledge, submission)
+
+    codes, after = await _suggested(world, submission.contribution)
+    assert codes == before_codes == {"stale"}
+    assert after.suggestions == _RULE_SUGGESTIONS
+    assert after.updated_at == before.updated_at
+    assert (await knowledge.row(submission.candidate)).index_status == "ready"

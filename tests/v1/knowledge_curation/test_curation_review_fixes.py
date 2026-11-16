@@ -91,6 +91,7 @@ async def test_approve_rejects_an_empty_etag(scene: Scene) -> None:
 
 async def test_approve_with_an_unknown_topic_is_invalid_and_changes_nothing(scene: Scene) -> None:
     candidate = await scene.candidate()
+    await scene.mark_processed(candidate)
     body = await scene.submit(candidate)
     reviewer = await scene.as_(scene.reviewer)
 

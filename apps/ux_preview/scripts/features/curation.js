@@ -1,9 +1,11 @@
 /* Knowledge Studio (/studio) — Manage → Knowledge Studio: the one place knowledge is run. Its sections are sub-rows of
    Knowledge Studio in the sidebar, named after what they hold:
-     daily work   Documents — every document, whatever its origin, in four views (page tabs): All (the registry: filter
-                  by processing state, select documents and Process them — nothing is processed until someone asks),
-                  Review (submissions and what a sync held back), Issues (what couldn't be processed, what changed at its
-                  source, what a sync couldn't read) and Quality (re-verification, missing details, duplicates).
+     daily work   Documents — every document, whatever its origin, in three views (page tabs), in the order work flows:
+                  All (the registry: filter, select and act; a Quality filter lists re-verification, missing details and
+                  duplicates with their fixes), Processing (what isn't processed yet — submissions first, then documents
+                  nobody processed, that failed or that changed at their source: select them and Process; nothing is
+                  processed until someone asks) and Review (processed submissions, new versions and what a sync held back:
+                  the assistant classified them while processing, the reviewer decides).
      setup        Collections (where documents live, who reads them) · Topics (what documents are about: the topic tree
                   and the suggestions the pipeline and reviewers make; features/masterdata.js, governance.js) · Sources
                   (what comes in, how often, how it's published; with the accounts it signs in with). The setup guide
@@ -20,7 +22,7 @@
   'use strict';
 
   const BASE = '/studio';
-  /** Who works documents (review, issues, processing): reviewers. Who keeps the topics: workspace admins. */
+  /** Who works documents (processing, review): reviewers. Who keeps the topics: workspace admins. */
   const canWork = () => can('knowledge.manage') && canReview();
   /** [id, label, group, who may use it]. Setup is listed in the order it's done: where → what about → what comes in. */
   const TAB_DEFS = [
@@ -29,14 +31,16 @@
     ['topics', 'Topics', 'setup', () => canManageTaxonomy() || canWork()],
     ['sources', 'Sources', 'setup', () => can('source.manage')],
   ];
-  /** Documents' views: [id, label, tone of its count]. Review and Issues keep documents from people; Quality never blocks. */
-  const VIEWS = [['all', 'All', ''], ['review', 'Review', 'accent'], ['issues', 'Issues', 'danger'], ['quality', 'Quality', '']];
+  /** Documents' views, in the order work flows: [id, label, tone of its count]. Review's count needs the caller (accent);
+      Processing's is information; All carries none. */
+  const VIEWS = [['all', 'All', ''], ['processing', 'Processing', 'default'], ['review', 'Review', 'accent']];
   const VIDS = VIEWS.map(v => v[0]);
   /** Topics' views: the tree (workspace admins) and the suggestions (everyone who works documents). */
   const TOPIC_VIEWS = [['topics', 'Topics'], ['suggestions', 'Suggestions']];
   const topicViews = () => TOPIC_VIEWS.filter(([id]) => id === 'suggestions' || canManageTaxonomy()).map(v => v[0]);
+  /** All's Quality filter (?quality=): three lists that keep published knowledge right, each row with its fix (governance.js). */
   const PARTS = [['reverify', 'Re-verification due'], ['details', 'Missing details'], ['duplicates', 'Possible duplicates']];
-  const QK = 'curQ', PK = 'curProb', AK = 'curAll', PER = 25;
+  const QK = 'curQ', PK = 'curProc', AK = 'curAll', PER = 25;
   const names = list => (list.length <= 2 ? list.join(' and ') : `${list.slice(0, 2).join(', ')} and ${plural(list.length - 2, 'other')}`);
   const relLow = ts => rel(ts).replace(/^(Just now|Yesterday)$/, m => m.toLowerCase());
   const lifeKey = d => lifecycleOf(d).key;
@@ -54,26 +58,26 @@
   const sourceProblems = () => (can('source.manage') ? (X.srcBadge?.() || 0) + (X.accBadge?.() || 0) : 0);
   /** Access requests a base owner decides here (workspace admins decide them in People). */
   const ownerRequests = () => (can('user.manage') ? 0 : pendingRequests().filter(r => kbRole(kbById(r.kb)) === 'owner').length);
-  /** Documents that stopped: couldn't be processed, or changed at the source since they were. */
-  const PROBLEM_KEYS = ['failed', 'update'];
-  const problemDocs = () => curatedDocs().filter(d => PROBLEM_KEYS.includes(lifeKey(d)) || (stageOf(d) === 'unpublished' && ['failed', 'outdated'].includes(d.status)));
-  /** Published or unpublished documents nobody has processed yet. */
-  const notProcessed = () => curatedDocs().filter(d => ['published', 'unpublished'].includes(stageOf(d)) && processingOf(d) === 'pending');
-  /** Decisions that keep documents from people (Review and Issues): what the sub-row and the Studio badge count. */
-  const decisionCount = () => reviewQueue().length + openBatches().length + problemDocs().length;
-  /** Items per view: entries to decide (a batch is one), issue rows plus the error classes syncs report, documents to keep
-      right; and what isn't processed (Overview). */
+  /** What waits on the caller in Processing: submissions (their contributors wait on a review that needs them processed)
+      and documents that stopped — couldn't be processed, or changed at their source. Not processed uploads are counted
+      in the view's own badge, not here: they wait for someone to choose them. */
+  const stopped = d => isCandidate(d) || ['failed', 'outdated'].includes(processingOf(d));
+  /** Items per view: entries to decide (a batch is one), what isn't processed (and how much of it waits on the caller),
+      documents to keep right. */
   function counts() {
-    const g = X.gov?.counts?.() || {};
+    const g = X.gov?.counts?.() || {}, proc = processingQueue();
     return {
       review: reviewQueue().length + openBatches().length,
-      issues: problemDocs().length + backfillRuns().reduce((s, r) => s + (r.backfill.issues || []).length, 0),
+      processing: proc.length,
+      waiting: proc.filter(stopped).length,
+      submissions: proc.filter(isCandidate).length,
       quality: (g.reverify || 0) + (g.details || 0) + (g.duplicates || 0),
       parts: { reverify: g.reverify || 0, details: g.details || 0, duplicates: g.duplicates || 0 },
-      pending: notProcessed().length,
       suggestions: X.gov?.suggestionCount?.() || 0,
     };
   }
+  /** What keeps documents from people (Review, and what waits in Processing): what the sub-row and the Studio badge count. */
+  const decisionCount = () => reviewQueue().length + openBatches().length + processingQueue().filter(stopped).length;
   /** For Overview → Knowledge health: counts per view, empty when the caller doesn't review. */
   X.reviewQueues = () => (canWork() ? counts() : {});
   /** The section the Studio opens on: what needs the caller first — decisions, then something broken, then the first one. */
@@ -84,23 +88,28 @@
     return ok[0] || 'documents';
   }
   const tabOf = query => (tabsAllowed().includes(query.tab) ? query.tab : landing());
-  /** Documents' view: ?view=, else Review when ?sel= names a submission or batch, else Review while it has entries, else All. */
+  /** Documents' view: ?view=, else Review when ?sel= names an entry or it has entries, else Processing while something
+      there waits on the caller, else All. */
   function viewOf(query, c = counts()) {
     if (VIDS.includes(query.view)) return query.view;
     if (query.sel || c.review) return 'review';
+    if (c.waiting) return 'processing';
     return 'all';
   }
   const topicViewOf = query => (topicViews().includes(query.view) ? query.view : topicViews()[0]);
-  /** Quality's open list: ?part=, else the first with items. */
-  function partOf(query, c = counts()) {
-    return PARTS.some(([id]) => id === query.part) ? query.part : PARTS.find(([id]) => c.parts[id])?.[0] || 'reverify';
-  }
-  /** Old addresses (Review, Documents, Taxonomy, Knowledge flow and their queues, stages and segments) → the view that
-      holds them now; null when the address is current. */
+  /** All's quality list: ?quality=, else none. */
+  const qualityOf = query => (PARTS.some(([id]) => id === query.quality) ? query.quality : '');
+  /** Old addresses (Review, Documents, Taxonomy, Knowledge flow, the Issues and Quality views, and their queues, stages and
+      segments) → the view that holds them now; null when the address is current. */
   function legacyOf(q) {
+    if (['issues', 'quality'].includes(q.view)) {
+      const n = { ...q }; delete n.part;
+      if (q.view === 'issues') return { ...n, view: 'processing' };
+      return { ...n, view: 'all', quality: PARTS.some(([id]) => id === q.part) ? q.part : firstPart() };
+    }
     const oldTab = ['flow', 'review', 'quality', 'details', 'duplicates', 'all', 'library', 'taxonomy', 'master'].includes(q.tab);
     if (!oldTab && !q.queue && !q.life && !q.stage && !q.seg && !q.mode) return null;
-    const n = { ...q }; ['mode', 'queue', 'life', 'stage', 'seg'].forEach(k => delete n[k]);
+    const n = { ...q }; ['mode', 'queue', 'life', 'stage', 'seg', 'part'].forEach(k => delete n[k]);
     const queue = q.queue || q.seg || (['details', 'duplicates'].includes(q.tab) ? q.tab : '');
     const toSuggestions = ['confirm', 'classify'].includes(queue) || q.node === '__learn';
     if (['taxonomy', 'master'].includes(q.tab) || q.mode === 'rules' || toSuggestions) {
@@ -109,12 +118,14 @@
       return n;
     }
     n.tab = 'documents';
-    if (['reverify', 'details', 'duplicates', 'quality', 'upkeep'].includes(queue) || q.tab === 'quality' || (queue === 'review' && q.tab !== 'review')) { n.view = 'quality'; if (PARTS.some(([id]) => id === queue)) n.part = queue; else if (queue === 'review') n.part = 'reverify'; }
-    else if (['problems', 'issues'].includes(queue) || q.life === 'attention' || q.stage === 'issue') n.view = 'issues';
+    if (['reverify', 'details', 'duplicates', 'quality', 'upkeep'].includes(queue) || q.tab === 'quality' || (queue === 'review' && q.tab !== 'review')) { n.view = 'all'; n.quality = PARTS.some(([id]) => id === queue) ? queue : queue === 'review' ? 'reverify' : firstPart(); }
+    else if (['problems', 'issues'].includes(queue) || q.life === 'attention' || q.stage === 'issue') n.view = 'processing';
     else if (['submissions', 'batches', 'publish'].includes(queue) || ['review', 'changes'].includes(q.life) || q.stage === 'decide' || q.tab === 'review' || q.mode === 'needs') n.view = 'review';
     else n.view = 'all';
     return n;
   }
+  /** The quality list with something in it, for an address that names none. */
+  const firstPart = () => { const p = counts().parts; return PARTS.find(([id]) => p[id])?.[0] || 'reverify'; };
   /** The sidebar badge counts what the landing section shows (Documents: decisions that keep documents from people). */
   X.studioBadge = () => {
     const l = landing();
@@ -142,12 +153,14 @@
   /* ═══════════════ Badges and inbox ═══════════════ */
   X.reviewNotices = () => {
     if (!canWork()) return [];
-    const out = [], q = reviewQueue();
+    const out = [], q = reviewQueue(), subs = processingQueue().filter(d => isCandidate(d) && processingOf(d) === 'pending');
     if (q.length) out.push({ id: 'cur-queue-' + q.length, icon: 'clock', tone: 'info', title: `${plural(q.length, 'document')} ${q.length === 1 ? 'is' : 'are'} waiting for your review`, body: names(q.map(d => d.name)), at: Math.max(...q.map(d => lastEvent(d).at)), to: docsHref('review'), cta: 'Review' });
+    // A new submission is processed before it's reviewed: the assistant classifies it for the reviewer.
+    if (subs.length) out.push({ id: 'cur-subs-' + subs.length, icon: 'play', tone: 'info', title: `${plural(subs.length, 'submission')} ${subs.length === 1 ? 'is' : 'are'} waiting to be processed`, body: names(subs.map(d => d.name)), at: Math.max(...subs.map(d => lastEvent(d).at)), to: docsHref('processing'), cta: 'Process' });
     // Workspace admins already get one notice per base with failed publishes.
     if (!isAdmin()) reviewableKbs().forEach(kb => {
       const failed = curatedDocs().filter(d => d.kb === kb.id && lifeKey(d) === 'failed');
-      if (failed.length) out.push({ id: `cur-failed-${kb.id}-${failed.length}`, icon: 'alert-circle', tone: 'warn', title: `${plural(failed.length, 'document')} in ${kb.name} couldn’t be published`, body: failed.map(d => d.name).join(', '), at: Math.max(...failed.map(d => d.updated)), to: docsHref('issues', { kb: kb.id }) });
+      if (failed.length) out.push({ id: `cur-failed-${kb.id}-${failed.length}`, icon: 'alert-circle', tone: 'warn', title: `${plural(failed.length, 'document')} in ${kb.name} couldn’t be published`, body: failed.map(d => d.name).join(', '), at: Math.max(...failed.map(d => d.updated)), to: docsHref('processing', { kb: kb.id, state: 'failed' }) });
     });
     return out;
   };
@@ -192,12 +205,12 @@
   };
 
   /* ═══════════════ Page ═══════════════ */
-  /** The page's one primary action follows the section and view: Add documents (Documents; secondary in Review, where the
-      decision bar is the primary), Import (Topics), New collection or Add source. */
+  /** The page's one primary action follows the section and view: Add documents (Documents → All; secondary in Processing
+      and Review, where Process and the decision bar are the primary), Import (Topics), New collection or Add source. */
   function headerAction(tab, view) {
     const upKb = S.ui[AK]?.kb;
     if (tab === 'topics') return canManageTaxonomy() && view === 'topics' ? btn('Import', { v: 'primary', icon: 'upload', act: 'md-import' }) : '';
-    if (tab === 'documents' && canContribute()) return btn('Add documents', { v: view === 'review' ? 'secondary' : 'primary', icon: 'upload', act: 'contribute', data: upKb ? { kb: upKb } : undefined });
+    if (tab === 'documents' && canContribute()) return btn('Add documents', { v: view === 'all' ? 'primary' : 'secondary', icon: 'upload', act: 'contribute', data: upKb ? { kb: upKb } : undefined });
     if (tab === 'collections' && can('knowledge.manage')) return btn('New collection', { v: 'primary', icon: 'plus', act: 'kb-create' });
     if (tab === 'sources') return X.src?.addBtn?.() || '';
     return '';
@@ -206,11 +219,13 @@
   P.studio = ({ query }) => {
     const allowed = tabsAllowed();
     if (!allowed.length) return noAccessPage();
+    // An old address renders as the current one at once (AFTER.studio rewrites the address bar).
+    query = legacyAddress(query) || query;
     const tab = tabOf(query), title = TAB_DEFS.find(t => t[0] === tab)[1], extra = X.res.demoChip();
     if (tab === 'documents') {
       const c = counts(), view = viewOf(query, c);
-      const body = view === 'review' ? reviewView(query, c) : view === 'issues' ? issuesView(c) : view === 'quality' ? qualityView(query, c) : documentsTab(query);
-      return page(pageHeader({ title, extra, actions: headerAction(tab, view) }), docTabs(view, c) + (view === 'all' || view === 'issues' ? processStrip() : '') + body);
+      const body = view === 'review' ? reviewView(query, c) : view === 'processing' ? processingView(query, c) : documentsTab(query, c);
+      return page(pageHeader({ title, extra, actions: headerAction(tab, view) }), docTabs(view, c) + (view !== 'review' ? processStrip() : '') + body);
     }
     if (tab === 'topics') {
       const view = topicViewOf(query), ok = topicViews(), n = X.gov?.suggestionCount?.() || 0;
@@ -220,27 +235,32 @@
     // The section's name is the title; the sidebar lists the sections under Knowledge Studio (X.studioNav).
     return page(pageHeader({ title, extra, actions: headerAction(tab) }), tab === 'collections' ? X.kb?.tab?.({ query }) : X.src?.tab?.({ query }));
   };
+  /** legacyOf without the empty values, or null. */
+  function legacyAddress(query) {
+    const q = legacyOf(query); if (!q) return null;
+    Object.keys(q).forEach(k => q[k] === '' && delete q[k]);
+    return q;
+  }
   const prevAfter = AFTER.studio;
   AFTER.studio = args => {
     prevAfter?.(args);
     // Old addresses the router doesn't rewrite land on the current one, so the view and Back agree.
-    const q = legacyOf(args.query); if (!q) return;
-    Object.keys(q).forEach(k => q[k] === '' && delete q[k]);
+    const q = legacyAddress(args.query); if (!q) return;
     history.replaceState(null, '', '#' + BASE + '?' + new URLSearchParams(q));
     S.cur.query = q;
   };
   A['topic-view'] = el => setQuery({ view: el.dataset.value, node: '', show: '' });
 
-  /** Documents' four views (page tabs: views of one set of documents). Review and Issues count what keeps documents from
-      people (accent, danger); Quality counts quietly; All carries no count. */
+  /** Documents' three views (page tabs: views of one set of documents, in the order work flows). Processing counts what
+      isn't processed (information); Review counts what waits for a decision (accent); All carries no count. */
   function docTabs(view, c) {
-    const items = VIEWS.map(([id, label, tone]) => ({ id, label, ...(id !== 'all' && c[id] ? { count: c[id], alert: !!tone, tone: tone || 'default' } : {}) }));
+    const items = VIEWS.map(([id, label, tone]) => ({ id, label, ...(id !== 'all' && c[id] ? { count: c[id], alert: tone === 'accent', tone } : {}) }));
     return contextBar(tabs(items, view, BASE, { act: 'doc-view', label: 'Documents views' }));
   }
-  A['doc-view'] = el => setQuery({ view: el.dataset.value, sel: '', part: '' });
-  /** One row of filter pills (a select on phones): [id, label]. */
+  A['doc-view'] = el => setQuery({ view: el.dataset.value, sel: '', quality: '', state: '' });
+  /** One row of filter pills (a select on phones): [id, label, count?]. */
   function pillRow(items, cur, act, label) {
-    const pill = ([id, l]) => `<button type="button" class="rq__pill" aria-pressed="${id === cur}" data-act="${act}" data-value="${id}">${esc(l)}</button>`;
+    const pill = ([id, l, n]) => `<button type="button" class="rq__pill" aria-pressed="${id === cur}" data-act="${act}" data-value="${id}">${esc(l)}${n ? `<span class="rq__count num">${fmtNum(n)}</span>` : ''}</button>`;
     const opts = items.map(([id, l]) => `<option value="${id}" ${id === cur ? 'selected' : ''}>${esc(l)}</option>`).join('');
     return `<div class="rq"><div class="rq__groups"><div class="rq__pills" role="group" aria-label="${esc(label)}">${items.map(pill).join('')}</div></div><select class="select select--sm rq__select" data-change="${act}" aria-label="${esc(label)}">${opts}</select></div>`;
   }
@@ -252,18 +272,18 @@
     return `<div class="proc-strip" role="status">${spinner('sm')}<div class="proc-strip__main"><div class="proc-strip__text"><span class="medium">${esc(`Processing ${plural(r.total, 'document')}`)}</span><span class="muted">${esc(`${fmtNum(r.done)} processed${r.failed ? ` · ${fmtNum(r.failed)} failed` : ''} · ${pct}%`)}</span>${ctx ? `<span class="muted" data-tip="${esc(c.topics?.length ? c.topics.map(topicName).join(', ') : c.note)}">${esc(ctx)}</span>` : ''}</div>${progress(pct, '', 'Processing progress')}</div>
       ${btn('Show them', { v: 'ghost', size: 'sm', act: 'cur-show-processing' })}${btn('Stop', { v: 'ghost', size: 'sm', act: 'cur-stop-processing' })}</div>`;
   }
-  A['cur-show-processing'] = () => setQuery({ view: 'all', processing: 'processing' });
+  A['cur-show-processing'] = () => setQuery({ view: 'processing', state: 'processing', sel: '', quality: '' });
   A['cur-stop-processing'] = () => { X.stopProcessRun?.(activeProcessRun()); toast('Stopped processing. What’s done stays processed; the rest is Not processed again.', { tone: 'accent' }); };
-  /** A view that's done: say so, and point at the next view with something in it. */
+  /** A view that's done: say so, and point at the step that has something in it — Processing's at Review, Review's at the
+      submissions still waiting to be processed. */
   function viewDone(id, c) {
-    const next = VIEWS.find(([v]) => v !== id && v !== 'all' && c[v]);
-    const COPY = {
-      review: ['Nothing to review', 'Submissions and what a sync held back show up here, one decision each.'],
-      issues: ['No issues', 'Documents that couldn’t be processed, or changed at their source, show up here with their fix.'],
-    };
-    const [title, desc] = COPY[id] || COPY.review;
-    const action = next ? btn(`Next: ${next[1]}`, { icon: 'arrow-right', act: 'doc-view', data: { value: next[0] } }) : btn('See all documents', { act: 'doc-view', data: { value: 'all' } });
-    return emptyState({ icon: 'check-circle', tone: 'success', title, desc, actions: action, boxed: true });
+    const next = (label, view) => btn(label, { icon: 'arrow-right', act: 'doc-view', data: { value: view } });
+    const all = btn('See all documents', { act: 'doc-view', data: { value: 'all' } });
+    if (id === 'processing') return emptyState({ icon: 'check-circle', tone: 'success', title: 'Everything is processed', desc: 'Submissions and documents that aren’t processed yet show up here. Submissions go to Review once they’re processed.', actions: c.review ? next('Next: Review', 'review') : all, boxed: true });
+    const n = c.submissions;
+    return emptyState({ icon: 'check-circle', tone: 'success', title: 'Nothing to review',
+      desc: n ? `${plural(n, 'submission')} ${n === 1 ? 'is' : 'are'} waiting to be processed. Process ${n === 1 ? 'it' : 'them'} first: the assistant classifies ${n === 1 ? 'it' : 'them'} for your review.` : 'Processed submissions, new versions and what a sync held back show up here, one decision each.',
+      actions: n ? next('Go to Processing', 'processing') : all, boxed: true });
   }
 
   /* ── Publish: what syncs held back (one decision per batch) and submissions, in one list ── */
@@ -293,15 +313,15 @@
     return q.order.slice(i + 1).find(id => !skip.has(id)) || q.order.slice(0, Math.max(0, i)).reverse().find(id => !skip.has(id)) || '';
   }
 
-  /** The reviewer's working copy of the pipeline's classification (reset when the document is classified again). `teach`:
-      a changed topic is recorded for Topics → Suggestions (on unless the reviewer turns it off); `process`: process it on approval. */
+  /** The reviewer's working copy of the assistant's classification (reset when the document is classified again). `teach`:
+      a changed topic is recorded for Topics → Suggestions (on unless the reviewer turns it off). */
   function draftOf(d) {
     const ai = aiOf(d); if (ai.status !== 'done') return null;
     let f = drafts()[d.id];
-    if (!f || f.at !== ai.at) f = drafts()[d.id] = { at: ai.at, kind: ai.kind.value, topics: ai.topics.map(t => t.id), kb: d.kb, summary: ai.summary || '', asVersionOf: '', teach: true, process: true };
+    if (!f || f.at !== ai.at) f = drafts()[d.id] = { at: ai.at, kind: ai.kind.value, topics: ai.topics.map(t => t.id), kb: d.kb, summary: ai.summary || '', asVersionOf: '', teach: true };
     return f;
   }
-  const decisionOf = d => { const f = draftOf(d); return f ? { kind: f.kind, topics: [...f.topics], kb: f.kb, summary: f.summary.trim(), asVersionOf: f.asVersionOf || undefined, teach: f.teach, process: f.process !== false } : {}; };
+  const decisionOf = d => { const f = draftOf(d); return f ? { kind: f.kind, topics: [...f.topics], kb: f.kb, summary: f.summary.trim(), asVersionOf: f.asVersionOf || undefined, teach: f.teach } : {}; };
 
   function confBadge(c, edited) {
     if (edited) return '<span class="cur-conf cur-conf--edited">Edited</span>';
@@ -404,21 +424,35 @@
     }).filter(Boolean);
     return out.length ? `<ul class="cur-risks" aria-label="What the pipeline found">${out.join('')}</ul>` : '';
   }
-  /** The document itself, in its own pane: the first page at reading size, scrolling on its own. */
+  /** The document itself, in its own pane: every page at reading size, scrolling on its own — the reviewer skims the whole file here;
+      Open full preview adds zoom, find and the side panel. */
   function docPane(d) {
-    const fmt = hasFlag(d, 'format'), p = fmt ? null : X.docModel?.(d)?.pages?.[0], pages = Math.max(1, d.pages || 1);
+    const fmt = hasFlag(d, 'format'), m = fmt ? null : X.docModel?.(d), pages = m && ['pdf', 'docx', 'slide'].includes(m.format) ? m.count : 0;
     const canvas = fmt ? emptyState({ icon: 'file', title: 'No preview for this file type', desc: 'Download it to check the content.', actions: btn('Download', { size: 'sm', icon: 'download', act: 'doc-dl', data: { id: d.id } }), compact: true })
-      : p ? `<div class="${cx('doc-page', p.cls)}">${p.html}</div>` : emptyState({ icon: 'file', title: 'No preview yet', compact: true });
-    const bar = `<header class="cur-pane__bar">${fileIcon(d.type, 'sm')}<span class="cur-pane__title truncate" data-tip="${esc(d.name)}">${esc(d.name)}</span>${fmt ? '' : `<span class="cur-pane__meta num">${esc(`Page 1 of ${pages}`)}</span>${linkBtn('Open full preview', { href: '/doc/' + d.id, icon: 'external' })}`}</header>`;
+      : m && X.rdr?.fileView ? X.rdr.fileView(d, { model: m, bar: false }) : emptyState({ icon: 'file', title: 'No preview yet', compact: true });
+    const bar = `<header class="cur-pane__bar">${fileIcon(d.type, 'sm')}<span class="cur-pane__title truncate" data-tip="${esc(d.name)}">${esc(d.name)}</span>${fmt ? '' : `${pages ? `<span class="cur-pane__meta num">${esc(plural(pages, 'page'))}</span>` : ''}${linkBtn('Open full preview', { href: '/doc/' + d.id, icon: 'external' })}`}</header>`;
     return `<section class="cur-pane" aria-label="Preview">${bar}<div class="cur-pane__scroll" id="cur-preview-${d.id}" data-keep-scroll tabindex="0">${canvas}</div></section>`;
   }
   const sugRow = (label, badge, control, foot = '') => `<div class="cur-sug"><div class="cur-sug__label"><span class="t-label">${esc(label)}</span>${badge}</div><div class="cur-sug__ctl">${control}${foot}</div></div>`;
   /** Why the assistant suggested a topic, in words, strongest first (the contributor's confirmation leads; core/lifecycle.js). */
   const whyText = t => topicEvidence(t.why || {}).join(' · ');
   const byContributor = '<span class="t-xs muted">Chosen by the contributor</span>';
+  /** Who chose the classification the reviewer starts from: the assistant while processing it (a new document), or, for
+      what isn't processed before review (a new version, a file type that can't be), the suggestion made on submit. */
+  function classifiedBy(d, ai) {
+    const p = ai.processed;
+    if (p) {
+      const within = [p.topics && `among ${plural(p.topics, 'topic')} chosen for its run`, p.note && 'with context for the AI'].filter(Boolean).join(', ');
+      return `${ai.confirmed ? 'Confirmed by the contributor, then classified' : 'Classified'} by the assistant when it was processed${within ? `, ${within}` : ''}.`;
+    }
+    if (ai.confirmed) return 'Confirmed by the contributor.';
+    if (d.submission?.versionOf) return 'Suggested from its name and note. A new version is processed after it’s published.';
+    if (processingOf(d) === 'unsupported') return 'This file type can’t be processed: suggested from its name and note.';
+    return 'Suggested by the assistant, checked against your topics.';
+  }
   function suggestionsCard(d, f) {
-    // The fields show they're editable; the line says who chose them: the contributor, or the assistant against the topics.
-    const ai = aiOf(d), from = `<p class="cur-insp__sub">${esc(ai.confirmed ? 'Confirmed by the contributor.' : 'Suggested by the assistant, checked against your topics.')}</p>`;
+    // The fields show they're editable; the line says who chose them: the contributor, or the assistant while processing it.
+    const ai = aiOf(d), from = ai.status === 'done' ? `<p class="cur-insp__sub">${ai.processed ? ic('sparkles', 'i-xs') : ''}<span>${esc(classifiedBy(d, ai))}</span></p>` : '';
     const sec = body => `<section class="cur-insp__sec cur-sugs" aria-labelledby="cur-cls-h"><h3 class="cur-insp__h" id="cur-cls-h">Classification</h3>${from}${body}</section>`;
     if (!f) return sec(`<div class="cur-analyzing">${spinner()}<span>Reading the file and classifying it against your rules…</span></div>`);
     const kinds = Object.entries(RESOURCE_KINDS).map(([id, k]) => [id, k.label]);
@@ -450,19 +484,17 @@
     const summary = sugRow('Summary', confBadge(null, f.summary.trim() !== (ai.summary || '').trim()), textarea({ id: 'cur-sum-' + d.id, bind: `curDraft.${d.id}.summary`, value: f.summary, rows: 3, attrs: 'maxlength="280" aria-label="Summary"' }));
     return sec(`<div class="cur-sug-list">${type}${topics}${proposed}${kb}${summary}</div>`);
   }
-  /** The decision footer: where it publishes, whether to process it now (on: it becomes searchable; off: published but Not
-      processed until someone processes it from All), and the three decisions. */
+  /** The decision footer: where it publishes and the three decisions. Approving publishes only: a new document was
+      processed before review; a new version waits in Processing once it's published. */
   function decisionBar(d, f) {
     const v = f && (f.asVersionOf || d.submission?.versionOf), o = v && docById(v);
     const target = f && kbById(f.kb), hint = !f ? 'Waiting for the assistant…' : o ? `Publishes v${res(o).version + 1} of “${o.name}”` : `Publishes to ${target?.name || ''} · ${target ? X.whoCanSee(target, target.id === d.kb ? docFolder(d) : null).label : ''}`;
-    const proc = f && !UNPROCESSABLE.includes(d.type) ? `<span class="cur-decide__proc" data-tip="${esc('Read, classify and index it so search and the assistant can use it.')}">${checkbox({ checked: f.process !== false, act: 'cur-proc', data: { id: d.id }, label: 'Process it now' })}</span>` : '';
     return `<footer class="cur-decide" role="group" aria-label="Decision">
-      <span class="cur-decide__hint truncate" data-tip="${esc(hint)}">${esc(hint)}</span>${proc}
+      <span class="cur-decide__hint truncate" data-tip="${esc(hint)}">${esc(hint)}</span>
       <div class="cur-decide__btns">${btn('Decline', { v: 'ghost', act: 'cur-decline', data: { id: d.id } })}${btn('Request changes', { icon: 'pencil', act: 'cur-changes', data: { id: d.id }, tip: 'Request changes (R)' })}
       ${btn(f ? 'Approve & publish' : 'Classifying…', { v: 'primary', icon: f ? 'check' : '', act: 'cur-approve', data: { id: d.id }, disabled: !f, loading: !f, tip: f ? 'Approve & publish (A)' : '' })}</div>
     </footer>`;
   }
-  A['cur-proc'] = el => { const f = draftOf(docById(el.dataset.id)); if (!f) return; f.process = f.process === false; refresh(); };
   const SEP = '<span aria-hidden="true"> · </span>';
   const navHtml = (pos, total) => `<div class="cur-detail__nav"><span class="t-xs muted num">${pos + 1} of ${total}</span>${iconBtn('chevron-up', 'Previous (K)', { size: 'sm', act: 'cur-step', data: { dir: -1 }, disabled: pos <= 0 })}${iconBtn('chevron-down', 'Next (J)', { size: 'sm', act: 'cur-step', data: { dir: 1 }, disabled: pos >= total - 1 })}</div>`;
   /** The workbench's right side: the document pane, then the inspector (who sent it, what the assistant found, its
@@ -557,53 +589,66 @@
     const detail = b ? batchDetail(b, pos, total) : d ? detailPanel(d, pos, total, selecting) : '<div class="cur-pane"></div><div class="cur-detail cur-insp"></div>';
     return `<div class="${cx('cur-split', 'cur-wb', b && 'cur-split--batch', open && 'has-sel')}">${queuePanel(q, cur)}${detail}</div>${queueBulk()}`;
   }
-  /** Quality: three lists that keep published knowledge trustworthy, one at a time. */
-  function qualityView(query, c) {
-    const part = partOf(query, c);
-    const seg = PARTS.filter(([id]) => c.parts[id] || id === part).map(([id, label]) => ({ id, label, count: c.parts[id] || '' }));
-    const nav = seg.length > 1 ? `<div class="cur-parts">${tabs(seg, part, BASE, { act: 'cur-part', label: 'Quality', variant: 'primary' })}</div>` : '';
-    return nav + (X.gov?.queue?.(part) ?? skelRows(4));
-  }
-  A['cur-part'] = el => setQuery({ part: el.dataset.value });
 
-  /* ── Issues: documents that couldn't be processed or changed at the source, each with its fix; files a sync couldn't read ── */
-  const PROBLEM_OPTS = [['failed', 'Processing failed'], ['update', 'Changed at the source']];
-  /** What first syncs couldn't read, by error class (counted, not listed): each class with its fix and its run. */
-  function syncIssues() {
-    const rows = backfillRuns().flatMap(r => (r.backfill.issues || []).map(([, label, n, fix]) => item({
-      lead: itemIcon('alert', 'warning', 'sm'), title: esc(label), desc: esc(`${fix} · ${r.srcName || srcById(r.source)?.name || ''}`), meta: `<span class="num">${fmtNum(n)}</span>`,
-      trail: btn('Open sync', { v: 'ghost', size: 'sm', act: 'src-run-open', data: { id: r.id } }),
-    })));
-    return rows.length ? section('Couldn’t be read in a sync', list(rows), { desc: esc('Fixed at the source, then the next sync reads them again.') }) : '';
+  /* ── Processing: what isn't processed yet — submissions first, then documents — select them and Process ── */
+  const PROC_PILLS = [['', 'All'], ['pending', 'Not processed'], ['processing', 'Processing'], ['failed', 'Failed'], ['outdated', 'Changed at the source']];
+  /** ?state= and ?kb= (from Overview, a notice, a toast or a collection page) set the filters once per address. */
+  function syncProcQuery(u, query) {
+    const qs = JSON.stringify([query.state, query.kb]);
+    if (u._qs === qs) return;
+    Object.assign(u, { _qs: qs, state: TO_PROCESS.includes(query.state) ? query.state : '', kb: query.kb || '', page: 1, sel: {}, allMatching: false });
   }
-  function issuesView(c) {
-    const u = ui(PK, { q: '', kb: '', life: '', sort: { key: 'updated', dir: 'desc' }, page: 1, sel: {} }), docs = problemDocs(), fromSyncs = syncIssues();
-    if (!docs.length) return fromSyncs || viewDone('issues', c);
-    const live = new Set(docs.map(d => d.id));
-    u.sel = Object.fromEntries(Object.entries(u.sel || {}).filter(([id, on]) => on && live.has(id)));
-    const kbOpts = queueKbs(docs).map(k => [k.id, k.name]), lifeOpts = PROBLEM_OPTS.filter(([k]) => docs.some(d => lifeKey(d) === k));
-    const tools = needsTools(docs.length, PK, ['kb', 'life'])
-      ? `<div class="toolbar">${searchField({ uiKey: PK, placeholder: 'Search documents' })}${lifeOpts.length > 1 || u.life ? filterButton('Issue', PK, 'life', lifeOpts) : ''}${kbOpts.length > 1 || u.kb ? filterButton('Collection', PK, 'kb', kbOpts) : ''}${clearFilters(PK, ['kb', 'life'])}</div>` : '';
-    const hint = '<p class="gov-summary">Couldn’t be processed, or changed at the source since it was. Each row shows its fix; select several to process them again together.</p>';
-    let rows = docs.filter(d => (!u.kb || d.kb === u.kb) && (!u.life || lifeKey(d) === u.life) && matchesQ(PK, d.name, kbById(d.kb)?.name, originName(d)));
-    rows = applySort(rows, PK, SORTERS);
-    if (!rows.length) return hint + tools + noMatches(PK, ['kb', 'life'], 'documents') + fromSyncs;
-    const pageRows = paginate(rows, PK, PER);
-    const head = `${selAllCheck(PK, pageRows.map(d => d.id))}${sortHead('Name', 'name', PK)}${th('Issue')}${th('Origin', 'table__column--hide-sm')}${sortHead('Updated', 'updated', PK)}${th('<span class="sr-only">Actions</span>', 'table__column--actions')}`;
-    const bulk = bulkBar(PK, btn('Process again', { v: 'ghost', size: 'sm', icon: 'refresh', act: 'cur-prob-process' }));
-    return hint + tools + `<div class="cur-prob">${table({ label: 'Issues', head, rows: pageRows.map(problemRow), foot: pager(rows.length, PK, PER) })}</div>` + fromSyncs + bulk;
+  /** Submissions first (their contributors wait on a review that needs them processed), then documents, each by the sort. */
+  function procRows(u) {
+    const docs = processingQueue();
+    const rows = applySort(docs.filter(d => (!u.state || processingOf(d) === u.state) && (!u.kb || d.kb === u.kb) && matchesQ(PK, d.name, originName(d), kbById(d.kb)?.name)), PK, SORTERS);
+    return { docs, rows: [...rows.filter(isCandidate), ...rows.filter(d => !isCandidate(d))] };
   }
-  function problemRow(d) {
-    const on = !!ui(PK).sel?.[d.id], why = d.status === 'failed' ? d.error || 'Processing stopped partway.' : lifecycleOf(d).desc;
+  function processingView(query, c) {
+    const u = ui(PK, { q: '', state: '', kb: '', sort: { key: 'updated', dir: 'desc' }, page: 1, sel: {} });
+    syncProcQuery(u, query);
+    return gate({
+      loading: () => skelRows(8),
+      empty: () => viewDone('processing', c),
+      ok: () => {
+        const { docs, rows } = procRows(u);
+        if (!docs.length) return viewDone('processing', c);
+        const live = new Set(docs.map(d => d.id));
+        u.sel = Object.fromEntries(Object.entries(u.sel || {}).filter(([id, on]) => on && live.has(id)));
+        const hint = '<p class="gov-summary">Select what to process: the assistant reads, classifies and indexes it. Submissions go to Review once they’re processed.</p>';
+        const kbOpts = queueKbs(docs).map(k => [k.id, k.name]);
+        const toolbar = `<div class="toolbar">${searchField({ uiKey: PK, placeholder: 'Search documents' })}${kbOpts.length > 1 || u.kb ? filterButton('Collection', PK, 'kb', kbOpts) : ''}${clearFilters(PK, ['kb'])}</div>`;
+        const states = PROC_PILLS.filter(([k]) => !k || k === u.state || docs.some(d => processingOf(d) === k));
+        const pills = states.length > 2 || u.state ? pillRow(states, u.state, 'cur-proc-state', 'Processing state') : '';
+        if (!rows.length) return hint + toolbar + pills + noMatches(PK, ['kb', 'state'], 'documents');
+        const pageRows = paginate(rows, PK, PER);
+        // Selecting the whole page offers the whole filtered list (the way to pick 1,000 documents at once).
+        const nSel = selCount(PK), allPage = pageRows.every(d => u.sel?.[d.id]), all = allMatching(PK, rows);
+        const more = nSel && allPage && !all && nSel < rows.length ? linkBtn('Select all matching', { act: 'cur-sel-matching', data: { ui: PK } }) : '';
+        const bulk = bulkBar(PK, more + btn('Process', { v: 'primary', size: 'sm', icon: 'play', act: 'cur-proc-process' }), all ? 'All matching selected' : '');
+        const head = `${selAllCheck(PK, pageRows.map(d => d.id))}${sortHead('Name', 'name', PK)}${th('State')}${sortHead('Updated', 'updated', PK)}${th('<span class="sr-only">Actions</span>', 'table__column--actions')}`;
+        return hint + toolbar + pills + `<div class="cur-proc">${table({ label: 'Not processed yet', head, rows: pageRows.map(procRow), foot: pager(rows.length, PK, PER) })}</div>` + bulk;
+      },
+    });
+  }
+  A['cur-proc-state'] = el => { const v = el.tagName === 'SELECT' ? el.value : el.dataset.value; const u = ui(PK); u.state = u.state === v ? '' : v; u.page = 1; u.sel = {}; u.allMatching = false; refresh(); };
+  A['cur-proc-process'] = () => processSelected(PK);
+  /** Where it came from, under its name: a submission's contributor and the collection it's for; else where it lives and
+      its origin. */
+  function docSub(d) {
+    const kb = kbById(d.kb);
+    if (isCandidate(d)) return `<span class="cur-subm">${ic('upload', 'i-xs')}<span>Submission</span></span><span aria-hidden="true"> · </span><span translate="no">${esc(contributorName(d))}</span> <span aria-hidden="true">→</span><span class="sr-only">to</span> <span translate="no">${esc(kb?.name || '')}</span>`;
+    return `<span translate="no">${esc([kb?.name, ...folderPath(docFolder(d)).map(f => f.name)].filter(Boolean).join(' › '))}</span><span aria-hidden="true"> · </span><span translate="no">${esc(originName(d))}</span>`;
+  }
+  function procRow(d) {
+    const on = !!ui(PK).sel?.[d.id];
     return `<tr class="table__row" data-act="cur-doc" data-id="${d.id}" tabindex="0" ${on ? 'aria-selected="true"' : ''}>
       ${selCheck(PK, d.id, 'Select ' + d.name)}
-      <td class="table__cell table__cell--primary"><div class="row gap-12">${fileIcon(d.type)}<div class="grow"><div class="cell-title truncate" data-tip="${esc(d.name)}">${esc(d.name)}</div><div class="cell-sub truncate">${esc(kbById(d.kb)?.name || '')}</div></div></div></td>
-      <td class="table__cell"><div class="stack gap-2">${lifeChip(d, 'sm')}<span class="cell-sub cur-prob__why" data-tip="${esc(why)}">${esc(why)}</span></div></td>
-      <td class="table__cell table__cell--hide-sm">${originCell(d)}</td>
+      <td class="table__cell table__cell--primary"><div class="row gap-12">${fileIcon(d.type)}<div class="grow"><div class="cell-title truncate" data-tip="${esc(d.name)}">${esc(d.name)}</div><div class="cell-sub truncate">${docSub(d)}</div></div></div></td>
+      <td class="table__cell">${procCell(d)}</td>
       <td class="table__cell muted cur-nowrap" data-tip="${esc(fmtDateTime(d.updated))}">${rel(d.updated)}</td>
       <td class="table__cell table__cell--actions"><div class="row gap-4 none">${rowFix(d)}<span class="reveal-on-hover">${iconBtn('more', 'More actions', { size: 'sm', menu: 'cur-row', data: { id: d.id, ctx: 'row' } })}</span></div></td></tr>`;
   }
-  A['cur-prob-process'] = () => processSelected(PK);
 
   /* ── Review actions ── */
   /** Scroll the detail's top into view (after picking or deciding). */
@@ -652,7 +697,7 @@
   }
   function undo(snaps, docs) {
     snaps.forEach(([d, s]) => restoreDoc(d, s));
-    if (onDocs()) setQuery({ view: 'review', sel: docs[0].id }); else refresh();
+    if (onReview()) setQuery({ view: 'review', sel: docs[0].id }); else refresh();
     toast(docs.length === 1 ? `“${docs[0].name}” is back in review` : `${plural(docs.length, 'document')} are back in review`, { tone: 'accent' });
   }
   /** Decide a batch: its status, the run's counters (so Sources, the run and Documents agree), audit, Undo, then the next
@@ -695,23 +740,25 @@
   };
   A['rb-pii-go'] = () => { const id = S.modal?.props?.id; closeModal(); decideBatch(id, 'approved'); };
   const inQueue = id => { const d = docById(id); return d && stageOf(d) === 'review' && canReviewKb(kbById(d.kb)) ? d : null; };
+  /** Approving needs a new document processed first (or a file type that can't be): it's what Review lists. */
+  const approvable = id => { const d = inQueue(id); return d && readyToReview(d) ? d : null; };
   A['cur-approve'] = el => {
-    const d = inQueue(el.dataset.id); if (!d || !draftOf(d)) return;
+    const d = approvable(el.dataset.id); if (!d || !draftOf(d)) return;
     const dec = decisionOf(d), o = docById(dec.asVersionOf || d.submission?.versionOf), kb = kbById(dec.kb || d.kb)?.name || 'its collection';
-    // Processed now unless the reviewer unticked it; then it waits as Not processed (Documents → All).
-    const after = dec.process ? 'Processing it now.' : 'Not processed yet: process it from All when you’re ready.';
-    const msg = o ? `Published v${res(o).version + 1} of “${o.name}”. ${after}` : `Published “${d.name}” to ${kb}. ${after}`;
+    // Approving publishes only: a new document was processed before review; a new version waits in Processing.
+    const msg = o ? `Published v${res(o).version + 1} of “${o.name}”. Process it from Processing so search uses the new version.` : `Published “${d.name}” to ${kb}`;
     decide([d], () => approveAndPublish(d, dec), msg);
   };
   A['cur-bulk-approve'] = () => {
     const ids = Object.keys(ui(QK).sel || {}).filter(id => ui(QK).sel[id]);
-    const docs = ids.map(inQueue).filter(Boolean);
+    const docs = ids.map(approvable).filter(Boolean);
     const personal = docs.filter(d => !analyzing(d) && hasFlag(d, 'personal')), busy = docs.filter(analyzing);
     const ok = docs.filter(d => !personal.includes(d) && !busy.includes(d));
     const skipped = [personal.length && `${personal.length} with personal data`, busy.length && `${busy.length} still being classified`].filter(Boolean).join(' and ');
     if (!ok.length) { toast(`Nothing published: ${skipped || 'select submissions first'}. Review ${personal.length + busy.length === 1 ? 'it' : 'them'} one by one.`, { tone: 'danger' }); return; }
     const decisions = new Map(ok.map(d => [d, decisionOf(d)]));
-    decide(ok, () => ok.forEach(d => approveAndPublish(d, decisions.get(d))), `Published ${plural(ok.length, 'document')} and started processing them${skipped ? ` · skipped ${skipped}` : ''}`);
+    const versions = ok.filter(d => d.submission?.versionOf || decisions.get(d).asVersionOf).length;
+    decide(ok, () => ok.forEach(d => approveAndPublish(d, decisions.get(d))), `Published ${plural(ok.length, 'document')}${versions ? ` · ${plural(versions, 'new version')} to process` : ''}${skipped ? ` · skipped ${skipped}` : ''}`);
     // Keep the skipped ones selected so they're easy to find.
     ui(QK).sel = Object.fromEntries([...personal, ...busy].map(d => [d.id, true])); refresh();
   };
@@ -801,9 +848,9 @@
   };
   A['cur-cmp-pick'] = el => { const f = draftOf(docById(el.dataset.id)); if (f) f.asVersionOf = el.dataset.other; closeDrawer(); refresh(); };
 
-  /* ═══════════════ All: the registry — filter by processing, select, Process ═══════════════ */
+  /* ═══════════════ All: the registry — filter, select, act; Quality lists what keeps knowledge right ═══════════════ */
   const SORTERS = { name: d => d.name.toLowerCase(), updated: d => d.updated };
-  const FACETS = ['kb', 'pub', 'src', 'kind', 'topic'];
+  const FACETS = ['kb', 'pub', 'proc', 'src', 'kind', 'topic'];
   function syncFromQuery(u, query) {
     const qs = JSON.stringify([query.processing, query.kb, query.src, query.topic, query.q]);
     if (u._qs === qs) return;
@@ -811,29 +858,29 @@
   }
   /** Who or what a document came from, in words: its source, its contributor, or the editor who uploaded it. */
   const originName = d => (srcKey(d) !== 'upload' ? srcById(d.source)?.name || res(d).source.name : contributorName(d));
-  const originCell = d => `<span class="row gap-6 cur-origin">${appIcon(res(d).source.app, 'sm')}<span class="truncate" data-tip="${esc(originName(d))}">${esc(originName(d))}</span></span>`;
-  /** Processing state for the filter: only documents that can be processed have one (submissions and declined ones don't). */
-  const procKey = d => (['published', 'unpublished'].includes(stageOf(d)) ? processingOf(d) : '');
+  /** Processing state for the filter: documents and new documents' submissions have one (new versions and declined ones don't). */
+  const procKey = d => (['published', 'unpublished'].includes(stageOf(d)) || isCandidate(d) ? processingOf(d) : '');
   const PUBS = { published: 'Published', unpublished: 'Unpublished', review: 'In review' };
   const pubKey = d => ({ changes: 'review' }[stageOf(d)] || stageOf(d));
-  /** Every filter but processing (the pill row is the processing filter). */
-  const facetMatch = (d, u) => (!u.kb || d.kb === u.kb) && (!u.pub || pubKey(d) === u.pub) && (!u.src || originKey(d) === u.src) && (!u.kind || resKind(d) === u.kind) && (!u.topic || resTopics(d).includes(u.topic)) && matchesQ(AK, d.name, contributorName(d), kbById(d.kb)?.name);
+  const facetMatch = (d, u) => (!u.kb || d.kb === u.kb) && (!u.pub || pubKey(d) === u.pub) && (!u.proc || procKey(d) === u.proc) && (!u.src || originKey(d) === u.src) && (!u.kind || resKind(d) === u.kind) && (!u.topic || resTopics(d).includes(u.topic)) && matchesQ(AK, d.name, contributorName(d), kbById(d.kb)?.name);
   function allRows(u) {
-    const docs = curatedDocs(), rows = docs.filter(d => facetMatch(d, u) && (!u.proc || procKey(d) === u.proc));
+    const docs = curatedDocs(), rows = docs.filter(d => facetMatch(d, u));
     return { docs, rows: applySort(rows, AK, SORTERS) };
   }
-  /** The processing pills: All, then every state, without counts (the backend doesn't count documents per state). */
-  function procPills(cur) {
-    const items = [['', 'All'], ...PROCESSING_ORDER.map(k => [k, PROCESSING[k].label])];
-    return pillRow(items, cur, 'cur-proc-filter', 'Processing state');
+  /** What a state means, in a line: why it isn't processed, what's happening, what went wrong — or what it's ready for. */
+  function procLine(d, k = procKey(d)) {
+    if (k === 'pending') return isCandidate(d) ? 'Goes to Review once it’s processed' : 'Search can’t find it';
+    if (k === 'processing') return 'Reading, classifying, indexing…';
+    if (k === 'failed') return d.error || 'Stopped partway';
+    if (k === 'outdated') return 'The previous version answers';
+    if (k === 'ready') return inSearch(d) ? `Searchable · v${res(d).version}` : isCandidate(d) ? 'Ready for review' : 'Ready to publish';
+    return 'Download only';
   }
-  A['cur-proc-filter'] = el => { const v = el.tagName === 'SELECT' ? el.value : el.dataset.value; const u = ui(AK); u.proc = u.proc === v ? '' : v; u.page = 1; u.sel = {}; refresh(); };
-  /** Processing: its state (a chip) and what that means for search. */
+  /** Processing: its state (a chip) and what that means. */
   function procCell(d) {
     const k = procKey(d);
     if (!k) return '<span class="cell-sub">—</span>';
-    const p = PROCESSING[k], searchable = inSearch(d);
-    const line = { pending: 'Search can’t find it', processing: 'Reading, classifying, indexing…', ready: searchable ? `Searchable · v${res(d).version}` : 'Ready to publish', failed: d.error || 'Stopped partway', outdated: 'The previous version answers', unsupported: 'Download only' }[k];
+    const p = PROCESSING[k], line = procLine(d, k);
     return `<div class="stack gap-2">${chip(p.label, { tone: p.tone, variant: k === 'ready' ? 'tertiary' : 'soft', dot: true, live: !!p.live, size: 'sm', tip: p.desc })}<span class="${cx('cell-sub truncate', (k === 'failed' || k === 'outdated') && 'cur-ix--bad')}" data-tip="${esc(line)}">${esc(line)}</span></div>`;
   }
   /** Publication: can readers see it? */
@@ -841,12 +888,13 @@
     const st = stageOf(d), icon = { published: 'eye', unpublished: 'eye-off', review: 'clock', changes: 'pencil', rejected: 'x-circle', merged: 'history' }[st] || 'eye';
     return `<span class="${cx('cur-pub', 'cur-pub--' + st)}">${ic(icon, 'i-xs')}<span class="truncate">${esc(publicationOf(d))}</span></span>`;
   }
-  /** Its topics and who chose them: the assistant, a person, or a suggestion still in review. */
+  /** Its topics and who chose them: the assistant, a person, or a suggestion still in review (a new document's once it's processed). */
   function topicCell(d) {
-    const inReview = ['review', 'changes'].includes(stageOf(d)), ai = inReview && d.ai?.status === 'done' ? d.ai : null;
-    const ids = ai ? ai.topics.map(t => t.id) : d.topics || [];
+    const inReview = ['review', 'changes'].includes(stageOf(d)), waiting = isCandidate(d) && TO_PROCESS.includes(processingOf(d));
+    const ai = inReview && !waiting && d.ai?.status === 'done' ? d.ai : null;
+    const ids = ai ? ai.topics.map(t => t.id) : inReview ? [] : d.topics || [];
     if (d.error && (d.status === 'failed' || inReview)) return `<span class="cur-topic-cell is-none">${esc('Not classified: no text to read')}</span>`;
-    if (!ids.length) return `<span class="cur-topic-cell is-none">${esc(inReview ? 'Classifying…' : procKey(d) === 'pending' ? 'Classified when processed' : 'No topic')}</span>`;
+    if (!ids.length) return `<span class="cur-topic-cell is-none">${esc(waiting || procKey(d) === 'pending' ? 'Classified when processed' : inReview ? 'Classifying…' : 'No topic')}</span>`;
     const by = ai ? 'Suggested' : topicsByPipeline(d) ? 'Assistant' : 'Set by a person';
     return `<div class="stack gap-2 cur-topic-cell"><span class="truncate" translate="no">${esc(ids.map(topicName).join(', '))}</span><span class="cell-sub">${esc(by)}</span></div>`;
   }
@@ -854,14 +902,24 @@
     const on = !!ui(AK).sel?.[d.id];
     return `<tr class="table__row" data-act="cur-doc" data-id="${d.id}" tabindex="0" ${on ? 'aria-selected="true"' : ''}>
       ${selCheck(AK, d.id, 'Select ' + d.name)}
-      <td class="table__cell table__cell--primary"><div class="row gap-12">${fileIcon(d.type)}<div class="grow"><div class="cell-title truncate" data-tip="${esc(d.name)}">${esc(d.name)}</div><div class="cell-sub truncate"><span translate="no">${esc([kbById(d.kb)?.name, ...folderPath(docFolder(d)).map(f => f.name)].filter(Boolean).join(' › '))}</span><span aria-hidden="true"> · </span><span translate="no">${esc(originName(d))}</span></div></div></div></td>
+      <td class="table__cell table__cell--primary"><div class="row gap-12">${fileIcon(d.type)}<div class="grow"><div class="cell-title truncate" data-tip="${esc(d.name)}">${esc(d.name)}</div><div class="cell-sub truncate">${docSub(d)}</div></div></div></td>
       <td class="table__cell">${procCell(d)}</td>
       <td class="table__cell table__cell--hide-sm">${pubCell(d)}</td>
       <td class="table__cell table__cell--hide-sm">${topicCell(d)}</td>
       <td class="table__cell muted cur-nowrap" data-tip="${esc(fmtDateTime(d.updated))}">${rel(d.updated)}</td>
       <td class="table__cell table__cell--actions"><div class="row gap-4 none">${rowFix(d)}<span class="reveal-on-hover">${iconBtn('more', 'More actions', { size: 'sm', menu: 'cur-row', data: { id: d.id, ctx: 'row' } })}</span></div></td></tr>`;
   }
-  function documentsTab(query) {
+  /** All filtered by quality (?quality=): one of the lists that keep published knowledge right, each row with its fix —
+      Verify, add details, Compare (governance.js renders it). Show all documents clears it. */
+  function qualityList(part, c) {
+    const items = PARTS.map(([id, label]) => [id, label, c.parts[id]]);
+    return `<div class="cur-quality">${pillRow(items, part, 'cur-quality', 'Quality')}${linkBtn('Show all documents', { act: 'cur-quality', data: { value: '' } })}</div>` + (X.gov?.queue?.(part) ?? skelRows(4));
+  }
+  A['cur-quality'] = el => { const v = el.tagName === 'SELECT' ? el.value : el.dataset.value; setQuery({ quality: v && v === qualityOf(S.cur.query) ? '' : v, sel: '' }); };
+  MENUS['cur-quality'] = () => { const p = counts().parts; return [{ section: 'Quality' }, ...PARTS.map(([id, label]) => ({ label, meta: fmtNum(p[id] || 0), run: () => setQuery({ quality: id }) }))]; };
+  function documentsTab(query, c) {
+    const part = qualityOf(query);
+    if (part) return gate({ loading: () => skelRows(8), empty: () => qualityList(part, c), ok: () => qualityList(part, c) });
     const u = ui(AK, { q: '', proc: '', kb: '', pub: '', src: '', kind: '', topic: '', sort: { key: 'updated', dir: 'desc' }, page: 1, sel: {} });
     syncFromQuery(u, query);
     const empty = () => emptyState({ icon: 'files', title: 'No documents yet', desc: 'Documents added to the collections you look after show up here, whatever their origin.', actions: canContribute() ? btn('Add documents', { v: 'primary', icon: 'upload', act: 'contribute' }) : '', boxed: true });
@@ -876,31 +934,33 @@
         const facets = allFacets(docs, u), sortLabel = u.sort?.key === 'name' ? 'Name' : 'Recently updated';
         const n = FACETS.filter(k => u[k]).length;
         // Wide: one dropdown per facet. Narrow: one Filters button (a bottom sheet on phones) plus removable chips for what's on.
-        // Processing is the pill row under the toolbar, never a second dropdown.
         const wide = facets.map(f => filterButton(f.label, AK, f.key, f.opts)).join('') + clearFilters(AK, FACETS);
         const narrow = facets.length ? `<button type="button" class="${cx('filter-button', n && 'is-set')}" data-popover="cur-filters" aria-haspopup="dialog" aria-expanded="false">${ic('filter')}<span>Filters</span>${n ? badge(n, { tone: 'accent' }) : ''}</button>` : '';
         const chips = n ? `<div class="cur-fchips">${facets.filter(f => u[f.key]).map(f => `<button type="button" class="chip chip--soft chip--accent cur-fchip" data-act="cur-filter-set" data-field="${f.key}" data-value="" aria-label="${esc(`Remove filter: ${f.label}`)}">${esc(f.opts.find(o => o[0] === u[f.key])?.[1] || u[f.key])}${ic('x', 'i-xs')}</button>`).join('')}</div>` : '';
+        // Quality switches the list to what keeps published knowledge right, with each row's fix (qualityList).
+        const quality = c.quality ? `<button type="button" class="filter-button cur-qbtn" data-menu="cur-quality" aria-haspopup="menu" aria-expanded="false">${ic('shield-check')}<span>Quality</span>${badge(c.quality)}${ic('chevron-down')}</button>` : '';
         const toolbar = `<div class="toolbar cur-toolbar">${searchField({ uiKey: AK, placeholder: 'Search documents' })}
-          <div class="cur-filters--wide">${wide}</div><div class="cur-filters--narrow">${narrow}</div>
+          <div class="cur-filters--wide">${wide}</div><div class="cur-filters--narrow">${narrow}</div>${quality}
           <div class="toolbar__end cur-sortmenu">${btn(sortLabel, { v: 'ghost', size: 'sm', icon: 'sort', menu: 'cur-sort', aria: `aria-label="Sort: ${esc(sortLabel)}"` })}</div></div>${chips}`;
-        const pills = procPills(u.proc);
-        if (!rows.length) return toolbar + pills + noMatches(AK, FACETS, 'documents');
+        if (!rows.length) return toolbar + noMatches(AK, FACETS, 'documents');
         const pageRows = paginate(rows, AK, PER);
         // Selecting the whole page offers the whole filtered list (the way to pick 1,000 documents to process at once).
         // No number: the backend doesn't count what a filter matches, so "all matching" is a filter, not a list.
-        const nSel = selCount(AK), allPage = pageRows.every(d => u.sel?.[d.id]), all = allMatching(u, rows);
-        const more = nSel && allPage && !all && nSel < rows.length ? linkBtn('Select all matching', { act: 'cur-sel-matching' }) : '';
+        const nSel = selCount(AK), allPage = pageRows.every(d => u.sel?.[d.id]), all = allMatching(AK, rows);
+        const more = nSel && allPage && !all && nSel < rows.length ? linkBtn('Select all matching', { act: 'cur-sel-matching', data: { ui: AK } }) : '';
         const bulk = bulkBar(AK, more + btn('Process', { v: 'secondary', size: 'sm', icon: 'play', act: 'cur-bulk-process' }) + btn('Publish', { v: 'ghost', size: 'sm', icon: 'eye', act: 'cur-bulk-publish' }) + btn('Unpublish', { v: 'ghost', size: 'sm', icon: 'eye-off', act: 'cur-bulk-unpublish' }) + btn('Archive', { v: 'ghost', size: 'sm', icon: 'archive', act: 'cur-bulk-archive' }), all ? 'All matching selected' : '');
         // Processing and publication are separate columns: either can be where a document stopped. No Visibility column:
         // who can read a document is its collection's (or folder's) audience.
         const head = `${selAllCheck(AK, pageRows.map(d => d.id))}${sortHead('Name', 'name', AK)}${th('Processing state')}${th('Publication', 'table__column--hide-sm')}${th('Topics', 'table__column--hide-sm')}${sortHead('Updated', 'updated', AK)}${th('<span class="sr-only">Actions</span>', 'table__column--actions')}`;
-        return toolbar + pills + `<div class="cur-all">${table({ label: 'All documents', head, rows: pageRows.map(allRow), foot: pager(rows.length, AK, PER) })}</div>` + bulk;
+        return toolbar + `<div class="cur-all">${table({ label: 'All documents', head, rows: pageRows.map(allRow), foot: pager(rows.length, AK, PER) })}</div>` + bulk;
       },
     });
   }
-  A['cur-sel-matching'] = () => { const u = ui(AK); u.sel = Object.fromEntries(allRows(u).rows.map(d => [d.id, true])); u.allMatching = true; refresh(); };
+  /** A list's rows as filtered now (All or Processing). */
+  const listRows = key => (key === PK ? procRows(ui(PK)).rows : allRows(ui(AK)).rows);
+  A['cur-sel-matching'] = el => { const key = el.dataset.ui || AK, u = ui(key); u.sel = Object.fromEntries(listRows(key).map(d => [d.id, true])); u.allMatching = true; refresh(); };
   /** "All matching" holds while every matching document is still selected (unchecking one makes it an explicit list). */
-  const allMatching = (u, rows) => !!u.allMatching && rows.length > 0 && selCount(AK) === rows.length && rows.every(d => u.sel?.[d.id]);
+  const allMatching = (key, rows) => { const u = ui(key); return !!u.allMatching && rows.length > 0 && selCount(key) === rows.length && rows.every(d => u.sel?.[d.id]); };
   /** Facets Documents offers, only when they'd split it (or one is in use): [{ key, label, opts }]. */
   function allFacets(docs, u) {
     const kbs = queueKbs(docs);
@@ -909,9 +969,11 @@
     const kinds = [...new Set(docs.map(resKind))].map(k => [k, kindMeta(k).label]).sort((a, b) => a[1].localeCompare(b[1]));
     const topics = [...new Set(docs.flatMap(resTopics))].filter(id => topicById(id)).map(id => [id, topicName(id)]).sort((a, b) => a[1].localeCompare(b[1]));
     const pubs = Object.entries(PUBS).filter(([k]) => docs.some(d => pubKey(d) === k));
+    const procs = PROCESSING_ORDER.filter(k => docs.some(d => procKey(d) === k)).map(k => [k, PROCESSING[k].label]);
     return [
       (kbs.length > 1 || u.kb) && { key: 'kb', label: 'Collection', opts: kbs.map(k => [k.id, k.name]) },
       (pubs.length > 1 || u.pub) && { key: 'pub', label: 'Publication', opts: pubs },
+      (procs.length > 1 || u.proc) && { key: 'proc', label: 'Processing', opts: procs },
       (origins.length > 1 || u.src) && { key: 'src', label: 'Origin', opts: origins },
       (kinds.length > 1 || u.kind) && { key: 'kind', label: 'Type', opts: kinds },
       (topics.length > 1 || u.topic) && { key: 'topic', label: 'Topic', opts: topics },
@@ -930,7 +992,7 @@
     const u = ui(AK), set = (key, dir) => { u.sort = { key, dir }; u.page = 1; refresh(); };
     return [{ section: 'Sort by' }, { label: 'Recently updated', checked: u.sort?.key !== 'name', run: () => set('updated', 'desc') }, { label: 'Name', checked: u.sort?.key === 'name', run: () => set('name', 'asc') }];
   };
-  /** Selected documents in a list (All or Issues) the caller reviews. */
+  /** Selected documents in a list (All or Processing) the caller reviews. */
   const selectedIn = key => selIds(key).map(docById).filter(d => d && canReviewKb(kbById(d.kb)));
   const canPublish = d => stageOf(d) === 'unpublished' && !d.archived;
   const canUnpublish = d => stageOf(d) === 'published' && !d.archived;
@@ -945,7 +1007,7 @@
   A['cur-bulk-publish'] = () => bulkPublish(AK);
   /** Process what's selected: one dialog that says what will happen, then one processing run. */
   function processSelected(key) {
-    const docs = selectedIn(key), all = key === AK && allMatching(ui(AK), allRows(ui(AK)).rows);
+    const docs = selectedIn(key), all = allMatching(key, listRows(key));
     if (!docs.some(canProcess)) { toast(docs.some(d => d.status === 'processing') ? 'These are being processed already' : docs.some(d => UNPROCESSABLE.includes(d.type)) ? 'Images and archives can’t be processed.' : 'None of these can be processed', { tone: 'danger' }); return; }
     openModal('cur-process', { key, ids: docs.map(d => d.id), all });
   }
@@ -986,6 +1048,8 @@
       size: 'md', icon: 'play', title,
       desc: esc(all ? 'The AI reads each file and suggests topics. You can keep working.' : `The AI reads each file and suggests topics. About ${mins} min for ${fmtNum(pages)} pages; you can keep working.`),
       body: `<div class="proc">${topics}${context}</div>`,
+      // Submissions it processes move on to Review with the assistant's classification.
+      footStart: todo.some(isCandidate) ? 'Submissions go to Review once they’re processed.' : '',
       foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn(all ? 'Process' : `Process ${plural(n, 'document')}`, { v: 'primary', icon: 'play', act: 'cur-process-go' }),
     };
   };
@@ -1048,22 +1112,31 @@
     open: { label: 'Open', icon: 'file-text', run: d => { closeDocDrawer(); go('/doc/' + d.id); } },
     original: { label: 'Open the published document', icon: 'file-text', run: d => { closeDocDrawer(); go('/doc/' + d.mergedInto); } },
     download: { label: 'Download', icon: 'download', run: d => X.downloadDocument(d) },
+    // A submission that can't wait for processing (it failed, or isn't worth it): the contributor hears back from here too.
+    changes: { label: 'Request changes…', icon: 'pencil', run: d => { closeDocDrawer(); openDecide('changes', [d.id]); } },
+    decline: { label: 'Decline…', icon: 'x-circle', run: d => { closeDocDrawer(); openDecide('decline', [d.id]); } },
     archive: { label: 'Archive', icon: 'archive', danger: true, run: d => X.archiveDocs([d], closeDocDrawer) },
   };
   /** Fixes a row shows as a visible button (actionable states only); everything else lives in ⋯. */
   const ROW_FIX = new Set(['process', 'retry', 'replace', 'update', 'republish', 'source']);
   /** May the caller open the document drawer? Reviewers of its base; editors for published documents (Classification and Upkeep). */
   const canOpenDoc = d => { const kb = d && kbById(d.kb); return !!kb && (canReviewKb(kb) || (canEditKb(kb) && isPublishedStage(d))); };
-  /** { main, more, tail } operations for a document's lifecycle state. Editors who don't review the base only open, edit and download. */
+  /** { main, more, tail } operations for a document's lifecycle state. Editors who don't review the base only open, edit and
+      download. A new document's submission is processed first (Process, or Process again), then reviewed. */
   function opsFor(d) {
     const k = lifeKey(d), live = ['published', 'update', 'stored', 'queued', 'failed', 'publishing'].includes(k);
     if (!canReviewKb(kbById(d.kb))) return { main: 'open', more: live ? ['edit'] : [], tail: ['download'] };
+    const tail = ['download', !d.archived && k !== 'merged' && 'archive'].filter(Boolean);
+    if (isCandidate(d)) {
+      const p = processingOf(d), main = { pending: 'process', failed: 'retry', processing: 'open' }[p] || 'review';
+      return { main, more: [main !== 'open' && 'open', ...(main === 'review' ? [] : ['changes', 'decline'])].filter(Boolean), tail };
+    }
     const synced = srcKey(d) !== 'upload' && !!srcById(d.source), raw = processingOf(d) === 'pending';
     const main = { analyzing: 'review', review: 'review', queued: 'process', failed: isLocked(d) ? (synced ? 'source' : 'replace') : 'retry', update: synced ? 'update' : 'replace', unpublished: raw ? 'process' : 'republish', merged: d.mergedInto ? 'original' : 'open' }[k] || 'open';
     const more = [main !== 'open' && 'open', k === 'unpublished' && main !== 'republish' && 'republish', (live || k === 'unpublished') && 'edit', (live || k === 'unpublished') && !kbById(d.kb)?.personal && 'move', canUnpublish(d) && 'unpublish'].filter(Boolean);
-    return { main, more, tail: ['download', !d.archived && k !== 'merged' && 'archive'].filter(Boolean) };
+    return { main, more, tail };
   }
-  /** The state's fix as a small row button (All documents, Problems), or ''. */
+  /** The state's fix as a small row button (All, Processing), or ''. */
   function rowFix(d) {
     const { main } = opsFor(d); if (!ROW_FIX.has(main)) return '';
     return btn(OPS[main].label, { v: 'secondary', size: 'sm', icon: OPS[main].icon, act: 'cur-op', data: { id: d.id, op: main } });
@@ -1096,40 +1169,43 @@
     if (evs.length && lifeKey(d) === 'published' && evs.at(-1).kind !== 'unpublished') items.push({ icon: 'check-circle', tone: 'success', label: 'Published', at: Math.max(d.updated, evs.at(-1).at) });
     return `<ol class="cur-tl">${items.map(x => `<li class="cur-tl__item">${itemIcon(x.icon, x.tone, 'sm')}<div class="grow"><div class="t-sm"><span class="medium">${esc(x.label)}</span>${x.by ? ` · ${esc(x.by)}` : ''}</div>${x.text ? `<div class="cur-tl__text">“${esc(x.text)}”</div>` : ''}<div class="t-xs muted">${esc(fmtDateTime(x.at))}</div></div></li>`).join('')}</ol>`;
   }
-  /** A document's progress, whatever its origin: Received → Reviewed → Published → Processed → Searchable. Publication and
-      processing are independent, so either can be done while the other isn't; Searchable needs both.
+  /** A document's progress, whatever its origin: Received → Processed → Reviewed → Published → Searchable. A submission is
+      processed before it's reviewed; otherwise publication and processing are independent, so either can be done while the
+      other isn't; Searchable needs both.
       Each step: { label, state: done | current | issue | skipped | todo, text, at?, action?, busy? }. */
   function flowSteps(d) {
     const k = lifeKey(d), st = stageOf(d), sub = d.submission || {}, src = srcKey(d) !== 'upload' ? srcById(d.source) : null, kb = kbById(d.kb);
     const ev = kind => [...(sub.events || [])].reverse().find(e => e.kind === kind);
+    const cand = isCandidate(d), p = processingOf(d), waiting = cand && TO_PROCESS.includes(p);
     const open = ['analyzing', 'review', 'changes'].includes(k), by = e => (e?.by ? ` by ${actorName(e.by)}` : '');
     const received = { state: 'done', at: sub.at || d.updated, text: sub.by ? `Contributed by ${actorName(sub.by)}` : src ? `Synced from ${src.name}` : `Uploaded by ${d.addedBy || 'an editor'}` };
-    const reviewed = k === 'analyzing' || k === 'review' ? { state: 'current', text: 'Waiting for a reviewer' }
-      : k === 'changes' ? { state: 'issue', text: `Changes requested${by(ev('changes'))}`, at: ev('changes')?.at }
-        : k === 'rejected' ? { state: 'issue', text: `Declined${by(ev('rejected'))}`, at: ev('rejected')?.at }
-          : ev('approved') ? { state: 'done', text: `Approved${by(ev('approved'))}`, at: ev('approved').at }
-            : { state: 'skipped', text: src ? `Not needed: ${src.name} publishes automatically` : 'Not needed: added by an editor of the collection' };
+    const reviewed = waiting ? { state: 'todo', text: 'Once it’s processed' }
+      : k === 'analyzing' || k === 'review' ? { state: 'current', text: 'Waiting for a reviewer' }
+        : k === 'changes' ? { state: 'issue', text: `Changes requested${by(ev('changes'))}`, at: ev('changes')?.at }
+          : k === 'rejected' ? { state: 'issue', text: `Declined${by(ev('rejected'))}`, at: ev('rejected')?.at }
+            : ev('approved') ? { state: 'done', text: `Approved${by(ev('approved'))}`, at: ev('approved').at }
+              : { state: 'skipped', text: src ? `Not needed: ${src.name} publishes automatically` : 'Not needed: added by an editor of the collection' };
     const who = kb ? X.whoCanSee(kb, docFolder(d)).label : '';
     const published = st === 'published' ? { state: 'done', text: who }
       : st === 'merged' ? { state: 'done', text: 'Published as a new version of another document' }
         : st === 'unpublished' ? { state: 'issue', text: 'Unpublished · readers don’t see it', action: X.res.canEditRes(d) || canReviewKb(kb) ? btn('Publish', { v: 'secondary', size: 'sm', icon: 'eye', act: 'cur-op', data: { id: d.id, op: 'republish' } }) : '' }
           : st === 'rejected' ? { state: 'skipped', text: 'Won’t be published' } : { state: 'todo', text: `After approval · ${who} will see it` };
-    // Processed: read → classified → indexed, in one line, with what the pipeline chose.
-    const v = res(d).version, p = processingOf(d), topics = res(d).topics;
+    // Processed: read → classified → indexed, in one line, with what the pipeline chose (for a submission, what its reviewer starts from).
+    const v = res(d).version, topics = cand ? (d.ai?.processed ? d.ai.topics.map(t => t.id) : []) : res(d).topics;
     const what = topics.length ? `${kindMeta(res(d).kind).label} · ${topics.map(topicName).join(', ')}` : 'no topic found';
     const procBtn = canProcess(d) && canReviewKb(kb) ? btn(p === 'pending' ? 'Process' : 'Process again', { v: 'secondary', size: 'sm', icon: 'play', act: 'cur-op', data: { id: d.id, op: p === 'pending' ? 'process' : 'retry' } }) : '';
-    const processed = open || st === 'rejected' || st === 'merged' ? { state: 'todo', text: open ? 'After approval, unless the reviewer processes it later' : 'Not processed' }
+    const processed = (open && !cand) || st === 'rejected' || st === 'merged' ? { state: 'todo', text: k === 'changes' ? 'Waiting for the contributor’s changes' : open ? 'After it’s published: a new version is processed from Processing' : 'Not processed' }
       : d.reclassifying ? { state: 'current', busy: true, text: 'Classifying again with the changed topics…' }
-        : { pending: { state: 'todo', text: 'Not processed yet: search and the assistant can’t use it', action: procBtn },
+        : { pending: { state: 'todo', text: cand ? 'Not processed yet: process it so the assistant classifies it for review' : 'Not processed yet: search and the assistant can’t use it', action: procBtn },
           processing: { state: 'current', busy: true, text: 'Reading, classifying and indexing…' },
-          ready: { state: 'done', text: `v${v} · ${what}${d.classCtx?.topics?.length ? ` · among ${plural(d.classCtx.topics.length, 'topic')} chosen for its run` : ''}${d.classCtx?.note ? ' · with context for the AI' : ''}`, at: d.processedAt },
+          ready: { state: 'done', text: `${cand ? 'Classified for review' : `v${v}`} · ${what}${d.classCtx?.topics?.length ? ` · among ${plural(d.classCtx.topics.length, 'topic')} chosen for its run` : ''}${d.classCtx?.note ? ' · with context for the AI' : ''}`, at: d.processedAt },
           failed: { state: 'issue', text: d.error || 'Processing stopped partway', action: procBtn },
           outdated: { state: 'issue', text: `Changed at the source · v${v} still answers until it’s processed again`, action: procBtn },
           unsupported: { state: 'skipped', text: 'This file type can’t be processed' } }[p];
     const searchable = inSearch(d) ? { state: 'done', text: `In search and answers for ${who}` }
       : k === 'update' ? { state: 'done', text: `Answers use v${v} until the update is processed` }
-        : { state: 'todo', text: st === 'published' ? 'Once it’s processed' : st === 'unpublished' && p === 'ready' ? 'Once it’s published' : 'Once it’s published and processed' };
-    return [['Received', received], ['Reviewed', reviewed], ['Published', published], ['Processed', processed], ['Searchable', searchable]].map(([label, s]) => ({ label, ...s }));
+        : { state: 'todo', text: st === 'published' ? 'Once it’s processed' : (st === 'unpublished' || cand) && p === 'ready' ? 'Once it’s published' : 'Once it’s published and processed' };
+    return [['Received', received], ['Processed', processed], ['Reviewed', reviewed], ['Published', published], ['Searchable', searchable]].map(([label, s]) => ({ label, ...s }));
   }
   /** current = waiting on someone (clock) or, when busy, work in progress (spinning loader). */
   const STEP_ICON = { done: ['check', 'success'], current: ['clock', 'accent'], issue: ['alert', 'warning'], skipped: ['minus', ''], todo: ['circle-dashed', ''] };

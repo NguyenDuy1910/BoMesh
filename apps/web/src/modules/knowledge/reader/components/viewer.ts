@@ -23,8 +23,6 @@ export interface ViewerProps {
   representation: ItemRepresentation & { uri: string };
   /** Reads the preview again (a freshly signed URL) when storage refuses the current one. */
   refresh: () => Promise<ItemPreview | undefined>;
-  /** Only the beginning (the review pane's first page). */
-  first: boolean;
   highlight?: SurfaceHighlight;
   focusHit: number;
   onMarks: (marks: ViewerMarks) => void;

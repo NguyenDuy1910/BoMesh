@@ -165,9 +165,10 @@ embedding model, index schema, contextualization model). The private
 `item_revisions` is the one append-only content store for every Document
 (and assistant artifacts); `items.storage_key`, `mime_type` and `size_bytes`
 follow the current revision. Source syncs write per-version object keys.
-`contributions` holds review of one candidate Document; approval moves or
-publishes it, or appends a revision, in one transaction and never starts an
-Ingestion Run. `item_links` shows a Document inside another Collection
+`contributions` holds review of one candidate Document; a NEW_DOCUMENT
+candidate is processed (an explicit Ingestion Run) before it is decided, and
+approval moves or publishes it, or appends a revision, in one transaction and
+never starts an Ingestion Run. `item_links` shows a Document inside another Collection
 without changing its canonical parent or granting access. `reading_lists`,
 `reading_list_entries`, `saved_items`, `recent_items` and `space_materials`
 are references outside the tree; every read re-checks access to the

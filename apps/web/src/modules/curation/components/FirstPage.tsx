@@ -2,28 +2,18 @@
 
 import { useQuery } from "@tanstack/react-query";
 
-import { toast } from "@/components/ui/Toast";
-import { errorMessage, resourceId } from "@/lib/api/client";
+import { resourceId } from "@/lib/api/client";
 import { useWorkspace } from "@/lib/workspace";
-import { downloadItem, getItemPreview, type Item } from "@/modules/knowledge/api";
-import { DocumentSurface } from "@/modules/knowledge/reader/components/DocumentSurface";
+import { getItemPreview, type Item } from "@/modules/knowledge/api";
 import { loadPdfJs, pdfSource } from "@/modules/knowledge/reader/pdf";
 import { surfaceView } from "@/modules/knowledge/reader/preview";
 import { parseTablePayload } from "@/modules/knowledge/reader/table";
 
 /**
- * What a reviewer can see of a document before it's published: its first page, drawn from the
- * preview engine's representation (`GetItemPreview`, readable by reviewers of an open submission, and
- * independent of processing) — a PDF's page 1, a table's first rows, a text's first lines, the picture.
+ * A document's first-page text for excerpts beside another document (Compare, possible duplicates), drawn from the
+ * preview engine's representation (`GetItemPreview`, readable by reviewers of an open submission, and independent of
+ * processing) — a PDF's page 1, a table's first rows, a text's first lines.
  */
-
-/** The first page in the reader's page styling (the review pane), scrolling in its own pane. */
-export function FirstPage({ item, onPages }: { item: Item; onPages?: (count: number) => void }) {
-  const { id: ws } = useWorkspace();
-  const download = () =>
-    downloadItem(ws, item.name ?? "", item.document?.fileName || item.displayName || "document").catch((e: unknown) => toast(errorMessage(e), { tone: "danger" }));
-  return <DocumentSurface document={{ id: resourceId(item.name), cover: item.document?.cover }} variant="first" onPages={onPages} onDownload={() => void download()} />;
-}
 
 /** Characters of first-page text kept for an excerpt. */
 const EXCERPT_CHARS = 6000;

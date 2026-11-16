@@ -398,15 +398,18 @@
   function submissionView(doc, kb, query) {
     const u = forDoc(rdrUi(), doc.id), l = lifecycleOf(doc), st = stageOf(doc), sub = doc.submission || {}, mine = isMine(doc);
     const reviewer = canReviewKb(kb) && can('knowledge.manage');
+    // A new document's submission is processed before it's reviewed: until then the reviewer's task is Process.
+    const p = processingOf(doc), toProcess = isCandidate(doc) && TO_PROCESS.includes(p);
     const track = X.ctb?.href(doc.id) || '/contributions';
     crumbs(mine || !reviewer
       ? [{ label: 'Knowledge', to: '/knowledge' }, { label: 'My contributions', to: '/contributions' }, { label: docTitle(doc) }]
-      : [{ label: 'Documents', to: docsHref('review') }, { label: docTitle(doc) }]);
+      : [{ label: 'Documents', to: docsHref(toProcess ? 'processing' : 'review') }, { label: docTitle(doc) }]);
     const open = railOpen(u), k = kindMeta(res(doc).kind);
     const back = backBtn(null);
     const meta = [esc(k.label), esc(kb.name), esc(mine ? 'Contributed by you' : `Contributed by ${contributorName(doc)}`), sub.at && `<span>Submitted ${esc(rel(sub.at).replace(/^(Just now|Yesterday)$/, s => s.toLowerCase()))}</span>`].filter(Boolean).join(dot);
-    // One primary: Review (reviewers) or Revise (the contributor, when changes were asked for — it opens the same place as Track).
-    const main = reviewer && st === 'review' ? btn('Review', { v: 'primary', icon: 'check-check', href: docsHref('review', { sel: doc.id }) })
+    // One primary: Process, then Review (reviewers), or Revise (the contributor, when changes were asked for — it opens the same place as Track).
+    const op = p === 'failed' ? 'retry' : 'process';
+    const main = reviewer && st === 'review' ? (toProcess ? (p === 'processing' ? '' : btn(op === 'retry' ? 'Process again' : 'Process', { v: 'primary', icon: 'play', act: 'cur-op', data: { id: doc.id, op } })) : btn('Review', { v: 'primary', icon: 'check-check', href: docsHref('review', { sel: doc.id }) }))
       : mine && st === 'changes' ? btn('Revise', { v: 'primary', icon: 'pencil', href: track })
         : '';
     const trackBtn = mine && !(st === 'changes') ? btn('Track', { v: main ? 'secondary' : 'primary', icon: 'history', href: track }) : '';

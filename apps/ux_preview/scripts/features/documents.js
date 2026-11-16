@@ -46,17 +46,22 @@
   const stillLocked = d => /password/i.test(d.error || '');
   const own = d => !!kbById(d.kb)?.personal;
   /** One document read, classified and indexed: the assistant applies the topics it picks when nobody chose any,
-      within the run's classification context (`ctx`) when it has one. */
+      within the run's classification context (`ctx`) when it has one. A submission's file is classified for its reviewer
+      instead: its suggestion becomes what the assistant chose (aiOf), and it moves on to Documents → Review. */
   function finishOne(d, ctx = null) {
     delete d.fresh;
     if (d.archived || d.status !== 'processing') return null;
     if (stillLocked(d)) { d.status = 'failed'; return false; }
     d.status = 'ready'; d.error = ''; d.processedAt = Date.now();
-    if (!own(d)) autoClassify(d, ctx);
+    if (isCandidate(d)) { if (ctx) d.classCtx = ctx; else delete d.classCtx; delete d.ai; aiOf(d); }
+    else if (!own(d)) autoClassify(d, ctx);
     return true;
   }
-  const processable = d => d && !d.archived && (isPublishedStage(d) || stageOf(d) === 'unpublished') && !UNPROCESSABLE.includes(d.type) && d.status !== 'processing';
-  /** A few documents at once (a row's fix, an approval, My files): one toast when they're done. */
+  const processable = d => d && !d.archived && (isPublishedStage(d) || stageOf(d) === 'unpublished' || isCandidate(d)) && !UNPROCESSABLE.includes(d.type) && d.status !== 'processing';
+  /** Where a reviewer goes next: processed submissions to Review, what failed to Processing. */
+  const reviewNow = docs => ({ label: 'Review', run: () => go(docsHref('review', { sel: docs[0].id })) });
+  const showFailed = { label: 'Show', run: () => go(docsHref('processing', { state: 'failed' })) };
+  /** A few documents at once (a row's fix, My files): one toast when they're done. */
   function processDocs(docs, { msg, quiet } = {}) {
     docs = docs.filter(processable);
     if (!docs.length) return 0;
@@ -68,11 +73,12 @@
       const ok = [], bad = [];
       docs.forEach(d => { const r = finishOne(d); if (r) ok.push(d); else if (r === false) bad.push(d); });
       refresh();
-      // Private files (My files) are "ready" for their owner; shared documents are "processed".
-      const okOwn = ok.filter(own), okPub = ok.filter(d => !own(d));
+      // Private files (My files) are "ready" for their owner; shared documents are "processed"; submissions are ready for review.
+      const okSub = ok.filter(isCandidate), okOwn = ok.filter(own), okPub = ok.filter(d => !own(d) && !isCandidate(d));
       const done = (list, verb) => list.length && toast(list.length === 1 ? `${list[0].name} is ${verb}` : `${plural(list.length, list === okOwn ? 'file' : 'document')} are ${verb}`, { action: list.length === 1 ? { label: 'Open', run: () => go('/doc/' + list[0].id) } : undefined });
       done(okPub, 'processed'); done(okOwn, 'ready');
-      bad.forEach(d => toast(own(d) ? `Couldn’t prepare ${d.name}` : `Couldn’t process ${d.name}`, { tone: 'danger', action: { label: own(d) ? 'Open' : 'See issue', run: () => go(!own(d) && can('knowledge.manage') && canReviewKb(kbById(d.kb)) ? docsHref('issues') : '/doc/' + d.id) } }));
+      if (okSub.length) toast(okSub.length === 1 ? `${okSub[0].name} is processed and ready for review` : `${plural(okSub.length, 'submission')} are processed and ready for review`, { action: reviewNow(okSub) });
+      bad.forEach(d => toast(own(d) ? `Couldn’t prepare ${d.name}` : `Couldn’t process ${d.name}`, { tone: 'danger', action: own(d) || !can('knowledge.manage') || !canReviewKb(kbById(d.kb)) ? { label: 'Open', run: () => go('/doc/' + d.id) } : showFailed }));
     }, 2600);
     return docs.length;
   }
@@ -108,7 +114,10 @@
       if (left.length <= step) {
         clearInterval(timer); DRIVEN.delete(run.id); run.status = 'completed'; run.dur = Date.now() - run.started;
         audit(`Processed ${plural(run.done, 'document')}${run.failed ? ` · ${run.failed} failed` : ''}`, '');
-        toast(run.failed ? `Processed ${plural(run.done, 'document')} · ${run.failed} failed` : `Processed ${plural(run.done, 'document')}`, { tone: run.failed ? 'accent' : 'success', action: run.failed ? { label: 'See issues', run: () => go(docsHref('issues')) } : undefined });
+        // Submissions it processed are ready for review: say so, and go there.
+        const subs = run.ids.map(docById).filter(d => d && isCandidate(d) && d.status === 'ready');
+        const msg = `Processed ${plural(run.done, 'document')}${run.failed ? ` · ${run.failed} failed` : ''}${subs.length ? ` · ${plural(subs.length, 'submission')} ready for review` : ''}`;
+        toast(msg, { tone: run.failed ? 'accent' : 'success', action: run.failed ? showFailed : subs.length ? reviewNow(subs) : undefined });
       }
       refresh();
     }, 450);

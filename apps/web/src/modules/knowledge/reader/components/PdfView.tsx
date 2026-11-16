@@ -95,7 +95,7 @@ type PdfViewProps = Omit<PdfViewerProps, "bar" | "scrollRef" | "onDownload"> & {
  * and `?q=` are found in the pages' text and marked in the text layer. Opening is cover-first: the
  * item's cover is page 1 until page 1 is drawn.
  */
-function PdfView({ representation, refresh, cover, highlight, focusHit, page = 0, first, scroller, onMarks, onPages, onFailed }: PdfViewProps) {
+function PdfView({ representation, refresh, cover, highlight, focusHit, page = 0, scroller, onMarks, onPages, onFailed }: PdfViewProps) {
   const [src, setSrc] = useState(() => ({ uri: representation.uri, expires: Date.parse(representation.expireTime ?? ""), at: Date.now() }));
   const [doc, setDoc] = useState<PdfDocument>();
   const [count, setCount] = useState(0);
@@ -141,7 +141,7 @@ function PdfView({ representation, refresh, cover, highlight, focusHit, page = 0
       const { width: w, height: h } = firstPage.getViewport({ scale: 1 });
       live.current = { doc: opened, refreshing: false };
       setSizes((s) => (s.has(1) ? s : new Map(s).set(1, [w, h])));
-      setCount(first ? 1 : opened.numPages);
+      setCount(opened.numPages);
       setDoc(opened);
       onPages(opened.numPages);
     })().catch((error: unknown) => {

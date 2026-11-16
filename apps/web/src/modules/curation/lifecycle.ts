@@ -3,8 +3,10 @@ import type { Contribution, Item } from "./api";
 /**
  * A document's two independent states (preview `core/lifecycle.js`, DOCUMENT_LIFECYCLE.md), as the backend keeps
  * them (`document.publicationState`, `document.indexingState`): publication (can readers see it?) and processing
- * (read, classified and indexed: can search and the assistant use it?). An open submission decides publication and
- * isn't processed. Nothing is processed until someone asks; a run never publishes. Searchable = published and processed.
+ * (read, classified and indexed: can search and the assistant use it?). An open submission decides publication; a new
+ * document's submission is processed before it's reviewed (the assistant classifies it for its reviewer), a new
+ * version's once it's approved. Nothing is processed until someone asks; a run never publishes. Searchable = published
+ * and processed.
  * Pure (no React, no icons) so the mapping is unit-tested.
  */
 
@@ -57,8 +59,8 @@ export const PROCESSING: Readonly<Record<ProcessingKey, StateMeta>> = {
   pending: { label: "Not processed", tone: "default", desc: "Not read, classified or indexed yet. Search and the assistant can’t use it." },
   processing: { label: "Processing", tone: "accent", live: true, desc: "Being read, classified against your topics and indexed." },
   ready: { label: "Processed", tone: "success", desc: "Read, classified and indexed: search and the assistant can use it once it’s published." },
-  failed: { label: "Processing failed", tone: "danger", desc: "It couldn’t be read or indexed. Its fix is in Issues." },
-  outdated: { label: "Outdated", tone: "warning", desc: "Changed since it was processed. Answers use the previous version until it’s processed again." },
+  failed: { label: "Processing failed", tone: "danger", desc: "It couldn’t be read or indexed. Process it again from Processing." },
+  outdated: { label: "Changed at the source", tone: "warning", desc: "Changed since it was processed. Answers use the previous version until it’s processed again." },
   unsupported: { label: "Not supported", tone: "default", desc: "Images and archives can’t be processed. People can still download them." },
 };
 
@@ -77,14 +79,37 @@ const FROM_INDEXING = Object.fromEntries(Object.entries(PROCESSING_STATE).map(([
 /** Changed at its source since it was processed (the previous version still answers). */
 export const changedAtSource = (item: Item | null | undefined) => (item?.document?.qualityIssues ?? []).some((i) => i.kind === "CHANGED_AT_SOURCE");
 
-/** How far it was processed, whatever its publication. A submission isn't processed; a file that didn't arrive failed. */
-export function processingOf({ item, contribution }: DocStates): ProcessingKey {
-  if (isSubmission(contribution)) return "pending";
+/** An open submission of a new document (in review, not a new version): its file is processed before a reviewer decides. */
+export const isCandidate = (c: Contribution | null | undefined) => (c?.state === "ANALYZING" || c?.state === "IN_REVIEW") && c.kind !== "NEW_REVISION";
+
+/** How far the item's content was processed (its `indexingState`); a file that didn't arrive failed. */
+function indexingOf(item: Item | null | undefined): ProcessingKey {
   const doc = item?.document;
   if (!doc) return "pending";
   if (doc.contentState === "FAILED") return "failed";
   const k = FROM_INDEXING[doc.indexingState ?? "PENDING"] ?? "pending";
   return k === "ready" && changedAtSource(item) ? "outdated" : k;
+}
+
+/**
+ * How far it was processed, whatever its publication. A new document's submission has its candidate's state (images
+ * and archives are Not supported); a new version's, or one waiting on its contributor or declined, isn't processed.
+ */
+export function processingOf({ item, contribution }: DocStates): ProcessingKey {
+  if (isCandidate(contribution)) {
+    const k = indexingOf(item);
+    return k === "pending" && isUnprocessable(item?.document?.fileName || item?.displayName, item?.document?.mimeType) ? "unsupported" : k;
+  }
+  if (isSubmission(contribution)) return "pending";
+  return indexingOf(item);
+}
+
+/** Ready for a reviewer's decision: a new document once processed (or a format that can't be), or a new version. */
+export function readyToReview(contribution: Contribution, item: Item | null | undefined): boolean {
+  if (contribution.state !== "ANALYZING" && contribution.state !== "IN_REVIEW") return false;
+  if (!isCandidate(contribution)) return true;
+  const p = processingOf({ item, contribution });
+  return p === "ready" || p === "outdated" || p === "unsupported";
 }
 
 /** In search and answers: published and processed. */
@@ -101,26 +126,26 @@ export function isUnprocessable(fileName: string | null | undefined, mime: strin
   return m.startsWith("image/") || ARCHIVE_MIME.test(m) || IMAGE_EXT.test(ext) || ARCHIVE_EXT.test(ext);
 }
 
-/** Can it be processed (again)? Published or unpublished, not while it runs, not an image or archive. */
+/** Can it be processed (again)? Published or unpublished, or a new document's submission; not while it runs, not an image or archive. */
 export function canProcess(s: DocStates): boolean {
   const item = s.item;
   if (!item?.name || item.state === "DELETED") return false;
   const pub = publicationOf(s);
-  if (pub !== "published" && pub !== "unpublished") return false;
+  if (pub !== "published" && pub !== "unpublished" && !isCandidate(s.contribution)) return false;
   const p = processingOf(s);
   return p !== "processing" && p !== "unsupported" && !isUnprocessable(item.document?.fileName || item.displayName, item.document?.mimeType);
 }
 
-/** Documents → Issues: published or unpublished documents that couldn't be processed or changed since they were. */
-export function isIssue(s: DocStates): boolean {
-  if (!s.item?.name || s.item.state === "DELETED") return false;
-  const pub = publicationOf(s);
-  const p = processingOf(s);
-  return (pub === "published" || pub === "unpublished") && (p === "failed" || p === "outdated");
-}
+/** Processing states Documents → Processing lists: what isn't processed yet. */
+export const TO_PROCESS = ["pending", "processing", "failed", "outdated"] as const satisfies readonly ProcessingKey[];
 
-/** Issues' filter: [processing state, label]. */
-export const ISSUE_OPTS: readonly (readonly [ProcessingKey, string])[] = [
-  ["failed", PROCESSING.failed.label],
-  ["outdated", PROCESSING.outdated.label],
-];
+/**
+ * Documents → Processing: a new document's submission, or a published or unpublished document, that isn't processed
+ * for its current revision. Never attachments, formats that can't be processed, new versions waiting for review or what's processed.
+ */
+export function toProcess(s: DocStates): boolean {
+  if (!s.item?.name || s.item.state === "DELETED" || s.item.document?.purpose === "CONVERSATION_ATTACHMENT") return false;
+  const pub = publicationOf(s);
+  if (!isCandidate(s.contribution) && pub !== "published" && pub !== "unpublished") return false;
+  return (TO_PROCESS as readonly ProcessingKey[]).includes(processingOf(s));
+}

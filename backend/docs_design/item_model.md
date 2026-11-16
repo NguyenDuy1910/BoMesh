@@ -168,11 +168,20 @@ lists only `STANDARD`, `PUBLISHED` documents whose processing finished
 (`indexingState` `SUCCEEDED` or `OUTDATED`): an upload stays in My files; a
 contribution appears once it is approved (moved and published) and processed.
 
-**4.7 Contributions are a separate resource; approval never ingests.**
-Approval moves the candidate into the target collection and publishes it, or
-publishes a source candidate in place, or appends a revision to the replaced
-document. Processing remains an explicit Ingestion Run (UI may offer
-"approve and process" as two calls).
+**4.7 Contributions are a separate resource; processing comes before review.**
+A reviewer first processes a NEW_DOCUMENT candidate with an explicit Ingestion
+Run (Documents → Processing; `contributions.review` on the deciding collection
+is enough to name it in `items[]`). Its CLASSIFYING step matches rules against
+the target collection, not the contributor's PERSONAL one, and replaces the
+contribution's suggested topics and summary: the assistant classifies, the
+reviewer decides. Approval requires that processing (`CANDIDATE_NOT_PROCESSED`
+otherwise; unsupported formats pass) and still never ingests: it moves the
+candidate into the target collection and publishes it, or publishes a source
+candidate in place — the index stays current, only the payload follows — or
+appends a revision to the replaced document (NEW_REVISION), which is processed
+by a run after approval. Rejected: processing on approval (the reviewer would
+decide without the classification); an automatic run on submit (cost for
+every declined file, and the reviewer chooses what to process).
 
 **4.8 One revision store for every Document.** `artifact_revisions` →
 `item_revisions` (rename; same columns plus `contribution_id`,
@@ -291,7 +300,9 @@ resource persistence".
     `filter` silently narrows to collections where the caller holds
     `ingestionRuns.create`, and an item it names must be readable (403);
     personal collections are selected only by `items[]` or an item the filter
-    names; attachments, artifacts, unsupported and content-pending documents
+    names; the candidate of an open NEW_DOCUMENT contribution may also be named
+    in `items[]` by holders of `contributions.review` on its deciding
+    collection; attachments, artifacts, unsupported and content-pending documents
     are never selected; tasks are listed only for items readable under 3.
 11. A NEW_REVISION contribution targets the governing collection of the
     replaced document (server-set), so only that collection's reviewers can
@@ -328,13 +339,18 @@ their document children → audit event.
 
 **Contribute and approve.** Member uploads to their personal collection →
 `CreateContribution {item, targetCollection?, note}` (candidate ACTIVE and
-AVAILABLE; `ANALYZING`, assistant suggestions and flags) → `IN_REVIEW`; while
+AVAILABLE; `ANALYZING`, rule suggestions and flags) → `IN_REVIEW`; while
 open the candidate cannot move, be deleted or change content → reviewer
-(`contributions.review` + `items.publish` on target) `:approve {etag,
+processes it: `CreateIngestionRun {items: [candidate]}` (CLASSIFYING rules
+against the target collection; on a current index the chosen topics and
+summary replace the contribution's suggestions) → reviewer
+(`contributions.review` + `items.publish` on target; NEW_DOCUMENT candidate
+processed, else `CANDIDATE_NOT_PROCESSED`) `:approve {etag,
 targetCollection, documentType, topics, summary}` → in one transaction the
 candidate moves through the Move routine and becomes `PUBLISHED` (or a
-revision is appended) → contribution `APPROVED` → no run starts; the reviewer
-or a schedule runs `CreateIngestionRun` when they choose. `:requestChanges`,
+revision is appended) → contribution `APPROVED` → no run starts: a moved
+candidate keeps its current index (payload re-synced); an appended revision is
+processed by a later `CreateIngestionRun`. `:requestChanges`,
 `:reject`, `:withdraw`, `:resubmit` change only the contribution.
 
 **Publish / unpublish.** `:publish` / `:unpublish` flip

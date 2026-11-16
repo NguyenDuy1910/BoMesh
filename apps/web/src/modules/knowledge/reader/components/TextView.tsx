@@ -13,9 +13,6 @@ import { Marked } from "./Marked";
 import { CutNotice } from "./ReaderParts";
 import { useRepresentationBody, type ViewerProps } from "./viewer";
 
-/** Lines of a text shown as a first page (the review pane). */
-const FIRST_PAGE_LINES = 60;
-
 const readText = (response: Response) => response.text();
 
 /**
@@ -23,7 +20,7 @@ const readText = (response: Response) => response.text();
  * pretty-printed (JSON) and cut at 1 MiB. MARKDOWN is rendered in the reader's page styling; PLAIN is
  * one monospaced page labelled with its `language`. Cited passages and search words are marked.
  */
-export function TextView({ fileKey, representation, refresh, first, highlight, focusHit, onMarks, onDownload }: ViewerProps) {
+export function TextView({ fileKey, representation, refresh, highlight, focusHit, onMarks, onDownload }: ViewerProps) {
   const body = useRepresentationBody({ fileKey, representation, refresh }, readText);
   const markdown = representation.textFormat === "MARKDOWN";
 
@@ -39,11 +36,10 @@ export function TextView({ fileKey, representation, refresh, first, highlight, f
     );
   }
   if (body.isError) return <ErrorState title="This file didn’t load" error={body.error} onRetry={() => void body.refetch()} />;
-  const text = first ? body.data.split("\n", FIRST_PAGE_LINES).join("\n") : body.data;
   return (
     <>
-      <TextBody text={text} markdown={markdown} language={representation.language} highlight={highlight} focusHit={focusHit} onMarks={onMarks} />
-      {representation.truncated && !first ? <CutNotice onDownload={onDownload}>Showing the first 1 MB — download for the rest.</CutNotice> : null}
+      <TextBody text={body.data} markdown={markdown} language={representation.language} highlight={highlight} focusHit={focusHit} onMarks={onMarks} />
+      {representation.truncated ? <CutNotice onDownload={onDownload}>Showing the first 1 MB — download for the rest.</CutNotice> : null}
     </>
   );
 }

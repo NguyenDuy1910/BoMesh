@@ -135,6 +135,7 @@ async def test_confirm_without_items_update_confirms_nothing(scene: Scene) -> No
 
 async def _approve(scene: Scene, suggested: Topic | None, topics: list[str], **body: Any) -> UUID:
     candidate = await scene.candidate()
+    await scene.mark_processed(candidate)
     contribution = await scene.submit(candidate)
     if suggested is not None:
         async with scene.sessions.begin() as session:
