@@ -615,7 +615,7 @@ async def import_topics(
         replace=body.mode == "REPLACE",
         validate_only=body.validate_only,
     )
-    return import_response(result)
+    return import_response(workspace, result)
 
 
 @router.post(f"{_WS}/topics:testClassification", name="TestTopicClassification")

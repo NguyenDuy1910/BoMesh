@@ -2,8 +2,8 @@
    (/knowledge/lists/:id): the personal side of Knowledge — Saved, My files and My reading lists (the reading lists you
    made), each listed in the sidebar under Knowledge; and, under Your work, what you contributed and where it stands. Recent
    reads are Your work → Recent (recent.js). Reading lists others share with you are in Browse ("Shared with you"); saved views
-   are in Browse's Views. Each section carries its own one action (My files → Upload, My reading lists → New reading list); My
-   contributions' header carries Contribute. Uses X.res (resources.js), X.ctb + DR['ctb'] (contribute.js),
+   are in Browse's Views. Each section's one action sits in its header, like My contributions' Contribute (My files → Upload,
+   My reading lists → New reading list). Uses X.res (resources.js), X.ctb + DR['ctb'] (contribute.js),
    core/catalog.js and core/lifecycle.js. Prefix: lib-, col-. */
 (() => {
   'use strict';
@@ -21,13 +21,15 @@
 
   /* ═══════════════ My library sections ═══════════════ */
   const SAVED_SORTS = { saved: 'Recently saved', updated: 'Recently updated', title: 'Title A–Z' };
-  /** A tab's one action, at the end of its toolbar. */
-  const tabBar = (start, action) => `<div class="toolbar lib-bar">${start}${action ? `<div class="toolbar__end">${action}</div>` : ''}</div>`;
-
+  /** A section's toolbar (its tools); the section's action is in the header. */
+  const tabBar = start => `<div class="toolbar lib-bar">${start}</div>`;
   P.library = ({ query }) => {
     const kb = personalKb(), tab = X.res.libraryTab(query);
-    // Each section is its own page (the sidebar lists it under Knowledge); no header action: each section has its own.
-    const head = X.res.hubHeader(tab);
+    // Each section is its own page (the sidebar lists it under Knowledge); its one action sits in the header, once there is
+    // something listed (an empty section's empty state carries it instead).
+    const has = { saved: false, files: !!kb && docsIn(kb.id).length > 0, lists: myCollections().length > 0 }[tab] && S.pageState !== 'empty';
+    const action = !has ? '' : tab === 'files' ? btn('Upload', { v: 'primary', icon: 'upload', act: 'contribute', data: { private: '1' } }) : tab === 'lists' ? btn('New reading list', { v: 'primary', icon: 'plus', act: 'col-new' }) : '';
+    const head = X.res.hubHeader(tab, { actions: action });
     const body = { saved: savedTab, files: filesTab, lists: collectionsTab }[tab](kb);
     return `<div class="page page--wide lib">${head}${body}</div>`;
   };
@@ -125,7 +127,7 @@
         const canShare = canContribute() && contributionTargets().length > 0;
         const share = d => (canShare ? btn('', { v: 'ghost', size: 'sm', icon: 'share', act: 'ctb-share', data: { id: d.id }, tip: 'Share as knowledge…', muted: true }) : '');
         const search = longOr(all.length, u.q) ? searchField({ uiKey: uk, placeholder: 'Search my files' }) : '';
-        return tabBar(`${search}<span class="t-sm muted row gap-4 lib-private">${ic('lock', 'i-sm')}Only you can see these</span>`, btn('Upload', { v: 'primary', size: 'sm', icon: 'upload', act: 'contribute', data: { private: '1' } }))
+        return tabBar(`${search}<span class="t-sm muted row gap-4 lib-private">${ic('lock', 'i-sm')}Only you can see these</span>`)
           + (rows.length ? X.res.rows(rows, d => ({ trail: process(d), reveal: share(d), hide: ['kb'] })) : noMatches(uk, [], 'files'));
       },
     });
@@ -143,8 +145,8 @@
     const empty = () => emptyState({ icon: 'list', title: 'No reading lists yet', desc: 'Group resources into a reading list, put them in order and share it with your team.', actions: btn('New reading list', { v: 'primary', icon: 'plus', act: 'col-new' }), boxed: true });
     return gate({
       loading: () => skelRows(4), empty,
-      // The tab already counts them: the toolbar only offers making another.
-      ok: () => !yours.length ? empty() : tabBar('', btn('New reading list', { v: 'primary', size: 'sm', icon: 'plus', act: 'col-new' })) + list(yours.map(colItem), 'lib-list'),
+      // New reading list is the header's action.
+      ok: () => !yours.length ? empty() : list(yours.map(colItem), 'lib-list'),
     });
   }
 
@@ -154,32 +156,39 @@
     crumbs([{ label: 'Knowledge', to: '/knowledge' }, { label: 'Not available' }]);
     return `<div class="page">${emptyState({ icon: 'list', title: 'This reading list isn’t available', desc: 'It may have been archived, or it isn’t shared with you.', actions: btn('Browse knowledge', { v: 'primary', href: '/knowledge' }), boxed: true })}</div>`;
   }
-  /** A reading list is ordered: view mode numbers the items and checks the ones you've read; Edit (one entry, for
-      editors) turns the page into its editor — name and description inline, reorder, notes, remove, Add resources — with Done as the
-      only primary. Every change saves as you make it (quiet toast with Undo). */
+  /** A reading list is ordered: it numbers the items and checks the ones you've read. People who may edit it change it in place —
+      the name and description are click-to-edit (Enter or leaving the field saves, Escape cancels), the audience chip is a menu —
+      each applying at once with Undo. Edit items (one entry) turns the list into its editor: reorder, notes, remove, Add resources,
+      with Done as the only primary. */
   P.collection = ({ params }) => {
     const c = collectionById(params.id);
     if (!c || !canSeeCollection(c)) return colUnavailable();
     // Yours sit in My reading lists; a shared reading list was found in Browse, so its trail is just Knowledge.
     crumbs([{ label: 'Knowledge', to: '/knowledge' }, ...(c.owner === me().id ? [{ label: 'My reading lists', to: libHref('lists') }] : []), { label: c.name }]);
-    const edit = canEditCollection(c), u = ui(colKey(c.id), { edit: false });
-    if (!edit) u.edit = false;
+    const edit = canEditCollection(c), u = ui(colKey(c.id), { edit: false, renaming: '' });
+    if (!edit) Object.assign(u, { edit: false, renaming: '' });
     const { ok, locked } = collectionItems(c);
-    const s = shareLabel(c);
-    const meta = `<span class="lib-col__head-meta">${chip(s.label, { icon: s.icon, size: 'sm' })}<span class="t-sm muted">${esc(c.owner === me().id ? 'By you' : 'By ' + actorName(c.owner))} · Updated ${esc(relLow(c.updated))}</span></span>`;
-    // View: one primary (Ask about this reading list), Edit, and ⋯ (Use in, copy, duplicate, archive). Edit mode: Done is the primary.
+    // Item actions only when items are shown (not in the forced Empty or Error state).
+    const shown = ok.length > 0 && !['empty', 'error'].includes(S.pageState);
+    if (!shown) u.edit = false;
+    const s = shareLabel(c), audiences = edit ? X.res.colAudiences(c) : [];
+    // Who can see it: a menu for editors when there is more than one choice; otherwise the plain chip.
+    const share = audiences.length > 1
+      ? `<button type="button" class="lib-col__share" data-menu="col-share" data-id="${esc(c.id)}" aria-haspopup="menu" aria-expanded="false" data-tip="Who can see it">${ic(s.icon, 'i-xs')}<span class="truncate">${esc(s.label)}</span>${ic('chevron-down', 'i-xs')}</button>`
+      : chip(s.label, { icon: s.icon, size: 'sm' });
+    const meta = `<span class="lib-col__head-meta">${share}<span class="t-sm muted"><span>${esc(c.owner === me().id ? 'Made by you' : 'Made by ' + actorName(c.owner))}</span><span aria-hidden="true"> · </span><span>Updated ${esc(relLow(c.updated))}</span></span></span>`;
+    const naming = u.renaming === 'name', describing = u.renaming === 'desc';
+    const heading = edit ? editableTitle({ id: 'col-name', tag: 'h1', cls: 'page-hero__title', value: naming ? u.val : c.name, editing: naming, edit: 'col-rename', commit: 'col-rename-done', cancel: 'col-rename-cancel', label: 'Rename reading list', maxlength: 60, data: { id: c.id } }) : '';
+    const about = !edit ? (c.desc ? `<p class="lib-col__desc">${esc(c.desc)}</p>` : '')
+      : c.desc || describing ? editableTitle({ id: 'col-desc', tag: 'p', cls: 'lib-col__desc', value: describing ? u.val : c.desc, editing: describing, edit: 'col-describe', commit: 'col-describe-done', cancel: 'col-rename-cancel', label: 'Edit description', maxlength: 200, placeholder: 'What it’s for and who should read it', data: { id: c.id } })
+        : `<p class="lib-col__desc etitle"><button type="button" class="lib-col__add" id="col-desc-btn" data-act="col-describe" data-id="${esc(c.id)}">Add a description</button></p>`;
+    // View: one primary (Ask about this reading list), Edit items, and ⋯ (Use in, copy, duplicate, archive). Edit items: Done is the primary.
     const actions = u.edit
-      ? btn('Add resources', { icon: 'plus', act: 'col-add' }) + btn('Done', { v: 'primary', icon: 'check', act: 'col-edit-mode', data: { id: c.id } })
-      : (ok.length ? btn('Ask about this reading list', { v: 'primary', icon: 'sparkles', act: 'col-ask', data: { id: c.id } }) : '')
-        + (edit ? btn('Edit', { icon: 'pencil', act: 'col-edit-mode', data: { id: c.id } }) : '')
+      ? btn('Add resources', { icon: 'plus', act: 'col-add' }) + btn('Done', { v: 'primary', icon: 'check', act: 'col-items', data: { id: c.id } })
+      : (shown ? btn('Ask about this reading list', { v: 'primary', icon: 'sparkles', act: 'col-ask', data: { id: c.id } }) : '')
+        + (edit && shown ? btn('Edit items', { icon: 'list', act: 'col-items', data: { id: c.id } }) : '')
         + iconBtn('more', 'More actions', { menu: 'col-more', data: { id: c.id } });
-    const head = u.edit
-      ? pageHeader({ title: 'Edit reading list', lead: itemIcon('list', 'accent'), desc: 'Changes save as you go.', actions })
-      : pageHeader({ title: c.name, lead: itemIcon('list', 'accent'), desc: (c.desc ? esc(c.desc) + '<br>' : '') + meta, extra: X.res.demoChip(), actions });
-    const details = u.edit ? `<section class="lib-edit__meta" aria-label="Reading list details">
-      ${field({ id: 'colm-name', label: 'Name', required: true, error: u.nameErr || '', control: input({ id: 'colm-name', value: c.name, attrs: `maxlength="60" data-change="col-meta-save" data-field="name" data-id="${esc(c.id)}"`, invalid: !!u.nameErr }) })}
-      ${field({ id: 'colm-desc', label: 'Description', optional: true, control: input({ id: 'colm-desc', value: c.desc || '', placeholder: 'What it’s for and who should read it', attrs: `maxlength="200" data-change="col-meta-save" data-field="desc" data-id="${esc(c.id)}"` }) })}
-      <div class="lib-edit__share"><span class="label">Who can see it</span><span class="row gap-8">${chip(s.label, { icon: s.icon, size: 'sm' })}${linkBtn('Change', { act: 'col-edit', data: { id: c.id } })}</span></div></section>` : '';
+    const head = pageHeader({ title: c.name, heading, lead: itemIcon('list', 'accent'), desc: about + meta, extra: X.res.demoChip(), actions });
     const lockedRow = locked ? `<div class="lib-locked">${ic('lock', 'i-sm')}<span>${plural(locked, 'item')} ${locked === 1 ? 'isn’t' : 'aren’t'} shared with you</span></div>` : '';
     const empty = () => emptyState({ icon: 'list', title: 'This reading list is empty', desc: edit ? 'Add resources people should read, in order.' : 'The owner hasn’t added anything yet.', actions: edit ? btn('Add resources', { v: 'primary', icon: 'plus', act: 'col-add' }) : '', boxed: true });
     const read = new Set(recentResources(200).map(x => x.doc.id));
@@ -187,12 +196,12 @@
       loading: () => skelRows(5), empty,
       ok: () => {
         if (!ok.length && !locked) return empty();
-        if (u.edit) return `<div class="lib-edit">${ok.map((x, i) => editRow(c, x, i, ok.length)).join('')}</div>${lockedRow}`;
+        if (u.edit) return `<p class="lib-edit__hint t-sm muted">Reorder, add notes or remove items. Changes save as you go.</p><div class="lib-edit">${ok.map((x, i) => editRow(c, x, i, ok.length)).join('')}</div>${lockedRow}`;
         return X.res.rows(ok.map(x => x.d), d => { const i = ok.findIndex(x => x.d === d); return { note: ok[i]?.note || '', pos: i + 1, read: read.has(d.id) }; }) + lockedRow;
       },
     });
     S.ui.colCur = c.id;
-    return `<div class="page lib">${head}${details}${body}</div>`;
+    return `<div class="page lib">${head}${body}</div>`;
   };
   function editRow(c, x, i, n) {
     const d = x.d, title = docTitle(d);
@@ -202,32 +211,41 @@
       ${iconBtn('trash', 'Remove from reading list', { size: 'sm', act: 'col-remove', data: { id: c.id, doc: d.id } })}
     </div>`;
   }
-  A['col-edit-mode'] = el => {
+  A['col-items'] = el => {
     const c = collectionById(el.dataset.id); if (!canEditCollection(c)) return;
     const u = ui(colKey(c.id), { edit: false });
-    u.edit = !u.edit; u.nameErr = ''; refresh();
-    if (u.edit) requestAnimationFrame(() => $('#colm-name')?.focus());
+    u.edit = !u.edit; u.renaming = ''; refresh();
   };
-  /** Name and description save when the field is left (or on Enter). A name can't be emptied: the field says so and keeps the old one. */
-  A['col-meta-save'] = el => {
-    const c = collectionById(el.dataset.id); if (!canEditCollection(c)) return;
-    const k = el.dataset.field, v = el.value.trim(), u = ui(colKey(c.id));
-    if (k === 'name' && !v) { u.nameErr = 'Enter a name.'; refresh(); requestAnimationFrame(() => $('#colm-name')?.focus()); return; }
-    u.nameErr = '';
-    if ((c[k] || '') === v) { refresh(); return; }
+  /* ── Name and description, in place. Commits are idempotent (Enter saves and re-renders, then the field loses focus). ── */
+  const editing = (el, what) => { const c = collectionById(el.dataset.id), u = c && ui(colKey(c.id)); return c && canEditCollection(c) && (!what || u.renaming === what) ? { c, u } : {}; };
+  A['col-rename'] = el => { const { c, u } = editing(el); if (!c) return; Object.assign(u, { renaming: 'name', val: c.name }); refresh(); };
+  A['col-describe'] = el => { const { c, u } = editing(el); if (!c) return; Object.assign(u, { renaming: 'desc', val: c.desc || '' }); refresh(); };
+  A['col-rename-cancel'] = el => { const { u } = editing(el); if (!u?.renaming) return; u.renaming = ''; refresh(); };
+  /** Apply one field at once, with Undo. */
+  function setMeta(c, k, v, msg) {
     const prev = { [k]: c[k], updated: c.updated };
     c[k] = v; c.updated = Date.now(); audit('Updated a reading list', c.name); persist(); refresh();
-    toast(k === 'name' ? 'Name saved' : 'Description saved', { action: { label: 'Undo', run: () => { Object.assign(c, prev); persist(); refresh(); } } });
+    toast(msg, { action: { label: 'Undo', run: () => { Object.assign(c, prev); persist(); refresh(); } } });
+  }
+  /** An empty or unchanged name just closes the field: a reading list always keeps a name. */
+  A['col-rename-done'] = el => {
+    const { c, u } = editing(el, 'name'); if (!c) return;
+    const v = el.value.trim(); u.renaming = '';
+    if (!v || v === c.name) { refresh(); return; }
+    setMeta(c, 'name', v, `Renamed to “${v}”`);
   };
-  /** A note saves when you leave its field (Enter leaves it too). */
-  A['col-note-enter'] = el => el.blur();
-  A['col-note-save'] = el => {
-    const c = collectionById(el.dataset.id); if (!canEditCollection(c)) return;
-    const it = c.items.find(i => i.doc === el.dataset.doc); if (!it) return;
-    const v = el.value.trim(), prev = it.note, prevAt = c.updated; if ((it.note || '') === v) return;
-    if (v) it.note = v; else delete it.note;
-    c.updated = Date.now(); audit('Edited reading list notes', c.name); persist(); refresh();
-    toast(v ? 'Note saved' : 'Note removed', { action: { label: 'Undo', run: () => { if (prev) it.note = prev; else delete it.note; c.updated = prevAt; persist(); refresh(); } } });
+  A['col-describe-done'] = el => {
+    const { c, u } = editing(el, 'desc'); if (!c) return;
+    const v = el.value.trim(); u.renaming = '';
+    if (v === (c.desc || '')) { refresh(); return; }
+    setMeta(c, 'desc', v, v ? 'Description saved' : 'Description removed');
+  };
+  /** Who can see it: picking another audience applies at once (the reading list's documents keep their own access). */
+  MENUS['col-share'] = el => {
+    const c = collectionById(el.dataset.id); if (!canEditCollection(c)) return [];
+    return [{ section: 'Who can see it' }, ...X.res.colAudiences(c).map(a => ({ label: a.label, icon: a.icon, checked: a.share === c.share, run: () => {
+      if (a.share !== c.share) setMeta(c, 'share', a.share, a.share !== 'private' ? `Shared with ${a.label}` : c.owner === me().id ? 'Only you can see it now' : `Only ${actorName(c.owner)} can see it now`);
+    } }))];
   };
   A['col-move'] = el => {
     const c = collectionById(el.dataset.id); if (!canEditCollection(c)) return;
@@ -261,7 +279,7 @@
   MENUS['col-more'] = el => {
     const c = collectionById(el.dataset.id); if (!c) return [];
     const edit = canEditCollection(c), own = c.owner === me().id;
-    // Editing (name, description, who can see it, items) is the header's Edit; ⋯ holds the rest.
+    // Name, description and who can see it change in place in the header; items in Edit items. ⋯ holds the rest.
     return [
       ...colUseItems(c),
       { label: 'Copy link', icon: 'link', run: () => copyText(location.href.split('#')[0] + '#/knowledge/lists/' + c.id, 'Link copied') },
@@ -270,9 +288,11 @@
       edit && { label: 'Archive', icon: 'archive', danger: true, run: () => archive(c) },
     ].filter(Boolean);
   };
+  /** The copy opens with its name ready to change (it starts as “… (copy)”). */
   function duplicate(c) {
     const copy = { id: uid('col'), name: `${c.name} (copy)`, desc: c.desc || '', owner: me().id, share: 'private', created: Date.now(), updated: Date.now(), items: c.items.map(i => ({ ...i })) };
     (D.collections ??= []).unshift(copy); audit('Duplicated a reading list', c.name); persist();
+    Object.assign(ui(colKey(copy.id), { edit: false }), { renaming: 'name', val: copy.name });
     go('/knowledge/lists/' + copy.id); toast(`Copied to “${copy.name}”`);
   }
   function archive(c) {

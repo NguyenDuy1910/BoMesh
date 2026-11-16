@@ -2,7 +2,8 @@
 'use strict';
 /* Conversations: the list under AI Chat's composer (/chat) — the caller's conversations, searchable and filterable
    by project, with rename, move and delete (immediate, with Undo). The one conversation ⋯ menu lives here and is
-   shared by those rows, project pages and the thread topbar (X.conversations.menu). */
+   shared by those rows, project pages and the thread topbar (X.conversations.menu); an open conversation renames
+   from its title instead (X.conversations.title: click to edit), so its ⋯ leaves Rename out. */
 
 const C = () => X.chat;
 const UIK = 'chats', PER = 20;
@@ -57,19 +58,21 @@ function listHtml() {
     ${gate({ ok, empty: none, loading: () => skelRows(4) })}</section>`;
 }
 
-/** The one ⋯ menu for a conversation, wherever it's shown. Rename · move to a project · Delete conversation. */
-function menu(c) {
+/** The one ⋯ menu for a conversation, wherever it's shown. Rename (rows only: the open thread renames from its title) ·
+    move to a project · Delete conversation. */
+function menu(c, { rename = true } = {}) {
   if (!c || !C().isMine(c)) return [];
   return [
-    { label: 'Rename', icon: 'pencil', run: () => A['conv-rename']({ dataset: { id: c.id } }) },
+    rename && { label: 'Rename', icon: 'pencil', run: () => A['conv-rename']({ dataset: { id: c.id } }) },
     ...(X.projects?.moveItems(c) || []),
     { sep: true },
     { label: 'Delete conversation', icon: 'trash', danger: true, run: () => A['conv-delete']({ dataset: { id: c.id } }) },
-  ];
+  ].filter(Boolean);
 }
 MENUS['conv-menu'] = el => menu(convById(el.dataset.id));
 
-/* Rename (the name is limited by maxlength, so only "empty" needs a message) */
+/* Rename from a row's ⋯ (a row is one link, so the name is edited in a small dialog; the name is limited by maxlength,
+   so only "empty" needs a message) */
 const vName = v => !v.trim() ? 'Enter a name.' : '';
 A['conv-rename'] = el => {
   const c = convById(el.dataset.id); if (!c) return;
@@ -92,6 +95,27 @@ A['conv-rename-save'] = async () => {
   toast(`Renamed to “${title}”`, { action: { label: 'Undo', run: () => { c.title = before; refresh(); } } });
 };
 
+/* Rename an open conversation: its title in the top row is the control. Applies at once with Undo; an empty or
+   unchanged name just closes. */
+function titleHtml(c) {
+  const u = C().cui(), on = u.renaming === c.id;
+  if (!C().isMine(c)) return '';
+  return editableTitle({ id: 'conv-title', value: on ? u.renameVal : c.title, editing: on, edit: 'conv-title-edit', commit: 'conv-title-done', cancel: 'conv-title-cancel', tag: 'h1', cls: 'topbar__title', label: 'Rename conversation', maxlength: 80, data: { id: c.id } });
+}
+A['conv-title-edit'] = el => {
+  const c = convById(el.dataset.id); if (!c || !C().isMine(c)) return;
+  Object.assign(C().cui(), { renaming: c.id, renameVal: c.title }); refresh();
+};
+A['conv-title-cancel'] = () => { const u = C().cui(); if (!u.renaming) return; u.renaming = null; refresh(); };
+/** Enter or leaving the field. Idempotent: Enter re-renders, then the field loses focus. */
+A['conv-title-done'] = el => {
+  const u = C().cui(), c = convById(el.dataset.id); if (!c || u.renaming !== c.id) return;
+  const title = el.value.trim(); u.renaming = null;
+  if (!title || title === c.title) { refresh(); return; }
+  const before = c.title; c.title = title; refresh();
+  toast(`Renamed to “${title}”`, { action: { label: 'Undo', run: () => { c.title = before; refresh(); } } });
+};
+
 /* Delete: reversible, so it happens at once and Undo puts it back where it was. Deleting the open conversation goes one level up. */
 A['conv-delete'] = el => {
   const c = convById(el.dataset.id); if (!c) return;
@@ -105,5 +129,5 @@ A['conv-delete'] = el => {
   toast(`Deleted “${c.title}”`, { action: { label: 'Undo', run: () => { if (!D.convs.includes(c)) D.convs.splice(Math.min(i, D.convs.length), 0, c); persist(); if (wasOpen) go('/chat/' + c.id); else refresh(); } } });
 };
 
-X.conversations = { menu, context, list: listHtml };
+X.conversations = { menu, context, list: listHtml, title: titleHtml };
 })();

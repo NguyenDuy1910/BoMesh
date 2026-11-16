@@ -164,10 +164,11 @@
       if (u.q || u.kb) return toolbar + noMatches(K, ['gap', 'kb'], 'documents');
       return toolbar + emptyState({ icon: 'check-circle', tone: 'success', title: `Every document has ${GAPS[u.gap]?.noun || 'its details'}`, boxed: true, compact: true });
     }
-    const page = paginate(rows, K, 20), topics = all.some(x => x.gaps.includes('topic'));
-    const head = selAllCheck(K, page.map(x => x.d.id)) + sortHead('Document', 'name', K) + th('Missing') + sortHead('Updated', 'updated', K, 'table__column--hide-sm') + th('<span class="sr-only">Actions</span>', 'table__column--actions');
+    // A list where every document lacks only a topic (Suggestions → Without a topic) says so in its title: no Missing column.
+    const page = paginate(rows, K, 20), topics = all.some(x => x.gaps.includes('topic')), onlyTopic = all.every(x => x.gaps.length === 1 && x.gaps[0] === 'topic');
+    const head = selAllCheck(K, page.map(x => x.d.id)) + sortHead('Document', 'name', K) + (onlyTopic ? '' : th('Missing')) + sortHead('Updated', 'updated', K, 'table__column--hide-sm') + th('<span class="sr-only">Actions</span>', 'table__column--actions');
     const bulk = topics ? bulkBar(K, btn('Apply topic', { v: 'ghost', size: 'sm', icon: 'tag', iconRight: 'chevron-down', menu: 'kh-topic', data: { ids: selIds(K).join(',') } })) : '';
-    return toolbar + table({ label: topics ? 'Without a topic' : 'Missing details', head, rows: page.map(x => detailRow(x, u, K, sug)), foot: pager(rows.length, K, 20) }) + bulk;
+    return toolbar + table({ label: topics ? 'Without a topic' : 'Missing details', head, rows: page.map(x => detailRow(x, u, K, sug, onlyTopic)), foot: pager(rows.length, K, 20) }) + bulk;
   }
   function suggestionsHtml(d, s) {
     if (!s) return '';
@@ -176,17 +177,18 @@
       : '<span class="t-xs muted">No suggestions</span>';
     return `<div class="kh-sug">${body}${iconBtn('x', 'Dismiss suggestions', { size: 'sm', act: 'kh-sug-close', data: { id: d.id } })}</div>`;
   }
-  function detailRow(x, u, K, sug) {
+  function detailRow(x, u, K, sug, onlyTopic) {
     const d = x.d, needsTopic = x.gaps.includes('topic');
     const gaps = x.gaps.map(g => chip(GAPS[g].label, { size: 'sm', icon: GAPS[g].icon, tone: g === u.gap ? 'warning' : 'default' })).join('');
     // Add topic (its menu starts with the assistant's suggestions); the pencil covers owner and summary.
     const actions = needsTopic
       ? btn('Add topic', { v: 'secondary', size: 'sm', icon: 'tag', iconRight: 'chevron-down', menu: 'kh-topic', data: { ids: d.id } }) + iconBtn('pencil', 'Edit details', { size: 'sm', act: 'res-edit', data: { id: d.id } })
       : btn('Edit details', { v: 'secondary', size: 'sm', icon: 'pencil', act: 'res-edit', data: { id: d.id } });
+    const sugs = needsTopic ? suggestionsHtml(d, sug[d.id]) : '';
     return `<tr class="table__row" data-act="cur-doc" data-id="${esc(d.id)}" tabindex="0">
       ${selCheck(K, d.id, 'Select ' + d.name)}
-      <td class="table__cell table__cell--primary"><div class="row gap-12">${fileIcon(d.type)}<div class="grow kh-min"><div class="cell-title truncate" data-tip="${esc(d.name)}">${esc(d.name)}</div><div class="cell-sub truncate">${esc(kbName(d))}</div></div></div></td>
-      <td class="table__cell kh-gaps"><div class="kh-chips">${gaps}</div>${needsTopic ? suggestionsHtml(d, sug[d.id]) : ''}</td>
+      <td class="table__cell table__cell--primary"><div class="row gap-12">${fileIcon(d.type)}<div class="grow kh-min"><div class="cell-title truncate" data-tip="${esc(d.name)}">${esc(d.name)}</div><div class="cell-sub truncate">${esc(kbName(d))}</div>${onlyTopic ? sugs : ''}</div></div></td>
+      ${onlyTopic ? '' : `<td class="table__cell kh-gaps"><div class="kh-chips">${gaps}</div>${sugs}</td>`}
       <td class="table__cell table__cell--hide-sm muted res-nowrap" data-tip="${esc(fmtDateTime(d.updated))}">${rel(d.updated)}</td>
       <td class="table__cell table__cell--actions"><div class="row gap-4 none">${actions}</div></td></tr>`;
   }
@@ -362,7 +364,7 @@
     const meta = [plural(g.n, 'document'), g.keywords?.length && `matched ${g.keywords.map(k => `“${k}”`).join(', ')}`].filter(Boolean);
     return `<section class="cg-card" aria-label="${esc(t?.name || 'Topic')}">
       <div class="cg-card__head">${itemIcon('tag', 'accent')}
-        <div class="cg-card__main"><div class="cg-card__title"><span class="medium" translate="no">${esc(t?.name || 'Untitled topic')}</span>${t?.code ? `<span class="md-code md-code--domain" translate="no">${esc(t.code)}</span>` : ''}${dm ? `<span class="t-sm muted" translate="no">${esc(dm.name)}</span>` : ''}</div>
+        <div class="cg-card__main"><div class="cg-card__title"><span class="medium" translate="no">${esc(t?.name || 'Untitled topic')}</span>${dm ? `<span class="t-sm muted" translate="no">${esc(dm.name)}</span>` : ''}</div>
           <div class="cg-card__meta">${meta.map(x => `<span>${esc(x)}</span>`).join(SEP)}</div></div>
         <div class="cg-card__acts">${btn('Confirm topic', { v: 'secondary', size: 'sm', icon: 'check', act: 'cg-confirm', data: { id: g.id } })}${iconBtn('more', 'More actions', { size: 'sm', menu: 'cg-more', data: { id: g.id } })}</div>
       </div>${sampleDisclosure(g)}</section>`;
@@ -416,12 +418,6 @@
       ...(canManageTaxonomy() && A['md-edit'] ? [{ label: 'Edit topic keywords…', icon: 'pencil', run: () => A['md-edit']({ dataset: { id: g.topic } }) }] : []),
     ];
   };
-  /** The next free code in a domain (OPS-05 after OPS-04), as the taxonomy numbers its topics. */
-  function nextTopicCode(dm) {
-    if (!dm.code) return '';
-    const nums = (D.topics || []).filter(t => t.parent === dm.id).map(t => +String(t.code || '').split('-')[1] || 0);
-    return `${dm.code}-${String(Math.max(0, ...nums) + 1).padStart(2, '0')}`;
-  }
   /** Create the proposed topic (with its keywords, so the next sync files these itself) and tag the documents that mention it. */
   A['cg-create'] = el => {
     const g = groupById(el.dataset.id), i = (g?.proposals || []).findIndex(p => p[0] === el.dataset.name);
@@ -430,11 +426,11 @@
     // Banking Operations is where the archive's documents belong; any domain when a workspace has no such domain.
     const dm = topicById('d-ops') || topicTree()[0]; if (!dm) return;
     const same = (D.topics || []).find(t => t.parent && !t.archived && fold(t.name) === fold(name));
-    const t = same || { id: uid('t'), name, parent: dm.id, code: nextTopicCode(dm), keywords: [...keywords] };
+    const t = same || { id: uid('t'), name, parent: dm.id, keywords: [...keywords] };
     if (!same) (D.topics ??= []).push(t);
     const delta = { 'topics.none': -n, 'topics.filed': n };
     g.proposals.splice(i, 1); g.n -= n; shiftBackfill(g.run, delta);
-    audit(same ? 'Tagged documents with a topic' : 'Created a topic and tagged documents', `${t.name}${t.code ? ` (${t.code})` : ''} → ${plural(n, 'document')}`);
+    audit(same ? 'Tagged documents with a topic' : 'Created a topic and tagged documents', `${t.name} → ${plural(n, 'document')}`);
     refresh();
     let undone = false;
     toast(same ? `Tagged ${plural(n, 'document')} with “${t.name}”` : `Created “${t.name}” in ${topicName(t.parent)} · ${plural(n, 'document')} tagged`, { action: { label: 'Undo', run: () => {

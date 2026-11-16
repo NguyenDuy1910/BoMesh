@@ -1,18 +1,18 @@
 "use client";
 
-import { Button, Description, FieldError, Input, Label, TextArea, TextField } from "@heroui/react";
-import { Archive, ArrowLeft, ChevronDown, ChevronRight, Clock, Code, Database, Download, FolderPlus, Lock, Pencil, Plus, Table, Tag, Undo2, Upload } from "lucide-react";
+import { Button, FieldError, Input, Label, TextArea, TextField } from "@heroui/react";
+import { Archive, ArrowLeft, ChevronDown, ChevronRight, Clock, Code, Database, Download, Folder, FolderOpen, FolderPlus, Lock, Pencil, Plus, Table, Tag, Undo2, Upload } from "lucide-react";
 import NextLink from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Fragment, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
-import { EmptyState, ErrorState, PageHeader, SaveBar, SearchInput, SectionTabs, SkeletonRows, StatusChip, toast } from "@/components/ui";
+import { Disclosure, EmptyState, ErrorState, PageHeader, SaveBar, SearchInput, SectionTabs, SkeletonRows, StatusChip, toast } from "@/components/ui";
 import { errorMessage, resourceId } from "@/lib/api/client";
 import { fmtNum, plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { catalogHref, fold, type Resource } from "@/modules/knowledge/model";
 
-import { createTopic, deleteTopic, undeleteTopic, updateTopic, type Topic, type TopicPatch } from "../api";
+import { deleteTopic, undeleteTopic, updateTopic, type Topic, type TopicPatch } from "../api";
 import { activeDomains, cleanName, distribution, nameTaken, topicCounts, topicsOf, type TopicCounts } from "../governance";
 import { docsHref, topicsHref } from "../model";
 import { useHeldDecisions } from "../decisions";
@@ -21,6 +21,7 @@ import { exportRows, TEMPLATE_ROWS } from "../topicSheet";
 import { DemoChip, PlainSelect } from "./parts";
 import { ActionsMenu, saveCsv } from "./shared";
 import { ImportDialog } from "./topics/ImportDialog";
+import { NewNodeDialog, type NewNodeRequest } from "./topics/NewTopicDialog";
 import { PromptDrawer } from "./topics/PromptDrawer";
 import { TestClassification } from "./topics/TestClassification";
 import {
@@ -39,7 +40,6 @@ import {
 } from "./topics/TopicSignals";
 import { TopicSuggestions } from "./topics/Suggestions";
 
-const NEW = "__new";
 const ARCHIVED = "__archived";
 
 /** Topics' views (`?view=`): the tree and what the assistant and reviewers suggest. */
@@ -57,10 +57,6 @@ interface Draft extends TermsDraft {
   rules: RuleDraft[];
   /** Example document item names. */
   examples: string[];
-  /** New nodes: the code to create it with (its topic ID); empty = one is made. */
-  code: string;
-  /** New nodes: a domain rather than a topic. */
-  domain?: boolean;
   /** Name (and domain) fields open. */
   ident: boolean;
   tried: boolean;
@@ -77,7 +73,6 @@ const valuesOf = (t: Topic): Draft => ({
   examples: [...(t.examples ?? [])],
   keywordsIn: "",
   synonymsIn: "",
-  code: "",
   ident: false,
   tried: false,
 });
@@ -99,16 +94,14 @@ const sameValues = (a: Draft, b: Draft) =>
 /** A topic the assistant can only match by name: no keywords and no synonyms. Filling these in is the main upkeep. */
 const isBare = (t: Topic) => t.kind === "TOPIC" && !t.keywords?.length && !t.synonyms?.length;
 
-/** Topic ID pattern (openapi `TopicId`): the code a new topic may be created with. */
-const CODE_RE = /^[a-z][a-z0-9-]{0,62}$/;
-
 /**
  * Knowledge Studio → Topics (preview `X.md.tab`, workspace admins): what documents are about, in two views as page
  * tabs (`?view=`). Topics: a summary line (counts; topics without keywords narrow the tree, `?show=bare`; ⋯ shows the
- * classification prompt, exports) and the tree (search over names, codes and keywords, domains with their topics and
- * counts, archived last; keyboard navigable) beside the selected node's detail (`?node=`); its one action is Import
- * (`?import=1` opens it). Suggestions: topics the assistant proposes, keywords from reviewers' corrections, topics to
- * confirm and documents without a topic; its tab counts the proposals (the sidebar badge's number).
+ * classification prompt, exports) and the tree (search over names and keywords, one New menu, domains with their
+ * topics and counts, archived last; keyboard navigable) beside the selected node's detail (`?node=`). New domains and
+ * topics are made in small dialogs, then edited in the detail. Its one action is Import (`?import=1` opens it).
+ * Suggestions: topics the assistant proposes, keywords from reviewers' corrections, topics to confirm and documents
+ * without a topic; its tab counts the proposals (the sidebar badge's number).
  */
 export function TopicsSection() {
   const { can, workspace } = useWorkspace();
@@ -123,6 +116,9 @@ export function TopicsSection() {
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [importing, setImporting] = useState(false);
   const [promptOpen, setPromptOpen] = useState(false);
+  const [adding, setAdding] = useState<NewNodeRequest | null>(null);
+  /** "Help the assistant" stays as the admin left it while they move between topics. */
+  const [assistOpen, setAssistOpen] = useState(false);
   const view = params.get("view") === "suggestions" ? "suggestions" : "topics";
 
   const setQuery = (patch: Record<string, string>) => {
@@ -210,7 +206,6 @@ export function TopicsSection() {
   const picked = params.get("node") ?? "";
   const byId = (id: string) => all.find((t) => resourceId(t.name) === id);
   const resolve = (): string => {
-    if (picked === NEW) return drafts[NEW] ? NEW : resourceId(domains[0]?.name);
     if (picked && byId(picked) && byId(picked)?.state !== "PROPOSED" && byId(picked)?.state !== "REJECTED") return picked;
     // Narrowed to topics without keywords: the first of them, ready to fill in.
     return resourceId(((bare && liveTopics.find(isBare)) || domains[0])?.name);
@@ -218,28 +213,17 @@ export function TopicsSection() {
   const node = resolve();
   const exportName = `${fold(workspace.displayName ?? "workspace").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}-topics.csv`;
 
-  const startNew = (kind: "domain" | "topic", parent = "") => {
-    setDrafts((d) => ({
-      ...d,
-      [NEW]: {
-        name: "",
-        parent: kind === "domain" ? "" : parent || domains[0]?.name || "",
-        desc: "",
-        guidance: "",
-        keywords: [],
-        synonyms: [],
-        rules: [],
-        examples: [],
-        keywordsIn: "",
-        synonymsIn: "",
-        code: "",
-        domain: kind === "domain",
-        ident: true,
-        tried: false,
-      },
-    }));
-    setQuery({ node: NEW });
+  /** Opens New domain / New topic. A new topic goes into `parent`, else the selected node's domain, else the first; with no domain yet, a domain comes first. */
+  const openNew = (kind: "domain" | "topic", parent = "") => {
+    if (kind === "domain" || !domains.length) {
+      setAdding({ kind: "domain", parent: "" });
+      return;
+    }
+    const cur = byId(node);
+    const context = cur?.state === "ACTIVE" ? (cur.kind === "TOPIC" ? cur.parentTopic : cur.name) : "";
+    setAdding({ kind: "topic", parent: parent || context || domains[0]?.name || "" });
   };
+  const newDialog = <NewNodeDialog request={adding} topics={all} onClose={() => setAdding(null)} onSelect={(id) => setQuery({ node: id })} />;
 
   const keywordCount = liveTopics.reduce((a, t) => a + (t.keywords?.length ?? 0), 0);
   const summary = (
@@ -275,7 +259,7 @@ export function TopicsSection() {
   );
   const prompt = <PromptDrawer isOpen={promptOpen} onClose={() => setPromptOpen(false)} topics={all} />;
 
-  if (!domains.length && !drafts[NEW]) {
+  if (!domains.length) {
     return (
       <>
         {header}
@@ -284,36 +268,41 @@ export function TopicsSection() {
           <EmptyState
             icon={Database}
             title="No topics yet"
-            description="Import your topics from a spreadsheet (Import, above), or add the first domain here."
+            description="Import your topics from a spreadsheet, or start with a domain."
             boxed
             actions={
-              <Button variant="secondary" onPress={() => startNew("domain")}>
-                <Plus className="i" aria-hidden />
-                Add domain
-              </Button>
+              <>
+                <Button variant="primary" onPress={() => setImporting(true)}>
+                  <Upload className="i" aria-hidden />
+                  Import
+                </Button>
+                <Button variant="secondary" onPress={() => openNew("domain")}>
+                  <FolderPlus className="i" aria-hidden />
+                  New domain
+                </Button>
+              </>
             }
           />
         </div>
-        <ImportDialog isOpen={importOpen} onClose={closeImport} topics={all} />
+        <ImportDialog isOpen={importOpen} onClose={closeImport} />
+        {newDialog}
         {prompt}
       </>
     );
   }
 
   const draftOf = (key: string): Draft | null => {
-    if (key === NEW) return drafts[NEW] ?? null;
     const t = byId(key);
     if (!t) return null;
     return drafts[key] ?? valuesOf(t);
   };
   const isDirty = (key: string) => {
-    if (key === NEW) return !!drafts[NEW];
     const t = byId(key);
     return !!t && !!drafts[key] && !sameValues(drafts[key], valuesOf(t));
   };
   // Merges onto the latest draft, so several patches in one event all land.
   const setDraft = (key: string, patch: Partial<Draft>) => {
-    const t = key === NEW ? null : byId(key);
+    const t = byId(key);
     setDrafts((d) => {
       const base = d[key] ?? (t ? valuesOf(t) : null);
       return base ? { ...d, [key]: { ...base, ...patch } } : d;
@@ -337,16 +326,14 @@ export function TopicsSection() {
             counts={counts}
             selected={node}
             dirty={(key) => isDirty(key)}
-            newDraft={drafts[NEW] ?? null}
             bare={bare}
             onSelect={(id) => setQuery({ node: id })}
-            onAdd={startNew}
+            onNew={openNew}
           />
           <div className="tx-main">
             <NodeDetail
               key={node}
-              nodeKey={node}
-              topic={node === NEW ? null : (byId(node) ?? null)}
+              topic={byId(node) ?? null}
               topics={all}
               counts={counts}
               published={published}
@@ -355,12 +342,15 @@ export function TopicsSection() {
               setDraft={(patch) => setDraft(node, patch)}
               dropDraft={() => dropDraft(node)}
               onSelect={(id) => setQuery({ node: id })}
-              onAdd={startNew}
+              onNew={openNew}
+              assistOpen={assistOpen}
+              onAssistOpen={setAssistOpen}
             />
           </div>
         </div>
       </div>
-      <ImportDialog isOpen={importOpen} onClose={closeImport} topics={all} />
+      <ImportDialog isOpen={importOpen} onClose={closeImport} />
+      {newDialog}
       {prompt}
     </>
   );
@@ -377,45 +367,57 @@ interface TreeItem {
   children?: TreeItem[];
 }
 
+const NO_KEYWORDS = "No keywords — add some so documents can be matched";
+
+/**
+ * Domains → topics on one row grid: [chevron 16] [icon 16] [name] [trailing]. Topic rows keep an empty chevron slot and
+ * indent by chevron + gap, so a topic's icon sits under its domain's name.
+ */
 function TopicTree({
   topics,
   counts,
   selected,
   dirty,
-  newDraft,
   bare,
   onSelect,
-  onAdd,
+  onNew,
 }: {
   topics: readonly Topic[];
   counts: TopicCounts;
   selected: string;
   dirty: (key: string) => boolean;
-  newDraft: Draft | null;
   /** Only topics without keywords (`?show=bare`). */
   bare: boolean;
   onSelect: (id: string) => void;
-  onAdd: (kind: "domain" | "topic", parent?: string) => void;
+  onNew: (kind: "domain" | "topic", parent?: string) => void;
 }) {
   const [q, setQ] = useState("");
   const [closed, setClosed] = useState<Record<string, boolean>>({});
   const [archivedOpen, setArchivedOpen] = useState(false);
+  const [shown, setShown] = useState(selected);
   const ref = useRef<HTMLUListElement>(null);
+  // A topic selected from elsewhere (just created, picked in its domain's list) opens its domain.
+  if (shown !== selected) {
+    setShown(selected);
+    const pick = topics.find((t) => resourceId(t.name) === selected);
+    const dom = pick?.kind === "TOPIC" ? (pick.parentTopic ?? "") : "";
+    if (dom && closed[dom]) setClosed((c) => ({ ...c, [dom]: false }));
+  }
   const needle = fold(q).trim();
-  // Search matches names, codes, keywords and synonyms.
-  const hit = (t: Topic) => (!needle || [t.displayName ?? "", resourceId(t.name), ...(t.keywords ?? []), ...(t.synonyms ?? [])].some((s) => fold(s).includes(needle))) && (!bare || isBare(t));
+  // Search matches names, keywords and synonyms (IDs are internal).
+  const hit = (t: Topic) => (!needle || [t.displayName ?? "", ...(t.keywords ?? []), ...(t.synonyms ?? [])].some((s) => fold(s).includes(needle))) && (!bare || isBare(t));
   const domains = activeDomains(topics);
   const id = (t: Topic) => resourceId(t.name);
   const dot = (key: string) => (dirty(key) ? <span className="tx-row__dot" role="img" aria-label="Unsaved changes" title="Unsaved changes" /> : null);
   // A topic with no words to recognise it by: a hollow ring (its fix: add keywords in its detail).
-  const warn = (t: Topic) => (isBare(t) ? <span className="tx-row__warn" role="img" aria-label="No keywords" title="No keywords" /> : null);
-  const code = (t: Topic) => (
-    <span className="tx-row__code" translate="no" title={id(t)}>
-      {id(t)}
+  const warn = (t: Topic) => (isBare(t) ? <span className="tx-row__warn" role="img" aria-label={NO_KEYWORDS} title={NO_KEYWORDS} /> : null);
+  const count = (n: number) => <span className="tx-row__count">{n ? fmtNum(n) : ""}</span>;
+  const name = (s: string, domain = false) => (
+    <span className={`tx-row__name${domain ? " tx-row__name--domain" : ""}`} translate="no" title={s}>
+      {s}
     </span>
   );
-  const count = (n: number) => <span className="tx-row__count">{n ? fmtNum(n) : ""}</span>;
-  const chev = (key: string, open: boolean, toggle: () => void) => (
+  const chev = (open: boolean, toggle: () => void) => (
     <span
       className="tx-row__chev"
       aria-hidden="true"
@@ -427,69 +429,66 @@ function TopicTree({
       {open ? <ChevronDown className="i i-sm" /> : <ChevronRight className="i i-sm" />}
     </span>
   );
-  const newItem = (level: 1 | 2): TreeItem => ({
-    id: NEW,
-    level,
-    cls: "is-new",
-    inner: (
-      <>
-        <span className="tx-row__code" translate="no">
-          {newDraft?.code.trim().toLowerCase() || "—"}
-        </span>
-        <span className="tx-row__name">{cleanName(newDraft?.name ?? "") || (newDraft?.domain ? "New domain" : "New topic")}</span>
-        {dot(NEW)}
-      </>
-    ),
-  });
+  const noChev = <span className="tx-row__chev tx-row__chev--none" aria-hidden="true" />;
+  const topicIcon = <Tag className="i tx-row__icon tx-row__icon--topic" aria-hidden />;
 
   const items: TreeItem[] = [];
   for (const dm of domains) {
     const all = topicsOf(topics, dm.name ?? "");
     const domHit = !bare && hit(dm);
     const kids = domHit ? all : all.filter(hit);
-    const draftHere = !!newDraft && !newDraft.domain && newDraft.parent === dm.name;
     if ((needle || bare) && !domHit && !kids.length) continue;
     const open = needle || bare ? true : !closed[dm.name ?? ""];
+    const Icon = open ? FolderOpen : Folder;
+    const addLabel = `Add topic to ${dm.displayName}`;
     items.push({
       id: id(dm),
       level: 1,
       expanded: open,
       inner: (
         <>
-          {chev(dm.name ?? "", open, () => setClosed((c) => ({ ...c, [dm.name ?? ""]: !c[dm.name ?? ""] })))}
-          <span className="md-code md-code--domain" translate="no">
-            {id(dm)}
+          {chev(open, () => setClosed((c) => ({ ...c, [dm.name ?? ""]: !c[dm.name ?? ""] })))}
+          <Icon className="i tx-row__icon" aria-hidden />
+          {name(dm.displayName ?? "", true)}
+          <span className="tx-row__trail">
+            {dot(id(dm))}
+            {count(counts.domain(dm.name ?? ""))}
+            <button
+              type="button"
+              className="tx-row__add"
+              tabIndex={-1}
+              aria-label={addLabel}
+              title={addLabel}
+              onClick={(e) => {
+                e.stopPropagation();
+                onNew("topic", dm.name);
+              }}
+            >
+              <Plus className="i i-sm" aria-hidden />
+            </button>
           </span>
-          <span className="tx-row__name tx-row__name--domain" translate="no">
-            {dm.displayName}
-          </span>
-          {dot(id(dm))}
-          {count(counts.domain(dm.name ?? ""))}
         </>
       ),
       children: open
-        ? [
-            ...kids.map<TreeItem>((t) => ({
-              id: id(t),
-              level: 2,
-              inner: (
-                <>
-                  {code(t)}
-                  <span className="tx-row__name" translate="no">
-                    {t.displayName}
-                  </span>
+        ? kids.map<TreeItem>((t) => ({
+            id: id(t),
+            level: 2,
+            inner: (
+              <>
+                {noChev}
+                {topicIcon}
+                {name(t.displayName ?? "")}
+                <span className="tx-row__trail">
                   {warn(t)}
                   {dot(id(t))}
                   {count(counts.topic(t.name ?? ""))}
-                </>
-              ),
-            })),
-            ...(draftHere ? [newItem(2)] : []),
-          ]
+                </span>
+              </>
+            ),
+          }))
         : [],
     });
   }
-  if (newDraft?.domain) items.push(newItem(1));
   const archived = topics.filter((t) => t.state === "DELETED" && (t.kind === "DOMAIN" || topics.some((d) => d.name === t.parentTopic)));
   if (archived.length && !needle && !bare) {
     items.push({
@@ -499,8 +498,8 @@ function TopicTree({
       cls: "tx-item--archived",
       inner: (
         <>
-          {chev(ARCHIVED, archivedOpen, () => setArchivedOpen((o) => !o))}
-          <Archive className="i i-sm tx-row__icon" aria-hidden />
+          {chev(archivedOpen, () => setArchivedOpen((o) => !o))}
+          <Archive className="i tx-row__icon" aria-hidden />
           <span className="tx-row__name muted">{`Archived (${archived.length})`}</span>
         </>
       ),
@@ -510,10 +509,9 @@ function TopicTree({
             level: 2,
             inner: (
               <>
-                {code(t)}
-                <span className="tx-row__name" translate="no">
-                  {t.displayName}
-                </span>
+                {noChev}
+                {t.kind === "DOMAIN" ? <Folder className="i tx-row__icon tx-row__icon--topic" aria-hidden /> : topicIcon}
+                {name(t.displayName ?? "")}
               </>
             ),
           }))
@@ -600,20 +598,17 @@ function TopicTree({
     </li>
   );
 
-  const current = topics.find((t) => resourceId(t.name) === selected && t.state === "ACTIVE");
-  const dm = current ? (current.kind === "TOPIC" ? topics.find((d) => d.name === current.parentTopic) : current) : domains[0];
-
   return (
     <div className="tx-side" id="tx-side">
       <div className="tx-side__tools">
         <SearchInput value={q} onChange={setQ} placeholder="Search topics and keywords" fullWidth />
         <ActionsMenu
-          label="Add domain or topic"
-          actions={[
-            ...(dm ? [{ id: "topic", label: `Add topic to ${dm.displayName}`, icon: Tag, onAction: () => onAdd("topic", dm.name) }] : []),
-            { id: "domain", label: "Add domain", icon: FolderPlus, onAction: () => onAdd("domain") },
-          ]}
+          label="New"
           icon={Plus}
+          actions={[
+            ...(domains.length ? [{ id: "topic", label: "New topic", icon: Tag, onAction: () => onNew("topic") }] : []),
+            { id: "domain", label: "New domain", icon: FolderPlus, onAction: () => onNew("domain") },
+          ]}
         />
       </div>
       {items.length ? (
@@ -667,7 +662,6 @@ function CountLinks({ topic, pub, rv }: { topic: string; pub: number; rv: number
 }
 
 interface NodeDetailProps {
-  nodeKey: string;
   topic: Topic | null;
   topics: readonly Topic[];
   counts: TopicCounts;
@@ -677,7 +671,10 @@ interface NodeDetailProps {
   setDraft: (patch: Partial<Draft>) => void;
   dropDraft: () => void;
   onSelect: (id: string) => void;
-  onAdd: (kind: "domain" | "topic", parent?: string) => void;
+  onNew: (kind: "domain" | "topic", parent?: string) => void;
+  /** "Help the assistant" expanded. */
+  assistOpen: boolean;
+  onAssistOpen: (open: boolean) => void;
 }
 
 function NodeDetail(p: NodeDetailProps) {
@@ -687,7 +684,6 @@ function NodeDetail(p: NodeDetailProps) {
   const ruleOptions = useRuleOptions();
   const [saving, setSaving] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
-  const codeRef = useRef<HTMLInputElement>(null);
   const { topic: t, draft: f, topics, counts } = p;
   const back = <Back onBack={() => p.onSelect("")} />;
   const fail = (error: unknown) => {
@@ -695,7 +691,7 @@ function NodeDetail(p: NodeDetailProps) {
     toast(errorMessage(error), { tone: "danger" });
   };
 
-  if (!f || (!t && p.nodeKey !== NEW)) {
+  if (!f || !t) {
     return (
       <div className="tx-detail">
         {back}
@@ -704,7 +700,7 @@ function NodeDetail(p: NodeDetailProps) {
     );
   }
 
-  if (t?.state === "DELETED") {
+  if (t.state === "DELETED") {
     const parent = topics.find((d) => d.name === t.parentTopic);
     const restore = async () => {
       if (parent?.state === "DELETED") {
@@ -725,9 +721,6 @@ function NodeDetail(p: NodeDetailProps) {
         <header className="tx-head">
           <div className="tx-head__main">
             <div className="tx-head__title-row">
-              <span className="md-code md-code--domain" translate="no">
-                {resourceId(t.name)}
-              </span>
               <h2 className="tx-head__title" translate="no">
                 {t.displayName}
               </h2>
@@ -762,23 +755,16 @@ function NodeDetail(p: NodeDetailProps) {
     );
   }
 
-  const isNew = !t;
-  const isDomain = t ? t.kind === "DOMAIN" : !!f.domain;
+  const isDomain = t.kind === "DOMAIN";
   const domains = activeDomains(topics);
   const parentName = (name: string) => topics.find((d) => d.name === name)?.displayName ?? "";
-  const kids = t && isDomain ? topicsOf(topics, t.name ?? "") : [];
+  const kids = isDomain ? topicsOf(topics, t.name ?? "") : [];
 
-  // Validation (shown once Save was tried). A new node's code is optional: empty → the server makes one.
+  // Validation (shown once Save was tried).
   const name = cleanName(f.name);
-  const code = f.code.trim().toLowerCase();
-  const err: { name?: string; code?: string; parent?: string } = {};
+  const err: { name?: string; parent?: string } = {};
   if (!name) err.name = "Enter a name.";
-  else if (nameTaken(topics, name, isDomain ? null : f.parent, t?.name)) err.name = isDomain ? `A domain called “${name}” already exists.` : `${parentName(f.parent)} already has “${name}”.`;
-  if (isNew && code) {
-    const taken = topics.find((x) => resourceId(x.name) === code);
-    if (!CODE_RE.test(code)) err.code = "Use lowercase letters, numbers and dashes, starting with a letter.";
-    else if (taken) err.code = `${code} is already used by “${taken.displayName}”.`;
-  }
+  else if (nameTaken(topics, name, isDomain ? null : f.parent, t.name)) err.name = isDomain ? `A domain called “${name}” already exists.` : `${parentName(f.parent)} already has “${name}”.`;
   if (!isDomain && !domains.some((d) => d.name === f.parent)) err.parent = "Choose a domain.";
   const shownErr = f.tried ? err : {};
 
@@ -788,7 +774,7 @@ function NodeDetail(p: NodeDetailProps) {
   const rules = rulesToApi(f.rules);
   /** The topic as edited, for the test box (unsaved changes only). */
   const edited: Topic | null =
-    t && !isDomain && p.dirty ? { name: t.name, displayName: name || t.displayName, keywords: terms.keywords, synonyms: terms.synonyms, guidance, examples: f.examples, rules } : null;
+    !isDomain && p.dirty ? { name: t.name, displayName: name || t.displayName, keywords: terms.keywords, synonyms: terms.synonyms, guidance, examples: f.examples, rules } : null;
 
   const save = async () => {
     const typed = isDomain ? {} : { keywords: terms.keywords, synonyms: terms.synonyms, keywordsIn: "", synonymsIn: "" };
@@ -796,58 +782,37 @@ function NodeDetail(p: NodeDetailProps) {
       p.setDraft({ ...typed, tried: true, ident: true });
       // Validate on submit: the first invalid field takes focus (a renamed field mounts focused).
       if (err.name) requestAnimationFrame(() => nameRef.current?.focus());
-      else if (err.code) requestAnimationFrame(() => codeRef.current?.focus());
       return;
     }
     p.setDraft({ ...typed, tried: true });
     setSaving(true);
     try {
-      if (!t) {
-        // Empty signals are left out.
-        const signals = isDomain
-          ? {}
-          : {
-              parentTopic: f.parent,
-              keywords: terms.keywords.length ? terms.keywords : undefined,
-              synonyms: terms.synonyms.length ? terms.synonyms : undefined,
-              guidance: guidance || undefined,
-              examples: f.examples.length ? f.examples : undefined,
-              rules: rules.length ? rules : undefined,
-            };
-        const created = await createTopic(ws, { displayName: name, kind: isDomain ? "DOMAIN" : "TOPIC", description: f.desc.trim() || undefined, ...signals }, code || undefined);
-        remember(created);
+      const before: Required<TopicPatch> = {
+        displayName: t.displayName ?? "",
+        description: t.description ?? "",
+        parentTopic: t.parentTopic ?? "",
+        keywords: t.keywords ?? [],
+        synonyms: t.synonyms ?? [],
+        guidance: t.guidance ?? "",
+        examples: t.examples ?? [],
+        rules: t.rules ?? [],
+      };
+      const after: TopicPatch = isDomain
+        ? { displayName: name, description: f.desc.trim() }
+        : { displayName: name, description: f.desc.trim(), parentTopic: f.parent, keywords: terms.keywords, synonyms: terms.synonyms, guidance, examples: f.examples, rules };
+      // Only what changed goes (`updateMask`); lists compare in order, and emptied ones are sent to clear them.
+      const changed = (Object.keys(after) as (keyof TopicPatch)[]).filter((k) => JSON.stringify(after[k]) !== JSON.stringify(before[k]));
+      if (!changed.length) {
         p.dropDraft();
-        invalidate();
-        p.onSelect(resourceId(created.name));
-        toast(isDomain ? `Added the domain “${name}”` : `Added “${name}” to ${parentName(f.parent)}`, { undo: () => void deleteTopic(ws, created.name ?? "").then(invalidate, fail) });
-      } else {
-        const before: Required<TopicPatch> = {
-          displayName: t.displayName ?? "",
-          description: t.description ?? "",
-          parentTopic: t.parentTopic ?? "",
-          keywords: t.keywords ?? [],
-          synonyms: t.synonyms ?? [],
-          guidance: t.guidance ?? "",
-          examples: t.examples ?? [],
-          rules: t.rules ?? [],
-        };
-        const after: TopicPatch = isDomain
-          ? { displayName: name, description: f.desc.trim() }
-          : { displayName: name, description: f.desc.trim(), parentTopic: f.parent, keywords: terms.keywords, synonyms: terms.synonyms, guidance, examples: f.examples, rules };
-        // Only what changed goes (`updateMask`); lists compare in order, and emptied ones are sent to clear them.
-        const changed = (Object.keys(after) as (keyof TopicPatch)[]).filter((k) => JSON.stringify(after[k]) !== JSON.stringify(before[k]));
-        if (!changed.length) {
-          p.dropDraft();
-          return;
-        }
-        const patch = Object.fromEntries(changed.map((k) => [k, after[k]])) as TopicPatch;
-        const saved = await updateTopic(ws, t, patch);
-        remember(saved);
-        p.dropDraft();
-        invalidate();
-        const revert = Object.fromEntries(changed.map((k) => [k, before[k]])) as TopicPatch;
-        toast(`Saved “${name}”`, { undo: () => void updateTopic(ws, saved, revert).then(invalidate, fail) });
+        return;
       }
+      const patch = Object.fromEntries(changed.map((k) => [k, after[k]])) as TopicPatch;
+      const saved = await updateTopic(ws, t, patch);
+      remember(saved);
+      p.dropDraft();
+      invalidate();
+      const revert = Object.fromEntries(changed.map((k) => [k, before[k]])) as TopicPatch;
+      toast(`Saved “${name}”`, { undo: () => void updateTopic(ws, saved, revert).then(invalidate, fail) });
     } catch (error) {
       toast(errorMessage(error), { tone: "danger" });
     } finally {
@@ -857,7 +822,6 @@ function NodeDetail(p: NodeDetailProps) {
 
   /** Archive acts at once with Undo; while documents or topics still use it, it says what to do first instead. */
   const archive = async () => {
-    if (!t) return;
     const used = isDomain ? counts.domain(t.name ?? "") + counts.reviewDomain(t.name ?? "") + kids.length : counts.topic(t.name ?? "") + counts.review(t.name ?? "");
     if (used) {
       toast(isDomain ? `“${t.displayName}” still has topics or documents. Move or archive them first.` : `Documents use “${t.displayName}”. Retag them first, then archive it.`, { tone: "accent" });
@@ -880,13 +844,10 @@ function NodeDetail(p: NodeDetailProps) {
     }
   };
 
-  const head = t ? (
+  const head = (
     <header className="tx-head">
       <div className="tx-head__main">
         <div className="tx-head__title-row">
-          <span className="md-code md-code--domain" translate="no">
-            {resourceId(t.name)}
-          </span>
           <h2 className="tx-head__title" translate="no">
             {t.displayName}
           </h2>
@@ -910,49 +871,30 @@ function NodeDetail(p: NodeDetailProps) {
         <ActionsMenu
           label={`More actions for ${t.displayName}`}
           actions={[
-            { id: "ident", label: isDomain ? "Edit name…" : "Edit name and domain…", icon: Pencil, onAction: () => p.setDraft({ ident: true }) },
+            { id: "ident", label: isDomain ? "Rename…" : "Edit name and domain…", icon: Pencil, onAction: () => p.setDraft({ ident: true }) },
             { id: "archive", label: "Archive", icon: Archive, danger: true, separated: true, onAction: () => void archive() },
           ]}
         />
       </div>
     </header>
-  ) : (
-    <header className="tx-head">
-      <div className="tx-head__main">
-        <h2 className="tx-head__title">{isDomain ? "New domain" : "New topic"}</h2>
-        <p className="tx-head__meta">
-          <span>{isDomain ? "Domains group topics on Home and in Browse." : "A topic people browse by and the assistant classifies with."}</span>
-        </p>
-      </div>
-    </header>
   );
 
-  const ident =
-    isNew || f.ident ? (
-      <div className={`tx-ident${isNew && !isDomain ? " tx-ident--3" : ""}`}>
-        <TextField value={f.name} onChange={(v) => p.setDraft({ name: v })} isRequired isInvalid={!!shownErr.name} maxLength={60} autoFocus>
-          <Label>Name</Label>
-          <Input ref={nameRef} translate="no" />
-          <FieldError>{shownErr.name}</FieldError>
-        </TextField>
-        {isNew ? (
-          <TextField value={f.code} onChange={(v) => p.setDraft({ code: v })} isInvalid={!!shownErr.code} maxLength={63}>
-            <Label>
-              Code <span className="label__opt">(optional)</span>
-            </Label>
-            <Input ref={codeRef} translate="no" spellCheck={false} autoCapitalize="none" autoComplete="off" placeholder={isDomain ? "e.g. ops" : "e.g. ops-cards"} />
-            {shownErr.code ? <FieldError>{shownErr.code}</FieldError> : <Description>The key in your spreadsheet. Stays the same when you rename.</Description>}
-          </TextField>
-        ) : null}
-        {isDomain ? null : (
-          <div className="field">
-            <span className="label">Domain</span>
-            <PlainSelect label="Domain" value={f.parent} options={domains.map((d) => [d.name ?? "", d.displayName ?? ""] as const)} onChange={(v) => p.setDraft({ parent: v })} />
-            {shownErr.parent ? <div className="field-error">{shownErr.parent}</div> : null}
-          </div>
-        )}
-      </div>
-    ) : null;
+  const ident = f.ident ? (
+    <div className="tx-ident">
+      <TextField className="field" value={f.name} onChange={(v) => p.setDraft({ name: v })} isRequired isInvalid={!!shownErr.name} maxLength={60} autoFocus>
+        <Label>Name</Label>
+        <Input ref={nameRef} translate="no" />
+        <FieldError>{shownErr.name}</FieldError>
+      </TextField>
+      {isDomain ? null : (
+        <div className="field">
+          <span className="label">Domain</span>
+          <PlainSelect label="Domain" value={f.parent} options={domains.map((d) => [d.name ?? "", d.displayName ?? ""] as const)} onChange={(v) => p.setDraft({ parent: v })} />
+          {shownErr.parent ? <div className="field-error">{shownErr.parent}</div> : null}
+        </div>
+      )}
+    </div>
+  ) : null;
 
   const desc = (
     <Sec title="Description" desc={isDomain ? "Shown on Home’s topic cards." : "For people choosing a topic."}>
@@ -962,61 +904,76 @@ function NodeDetail(p: NodeDetailProps) {
     </Sec>
   );
 
-  // A topic's job is to recognise documents, so its words lead; the description (for people) and guidance follow.
+  // What's set behind "Help the assistant", so a collapsed section still says what it holds.
+  const assistSet = [guidance ? "Guidance" : "", rules.length ? plural(rules.length, "rule") : "", f.examples.length ? plural(f.examples.length, "example") : ""].filter(Boolean);
+  const assistSummary = (assistSet.length ? assistSet : ["Not set"]).map((s, i) => (
+    <Fragment key={s}>
+      {i ? <span aria-hidden="true"> · </span> : null}
+      <span>{s}</span>
+    </Fragment>
+  ));
+
+  // A topic's job is to recognise documents, so its words lead; what only the assistant needs waits behind one disclosure.
   const signals = isDomain ? null : (
     <>
       <TermsEditor value={f} onChange={p.setDraft} />
       {desc}
-      <Sec title="Guidance for the assistant" desc="When to use it, and what belongs elsewhere.">
-        <TextField value={f.guidance} onChange={(v) => p.setDraft({ guidance: v })} maxLength={GUIDANCE_MAX} aria-label="Guidance for the assistant">
-          <TextArea rows={3} placeholder={"Use for…\nNot for…"} />
-        </TextField>
-      </Sec>
-      <RulesEditor rules={f.rules} options={ruleOptions} onChange={(next) => p.setDraft({ rules: next })} />
-      <ExamplesEditor topic={t?.name ?? null} examples={f.examples} onChange={(next) => p.setDraft({ examples: next })} />
+      <Disclosure
+        className="tx-adv"
+        title={
+          <>
+            Help the assistant<span className="label__opt">(optional)</span>
+          </>
+        }
+        summary={assistSummary}
+        isOpen={p.assistOpen}
+        onOpenChange={p.onAssistOpen}
+      >
+        <Sec title="Guidance for the assistant" desc="When to use it, and what belongs elsewhere.">
+          <TextField value={f.guidance} onChange={(v) => p.setDraft({ guidance: v })} maxLength={GUIDANCE_MAX} aria-label="Guidance for the assistant">
+            <TextArea rows={3} placeholder={"Use for…\nNot for…"} />
+          </TextField>
+        </Sec>
+        <RulesEditor rules={f.rules} options={ruleOptions} onChange={(next) => p.setDraft({ rules: next })} />
+        <ExamplesEditor topic={t.name ?? null} examples={f.examples} onChange={(next) => p.setDraft({ examples: next })} />
+      </Disclosure>
     </>
   );
 
-  const topicsSec =
-    t && isDomain ? (
-      <Sec
-        title="Topics"
-        aside={
-          <Button variant="ghost" size="sm" onPress={() => p.onAdd("topic", t.name)}>
-            <Plus className="i" aria-hidden />
-            Add topic
-          </Button>
-        }
-      >
-        {kids.length ? (
-          <ul className="tx-trows">
-            {kids.map((k) => {
-              const kw = (k.keywords?.length ?? 0) + (k.synonyms?.length ?? 0);
-              return (
-                <li key={k.name}>
-                  <button type="button" className="tx-trow" onClick={() => p.onSelect(resourceId(k.name))}>
-                    <span className="tx-row__code" translate="no">
-                      {resourceId(k.name)}
-                    </span>
-                    <span className="tx-trow__name truncate" translate="no">
-                      {k.displayName}
-                    </span>
-                    <span className={`tx-trow__kw${kw ? "" : " is-warn"}`}>{kw ? plural(kw, "keyword") : "No keywords"}</span>
-                    <span className="tx-trow__n">{`${fmtNum(counts.topic(k.name ?? ""))} published`}</span>
-                    <ChevronRight className="i i-sm muted" aria-hidden />
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        ) : (
-          <p className="tx-sec__empty">No topics yet.</p>
-        )}
-      </Sec>
-    ) : null;
+  const topicsSec = isDomain ? (
+    <Sec
+      title="Topics"
+      aside={
+        <Button variant="ghost" size="sm" onPress={() => p.onNew("topic", t.name)}>
+          <Plus className="i" aria-hidden />
+          Add topic
+        </Button>
+      }
+    >
+      {kids.length ? (
+        <ul className="tx-trows">
+          {kids.map((k) => {
+            const kw = (k.keywords?.length ?? 0) + (k.synonyms?.length ?? 0);
+            return (
+              <li key={k.name}>
+                <button type="button" className="tx-trow" onClick={() => p.onSelect(resourceId(k.name))}>
+                  <span className="tx-trow__name truncate" translate="no">
+                    {k.displayName}
+                  </span>
+                  <span className={`tx-trow__kw${kw ? "" : " is-warn"}`}>{kw ? plural(kw, "keyword") : "No keywords"}</span>
+                  <span className="tx-trow__n">{`${fmtNum(counts.topic(k.name ?? ""))} published`}</span>
+                  <ChevronRight className="i i-sm muted" aria-hidden />
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="tx-sec__empty">No topics yet.</p>
+      )}
+    </Sec>
+  ) : null;
 
-  const dist = t ? <Distribution topic={t} kids={kids} published={p.published} counts={counts} /> : null;
-  const test = t && !isDomain ? <TestClassification topic={t} draft={edited} topics={topics} options={ruleOptions} /> : null;
   const nErr = f.tried ? Object.keys(err).length : 0;
 
   return (
@@ -1026,31 +983,26 @@ function NodeDetail(p: NodeDetailProps) {
       {ident}
       {isDomain ? desc : signals}
       {topicsSec}
-      {dist}
-      {test}
+      {isDomain ? null : <Distribution topic={t} published={p.published} counts={counts} />}
+      {isDomain ? null : <TestClassification topic={t} draft={edited} topics={topics} options={ruleOptions} />}
       <SaveBar
         isDirty={p.dirty}
         isSaving={saving}
         onSave={() => void save()}
-        onDiscard={() => {
-          p.dropDraft();
-          if (isNew) p.onSelect(resourceId(f.parent));
-        }}
-        message={`${isNew ? (isDomain ? "New domain" : "New topic") : "Unsaved changes"}${nErr ? ` · ${plural(nErr, "field")} to fix` : ""}`}
-        saveLabel={isNew ? (isDomain ? "Add domain" : "Add topic") : "Save"}
+        onDiscard={p.dropDraft}
+        message={`Unsaved changes${nErr ? ` · ${plural(nErr, "field")} to fix` : ""}`}
+        saveLabel="Save"
       />
     </div>
   );
 }
 
-/** How a topic's (or a domain's) published documents spread over the collections, and what's still in review. */
-function Distribution({ topic: t, kids, published, counts }: { topic: Topic; kids: readonly Topic[]; published: readonly Resource[]; counts: TopicCounts }) {
-  const isDomain = t.kind === "DOMAIN";
-  const ids = isDomain ? [t.name ?? "", ...kids.map((k) => k.name ?? "")] : [t.name ?? ""];
-  const rows = distribution(published, ids);
+/** How a topic's published documents spread over the collections, and what's still in review. */
+function Distribution({ topic: t, published, counts }: { topic: Topic; published: readonly Resource[]; counts: TopicCounts }) {
+  const rows = distribution(published, [t.name ?? ""]);
   const max = rows[0]?.n || 1;
   const total = rows.reduce((a, r) => a + r.n, 0);
-  const rv = isDomain ? counts.reviewDomain(t.name ?? "") : counts.review(t.name ?? "");
+  const rv = counts.review(t.name ?? "");
   return (
     <Sec title="Distribution" aside={<span className="tx-sec__meta">{`${plural(total, "published document")} · ${plural(rows.length, "collection")}`}</span>}>
       {rows.length ? (
@@ -1079,4 +1031,3 @@ function Distribution({ topic: t, kids, published, counts }: { topic: Topic; kid
     </Sec>
   );
 }
-

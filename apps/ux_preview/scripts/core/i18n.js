@@ -93,6 +93,9 @@ function localizeText(node) {
 function localizeAttrs(el) {
   if (el.closest(SKIP_SEL) && !el.matches('textarea')) return;
   for (const a of ATTRS) { const v = el.getAttribute(a); if (v) { const r = tr(v); if (r != null && r !== v) el.setAttribute(a, r); } }
+  // Phone tables stack each cell under its column name (CSS `content: attr(data-label)`). Only table cells: elsewhere
+  // data-label is a value code reads back (filters, criteria), never copy.
+  if (el.matches('.table__cell[data-label]')) { const v = el.getAttribute('data-label'), r = tr(v); if (r != null && r !== v) el.setAttribute('data-label', r); }
 }
 /** Localize a subtree in place (no-op in English). */
 function localize(root) {
@@ -102,7 +105,7 @@ function localize(root) {
   const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   for (let n = w.nextNode(); n; n = w.nextNode()) localizeText(n);
   localizeAttrs(root);
-  root.querySelectorAll(ATTRS.map(a => `[${a}]`).join(',')).forEach(localizeAttrs);
+  root.querySelectorAll([...ATTRS.map(a => `[${a}]`), '.table__cell[data-label]'].join(',')).forEach(localizeAttrs);
 }
 new MutationObserver(muts => {
   if (S.lang === 'en') return;

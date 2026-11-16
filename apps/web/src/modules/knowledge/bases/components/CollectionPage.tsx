@@ -123,7 +123,7 @@ function CollectionDetail({ collection }: { collection: Item }) {
     }
   };
 
-  /** For the collection's reviewers: what's waiting in Documents → Review and Issues, with the task as the action. */
+  /** For the collection's reviewers: what's waiting in Documents → Review and Processing, with the task as the action. */
   const n = reviewer ? review.submissions : 0;
   const m = reviewer ? review.problems : 0;
   const alert =
@@ -136,8 +136,8 @@ function CollectionDetail({ collection }: { collection: Item }) {
           actions={
             <>
               {m ? (
-                <NextLink href={`/studio?tab=documents&view=issues&kb=${cId}`} className={buttonVariants({ variant: n ? "ghost" : "secondary", size: "sm" })}>
-                  See issues
+                <NextLink href={`/studio?tab=documents&view=processing&state=failed&kb=${cId}`} className={buttonVariants({ variant: n ? "ghost" : "secondary", size: "sm" })}>
+                  Show
                 </NextLink>
               ) : null}
               {n ? (

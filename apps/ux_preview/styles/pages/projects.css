@@ -6,7 +6,8 @@
 .proj { display: flex; flex-direction: column; gap: 32px; padding-top: 40px; }
 .proj-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .proj-head__icon { display: grid; place-items: center; width: 40px; height: 40px; flex: none; border-radius: var(--radius-xl); background: var(--default-soft); color: var(--muted); }
-.proj-head__title { flex: 1 1 auto; min-width: 0; font-size: 24px; line-height: 32px; font-weight: 600; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.proj-head__main { flex: 1 1 auto; min-width: 0; }
+.proj-head__title { font-size: 24px; line-height: 32px; font-weight: 600; letter-spacing: -0.01em; overflow-wrap: anywhere; }
 .proj-ask { position: relative; margin-top: -12px; }
 .proj-sec { min-width: 0; }
 .proj-sec__head { display: flex; align-items: baseline; gap: 8px; min-height: 32px; margin-bottom: 8px; }

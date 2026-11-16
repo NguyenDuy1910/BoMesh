@@ -109,11 +109,8 @@
 .cur-why { display: flex; flex-direction: column; gap: 2px; margin: 8px 0 0; padding: 8px 10px; list-style: none; border-radius: var(--radius-lg); background: var(--surface-secondary); font-size: 12px; line-height: 18px; }
 .cur-why li { overflow-wrap: anywhere; }
 
-/* ───── Topics pieces still shared: codes, proposals, import check (the tree and detail live in taxonomy.css) ───── */
+/* ───── Topics pieces still shared: proposals, import check (the tree and detail live in taxonomy.css) ───── */
 .md-min { min-width: 0; }
-
-.md-code { display: inline-flex; align-items: center; flex: none; min-width: 52px; font-family: var(--font-mono); font-size: 11.5px; line-height: 16px; color: var(--muted); letter-spacing: .01em; }
-.md-code--domain { min-width: 0; padding: 1px 6px; border-radius: var(--radius-sm); background: var(--default); color: var(--default-foreground); }
 
 /* Proposed by the assistant (Topics → Suggestions): compact rows — the name as a sentence, the reason, Accept and ⋯. */
 .md-props { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; border-radius: var(--radius-2xl); background: var(--surface); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); overflow: hidden; }
@@ -132,7 +129,7 @@
 /* Import: the file, what will change, what happens next */
 .md-file { display: flex; align-items: center; gap: 12px; padding: 10px 10px 10px 12px; border-radius: var(--radius-xl); background: var(--surface-secondary); }
 .md-errs { display: flex; flex-direction: column; gap: 2px; margin: 4px 0 0; padding: 0; list-style: none; }
-.md-errs .md-code { min-width: 0; margin-right: 4px; }
+.md-errs__row { margin-right: 4px; font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); }
 .md-chg { display: flex; flex-direction: column; gap: 6px; }
 .md-chg__title { display: flex; align-items: center; gap: 8px; font-size: 13px; line-height: 20px; font-weight: 600; }
 .md-chg__list { display: flex; flex-direction: column; margin: 0; padding: 4px 0; list-style: none; border-radius: var(--radius-xl); box-shadow: inset 0 0 0 1px var(--card-border); font-size: 13px; line-height: 20px; }

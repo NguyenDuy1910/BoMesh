@@ -3,6 +3,7 @@ compiled classification prompt (``api_design.md`` §5 Topic)."""
 
 from __future__ import annotations
 
+import re
 from types import SimpleNamespace
 from typing import Any
 
@@ -160,19 +161,39 @@ async def test_examples_are_filtered_to_what_the_reader_sees(scene: Scene) -> No
     assert admin_view.json()["examples"] == [item_name(secret), item_name(visible)]
 
 
-async def test_import_creates_updates_skips_and_validates_only(scene: Scene) -> None:
+async def _topics_by_display_name(scene: Scene) -> dict[str, Any]:
+    admin = await scene.as_(scene.admin)
+    listed = await admin.get(scene.url("topics"), params={"pageSize": 100})
+    assert listed.status_code == 200, listed.text
+    return {topic["displayName"]: topic for topic in listed.json()["topics"]}
+
+
+def _without_topic(change: dict[str, Any]) -> dict[str, Any]:
+    """An ImportTopics change without its topic name (provisional for creates in a preview)."""
+    return {key: value for key, value in change.items() if key != "topic"}
+
+
+async def test_import_creates_by_name_updates_skips_and_validates_only(scene: Scene) -> None:
     await _create(scene, "ops", kind="DOMAIN")
     await _create(scene, "ops-01", parentTopic=_topic(scene, "ops"), description="Old")
     admin = await scene.as_(scene.admin)
     rows = [
-        {"code": "PAY", "name": "Payments"},
-        {"code": "pay-01", "name": "Settlement", "parentCode": "PAY", "keywords": ["napas"]},
-        {"code": "ops-01", "name": "Ops-01", "description": "New", "guidance": "Runbooks."},
-        {"code": "ops", "name": "Ops"},
-        {"code": "bad code!", "name": "Bad"},
-        {"code": "pay-02", "name": "Orphan", "parentCode": "nowhere"},
-        {"code": "pay", "name": "Again"},
-        {"code": "dom-kw", "name": "Domain with keywords", "keywords": ["x"]},
+        {"domain": "Payments"},
+        {"domain": "Payments", "topic": "Settlement", "keywords": ["napas"]},
+        {
+            "domain": " ops ",
+            "topic": "Ops-01",
+            "description": "New",
+            "keywords": ["kyc"],
+            "guidance": "Runbooks.",
+        },
+        {"domain": "Ops"},
+        {"domain": "  "},
+        {"domain": "payments", "topic": " SETTLEMENT "},
+        {"domain": "Ops", "keywords": ["x"]},
+        {"domain": "Ops", "topic": "Elsewhere", "name": "workspaces/other/topics/x"},
+        {"domain": "Ops", "topic": "Wrong kind", "name": _topic(scene, "ops")},
+        {"domain": "Logistics", "topic": "Shipping", "name": ""},
     ]
 
     preview = await admin.post(
@@ -185,18 +206,53 @@ async def test_import_creates_updates_skips_and_validates_only(scene: Scene) -> 
     applied = await admin.post(scene.url("topics:import"), json={"rows": rows})
 
     assert preview.status_code == 200, preview.text
-    assert preview.json() == applied.json()
+    assert applied.status_code == 200, applied.text
     assert codes_after_preview == {"ops", "ops-01"}
     result = applied.json()
-    assert result["created"] == [_topic(scene, "pay"), _topic(scene, "pay-01")]
-    assert result["updated"] == [_topic(scene, "ops-01")]
+    for key in ("updated", "archived", "unchangedCount", "skippedRows"):
+        assert preview.json()[key] == result[key]
+    # Creates get provisional names in a preview; the rest is the same.
+    assert [_without_topic(change) for change in preview.json()["created"]] == [
+        _without_topic(change) for change in result["created"]
+    ]
+    assert [_without_topic(change) for change in result["created"]] == [
+        {"kind": "DOMAIN", "displayName": "Payments", "row": 1},
+        {"kind": "TOPIC", "displayName": "Settlement", "domain": "Payments", "row": 2},
+        {"kind": "DOMAIN", "displayName": "Logistics"},
+        {"kind": "TOPIC", "displayName": "Shipping", "domain": "Logistics", "row": 10},
+    ]
+    assert result["updated"] == [
+        {
+            "topic": _topic(scene, "ops-01"),
+            "kind": "TOPIC",
+            "displayName": "Ops-01",
+            "domain": "Ops",
+            "row": 3,
+            "changes": ["DESCRIPTION", "KEYWORDS", "GUIDANCE"],
+        }
+    ]
     assert result["unchangedCount"] == 1
-    assert [row["row"] for row in result["skippedRows"]] == [5, 6, 7, 8]
-    settlement = (await admin.get(scene.url("topics/pay-01"))).json()
-    assert (settlement["parentTopic"], settlement["keywords"]) == (_topic(scene, "pay"), ["napas"])
-    ops = (await admin.get(scene.url("topics/ops-01"))).json()
-    assert (ops["description"], ops["guidance"], ops["parentTopic"]) == (
+    assert [row["row"] for row in result["skippedRows"]] == [5, 6, 7, 8, 9]
+    topics = await _topics_by_display_name(scene)
+    assert [change["topic"] for change in result["created"]] == [
+        topics[display_name]["name"]
+        for display_name in ("Payments", "Settlement", "Logistics", "Shipping")
+    ]
+    assert all(
+        re.fullmatch(rf"workspaces/{scene.ws.id}/topics/t[0-9a-f]{{12}}", change["topic"])
+        for change in result["created"]
+    )
+    assert topics["Logistics"]["kind"] == "DOMAIN"
+    assert topics["Shipping"]["parentTopic"] == topics["Logistics"]["name"]
+    settlement = topics["Settlement"]
+    assert (settlement["parentTopic"], settlement["keywords"]) == (
+        topics["Payments"]["name"],
+        ["napas"],
+    )
+    ops = topics["Ops-01"]
+    assert (ops["description"], ops["keywords"], ops["guidance"], ops["parentTopic"]) == (
         "New",
+        ["kyc"],
         "Runbooks.",
         _topic(scene, "ops"),
     )
@@ -206,7 +262,78 @@ async def test_import_creates_updates_skips_and_validates_only(scene: Scene) -> 
     assert denied.status_code == 403
 
 
-async def test_import_replace_archives_unused_topics_and_keeps_used_ones(scene: Scene) -> None:
+async def test_import_renames_and_moves_by_name_and_skips_ambiguous_names(scene: Scene) -> None:
+    await _create(scene, "hr", kind="DOMAIN", displayName="Human Resources")
+    await _create(scene, "hiring", parentTopic=_topic(scene, "hr"))
+    await _create(scene, "payroll", parentTopic=_topic(scene, "hr"))
+    await _create(scene, "budget", parentTopic=_topic(scene, "hr"))
+    await _create(scene, "fin", kind="DOMAIN", displayName="Finance")
+    await _create(scene, "rep-a", parentTopic=_topic(scene, "fin"), displayName="Reports")
+    await _create(scene, "rep-b", parentTopic=_topic(scene, "fin"), displayName="Reports")
+    await _create(scene, "dup-a", kind="DOMAIN", displayName="Shared")
+    await _create(scene, "dup-b", kind="DOMAIN", displayName="Shared")
+    admin = await scene.as_(scene.admin)
+    rows = [
+        {"domain": "People", "name": _topic(scene, "hr"), "description": "Staff"},
+        {"domain": "people", "topic": " HIRING ", "description": "Recruiting"},
+        {"domain": "People", "topic": "Compensation", "name": _topic(scene, "payroll")},
+        {"domain": "Finance", "topic": "Budget", "name": _topic(scene, "budget")},
+        {"domain": "Finance", "topic": "reports"},
+        {"domain": "shared", "topic": "Anything"},
+        {"domain": "Finance", "topic": "Budget again", "name": _topic(scene, "budget")},
+    ]
+
+    response = await admin.post(scene.url("topics:import"), json={"rows": rows})
+
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["created"] == []
+    assert [_without_topic(change) for change in result["updated"]] == [
+        {
+            "kind": "DOMAIN",
+            "displayName": "People",
+            "row": 1,
+            "changes": ["RENAMED", "DESCRIPTION"],
+            "previousDisplayName": "Human Resources",
+        },
+        {
+            "kind": "TOPIC",
+            "displayName": "HIRING",
+            "domain": "People",
+            "row": 2,
+            "changes": ["RENAMED", "DESCRIPTION"],
+            "previousDisplayName": "Hiring",
+        },
+        {
+            "kind": "TOPIC",
+            "displayName": "Compensation",
+            "domain": "People",
+            "row": 3,
+            "changes": ["RENAMED"],
+            "previousDisplayName": "Payroll",
+        },
+        {"kind": "TOPIC", "displayName": "Budget", "domain": "Finance", "row": 4, "changes": ["MOVED"]},
+    ]
+    assert [change["topic"] for change in result["updated"]] == [
+        _topic(scene, name) for name in ("hr", "hiring", "payroll", "budget")
+    ]
+    assert result["unchangedCount"] == 0
+    skipped = {row["row"]: row["reason"] for row in result["skippedRows"]}
+    assert sorted(skipped) == [5, 6, 7]
+    assert "more than one topic" in skipped[5]
+    assert "more than one domain" in skipped[6]
+    assert "another row" in skipped[7]
+    hr = (await admin.get(scene.url("topics/hr"))).json()
+    assert (hr["displayName"], hr["description"]) == ("People", "Staff")
+    hiring = (await admin.get(scene.url("topics/hiring"))).json()
+    assert (hiring["displayName"], hiring["description"]) == ("HIRING", "Recruiting")
+    payroll = (await admin.get(scene.url("topics/payroll"))).json()
+    assert (payroll["displayName"], payroll["parentTopic"]) == ("Compensation", _topic(scene, "hr"))
+    budget = (await admin.get(scene.url("topics/budget"))).json()
+    assert budget["parentTopic"] == _topic(scene, "fin")
+
+
+async def test_import_replace_archives_unmatched_topics_and_keeps_used_ones(scene: Scene) -> None:
     await _create(scene, "hr", kind="DOMAIN")
     await _create(scene, "hiring", parentTopic=_topic(scene, "hr"))
     await _create(scene, "payroll", parentTopic=_topic(scene, "hr"))
@@ -224,16 +351,38 @@ async def test_import_replace_archives_unused_topics_and_keeps_used_ones(scene: 
     response = await admin.post(
         scene.url("topics:import"),
         json={
-            "rows": [{"code": "hr", "name": "People"}, {"code": "hiring", "name": "Hiring"}],
+            "rows": [
+                {"domain": "People", "name": _topic(scene, "hr")},
+                {"domain": "People", "topic": "hiring"},
+            ],
             "mode": "REPLACE",
         },
     )
 
     assert response.status_code == 200, response.text
     result = response.json()
-    assert set(result["archived"]) == {_topic(scene, "old"), _topic(scene, "legacy")}
-    assert result["updated"] == [_topic(scene, "hr")]
-    assert result["unchangedCount"] == 2  # hiring unchanged; payroll kept in use
+    assert result["archived"] == [
+        {"topic": _topic(scene, "old"), "kind": "TOPIC", "displayName": "Old", "domain": "Legacy"},
+        {"topic": _topic(scene, "legacy"), "kind": "DOMAIN", "displayName": "Legacy"},
+    ]
+    assert [_without_topic(change) for change in result["updated"]] == [
+        {
+            "kind": "DOMAIN",
+            "displayName": "People",
+            "row": 1,
+            "changes": ["RENAMED"],
+            "previousDisplayName": "Hr",
+        },
+        {
+            "kind": "TOPIC",
+            "displayName": "hiring",
+            "domain": "People",
+            "row": 2,
+            "changes": ["RENAMED"],
+            "previousDisplayName": "Hiring",
+        },
+    ]
+    assert result["unchangedCount"] == 1  # payroll kept in use
     states = {
         topic["name"]: topic["state"]
         for topic in (

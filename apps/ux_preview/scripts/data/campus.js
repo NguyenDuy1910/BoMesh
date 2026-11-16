@@ -424,7 +424,6 @@ seedWorkspace('ws-campus', () => {
     { id: 'd-hanhchinh', name: 'Hành chính & Nhân sự', icon: 'building', color: '#4F5865', desc: 'Biểu mẫu, nhân sự và quản trị nhà trường.' },
     { id: 't-bieumau', name: 'Biểu mẫu', parent: 'd-hanhchinh' }, { id: 't-nhansu', name: 'Nhân sự & viên chức', parent: 'd-hanhchinh' }, { id: 't-quantri', name: 'Quản trị nhà trường', parent: 'd-hanhchinh' },
   ];
-  const CODES = { 'd-hocvu': 'HV', 'd-hoctap': 'HT', 'd-nghiencuu': 'NC', 'd-chuyenmon': 'CM', 'd-sinhvien': 'SV', 'd-hanhchinh': 'HC' };
   const KEYWORDS = {
     't-quyche': ['quy chế', 'học vụ', 'cảnh báo học vụ'], 't-dangky': ['đăng ký học phần', 'thời khóa biểu', 'rút học phần'], 't-thi': ['lịch thi', 'phúc khảo', 'điểm thi'],
     't-totnghiep': ['tốt nghiệp', 'thực tập', 'chuẩn đầu ra'], 't-hocphi': ['học phí', 'biên lai'], 't-ctdt': ['chương trình đào tạo', 'chuẩn đầu ra'],
@@ -432,10 +431,7 @@ seedWorkspace('ws-campus', () => {
     't-khoaluan': ['khóa luận', 'đồ án', 'đề tài'], 't-hocbong': ['học bổng'], 't-renluyen': ['điểm rèn luyện', 'khen thưởng'], 't-ktx': ['ký túc xá', 'ngoại trú'],
     't-hotro': ['miễn giảm', 'trợ cấp', 'vay vốn'], 't-bieumau': ['mẫu đơn', 'biểu mẫu', 'đơn xin', 'phiếu'], 't-nhansu': ['viên chức', 'hợp đồng', 'tuyển dụng'],
   };
-  D.topics.filter(t => !t.parent).forEach(dm => {
-    dm.code = CODES[dm.id];
-    D.topics.filter(t => t.parent === dm.id).forEach((t, i) => { t.code = `${dm.code}-${String(i + 1).padStart(2, '0')}`; if (KEYWORDS[t.id]) t.keywords = KEYWORDS[t.id]; });
-  });
+  D.topics.filter(t => KEYWORDS[t.id]).forEach(t => { t.keywords = KEYWORDS[t.id]; });
   const topic = id => D.topics.find(t => t.id === id);
   Object.assign(topic('t-bieumau'), {
     desc: 'Mẫu đơn, phiếu và giấy xác nhận sinh viên, giảng viên tải về để nộp cho khoa và phòng ban.',

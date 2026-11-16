@@ -14,9 +14,9 @@ import { docsHref } from "../model";
 import { useActiveRuns, useInvalidateCuration } from "../queries";
 
 /**
- * A processing run in flight (preview `processStrip`, Documents → All and Issues): how far it is from the run's own
- * counts, the classification it works with, Show them (All filtered to Processing) and Stop. It is just the
- * workspace's active run, so a reload picks it up again; when a run ends, a toast reports it (failures: See issues).
+ * A processing run in flight (preview `processStrip`, Documents → All and Processing): how far it is from the run's
+ * own counts, the classification it works with, Show them (All filtered to Processing) and Stop. It is just the
+ * workspace's active run, so a reload picks it up again; when a run ends, a toast reports it (failures: Open Processing).
  */
 export function ProcessingStrip() {
   const router = useRouter();
@@ -42,7 +42,7 @@ export function ProcessingStrip() {
       const failed = r.counts?.failedCount ?? 0;
       toast(failed ? `Processed ${plural(ok, "document")} · ${fmtNum(failed)} failed` : `Processed ${plural(ok, "document")}`, {
         tone: failed ? "accent" : "success",
-        action: failed ? { label: "See issues", onPress: () => router.push(docsHref("issues")) } : undefined,
+        action: failed ? { label: "Open Processing", onPress: () => router.push(docsHref("processing", { state: "failed" })) } : undefined,
       });
     }
   }, [runs.data, invalidate, router]);

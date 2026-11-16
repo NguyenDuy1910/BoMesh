@@ -177,9 +177,9 @@ export function listAllTopics(workspace: string, { deleted = false }: { deleted?
 export type TopicFields = Pick<Topic, "displayName" | "description" | "parentTopic" | "keywords" | "synonyms" | "guidance" | "examples" | "rules">;
 export type TopicRule = Schema<"TopicRule">;
 
-/** `topicId` (optional) is the topic's code: lowercase, `^[a-z][a-z0-9-]{0,62}$`; taken → ALREADY_EXISTS. Omitted → the server picks one. */
-export function createTopic(workspace: string, topic: Partial<TopicFields> & Pick<Topic, "kind">, topicId?: string): Promise<Topic> {
-  return call(api.POST("/api/v1/workspaces/{workspace}/topics", { params: { path: { workspace }, query: { topicId: topicId || undefined, requestId: requestId() } }, body: topic }));
+/** Creates a domain or topic; the server picks its ID (IDs are internal and never shown). */
+export function createTopic(workspace: string, topic: Partial<TopicFields> & Pick<Topic, "kind">): Promise<Topic> {
+  return call(api.POST("/api/v1/workspaces/{workspace}/topics", { params: { path: { workspace }, query: { requestId: requestId() } }, body: topic }));
 }
 
 export type TopicPatch = Partial<TopicFields>;
@@ -229,6 +229,7 @@ export async function confirmTopicAssignments(workspace: string, topic: string, 
 
 export type TopicImportRow = Schema<"TopicImportRow">;
 export type ImportTopicsResult = Schema<"ImportTopicsResponse">;
+export type TopicImportChange = Schema<"TopicImportChange">;
 
 /** Imports spreadsheet rows the client parsed (one transaction); `validateOnly` reports the same result and changes nothing. */
 export function importTopics(workspace: string, body: { rows: readonly TopicImportRow[]; mode: "MERGE" | "REPLACE"; validateOnly?: boolean }): Promise<ImportTopicsResult> {

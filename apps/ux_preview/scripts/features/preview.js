@@ -110,7 +110,7 @@
     if (marks.length) p.hit = ((p.hit % marks.length) + marks.length) % marks.length;
     const count = $('#pv-hits', root);
     if (count) {
-      count.textContent = marks.length ? `${p.hit + 1} of ${marks.length}` : 'No matches on these pages';
+      count.textContent = marks.length ? `${p.hit + 1} / ${marks.length}` : 'No matches on these pages';
       $$('.pv-hitnav', root).forEach(b => { b.disabled = marks.length < 2; });
     }
     let target = null;

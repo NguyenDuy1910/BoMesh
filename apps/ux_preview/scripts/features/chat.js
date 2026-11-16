@@ -354,7 +354,7 @@ function ensureSeed(conv) {
 function lastLine(conv) {
   const a = [...conv.messages].reverse().find(m => m.role === 'assistant'); if (!a) return '';
   if (a.citations?.length && !visCites(a).length) return 'Uses knowledge you can’t access';
-  return (plain(a.text).split('\n').find(l => l.trim()) || '').replace(/:\s*$/, '');
+  return (plain(a.text).split('\n').find(l => l.trim()) || '').replace(/^\s*(?:[-*•]|\d+\.)\s+/, '').replace(/:\s*$/, '');
 }
 
 /* ═══════════════ Markdown subset ═══════════════ */
@@ -704,10 +704,12 @@ P.chatThread = ({ params }) => {
   ensureSeed(conv); conv.scope ??= []; settleStale(conv);
   const sp = holderSpace(conv);
   const proj = X.projects?.of(conv);
-  crumbs(sp ? [{ label: 'Spaces', to: '/spaces' }, { label: sp.name, to: '/space/' + sp.id }, { label: conv.title }] : proj ? [{ label: 'Projects', to: '/projects' }, { label: proj.name, to: '/project/' + proj.id }, { label: conv.title }] : [{ label: 'AI Chat', to: '/chat' }, { label: conv.title }]);
-  // The conversation's title is the top row's H1, its Share and ⋯ the row's actions: the thread starts right under it.
-  pageHeader({ title: conv.title, actions: `<span class="chat-top-actions">${btn(conv.share ? 'Shared' : 'Share', { v: 'ghost', size: 'sm', icon: conv.share ? 'users' : 'share', act: 'chat-share', data: { id: conv.id }, tip: conv.share ? shareSummary(conv) : '' })}${iconBtn('more', 'More', { size: 'sm', menu: 'chat-more', data: { id: conv.id } })}</span>` });
-  const u = cui(); const panel = u.panel?.conv === conv.id ? u.panel : null;
+  // Its parent is where it lives, as in AI Chat's list and Delete (conversations.js): its project, else its space, else AI Chat.
+  crumbs(proj ? [{ label: 'Projects', to: '/projects' }, { label: proj.name, to: '/project/' + proj.id }, { label: conv.title }] : sp ? [{ label: 'Spaces', to: '/spaces' }, { label: sp.name, to: '/space/' + sp.id }, { label: conv.title }] : [{ label: 'AI Chat', to: '/chat' }, { label: conv.title }]);
+  // The conversation's title is the top row's H1 (click it to rename), its Share and ⋯ the row's actions: the thread starts right under it.
+  const u = cui(); if (u.renaming && u.renaming !== conv.id) u.renaming = null;
+  pageHeader({ title: conv.title, heading: X.conversations?.title(conv), actions: `<span class="chat-top-actions">${btn(conv.share ? 'Shared' : 'Share', { v: 'ghost', size: 'sm', icon: conv.share ? 'users' : 'share', act: 'chat-share', data: { id: conv.id }, tip: conv.share ? shareSummary(conv) : '' })}${iconBtn('more', 'More', { size: 'sm', menu: 'chat-more', data: { id: conv.id } })}</span>` });
+  const panel = u.panel?.conv === conv.id ? u.panel : null;
   const streaming = run?.conv === conv.id;
   const ok = () => `<div class="chat-thread">${conv.messages.map(m => m.role === 'user' ? userHtml(m) : `<div class="chat-msg chat-msg--ai" id="msg-${m.id}">${aiInner(conv, m)}</div>`).join('')}</div><div class="chat-tail" id="chat-tail" aria-hidden="true" style="height:${turn ? u.tail || 0 : 0}px"></div>`;
   const side = panel?.kind === 'file' ? X.chatFiles?.panel(conv, panel) || '' : '';
@@ -953,13 +955,18 @@ A['chat-request'] = el => {
   toast('Access requested'); refresh();
 };
 
-/* Thread ⋯: the same conversation menu as AI Chat's list and project pages (conversations.js) */
-MENUS['chat-more'] = el => X.conversations?.menu(convById(el.dataset.id)) || [];
+/* Thread ⋯: the conversation menu of AI Chat's list and project pages (conversations.js), minus Rename — the title renames itself */
+MENUS['chat-more'] = el => X.conversations?.menu(convById(el.dataset.id), { rename: false }) || [];
 
 /* ═══════════════ Share ═══════════════
-   conv.share = { who: 'workspace' | 'people', people: [member ids], at } — saved on the conversation, shown when Share reopens,
-   revocable with Stop sharing (Undo). The dialog edits a draft: Cancel discards it. */
-const shareLink = conv => `https://bomesh.app/${curWs().code}/s/${conv.id}-${(hashOf(conv.id) % 1679616).toString(36)}`;
+   conv.share = { id, who: 'workspace' | 'people', people: [member ids], by, at } — one live share per conversation (backend
+   Share: conversations/{c}/shares/{s}), saved on the conversation, shown when Share reopens, revocable with Stop sharing (Undo).
+   Sharing again with other people makes a new share and revokes the previous one (its link stops opening), as does
+   stopping. The dialog edits a draft: Cancel discards it.
+   The link opens the read-only page /chat/:id/shares/:share (P.chatShared). */
+const shareIdOf = conv => conv.share?.id || (hashOf(conv.id) % 1679616).toString(36);
+const sharePath = conv => `/chat/${conv.id}/shares/${shareIdOf(conv)}`;
+const shareLink = conv => `${location.origin}${location.pathname}#${sharePath(conv)}`;
 const memberName = id => D.members.find(x => x.id === id)?.name || 'Someone';
 function namesList(ids) { const n = ids.map(memberName); return n.length <= 2 ? n.join(' and ') : `${n[0]}, ${n[1]} and ${n.length - 2} more`; }
 function shareSummary(conv) { const s = conv?.share; return !s ? '' : s.who === 'people' ? `Shared with ${namesList(s.people)}` : `Anyone in ${curWs().name} can open it`; }
@@ -1000,15 +1007,48 @@ A['chat-share-save'] = async () => {
   const next = { who: s.who, people: s.who === 'people' ? [...s.people] : [] };
   if (sameShare(conv.share, next)) { if (await copyText(shareLink(conv), 'Link copied')) closeModal(); return; }
   const first = !conv.share;
-  conv.share = { ...next, at: conv.share && conv.share.who === next.who ? conv.share.at : Date.now() };
+  conv.share = { ...next, id: uid('sh'), by: conv.share?.by || me().id, at: Date.now() };
   persist(); closeModal(); refresh();
-  const msg = !first ? 'Sharing updated. Link copied.' : next.who === 'people' ? `Shared with ${namesList(next.people)}. Link copied.` : `Shared with everyone in ${curWs().name}. Link copied.`;
+  const msg = !first ? 'Sharing updated. The new link is copied; the old one no longer opens.' : next.who === 'people' ? `Shared with ${namesList(next.people)}. Link copied.` : `Shared with everyone in ${curWs().name}. Link copied.`;
   await copyText(shareLink(conv), msg);
 };
 A['chat-share-stop'] = () => {
   const s = ui('chatShare'), conv = convById(s.id); if (!conv?.share) return;
   const before = conv.share; delete conv.share; persist(); closeModal(); refresh();
   toast('Stopped sharing. The link no longer opens.', { action: { label: 'Undo', run: () => { conv.share = before; persist(); refresh(); } } });
+};
+
+/* Shared conversation (read-only): what the link shows. The snapshot is re-filtered for whoever opens it — answers built
+   only from knowledge they can't open are withheld, citations they can't open are dropped. No composer, feedback or files
+   (files are shared on their own). The owner sees the same page with a way back to the conversation. */
+function canOpenShare(conv, shareId) {
+  const s = conv?.share; if (!s || shareIdOf(conv) !== shareId) return false;
+  return s.by === me().id || conv.owner === me().id || s.who === 'workspace' || (s.people || []).includes(me().id);
+}
+function sharedAnswer(m) {
+  const all = m.citations || [], vis = visCites(m), visN = new Set(vis.map(c => c.n));
+  if (all.length && !vis.length) return `<p class="chat-hint">${ic('lock', 'i-xs')}<span>This answer uses knowledge you can’t open, so it isn’t shown.</span></p>`;
+  if (!m.text) return '';
+  const ctx = { cite: n => { if (!visN.has(n)) return ''; const c = vis.find(x => x.n === n), d = docById(c.doc); return `<button type="button" class="cite" data-act="cite-open" data-msg="${m.id}" data-n="${n}" aria-label="Source ${n}: ${esc(d.name)}, page ${c.page}">${n}</button>`; } };
+  return `<div class="chat-answer">${md(m.text, ctx)}</div>`
+    + (vis.length < all.length ? `<p class="chat-hint">${ic('lock', 'i-xs')}<span>Some sources are hidden because you can’t open them.</span></p>` : '')
+    + (vis.length ? sourcesHtml(m, vis) : '');
+}
+P.chatShared = ({ params }) => {
+  const conv = convById(params.id);
+  if (!canOpenShare(conv, params.share)) {
+    crumbs([{ label: 'AI Chat', to: '/chat' }, { label: 'Shared conversation' }]);
+    return `<div class="page">${emptyState({ icon: 'link', title: 'This link doesn’t open', desc: 'The person who shared it stopped sharing, or it wasn’t shared with you.', actions: btn('Go to AI Chat', { v: 'primary', icon: 'message', href: '/chat' }) })}</div>`;
+  }
+  const s = conv.share, owner = s.by === me().id || conv.owner === me().id;
+  crumbs([{ label: 'AI Chat', to: '/chat' }, { label: conv.title }]);
+  pageHeader({ title: conv.title, meta: owner ? shareSummary(conv) : `Shared by ${memberName(s.by || conv.owner)} · ${rel(s.at)}`,
+    actions: owner ? btn('Open conversation', { v: 'secondary', size: 'sm', icon: 'message', href: '/chat/' + conv.id }) : '' });
+  const turns = conv.messages.filter(m => m.role === 'user' || (m.state || 'done') === 'done').map(m => m.role === 'user'
+    ? `<div class="chat-msg chat-msg--user"><div class="chat-user"><div class="chat-bubble">${esc(m.text)}</div></div></div>`
+    : `<div class="chat-msg chat-msg--ai">${sharedAnswer(m)}</div>`).join('');
+  return `<div class="page page--narrow"><div class="chat-thread">${turns}</div>
+    <p class="chat-hint">${ic('lock', 'i-xs')}<span>Read-only. Sources open only for people who already have access.</span></p></div>`;
 };
 
 /* ═══════════════ Escape: edit → file editing → panel ═══════════════ */

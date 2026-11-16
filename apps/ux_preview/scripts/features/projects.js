@@ -9,7 +9,8 @@
    sidebar never lists folders or conversations inline. Every conversation is
    also in AI Chat, so moving one out of a project never loses it.
    Exports: X.projects { of, byId, refs, moveItems, addDocs, list, max, room, docIds }.
-   Actions: proj-*. Modal: proj-name. Menus: proj-row (conversation rows use conv-menu). */
+   Actions: proj-*. Modal: proj-name (create; rename from a Projects row). Menus: proj-row (conversation rows use conv-menu).
+   The project page renames from its title (click to edit) and deletes with one icon: both apply at once with Undo. */
 
 const MAX_REFS = 10;
 const C = () => X.chat;
@@ -69,8 +70,11 @@ P.project = ({ params }) => {
   const chats = `<section class="proj-sec" aria-labelledby="proj-chats-h"><div class="proj-sec__head"><h2 class="proj-sec__title" id="proj-chats-h">Conversations</h2>${convs.length ? `<span class="proj-sec__count num">${fmtNum(convs.length)}</span>` : ''}</div>
     ${convs.length ? `<div class="proj-chats">${convs.map(x => { const last = C().lastLine(x); return `<div class="proj-chat" data-reveal-root><a class="proj-chat__link" href="#/chat/${esc(x.id)}"><span class="proj-chat__title truncate">${esc(x.title)}</span>${last ? `<span class="proj-chat__last truncate">${esc(last)}</span>` : ''}</a><span class="proj-chat__at">${esc(rel(x.at))}</span><span class="reveal-on-hover">${iconBtn('more', `Options for ${x.title}`, { size: 'sm', menu: 'conv-menu', data: { id: x.id }, cls: 'proj-chat__more' })}</span></div>`; }).join('')}</div>`
       : `<p class="proj-empty">Conversations you start here stay in this project. You can also move one here from its ⋯ menu.</p>`}</section>`;
+  // The name renames itself (click to edit); Delete is the one other project action, so it is an icon, not a ⋯ menu.
+  const ren = ui('projItem'), editing = ren.renaming === p.id;
+  const title = editableTitle({ id: 'proj-title', value: editing ? ren.val : p.name, editing, edit: 'proj-title-edit', commit: 'proj-title-done', cancel: 'proj-title-cancel', tag: 'h1', cls: 'proj-head__title', label: 'Rename project', maxlength: 60, error: editing ? ren.err : '', data: { id: p.id } });
   return `<div class="page page--narrow proj">
-    <header class="proj-head"><span class="proj-head__icon" aria-hidden="true">${ic('folder')}</span><h1 class="proj-head__title">${esc(p.name)}</h1>${iconBtn('more', 'Project options', { menu: 'proj-row', data: { id: p.id } })}</header>
+    <header class="proj-head"><span class="proj-head__icon" aria-hidden="true">${ic('folder')}</span><div class="proj-head__main">${title}</div>${iconBtn('trash', 'Delete project', { act: 'proj-delete', data: { id: p.id } })}</header>
     <div class="proj-ask chat-drop" data-drop="${esc(key)}">${C().composerHtml({ key, holder: c, placeholder: `New chat in ${p.name}`, lg: true })}</div>
     ${knowledge}${chats}
   </div>`;
@@ -118,6 +122,21 @@ A['proj-name-save'] = async () => {
   persist(); go('/project/' + p.id);
   toast(`Created “${name}”`);
 };
+/* Rename on the project page: the title is the control. Enter or leaving it applies at once (Undo); an empty or unchanged
+   name just closes; a name you already use keeps it open with the reason. Idempotent (Enter re-renders, then blur). */
+A['proj-title-edit'] = el => { const p = byId(el.dataset.id); if (!p) return; S.ui.projItem = { renaming: p.id, val: p.name, err: '' }; refresh(); };
+A['proj-title-cancel'] = () => { const u = ui('projItem'); if (!u.renaming) return; S.ui.projItem = {}; refresh(); };
+A['proj-title-done'] = el => {
+  const u = ui('projItem'), p = byId(el.dataset.id); if (!p || u.renaming !== p.id) return;
+  const name = el.value.trim();
+  if (!name || name === p.name) { S.ui.projItem = {}; refresh(); return; }
+  const err = vName(name, p.id);
+  if (err) { Object.assign(u, { val: el.value, err }); refresh(); return; }
+  S.ui.projItem = {};
+  const before = p.name; p.name = name; save();
+  toast(`Renamed to “${name}”`, { action: { label: 'Undo', run: () => { p.name = before; save(); } } });
+};
+A['proj-delete'] = el => { const p = byId(el.dataset.id); if (p) remove(p); };
 A['proj-new'] = () => openName();
 /** Delete is reversible (its conversations stay in AI Chat, documents stay in Knowledge): it happens at once, Undo restores
     the project and its conversations. Deleting the open project goes one level up, to Projects. */
@@ -128,7 +147,7 @@ function remove(p) {
   persist(); if (here) go('/projects'); else refresh();
   toast(convs.length ? `Deleted “${p.name}”. Its ${plural(convs.length, 'conversation')} stay in AI Chat.` : `Deleted “${p.name}”`, { action: { label: 'Undo', run: () => { all().splice(Math.min(i, all().length), 0, p); convs.forEach(c => (c.project = p.id)); persist(); if (here) go('/project/' + p.id); else refresh(); } } });
 }
-/* The project page is where new chats in it start (its row on Projects opens it), so the menu only holds what the row can't do. */
+/* A Projects row opens the project; its ⋯ holds what the row can't do (a row is one link, so Rename asks in a small dialog). */
 MENUS['proj-row'] = el => {
   const p = byId(el.dataset.id); if (!p) return [];
   return [

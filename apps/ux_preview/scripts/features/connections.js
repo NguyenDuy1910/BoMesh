@@ -70,7 +70,7 @@
   window.addEventListener('load', () => D.accounts.forEach(a => delete a.checking));
 
   /* ═══════════════ Sources → Accounts ═══════════════ */
-  /** The list only: problems (an expired account) are announced once, above the Sources views, with Reconnect. */
+  /** The list only: an expired account is counted in the view's label and fixed on its own row (Reconnect). */
   function accountsView() {
     X.src?.boot();
     const none = () => emptyState({ icon: 'key', title: 'No accounts yet', desc: 'An account is added the first time you add a source: sign in once, then pick what to sync.', actions: btn('Add source', { v: 'primary', icon: 'plus', act: 'src-connect' }), boxed: true });
@@ -90,25 +90,26 @@
     const used = usedBy(a);
     const st = a.checking ? `<span class="row gap-6 t-sm muted">${spinner('sm')}Checking…</span>` : status('account', a.status);
     const usedCell = used.length ? linkBtn(plural(used.length, 'source'), { act: 'acc-sources', data: { id: a.id } }) : '<span class="muted">Not used</span>';
-    // The alert above the table names what stopped and carries Reconnect; rows stay quiet (everything else in ⋯).
+    // An expired account's fix (Reconnect) sits on its row, like a source's; everything else is in ⋯.
+    const fix = a.status === 'expired' && !a.checking ? btn('Reconnect', { size: 'sm', icon: 'log-in', act: 'acc-reconnect', data: { id: a.id } }) : '';
     return `<tr class="table__row">
       <td class="table__cell table__cell--primary"><div class="row gap-12">${appIcon(a.app)}<div class="stack src-min"><span class="cell-title truncate">${esc(a.label)}</span><span class="cell-sub truncate">${esc(appName(a.app))}${a.user !== a.label ? ' · ' + esc(a.user) : ''}</span></div></div></td>
       <td class="table__cell">${st}</td>
       <td class="table__cell">${usedCell}</td>
       <td class="table__cell table__cell--hide-sm muted">${rel(a.checked)}</td>
-      <td class="table__cell table__cell--actions src-actions">${iconBtn('more', 'More actions', { size: 'sm', menu: 'acc-row', data: { id: a.id } })}</td></tr>`;
+      <td class="table__cell table__cell--actions src-actions"><div class="row gap-4">${fix}${iconBtn('more', 'More actions', { size: 'sm', menu: 'acc-row', data: { id: a.id } })}</div></td></tr>`;
   }
   MENUS['acc-row'] = el => {
     const a = accById(el.dataset.id); if (!a) return [];
     const expired = a.status === 'expired';
-    const reconnect = { label: 'Reconnect', icon: 'log-in', run: () => A['acc-reconnect']({ dataset: { id: a.id } }) };
-    const test = { label: 'Test connection', icon: 'refresh', disabled: a.checking, run: () => A['acc-test']({ dataset: { id: a.id } }) };
     return [
-      ...(expired ? [reconnect, test] : [test, reconnect]),
+      // An expired account's Reconnect is on its row; a working one can still sign in again (e.g. as someone else).
+      !expired && { label: 'Reconnect', icon: 'log-in', run: () => A['acc-reconnect']({ dataset: { id: a.id } }) },
+      { label: 'Test connection', icon: 'refresh', disabled: a.checking, run: () => A['acc-test']({ dataset: { id: a.id } }) },
       { label: 'Add source with this account', icon: 'plug', disabled: a.status !== 'connected', run: () => X.src.openWizard({ app: a.app, acc: a.id }) },
       { sep: true },
       { label: 'Disconnect', icon: 'trash', danger: true, run: () => A['acc-disconnect']({ dataset: { id: a.id } }) },
-    ];
+    ].filter(Boolean);
   };
   A['acc-sources'] = el => { const a = accById(el.dataset.id); if (!a) return; Object.assign(ui('srcList', {}), { q: a.label, status: '', page: 1 }); go(studioHref('sources')); };
   A['acc-test'] = async el => {

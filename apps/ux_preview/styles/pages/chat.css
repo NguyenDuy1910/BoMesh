@@ -280,6 +280,9 @@ a.wk-chip:hover { background: var(--default); }
 .wk-panel--full { width: min(1040px, 72%); }
 .wk-head { gap: 4px; }
 .wk-head > .file-icon { margin-right: 6px; }
+.wk-head__main { min-width: 0; }
+/* The file's name (click to rename) stays on one line. */
+.wk-head .etitle__text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wk-tabs { display: flex; align-items: center; gap: 8px; padding: 0 12px 0 16px; border-bottom: 1px solid var(--separator); }
 .wk-tabs .tabs { flex: 1 1 auto; border-bottom: 0; }
 .wk-body { padding: 16px; }

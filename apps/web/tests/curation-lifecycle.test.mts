@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { canProcess, inSearch, isIssue, isUnprocessable, PROCESSING_ORDER, PROCESSING_STATE, processingOf, publicationOf } from "../src/modules/curation/lifecycle.ts";
+import { canProcess, inSearch, isUnprocessable, PROCESSING_ORDER, PROCESSING_STATE, processingOf, publicationOf, readyToReview, toProcess } from "../src/modules/curation/lifecycle.ts";
 
 type Doc = {
   publicationState?: "PUBLISHED" | "UNPUBLISHED";
@@ -14,7 +14,7 @@ type Doc = {
 
 const item = (document: Doc, extra: { state?: "ACTIVE" | "DELETED" } = {}) =>
   ({ name: "workspaces/w/items/d1", state: "ACTIVE", ...extra, document: { fileName: "Policy.pdf", mimeType: "application/pdf", contentState: "AVAILABLE", ...document } }) as never;
-const contribution = (state: string) => ({ name: "workspaces/w/contributions/c1", state }) as never;
+const contribution = (state: string, kind = "NEW_DOCUMENT") => ({ name: "workspaces/w/contributions/c1", state, kind }) as never;
 
 test("publication: an open or declined submission decides, else the item's publicationState", () => {
   assert.equal(publicationOf({ contribution: contribution("ANALYZING") }), "review");
@@ -44,8 +44,11 @@ test("processing follows indexingState, independent of publication", () => {
   assert.deepEqual([...PROCESSING_ORDER], ["pending", "processing", "ready", "failed", "outdated", "unsupported"]);
 });
 
-test("processing: submissions aren't processed, missing state is Not processed, failed content fails, changed at source is outdated", () => {
-  assert.equal(processingOf({ item: item({ indexingState: "SUCCEEDED" }), contribution: contribution("IN_REVIEW") }), "pending");
+test("processing: a new document's submission has its candidate's state; a new version's or a decided one isn't processed", () => {
+  assert.equal(processingOf({ item: item({ indexingState: "SUCCEEDED" }), contribution: contribution("IN_REVIEW") }), "ready");
+  assert.equal(processingOf({ item: item({ indexingState: "PENDING", fileName: "scan.png", mimeType: "image/png" }), contribution: contribution("IN_REVIEW") }), "unsupported");
+  assert.equal(processingOf({ item: item({ indexingState: "SUCCEEDED" }), contribution: contribution("IN_REVIEW", "NEW_REVISION") }), "pending");
+  assert.equal(processingOf({ item: item({ indexingState: "SUCCEEDED" }), contribution: contribution("CHANGES_REQUESTED") }), "pending");
   assert.equal(processingOf({ item: item({}) }), "pending");
   assert.equal(processingOf({}), "pending");
   assert.equal(processingOf({ item: item({ contentState: "FAILED", indexingState: "PENDING" }) }), "failed");
@@ -60,14 +63,16 @@ test("searchable needs published and processed", () => {
   assert.equal(inSearch({ item: item({ publicationState: "PUBLISHED", indexingState: "SUCCEEDED" }), contribution: contribution("IN_REVIEW") }), false);
 });
 
-test("canProcess: published or unpublished, not running, not unsupported, not an image or archive, not a submission", () => {
+test("canProcess: published, unpublished or a new document's submission; not running, unsupported, an image or archive", () => {
   assert.equal(canProcess({ item: item({ publicationState: "PUBLISHED", indexingState: "PENDING" }) }), true);
   assert.equal(canProcess({ item: item({ publicationState: "UNPUBLISHED", indexingState: "FAILED" }) }), true);
   assert.equal(canProcess({ item: item({ publicationState: "PUBLISHED", indexingState: "SUCCEEDED" }) }), true);
   assert.equal(canProcess({ item: item({ publicationState: "PUBLISHED", indexingState: "RUNNING" }) }), false);
   assert.equal(canProcess({ item: item({ publicationState: "PUBLISHED", indexingState: "UNSUPPORTED" }) }), false);
   assert.equal(canProcess({ item: item({ publicationState: "PUBLISHED", indexingState: "PENDING", fileName: "scan.png", mimeType: "image/png" }) }), false);
-  assert.equal(canProcess({ item: item({ publicationState: "UNPUBLISHED", indexingState: "PENDING" }), contribution: contribution("IN_REVIEW") }), false);
+  assert.equal(canProcess({ item: item({ publicationState: "UNPUBLISHED", indexingState: "PENDING" }), contribution: contribution("IN_REVIEW") }), true);
+  assert.equal(canProcess({ item: item({ publicationState: "UNPUBLISHED", indexingState: "PENDING" }), contribution: contribution("IN_REVIEW", "NEW_REVISION") }), false);
+  assert.equal(canProcess({ item: item({ publicationState: "UNPUBLISHED", indexingState: "PENDING" }), contribution: contribution("CHANGES_REQUESTED") }), false);
   assert.equal(canProcess({ item: item({ publicationState: "PUBLISHED", indexingState: "PENDING" }, { state: "DELETED" }) }), false);
 });
 
@@ -80,10 +85,23 @@ test("images and archives can't be processed", () => {
   assert.equal(isUnprocessable("notes.md", "text/markdown"), false);
 });
 
-test("Issues: failed or outdated, published or unpublished; never submissions or Not processed", () => {
-  assert.equal(isIssue({ item: item({ publicationState: "PUBLISHED", indexingState: "FAILED" }) }), true);
-  assert.equal(isIssue({ item: item({ publicationState: "UNPUBLISHED", indexingState: "OUTDATED" }) }), true);
-  assert.equal(isIssue({ item: item({ publicationState: "PUBLISHED", indexingState: "SUCCEEDED", qualityIssues: [{ kind: "CHANGED_AT_SOURCE" }] }) }), true);
-  assert.equal(isIssue({ item: item({ publicationState: "PUBLISHED", indexingState: "PENDING" }) }), false);
-  assert.equal(isIssue({ item: item({ publicationState: "UNPUBLISHED", indexingState: "FAILED" }), contribution: contribution("CHANGES_REQUESTED") }), false);
+test("Review: a new document once processed (or one that can't be), every new version; never a decided submission", () => {
+  assert.equal(readyToReview(contribution("IN_REVIEW"), item({ indexingState: "PENDING" })), false);
+  assert.equal(readyToReview(contribution("IN_REVIEW"), item({ indexingState: "RUNNING" })), false);
+  assert.equal(readyToReview(contribution("IN_REVIEW"), item({ indexingState: "FAILED" })), false);
+  assert.equal(readyToReview(contribution("IN_REVIEW"), item({ indexingState: "SUCCEEDED" })), true);
+  assert.equal(readyToReview(contribution("IN_REVIEW"), item({ indexingState: "UNSUPPORTED" })), true);
+  assert.equal(readyToReview(contribution("IN_REVIEW", "NEW_REVISION"), item({ indexingState: "PENDING" })), true);
+  assert.equal(readyToReview(contribution("CHANGES_REQUESTED"), item({ indexingState: "SUCCEEDED" })), false);
+});
+
+test("Processing: what isn't processed for its current revision, submissions of new documents included", () => {
+  assert.equal(toProcess({ item: item({ publicationState: "PUBLISHED", indexingState: "PENDING" }) }), true);
+  assert.equal(toProcess({ item: item({ publicationState: "UNPUBLISHED", indexingState: "FAILED" }) }), true);
+  assert.equal(toProcess({ item: item({ publicationState: "PUBLISHED", indexingState: "SUCCEEDED", qualityIssues: [{ kind: "CHANGED_AT_SOURCE" }] }) }), true);
+  assert.equal(toProcess({ item: item({ publicationState: "PUBLISHED", indexingState: "SUCCEEDED" }) }), false);
+  assert.equal(toProcess({ item: item({ publicationState: "PUBLISHED", indexingState: "UNSUPPORTED" }) }), false);
+  assert.equal(toProcess({ item: item({ indexingState: "PENDING" }), contribution: contribution("IN_REVIEW") }), true);
+  assert.equal(toProcess({ item: item({ indexingState: "SUCCEEDED" }), contribution: contribution("IN_REVIEW") }), false);
+  assert.equal(toProcess({ item: item({ indexingState: "PENDING" }), contribution: contribution("IN_REVIEW", "NEW_REVISION") }), false);
 });

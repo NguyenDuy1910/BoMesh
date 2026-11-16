@@ -118,7 +118,7 @@
   /** "Replace finding": re-read the cited passage and restate it. */
   function restate(cell, label, docId) {
     const q = cell.cite?.quote;
-    if (!q) { const f = finding(docId, label); return f.none ? { ...f, text: 'Not reported in this paper.' } : f; }
+    if (!q) { const f = finding(docId, label); return f.none ? { ...f, text: 'Not reported in this source.' } : f; }
     let s = q.replace(/^(we|our|in this (paper|study),?|this (paper|study))\s+/i, '').replace(/\s+/g, ' ');
     s = s.split(/;|, (?:so|which|whose|and|but|allowing|freezing|while)\b/)[0].replace(/\.$/, '');
     if (s.length > 80) { const cut = Math.max(...[', ', ' on ', ' in ', ' for ', ' from ', ' at ', ' across ', ' with '].map(b => s.lastIndexOf(b, 80))); if (cut > 30) s = s.slice(0, cut); }
@@ -179,7 +179,7 @@
     return `<div class="rv">
       ${u.synth ? synthSkeleton() : d.synthesis ? synthCard(w, can) : ''}
       ${empty ? '' : `<div class="rv-bar"><span class="t-sm muted rv-bar__hint">Select a cell to see its evidence</span><span class="row gap-8">${addCrit}${synth}</span></div>`}
-      ${!empty ? matrix(w, can, u) + cards(w, can, u) : emptyState({ icon: 'table', title: d.papers.length ? 'No criteria yet' : 'No papers yet', desc: d.papers.length ? 'Add what you want to compare, like Cost or Risks.' : 'Add documents from this space’s knowledge to compare them.', actions: can ? btn(d.papers.length ? 'Add criterion' : 'Add papers', { v: 'primary', icon: 'plus', act: d.papers.length ? 'rv-add-crit' : 'rv-add-paper', data: { w: w.id } }) : '', boxed: true })}
+      ${!empty ? matrix(w, can, u) + cards(w, can, u) : emptyState({ icon: 'table', title: d.papers.length ? 'No criteria yet' : 'No sources yet', desc: d.papers.length ? 'Add what you want to compare, like Cost or Risks.' : 'Add documents from this space’s knowledge to compare them.', actions: can ? btn(d.papers.length ? 'Add criterion' : 'Add sources', { v: 'primary', icon: 'plus', act: d.papers.length ? 'rv-add-crit' : 'rv-add-paper', data: { w: w.id } }) : '', boxed: true })}
     </div>`;
   }
   const isSel = (u, p, c) => !!u.sel && !u.sel.cite && u.sel.p === p && u.sel.c === c;
@@ -200,7 +200,7 @@
       }).join('');
       return `<tr class="${cx('table__row', u.fresh[pid] && 'table__row--new')}">${lead}${cells}${can ? '<td class="table__cell rv-cell--add" aria-hidden="true"></td>' : ''}</tr>`;
     });
-    const addRow = can ? `<tr class="table__row rv-add-row"><th class="table__cell rv-paper" scope="row">${btn('Add papers', { v: 'ghost', size: 'sm', icon: 'plus', act: 'rv-add-paper', data: { w: w.id } })}</th><td class="table__cell" colspan="${d.criteria.length + 1}"></td></tr>` : '';
+    const addRow = can ? `<tr class="table__row rv-add-row"><th class="table__cell rv-paper" scope="row">${btn('Add sources', { v: 'ghost', size: 'sm', icon: 'plus', act: 'rv-add-paper', data: { w: w.id } })}</th><td class="table__cell" colspan="${d.criteria.length + 1}"></td></tr>` : '';
     return `<div class="table-root rv-matrix"><div class="table__scroll rv-matrix__scroll" id="rv-scroll-${w.id}" data-w="${w.id}" tabindex="0" role="region" aria-label="${esc(w.title)}"><table class="table__content rv-table"><thead class="table__head"><tr>${head}</tr></thead><tbody class="table__body">${rows.join('')}${addRow}</tbody></table></div></div>`;
   }
   /** Phones: one card per source, each criterion a row (the table is hidden by a container query). */
@@ -214,7 +214,7 @@
         return `<li><button type="button" class="${cx('rv-card__row', cell.none && 'rv-cell--none', isSel(u, pid, c.id) && 'is-selected')}" ${cellAttrs(w, pid, c, pp, cell, u)}><span class="rv-card__label">${esc(c.label)}</span><span class="rv-card__text">${text}</span></button></li>`;
       }).join('');
       return `<section class="card rv-card" aria-label="${esc(pp.title)}"><div class="rv-card__head"><div class="grow" style="min-width:0"><a class="rv-paper__title clamp-2" href="#/doc/${esc(pid)}">${esc(pp.title)}</a>${pp.authors || pp.year ? `<div class="t-xs muted truncate">${esc(pp.authors)}${pp.year ? ' · ' + esc(pp.year) : ''}</div>` : ''}</div>${can ? iconBtn('more', `Options for ${pp.title}`, { size: 'sm', menu: 'rv-row', data: { w: w.id, id: pid } }) : ''}</div><ul class="rv-card__list">${rows}</ul></section>`;
-    }).join('')}${can ? `<div class="row gap-8">${btn('Add papers', { size: 'sm', icon: 'plus', act: 'rv-add-paper', data: { w: w.id } })}</div>` : ''}</div>`;
+    }).join('')}${can ? `<div class="row gap-8">${btn('Add sources', { size: 'sm', icon: 'plus', act: 'rv-add-paper', data: { w: w.id } })}</div>` : ''}</div>`;
   }
   function flash(w, key) { const u = rvu(w); u.fresh[key] = true; setTimeout(() => { delete u.fresh[key]; }, 1700); }
   /* The table keeps its horizontal position across re-renders (core only keeps vertical scroll). */
@@ -240,7 +240,7 @@
       const pp = paper(s.p);
       title = pp.title; href = cell.cite ? docHref(cell.cite) : '/doc/' + s.p;
       body = `<div class="t-label mb-8">${esc(crit.label)}</div><p class="rv-ev__finding">${u.busy ? `<span class="row gap-8 muted">${spinner()}Re-reading the passage…</span>` : esc(cell.text)}</p>${cell.replaced ? `<div class="t-xs muted mt-4">Re-read ${esc(rel(cell.replaced).toLowerCase())}</div>` : ''}`
-        + (cell.cite ? `<div class="t-label mt-24 mb-8">Evidence</div>${evidenceBody(pp.doc, cell.cite)}` : `<div class="mt-24">${alertBox('default', 'No passage found', `This paper doesn’t report ${esc(crit.label.toLowerCase())}. Check the document if you expected it.`)}</div>`);
+        + (cell.cite ? `<div class="t-label mt-24 mb-8">Evidence</div>${evidenceBody(pp.doc, cell.cite)}` : `<div class="mt-24">${alertBox('default', 'No passage found', `This source doesn’t report ${esc(crit.label.toLowerCase())}. Check the document if you expected it.`)}</div>`);
       ref = cell.cite ? `“${cell.cite.quote}” — ${pp.parsed ? `${pp.authors} (${pp.year}), ` : ''}${pp.title}, p. ${cell.cite.page}` : '';
       reread = ctx.canEdit ? iconBtn('retry', 'Re-read the passage and restate the finding', { size: 'sm', act: 'rv-replace', data: { w: w.id }, disabled: u.busy }) : '';
     }
@@ -269,7 +269,7 @@
   const hasYear = d => /\b(19|20)\d\d\s+[—–-]/.test(d.name);
   A['rv-add-paper'] = el => { S.ui.rvAdd = { q: '', picked: [], err: '' }; openModal('rv-add-paper', { w: el.dataset.w }); };
   M['rv-add-paper'] = p => {
-    const w = W(p.w); if (!w) return { title: 'Add papers', body: '' };
+    const w = W(p.w); if (!w) return { title: 'Add sources', body: '' };
     const sp = spaceById(w.space), f = ui('rvAdd', { q: '', picked: [], err: '' }), q = f.q.trim().toLowerCase(), n = f.picked.length;
     const docs = paperDocs(sp).filter(d => !w.data.papers.includes(d.id)).sort((a, b) => hasYear(b) - hasYear(a));
     const shown = docs.filter(d => !q || d.name.toLowerCase().includes(q) || (kbById(d.kb)?.name || '').toLowerCase().includes(q));
@@ -278,14 +278,14 @@
       return checkbox({ id: 'rv-add-' + d.id, checked: f.picked.includes(d.id), act: 'rv-add-paper-pick', data: { id: d.id }, label: `<span class="rv-opt">${fileIcon(d.type, 'sm')}<span class="rv-opt__text"><span class="rv-opt__title truncate">${esc(pp.title)}</span><span class="rv-opt__meta truncate">${meta}</span></span>${d.status !== 'ready' ? status('doc', d.status) : ''}</span>` });
     }).join('');
     const room = MAX_SOURCES - w.data.papers.length;
-    const picker = !docs.length ? emptyState({ icon: 'files', title: 'Every paper is already in this review', desc: 'Add documents to the space’s knowledge to compare more.', compact: true })
+    const picker = !docs.length ? emptyState({ icon: 'files', title: 'Every source is already in this review', desc: 'Add documents to the space’s knowledge to compare more.', compact: true })
       : rows ? `<div class="option-list rv-options mt-12" id="rv-add-list" data-keep-scroll role="group" aria-label="Documents">${rows}</div>` : `<p class="t-sm muted rv-options__empty">No documents match. Try another word.</p>`;
     return {
-      title: 'Add papers', icon: 'files', size: 'md',
+      title: 'Add sources', icon: 'files', size: 'md',
       desc: 'Each one is read for every criterion, and every cell cites its passage.',
       body: `${docs.length ? searchField({ id: 'rv-add-q', bind: 'rvAdd.q', value: f.q, placeholder: 'Search documents', size: 'md', full: true, live: true, autofocus: true, label: 'Search documents' }) : ''}${picker}${f.err ? `<div class="field-error mt-8" role="alert">${ic('alert-circle')}<span>${esc(f.err)}</span></div>` : ''}`,
-      footStart: n ? `${plural(n, 'paper')} selected · room for ${fmtNum(Math.max(0, room))}` : docs.length ? `Room for ${plural(Math.max(0, room), 'more paper')}.` : '',
-      foot: btn(docs.length ? 'Cancel' : 'Close', { v: 'ghost', act: 'close-modal' }) + (docs.length ? btn(n ? `Add ${plural(n, 'paper')}` : 'Add papers', { v: 'primary', icon: 'plus', act: 'rv-add-paper-go', data: { w: w.id } }) : ''),
+      footStart: n ? `${plural(n, 'source')} selected · room for ${fmtNum(Math.max(0, room))}` : docs.length ? `Room for ${plural(Math.max(0, room), 'more source')}.` : '',
+      foot: btn(docs.length ? 'Cancel' : 'Close', { v: 'ghost', act: 'close-modal' }) + (docs.length ? btn(n ? `Add ${plural(n, 'source')}` : 'Add sources', { v: 'primary', icon: 'plus', act: 'rv-add-paper-go', data: { w: w.id } }) : ''),
     };
   };
   A['rv-add-paper-pick'] = el => { const f = ui('rvAdd'), id = el.dataset.id; f.picked = f.picked.includes(id) ? f.picked.filter(x => x !== id) : [...f.picked, id]; f.err = ''; refreshLayer(); };
@@ -294,7 +294,7 @@
     const ids = f.picked.filter(id => !w.data.papers.includes(id));
     if (!ids.length) { f.err = 'Select at least one document.'; refreshLayer(); return; }
     const room = MAX_SOURCES - w.data.papers.length;
-    if (ids.length > room) { f.err = room > 0 ? `A review compares up to ${MAX_SOURCES} papers. Pick ${room} or fewer, or remove a paper first.` : `This review already compares ${MAX_SOURCES} papers. Remove one first.`; refreshLayer(); return; }
+    if (ids.length > room) { f.err = room > 0 ? `A review compares up to ${MAX_SOURCES} sources. Pick ${room} or fewer, or remove a source first.` : `This review already compares ${MAX_SOURCES} sources. Remove one first.`; refreshLayer(); return; }
     closeModal();
     const u = rvu(w); ids.forEach(id => { w.data.papers.push(id); u.pendingRows[id] = true; }); refresh();
     requestAnimationFrame(() => { const sc = $('#rv-scroll-' + w.id); sc?.closest('.rv')?.querySelector('.table__row:last-child')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); });
@@ -322,9 +322,9 @@
     const w = W(el.dataset.w), id = el.dataset.id; if (!w) return [];
     return [
       { label: 'Open document', icon: 'file-text', run: () => go('/doc/' + id) },
-      { label: 'Re-read this paper', icon: 'retry', run: async () => { const u = rvu(w); u.pendingRows[id] = true; refresh(); await sleep(900); w.data.cells[id] = Object.fromEntries(w.data.criteria.map(c => [c.id, finding(id, c.label)])); delete u.pendingRows[id]; flash(w, id); saveWork(w); refresh(); toast('Row refreshed from the paper'); } },
+      { label: 'Re-read this source', icon: 'retry', run: async () => { const u = rvu(w); u.pendingRows[id] = true; refresh(); await sleep(900); w.data.cells[id] = Object.fromEntries(w.data.criteria.map(c => [c.id, finding(id, c.label)])); delete u.pendingRows[id]; flash(w, id); saveWork(w); refresh(); toast('Row refreshed from the source'); } },
       { sep: true },
-      { label: 'Remove paper', icon: 'trash', danger: true, run: () => removePaper(w, id) },
+      { label: 'Remove source', icon: 'trash', danger: true, run: () => removePaper(w, id) },
     ];
   };
 
@@ -424,7 +424,7 @@
     const actions = can ? (stale ? btn('Update', { size: 'sm', icon: 'retry', act: 'rv-synth', data: { w: w.id } }) : '') + iconBtn('x', 'Remove synthesis', { size: 'sm', act: 'rv-synth-hide', data: { w: w.id } }) : '';
     // On phones the synthesis folds into one line so the comparison stays on the first screen.
     const toggle = `<button type="button" class="rv-synth__toggle" data-act="rv-synth-open" data-w="${w.id}" aria-expanded="${!!u.synthOpen}">${ic('chevron-down', 'disclosure__chevron')}<span class="sr-only">Show synthesis</span></button>`;
-    return `<section class="${cx('card rv-synth', u.synthOpen && 'is-open')}" aria-label="Synthesis"><div class="card__header"><span class="item-icon item-icon--accent" aria-hidden="true">${ic('sparkles')}</span><div class="grow"><h2 class="card__title">Synthesis</h2><p class="card__description">${stale ? 'The review changed since this was written.' : `From ${plural(w.data.papers.length, 'paper')} · ${rel(s.at)}`}</p></div><div class="row gap-4 none">${actions}${toggle}</div></div>
+    return `<section class="${cx('card rv-synth', u.synthOpen && 'is-open')}" aria-label="Synthesis"><div class="card__header"><span class="item-icon item-icon--accent" aria-hidden="true">${ic('sparkles')}</span><div class="grow"><h2 class="card__title">Synthesis</h2><p class="card__description">${stale ? 'The review changed since this was written.' : `From ${plural(w.data.papers.length, 'source')} · ${rel(s.at)}`}</p></div><div class="row gap-4 none">${actions}${toggle}</div></div>
       <div class="rv-synth__grid">${col('Consensus', 'check-circle', s.consensus)}${col('Disagreements', 'git-compare', s.disagreements)}${col('Gaps', 'target', s.gaps)}</div></section>`;
   }
   A['rv-synth-open'] = el => { const w = W(el.dataset.w); if (!w) return; const u = rvu(w); u.synthOpen = !u.synthOpen; refresh(); };

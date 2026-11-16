@@ -130,7 +130,7 @@ function topbar() {
   const near = [...parents].reverse().find(c => c.to);
   const back = near ? `<a class="button button--ghost button--icon-only button--sm button--muted topbar__back" href="#${near.to}" aria-label="Back to ${esc(near.label)}" data-tip="${esc(near.label)}">${ic('arrow-left')}</a>` : '';
   const trail = parents.length ? `<nav class="topbar__trail" aria-label="Breadcrumb">${parents.map(c => (c.to ? `<a class="topbar__crumb" href="#${c.to}">${esc(c.label)}</a>` : `<span class="topbar__crumb">${esc(c.label)}</span>`) + ic('chevron-right', 'i-xs topbar__chev')).join('')}</nav>` : '';
-  const titleEl = !title ? '' : own ? `<h1 class="topbar__title truncate">${esc(title)}</h1>` : `<span class="topbar__title topbar__title--peek truncate" aria-hidden="true">${esc(title)}</span>`;
+  const titleEl = !title ? '' : own ? (h.heading || `<h1 class="topbar__title truncate">${esc(title)}</h1>`) : `<span class="topbar__title topbar__title--peek truncate" aria-hidden="true">${esc(title)}</span>`;
   const context = `<div class="topbar__context">${back}${trail}${titleEl}${own && h.extra ? `<span class="topbar__extra">${h.extra}</span>` : ''}${own && h.meta ? `<span class="topbar__meta truncate">${h.meta}</span>` : ''}</div>`;
   const actions = (h.actions || '') + (S.topbarEnd || '');
   const unread = inApp ? X.inboxUnread?.() || 0 : 0;

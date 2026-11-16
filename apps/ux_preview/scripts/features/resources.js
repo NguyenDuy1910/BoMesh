@@ -8,7 +8,7 @@
    repeats what its surface shows and holds at most 8 entries. Pages (home.js,
    hub.js, library.js, reader.js, knowledge.js, spaces.js, governance.js)
    compose these; none re-implements them. Titles: docTitle(d) (catalog.js).
-   Exports: X.res.*. Actions: res-*, col-new, col-edit. Model: core/catalog.js. */
+   Exports: X.res.*. Actions: res-*, col-new. Model: core/catalog.js. */
 (() => {
   'use strict';
 
@@ -86,21 +86,23 @@
       bookmark stays visible. */
   function row(d, { q = '', act = 'res-open', data, active = false, note = '', trail = '', reveal = '', select, compact = false, hide = [], pos, read = false } = {}) {
     const r = res(d), toks = tokens(q), k = kindMeta(r.kind);
-    const snip = q ? resSnippet(d, q) : '';
+    // The best matching passage of the document's own text (never its running header: a title-only match shows the summary instead);
+    // the raw text excerpt only when the document has no passages.
+    const snip = !q ? '' : passages(d).length ? matchPassage(d, q)?.html || '' : resSnippet(d, q);
     const meta = [esc(k.label), !hide.includes('kb') && esc(r.kb?.name || ''), `Updated ${esc(rel(d.updated).replace(/^(Just now|Yesterday)$/, m => m.toLowerCase()))}`].filter(Boolean).join('<span class="res-dot" aria-hidden="true">·</span>');
     // The source glyph says where a document comes from; for an upload it adds nothing, so it's left out.
     const src = r.source.app && r.source.app !== 'upload' ? appIcon(r.source.app, 'sm') : '';
     const about = compact ? '' : snip || markTokens(blurb(d), toks);
-    const desc = about ? `<span class="res-row__summary">${about}</span>` : '';
+    const desc = about ? `<span class="res-row__summary" translate="no">${about}</span>` : '';
     const title = docTitle(d);
     const sel = select ? `<span class="res-row__check">${checkbox({ checked: !!ui(select).sel?.[d.id], act: 'sel-toggle', data: { ui: select, id: d.id }, aria: 'Select ' + title })}</span>` : '';
     const done = read ? `<span class="res-row__read">${ic('check', 'i-xs')}Read</span>` : '';
     return `<div class="${cx('res-row', active && 'is-active', compact && 'res-row--compact')}" role="button" tabindex="0" data-act="${act}" ${dataAttrs({ id: d.id, ...(data || {}) })} ${active ? 'aria-current="true"' : ''}>
       ${sel}${pos != null ? `<span class="res-row__pos num"><span class="sr-only">Item </span>${pos}</span>` : ''}<span class="res-row__lead">${fileIcon(d.type)}</span>
       <span class="res-row__body">
-        <span class="res-row__title"><span class="truncate">${markTokens(title, toks)}</span>${trustChip(d, { quiet: true })}${statusChip(d)}${done}</span>
+        <span class="res-row__title"><span class="truncate" translate="no">${markTokens(title, toks)}</span>${trustChip(d, { quiet: true })}${statusChip(d)}${done}</span>
         <span class="res-row__meta">${src}${meta}</span>
-        ${desc}${note ? `<span class="res-row__note">${ic('note', 'i-xs')}<span>${esc(note)}</span></span>` : ''}
+        ${desc}${note ? `<span class="res-row__note">${ic('note', 'i-xs')}<span translate="no">${esc(note)}</span></span>` : ''}
         ${compact ? '' : topicChips(d)}
       </span>
       <span class="res-row__trail">${trail}<span class="reveal-on-hover">${reveal}${saveBtn(d)}${moreBtn(d)}</span></span>
@@ -169,12 +171,12 @@
     const page = c.image ? `<div class="doc-cover__img"><div class="doc-cover__render"><div class="${cx('doc-page', c.image.cls)}">${c.image.html}</div></div></div>`
       : `<div class="doc-cover__text">${c.title ? `<p class="doc-cover__title">${esc(c.title)}</p>` : ''}${c.lines.map(l => `<p>${esc(l)}</p>`).join('')}</div>`;
     if (c.kind === 'IMAGE') return `<div class="doc-thumb doc-thumb--image" aria-hidden="true" inert><span class="doc-cover__pic" style="--hue:${c.image.hue}"></span></div>`;
-    if (c.kind === 'SLIDE') return `<div class="doc-thumb doc-thumb--slide" aria-hidden="true" inert><div class="doc-cover__slide">${c.image ? page : `<div class="doc-cover__text">${c.title ? `<p class="doc-cover__title">${esc(c.title)}</p>` : ''}${c.lines.length ? `<ul>${c.lines.slice(0, 4).map(l => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}</div>`}</div></div>`;
+    if (c.kind === 'SLIDE') return `<div class="doc-thumb doc-thumb--slide" aria-hidden="true" inert translate="no"><div class="doc-cover__slide">${c.image ? page : `<div class="doc-cover__text">${c.title ? `<p class="doc-cover__title">${esc(c.title)}</p>` : ''}${c.lines.length ? `<ul>${c.lines.slice(0, 4).map(l => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}</div>`}</div></div>`;
     if (c.kind === 'SHEET' && !c.image) {
       const cols = Math.max(...c.cells.map(r => r.length));
-      return `<div class="doc-thumb doc-thumb--sheet" aria-hidden="true" inert><table class="doc-cover__grid"><thead><tr><th></th>${L.slice(0, cols).split('').map(x => `<th>${x}</th>`).join('')}</tr></thead><tbody>${c.cells.map((r, i) => `<tr><th>${i + 1}</th>${Array.from({ length: cols }, (_, j) => `<td>${esc(r[j] || '')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+      return `<div class="doc-thumb doc-thumb--sheet" aria-hidden="true" inert translate="no"><table class="doc-cover__grid"><thead><tr><th></th>${L.slice(0, cols).split('').map(x => `<th>${x}</th>`).join('')}</tr></thead><tbody>${c.cells.map((r, i) => `<tr><th>${i + 1}</th>${Array.from({ length: cols }, (_, j) => `<td>${esc(r[j] || '')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
     }
-    return `<div class="${cx('doc-thumb doc-thumb--page', c.kind === 'TEXT' && 'doc-thumb--text')}" aria-hidden="true" inert><div class="doc-cover__paper">${page}</div></div>`;
+    return `<div class="${cx('doc-thumb doc-thumb--page', c.kind === 'TEXT' && 'doc-thumb--text')}" aria-hidden="true" inert translate="no"><div class="doc-cover__paper">${page}</div></div>`;
   }
   /** Card preview, from the list's own data — no content read per card. The cover image; else, when searching, the matching passage
       (SearchItems returns it); else the cover's text; else (no cover yet, or nothing to show) a tinted typed tile. Decorative: the card's
@@ -183,17 +185,22 @@
     const c = cover(d), toks = tokens(q);
     if (c?.image) return coverHtml(c);
     const hit = toks.length ? matchPassage(d, q) : null;
-    if (hit) return `<div class="doc-thumb doc-thumb--focus" aria-hidden="true" inert><div class="doc-focus"><div class="doc-focus__head"><span class="doc-focus__title">${esc(hit.heading || kindMeta(res(d).kind).label)}</span>${hit.where ? `<span class="doc-focus__page">${esc(hit.where)}</span>` : ''}</div><p>${hit.html}</p></div></div>`;
+    if (hit) return `<div class="doc-thumb doc-thumb--focus" aria-hidden="true" inert><div class="doc-focus"><div class="doc-focus__head"><span class="doc-focus__title"${hit.heading ? ' translate="no"' : ''}>${esc(hit.heading || kindMeta(res(d).kind).label)}</span>${hit.where ? `<span class="doc-focus__page">${esc(hit.where)}</span>` : ''}</div><p translate="no">${hit.html}</p></div></div>`;
     if (c) return coverHtml(c);
     // No cover: the format's tile on its tone; the card's head names the type and title right below.
     const tone = FMT_TONE[formatOf(d)[0]] || 'default';
     return `<div class="doc-thumb doc-thumb--blank doc-thumb--${tone}" aria-hidden="true">${fileIcon(d.type, 'lg')}</div>`;
   }
-  /** The passage that best matches a query: { where: "Page 2", heading, html }. */
+  /** The passage that best matches a query: { where: "Page 2", heading, html } — clipped around its first matching word, so the match
+      is always in view. */
   function matchPassage(d, q) {
     const toks = tokens(q);
     const b = toks.length ? matchBlock(passages(d), toks) : null;
-    return b ? { where: X.docFormat?.(d) !== 'sheet' ? `Page ${b.page}` : '', heading: b.heading, html: markTokens(clip(b.text, 220), toks) } : null;
+    if (!b) return null;
+    const low = fold(b.text), at = Math.min(...toks.map(t => low.indexOf(t)).filter(i => i >= 0));
+    const from = at > 100 ? b.text.lastIndexOf(' ', at - 60) + 1 : 0;
+    const text = (from > 0 ? '…' : '') + clip(b.text.slice(from), 220);
+    return { where: X.docFormat?.(d) !== 'sheet' ? `Page ${b.page}` : '', heading: b.heading, html: markTokens(text, toks) };
   }
   /** One line on what a document is for: its summary. Never a generated "Guide in …" filler. */
   const blurb = d => d.summary || '';
@@ -219,8 +226,8 @@
       <div class="doc-card__media">${preview(d, { q })}
         <div class="doc-card__actions">${saveBtn(d)}${moreBtn(d)}</div></div>
       <div class="doc-card__body">
-        <div class="doc-card__head">${fileIcon(d.type, 'sm')}<h3 class="doc-card__title">${markTokens(docTitle(d), toks)}</h3></div>
-        ${about ? `<p class="doc-card__about">${markTokens(about, toks)}</p>` : ''}
+        <div class="doc-card__head">${fileIcon(d.type, 'sm')}<h3 class="doc-card__title" translate="no">${markTokens(docTitle(d), toks)}</h3></div>
+        ${about ? `<p class="doc-card__about" translate="no">${markTokens(about, toks)}</p>` : ''}
         <div class="doc-card__meta">${meta ? `<span class="doc-card__where truncate">${meta}</span>` : ''}<span class="doc-card__when" data-tip="Updated ${esc(fmtDate(d.updated))}">${esc(rel(d.updated))}</span>${statusChip(d)}${trustMark(d)}</div>
       </div>
     </article>`;
@@ -369,7 +376,7 @@
     else if (removed) toast(removed === 1 ? 'Removed from the reading list' : `Removed from ${plural(removed, 'reading list')}`, { action: { label: 'Undo', run: undo } });
   };
 
-  /* ── Create / edit a reading list ── */
+  /* ── New reading list (an existing one changes in place on its page: library.js) ── */
   /** Who can see a reading list: only you, the members of one space you run, or everyone (admins). A space the reading list is already
       shared with stays selectable even if you no longer run it. */
   function colScopes(f) {
@@ -383,48 +390,49 @@
     ].filter(Boolean);
     return { opts, spaces, spName };
   }
-  function colEditState(c, ids = []) {
-    const share = c?.share || 'private', sp = share.startsWith('space:') ? share.slice(6) : linkableSpaces()[0]?.id || '';
-    return { id: c?.id || '', name: c?.name || '', desc: c?.desc || '', share, scope: share === 'workspace' ? 'workspace' : share.startsWith('space:') ? 'space' : 'private', space: sp, ids, touched: false, busy: false };
-  }
-  /** A['col-new']({dataset:{ids?}}) creates a reading list (optionally with resources); A['col-edit']({dataset:{id}}) edits one. */
-  A['col-new'] = el => { S.ui.colEdit = colEditState(null, (el?.dataset?.ids || '').split(',').filter(Boolean)); openModal('col-edit', {}); };
-  A['col-edit'] = el => { const c = collectionById(el.dataset.id); if (!canEditCollection(c)) return; S.ui.colEdit = colEditState(c); openModal('col-edit', {}); };
-  M['col-edit'] = () => {
-    const f = ui('colEdit'), err = f.touched && !f.name.trim() ? 'Enter a name.' : '', dis = f.busy ? 'disabled' : '';
+  /** The audiences a reading list's page offers in its Who can see it menu: [{ share, label, icon }]. Private means its owner only. */
+  X.res.colAudiences = c => {
+    const { spaces, spName } = colScopes({ share: c.share || 'private' });
+    return [
+      { share: 'private', label: c.owner === me().id ? 'Only me' : `Only ${actorName(c.owner)}`, icon: 'lock' },
+      ...spaces.map(s => ({ share: 'space:' + s.id, label: spName(s), icon: 'layers' })),
+      (isAdmin() || c.share === 'workspace') && { share: 'workspace', label: `Everyone in ${curWs().name}`, icon: 'globe' },
+    ].filter(Boolean);
+  };
+  /** A['col-new']({dataset:{ids?}}) creates a reading list, optionally with resources. */
+  A['col-new'] = el => {
+    S.ui.colNew = { name: '', share: 'private', scope: 'private', space: linkableSpaces()[0]?.id || '', ids: (el?.dataset?.ids || '').split(',').filter(Boolean), touched: false, busy: false };
+    openModal('col-new', {});
+  };
+  /** Only what a new list needs: its name and who can see it (Only me unless you choose). The description is added on its page. */
+  M['col-new'] = () => {
+    const f = ui('colNew'), err = f.touched && !f.name.trim() ? 'Enter a name.' : '', dis = f.busy ? 'disabled' : '';
     const { opts, spaces, spName } = colScopes(f);
     const spacePick = f.scope === 'space' && spaces.length > 1
-      ? `<div class="col-space">${field({ id: 'col-space', label: 'Which space?', control: select({ id: 'col-space', bind: 'colEdit.space', value: f.space, options: spaces.map(s => [s.id, spName(s)]), attrs: dis }) })}</div>` : '';
+      ? `<div class="col-space">${field({ id: 'col-space', label: 'Which space?', control: select({ id: 'col-space', bind: 'colNew.space', value: f.space, options: spaces.map(s => [s.id, spName(s)]), attrs: dis }) })}</div>` : '';
     const who = opts.length > 1
-      ? `<div class="field col-scope"><span class="label" id="col-scope-l">Who can see it</span>${choiceGroup({ name: 'col-scope', value: f.scope, act: 'col-edit-scope', options: opts, cols: opts.length })}${spacePick}</div>`
+      ? `<div class="field col-scope"><span class="label" id="col-scope-l">Who can see it</span>${choiceGroup({ name: 'col-scope', value: f.scope, act: 'col-new-scope', options: opts, cols: opts.length })}${spacePick}</div>`
       : `<p class="col-only">${ic('lock', 'i-sm')}<span>Only you can see it.</span></p>`;
     const n = f.ids.length;
     return {
-      size: 'md', title: f.id ? 'Edit reading list' : 'New reading list', icon: f.id ? 'pencil' : 'list',
-      desc: f.id ? 'Change its name, description or who can see it.' : n ? `A reading list that starts with ${plural(n, 'resource')}.` : 'A reading list you can order, annotate and share.',
-      body: `<div class="kn-form">${field({ id: 'col-name', label: 'Name', required: true, error: err, control: input({ id: 'col-name', bind: 'colEdit.name', value: f.name, placeholder: 'e.g. On-call reading list', autofocus: true, onEnter: 'col-edit-go', invalid: !!err, attrs: `maxlength="60" data-input="kn-revalidate" data-form="colEdit" ${dis}` }) })}
-        ${field({ id: 'col-desc', label: 'Description', optional: true, control: textarea({ id: 'col-desc', bind: 'colEdit.desc', value: f.desc, rows: 2, placeholder: 'What it’s for and who should read it', attrs: `maxlength="200" ${dis}` }) })}
+      size: 'md', title: 'New reading list', icon: 'list',
+      desc: n ? `A reading list that starts with ${plural(n, 'resource')}.` : 'A reading list you can order, annotate and share.',
+      body: `<div class="kn-form">${field({ id: 'col-name', label: 'Name', required: true, error: err, control: input({ id: 'col-name', bind: 'colNew.name', value: f.name, placeholder: 'e.g. On-call reading list', autofocus: true, onEnter: 'col-new-go', invalid: !!err, attrs: `maxlength="60" data-input="kn-revalidate" data-form="colNew" ${dis}` }) })}
         ${who}</div>`,
       footStart: 'Documents keep their own access.',
-      foot: btn('Cancel', { v: 'ghost', act: 'close-modal', disabled: f.busy }) + btn(f.id ? 'Save changes' : 'Create reading list', { v: 'primary', icon: f.id ? 'check' : 'plus', act: 'col-edit-go', loading: f.busy }),
+      foot: btn('Cancel', { v: 'ghost', act: 'close-modal', disabled: f.busy }) + btn('Create reading list', { v: 'primary', icon: 'plus', act: 'col-new-go', loading: f.busy }),
     };
   };
-  A['col-edit-scope'] = el => { ui('colEdit').scope = el.dataset.value; refreshLayer(); };
-  A['col-edit-go'] = async () => {
-    const f = ui('colEdit'); if (f.busy) return;
+  A['col-new-scope'] = el => { ui('colNew').scope = el.dataset.value; refreshLayer(); };
+  A['col-new-go'] = async () => {
+    const f = ui('colNew'); if (f.busy) return;
     f.touched = true;
     if (!f.name.trim()) { refreshLayer(); $('#col-name')?.focus(); return; }
     const { spaces } = colScopes(f);
     const share = f.scope === 'space' ? 'space:' + (spaces.some(s => s.id === f.space) ? f.space : spaces[0]?.id) : f.scope === 'workspace' ? 'workspace' : 'private';
     f.busy = true; S.modal.props.guard = true; refreshLayer(); await sleep(400);
-    if (f.id) {
-      const c = collectionById(f.id), prev = { name: c.name, desc: c.desc, share: c.share, updated: c.updated };
-      Object.assign(c, { name: f.name.trim(), desc: f.desc.trim(), share, updated: Date.now() });
-      audit('Updated a reading list', c.name); closeModal(); refresh();
-      toast('Reading list saved', { action: { label: 'Undo', run: () => { Object.assign(c, prev); persist(); refresh(); } } }); return;
-    }
-    const c = { id: uid('col'), name: f.name.trim(), desc: f.desc.trim(), owner: me().id, share, created: Date.now(), updated: Date.now(), items: f.ids.map(doc => ({ doc, added: Date.now() })) };
-    (D.collections ??= []).unshift(c); audit('Created a reading list', c.name);
+    const c = { id: uid('col'), name: f.name.trim(), desc: '', owner: me().id, share, created: Date.now(), updated: Date.now(), items: f.ids.map(doc => ({ doc, added: Date.now() })) };
+    (D.collections ??= []).unshift(c); audit('Created a reading list', c.name); persist();
     closeModal(); go('/knowledge/lists/' + c.id); toast(c.items.length ? `Created “${c.name}”` : `Created “${c.name}”. Add resources to start the list.`);
   };
 

@@ -1202,8 +1202,8 @@ async def _(x: Ctx, i: int) -> Call:
 
 @spec("ImportTopics")
 async def _(x: Ctx, i: int) -> Call:
-    rows = [{"code": f"import-domain-{d}", "name": f"Import domain {d}"} for d in range(10)]
-    rows += [{"code": f"import-topic-{d}-{t}", "name": f"Import topic {d}.{t}", "parentCode": f"import-domain-{d}",
+    rows = [{"domain": f"Import domain {d}"} for d in range(10)]
+    rows += [{"domain": f"Import domain {d}", "topic": f"Import topic {d}.{t}",
               "keywords": ["a", "b"]} for d in range(10) for t in range(20)]
     return Call("POST", f"{x.ws}/topics:import", json={"rows": rows, "mode": "MERGE", "validateOnly": True})
 

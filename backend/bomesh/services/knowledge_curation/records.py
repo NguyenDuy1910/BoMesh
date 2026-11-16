@@ -207,11 +207,13 @@ class TopicRecord:
 
 @dataclass(frozen=True, slots=True)
 class TopicImportRow:
-    """One ImportTopics row; ``None`` = the column is absent (left unchanged)."""
+    """One ImportTopics row, by display name: ``topic`` ``None`` = the row is its
+    ``domain``; ``name`` is the topic resource name from an export (unparsed: an
+    unknown one skips the row). Other ``None`` = the column is absent (left unchanged)."""
 
-    code: str
-    name: str
-    parent_code: str | None = None
+    domain: str
+    topic: str | None = None
+    name: str | None = None
     description: str | None = None
     keywords: tuple[str, ...] | None = None
     synonyms: tuple[str, ...] | None = None
@@ -219,10 +221,25 @@ class TopicImportRow:
 
 
 @dataclass(frozen=True, slots=True)
+class TopicImportChange:
+    """A topic or domain an import creates, updates or archives, by code; ``domain`` is
+    its domain's display name after the import (topics only), ``row`` the 1-based row
+    that caused it, ``changes`` what an update changes (``RENAMED``, ``MOVED``, …)."""
+
+    code: str
+    kind: str
+    display_name: str
+    domain: str | None = None
+    row: int | None = None
+    changes: tuple[str, ...] = ()
+    previous_display_name: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class TopicImportResult:
-    created: tuple[str, ...]
-    updated: tuple[str, ...]
-    archived: tuple[str, ...]
+    created: tuple[TopicImportChange, ...]
+    updated: tuple[TopicImportChange, ...]
+    archived: tuple[TopicImportChange, ...]
     unchanged_count: int
     #: ``(1-based row, reason)``.
     skipped: tuple[tuple[int, str], ...]

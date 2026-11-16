@@ -18,6 +18,7 @@
 .rdr-head__meta .res-dot { color: var(--muted); }
 .rdr-hits { display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 12px; border-radius: var(--radius-xl); background: var(--evidence); font-size: 13px; font-weight: 500; }
 .rdr-hits .button--ghost { --button-bg-hover: var(--evidence-strong); }
+.rdr-hits__n { flex: none; font-variant-numeric: tabular-nums; }
 
 /* Body: canvas · rail */
 .rdr-body { position: relative; flex: 1 1 auto; min-height: 0; display: flex; }
@@ -246,6 +247,8 @@
   .rdr-head__title { font-size: 15px; line-height: 22px; }
   .topbar__actions .res-save:not(.is-on) { background: transparent; box-shadow: none; }
   .rdr-back { margin-left: -8px; min-width: 40px; height: 40px; }
+  /* One way back: when the Reader offers its own (where you came from), the top row's crumb-back would be a second arrow. */
+  body:has(.rdr-back) .topbar__back { display: none; }
   .rdr.is-collapsed .rdr-head { margin-top: calc(-1 * var(--rdr-head-h, 53px)); }
   .doc-viewer__zoom { display: none; }
   .doc-viewer__bar { justify-content: center; }

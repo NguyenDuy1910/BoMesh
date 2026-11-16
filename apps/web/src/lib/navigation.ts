@@ -112,7 +112,7 @@ const QUALITY_PARTS = ["reverify", "details", "duplicates"];
 const OLD_LIFE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   review: { view: "review" },
   changes: { view: "review" },
-  attention: { view: "issues" },
+  attention: { view: "processing" },
   publishing: { view: "all", processing: "processing" },
   published: { view: "all", pub: "published" },
   closed: { view: "all", pub: "unpublished" },
@@ -121,17 +121,18 @@ const OLD_LIFE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
 
 /**
  * Old Knowledge Studio addresses → the current one (preview `features/curation.js` `legacyOf`), null when `q` is
- * current. Review, Quality, Knowledge flow and their queues land in Documents' views (`view=review|issues|quality`,
- * Quality's `part=`); Taxonomy, Master data and classification rules in Topics; corrections, confirmations and
- * proposals in Topics → Suggestions; Library and All in Documents → All; Bases in Collections. The Studio replaces the
- * address with the result (no history entry).
+ * current. Review, Quality, Issues, Knowledge flow and their queues land in Documents' views (`view=all|processing|
+ * review`; Quality is All's `quality=` filter, Issues is Processing); Taxonomy, Master data and classification rules in
+ * Topics; corrections, confirmations and proposals in Topics → Suggestions; Library and All in Documents → All; Bases in
+ * Collections. The Studio replaces the address with the result (no history entry).
  */
 export function studioAddress(q: Readonly<Record<string, string>>): Record<string, string> | null {
   const life = q.life ?? "";
   const learn = q.node === "__learn" || q.node === "__proposed";
-  if (!OLD_TABS.includes(q.tab ?? "") && !q.queue && !life && !q.stage && !q.seg && !q.mode && !learn) return null;
+  const oldView = q.tab === "documents" && (q.view === "issues" || q.view === "quality");
+  if (!OLD_TABS.includes(q.tab ?? "") && !q.queue && !life && !q.stage && !q.seg && !q.mode && !learn && !oldView) return null;
   const n: Record<string, string> = { ...q };
-  for (const k of ["mode", "queue", "stage", "seg", "life"]) delete n[k];
+  for (const k of ["mode", "queue", "stage", "seg", "life", "part"]) delete n[k];
   if (life) return { ...n, tab: "documents", ...(OLD_LIFE[life] ?? { view: "all" }) };
   if (q.tab === "bases") return { ...n, tab: "collections" };
   const queue = q.queue || q.seg || (q.tab === "details" || q.tab === "duplicates" ? q.tab : "");
@@ -141,11 +142,11 @@ export function studioAddress(q: Readonly<Record<string, string>>): Record<strin
     return { ...n, tab: "topics", view: suggestions ? "suggestions" : "topics" };
   }
   n.tab = "documents";
-  if (["reverify", "details", "duplicates", "quality", "upkeep"].includes(queue) || q.tab === "quality" || (queue === "review" && q.tab !== "review")) {
-    n.view = "quality";
-    if (QUALITY_PARTS.includes(queue)) n.part = queue;
-    else if (queue === "review") n.part = "reverify";
-  } else if (queue === "problems" || queue === "issues" || q.stage === "issue") n.view = "issues";
+  const part = QUALITY_PARTS.find((p) => p === q.part || p === queue);
+  if (q.view === "quality" || ["reverify", "details", "duplicates", "quality", "upkeep"].includes(queue) || q.tab === "quality" || (queue === "review" && q.tab !== "review")) {
+    n.view = "all";
+    n.quality = part ?? "reverify";
+  } else if (q.view === "issues" || queue === "problems" || queue === "issues" || q.stage === "issue") n.view = "processing";
   else if (["submissions", "batches", "publish"].includes(queue) || q.stage === "decide" || q.tab === "review" || q.mode === "needs") n.view = "review";
   else n.view = "all";
   return n;

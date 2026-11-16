@@ -110,7 +110,7 @@ Box sizes never change, so nothing moves when the level changes.
 | ⌘/Ctrl + scroll · trackpad pinch · two-finger pinch | Zoom around the pointer (20–200 %) |
 | Keyboard on the canvas | Arrows pan (Shift: further), + / − zoom, 0 = 100 %, 1 = fit, Esc clears the selection |
 | Hover a node | Its path back to the workspace lights up |
-| Select a box | Highlight with its path and subtree; the rest dims; the **inspector** opens (level, name, path, counts, description, the first five documents here, Expand/Collapse, Focus, Open in Knowledge, and for its editors *Edit in Studio* → that collection's Contents on that folder). Select again, ×, Esc or a click on empty canvas closes it |
+| Select a box | Highlight with its path and subtree; the rest dims; the **inspector** opens (header: level, name, a quiet *Focus* icon that centres the box, ×; then path, counts, description, the first five documents here; one action, *Open in Knowledge* (secondary: its collection in Browse), and for its editors the link *Edit in Studio* → that collection's Contents on that folder). Folding stays on the box's own handle (no Expand/Collapse button repeating it). Select again, ×, Esc or a click on empty canvas closes it |
 | A box's handle | Fold / open that branch only |
 | A document (node, cluster row or inspector row) | The existing document preview (the Reader from there) |
 | *+N more* | The cluster shows all its documents in place |

@@ -18,7 +18,8 @@
   /* ── Access requests to a collection (admins: all; owners: their bases) ── */
   function accessItem(r) {
     const kb = kbById(r.kb);
-    return { id: 'req-' + r.id, icon: 'user-plus', tone: 'warn', title: `${actorName(r.user)} requested ${r.role === 'editor' ? 'edit' : 'view'} access to ${kb?.name || 'a collection'}`, body: r.note ? `“${r.note}”` : 'No message.', at: r.at, to: isAdmin() ? '/people?tab=requests' : kbManageHref({ id: r.kb }, 'access'), kind: 'request', req: r.id };
+    const who = actorName(r.user), where = kb?.name || 'a collection';
+    return { id: 'req-' + r.id, icon: 'user-plus', tone: 'warn', title: r.role === 'editor' ? `${who} requested edit access to ${where}` : `${who} requested view access to ${where}`, body: r.note ? `“${r.note}”` : 'No message.', at: r.at, to: isAdmin() ? '/people?tab=requests' : kbManageHref({ id: r.kb }, 'access'), kind: 'request', req: r.id };
   }
 
   /* ── Spaces: announcements from the last 7 days ── */
@@ -43,8 +44,9 @@
     return (D.events || []).filter(ev => ev.at > t && ev.at - t <= 3 * DAY && eventVisible(ev)).map(ev => {
       const sp = spaceById(ev.space);
       const to = ev.work && hasModule('work') ? '/work/' + ev.work : ev.doc ? '/doc/' + ev.doc : ev.requestType && hasModule('requests') ? '/requests/new?type=' + ev.requestType : '/space/' + ev.space;
-      const verb = { quiz: 'closes', exam: 'is', meeting: 'is' }[ev.kind] || 'is due';
-      return { id: 'due-' + ev.id, icon: 'calendar', tone: 'warn', title: `${ev.title} ${verb} ${relFuture(ev.at)}`, body: sp?.name || '', at: Math.min(t, ev.at - 3 * DAY), due: ev.at, when: `Due ${fmtDateTime(ev.at)}`, to, needs: true };
+      // The event's own title; when it is, in words that fit its kind (a meeting isn't "due").
+      const when = { quiz: 'Closes {0}', exam: 'Starts {0}', meeting: 'Starts {0}' }[ev.kind] || 'Due {0}';
+      return { id: 'due-' + ev.id, icon: 'calendar', tone: 'warn', title: ev.title, body: sp?.name || '', at: Math.min(t, ev.at - 3 * DAY), due: ev.at, when: when.replace('{0}', relFuture(ev.at)), to, needs: true };
     });
   }
 
@@ -63,7 +65,9 @@
       if (w.kind === 'quiz' && w.owner === me().id && w.status === 'published' && st?.attempts > 0) {
         const qs = w.data.questions || [], by = st.byQuestion || [];
         const worst = by.length ? by.indexOf(Math.min(...by)) : -1;
-        out.push({ id: 'quizres-' + w.id, icon: 'chart', tone: 'ok', title: `Results are in for ${w.title}`, body: `${plural(st.attempts, 'attempt')} · average ${st.avg}/${qs.length}${worst >= 0 && qs[worst] ? ` · most missed: “${qs[worst].q}” (${Math.round(by[worst] * 100)}% correct)` : ''}`, at: w.updated, to: '/work/' + w.id });
+        const avg = `${st.avg}/${qs.length}`, tries = plural(st.attempts, 'attempt');
+        const body = worst >= 0 && qs[worst] ? `Average ${avg} from ${tries} · Most missed: “${qs[worst].q}” (${Math.round(by[worst] * 100)}% correct)` : `Average ${avg} from ${tries}`;
+        out.push({ id: 'quizres-' + w.id, icon: 'chart', tone: 'ok', title: `Results are in for ${w.title}`, body, at: w.updated, to: '/work/' + w.id });
       }
       if (w.owner === me().id && ['draft', 'changes'].includes(w.status) && sp) {
         const ev = (D.events || []).find(e => e.work === w.id && e.at > now());
@@ -175,15 +179,13 @@
     return item({
       lead: itemIcon(i.icon || 'bell', TONE[i.tone] ?? '', 'sm'),
       title: esc(i.title),
-      desc: `<span class="truncate inbox-line">${esc(i.body || '')}</span><span class="inbox-time">${esc(i.when || rel(i.at))}</span>${decide ? `<span class="inbox-decide">${decide}</span>` : ''}`,
+      desc: `<span class="truncate inbox-line">${esc(i.body || '')}</span><span class="inbox-time" data-tip="${esc(fmtDateTime(i.due ?? i.at))}">${esc(i.when || rel(i.at))}</span>${decide ? `<span class="inbox-decide">${decide}</span>` : ''}`,
       trail: `<span class="reveal-on-hover">${iconBtn('x', 'Dismiss', { size: 'sm', act: 'inbox-dismiss', data: { id: i.id } })}</span>`,
       act: 'inbox-open', data: { id: i.id }, unread: isUnread(i), cls: 'inbox-item', lines: 2,
     });
   }
-  function caughtUpText() {
-    const what = [hasModule('spaces') && 'deadlines and announcements', hasModule('requests') && 'requests', isAdmin() ? 'syncs and access requests' : 'shared knowledge'].filter(Boolean);
-    return `Updates about ${what.length > 1 ? what.slice(0, -1).join(', ') + ' and ' + what.at(-1) : what[0]} show up here.`;
-  }
+  /** One sentence for every workspace and persona (a per-module list read as a stitched-together phrase, especially in Vietnamese). */
+  const caughtUpText = () => 'What needs you and updates about your work show up here.';
 
   /** The bell's popover: Needs you (soonest due, or longest waiting, first), then Updates (newest first). Mark all read and
       Notification settings sit in its footer. Opening a row goes to its object and closes the popover. */

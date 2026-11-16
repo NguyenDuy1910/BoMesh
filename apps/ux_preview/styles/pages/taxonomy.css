@@ -1,6 +1,6 @@
 /* Knowledge Studio → Topics (features/masterdata.js): the domain → topic tree, the topic detail and its classification
    signals, keywords from corrections (shown in Suggestions) and the prompt drawer.
-   Prefixes: tx-, md-learn, md-prompt. Tokens only. Shared pieces (.md-code, .md-props, import dialog) live in studio.css. */
+   Prefixes: tx-, md-learn, md-prompt. Tokens only. Shared pieces (.md-props, import dialog) live in studio.css. */
 
 .tx { display: flex; flex-direction: column; gap: 12px; }
 
@@ -49,25 +49,32 @@
 .tx-item { outline: none; }
 .tx-item--prop { margin-bottom: 4px; }
 .tx-item--archived { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--separator); }
-.tx-row { display: flex; align-items: center; gap: 6px; min-height: 32px; padding: 4px 8px; border-radius: var(--radius-lg); font-size: 13px; line-height: 18px; cursor: pointer; user-select: none; transition: background-color var(--dur-fast); }
+/* One row grid for every level: [chevron 16] [icon 16] [name] [trailing], 8px gaps, 32px tall. Topic rows keep an empty
+   chevron slot and indent by chevron + gap (24px), so a topic's icon sits under its domain's name. */
+.tx-row { display: grid; grid-template-columns: 16px 16px minmax(0, 1fr) auto; align-items: center; column-gap: 8px; height: 32px; padding: 0 8px; border-radius: var(--radius-lg); font-size: 13px; line-height: 18px; cursor: pointer; user-select: none; transition: background-color var(--dur-fast); }
 .tx-row:hover { background: var(--default-soft); }
 .tx-row.is-selected { background: var(--accent-soft); color: var(--accent-soft-foreground); }
 .tx-item:focus-visible > .tx-row { outline: 2px solid var(--focus); outline-offset: -2px; }
-.tx-group .tx-row { padding-left: 30px; }
-.tx-row__chev { display: inline-flex; flex: none; margin: -4px 0 -4px -4px; padding: 4px; border-radius: var(--radius-sm); color: var(--muted); }
-.tx-row__chev:hover { background: var(--default-soft-hover); color: var(--foreground); }
-.tx-row__icon { flex: none; color: var(--accent); }
-.tx-item--archived .tx-row__icon { color: var(--muted); }
-.tx-row__code { flex: none; min-width: 48px; font-family: var(--font-mono); font-size: 11px; line-height: 16px; color: var(--muted); }
-.tx-row.is-selected .tx-row__code { color: inherit; opacity: .8; }
-.tx-row__name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tx-group .tx-row { padding-left: 32px; }
+.tx-row__chev { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: var(--radius-sm); color: var(--muted); }
+.tx-row__chev:not(.tx-row__chev--none):hover { background: var(--default-soft-hover); color: var(--foreground); }
+.tx-row__icon { width: 16px; height: 16px; color: var(--accent); }
+.tx-row__icon--topic, .tx-item--archived .tx-row__icon { color: var(--muted); }
+.tx-row.is-selected .tx-row__icon { color: var(--accent); }
+.tx-row__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tx-row__name--domain { font-weight: 600; }
-.tx-row__count { flex: none; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tx-row__trail { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; }
+.tx-row__count { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
+.tx-row__count:empty { display: none; }
 .tx-row.is-selected .tx-row__count { color: inherit; }
 .tx-row__dot { flex: none; width: 6px; height: 6px; border-radius: var(--radius-full); background: var(--warning); }
 /* No keywords: a hollow warning ring, so it never reads as the filled "unsaved" dot. */
 .tx-row__warn { flex: none; width: 7px; height: 7px; border-radius: var(--radius-full); box-shadow: inset 0 0 0 1.5px var(--warning); }
-.tx-item.is-new .tx-row__name { font-style: italic; }
+/* Domain rows: hover/focus swaps the count for "+ Add topic to {domain}". */
+.tx-row__add { display: none; align-items: center; justify-content: center; width: 22px; height: 22px; margin: -3px -4px -3px 0; padding: 0; border: 0; border-radius: var(--radius-sm); background: none; color: var(--muted); cursor: pointer; }
+.tx-row__add:hover { background: var(--default-soft-hover); color: var(--foreground); }
+.tx-row:hover .tx-row__add, .tx-item:focus-visible > .tx-row .tx-row__add { display: inline-flex; }
+.tx-row:hover .tx-row__count:has(~ .tx-row__add), .tx-item:focus-visible > .tx-row .tx-row__count:has(~ .tx-row__add) { display: none; }
 
 /* Detail */
 .tx-main { min-width: 0; }
@@ -78,28 +85,35 @@
 .tx-head__title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
 .tx-head__title { margin: 0; min-width: 0; font-size: 18px; line-height: 26px; font-weight: 600; overflow-wrap: anywhere; }
 .tx-head__meta { margin: 0; font-size: 13px; line-height: 19px; color: var(--muted); overflow-wrap: anywhere; }
-.tx-head__domain { padding: 0; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; text-decoration: underline; text-decoration-color: var(--separator); text-underline-offset: 3px; }
-.tx-head__domain:hover { color: var(--foreground); }
+/* A topic's domain: a quiet menu button (move to another domain). */
+.tx-head__domain { display: inline-flex; align-items: center; gap: 2px; margin: -2px -4px; padding: 2px 4px; border: 0; border-radius: var(--radius-sm); background: none; font: inherit; color: inherit; cursor: pointer; }
+.tx-head__domain:hover, .tx-head__domain[aria-expanded="true"] { background: var(--default-soft); color: var(--foreground); }
+.tx-head__domain:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
 .tx-head__acts { display: flex; align-items: center; gap: 4px; flex: none; }
 .tx-review { color: var(--accent); }
-
-.tx-ident { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 2fr); gap: 12px; align-items: start; padding: 14px; border-radius: var(--radius-xl); background: var(--surface-secondary); }
-.tx-ident .field { margin: 0; }
 
 .tx-sec { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .tx-sec__head { display: flex; align-items: center; gap: 8px; min-height: 28px; }
 .tx-sec__title { flex: 1 1 auto; margin: 0; font-size: 14px; line-height: 20px; font-weight: 600; }
-.tx-sec__title .label__opt { margin-left: 6px; font-weight: 400; }
 .tx-sec__meta { font-size: 12px; color: var(--muted); }
 .tx-sec__desc { margin: -4px 0 2px; font-size: 13px; line-height: 19px; color: var(--muted); max-width: 72ch; }
 .tx-sec__empty { margin: 0; font-size: 13px; line-height: 19px; color: var(--muted); }
 .tx-sec > .button { align-self: flex-start; }
+
+/* Fine-tune classification (optional): guidance, examples, rules behind one disclosure; closed, a summary of what's set */
+.tx-adv { display: flex; flex-direction: column; gap: 16px; padding: 4px 0; border-top: 1px solid var(--separator); border-bottom: 1px solid var(--separator); }
+.tx-adv__h { margin: 0; font: inherit; }
+.tx-adv__toggle { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; width: 100%; min-height: 40px; padding: 6px 8px; margin: 0 -8px; border: 0; border-radius: var(--radius-lg); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; box-sizing: content-box; }
+.tx-adv__toggle:hover { background: var(--default-soft); }
+.tx-adv__toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.tx-adv__chev { flex: none; color: var(--muted); }
+.tx-adv__title { font-size: 14px; line-height: 20px; font-weight: 600; }
+.tx-adv__title .label__opt { margin-left: 6px; font-weight: 400; }
+.tx-adv__sum { margin-left: auto; font-size: 12.5px; line-height: 18px; color: var(--muted); }
+.tx-adv__body { display: flex; flex-direction: column; gap: 20px; padding: 0 0 12px; }
 .tx-text { margin: 0; font-size: 14px; line-height: 21px; }
 
-/* Keywords & synonyms: chip fields */
-.tx-terms { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
-.tx-terms__group { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.tx-terms__label { font-size: 12px; line-height: 16px; font-weight: 500; color: var(--muted); }
+/* Keywords: one chip field */
 .tx-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-height: 40px; padding: 5px; border-radius: var(--field-radius); background: var(--field-background); box-shadow: var(--field-shadow), inset 0 0 0 1px var(--field-border); }
 .tx-chips:focus-within { box-shadow: 0 0 0 2px var(--focus-halo), inset 0 0 0 1px var(--focus); }
 .tx-chips--docs { min-height: 0; padding: 0; background: none; box-shadow: none; }
@@ -107,7 +121,6 @@
 .tx-chips__input.input { flex: 1 1 120px; min-width: 120px; height: 28px; border: 0; background: transparent; box-shadow: none; padding: 0 4px; }
 .tx-chips__input.input:focus { box-shadow: none; outline: none; }
 .tx-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; height: 26px; padding: 0 2px 0 8px; border-radius: var(--radius-md); background: var(--default); color: var(--default-foreground); font-size: 12.5px; line-height: 16px; }
-.tx-chip--syn { background: transparent; box-shadow: inset 0 0 0 1px var(--border); border: 1px dashed transparent; }
 .tx-chip--doc { height: 30px; padding-left: 4px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--card-border); }
 .tx-chip__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tx-chip__x { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 20px; height: 20px; padding: 0; border: 0; border-radius: var(--radius-sm); background: none; color: var(--muted); cursor: pointer; }
@@ -175,9 +188,6 @@
 
 @container app (max-width: 1023px) {
   .tx-panes { grid-template-columns: 232px minmax(0, 1fr); gap: 16px; }
-  .tx-ident { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  .tx-ident .field:first-child { grid-column: 1 / -1; }
-  .tx-terms { grid-template-columns: minmax(0, 1fr); }
 }
 /* Phones: one pane at a time — the tree, or the picked node with Back. */
 @container app (max-width: 679px) {
@@ -186,7 +196,6 @@
   .tx--picked .tx-side, .tx:not(.tx--picked) .tx-main { display: none; }
   .tx--picked .tx-sum { display: none; }
   .tx-back { display: block; margin: -8px 0 -8px -8px; }
-  .tx-ident { grid-template-columns: minmax(0, 1fr); padding: 12px; }
   .tx-dist__row { grid-template-columns: minmax(0, 1fr) 72px 36px; }
   .tx-test__form { flex-wrap: wrap; }
   .tx-test__q { flex-basis: 100%; }

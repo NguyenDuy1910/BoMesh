@@ -303,16 +303,16 @@
     }
     const n = v.n, label = levelOf(n, n.depth), path = (v.anc || []).filter(id => id !== 'ws').map(id => all.get(id)?.n?.name).filter(Boolean);
     const docs = n.docs.slice(0, 5);
+    // One way on: open it in Knowledge. Folding stays on the box's own handle; centring is a quiet icon by Close.
+    const focus = iconBtn('target', 'Focus', { size: 'sm', act: 'atlas-focus', data: { id: v.id } });
     return `<aside class="atlas-inspector" style="${toneStyle(v.tone)}" aria-label="Details">
-      <div class="atlas-inspector__head"><span class="an__icon">${ic(levelIcon(label, n.depth))}</span><div class="grow"><div class="an__type">${esc(label)}</div><h2 class="atlas-inspector__title" translate="no">${esc(n.name)}</h2></div>${close}</div>
+      <div class="atlas-inspector__head"><span class="an__icon">${ic(levelIcon(label, n.depth))}</span><div class="grow"><div class="an__type">${esc(label)}</div><h2 class="atlas-inspector__title" translate="no">${esc(n.name)}</h2></div>${focus}${close}</div>
       ${path.length ? `<p class="atlas-inspector__path" translate="no">${path.map(esc).join(' › ')}</p>` : ''}
       <p class="atlas-inspector__stats num">${esc(plural(n.count, 'document'))}${n.kids.length ? ` · ${esc(plural(n.kids.length, 'folder'))}` : ''}</p>
       ${n.desc ? `<p class="atlas-inspector__desc" translate="no">${esc(n.desc)}</p>` : ''}
       ${docs.length ? `<div class="atlas-inspector__sec"><div class="atlas-inspector__label">${n.docs.length > docs.length ? `Here · ${esc(plural(n.docs.length, 'document'))}` : 'Here'}</div>${docs.map(d => docRow(d, [])).join('')}</div>` : ''}
       <div class="atlas-inspector__actions">
-        ${v.hasKids ? btn(v.open ? 'Collapse' : 'Expand', { size: 'sm', icon: v.open ? 'chevrons-down-up' : 'chevrons', act: 'atlas-toggle', data: { id: v.id } }) : ''}
-        ${btn('Focus', { size: 'sm', icon: 'target', act: 'atlas-focus', data: { id: v.id } })}
-        ${linkBtn('Open in Knowledge', { href: kbHref(n.kb), icon: 'arrow-right', size: 'sm' })}
+        ${btn('Open in Knowledge', { v: 'secondary', size: 'sm', iconRight: 'arrow-right', href: kbHref(n.kb) })}
         ${canEditKb(n.kb) ? linkBtn('Edit in Studio', { href: kbContentsHref(n.kb, n.root ? '' : n.id), icon: 'pencil', size: 'sm' }) : ''}
       </div></aside>`;
   }

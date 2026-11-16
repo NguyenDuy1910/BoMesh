@@ -174,14 +174,15 @@
     valid.forEach(x => { f.meta[x.id] ??= suggest(x, f.kb); });
     f.step = 'details'; refreshLayer();
   }
+  /** One progress indicator (the status line); the files it's reading are listed plainly, and the next step waits, disabled. */
   function analyzingDialog(f) {
     const valid = f.files.filter(x => !x.err), ws = curWs().name;
-    const rows = valid.map(x => item({ lead: fileIcon(x.type), title: esc(x.name), desc: fmtSize(x.size), trail: spinner('sm') }));
+    const rows = valid.map(x => item({ lead: fileIcon(x.type), title: esc(x.name), desc: fmtSize(x.size) }));
     return {
       size: 'lg', icon: 'sparkles', title: 'Analyzing',
       desc: 'The assistant suggests a title, type, topics and collection. You check them next.',
-      body: `<div class="ctb-analyzing" role="status" aria-live="polite">${spinner()}<span>Reading the file and matching it against ${esc(ws)}’s topics…</span></div>${list(rows)}`,
-      foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn('Check the details', { v: 'primary', loading: true, disabled: true }),
+      body: `<div class="ctb-analyzing" role="status" aria-live="polite">${spinner()}<span>${valid.length > 1 ? `Reading the files and matching them against ${esc(ws)}’s topics…` : `Reading the file and matching it against ${esc(ws)}’s topics…`}</span></div>${list(rows)}`,
+      foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn('Check the details', { v: 'primary', iconRight: 'arrow-right', disabled: true }),
     };
   }
   /** One file's suggestions as an editable form. */

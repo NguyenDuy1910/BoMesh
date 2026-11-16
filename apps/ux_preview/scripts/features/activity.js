@@ -68,10 +68,11 @@
       foot: related ? btn(related.label, { v: 'primary', iconRight: 'arrow-right', act: related.act, data: related.data }) : '',
     };
   }
-  /** Header actions: Export as a button; on phones it moves into a ⋯ menu so content comes first. */
-  const exportActions = (act, live) => btn('Export CSV', { icon: 'download', act, disabled: !live, tip: live ? '' : 'Available once the log has loaded', cls: 'act-export-wide' })
-    + iconBtn('more', 'More actions', { menu: 'audit-more', data: { act }, cls: 'act-export-menu' });
-  MENUS['audit-more'] = el => [{ label: 'Export CSV', icon: 'download', run: () => A[el.dataset.act]?.() }];
+  /** Header action: Export as a labelled button; on phones the same action as an icon so content comes first.
+      Only when there's a loaded log to export (not while loading, empty or failed). */
+  const exportActions = (act, live) => (live
+    ? btn('Export CSV', { icon: 'download', act, cls: 'act-export-wide' }) + iconBtn('download', 'Export CSV', { act, cls: 'act-export-icon' })
+    : '');
 
   X.auditLog = {
     toolbar: (o) => { FILTERS[o.uiKey] = o.filters; return toolbar(o); },
@@ -114,13 +115,15 @@
     return `<div class="page page--wide">${head}${tab === 'signins' ? signinsTab() : changesTab()}</div>`;
   };
 
+  /** Search and filters only when there's a log to search (not on the empty or error state). */
+  const hasLog = () => S.pageState !== 'empty' && S.pageState !== 'error';
   function changesTab() {
     ui('actC', { q: '', win: '30', area: '', actor: '', outcome: '', page: 1 });
     const rows = events(); const live = !S.navLoading && S.pageState === 'live';
     const people = [['system', 'BoMesh'], ...[...D.members].sort((a, b) => a.name.localeCompare(b.name)).map(m => [m.id, m.name])];
     const filters = [['Person', 'actor', people], ['Area', 'area', areas().map(a => [a, a])], ['Outcome', 'outcome', [['success', 'Succeeded'], ['failure', 'Failed']]]];
     const fields = filters.map(f => f[1]);
-    const tools = needsTools(D.audit.length, 'actC', fields) ? X.auditLog.toolbar({ uiKey: 'actC', placeholder: 'Search activity', filters, count: live ? plural(rows.length, 'event') : '' }) : '';
+    const tools = hasLog() && needsTools(D.audit.length, 'actC', fields) ? X.auditLog.toolbar({ uiKey: 'actC', placeholder: 'Search activity', filters, count: live ? plural(rows.length, 'event') : '' }) : '';
     return tools + gate({
       empty: () => emptyState({ icon: 'activity', boxed: true, title: 'No activity yet', desc: 'Changes to knowledge, sources, people and settings show up here.' }),
       ok: () => (rows.length ? table({ rows, uiKey: 'actC', label: 'Workspace changes', who: actor, open: 'act-open' }) : noEvents('actC', fields, 'events')),
@@ -132,7 +135,7 @@
     const rows = signins(); const live = !S.navLoading && S.pageState === 'live';
     const filters = [['Method', 'method', [...new Set(D.signins.map(s => s.method))].map(m => [m, m])], ['Status', 'st', [['active', 'Active now'], ['ended', 'Ended'], ['blocked', 'Blocked']]]];
     const fields = filters.map(f => f[1]);
-    const tools = needsTools(D.signins.length, 'actS', fields) ? X.auditLog.toolbar({ uiKey: 'actS', placeholder: 'Search sign-ins', filters, count: live ? plural(rows.length, 'sign-in') : '' }) : '';
+    const tools = hasLog() && needsTools(D.signins.length, 'actS', fields) ? X.auditLog.toolbar({ uiKey: 'actS', placeholder: 'Search sign-ins', filters, count: live ? plural(rows.length, 'sign-in') : '' }) : '';
     const open = can('user.manage');
     return tools + gate({
       empty: () => emptyState({ icon: 'key', boxed: true, title: 'No sign-ins yet', desc: 'Each sign-in to this workspace shows up here.' }),

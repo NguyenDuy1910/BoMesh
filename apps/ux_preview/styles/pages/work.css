@@ -67,12 +67,6 @@ button.work-steps__btn:hover { background: var(--default); color: var(--foregrou
 .work-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 .main:has(.work-page) { --page-max: 880px; }
 .work-title { min-width: 0; overflow-wrap: anywhere; }
-.work-title__btn { display: inline; text-align: left; font: inherit; color: inherit; border-radius: var(--radius-sm); padding: 0 2px; margin: 0 -2px; }
-.work-title__btn:hover { background: var(--default); }
-.work-title__pen { width: 14px; height: 14px; margin-left: 8px; color: var(--muted); opacity: 0; vertical-align: 1px; transition: opacity var(--dur-fast); }
-.work-title__btn:hover .work-title__pen, .work-title__btn:focus-visible .work-title__pen { opacity: 1; }
-.work-rename { display: flex; align-items: center; gap: 8px; flex: 1 1 360px; min-width: 0; }
-.work-rename .input { flex: 1 1 auto; min-width: 0; font-size: 16px; font-weight: 600; }
 .work-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; margin-top: 4px; font-size: 13px; line-height: 20px; color: var(--muted); min-width: 0; }
 .work-meta__dot { color: var(--muted); opacity: .6; }
 .work-meta__space { display: inline-flex; min-width: 0; border-radius: var(--radius-sm); }

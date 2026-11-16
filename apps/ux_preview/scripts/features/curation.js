@@ -35,8 +35,9 @@
       Processing's is information; All carries none. */
   const VIEWS = [['all', 'All', ''], ['processing', 'Processing', 'default'], ['review', 'Review', 'accent']];
   const VIDS = VIEWS.map(v => v[0]);
-  /** Topics' views: the tree (workspace admins) and the suggestions (everyone who works documents). */
-  const TOPIC_VIEWS = [['topics', 'Topics'], ['suggestions', 'Suggestions']];
+  /** Topics' views: every topic (workspace admins) and the suggestions (everyone who works documents). "All", like
+      Documents' first view, so the view never repeats the page title. */
+  const TOPIC_VIEWS = [['topics', 'All'], ['suggestions', 'Suggestions']];
   const topicViews = () => TOPIC_VIEWS.filter(([id]) => id === 'suggestions' || canManageTaxonomy()).map(v => v[0]);
   /** All's Quality filter (?quality=): three lists that keep published knowledge right, each row with its fix (governance.js). */
   const PARTS = [['reverify', 'Re-verification due'], ['details', 'Missing details'], ['duplicates', 'Possible duplicates']];
@@ -205,11 +206,11 @@
   };
 
   /* ═══════════════ Page ═══════════════ */
-  /** The page's one primary action follows the section and view: Add documents (Documents → All; secondary in Processing
-      and Review, where Process and the decision bar are the primary), Import (Topics), New collection or Add source. */
+  /** The page's actions follow the section and view: Add documents (Documents → All; secondary in Processing and Review,
+      where Process and the decision bar are the primary), ⋯ and Import (Topics → All), New collection or Add source. */
   function headerAction(tab, view) {
     const upKb = S.ui[AK]?.kb;
-    if (tab === 'topics') return canManageTaxonomy() && view === 'topics' ? btn('Import', { v: 'primary', icon: 'upload', act: 'md-import' }) : '';
+    if (tab === 'topics') return view === 'topics' ? X.md?.headerActions?.() || '' : '';
     if (tab === 'documents' && canContribute()) return btn('Add documents', { v: view === 'all' ? 'primary' : 'secondary', icon: 'upload', act: 'contribute', data: upKb ? { kb: upKb } : undefined });
     if (tab === 'collections' && can('knowledge.manage')) return btn('New collection', { v: 'primary', icon: 'plus', act: 'kb-create' });
     if (tab === 'sources') return X.src?.addBtn?.() || '';
@@ -430,7 +431,8 @@
     const fmt = hasFlag(d, 'format'), m = fmt ? null : X.docModel?.(d), pages = m && ['pdf', 'docx', 'slide'].includes(m.format) ? m.count : 0;
     const canvas = fmt ? emptyState({ icon: 'file', title: 'No preview for this file type', desc: 'Download it to check the content.', actions: btn('Download', { size: 'sm', icon: 'download', act: 'doc-dl', data: { id: d.id } }), compact: true })
       : m && X.rdr?.fileView ? X.rdr.fileView(d, { model: m, bar: false }) : emptyState({ icon: 'file', title: 'No preview yet', compact: true });
-    const bar = `<header class="cur-pane__bar">${fileIcon(d.type, 'sm')}<span class="cur-pane__title truncate" data-tip="${esc(d.name)}">${esc(d.name)}</span>${fmt ? '' : `${pages ? `<span class="cur-pane__meta num">${esc(plural(pages, 'page'))}</span>` : ''}${linkBtn('Open full preview', { href: '/doc/' + d.id, icon: 'external' })}`}</header>`;
+    // The inspector beside it names the document: the bar only says its length and opens the full preview.
+    const bar = fmt ? '' : `<header class="cur-pane__bar">${pages ? `<span class="cur-pane__meta num">${esc(plural(pages, 'page'))}</span>` : ''}<span class="grow"></span>${linkBtn('Open full preview', { href: '/doc/' + d.id, icon: 'external' })}</header>`;
     return `<section class="cur-pane" aria-label="Preview">${bar}<div class="cur-pane__scroll" id="cur-preview-${d.id}" data-keep-scroll tabindex="0">${canvas}</div></section>`;
   }
   const sugRow = (label, badge, control, foot = '') => `<div class="cur-sug"><div class="cur-sug__label"><span class="t-label">${esc(label)}</span>${badge}</div><div class="cur-sug__ctl">${control}${foot}</div></div>`;
@@ -1242,10 +1244,28 @@
         ['Version', `v${res(d).version}`],
         ['Who could see it', `<span class="row gap-6">${ic(X.whoCanSee(kb, docFolder(d)).icon, 'i-sm muted')}${esc(X.whoCanSee(kb, docFolder(d)).label)}</span>`],
       ])}</div>`;
+    // People who may edit its details rename it right on the title (the file keeps its extension; the icon says the format).
+    const rn = S.ui[DRN]?.id === d.id ? S.ui[DRN] : null, canRename = opsFor(d).more.includes('edit') && X.res.canEditRes(d);
     return {
-      title: d.name, lead: fileIcon(d.type, 'lg'), desc: esc(kb.name), size: 'lg', body,
+      title: docTitle(d), lead: fileIcon(d.type, 'lg'), desc: esc(kb.name), size: 'lg', body,
+      titleEdit: canRename ? { id: 'cur-doc-name', value: rn ? rn.val : docTitle(d), editing: !!rn, edit: 'cur-doc-rename', commit: 'cur-doc-rename-done', cancel: 'cur-doc-rename-cancel', label: 'Rename document', maxlength: 160, error: rn?.err || '', data: { id: d.id } } : null,
       headActions: iconBtn('more', 'More actions', { menu: 'cur-row', data: { id: d.id, ctx: 'drawer' } }),
       foot: opBtn(main, 'primary'),
     };
+  };
+  /* ── Rename a document: the drawer's title ── */
+  const DRN = 'curDocRename';
+  A['cur-doc-rename'] = el => { const d = docById(el.dataset.id); if (!d || !X.res.canEditRes(d)) return; S.ui[DRN] = { id: d.id, val: docTitle(d), err: '' }; refresh(); };
+  A['cur-doc-rename-cancel'] = () => { if (!S.ui[DRN]) return; S.ui[DRN] = null; refresh(); };
+  /** Enter or leaving the title. Idempotent; an empty or unchanged title just closes it. */
+  A['cur-doc-rename-done'] = el => {
+    const r = S.ui[DRN], d = r && docById(r.id); if (!d) return;
+    const title = el.value.trim(), before = d.name;
+    S.ui[DRN] = null;
+    if (!title || title === docTitle(d)) { refresh(); return; }
+    d.name = title + d.name.slice(docTitle(d).length);
+    D.audit.unshift({ id: uid('ev'), at: Date.now(), actor: me().id, action: 'Renamed a document', type: 'Knowledge', target: `${before} → ${d.name}`, outcome: 'success', ip: '10.4.12.30', device: 'Chrome on macOS' });
+    refresh();
+    toast(`Renamed to “${title}”`, { action: { label: 'Undo', run: () => { d.name = before; refresh(); } } });
   };
 })();

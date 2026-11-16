@@ -12,13 +12,10 @@
   /** Merge metadata into existing documents: { id: {…fields} }. */
   const meta = map => Object.entries(map).forEach(([id, o]) => { const d = D.docs.find(x => x.id === id); if (d) Object.assign(d, o); });
   const views = () => Math.round(5 + rnd() * 400);
-  /** Topics (Knowledge Studio → Topics): domain codes, topic codes (DOMAIN-nn in order) and the keywords the
-      assistant classifies incoming documents by, plus the import history. */
-  const master = (codes, keywords, imports = []) => {
-    D.topics.filter(t => !t.parent).forEach(dm => {
-      dm.code = codes[dm.id];
-      D.topics.filter(t => t.parent === dm.id).forEach((t, i) => { t.code = `${dm.code}-${String(i + 1).padStart(2, '0')}`; if (keywords[t.id]) t.keywords = keywords[t.id]; });
-    });
+  /** Topics (Knowledge Studio → Topics): the keywords the assistant classifies incoming documents by, plus the import
+      history. Topics carry no code: their id is internal, the name is what people see and what a spreadsheet matches. */
+  const master = (keywords, imports = []) => {
+    D.topics.filter(t => keywords[t.id]).forEach(t => { t.keywords = keywords[t.id]; });
     D.masterImports = imports;
   };
   /** Topic detail (Knowledge Studio → Topics): business description (desc), guidance for the assistant,
@@ -53,7 +50,7 @@
       { id: 'd-eng', name: 'Engineering', icon: 'terminal', color: '#1F7A8C', desc: 'Runbooks, incidents and on-call.' }, { id: 't-incidents', name: 'Incidents & on-call', parent: 'd-eng' },
     ];
     // Topics were added by hand: no import yet, few keywords (the Studio offers Import).
-    master({ 'd-people': 'PPL', 'd-sales': 'SAL', 'd-product': 'PRD', 'd-finance': 'FIN', 'd-legal': 'LEG', 'd-eng': 'ENG' }, {
+    master({
       't-travel': ['business trip', 'per diem', 'expense claim'], 't-leave': ['parental leave', 'vacation', 'benefits'],
       't-pricing': ['price list', 'discount'], 't-compete': ['battlecard', 'competitor'], 't-api': ['api', 'webhook', 'sdk'],
       't-releases': ['release notes', 'changelog'], 't-security': ['security whitepaper', 'retention'], 't-incidents': ['incident', 'on-call', 'runbook'],
@@ -178,7 +175,7 @@
       { id: 'd-people', name: 'Internal Policies & Guidelines', icon: 'users', color: '#B4467A', desc: 'Leave, travel, conduct, hybrid work and onboarding.' },
       { id: 't-hr', name: 'Leave & benefits', parent: 'd-people' }, { id: 't-travel', name: 'Travel & expenses', parent: 'd-people' }, { id: 't-conduct', name: 'Code of conduct', parent: 'd-people' }, { id: 't-hybrid', name: 'Hybrid work', parent: 'd-people' }, { id: 't-onboarding', name: 'Onboarding', parent: 'd-people' },
     ];
-    master({ 'd-eng': 'ENG', 'd-data': 'DAT', 'd-ops': 'OPS', 'd-sec': 'SEC', 'd-product': 'PRD', 'd-people': 'POL' }, {
+    master({
       't-arch': ['adr', 'architecture decision', 'design review', 'target architecture'], 't-api': ['api', 'webhook', 'idempotency', 'endpoint', 'openapi'],
       't-reliability': ['runbook', 'on-call', 'slo', 'failover'], 't-cloud': ['kubernetes', 'aws', 'terraform', 'kafka', 'infrastructure'], 't-devex': ['ci cd', 'code review', 'developer tooling'],
       't-dwh': ['warehouse', 'dbt', 'data dictionary', 'data pipeline'], 't-metrics': ['metric definition', 'kpi', 'active customers', 'dashboard'],

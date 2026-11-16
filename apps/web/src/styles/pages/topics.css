@@ -1,5 +1,5 @@
 /* Knowledge Studio → Topics (features/masterdata.js): the domain → topic tree, the topic detail and its
-   classification signals. Prefix: tx-. Tokens only. Shared pieces (.md-code, .md-props, import dialog) live in studio.css. */
+   classification signals. Prefix: tx-. Tokens only. Shared pieces (.md-props, import dialog) live in studio.css. */
 
 .tx { display: flex; flex-direction: column; gap: 12px; }
 
@@ -24,25 +24,32 @@
 .tx-tree { flex: 1 1 auto; min-height: 0; padding: 6px; overflow-y: auto; }
 .tx-item { outline: none; }
 .tx-item--archived { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--separator); }
-.tx-row { display: flex; align-items: center; gap: 6px; min-height: 32px; padding: 4px 8px; border-radius: var(--radius-lg); font-size: 13px; line-height: 18px; cursor: pointer; user-select: none; transition: background-color var(--dur-fast); }
+/* One row grid for every level: [chevron 16] [icon 16] [name] [trailing], 8px gaps, 32px tall. Topic rows keep an empty
+   chevron slot and indent by chevron + gap (24px), so a topic's icon sits under its domain's name. */
+.tx-row { display: grid; grid-template-columns: 16px 16px minmax(0, 1fr) auto; align-items: center; column-gap: 8px; height: 32px; padding: 0 8px; border-radius: var(--radius-lg); font-size: 13px; line-height: 18px; cursor: pointer; user-select: none; transition: background-color var(--dur-fast); }
 .tx-row:hover { background: var(--default-soft); }
 .tx-row.is-selected { background: var(--accent-soft); color: var(--accent-soft-foreground); }
 .tx-item:focus-visible > .tx-row { outline: 2px solid var(--focus); outline-offset: -2px; }
-.tx-group .tx-row { padding-left: 30px; }
-.tx-row__chev { display: inline-flex; flex: none; margin: -4px 0 -4px -4px; padding: 4px; border-radius: var(--radius-sm); color: var(--muted); }
-.tx-row__chev:hover { background: var(--default-soft-hover); color: var(--foreground); }
-.tx-row__icon { flex: none; color: var(--accent); }
-.tx-item--archived .tx-row__icon { color: var(--muted); }
-.tx-row__code { flex: none; min-width: 48px; font-family: var(--font-mono); font-size: 11px; line-height: 16px; color: var(--muted); }
-.tx-row.is-selected .tx-row__code { color: inherit; opacity: .8; }
-.tx-row__name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tx-group .tx-row { padding-left: 32px; }
+.tx-row__chev { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: var(--radius-sm); color: var(--muted); }
+.tx-row__chev:not(.tx-row__chev--none):hover { background: var(--default-soft-hover); color: var(--foreground); }
+.tx-row__icon { width: 16px; height: 16px; color: var(--accent); }
+.tx-row__icon--topic, .tx-item--archived .tx-row__icon { color: var(--muted); }
+.tx-row.is-selected .tx-row__icon { color: var(--accent); }
+.tx-row__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tx-row__name--domain { font-weight: 600; }
-.tx-row__count { flex: none; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tx-row__trail { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; }
+.tx-row__count { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
+.tx-row__count:empty { display: none; }
 .tx-row.is-selected .tx-row__count { color: inherit; }
 .tx-row__dot { flex: none; width: 6px; height: 6px; border-radius: var(--radius-full); background: var(--warning); }
 /* No keywords: a hollow warning ring, so it never reads as the filled "unsaved" dot. */
 .tx-row__warn { flex: none; width: 7px; height: 7px; border-radius: var(--radius-full); box-shadow: inset 0 0 0 1.5px var(--warning); }
-.tx-item.is-new .tx-row__name { font-style: italic; }
+/* Domain rows: hover/focus swaps the count for "+ Add topic to {domain}". */
+.tx-row__add { display: none; align-items: center; justify-content: center; width: 22px; height: 22px; margin: -3px -4px -3px 0; padding: 0; border: 0; border-radius: var(--radius-sm); background: none; color: var(--muted); cursor: pointer; }
+.tx-row__add:hover { background: var(--default-soft-hover); color: var(--foreground); }
+.tx-row:hover .tx-row__add, .tx-item:focus-visible > .tx-row .tx-row__add { display: inline-flex; }
+.tx-row:hover .tx-row__count:has(~ .tx-row__add), .tx-item:focus-visible > .tx-row .tx-row__count:has(~ .tx-row__add) { display: none; }
 
 /* Detail */
 .tx-main { min-width: 0; }
@@ -58,7 +65,8 @@
 .tx-head__acts { display: flex; align-items: center; gap: 4px; flex: none; }
 .tx-review { color: var(--accent); }
 
-.tx-ident { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 2fr); gap: 12px; align-items: start; padding: 14px; border-radius: var(--radius-xl); background: var(--surface-secondary); }
+.tx-ident { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 12px; align-items: start; padding: 14px; border-radius: var(--radius-xl); background: var(--surface-secondary); }
+.tx-ident .field:only-child { grid-column: 1 / -1; }
 .tx-ident .field { margin: 0; }
 
 .tx-sec { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
@@ -69,6 +77,13 @@
 .tx-sec__desc { margin: -4px 0 2px; font-size: 13px; line-height: 19px; color: var(--muted); max-width: 72ch; }
 .tx-sec__empty { margin: 0; font-size: 13px; line-height: 19px; color: var(--muted); }
 .tx-sec > .button { align-self: flex-start; }
+
+/* Help the assistant (optional): guidance, rules, examples behind one disclosure with a summary of what's set */
+.disclosure.tx-adv { border-radius: 0; background: none; box-shadow: none; border-top: 1px solid var(--separator); border-bottom: 1px solid var(--separator); }
+.tx-adv > .disclosure__trigger { width: calc(100% + 16px); min-height: 40px; margin: 4px -8px; padding: 6px 8px; border-radius: var(--radius-lg); font-size: 14px; line-height: 20px; font-weight: 600; }
+.tx-adv .label__opt { margin-left: 6px; }
+.tx-adv .disclosure__summary { font-size: 12.5px; line-height: 18px; }
+.tx-adv > .disclosure__body { display: flex; flex-direction: column; gap: 20px; padding: 0 0 12px; }
 .tx-text { margin: 0; font-size: 14px; line-height: 21px; }
 
 /* Keywords & synonyms: chip fields */
@@ -150,8 +165,6 @@
 
 @container app (max-width: 1023px) {
   .tx-panes { grid-template-columns: 232px minmax(0, 1fr); gap: 16px; }
-  .tx-ident { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  .tx-ident .field:first-child { grid-column: 1 / -1; }
   .tx-terms { grid-template-columns: minmax(0, 1fr); }
 }
 /* Phones: one pane at a time — the tree, or the picked node with Back. */
@@ -173,8 +186,6 @@
 /* ───── Web only: kit markup ───── */
 .tx-side__tools .search-input { flex: 1 1 auto; min-width: 0; }
 .tx-ident .field-error { margin-top: 4px; }
-/* Editing an existing node: name and domain share the row (its code is read-only once made). */
-@container app (min-width: 680px) { .tx-ident { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .tx-ident .field:first-child { grid-column: auto; } }
 
 /* ───── Topics → Suggestions (TopicSuggestions; preview taxonomy.css md-learn, studio.css cg-) ───── */
 /* Keywords from reviewers' corrections: one card per topic, whole sentences per line. */
@@ -202,13 +213,7 @@
   .cg-move .field { flex-basis: 100%; }
 }
 
-/* ───── Topic detail: codes, signals, test box, prompt drawer (TopicDetail; preview taxonomy.css tx-, md-prompt) ───── */
-/* Codes are topic IDs (up to 63 characters): clipped in rows, the full code in the row's tooltip. */
-.tx-row__code { max-width: 112px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tx-row .md-code--domain, .tx-head .md-code--domain { display: inline-block; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* A new topic's name, code and domain share the row (as the preview); a new domain keeps two columns. */
-@container app (min-width: 1024px) { .tx-ident--3 { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 2fr); } }
-@container app (min-width: 680px) and (max-width: 1023px) { .tx-ident.tx-ident--3 > :first-child { grid-column: 1 / -1; } }
+/* ───── Topic detail: signals, test box, prompt drawer (TopicDetail; preview taxonomy.css tx-, md-prompt) ───── */
 /* Chip inputs: the HeroUI input sits borderless inside the chip box. */
 .tx-terms__group { margin: 0; }
 .tx-chips .tx-chips__input { flex: 1 1 120px; min-width: 120px; height: 28px; padding: 0 4px; border: 0; background: transparent; box-shadow: none; }

@@ -5,7 +5,6 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, Code, Copy } from "lucide-react";
 
 import { ErrorState, ItemIcon, SkeletonRows } from "@/components/ui";
-import { resourceId } from "@/lib/api/client";
 import { fmtNum } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { copyText } from "@/modules/chat/download";
@@ -56,9 +55,6 @@ export function PromptDrawer({ isOpen, onClose, topics }: { isOpen: boolean; onC
                     <li key={`${r.topic}-${i}`}>
                       <span>{r.rule ? ruleText(r.rule, options) : ""}</span>
                       <ArrowRight className="i i-xs" aria-hidden />
-                      <span className="md-code" translate="no">
-                        {resourceId(r.topic)}
-                      </span>
                       <span translate="no">{t?.displayName ?? ""}</span>
                     </li>
                   );

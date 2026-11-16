@@ -42,7 +42,7 @@
   const staffRoles = sp => spaceType(sp?.type).staff;
   const staffMembers = sp => (sp?.members || []).filter(m => staffRoles(sp).includes(m.role));
   const roleLabel = (sp, userId) => { const role = spaceRole(sp, userId); return spaceType(sp?.type).roles.find(([k]) => k === role)?.[1] || ''; };
-  const fmtDay = ts => new Date(ts).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  const fmtDay = ts => new Date(ts).toLocaleDateString(uiLocale(), { weekday: 'short', month: 'short', day: 'numeric' });
   const span = ms => ms < HOUR - MIN / 2 ? plural(Math.max(1, Math.round(ms / MIN)), 'min', 'min') : Math.round(ms / HOUR) < 24 ? Math.round(ms / HOUR) + ' h' : plural(Math.round(ms / DAY), 'day');
   /** rel() for use mid-sentence ("Updated just now", "closed yesterday"). */
   const relIn = ts => { const s = rel(ts); return /^(Just now|Yesterday)$/.test(s) ? s.toLowerCase() : s; };
@@ -267,7 +267,7 @@
     const empty = () => u.view === 'closed'
       ? emptyState({ icon: 'archive', boxed: true, compact: !!space, title: 'Nothing closed yet', desc: 'Requests you approve, decline or answer move here.' })
       : emptyState({ icon: 'check-circle', tone: 'success', boxed: true, compact: !!space, title: 'Your queue is clear', desc: space ? 'New requests and questions for this space show up here.' : 'New requests and questions for your spaces show up here.' });
-    return toolbar + gate({
+    return (S.pageState === 'error' ? '' : toolbar) + gate({
       empty,
       ok: () => {
         if (!inView.length) return empty();
@@ -615,7 +615,7 @@
       const send = v => btn('Send', { v, icon: 'send', act: 'rq-send-note', data });
       if (t.question) {
         label = 'Your answer'; placeholder = asking ? `What do you need from ${first}?` : `Answer ${first}. Cite the slide or document if you can.`;
-        decide = asking ? send('primary') : btn('Answer', { v: 'primary', icon: 'send', act: 'rq-answer', data });
+        decide = asking ? send('primary') : btn('Send answer', { v: 'primary', icon: 'send', act: 'rq-answer', data });
       } else if (asking) {
         label = `Message to ${first}`; placeholder = `What do you need from ${first}?`;
         decide = send('primary');
@@ -641,9 +641,11 @@
   }
   function closedNote(r, t, sp, isReq) {
     const word = { completed: t.question ? 'answered' : 'completed', declined: 'declined', withdrawn: 'withdrawn' }[r.status] || 'closed';
+    // Whole sentences per outcome, so each translates as one string.
+    const said = { answered: 'This request was answered {0}.', completed: 'This request was completed {0}.', declined: 'This request was declined {0}.', withdrawn: 'This request was withdrawn {0}.', closed: 'This request was closed {0}.' }[word].replace('{0}', relIn(r.updated));
     const action = !isReq ? '' : t.question && r.status === 'completed' ? btn('Ask a follow-up', { size: 'sm', icon: 'message', act: 'rq-ask-staff', data: { space: r.space } })
       : r.status !== 'completed' ? btn('Send a new request', { size: 'sm', href: '/requests/new?type=' + r.type }) : '';
-    return `<div class="rq-closed">${ic(r.status === 'declined' ? 'x-circle' : r.status === 'withdrawn' ? 'undo' : 'check-circle', 'i-sm')}<span class="grow">This request was ${word} ${esc(relIn(r.updated))}.</span>${action}</div>`;
+    return `<div class="rq-closed">${ic(r.status === 'declined' ? 'x-circle' : r.status === 'withdrawn' ? 'undo' : 'check-circle', 'i-sm')}<span class="grow">${esc(said)}</span>${action}</div>`;
   }
 
   function sideCards(r, t, sp, { isReq, staff }) {
@@ -693,13 +695,15 @@
       lead: mark(sp, 40),
       title: title(r), extra: requestStatus(r),
       desc: `<span class="rq-sub">${sub.map(x => /^</.test(x) ? x : esc(x)).join('<span aria-hidden="true">·</span>')}</span>`,
-      // Withdrawing is rare and ends the request: it lives in ⋯.
-      actions: isReq && isOpen(r) ? iconBtn('more', 'More', { menu: 'rq-more', data: { id: r.id } }) : '',
+      // Withdrawing is rare and ends the request (it confirms): a quiet button, the only header action.
+      actions: isReq && isOpen(r) ? btn('Withdraw', { v: 'ghost', icon: 'undo', act: 'rq-withdraw', data: { id: r.id } }) : '',
     });
     const thread = `<section class="card rq-thread" aria-label="Activity">${r.thread.map(m => entry(r, m, sp)).join('')}</section>`;
-    return `<div class="page rq-page rq-page--item">${head}<div class="rq-detail"><div class="rq-main">${thread}${composer(r, t, sp, { isReq, staff })}</div><aside class="rq-side" aria-label="Request details">${sideCards(r, t, sp, { isReq, staff })}</aside></div></div>`;
+    // The request itself always exists here, so Empty shows it as is; Loading and Error replace the body.
+    const detail = () => `<div class="rq-detail"><div class="rq-main">${thread}${composer(r, t, sp, { isReq, staff })}</div><aside class="rq-side" aria-label="Request details">${sideCards(r, t, sp, { isReq, staff })}</aside></div>`;
+    const body = gate({ loading: () => skelRows(5), empty: detail, ok: detail });
+    return `<div class="page rq-page rq-page--item">${head}${body}</div>`;
   };
-  MENUS['rq-more'] = el => { const r = reqById(el.dataset.id); return r && isOpen(r) && r.requester === me().id ? [{ label: 'Withdraw request', icon: 'undo', danger: true, run: () => A['rq-withdraw']({ dataset: { id: r.id } }) }] : []; };
 
   /* ── Request actions ── */
   function ctx(el) { const r = reqById(el.dataset.id); return r ? { r, t: typeById(r.type) || { name: 'Request' }, c: composerState(r) } : null; }

@@ -160,12 +160,12 @@
   };
 
   /* ═══════════════════════════ One managed base ═══════════════════════════ */
-  /** Contents (its folders and documents) for everyone who edits it; owners also get Access and Settings; Sources for all. */
+  /** Contents (its folders and documents) for everyone who edits it; owners also get Access; Sources for all. Its name and
+      description are edited in place on the header and archiving is in ⋯, so there's no Settings tab. */
   function tabsFor(kb) {
     const own = kbRole(kb) === 'owner', t = [{ id: 'contents', label: 'Contents' }];
     if (own) t.push({ id: 'access', label: 'Access', count: pendingRequests().filter(r => r.kb === kb.id).length || '', alert: true });
     t.push({ id: 'sources', label: 'Sources', count: D.sources.filter(s => s.kb === kb.id).length });
-    if (own) t.push({ id: 'settings', label: 'Settings' });
     return t;
   }
   function unavailable() {
@@ -184,22 +184,60 @@
     const sp = kbSpace(kb);
     // The owning unit only adds information when it isn't the base's own name ("Payments Platform" owned by Payments Platform).
     const owner = ownerOfKb(kb) === kb.name ? '' : ownerOfKb(kb), topics = (kb.topics || []).map(t => `<a class="res-topic" href="#${X.res.topicHref(t)}">${esc(topicName(t))}</a>`).join('');
-    const sub = [kb.desc ? esc(kb.desc) : '', owner || topics ? `<span class="kb-head__meta">${owner ? `<span class="row gap-4 t-sm muted">${ic('building', 'i-sm')}${esc(owner)}</span>` : ''}${topics ? `<span class="res-topics">${topics}</span>` : ''}</span>` : ''].filter(Boolean).join('<br>');
-    const head = pageHeader({ title: kb.name, desc: sub, lead: kbMark(kb, 40), extra: accessChip(kb) + (sp ? `<a class="kb-space-link" href="#/space/${esc(sp.id)}">${spaceChip(sp)}</a>` : ''), actions });
-    const body = tab === 'sources' ? sourcesTab(kb) : tab === 'settings' ? settingsTab(kb) : tab === 'access' ? accessTab(kb) : contentsTab(kb, folder);
+    // Its owners rename it on the title and describe it on the line under it (each applies at once, with Undo); everyone
+    // else reads them.
+    const own = kbRole(kb) === 'owner', r = S.ui[KR]?.id === kb.id ? S.ui[KR] : null, dd = S.ui[KD]?.id === kb.id ? S.ui[KD] : null;
+    const descHtml = own ? editableTitle({ id: 'kb-desc', tag: 'span', cls: cx('kb-desc-edit', !kb.desc && !dd && 'is-empty'), value: dd ? dd.val : kb.desc || addDesc(), editing: !!dd, edit: 'kb-describe', commit: 'kb-describe-done', cancel: 'kb-describe-cancel', label: 'Edit description', maxlength: 200, placeholder: 'e.g. Runbooks for the payment rails', data: { kb: kb.id } })
+      : kb.desc ? esc(kb.desc) : '';
+    const sub = [descHtml, owner || topics ? `<span class="kb-head__meta">${owner ? `<span class="row gap-4 t-sm muted">${ic('building', 'i-sm')}${esc(owner)}</span>` : ''}${topics ? `<span class="res-topics">${topics}</span>` : ''}</span>` : ''].filter(Boolean).join('<br>');
+    const heading = own ? editableTitle({ id: 'kb-name', value: r ? r.val : kb.name, editing: !!r, edit: 'kb-rename', commit: 'kb-rename-done', cancel: 'kb-rename-cancel', tag: 'h1', cls: 'page-hero__title', label: 'Rename collection', maxlength: 60, error: r?.err || '', data: { kb: kb.id } }) : '';
+    const head = pageHeader({ title: kb.name, heading, desc: sub, lead: kbMark(kb, 40), extra: accessChip(kb) + (sp ? `<a class="kb-space-link" href="#/space/${esc(sp.id)}">${spaceChip(sp)}</a>` : ''), actions });
+    const body = tab === 'sources' ? sourcesTab(kb) : tab === 'access' ? accessTab(kb) : contentsTab(kb, folder);
     return `<div class="page">${head}${reviewAlert(kb)}${tabList.length > 1 ? contextBar(tabs(tabList, tab, kbManageHref(kb))) : ''}${body}</div>`;
   };
-  /** Rare actions only: contents, access and archiving live in their own tabs, so they aren't repeated here. */
+  /* ── Rename: the title itself (owners) ── */
+  const KR = 'kbRename';
+  A['kb-rename'] = el => { const kb = kbById(el.dataset.kb); if (!kb || kbRole(kb) !== 'owner') return; S.ui[KR] = { id: kb.id, val: kb.name, err: '' }; refresh(); };
+  A['kb-rename-cancel'] = () => { if (!S.ui[KR]) return; S.ui[KR] = null; refresh(); };
+  /** Enter or leaving the title. Idempotent; an empty or unchanged name just closes it. */
+  A['kb-rename-done'] = el => {
+    const r = S.ui[KR], kb = r && kbById(r.id); if (!kb) return;
+    const name = el.value.trim();
+    if (!name || name === kb.name) { S.ui[KR] = null; refresh(); return; }
+    const err = nameError(name, kb.id);
+    if (err) { Object.assign(r, { val: el.value, err }); refresh(); return; }
+    const before = kb.name;
+    S.ui[KR] = null; kb.name = name; kb.updated = Date.now();
+    audit('Renamed collection', `${before} → ${name}`); refresh();
+    toast(`Renamed to “${name}”`, { action: { label: 'Undo', run: () => { kb.name = before; audit('Undid a rename', `${name} → ${before}`); refresh(); } } });
+  };
+  /* ── Describe: the line under the title (owners) ── */
+  const KD = 'kbDescEdit';
+  A['kb-describe'] = el => { const kb = kbById(el.dataset.kb); if (!kb || kbRole(kb) !== 'owner') return; S.ui[KD] = { id: kb.id, val: kb.desc || '' }; refresh(); };
+  A['kb-describe-cancel'] = () => { if (!S.ui[KD]) return; S.ui[KD] = null; refresh(); };
+  /** Enter or leaving it. Idempotent; emptying it removes the description. */
+  A['kb-describe-done'] = el => {
+    const r = S.ui[KD], kb = r && kbById(r.id); if (!kb) return;
+    const v = el.value.trim(), before = kb.desc || '';
+    S.ui[KD] = null;
+    if (v === before) { refresh(); return; }
+    kb.desc = v; kb.updated = Date.now();
+    audit('Updated collection details', kb.name); refresh();
+    toast(v ? 'Description updated' : 'Description removed', { action: { label: 'Undo', run: () => { kb.desc = before; refresh(); } } });
+  };
+  /** Rare actions only: contents and access live in their own tabs, so they aren't repeated here. */
   MENUS['kb-more'] = el => {
     const kb = kbById(el.dataset.kb); if (!kb) return [];
-    const onSources = S.cur.r.page === 'kbDetail' && (S.cur.query.tab || tabsFor(kb)[0].id) === 'sources';
     return [
       // Every document with its processing and publication, for its reviewers; what readers see for everyone.
       can('knowledge.manage') && canReviewKb(kb) && { label: 'Open in Documents', icon: 'files', run: () => go(docsHref('all', { kb: kb.id })) },
       { label: 'Open in Knowledge', icon: 'book', run: () => go(kbHref(kb)) },
-      can('source.manage') && !onSources && { label: 'Add source', icon: 'plug', run: () => go(kbManageHref(kb, 'sources')) },
+      can('source.manage') && X.src?.openWizard && { label: 'Add source', icon: 'plug', run: () => X.src.openWizard({ kb: kb.id }) },
       // The link people can open: its documents in Browse.
       { label: 'Copy link', icon: 'link', run: () => copyText(location.href.split('#')[0] + '#' + kbHref(kb), 'Link copied') },
+      // Archiving is reversible (Undo), so it's a plain menu item, not a form of its own.
+      kbRole(kb) === 'owner' && { sep: true },
+      kbRole(kb) === 'owner' && { label: 'Archive collection', icon: 'archive', danger: true, run: () => A['kb-archive']({ dataset: { kb: kb.id } }) },
     ].filter(Boolean);
   };
 
@@ -211,7 +249,7 @@
     const n = docs.filter(readyToReview).length, p = docs.filter(d => isCandidate(d) && processingOf(d) === 'pending').length, m = docs.filter(d => lifecycleOf(d).key === 'failed' || (isCandidate(d) && processingOf(d) === 'failed')).length;
     if (!n && !p && !m) return '';
     const title = [p && `${plural(p, 'submission')} waiting to be processed`, n && `${plural(n, 'submission')} waiting for review`, m && `${plural(m, 'document')} couldn’t be processed`].filter(Boolean).join(' · ');
-    const actions = (p || m ? btn(p ? 'Process' : 'Show', { v: n ? 'ghost' : 'secondary', size: 'sm', href: docsHref('processing', { kb: kb.id, ...(p ? {} : { state: 'failed' }) }) }) : '')
+    const actions = (p || m ? btn(p ? 'Process' : 'See what failed', { v: n ? 'ghost' : 'secondary', size: 'sm', href: docsHref('processing', { kb: kb.id, ...(p ? {} : { state: 'failed' }) }) }) : '')
       + (n ? btn(`Review ${fmtNum(n)}`, { v: 'secondary', size: 'sm', href: docsHref('review', { kb: kb.id }) }) : '');
     return `<div class="mb-12">${alertBox(m ? 'warning' : 'accent', title, '', actions, { icon: m ? 'alert' : 'clock' })}</div>`;
   }
@@ -271,12 +309,22 @@
     const trail = [{ id: '', name: kb.name }, ...folderPath(f?.id)];
     const crumbs = trail.length > 1 ? `<nav class="st-crumbs" aria-label="Location">${trail.slice(0, -1).map(x => `<button type="button" class="st-crumb" data-act="kb-folder" data-kb="${kb.id}" data-id="${esc(x.id)}" translate="no">${esc(x.name)}</button>`).join(`<span aria-hidden="true">${ic('chevron-right', 'i-xs')}</span>`)}</nav>` : '';
     const nDocs = countUnder(docs, f), nFolders = (f ? folderSubtree(f.id).length - 1 : (D.folders || []).filter(x => x.kb === kb.id).length);
-    const meta = [f ? levelOf(f, depthOf(f)) : 'Top level', plural(nDocs, 'document'), nFolders ? plural(nFolders, 'folder') : ''].filter(Boolean).join(' · ');
-    const more = f && edit ? iconBtn('more', 'Folder actions', { size: 'sm', menu: 'kb-folder-more', data: { id: f.id } }) : '';
+    const counts = [plural(nDocs, 'document'), nFolders ? plural(nFolders, 'folder') : ''].filter(Boolean).join(' · ');
+    const more = f && edit ? iconBtn('more', 'Folder actions', { size: 'sm', menu: 'kb-folder-more', data: { id: f.id, ctx: 'head' } }) : '';
     const newFolder = edit ? btn('New folder', { v: 'secondary', size: 'sm', icon: 'folder-plus', act: 'kb-folder-new', data: { kb: kb.id, parent: f?.id || '' } }) : '';
-    // The page header already names the collection: its top level shows only what's in it.
-    const title = f ? `<h2 class="st-head__title" translate="no">${esc(f.name)}</h2>${more}` : `<p class="st-head__meta">${esc(meta)}</p>`;
-    const head = `<div class="st-head">${crumbs}<div class="st-head__row">${title}<span class="grow"></span>${newFolder}</div>${f ? `<p class="st-head__meta">${esc(meta)}</p>` : ''}${f?.desc ? `<p class="st-head__desc" translate="no">${esc(f.desc)}</p>` : ''}${accessLine(kb, f)}</div>`;
+    // The page header already names the collection: its top level shows only what's in it. A folder's editors rename it on
+    // its title, describe it under it and change its kind from the meta line — each applies at once, with Undo.
+    const rn = f && S.ui[FR]?.id === f.id ? S.ui[FR] : null;
+    const name = !f ? '' : edit ? editableTitle({ id: 'kbf-title', value: rn ? rn.val : f.name, editing: !!rn, edit: 'kb-folder-rename', commit: 'kb-folder-rename-done', cancel: 'kb-folder-rename-cancel', cls: 'st-head__title', label: 'Rename folder', maxlength: 80, error: rn?.err || '', data: { id: f.id } })
+      : `<h2 class="st-head__title" translate="no">${esc(f.name)}</h2>`;
+    const title = f ? `<div class="st-head__name">${name}</div>${more}` : `<p class="st-head__meta">${esc(`Top level · ${counts}`)}</p>`;
+    const kind = !f ? '' : edit && mapLevels().length > 1
+      ? `<button type="button" class="st-head__kind" data-menu="kb-folder-kind" data-id="${esc(f.id)}" aria-haspopup="menu" aria-expanded="false" data-tip="${esc('Change its kind')}">${esc(levelOf(f, depthOf(f)))}${ic('chevron-down', 'i-xs')}</button>`
+      : `<span>${esc(levelOf(f, depthOf(f)))}</span>`;
+    const fd = f && S.ui[FD]?.id === f.id ? S.ui[FD] : null;
+    const desc = !f ? '' : edit ? `<p class="st-head__desc">${editableTitle({ id: 'kbf-desc', tag: 'span', cls: cx('kb-desc-edit', !f.desc && !fd && 'is-empty'), value: fd ? fd.val : f.desc || addDesc(), editing: !!fd, edit: 'kb-folder-describe', commit: 'kb-folder-describe-done', cancel: 'kb-folder-describe-cancel', label: 'Edit description', maxlength: 200, placeholder: 'Shown on Home when someone selects it', data: { id: f.id } })}</p>`
+      : f.desc ? `<p class="st-head__desc" translate="no">${esc(f.desc)}</p>` : '';
+    const head = `<div class="st-head">${crumbs}<div class="st-head__row">${title}<span class="grow"></span>${newFolder}</div>${desc}${f ? `<p class="st-head__meta">${kind}<span aria-hidden="true"> · </span><span>${esc(counts)}</span></p>` : ''}${accessLine(kb, f)}</div>`;
     const tools = here.length + kids.length > 12 || q ? `<div class="toolbar st-tools">${searchField({ uiKey: k, placeholder: `Search ${kb.name}` })}</div>` : '';
     if (!kids.length && !here.length) {
       const empty = q ? emptyState({ icon: 'search', title: `Nothing called “${q}”`, desc: 'Search looks through every folder of this collection.', compact: true })
@@ -284,11 +332,11 @@
       return `<section class="st-main" aria-label="${esc(f ? f.name : kb.name)}">${head}${tools}<div class="st-empty">${empty}</div></section>`;
     }
     const fRow = x => {
-      const sub = [q ? where(kb, folderById(x.parent)) : levelOf(x, depthOf(x)), x.own ? 'Own access' : ''].filter(Boolean).join(' · ');
+      const sub = [q ? where(kb, folderById(x.parent)) : levelOf(x, depthOf(x)), plural(countUnder(docs, x), 'document'), x.own ? 'Own access' : ''].filter(Boolean).join(' · ');
       return `<tr class="table__row st-frow" data-act="kb-folder" data-kb="${kb.id}" data-id="${x.id}" tabindex="0">
         <td class="table__cell table__cell--check"></td>
         <td class="table__cell table__cell--primary"><div class="row gap-12"><span class="st-ficon" aria-hidden="true">${ic(folderIcon(x), 'i-sm')}</span><div class="grow"><div class="cell-title truncate" translate="no">${esc(x.name)}</div><div class="cell-sub truncate">${esc(sub)}</div></div></div></td>
-        <td class="table__cell muted t-sm">${esc(plural(countUnder(docs, x), 'document'))}</td>
+        <td class="table__cell"></td>
         <td class="table__cell table__cell--hide-sm"></td>
         <td class="table__cell table__cell--actions">${edit ? `<span class="reveal-on-hover">${iconBtn('more', 'Folder actions', { size: 'sm', menu: 'kb-folder-more', data: { id: x.id } })}</span>` : ''}</td></tr>`;
     };
@@ -318,26 +366,69 @@
       canOpenRes(d) && { label: 'Open', icon: 'file-text', run: () => go('/doc/' + d.id) },
     ].filter(Boolean);
   };
+  /** A folder's ⋯. On its own page the title renames it, the line under it describes it and the access line restricts it,
+      so the menu holds only moving and removing; a row's ⋯ also offers Rename (opens the folder, its title ready to type). */
   MENUS['kb-folder-more'] = el => {
     const f = folderById(el.dataset.id), kb = f && kbById(f.kb); if (!f || !canEditKb(kb)) return [];
-    const own = kbRole(kb) === 'owner';
+    const own = kbRole(kb) === 'owner', row = el.dataset.ctx !== 'head';
     return [
-      { label: 'Edit details…', icon: 'pencil', run: () => A['kb-folder-edit']({ dataset: { id: f.id } }) },
+      row && { label: 'Rename', icon: 'pencil', run: () => { S.ui[FR] = { id: f.id, val: f.name, err: '' }; setQuery({ tab: 'contents', folder: f.id }); requestAnimationFrame(() => { const i = $('#kbf-title'); i?.focus(); i?.select(); }); } },
       { label: 'Move to…', icon: 'folder', run: () => A['kb-folder-move']({ dataset: { id: f.id } }) },
-      own && { label: f.own ? 'Manage access…' : 'Restrict access…', icon: 'lock', run: () => A['kb-folder-access']({ dataset: { id: f.id } }) },
+      own && row && { label: f.own ? 'Manage access…' : 'Restrict access…', icon: 'lock', run: () => A['kb-folder-access']({ dataset: { id: f.id } }) },
       { sep: true },
       { label: 'Remove folder', icon: 'trash', danger: true, run: () => A['kb-folder-remove']({ dataset: { id: f.id } }) },
     ].filter(Boolean);
   };
-
-  /* ── Folder details: new or edit ── */
-  const FK = 'kbFolder';
-  A['kb-folder-new'] = el => { S.ui[FK] = { kb: el.dataset.kb, parent: el.dataset.parent || null, id: '', name: '', desc: '', level: '', touched: false }; openModal('kb-folder', {}); };
-  A['kb-folder-edit'] = el => {
-    const f = folderById(el.dataset.id); if (!f) return;
-    S.ui[FK] = { kb: f.kb, parent: f.parent || null, id: f.id, name: f.name, desc: f.desc || '', level: f.level || '', touched: false };
-    openModal('kb-folder', {});
+  /** The quiet "Add a description" an empty description shows to the people who may write one (localized here: the
+      editable text itself is never translated). */
+  const addDesc = () => tr('Add a description') ?? 'Add a description';
+  /* ── A folder's description, under its title (editors) ── */
+  const FD = 'kbFolderDesc';
+  A['kb-folder-describe'] = el => { const f = folderById(el.dataset.id); if (!f || !canEditKb(kbById(f.kb))) return; S.ui[FD] = { id: f.id, val: f.desc || '' }; refresh(); };
+  A['kb-folder-describe-cancel'] = () => { if (!S.ui[FD]) return; S.ui[FD] = null; refresh(); };
+  /** Enter or leaving it. Idempotent; emptying it removes the description. */
+  A['kb-folder-describe-done'] = el => {
+    const r = S.ui[FD], f = r && folderById(r.id); if (!f) return;
+    const v = el.value.trim(), before = f.desc || '';
+    S.ui[FD] = null;
+    if (v === before) { refresh(); return; }
+    const kb = kbById(f.kb);
+    if (v) f.desc = v; else delete f.desc;
+    audit('Updated folder', `${kb.name} › ${f.name}`); refresh();
+    toast(v ? 'Description updated' : 'Description removed', { action: { label: 'Undo', run: () => { if (before) f.desc = before; else delete f.desc; refresh(); } } });
   };
+  /** A folder's kind (Home's label and icon for it): its level's by default, or another of the workspace's map levels. */
+  MENUS['kb-folder-kind'] = el => {
+    const f = folderById(el.dataset.id), kb = f && kbById(f.kb); if (!f || !canEditKb(kb)) return [];
+    const byDepth = levelOf(null, depthOf(f)), set = level => {
+      const before = f.level; if ((before || '') === (level || '')) return;
+      if (level) f.level = level; else delete f.level;
+      audit('Updated folder', `${kb.name} › ${f.name}`); refresh();
+      toast(`“${f.name}” is shown as ${levelOf(f, depthOf(f))}`, { action: { label: 'Undo', run: () => { if (before) f.level = before; else delete f.level; refresh(); } } });
+    };
+    return [{ section: 'Shown on Home as' }, { label: `${byDepth} (its level)`, checked: !f.level || f.level === byDepth, run: () => set('') },
+      ...mapLevels().filter(l => l !== byDepth).map(l => ({ label: l, checked: f.level === l, run: () => set(l) }))];
+  };
+  /* ── Rename a folder: its title (editors of the collection) ── */
+  const FR = 'kbFolderRename';
+  A['kb-folder-rename'] = el => { const f = folderById(el.dataset.id); if (!f || !canEditKb(kbById(f.kb))) return; S.ui[FR] = { id: f.id, val: f.name, err: '' }; refresh(); };
+  A['kb-folder-rename-cancel'] = () => { if (!S.ui[FR]) return; S.ui[FR] = null; refresh(); };
+  /** Enter or leaving the title. Idempotent; an empty or unchanged name just closes it. */
+  A['kb-folder-rename-done'] = el => {
+    const r = S.ui[FR], f = r && folderById(r.id); if (!f) return;
+    const name = el.value.trim();
+    if (!name || name === f.name) { S.ui[FR] = null; refresh(); return; }
+    const err = folderNameError({ ...f, parent: f.parent || null, name });
+    if (err) { Object.assign(r, { val: el.value, err }); refresh(); return; }
+    const kb = kbById(f.kb), before = f.name;
+    S.ui[FR] = null; f.name = name; kb.updated = Date.now();
+    audit('Renamed folder', `${kb.name} › ${before} → ${name}`); refresh();
+    toast(`Renamed to “${name}”`, { action: { label: 'Undo', run: () => { f.name = before; refresh(); } } });
+  };
+
+  /* ── New folder: its name and description (afterwards the folder's own page edits them in place) ── */
+  const FK = 'kbFolder';
+  A['kb-folder-new'] = el => { S.ui[FK] = { kb: el.dataset.kb, parent: el.dataset.parent || null, name: '', desc: '', touched: false }; openModal('kb-folder', {}); };
   function folderNameError(f) {
     const n = (f.name || '').trim();
     if (!n) return 'Enter a name.';
@@ -346,32 +437,21 @@
     return dup ? `“${dup.name}” is already here. Choose another name.` : '';
   }
   M['kb-folder'] = () => {
-    const f = ui(FK), kb = kbById(f.kb), parent = folderById(f.parent), depth = (parent ? depthOf(parent) : 1) + 1;
+    const f = ui(FK), kb = kbById(f.kb), parent = folderById(f.parent);
     const err = folderNameError(f), shown = f.touched || err.includes('already') ? err : '';
-    const levels = mapLevels(), byDepth = levelOf(null, depth);
-    // Kind is rare: a new folder takes its depth's label; changing it is part of its details.
-    const kind = f.id && levels.length > 1 ? field({ id: 'kbf-level', label: 'Kind', desc: 'What it is in your organisation. Home shows it with this label and icon.', control: select({ id: 'kbf-level', bind: FK + '.level', value: f.level, options: [['', `${byDepth} (its level)`], ...levels.filter(l => l !== byDepth).map(l => [l, l])] }) }) : '';
     return {
-      title: f.id ? 'Folder details' : 'New folder', icon: 'folder', size: 'md',
+      title: 'New folder', icon: 'folder', size: 'md',
       desc: `In ${esc(where(kb, parent))}`,
       body: `<div class="kn-form">${field({ id: 'kbf-name', label: 'Name', required: true, error: shown, control: input({ id: 'kbf-name', bind: FK + '.name', value: f.name, placeholder: 'e.g. Chargebacks', autofocus: true, onEnter: 'kb-folder-go', invalid: !!shown, attrs: 'data-live maxlength="80"' }) })}
-        ${field({ id: 'kbf-desc', label: 'Description', optional: true, desc: 'Shown on Home when someone selects it.', control: input({ id: 'kbf-desc', bind: FK + '.desc', value: f.desc, placeholder: 'e.g. Evidence packs and reason codes for card disputes', onEnter: 'kb-folder-go', attrs: 'maxlength="200"' }) })}
-        ${kind}</div>`,
-      footStart: f.id ? '' : `${ic(X.whoCanSee(kb, parent?.id).icon, 'i-sm')}<span>${esc(`Readable by: ${X.whoCanSee(kb, parent?.id).label}`)}</span>`,
-      foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn(f.id ? 'Save' : 'Create folder', { v: 'primary', icon: f.id ? '' : 'folder-plus', act: 'kb-folder-go' }),
+        ${field({ id: 'kbf-desc-new', label: 'Description', optional: true, desc: 'Shown on Home when someone selects it.', control: input({ id: 'kbf-desc-new', bind: FK + '.desc', value: f.desc, placeholder: 'e.g. Evidence packs and reason codes for card disputes', onEnter: 'kb-folder-go', attrs: 'maxlength="200"' }) })}</div>`,
+      footStart: `${ic(X.whoCanSee(kb, parent?.id).icon, 'i-sm')}<span>${esc(`Readable by: ${X.whoCanSee(kb, parent?.id).label}`)}</span>`,
+      foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn('Create folder', { v: 'primary', icon: 'folder-plus', act: 'kb-folder-go' }),
     };
   };
   A['kb-folder-go'] = () => {
     const f = ui(FK), kb = kbById(f.kb); f.touched = true;
     if (folderNameError(f)) { refreshLayer(); $('#kbf-name')?.focus(); return; }
-    const vals = { name: f.name.trim(), desc: f.desc.trim(), level: f.level || undefined };
-    if (f.id) {
-      const x = folderById(f.id), before = { name: x.name, desc: x.desc, level: x.level };
-      Object.assign(x, vals); closeModal(); refresh();
-      audit('Updated folder', `${kb.name} › ${x.name}`);
-      toast('Folder saved', { action: { label: 'Undo', run: () => { Object.assign(x, before); refresh(); } } });
-      return;
-    }
+    const vals = { name: f.name.trim(), ...(f.desc.trim() ? { desc: f.desc.trim() } : {}) };
     const sibs = foldersIn(kb.id, f.parent || null), x = { id: uid('f'), kb: kb.id, parent: f.parent || null, order: Math.max(-1, ...sibs.map(s => s.order ?? 0)) + 1, ...vals };
     (D.folders ||= []).push(x); kb.updated = Date.now();
     closeModal(); refresh();
@@ -636,41 +716,11 @@
     toast(`Shared with ${added.length === 1 ? shareName(added[0]) : plural(added.length, 'person or group', 'people and groups')}`, { action: { label: 'Undo', run: () => { kb.shares = kb.shares.filter(s => !added.includes(s)); restoreRoles(kb, roles); refresh(); } } });
   };
 
-  /* ── Settings tab ── */
-  function settingsTab(kb) {
-    const key = 'kbSet-' + kb.id, f = ui(key, { name: kb.name, desc: kb.desc || '', touched: false, busy: false });
-    const err = nameError(f.name, kb.id), shown = f.touched || (f.name.trim() && err.includes('exists')) ? err : '';
-    const dirty = f.name.trim() !== kb.name || f.desc.trim() !== (kb.desc || '');
-    const n = docsIn(kb.id).length;
-    return gate({
-      loading: () => skelRows(3),
-      ok: () => `<div class="kb-narrow stack gap-16">
-        ${card(formSection('Details', 'Shown in Browse filters and when people choose what to ask about.',
-          field({ id: 'kbs-name', label: 'Name', required: true, error: shown, counter: `<span class="counter">${f.name.length}/60</span>`, control: input({ id: 'kbs-name', bind: key + '.name', value: f.name, invalid: !!shown, onEnter: 'kb-set-save', attrs: `data-live maxlength="60" data-kb="${kb.id}" ${f.busy ? 'disabled' : ''}` }) })
-          + field({ id: 'kbs-desc', label: 'Description', optional: true, counter: `<span class="counter">${f.desc.length}/200</span>`, control: textarea({ id: 'kbs-desc', bind: key + '.desc', value: f.desc, rows: 3, attrs: `data-live maxlength="200" ${f.busy ? 'disabled' : ''}` }) })), { cls: 'card--lg' })}
-        ${card(formSection('Archive collection', `${n ? `Removes it and its ${plural(n, 'document')} from answers and search for everyone.` : 'Removes it for everyone.'} You can undo right after.`,
-          `<div>${btn('Archive collection', { v: 'danger-soft', icon: 'archive', act: 'kb-archive', data: { kb: kb.id } })}</div>`), { cls: 'card--lg' })}
-        ${dirty ? `<div class="savebar"><span class="savebar__text">Unsaved changes</span>${btn('Discard', { v: 'ghost', act: 'kb-set-discard', data: { kb: kb.id }, disabled: f.busy })}${btn('Save', { v: 'primary', act: 'kb-set-save', data: { kb: kb.id }, loading: f.busy })}</div>` : ''}
-      </div>`,
-    });
-  }
-  A['kb-set-discard'] = el => { const kb = kbById(el.dataset.kb); S.ui['kbSet-' + kb.id] = { name: kb.name, desc: kb.desc || '', touched: false, busy: false }; refresh(); };
-  A['kb-set-save'] = async el => {
-    const kb = kbById(el.dataset.kb), f = ui('kbSet-' + kb.id); if (f.busy) return;
-    f.touched = true;
-    if (nameError(f.name, kb.id)) { refresh(); $('#kbs-name')?.focus(); return; }
-    if (f.name.trim() === kb.name && f.desc.trim() === (kb.desc || '')) { refresh(); return; }
-    f.busy = true; refresh(); await sleep(600);
-    kb.name = f.name.trim(); kb.desc = f.desc.trim(); kb.updated = Date.now();
-    S.ui['kbSet-' + kb.id] = { name: kb.name, desc: kb.desc, touched: false, busy: false };
-    audit('Updated collection details', kb.name);
-    refresh(); toast('Changes saved');
-  };
   /** Archiving is reversible: it happens at once, with Undo (no confirmation). */
   A['kb-archive'] = el => {
     const kb = kbById(el.dataset.kb); if (!kb) return;
     kb.archived = true; audit('Archived collection', kb.name); go(studioHref('collections'));
-    toast(`Archived “${kb.name}”`, { action: { label: 'Undo', run: () => { kb.archived = false; audit('Restored collection', kb.name); go(kbManageHref(kb, 'settings')); toast(`Restored “${kb.name}”`); } } });
+    toast(`Archived “${kb.name}”`, { action: { label: 'Undo', run: () => { kb.archived = false; audit('Restored collection', kb.name); go(kbManageHref(kb)); toast(`Restored “${kb.name}”`); } } });
   };
 
   /* ═══════════════════════════ Request access ═══════════════════════════ */

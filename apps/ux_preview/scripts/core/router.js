@@ -15,6 +15,8 @@ function route(path, def) {
 // Signed-out and workspace selection
 route('/signin', { page: 'signin', mode: 'auth', title: 'Sign in' });
 route('/signup', { page: 'signup', mode: 'auth', title: 'Create account' });
+route('/password-reset', { page: 'passwordReset', mode: 'auth', title: 'Reset your password' });
+route('/password-reset/:token', { page: 'passwordResetToken', mode: 'auth', title: 'Choose a new password' });
 route('/workspaces', { page: 'workspaces', mode: 'auth', title: 'Choose a workspace' });
 // Member — Home is the knowledge-first landing in every workspace; `module` routes exist only where the workspace has that module on (core/workspace.js)
 route('/home', { page: 'home', mode: 'workspace', nav: 'home', title: 'Home' });
@@ -29,6 +31,8 @@ route('/requests/:id', { page: 'requestItem', mode: 'workspace', nav: 'requests'
 // AI Chat: one destination — start a conversation (the composer) and pick up any earlier one (the list below it).
 route('/chat', { page: 'chatHome', mode: 'workspace', nav: 'chat', title: 'AI Chat', bare: true });
 route('/chat/:id', { page: 'chatThread', mode: 'workspace', nav: 'chat', title: 'Conversation', bare: true });
+// A shared conversation: the read-only page a share link opens (conversation_loop.md §Sharing).
+route('/chat/:id/shares/:share', { page: 'chatShared', mode: 'workspace', nav: 'chat', title: 'Shared conversation' });
 // Your work: what you touched lately, your project folders, your submissions.
 route('/recent', { page: 'recent', mode: 'workspace', nav: 'recent', title: 'Recent', simLoad: true });
 route('/projects', { page: 'projects', mode: 'workspace', nav: 'projects', title: 'Projects', simLoad: true });

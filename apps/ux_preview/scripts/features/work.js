@@ -364,10 +364,11 @@
   /* ═══════════════ /work/:id ═══════════════ */
   const scroller = inner => `<div class="work-scroll" id="work-scroll" data-keep-scroll>${inner}</div>`;
   function header(w, k, ctx) {
-    const u = ui('workItem');
-    const titleHtml = u.renaming === w.id
-      ? `<div class="work-rename">${input({ id: 'work-rename', bind: 'workItem.name', value: u.name, onEnter: 'work-rename-save', attrs: 'aria-label="Title"' })}${btn('Save', { v: 'primary', size: 'sm', act: 'work-rename-save' })}${btn('Cancel', { v: 'ghost', size: 'sm', act: 'work-rename-cancel' })}</div>`
-      : ctx.canEdit ? `<h1 class="page-hero__title work-title"><button type="button" class="work-title__btn" data-act="work-rename" data-id="${w.id}" data-tip="Rename">${esc(w.title)}${ic('pencil', 'work-title__pen')}</button></h1>` : `<h1 class="page-hero__title work-title">${esc(w.title)}</h1>`;
+    const u = ui('workItem'), editing = u.renaming === w.id;
+    // People who can edit rename from the title itself (click to edit, applies at once with Undo); others read it.
+    const titleHtml = ctx.canEdit
+      ? editableTitle({ id: 'work-title', value: editing ? u.name : w.title, editing, edit: 'work-rename', commit: 'work-rename-done', cancel: 'work-rename-cancel', tag: 'h1', cls: 'page-hero__title work-title', label: 'Rename', maxlength: 120, data: { id: w.id } })
+      : `<h1 class="page-hero__title work-title">${esc(w.title)}</h1>`;
     const sp = ctx.sp, n = (w.sources || []).length;
     const meta = [
       sp && `<a class="work-meta__space" href="#/space/${sp.id}">${spaceTag(sp)}</a>`,
@@ -381,7 +382,7 @@
     if (w.status !== 'generating') { try { actions = k.actions?.(w, ctx) || ''; } catch (e) { console.error(e); } }
     const more = moreItems(w).length ? iconBtn('more', 'More', { menu: 'work-more', data: { id: w.id } }) : '';
     // The identity block opens the page; its actions live in the top row with the trail (the title joins them once scrolled).
-    return pageHeader({ title: w.title, lead: tile(w), heading: titleHtml, extra: u.renaming === w.id ? '' : statusChip(w), desc: `<div class="work-meta">${meta}</div>`, actions: actions + more });
+    return pageHeader({ title: w.title, lead: tile(w), heading: titleHtml, extra: editing ? '' : statusChip(w), desc: `<div class="work-meta">${meta}</div>`, actions: actions + more });
   }
   P.workItem = ({ params, query }) => {
     const w = workById(params.id);
@@ -408,21 +409,19 @@
     if (w && w.status !== 'generating' && canSee(w)) { try { kindOf(w).after?.(w, ctxFor(w)); } catch (e) { console.error(e); } }
   };
 
-  /* Rename */
-  A['work-rename'] = el => { const w = workById(el.dataset.id || S.cur.params.id); if (!w || !canEdit(w)) return; const u = ui('workItem'); u.renaming = w.id; u.name = w.title; refresh(); requestAnimationFrame(() => $('#work-rename')?.select()); };
-  A['work-rename-cancel'] = () => { ui('workItem').renaming = null; refresh(); };
-  A['work-rename-save'] = () => {
-    const u = ui('workItem'), w = workById(u.renaming); if (!w) return;
-    const name = (u.name || '').trim();
-    if (!name) { toast('Give it a title.', { tone: 'danger' }); return; }
-    const prev = w.title; u.renaming = null;
-    if (name === prev) { refresh(); return; }
+  /* Rename: the title is the control. Enter or leaving it applies at once (Undo); an empty or unchanged title just closes.
+     Idempotent (Enter re-renders, then the field loses focus). */
+  A['work-rename'] = el => { const w = workById(el.dataset.id); if (!w || !canEdit(w)) return; S.ui.workItem = { renaming: w.id, name: w.title }; refresh(); };
+  A['work-rename-cancel'] = () => { const u = ui('workItem'); if (!u.renaming) return; S.ui.workItem = {}; refresh(); };
+  A['work-rename-done'] = el => {
+    const u = ui('workItem'), w = workById(el.dataset.id); if (!w || u.renaming !== w.id) return;
+    const name = el.value.trim(), prev = w.title;
+    S.ui.workItem = {};
+    if (!name || name === prev) { refresh(); return; }
     const evs = (D.events || []).filter(e => e.work === w.id), prevEv = evs.map(e => e.title);
     w.title = name; save(w); evs.forEach(e => (e.title = `${name.split(' — ')[0]} closes`)); refresh();
-    toast('Renamed', { action: { label: 'Undo', run: () => { w.title = prev; evs.forEach((e, i) => (e.title = prevEv[i])); save(w); refresh(); } } });
+    toast(`Renamed to “${name}”`, { action: { label: 'Undo', run: () => { w.title = prev; evs.forEach((e, i) => (e.title = prevEv[i])); save(w); refresh(); } } });
   };
-  const prevEsc = A['esc-page'];
-  A['esc-page'] = () => { if (S.ui.workItem?.renaming && S.cur?.r.page === 'workItem') { A['work-rename-cancel'](); return true; } return prevEsc?.() || false; };
 
   /* More menu */
   function moreItems(w) {

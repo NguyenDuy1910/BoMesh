@@ -295,8 +295,8 @@ function topicEvidence(w = {}) {
   return [
     w.contributor && 'confirmed by the contributor',
     w.rule && `rule: ${ruleText(w.rule)}`,
-    w.keywords?.length && `matched ${q(w.keywords)}`,
-    w.synonyms?.length && `synonym ${q(w.synonyms)}`,
+    // Keywords and synonyms count the same and people edit them as one list, so their evidence reads the same.
+    (w.keywords?.length || w.synonyms?.length) && `matched ${q([...(w.keywords || []), ...(w.synonyms || [])].slice(0, 3))}`,
     w.name && 'the title names it',
     ex && canSeeDoc(ex) && `close to the example “${docTitle(ex)}”`,
     o && canSeeDoc(o) && `like “${docTitle(o)}”`,

@@ -140,7 +140,8 @@ a.topbar__crumb:focus-visible { outline: 2px solid var(--focus); outline-offset:
 .topbar__trail:has(+ .topbar__title--peek) > .topbar__chev:last-child { opacity: 0; transition: opacity var(--dur); }
 .main.is-past-hero .topbar__trail:has(+ .topbar__title--peek) > .topbar__chev:last-child { opacity: .6; }
 .topbar__extra { display: inline-flex; flex: none; }
-.topbar__meta { flex: 0 1 auto; min-width: 0; padding-left: 4px; font-size: var(--text-sm); line-height: 20px; color: var(--muted); }
+/* The status line gives way first: the title keeps its width until the status line is gone. */
+.topbar__meta { flex: 0 1000 auto; min-width: 0; padding-left: 4px; font-size: var(--text-sm); line-height: 20px; color: var(--muted); }
 .topbar__end { display: flex; align-items: center; gap: 8px; flex: none; min-width: 0; }
 .topbar__actions { display: flex; align-items: center; gap: 6px; min-width: 0; }
 /* Page actions sit in the top row at the compact control size, whatever size the page asked for. */

@@ -153,7 +153,7 @@
         label: 'Workspaces',
         head: sortHead('Workspace', 'name', 'pws') + th('Owner', 'hide-md') + sortHead('Members', 'members', 'pws', 'table__column--num') + sortHead('Questions, 30 days', 'questions30', 'pws', 'table__column--num') + th('Status'),
         rows: rows.map(w => `<tr class="${cx('table__row', w.id === newId && 'table__row--new')}" data-act="pws-open" data-id="${w.id}" tabindex="0">
-          <td class="table__cell table__cell--primary"><div class="row gap-12">${wsMark(w, 32)}<div class="stack"><span class="cell-title row gap-8"><span class="truncate">${esc(w.name)}</span>${mixed ? tplChip(w) : ''}</span><span class="cell-sub mono truncate">${esc(wsUrl(w))}</span></div></div></td>
+          <td class="table__cell table__cell--primary"><div class="row gap-12">${wsMark(w, 32)}<div class="stack"><span class="cell-title row gap-8"><span class="truncate">${esc(w.name)}</span>${mixed ? `<span class="pf-ws-tpl">${tplChip(w)}</span>` : ''}</span><span class="cell-sub mono truncate">${esc(wsUrl(w))}</span></div></div></td>
           <td class="table__cell table__cell--hide-sm hide-md"><span class="row gap-8">${avatar(w.owner, 'xs')}<span class="truncate">${esc(w.owner)}</span></span></td>
           <td class="table__cell table__cell--num num" data-label="Members">${fmtNum(w.members)}</td>
           <td class="table__cell table__cell--num num" data-label="Questions">${fmtNum(w.questions30)}</td>
@@ -163,7 +163,7 @@
     };
     const live = S.pageState === 'live' && !S.navLoading;
     return `<div class="page page--wide">${pageHeader({ title: 'Workspaces', meta: live && all.length ? wsSummary(all) : '', extra: PREVIEW, actions: btn('Create workspace', { v: 'primary', icon: 'plus', act: 'pws-create' }) })}
-      ${gate({ ok: () => toolbar + tbl(), loading: () => skelRows(7), empty: () => emptyState({ icon: 'building', title: 'No workspaces yet', desc: 'Create one for each customer or team. Its first admin sets up the rest.', actions: btn('Create workspace', { icon: 'plus', act: 'pws-create' }), boxed: true }) })}</div>`;
+      ${gate({ ok: () => toolbar + tbl(), loading: () => skelRows(7), empty: () => emptyState({ icon: 'building', title: 'No workspaces yet', desc: 'Create one for each customer or team. Its first admin sets up the rest.', boxed: true }) })}</div>`;
   };
   AFTER.pWorkspaces = () => { if (newId) $('tr.table__row--new')?.scrollIntoView({ block: 'nearest' }); };
 
@@ -226,14 +226,6 @@
     closeModal(); refresh(); refreshLayer();
     toast(`Declined. ${w.name}’s admins see your reason.`);
   };
-  /* Rare and administrative: copy the address, suspend. The status's own next step is the drawer's footer instead. */
-  MENUS['pf-ws-more'] = el => {
-    const w = wsById(el.dataset.id); if (!w) return [];
-    return [
-      { label: 'Copy URL', icon: 'copy', run: () => A['pf-ws-copy']({ dataset: { id: w.id } }) },
-      ...(['active', 'new'].includes(w.status) ? [{ sep: true }, { label: 'Suspend workspace', icon: 'pause', danger: true, run: () => suspendWs(w) }] : []),
-    ];
-  };
 
   DR['pf-ws'] = ({ id }) => {
     const w = wsById(id);
@@ -251,7 +243,9 @@
         : w.status === 'suspended' ? btn('Reactivate', { v: 'primary', icon: 'play', act: 'pf-ws-suspend', data: { id: w.id } })
           : isMemberWs(w) ? btn('Open workspace', { v: 'primary', iconRight: 'arrow-right', act: 'pf-ws-enter', data: { id: w.id } }) : '';
     return {
-      title: w.name, lead: wsMark(w, 40), desc: `<span class="mono">${esc(wsUrl(w))}</span>`,
+      // The platform can't rename a workspace (UpdateWorkspace is its own admins' permission), so the name is plain text.
+      // The address copies in place; suspending is the one rare action left, so it's an icon, not a ⋯ menu.
+      title: w.name, lead: wsMark(w, 40), desc: `<span class="row gap-4"><span class="mono">${esc(wsUrl(w))}</span>${iconBtn('copy', 'Copy workspace URL', { size: 'sm', act: 'pf-ws-copy', data: { id: w.id } })}</span>`,
       body: `${notice ? `<div class="drawer__section">${notice}</div>` : ''}<div class="drawer__section">${kv([
         ['Status', status('ws', w.status)],
         ['Template', tplChip(w)],
@@ -262,7 +256,7 @@
         <div class="drawer__section"><div class="pf-sec-head"><h3 class="drawer__section-title">Questions, last 14 days</h3><span class="t-xs muted num">${fmtNum(total)}</span></div>
           ${off ? `<p class="t-sm muted">No questions while ${w.status === 'archived' ? 'archived' : 'suspended'}.</p>` : sparkline(vals, { height: 48 }) + axis(labels[0], 'Today')}</div>
         <div class="drawer__section"><h3 class="drawer__section-title">Admins</h3>${list(admins.map(a => item({ lead: avatar(a.name, 'sm'), title: esc(a.name), desc: esc(a.email), trail: a.owner ? chip('Owner', { size: 'sm' }) : '' })))}</div>`,
-      headActions: iconBtn('more', 'More actions', { menu: 'pf-ws-more', data: { id: w.id } }),
+      headActions: ['active', 'new'].includes(w.status) ? iconBtn('pause', 'Suspend workspace', { act: 'pf-ws-suspend', data: { id: w.id } }) : '',
       foot,
     };
   };
@@ -386,7 +380,6 @@
   A['pu-open'] = el => { if (userById(el.dataset.id)) openDrawer('pf-user', { id: el.dataset.id }); };
   A['pf-user-admin'] = el => { const u = userById(el.dataset.id); if (u) toggleAdmin(u); };
   A['pf-user-suspend'] = el => { const u = userById(el.dataset.id); if (u) suspendUser(u); };
-  MENUS['pf-user-more'] = el => { const u = userById(el.dataset.id); return u && !isSelf(u) && u.status !== 'suspended' ? [{ label: 'Suspend account', icon: 'pause', danger: true, run: () => suspendUser(u) }] : []; };
   DR['pf-user'] = ({ id }) => {
     const u = userById(id);
     if (!u) return { title: 'Account not found', body: emptyState({ icon: 'user', title: 'This account no longer exists', compact: true }) };
@@ -398,8 +391,8 @@
           ${mships.length ? list(mships.map(({ w, role }) => item({ lead: wsMark(w, 28), title: esc(w.name), desc: `<span class="mono">${esc(wsUrl(w))}</span>`, meta: esc(role), trail: ic('chevron-right', 'i-sm muted'), act: 'pws-open', data: { id: w.id } })))
             : emptyState({ icon: 'building', title: 'Not in any workspace', desc: 'Platform admins can manage workspaces without joining them.', compact: true, boxed: true })}</div>
         <div class="drawer__section">${switchRow({ title: 'Platform admin', desc: self ? 'You can’t change your own platform role.' : 'Can manage every workspace, user and connector.', on: u.platformAdmin, act: 'pf-user-admin', data: { id: u.id }, disabled: self })}</div>`,
-      // Suspending is rare and destructive (⋯); a suspended account's way forward is reactivating it.
-      headActions: self || u.status === 'suspended' ? '' : iconBtn('more', 'More actions', { menu: 'pf-user-more', data: { id: u.id } }),
+      // Suspending is rare and the only action besides the switch: one quiet icon; a suspended account's way forward is reactivating it.
+      headActions: self || u.status === 'suspended' ? '' : iconBtn('pause', 'Suspend account', { act: 'pf-user-suspend', data: { id: u.id } }),
       foot: !self && u.status === 'suspended' ? btn('Reactivate account', { v: 'primary', icon: 'play', act: 'pf-user-suspend', data: { id: u.id } }) : '',
     };
   };
@@ -482,7 +475,9 @@
   const signed = d => `${d >= 0 ? '+' : '−'}${Math.abs(d)}%`;
   P.pUsage = () => {
     const u = ui('pfus', { win: '30' }); const n = +u.win;
-    const header = pageHeader({ title: 'Usage', extra: PREVIEW, actions: btn('Export CSV', { icon: 'download', act: 'pf-usage-export' }) });
+    // Export only when there's something to export (not while loading, empty or failed).
+    const live = S.pageState === 'live' && !S.navLoading;
+    const header = pageHeader({ title: 'Usage', extra: PREVIEW, actions: live ? btn('Export CSV', { icon: 'download', act: 'pf-usage-export' }) : '' });
     const ok = () => {
       const rows = usageRows(n);
       const tot = k => rows.reduce((a, r) => a + r[k], 0);
@@ -602,7 +597,9 @@
     })), 'pf-models');
     const incidents = () => `<section class="section" aria-label="Recent incidents">${disclosure({ path: 'pfh.inc', icon: 'check-circle', title: 'Recent incidents', summary: esc(`${plural(INCIDENTS.length, 'incident')} resolved in the last 30 days`),
       body: list(INCIDENTS.map(x => item({ lead: itemIcon('check-circle', 'success', 'sm'), title: esc(x.title), desc: esc(x.impact), meta: `${esc(fmtDate(x.at))} · ${esc(fmtDur(x.dur))}` }))) })}</section>`;
-    return `<div class="page">${pageHeader({ title: 'System health', meta: `Updated ${esc(rel(u.updated).toLowerCase())}`, extra: PREVIEW, actions: btn('Refresh', { icon: 'refresh', act: 'pf-health-refresh', loading: u.busy, disabled: u.busy }) })}
+    // "Updated …" and Refresh describe live status; the error state brings its own Try again.
+    const live = S.pageState === 'live' && !S.navLoading;
+    return `<div class="page">${pageHeader({ title: 'System health', meta: live ? `Updated ${esc(rel(u.updated).toLowerCase())}` : '', extra: PREVIEW, actions: live ? btn('Refresh', { icon: 'refresh', act: 'pf-health-refresh', loading: u.busy, disabled: u.busy }) : '' })}
       ${gate({
         ok: () => `<div class="pf-banner">${banner()}</div>${section('Services', services())}${section('AI capabilities', models(), { desc: 'Models are set in the deployment configuration and change on restart.' })}${incidents()}`,
         loading: () => skelRows(7),

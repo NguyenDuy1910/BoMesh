@@ -34,21 +34,23 @@
     return { toks, docs, cols, kbs, convs, people };
   }
 
+  /** Names, descriptions and conversation text are people's own words: highlighted, never machine-translated word by word. */
+  const own = html => (html ? `<span translate="no">${html}</span>` : '');
   const colItem = (c, toks) => {
     const s = shareLabel(c);
     return item({
-      lead: itemIcon('layers', '', 'sm'), title: markTokens(c.name, toks), desc: c.desc ? markTokens(c.desc, toks) : '',
+      lead: itemIcon('list', '', 'sm'), title: own(markTokens(c.name, toks)), desc: own(c.desc ? markTokens(c.desc, toks) : ''),
       meta: `<span class="row gap-4">${ic(s.icon, 'i-xs')}${esc(s.label)}</span> · ${plural(c.items.length, 'item')}`, href: '/knowledge/lists/' + c.id,
     });
   };
   const kbItem = (k, toks) => {
     const locked = kbRole(k) === 'none';
     return item({
-      lead: X.kbMark(k, 32, locked), title: markTokens(k.name, toks), desc: markTokens(k.desc || '', toks),
+      lead: X.kbMark(k, 32, locked), title: own(markTokens(k.name, toks)), desc: own(markTokens(k.desc || '', toks)),
       meta: locked ? chip('Locked', { icon: 'lock', size: 'sm' }) : plural(docsIn(k.id).length, 'document'), href: kbHref(k),
     });
   };
-  const convItem = ({ c, snip }, toks) => item({ lead: itemIcon('message', '', 'sm'), title: markTokens(c.title, toks), desc: snip, meta: rel(c.at), href: '/chat/' + c.id });
+  const convItem = ({ c, snip }, toks) => item({ lead: itemIcon('message', '', 'sm'), title: own(markTokens(c.title, toks)), desc: own(snip), meta: rel(c.at), href: '/chat/' + c.id });
   const personItem = (m, toks) => item({ lead: avatar(m.name, 'sm'), title: markTokens(m.name, toks), desc: markTokens(m.email, toks), meta: esc(roleById(m.roleId)?.name || ''), act: 'srch-person', data: { id: m.id } });
 
   P.search = ({ query }) => {
@@ -69,7 +71,7 @@
     // Documents never paginate here: their full set (with filters and sort) is Knowledge.
     const open = groups.find(g => g.id === query.tab && g.id !== 'docs');
     // Same wording as Home and ⌘K: "Ask AI", answered with sources.
-    const ask = `<button type="button" class="card card--action srch-ask" data-act="srch-ask">${itemIcon('sparkles', 'accent')}<span class="grow stack"><span class="medium">Ask AI</span><span class="t-sm muted truncate"><span translate="no">“${esc(q)}”</span> · Answer with sources</span></span>${ic('arrow-right', 'muted')}</button>`;
+    const ask = `<button type="button" class="card card--action srch-ask" data-act="srch-ask">${itemIcon('sparkles', 'accent')}<span class="grow stack"><span class="medium">Ask AI</span><span class="t-sm muted truncate"><span translate="no">“${esc(q)}”</span><span aria-hidden="true"> · </span><span>Answer with sources</span></span></span>${ic('arrow-right', 'muted')}</button>`;
     const more = g => (g.id === 'docs'
       ? linkBtn(g.rows.length > PER_GROUP ? `See all ${fmtNum(g.rows.length)} in Knowledge` : 'Open in Knowledge', { href: catalogHref({ q }), icon: 'arrow-right' })
       : g.rows.length > PER_GROUP ? linkBtn(`See all ${fmtNum(g.rows.length)}`, { act: 'srch-tab', data: { value: g.id }, icon: 'arrow-right' }) : '');

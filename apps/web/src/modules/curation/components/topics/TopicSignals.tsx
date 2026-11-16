@@ -1,6 +1,6 @@
 "use client";
 
-import { Button, Input, Label, TextField } from "@heroui/react";
+import { Button, Description, Input, Label, TextField } from "@heroui/react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ArrowRight, Plus, X } from "lucide-react";
 import NextLink from "next/link";
@@ -121,10 +121,17 @@ export function TermsEditor({ value, onChange }: { value: TermsDraft; onChange: 
   );
 }
 
-function ChipField({
+/**
+ * Chips with an input that adds on Enter (`onCommit`). In the detail it's one of the Keywords & synonyms pair; `form`
+ * renders it as a regular form field (label, optional mark, description), as in the New topic dialog.
+ */
+export function ChipField({
   label,
   placeholder,
-  syn,
+  syn = false,
+  form = false,
+  optional = false,
+  description,
   chips,
   typed,
   onType,
@@ -133,7 +140,10 @@ function ChipField({
 }: {
   label: string;
   placeholder: string;
-  syn: boolean;
+  syn?: boolean;
+  form?: boolean;
+  optional?: boolean;
+  description?: string;
   chips: readonly string[];
   typed: string;
   onType: (v: string) => void;
@@ -147,8 +157,16 @@ function ChipField({
   };
   // The whole group is the text field, so its label names the input inside the chip box.
   return (
-    <TextField value={typed} onChange={onType} className="tx-terms__group">
-      <Label className="tx-terms__label">{label}</Label>
+    <TextField value={typed} onChange={onType} className={form ? "field" : "tx-terms__group"}>
+      <Label className={form ? undefined : "tx-terms__label"}>
+        {label}
+        {optional ? (
+          <>
+            {" "}
+            <span className="label__opt">(optional)</span>
+          </>
+        ) : null}
+      </Label>
       <div className="tx-chips">
         {chips.map((k, i) => (
           <span key={`${k}-${i}`} className={`tx-chip${syn ? " tx-chip--syn" : ""}`}>
@@ -161,9 +179,10 @@ function ChipField({
           </span>
         ))}
         {chips.length < MAX_TERMS ? (
-          <Input className="tx-chips__input" placeholder={placeholder} spellCheck={false} autoComplete="off" maxLength={300} translate="no" onKeyDown={onKeyDown} />
+          <Input className="tx-chips__input" placeholder={placeholder} spellCheck={false} autoComplete="off" maxLength={300} onKeyDown={onKeyDown} />
         ) : null}
       </div>
+      {description ? <Description>{description}</Description> : null}
     </TextField>
   );
 }

@@ -396,16 +396,17 @@
   /* ═══════════════ Knowledge Studio → Sources ═══════════════ */
   /** One section for everything that brings documents in: the sources, their sync history and the accounts they sign in
       with (an account is a source's credential, not a destination of its own). Views switch with one segmented
-      control; problems are fixed on their own rows. The Studio owns the header and its Add source action. */
-  const VIEWS = [['sources', 'Sources'], ['history', 'Sync history'], ['accounts', 'Accounts']];
+      control; problems are fixed on their own rows. The Studio owns the header and its Add source action. The first view
+      is "All", like Documents' and Topics', so it never repeats the page title. */
+  const VIEWS = [['sources', 'All'], ['history', 'Sync history'], ['accounts', 'Accounts']];
   function sourcesTabBody({ query }) {
     boot();
     const view = VIEWS.some(([v]) => v === query.view) ? query.view : 'sources';
     const live = S.pageState === 'live' && !S.navLoading;
     // Problems are fixed on their own row (Reconnect, Retry, Process n), not in banners above the list; an expired account
-    // shows on the Accounts view, whose label says so.
+    // shows on the Accounts view, whose label says so. Like Documents' views, a view counts only what needs someone.
     const expired = live ? D.accounts.filter(a => a.status === 'expired').length : 0;
-    const counts = { sources: live ? fmtNum(D.sources.length) : '', accounts: expired ? `${fmtNum(expired)} expired` : live ? fmtNum(D.accounts.length) : '' };
+    const counts = { accounts: expired ? `${fmtNum(expired)} expired` : '' };
     const control = `<div class="src-views">${seg({ value: view, act: 'src-view', label: 'Sources views', options: VIEWS.map(([v, l]) => [v, counts[v] ? `${l} · ${counts[v]}` : l]) })}</div>`;
     const body = view === 'history' ? tabHistory() : view === 'accounts' ? (X.acc?.view?.() ?? skelRows(3)) : tabSources();
     return `${control}${body}`;
@@ -480,22 +481,20 @@
       <td class="table__cell">${bfRun(s) ? bfCell(s, bfRun(s)) : s.status === 'syncing' ? syncingChip(s) : statusChip(s)}</td>
       <td class="table__cell table__cell--actions src-actions"><div class="row gap-4">${rowAction(s)}<span class="reveal-on-hover">${iconBtn('more', 'More actions', { size: 'sm', menu: 'src-row', data: { id: s.id } })}</span></div></td></tr>`;
   }
-  /** Row ⋯ holds what the row doesn't show. In the drawer, Sync now / Pause sit in the footer and
-      Change / View all beside their sections, so only Disconnect is left. */
+  /** Row ⋯ holds what the row doesn't show (its visible fix — Reconnect, Retry, Resume… — isn't repeated). The drawer has
+      its own controls: its title renames, its footer syncs and pauses, Disconnect is an icon in its header. */
   MENUS['src-row'] = el => {
     const s = srcById(el.dataset.id); if (!s) return [];
-    const syncing = s.status === 'syncing', paused = s.status === 'paused', bf = !!bfRun(s);
+    const syncing = s.status === 'syncing', paused = s.status === 'paused', shown = rowActKind(s);
     const items = [];
-    if (el.dataset.ctx !== 'drawer') {
-      const shown = rowActKind(s);
-      if (s.status === 'reconnect') items.push({ label: 'Reconnect', icon: 'log-in', run: () => A['acc-reconnect']({ dataset: { id: s.account } }) });
-      else if (shown !== 'sync') items.push({ label: 'Sync now', icon: 'refresh', disabled: syncing || bf, run: () => A['src-sync']({ dataset: { id: s.id } }) });
-      items.push({ label: 'Edit schedule', icon: 'clock', run: () => A['src-open']({ dataset: { id: s.id, focus: 'schedule' } }) });
-      if (shown !== 'resume' && shown !== 'bf') items.push({ label: paused ? 'Resume' : 'Pause', icon: paused ? 'play' : 'pause', disabled: syncing, run: () => A['src-pause']({ dataset: { id: s.id } }) });
-      items.push({ label: 'Change what’s synced', icon: 'folder', disabled: !accById(s.account), run: () => openWizard({ mode: 'scope', srcId: s.id }) },
-        { label: 'View sync history', icon: 'history', run: () => A['src-history']({ dataset: { id: s.id } }) }, { sep: true });
-    }
-    items.push({ label: 'Disconnect', icon: 'trash', danger: true, run: () => A['src-disconnect']({ dataset: { id: s.id } }) });
+    // Sync now only when the row doesn't already offer it (as Sync now or Retry) and it can run (not syncing, paused or expired).
+    if (!['sync', 'retry', 'reconnect', 'cancel', 'bf', 'resume'].includes(shown) && !['reconnect', 'paused'].includes(s.status)) items.push({ label: 'Sync now', icon: 'refresh', run: () => A['src-sync']({ dataset: { id: s.id } }) });
+    items.push({ label: 'Edit schedule', icon: 'clock', run: () => A['src-open']({ dataset: { id: s.id, focus: 'schedule' } }) });
+    if (shown !== 'resume' && shown !== 'bf') items.push({ label: paused ? 'Resume' : 'Pause', icon: paused ? 'play' : 'pause', disabled: syncing, run: () => A['src-pause']({ dataset: { id: s.id } }) });
+    items.push({ label: 'Change what’s synced', icon: 'folder', disabled: !accById(s.account), run: () => openWizard({ mode: 'scope', srcId: s.id }) },
+      { label: 'View sync history', icon: 'history', run: () => A['src-history']({ dataset: { id: s.id } }) },
+      { label: 'Rename', icon: 'pencil', run: () => { A['src-open']({ dataset: { id: s.id } }); A['src-rename']({ dataset: { id: s.id } }); requestAnimationFrame(() => { const i = $('#src-name'); i?.focus(); i?.select(); }); } },
+      { sep: true }, { label: 'Disconnect', icon: 'trash', danger: true, run: () => A['src-disconnect']({ dataset: { id: s.id } }) });
     return items;
   };
 
@@ -665,12 +664,32 @@
       else if (waiting) foot = btn('Sync now', { icon: 'refresh', act: 'src-sync', data: { id: s.id }, disabled: !acc, tip: acc ? '' : 'Choose an account first' }) + btn(`Process ${fmtNum(waiting)}`, { v: 'primary', icon: 'play', act: 'src-process', data: { id: s.id } });
       else foot = btn(paused ? 'Resume' : 'Pause', { icon: paused ? 'play' : 'pause', act: 'src-pause', data: { id: s.id } }) + btn('Sync now', { v: 'primary', icon: 'refresh', act: 'src-sync', data: { id: s.id }, disabled: !acc, tip: acc ? '' : 'Choose an account first' });
     }
+    // Its managers rename it right on the title (applies at once, with Undo); its name is only a label, so syncing is unaffected.
+    const rn = S.ui[SRN]?.id === s.id ? S.ui[SRN] : null;
     return {
       lead: appIcon(s.app, 'lg'), title: s.name, desc: esc(appName(s.app)),
-      headActions: canM ? iconBtn('more', 'More actions', { menu: 'src-row', data: { id: s.id, ctx: 'drawer' } }) : '',
+      titleEdit: canM ? { id: 'src-name', value: rn ? rn.val : s.name, editing: !!rn, edit: 'src-rename', commit: 'src-rename-done', cancel: 'src-rename-cancel', label: 'Rename source', maxlength: 80, error: rn?.err || '', data: { id: s.id } } : null,
+      // Its other actions sit in the footer and beside their sections; Disconnect is the one left, so it's an icon, not a ⋯.
+      headActions: canM ? iconBtn('trash', 'Disconnect source', { act: 'src-disconnect', data: { id: s.id } }) : '',
       body: sourceSummary(s, acc, kb) + scope + settings + recent,
       foot,
     };
+  };
+  /* ── Rename a source: the drawer's title ── */
+  const SRN = 'srcRename';
+  A['src-rename'] = el => { const s = srcById(el.dataset.id); if (!s || !srcCan()) return; S.ui[SRN] = { id: s.id, val: s.name, err: '' }; refresh(); };
+  A['src-rename-cancel'] = () => { if (!S.ui[SRN]) return; S.ui[SRN] = null; refresh(); };
+  /** Enter or leaving the title. Idempotent; an empty or unchanged name just closes it. */
+  A['src-rename-done'] = el => {
+    const r = S.ui[SRN], s = r && srcById(r.id); if (!s) return;
+    const name = el.value.trim();
+    if (!name || name === s.name) { S.ui[SRN] = null; refresh(); return; }
+    const dup = D.sources.find(x => x !== s && x.name.trim().toLowerCase() === name.toLowerCase());
+    if (dup) { Object.assign(r, { val: el.value, err: `“${dup.name}” already exists. Choose another name.` }); refresh(); return; }
+    const before = s.name;
+    S.ui[SRN] = null; s.name = name;
+    audit('Renamed a source', `${before} → ${name}`); refresh();
+    toast(`Renamed to “${name}”`, { action: { label: 'Undo', run: () => { s.name = before; refresh(); } } });
   };
   A['src-sched-freq'] = el => { ui('srcSched').freq = el.dataset.value; refreshLayer(); };
   A['src-sched-chg'] = () => refreshLayer();

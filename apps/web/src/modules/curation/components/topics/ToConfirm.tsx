@@ -101,9 +101,6 @@ export function ConfirmCard({ g, topics }: { g: ConfirmGroup; topics: readonly T
             <span className="medium" translate="no">
               {t.displayName}
             </span>
-            <span className="md-code md-code--domain" translate="no">
-              {resourceId(t.name)}
-            </span>
             {domain ? (
               <span className="t-sm muted" translate="no">
                 {domain.displayName}

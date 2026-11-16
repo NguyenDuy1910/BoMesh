@@ -18,9 +18,9 @@ prompt.
 from __future__ import annotations
 
 import math
-import re
-from collections import Counter
+from collections import Counter, defaultdict
 from collections.abc import Collection, Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -87,12 +87,14 @@ from bomesh.services.knowledge_curation.records import (
     TopicClassificationTest,
     TopicDomainSummary,
     TopicDraft,
+    TopicImportChange,
     TopicImportResult,
     TopicImportRow,
     TopicRecord,
     TopicRule,
     TopicSignals,
     TopicSummary,
+    parse_topic,
     topic_name,
 )
 from bomesh.services.knowledge_curation.support import CurationDeps, now, referenced_item
@@ -104,7 +106,6 @@ MAX_GUIDANCE = 2000
 MAX_EXAMPLES = 5
 MAX_RULES = 20
 MAX_DISPLAY_NAME = 255
-_TOPIC_ID = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 #: Placeholders of the compiled prompt (CompileTopicClassificationPrompt).
 _PROMPT_NOTE = "[the run's note for the assistant]"
 _PROMPT_TITLE = "[document title]"
@@ -151,7 +152,7 @@ class TopicService:
                 if replayed is not None:
                     topic = await _load(session, workspace_id, replayed.rsplit("/", 1)[1])
                     return await topic_record(session, ctx.authorizer, ctx.principal, topic)
-            code = topic_id or f"t{uuid4().hex[:12]}"
+            code = topic_id or _generated_code()
             if await _find(session, workspace_id, code) is not None:
                 raise AlreadyExists(f"Topic '{topic_name(workspace_id, code)}' already exists.")
             parent_id = await _parent_id(session, workspace_id, draft.parent_code)
@@ -375,10 +376,11 @@ class TopicService:
     ) -> TopicImportResult:
         """ImportTopics: create and update topics from rows in one transaction.
 
-        A row that cannot apply is skipped with its reason. REPLACE also
-        archives the ACTIVE topics missing from the rows, unless in use. The
-        outcome is computed in memory; ``validateOnly`` stops there (no write,
-        no row lock), a real import then writes it in a few set-based statements.
+        Rows name domains and topics by display name (:func:`_plan_import`); a
+        row that cannot apply is skipped with its reason. REPLACE also archives
+        the ACTIVE topics no row matched, unless in use. The outcome is computed
+        in memory; ``validateOnly`` stops there (no write, no row lock), a real
+        import then writes it in a few set-based statements.
         """
         await self._open(ctx, workspace_id, "topics.update", write=True)
         granted = await ctx.authorizer.workspace_permissions(ctx.principal, workspace_id)
@@ -387,33 +389,10 @@ class TopicService:
             if not validate_only:
                 statement = statement.with_for_update()
             existing = {topic.code: topic for topic in await session.scalars(statement)}
-            planned, skipped, named = _plan_import(rows, existing)
-            if any(row.code not in existing for _, row, _ in planned) and "topics.create" not in granted:
+            plan = _plan_import(workspace_id, rows, existing)
+            if plan.new and "topics.create" not in granted:
                 raise permission_denied("topics.create", WorkspaceRef(workspace_id))
-            codes = {topic.id: topic.code for topic in existing.values()}
-            # The parent code of every live topic once the import applied.
-            parents = {
-                code: codes.get(topic.parent_topic_id) if topic.parent_topic_id else None
-                for code, topic in existing.items()
-                if topic.deleted_at is None
-            }
-            new: list[tuple[TopicImportRow, str]] = []
-            changes: dict[str, dict[str, Any]] = {}
-            created: list[str] = []
-            updated: list[str] = []
-            unchanged = 0
-            for _, row, kind in planned:
-                topic = existing.get(row.code)
-                if topic is None:
-                    new.append((row, kind))
-                    created.append(topic_name(workspace_id, row.code))
-                elif changed := _import_changes(topic, row, parents[row.code]):
-                    changes[row.code] = changed
-                    updated.append(topic_name(workspace_id, row.code))
-                else:
-                    unchanged += 1
-                if topic is None or row.parent_code is not None:
-                    parents[row.code] = row.parent_code
+            unchanged = plan.unchanged
             archived: list[Topic] = []
             if replace:
                 # Topics before domains: a domain is in use while it has live topics.
@@ -421,13 +400,14 @@ class TopicService:
                     (
                         topic
                         for topic in existing.values()
-                        if topic.code not in named
+                        if topic.code not in plan.matched
                         and topic.state == "active"
                         and topic.deleted_at is None
                     ),
                     key=lambda topic: (topic.kind == "domain", topic.code),
                 )
                 tagged = await _tagged(session, [topic.id for topic in missing])
+                parents = plan.parents
                 children = Counter(parent for parent in parents.values() if parent is not None)
                 for topic in missing:
                     if topic.id in tagged or children[topic.code]:
@@ -438,9 +418,11 @@ class TopicService:
                     archived.append(topic)
                     if (parent := parents.pop(topic.code)) is not None:
                         children[parent] -= 1
+            # Before applying: the result reports the names an update replaces.
+            result = _import_result(existing, plan, archived, unchanged)
             if not validate_only:
-                await _apply_import(session, ctx, workspace_id, existing, new, changes, archived)
-                if created or updated or archived:
+                await _apply_import(session, ctx, workspace_id, existing, plan, archived)
+                if plan.new or plan.changes or archived:
                     await Audit(session).record(
                         ctx,
                         workspace_id=workspace_id,
@@ -448,13 +430,7 @@ class TopicService:
                         action="ImportTopics",
                         target=f"workspaces/{workspace_id}",
                     )
-            return TopicImportResult(
-                created=tuple(created),
-                updated=tuple(updated),
-                archived=tuple(topic_name(workspace_id, topic.code) for topic in archived),
-                unchanged_count=unchanged,
-                skipped=tuple(skipped),
-            )
+            return result
 
     async def test_classification(
         self,
@@ -869,93 +845,249 @@ async def _validated_signals(
 # -- Import ------------------------------------------------------------------------------
 
 
-def _plan_import(
-    rows: Sequence[TopicImportRow], existing: Mapping[str, Topic]
-) -> tuple[list[tuple[int, TopicImportRow, str]], list[tuple[int, str]], set[str]]:
-    """The rows that apply as ``(position, normalized row, kind)``, domains first;
-    the skipped ``(position, reason)``; and every code the rows name (REPLACE keeps them)."""
-    normalized: list[tuple[int, TopicImportRow]] = []
-    skipped: list[tuple[int, str]] = []
-    named: set[str] = set()
-    for position, row in enumerate(rows, start=1):
-        code = row.code.strip().lower()
-        parent = (row.parent_code or "").strip().lower() or None
-        name = row.name.strip()
-        if not _TOPIC_ID.match(code):
-            skipped.append((position, f"'{row.code}' is not a valid topic code."))
-            continue
-        if code in named:
-            skipped.append((position, f"The code '{code}' is in an earlier row."))
-            continue
-        named.add(code)
-        if not name or len(name) > MAX_DISPLAY_NAME:
-            skipped.append((position, f"The name is required (at most {MAX_DISPLAY_NAME} characters)."))
-            continue
+@dataclass(frozen=True, slots=True)
+class _NewTopic:
+    """A topic or domain an import creates; ``parent_code`` may name another new one."""
+
+    code: str
+    kind: str
+    parent_code: str | None
+    display_name: str
+    description: str | None = None
+    keywords: tuple[str, ...] = ()
+    synonyms: tuple[str, ...] = ()
+    guidance: str | None = None
+    #: A domain created only because topic rows name it (no row of its own).
+    implicit: bool = False
+
+
+@dataclass(slots=True)
+class _ImportPlan:
+    """An import's outcome by code. ``new`` and ``changes`` carry their row's position;
+    ``matched`` are the existing topics some row resolved to (REPLACE keeps them);
+    ``parents`` is the domain code of every live topic once the import applied."""
+
+    parents: dict[str, str | None]
+    new: list[tuple[int, _NewTopic]] = field(default_factory=list)
+    changes: dict[str, tuple[int, dict[str, Any]]] = field(default_factory=dict)
+    matched: set[str] = field(default_factory=set)
+    unchanged: int = 0
+    skipped: list[tuple[int, str]] = field(default_factory=list)
+
+
+class _Skip(Exception):
+    """A row that cannot apply; the message is its reason."""
+
+
+def _match_key(display_name: str) -> str:
+    """How an import compares display names: case and whitespace do not count."""
+    return " ".join(display_name.split()).casefold()
+
+
+def _generated_code() -> str:
+    """A server-generated topic ID."""
+    return f"t{uuid4().hex[:12]}"
+
+
+def _import_row(
+    row: TopicImportRow, workspace_id: UUID, existing: Mapping[str, Topic]
+) -> tuple[TopicImportRow, Topic | None]:
+    """The trimmed row and the live ACTIVE topic its ``name`` identifies; :class:`_Skip` otherwise."""
+    domain = row.domain.strip()
+    topic = (row.topic or "").strip() or None
+    kind = "topic" if topic else "domain"
+    if not domain:
+        raise _Skip("The domain is required.")
+    if len(domain) > MAX_DISPLAY_NAME or len(topic or "") > MAX_DISPLAY_NAME:
+        raise _Skip(f"A domain or topic name is at most {MAX_DISPLAY_NAME} characters.")
+    try:
+        keywords = _terms(row.keywords, "keywords") if row.keywords is not None else None
+        synonyms = _terms(row.synonyms, "synonyms") if row.synonyms is not None else None
+        guidance = _guidance(row.guidance) if row.guidance is not None else None
+    except InvalidArgument as exc:
+        raise _Skip(exc.message) from None
+    if kind == "domain" and (keywords or synonyms or guidance):
+        raise _Skip("A domain has no keywords, synonyms or guidance.")
+    target = None
+    if ref := (row.name or "").strip():
         try:
-            keywords = _terms(row.keywords, "keywords") if row.keywords is not None else None
-            synonyms = _terms(row.synonyms, "synonyms") if row.synonyms is not None else None
-            guidance = _guidance(row.guidance) if row.guidance is not None else None
-        except InvalidArgument as exc:
-            skipped.append((position, exc.message))
-            continue
-        normalized.append(
-            (
-                position,
-                TopicImportRow(
-                    code=code,
-                    name=name,
-                    parent_code=parent,
-                    description=row.description.strip() if row.description is not None else None,
-                    keywords=keywords,
-                    synonyms=synonyms,
-                    guidance=guidance,
-                ),
+            target = existing.get(parse_topic(ref, workspace_id, field="name"))
+        except InvalidArgument:
+            target = None
+        if target is None:
+            raise _Skip(f"'{ref}' is not a topic of this workspace.")
+        if target.deleted_at is not None:
+            raise _Skip(f"'{ref}' is archived; restore it first.")
+        if target.state != "active":
+            raise _Skip(f"'{ref}' is not ACTIVE.")
+        if target.kind != kind:
+            raise _Skip(f"'{ref}' is a {target.kind}, not a {kind}.")
+    normalized = TopicImportRow(
+        domain=domain,
+        topic=topic,
+        description=row.description.strip() if row.description is not None else None,
+        keywords=keywords,
+        synonyms=synonyms,
+        guidance=guidance,
+    )
+    return normalized, target
+
+
+def _plan_import(
+    workspace_id: UUID, rows: Sequence[TopicImportRow], existing: Mapping[str, Topic]
+) -> _ImportPlan:
+    """Resolve every row to a domain or topic, existing or new, by display name.
+
+    Rows with a ``name`` claim their topic first, domain rows before topic rows, so a
+    rename or move wins over a row matching the old name.
+    """
+    planner = _ImportPlanner(workspace_id, existing)
+    prepared: list[tuple[int, TopicImportRow, Topic | None]] = []
+    for position, row in enumerate(rows, start=1):
+        try:
+            prepared.append((position, *_import_row(row, workspace_id, existing)))
+        except _Skip as exc:
+            planner.plan.skipped.append((position, str(exc)))
+    prepared.sort(key=lambda entry: (entry[1].topic is not None, entry[2] is None))
+    for position, row, target in prepared:
+        try:
+            if row.topic is None:
+                planner.domain_row(position, row, target)
+            else:
+                planner.topic_row(position, row, row.topic, target)
+        except _Skip as exc:
+            planner.plan.skipped.append((position, str(exc)))
+    planner.plan.skipped.sort()
+    return planner.plan
+
+
+class _ImportPlanner:
+    """Matches import rows by display name. A name matches an ACTIVE domain (a topic:
+    an ACTIVE topic of its domain) no other row claimed; none matching = it is
+    created, also a domain that only topic rows name. A name a row already used in
+    its domain skips the row."""
+
+    def __init__(self, workspace_id: UUID, existing: Mapping[str, Topic]) -> None:
+        self._workspace_id = workspace_id
+        self._existing = existing
+        codes = {topic.id: topic.code for topic in existing.values()}
+        self.plan = _ImportPlan(
+            parents={
+                code: codes.get(topic.parent_topic_id) if topic.parent_topic_id else None
+                for code, topic in existing.items()
+                if topic.deleted_at is None
+            }
+        )
+        #: Live ACTIVE domains by match key; topics by (domain code, match key).
+        self._domains: dict[str, list[str]] = defaultdict(list)
+        self._topics: dict[tuple[str, str], list[str]] = defaultdict(list)
+        for topic in existing.values():
+            if topic.state != "active" or topic.deleted_at is not None:
+                continue
+            if topic.kind == "domain":
+                self._domains[_match_key(topic.display_name)].append(topic.code)
+            elif (parent := self.plan.parents[topic.code]) is not None:
+                self._topics[(parent, _match_key(topic.display_name))].append(topic.code)
+        #: What the rows applied so far named: domain match key → code, (domain, topic key).
+        self._file_domains: dict[str, str] = {}
+        self._file_topics: set[tuple[str, str]] = set()
+        self._taken = set(existing)
+
+    def domain_row(self, position: int, row: TopicImportRow, target: Topic | None) -> None:
+        self._unclaimed_target(target)
+        key = _match_key(row.domain)
+        if key in self._file_domains:
+            raise _Skip(f"The domain '{row.domain}' is in another row.")
+        if target is None and (found := self._unclaimed(self._domains[key], row.domain, "domain")):
+            target = self._existing[found]
+        if target is None:
+            self._file_domains[key] = self._create(
+                position, _NewTopic(self._code(), "domain", None, row.domain, row.description or None)
             )
+        else:
+            self._file_domains[key] = target.code
+            self._update(position, target, row, None)
+
+    def topic_row(
+        self, position: int, row: TopicImportRow, display_name: str, target: Topic | None
+    ) -> None:
+        self._unclaimed_target(target)
+        domain_key = _match_key(row.domain)
+        domain = self._file_domains.get(domain_key) or self._unclaimed(
+            self._domains[domain_key], row.domain, "domain"
         )
-    # Live domains, then the domain rows that apply: a topic row's parent is one of them.
-    domains = {
-        code
-        for code, topic in existing.items()
-        if topic.kind == "domain" and topic.state == "active" and topic.deleted_at is None
-    }
-    planned: list[tuple[int, TopicImportRow, str]] = []
-    kinds = {
-        position: (
-            existing[row.code].kind
-            if row.code in existing
-            else ("topic" if row.parent_code else "domain")
+        topic_key = _match_key(display_name)
+        if domain is not None:
+            if (domain, topic_key) in self._file_topics:
+                raise _Skip(f"The topic '{display_name}' of '{row.domain}' is in another row.")
+            if target is None and (
+                found := self._unclaimed(self._topics[(domain, topic_key)], display_name, "topic")
+            ):
+                target = self._existing[found]
+            self.plan.matched.add(domain)
+        else:
+            domain = self._create(
+                position, _NewTopic(self._code(), "domain", None, row.domain, implicit=True)
+            )
+        self._file_domains[domain_key] = domain
+        self._file_topics.add((domain, topic_key))
+        if target is not None:
+            self._update(position, target, row, domain)
+            return
+        self._create(
+            position,
+            _NewTopic(
+                self._code(),
+                "topic",
+                domain,
+                display_name,
+                row.description or None,
+                row.keywords or (),
+                row.synonyms or (),
+                row.guidance,
+            ),
         )
-        for position, row in normalized
-    }
-    for position, row in sorted(normalized, key=lambda entry: kinds[entry[0]] != "domain"):
-        topic = existing.get(row.code)
-        kind = kinds[position]
-        reason = None
-        if topic is not None and topic.deleted_at is not None:
-            reason = "The topic is archived; restore it first."
-        elif topic is not None and topic.state != "active":
-            reason = "The topic is not ACTIVE."
-        elif kind == "domain" and row.parent_code:
-            reason = "A domain has no parent."
-        elif row.parent_code and row.parent_code not in domains:
-            reason = f"The parent '{row.parent_code}' is not a domain."
-        elif kind == "domain" and (row.keywords or row.synonyms or row.guidance):
-            reason = "A domain has no keywords, synonyms or guidance."
-        if reason is not None:
-            skipped.append((position, reason))
-            continue
-        planned.append((position, row, kind))
-        if kind == "domain":
-            domains.add(row.code)
-    return planned, sorted(skipped), named
+
+    def _unclaimed_target(self, target: Topic | None) -> None:
+        if target is not None and target.code in self.plan.matched:
+            raise _Skip(f"'{topic_name(self._workspace_id, target.code)}' is in another row.")
+
+    def _unclaimed(self, candidates: Sequence[str], display_name: str, kind: str) -> str | None:
+        free = [code for code in candidates if code not in self.plan.matched]
+        if len(free) > 1:
+            raise _Skip(f"'{display_name}' matches more than one {kind}.")
+        return free[0] if free else None
+
+    def _code(self) -> str:
+        while (code := _generated_code()) in self._taken:
+            pass
+        self._taken.add(code)
+        return code
+
+    def _create(self, position: int, new: _NewTopic) -> str:
+        self.plan.new.append((position, new))
+        if new.kind == "topic":
+            self.plan.parents[new.code] = new.parent_code
+        return new.code
+
+    def _update(
+        self, position: int, topic: Topic, row: TopicImportRow, parent: str | None
+    ) -> None:
+        self.plan.matched.add(topic.code)
+        if changed := _import_changes(topic, row, parent, self.plan.parents.get(topic.code)):
+            self.plan.changes[topic.code] = (position, changed)
+            if "parent_code" in changed:
+                self.plan.parents[topic.code] = parent
+        else:
+            self.plan.unchanged += 1
 
 
-def _import_changes(topic: Topic, row: TopicImportRow, parent_code: str | None) -> dict[str, Any]:
-    """The row's present columns that differ from ``topic``, by attribute; the parent
-    compares by code (``topic``'s is ``parent_code``) under the key ``parent_code``."""
-    wanted: dict[str, Any] = {"display_name": row.name}
-    if row.parent_code is not None:
-        wanted["parent_code"] = row.parent_code
+def _import_changes(
+    topic: Topic, row: TopicImportRow, parent_code: str | None, current_parent: str | None
+) -> dict[str, Any]:
+    """The row's present columns that differ from ``topic``, by attribute; a topic's
+    domain compares by code under the key ``parent_code``."""
+    wanted: dict[str, Any] = {"display_name": row.topic if topic.kind == "topic" else row.domain}
     if row.description is not None:
         wanted["description"] = row.description or None
     if row.keywords is not None:
@@ -964,11 +1096,75 @@ def _import_changes(topic: Topic, row: TopicImportRow, parent_code: str | None) 
         wanted["synonyms"] = list(row.synonyms)
     if row.guidance is not None:
         wanted["guidance"] = row.guidance
-    return {
-        key: value
-        for key, value in wanted.items()
-        if (parent_code if key == "parent_code" else getattr(topic, key)) != value
-    }
+    changed = {key: value for key, value in wanted.items() if getattr(topic, key) != value}
+    if topic.kind == "topic" and parent_code != current_parent:
+        changed["parent_code"] = parent_code
+    return changed
+
+
+#: TopicImportChange ``changes`` by ``_import_changes`` key, in the contract's order.
+_CHANGE_KINDS = {
+    "display_name": "RENAMED",
+    "parent_code": "MOVED",
+    "description": "DESCRIPTION",
+    "keywords": "KEYWORDS",
+    "synonyms": "SYNONYMS",
+    "guidance": "GUIDANCE",
+}
+
+
+def _import_result(
+    existing: Mapping[str, Topic], plan: _ImportPlan, archived: Sequence[Topic], unchanged: int
+) -> TopicImportResult:
+    """The outcome named the way the file names it: display names after the import."""
+    names = {code: topic.display_name for code, topic in existing.items()}
+    for code, (_, changed) in plan.changes.items():
+        names[code] = changed.get("display_name", names[code])
+    for _, new in plan.new:
+        names[new.code] = new.display_name
+    codes = {topic.id: topic.code for topic in existing.values()}
+
+    def domain_name(parent_code: str | None) -> str | None:
+        return names[parent_code] if parent_code is not None else None
+
+    created = tuple(
+        TopicImportChange(
+            code=new.code,
+            kind=new.kind,
+            display_name=new.display_name,
+            domain=domain_name(new.parent_code),
+            row=None if new.implicit else position,
+        )
+        for position, new in sorted(plan.new, key=lambda entry: entry[0])
+    )
+    updated = tuple(
+        TopicImportChange(
+            code=code,
+            kind=existing[code].kind,
+            display_name=names[code],
+            domain=domain_name(plan.parents.get(code)),
+            row=position,
+            changes=tuple(kind for key, kind in _CHANGE_KINDS.items() if key in changed),
+            previous_display_name=existing[code].display_name if "display_name" in changed else None,
+        )
+        for code, (position, changed) in sorted(plan.changes.items(), key=lambda entry: entry[1][0])
+    )
+    removed = tuple(
+        TopicImportChange(
+            code=topic.code,
+            kind=topic.kind,
+            display_name=topic.display_name,
+            domain=domain_name(codes.get(topic.parent_topic_id) if topic.parent_topic_id else None),
+        )
+        for topic in archived
+    )
+    return TopicImportResult(
+        created=created,
+        updated=updated,
+        archived=removed,
+        unchanged_count=unchanged,
+        skipped=tuple(plan.skipped),
+    )
 
 
 async def _apply_import(
@@ -976,35 +1172,34 @@ async def _apply_import(
     ctx: RequestContext,
     workspace_id: UUID,
     existing: Mapping[str, Topic],
-    new: Sequence[tuple[TopicImportRow, str]],
-    changes: Mapping[str, Mapping[str, Any]],
+    plan: _ImportPlan,
     archived: Sequence[Topic],
 ) -> None:
     """Write an import's outcome: new domains, then new topics (one multi-row
-    INSERT each, their parents resolved by code), then the updates and archives."""
+    INSERT each, their domains resolved by code), then the updates and archives."""
     ids = {code: topic.id for code, topic in existing.items()}
     for kind in ("domain", "topic"):
         values = [
             {
                 "tenant_id": workspace_id,
-                "code": row.code,
+                "code": new.code,
                 "kind": kind,
-                "parent_topic_id": ids[row.parent_code] if row.parent_code else None,
-                "display_name": row.name,
-                "description": row.description,
-                "keywords": list(row.keywords or ()),
-                "synonyms": list(row.synonyms or ()),
-                "guidance": row.guidance,
+                "parent_topic_id": ids[new.parent_code] if new.parent_code else None,
+                "display_name": new.display_name,
+                "description": new.description,
+                "keywords": list(new.keywords),
+                "synonyms": list(new.synonyms),
+                "guidance": new.guidance,
                 "state": "active",
                 "created_by_user_id": ctx.user_id,
             }
-            for row, row_kind in new
-            if row_kind == kind
+            for _, new in plan.new
+            if new.kind == kind
         ]
         if values:
             inserted = await session.execute(insert(Topic).returning(Topic.code, Topic.id), values)
             ids.update(inserted.tuples().all())
-    for code, changed in changes.items():
+    for code, (_, changed) in plan.changes.items():
         topic = existing[code]
         for key, value in changed.items():
             if key == "parent_code":

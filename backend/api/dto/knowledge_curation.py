@@ -35,6 +35,7 @@ from bomesh.services.knowledge_curation.records import (
     TopicClassificationPrompt,
     TopicClassificationTest,
     TopicCorrectionRecord,
+    TopicImportChange,
     TopicImportResult,
     TopicImportRow,
     TopicRecord,
@@ -421,9 +422,9 @@ class MergeTopicRequest(ProtoMessage):
 
 
 class TopicImportRowMessage(ProtoMessage):
-    code: str
-    name: str
-    parent_code: str | None = None
+    domain: str
+    topic: str | None = None
+    name: str | None = None
     description: str | None = None
     keywords: list[str] | None = None
     synonyms: list[str] | None = None
@@ -441,10 +442,22 @@ class TopicImportSkippedRowMessage(ProtoMessage):
     reason: str
 
 
+class TopicImportChangeMessage(ProtoMessage):
+    topic: str
+    kind: TopicKind
+    display_name: str
+    domain: str | None = None
+    row: int | None = None
+    changes: (
+        list[Literal["RENAMED", "MOVED", "DESCRIPTION", "KEYWORDS", "SYNONYMS", "GUIDANCE"]] | None
+    ) = None
+    previous_display_name: str | None = None
+
+
 class ImportTopicsResponse(ProtoMessage):
-    created: list[str]
-    updated: list[str]
-    archived: list[str]
+    created: list[TopicImportChangeMessage]
+    updated: list[TopicImportChangeMessage]
+    archived: list[TopicImportChangeMessage]
     unchanged_count: int
     skipped_rows: list[TopicImportSkippedRowMessage]
 
@@ -581,9 +594,9 @@ def import_rows(request: ImportTopicsRequest) -> tuple[TopicImportRow, ...]:
         raise InvalidArgument.for_field("rows", f"At most {MAX_IMPORT_ROWS} rows are allowed.")
     return tuple(
         TopicImportRow(
-            code=row.code,
+            domain=row.domain,
+            topic=row.topic,
             name=row.name,
-            parent_code=row.parent_code,
             description=row.description,
             keywords=tuple(row.keywords) if row.keywords is not None else None,
             synonyms=tuple(row.synonyms) if row.synonyms is not None else None,
@@ -593,11 +606,22 @@ def import_rows(request: ImportTopicsRequest) -> tuple[TopicImportRow, ...]:
     )
 
 
-def import_response(result: TopicImportResult) -> ImportTopicsResponse:
+def import_response(workspace_id: UUID, result: TopicImportResult) -> ImportTopicsResponse:
+    def change(record: TopicImportChange) -> TopicImportChangeMessage:
+        return TopicImportChangeMessage(
+            topic=topic_name(workspace_id, record.code),
+            kind=record.kind.upper(),  # type: ignore[arg-type]
+            display_name=record.display_name,
+            domain=record.domain,
+            row=record.row,
+            changes=list(record.changes) or None,  # type: ignore[arg-type]
+            previous_display_name=record.previous_display_name,
+        )
+
     return ImportTopicsResponse(
-        created=list(result.created),
-        updated=list(result.updated),
-        archived=list(result.archived),
+        created=[change(record) for record in result.created],
+        updated=[change(record) for record in result.updated],
+        archived=[change(record) for record in result.archived],
         unchanged_count=result.unchanged_count,
         skipped_rows=[
             TopicImportSkippedRowMessage(row=row, reason=reason) for row, reason in result.skipped

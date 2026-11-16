@@ -5,8 +5,8 @@ import { ChevronDown, type LucideIcon } from "lucide-react";
 import { useId, useState, type ReactNode } from "react";
 
 export interface DisclosureProps {
-  /** The quiet header row's text. */
-  title: string;
+  /** The quiet header row's text (may carry an "(optional)" mark). */
+  title: ReactNode;
   /** A short summary of the current choice, shown at the end of the header row. */
   summary?: ReactNode;
   icon?: LucideIcon;

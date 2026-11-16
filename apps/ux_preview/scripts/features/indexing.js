@@ -121,8 +121,9 @@
       ${gate({
         ok,
         loading: () => skelRows(8),
-        error: () => errorState({ title: 'Indexing status didn’t load' }),
-        empty: () => emptyState({ icon: 'database', title: 'No indexing jobs yet', desc: 'Jobs appear once workspaces add documents.', boxed: true }),
+        error: () => errorState({ title: tab === 'policies' ? 'Indexing policies didn’t load' : 'Indexing status didn’t load' }),
+        // Policies are deployment settings: they exist (and can be set up front) before any job has run.
+        empty: () => (tab === 'policies' ? ok() : emptyState({ icon: 'database', title: 'No indexing jobs yet', desc: 'Jobs appear once workspaces add documents.', boxed: true })),
       })}</div>`;
   };
 
@@ -136,24 +137,27 @@
   function wsRow(w) {
     const s = statOf(w), paused = !!s.paused, high = s.fail >= 0.05;
     // Paused is the exceptional state, so Resume stays one click away; Pause lives in the row menu.
+    // A paused row with nothing to retry has no menu: Show jobs alone is in the drawer the row opens.
     const act = paused ? btn('Resume', { size: 'sm', icon: 'play', act: 'pix-pause', data: { id: w.id } }) : '';
+    const more = wsMenu(w).length > 1 ? iconBtn('more', 'More actions', { size: 'sm', menu: 'pix-ws', data: { id: w.id } }) : '';
     return `<tr class="table__row" data-act="pix-ws-open" data-id="${esc(w.id)}" tabindex="0">
       <td class="table__cell table__cell--primary">${wsCell(w)}</td>
       <td class="table__cell">${wsChip(w)}</td>
       <td class="table__cell table__cell--num num" data-label="Queue">${fmtNum(s.queue || 0)}</td>
       <td class="table__cell table__cell--num num ${high ? 'text-warning medium' : ''}" data-label="Failure rate">${fmtPct(s.fail)}</td>
-      <td class="table__cell table__cell--actions"><div class="row gap-4 none">${act}${iconBtn('more', 'More actions', { size: 'sm', menu: 'pix-ws', data: { id: w.id } })}</div></td></tr>`;
+      <td class="table__cell table__cell--actions"><div class="row gap-4 none">${act}${more}</div></td></tr>`;
   }
-  MENUS['pix-ws'] = el => {
-    const w = wsById(el.dataset.id); if (!w) return [];
+  /* Only what applies to this row: Retry when a retry can succeed; Pause only while running (a paused row shows Resume itself). */
+  function wsMenu(w) {
     const paused = isPaused(w.id), n = failedJobs(w.id).filter(canRetry).length;
     return [
-      { label: n ? `Retry ${plural(n, 'failed job')}` : 'Retry failed jobs', icon: 'retry', disabled: !n, run: () => retryJobs(failedJobs(w.id), w.name, w.id) },
+      n && { label: `Retry ${plural(n, 'failed job')}`, icon: 'retry', run: () => retryJobs(failedJobs(w.id), w.name, w.id) },
       { label: 'Show jobs', icon: 'list', run: () => showJobs({ ws: w.id }) },
-      { sep: true },
-      { label: paused ? 'Resume indexing' : 'Pause indexing', icon: paused ? 'play' : 'pause', run: () => A['pix-pause']({ dataset: { id: w.id } }) },
-    ];
-  };
+      !paused && { sep: true },
+      !paused && { label: 'Pause indexing', icon: 'pause', run: () => A['pix-pause']({ dataset: { id: w.id } }) },
+    ].filter(Boolean);
+  }
+  MENUS['pix-ws'] = el => { const w = wsById(el.dataset.id); return w ? wsMenu(w) : []; };
   A['pix-ws-open'] = el => { if (wsById(el.dataset.id)) openDrawer('pix-ws', { id: el.dataset.id }); };
   /** Pausing holds new work but deletes nothing (published documents stay searchable): at once, with Undo; resuming likewise. */
   A['pix-pause'] = el => {
@@ -163,6 +167,8 @@
       const before = { pausedAt: s.pausedAt, pausedBy: s.pausedBy };
       delete s.paused; delete s.pausedAt; delete s.pausedBy; log('Resumed indexing', w.name, w.id);
       settleRetries(w.id); repaint();
+      // The row's Resume button goes away with the pause: keep the keyboard on the row it was in.
+      if (el.closest?.('.table__cell--actions')) $(`#app tr[data-id="${w.id}"]`)?.focus();
       toast(`Resumed indexing for ${w.name}. Queued jobs start now.`, { action: { label: 'Undo', run: () => { Object.assign(s, { paused: true, ...before }); log('Paused indexing', w.name, w.id); repaint(); } } });
       return;
     }
@@ -189,7 +195,7 @@
     if (!ok.length) { toast(skipped ? `None of these can be retried. ${plural(skipped, 'job')} need${skipped === 1 ? 's' : ''} the workspace to replace the file.` : 'No failed jobs to retry', { tone: 'accent' }); return; }
     const snap = ok.map(j => [j, { ...j }]), key = uid('rt');
     ok.forEach(j => Object.assign(j, { status: 'queued', retries: (j.retries || 0) + 1, at: Date.now(), dur: null }));
-    log(`Retried ${plural(ok.length, 'failed job')}`, scope, wsId);
+    log(`Retried ${ok.length} failed job${ok.length === 1 ? '' : 's'}`, scope, wsId);   // stored English like every audit action; the interface localizes it
     retryTimers[key] = setTimeout(() => { delete retryTimers[key]; finishRetried(ok); repaint(); }, 3200);
     repaint();
     const held = wsId && isPaused(wsId) ? ' · they run when indexing resumes' : '';
@@ -213,7 +219,7 @@
       return item({
         lead: itemIcon(e.icon, k === 'timeout' ? 'warning' : 'danger', 'sm'),
         title: `${esc(e.label)} <span class="num muted">· ${fmtNum(n)}</span>`,
-        desc: `${esc(e.hint)} <span class="muted">${esc(`In ${plural(wsN, 'workspace')}.`)}</span>`,
+        desc: `${esc(e.hint)} <span class="muted">${esc(`Seen in ${plural(wsN, 'workspace')}.`)}</span>`,
         trail: `<span class="row gap-8 none">${retry}${btn('Show jobs', { v: 'ghost', size: 'sm', act: 'pix-show-err', data: { err: k } })}</span>`,
       });
     }), 'pix-errs') : emptyState({ icon: 'check-circle', tone: 'success', title: 'No failed jobs in the last 24 hours', compact: true, boxed: true });
@@ -263,7 +269,8 @@
     return {
       lead: fileIcon(j.type, 'lg'), title: j.id, desc: esc('Job metadata only'),
       body: `${note ? `<section class="drawer__section">${note}</section>` : ''}<section class="drawer__section">${kv([
-        ['Status', jobChip(j)],
+        // The alert above already names the error class: the status row just says Failed.
+        ['Status', note && st === 'failed' ? chip('Failed', { tone: 'danger', size: 'sm', dot: true }) : jobChip(j)],
         ['Workspace', w ? `<button type="button" class="link-button" data-act="pix-ws-open" data-id="${esc(w.id)}">${esc(w.name)}</button>` : '<span class="muted">Removed workspace</span>'],
         ['File', esc(`${String(j.type).toUpperCase()} · ${fmtSize(j.size)}`)],
         ['Stage', esc(STAGES[j.stage] || '—')],

@@ -20,7 +20,6 @@ const hasIssue = (item: Item, kind: string) => issues(item).some((i) => i.kind =
 
 /** One line above each queue: what it finds and what to do about it (counts live on the queue chooser). */
 export const QUEUE_HINT = {
-  problems: "Couldn’t be processed, or changed at the source since it was. Each row shows its fix; select several to process them again together.",
   reverify: "Verification expired or never happened. Verify what’s still right.",
   details: "Documents without a topic, owner or summary are harder to find. Fill in what’s missing.",
   duplicates: "Near-identical documents compete in answers. Compare each pair and keep one.",
