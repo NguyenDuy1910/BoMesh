@@ -10,7 +10,7 @@ import { useSpaces } from "@/modules/spaces/queries";
 import { listAllItems, listMaterials, searchItems, type SearchItemsRequest, type SearchItemsResult } from "../api";
 import { catalogSearchRequest, facetOptions, UPDATED_WINDOWS } from "../model";
 import { knowledgeKeys, useKnowledgeBases, useTopics } from "../queries";
-import { activeCount, answerLocally, apiParams, browseFacets, isLocal, PER_PAGE, poolRequest, setKey, type BrowseFacetId, type BrowseParams, type LocalContext } from "./catalog";
+import { activeCount, answerLocally, apiParams, BROWSE_SCOPE, browseFacets, isLocal, PER_PAGE, poolRequest, setKey, type BrowseFacetId, type BrowseParams, type LocalContext } from "./catalog";
 import { useFacetLabel } from "./labels";
 
 export interface BrowseOption {
@@ -40,8 +40,8 @@ export interface CatalogView {
 
 const POOL_LIMIT = 1000;
 const LANG_FACET = { field: "document.languageCode", limit: 30, excludedFromFilter: true };
-/** One long-lived probe: the readable pool's size, and its owners with their names (local answers label owners from it). */
-const POOL_PROBE: SearchItemsRequest = { pageSize: 1, facetSpecs: [{ field: "document.owner", limit: 100, excludedFromFilter: true }] };
+/** One long-lived probe: the Browse pool's size, and its owners with their names (local answers label owners from it). */
+const POOL_PROBE: SearchItemsRequest = { filter: BROWSE_SCOPE, pageSize: 1, facetSpecs: [{ field: "document.owner", limit: 100, excludedFromFilter: true }] };
 
 /**
  * Browse results for URL params. One SearchItems call per result set answers filters, every facet
@@ -66,7 +66,7 @@ export function useCatalog(p: BrowseParams): CatalogView {
   const setPage = (n: number) => setPaging({ ...current, page: n });
 
   const serverRequest = useMemo<SearchItemsRequest>(() => {
-    const req = catalogSearchRequest(apiParams(p), ws, { pageSize: PER_PAGE, pageToken: current.tokens[page] });
+    const req = catalogSearchRequest(apiParams(p), ws, { base: BROWSE_SCOPE, pageSize: PER_PAGE, pageToken: current.tokens[page] });
     return { ...req, facetSpecs: [...(req.facetSpecs ?? []), LANG_FACET] };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `key` captures the params
   }, [key, ws, page, current.tokens[page]]);

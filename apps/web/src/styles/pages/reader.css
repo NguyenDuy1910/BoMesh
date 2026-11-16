@@ -1,6 +1,6 @@
 /* Reader (features/reader.js): /doc/:id, a bare route that owns its scroll.
-   Shell (rdr-*), page canvas (doc-* — markup from the rendition model in
-   documents.js), evidence marks, selection toolbar, rail (Ask · About · Related). Tokens only. */
+   Shell (rdr-*), page canvas (doc-* — the preview engine's representations and the item's cover),
+   evidence marks, selection toolbar, rail (Ask · About · Related). Tokens only. */
 
 /* ───── Shell ───── */
 .rdr { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; }
@@ -91,53 +91,42 @@
 .rdr-composer { flex: none; display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--separator); }
 .rdr-composer .input { flex: 1 1 auto; min-width: 0; }
 
-/* ───── Pages (rendition markup, shared with previews and thumbnails) ───── */
+/* ───── Pages (covers, PDF pages, text; shared with previews and the review pane) ───── */
 .doc-page { max-width: 760px; margin: 0 auto 8px; padding: 56px 64px; border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); font-size: 15px; line-height: 1.75; color: var(--foreground); overflow-wrap: anywhere; }
 .doc-page h2 { font-size: 22px; line-height: 30px; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 8px; }
 .doc-page h3 { font-size: 16px; line-height: 24px; font-weight: 600; margin: 24px 0 8px; scroll-margin-top: 64px; }
-.doc-page h2 + h3, .doc-page .doc-sub + h3 { margin-top: 20px; }
+.doc-page h2 + h3 { margin-top: 20px; }
 .doc-page p { margin: 0 0 12px; }
-.doc-page ul { padding-left: 22px; margin: 0 0 12px; }
+.doc-page ul, .doc-page ol { padding-left: 22px; margin: 0 0 12px; }
+.doc-page ul { list-style: disc; }
+.doc-page ol { list-style: decimal; }
 .doc-page li + li { margin-top: 4px; }
 .doc-page table { width: 100%; border-collapse: collapse; margin: 8px 0 16px; font-size: 14px; line-height: 20px; }
 .doc-page th, .doc-page td { border: 1px solid var(--border); padding: 8px 10px; text-align: left; overflow-wrap: break-word; }
 .doc-page th { background: var(--surface-secondary); font-weight: 600; }
 .doc-page mark.evidence { scroll-margin: 120px; }
-.doc-sub { font-size: 13px; line-height: 18px; color: var(--muted); }
 .doc-gap { max-width: 816px; margin: 0 auto 20px; padding: 10px; border: 1px dashed var(--border-secondary); border-radius: 4px; text-align: center; font-size: 12px; line-height: 16px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .doc-state { display: grid; place-items: center; min-height: 100%; }
 /* Not processed yet but the cover exists: the message sits above the first page, which stays in view. */
 .doc-state:has(+ .doc-viewer) { min-height: 0; padding: 32px 0 8px; }
 
-/* PDF and Word: white paper with print margins, a running header (PDF) and a page footer — in every theme. */
-.doc-page--pdf, .doc-page--docx { position: relative; max-width: 816px; min-height: 0; aspect-ratio: 8.5 / 11; margin: 0 auto 20px; padding: 72px 80px 64px; border-radius: 2px; background: var(--paper); color: var(--paper-ink); box-shadow: var(--paper-shadow); }
-.doc-page--pdf th, .doc-page--pdf td, .doc-page--docx th, .doc-page--docx td { border-color: var(--paper-rule); }
-.doc-page--pdf th, .doc-page--docx th { background: color-mix(in oklab, var(--paper-rule) 45%, var(--paper)); }
-.doc-page--pdf .doc-sub, .doc-page--docx .doc-sub { color: var(--paper-muted); }
+/* PDF: white paper with print margins — in every theme. */
+.doc-page--pdf { position: relative; max-width: 816px; min-height: 0; aspect-ratio: 8.5 / 11; margin: 0 auto 20px; padding: 72px 80px 64px; border-radius: 2px; background: var(--paper); color: var(--paper-ink); box-shadow: var(--paper-shadow); }
+.doc-page--pdf th, .doc-page--pdf td { border-color: var(--paper-rule); }
+.doc-page--pdf th { background: color-mix(in oklab, var(--paper-rule) 45%, var(--paper)); }
 .doc-page--pdf { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; font-size: 14px; line-height: 1.62; }
 .doc-page--pdf h2 { font-size: 24px; line-height: 30px; font-weight: 700; letter-spacing: -0.01em; }
 .doc-page--pdf h3 { font-size: 15px; line-height: 22px; font-weight: 700; margin-top: 22px; }
-.doc-page--docx { font-family: Aptos, Calibri, Carlito, "Segoe UI", sans-serif; font-size: 14.5px; line-height: 1.55; }
-.doc-page--docx h2 { font-size: 30px; line-height: 38px; font-weight: 400; letter-spacing: -0.015em; margin-bottom: 4px; }
-.doc-page--docx h3 { font-size: 19px; line-height: 26px; font-weight: 500; color: var(--docx-heading); margin: 22px 0 6px; }
-.doc-run { position: absolute; top: 30px; left: 80px; right: 80px; display: flex; justify-content: space-between; gap: 16px; padding-bottom: 6px; border-bottom: 1px solid var(--paper-rule); font-size: 10px; line-height: 14px; color: var(--paper-muted); }
-.doc-run span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.doc-foot { position: absolute; left: 0; right: 0; bottom: 24px; text-align: center; font-size: 10px; line-height: 14px; color: var(--paper-muted); font-variant-numeric: tabular-nums; }
 
-/* Slides: a 16:9 deck with a title slide, slide titles and slide numbers. */
+/* Slides (a deck's cover): a 16:9 slide with its title and bullets. */
 .doc-page--slide { position: relative; max-width: 960px; aspect-ratio: 16 / 9; margin: 0 auto 24px; display: flex; flex-direction: column; justify-content: flex-start; padding: 44px 64px 48px; border-radius: 4px; background: var(--paper); color: var(--paper-ink); box-shadow: var(--paper-shadow); font-size: 17px; line-height: 1.5; overflow: hidden; }
 .doc-page--slide h3 { margin: 0 0 20px; padding-bottom: 12px; font-size: 26px; line-height: 32px; font-weight: 600; color: var(--slide-ink); border-bottom: 3px solid color-mix(in oklab, var(--slide-ink) 18%, transparent); }
 .doc-page--slide ul { padding-left: 24px; }
 .doc-page--slide li + li { margin-top: 8px; }
 .doc-page--slide th, .doc-page--slide td { border-color: var(--paper-rule); }
 .doc-page--slide th { background: color-mix(in oklab, var(--slide-ink) 8%, var(--paper)); }
-.doc-page--slide .doc-foot { left: auto; right: 24px; bottom: 16px; font-size: 11px; }
-.doc-page.doc-slide--title { justify-content: center; background: var(--slide-title-bg); color: var(--paper); }
-.doc-slide--title h2 { font-size: 40px; line-height: 48px; font-weight: 600; letter-spacing: -0.02em; }
-.doc-slide--title .doc-sub { color: color-mix(in oklab, var(--paper) 72%, transparent); font-size: 16px; line-height: 24px; }
-.doc-slide--title .doc-foot { color: color-mix(in oklab, var(--paper) 60%, transparent); }
 
-/* Spreadsheet: gridlines, column letters, row numbers and sheet tabs. */
+/* Spreadsheet (a sheet's cover): gridlines, column letters, row numbers. */
 .doc-page--sheet { padding: 0; overflow: hidden; font-size: 13px; line-height: 1.45; max-width: 960px; }
 .doc-sheet { overflow: auto; }
 .doc-page .doc-sheet table { margin: 0; font-size: 13px; }
@@ -146,25 +135,10 @@
 .doc-sheet .num { text-align: right; font-variant-numeric: tabular-nums; }
 .doc-sheet__rn { width: 40px; text-align: center !important; color: var(--muted); background: var(--surface-secondary); font-size: 11px; }
 .doc-sheet__hdr td { font-weight: 600; background: var(--surface-tertiary); }
-.doc-sheet__notes { padding: 14px 18px; border-top: 1px solid var(--separator); }
-.doc-note { font-size: 13px; line-height: 20px; color: var(--muted); margin: 0 0 6px !important; }
-.doc-note:last-child { margin-bottom: 0 !important; }
-.doc-sheet__tabs { display: flex; gap: 2px; padding: 6px 10px; border-top: 1px solid var(--separator); background: var(--surface-secondary); font-size: 12px; }
-.doc-sheet__tabs span { padding: 3px 12px; border-radius: var(--radius-md); color: var(--muted); }
-.doc-sheet__tabs span.is-on { background: var(--surface); color: var(--foreground); box-shadow: var(--surface-shadow); font-weight: 500; }
-
-/* Email: subject, sender and recipients above the message. */
-.doc-mail { margin: 0 0 20px; padding-bottom: 16px; border-bottom: 1px solid var(--separator); }
-.doc-mail h2 { margin-bottom: 12px; }
-.doc-mail__from { display: flex; align-items: center; gap: 10px; font-size: 13px; line-height: 18px; }
-.doc-mail__who { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
-.doc-mail__name { font-weight: 600; }
-.doc-mail__to, .doc-mail__date { color: var(--muted); }
-.doc-mail__date { flex: none; font-size: 12px; }
 
 /* ───── Native viewer (reader) ───── */
-/* The canvas follows the file: a neutral desk under paged files, the page itself for web-like files and sheets. */
-.rdr-canvas:has(.doc-viewer--pdf, .doc-viewer--docx, .doc-viewer--slide) { background: var(--viewer-canvas); padding-top: 0; }
+/* The canvas follows the file: a neutral desk under pages, pictures and players, the page itself for text and sheets. */
+.rdr-canvas:has(.doc-viewer--pdf, .doc-viewer--slide, .doc-viewer--image, .doc-viewer--media) { background: var(--viewer-canvas); padding-top: 0; }
 .rdr-canvas:has(.doc-viewer--flow) { background: var(--surface); }
 .rdr-canvas:has(.doc-viewer--sheet) { background: var(--surface); padding: 0; }
 .rdr-canvas:has(.doc-viewer) > .rdr-banners { padding-top: 16px; }
@@ -179,34 +153,25 @@
 /* Opening: the cover is page 1 at once (`.doc-page--cover`), the next page a sized blank, until the pages arrive. */
 .doc-page.doc-page--blank { background: var(--paper); }
 .doc-page.doc-page--blank:not(.doc-page--slide) { aspect-ratio: 8.5 / 11; }
-/* Web-like files read as one continuous page — no paper, no page breaks. */
+/* Text reads as one continuous page — no paper, no page breaks. */
 .doc-viewer--flow { max-width: 780px; margin: 0 auto; padding: 16px 8px 48px; }
 .doc-viewer--flow .doc-page { max-width: none; margin: 0; padding: 0; border-radius: 0; background: transparent; box-shadow: none; }
 /* Format typography applies wherever the page appears (reader, quick preview, review, thumbnails). */
 .doc-page--markdown { font-size: 16px; line-height: 1.6; }
 .doc-page--markdown h2 { font-size: 30px; line-height: 38px; font-weight: 600; padding-bottom: 10px; margin-bottom: 16px; border-bottom: 1px solid var(--separator); }
 .doc-page--markdown h3 { font-size: 22px; line-height: 30px; font-weight: 600; padding-bottom: 6px; margin: 28px 0 14px; border-bottom: 1px solid var(--separator); }
-.doc-page--markdown .doc-sub { font-size: 14px; margin: -8px 0 16px; }
 .doc-page--markdown tbody tr:nth-child(even) td { background: var(--surface-secondary); }
-.doc-page--web { font-size: 15px; line-height: 1.7; }
-.doc-page--web h2 { font-size: 32px; line-height: 40px; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 6px; }
-.doc-page--web .doc-sub { margin-bottom: 24px; }
-.doc-page--web h3 { font-size: 20px; line-height: 28px; margin: 32px 0 10px; }
 .doc-page--text { font-family: var(--font-mono); font-size: 13px; line-height: 1.65; white-space: pre-wrap; }
 .doc-page--text h2, .doc-page--text h3 { font-size: inherit; line-height: inherit; font-weight: 600; margin: 18px 0 6px; letter-spacing: 0; }
-.doc-page--text .doc-sub { font-size: inherit; }
-.doc-page--email { font-size: 15px; line-height: 1.65; }
 /* Spreadsheet: full-bleed grid with a formula bar; selecting a cell shows its reference and value. */
 .doc-viewer--sheet { display: flex; flex-direction: column; min-height: 100%; }
-.doc-fx { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 0; height: 36px; border-bottom: 1px solid var(--separator); background: var(--surface); font-size: 13px; }
+.doc-fx { position: sticky; top: 0; z-index: 3; display: flex; flex: none; align-items: center; gap: 0; height: 36px; border-bottom: 1px solid var(--separator); background: var(--surface); font-size: 13px; }
 .doc-fx__ref { flex: none; width: 76px; padding: 0 12px; border-right: 1px solid var(--separator); font-variant-numeric: tabular-nums; font-weight: 500; }
 .doc-fx__fn { flex: none; padding: 0 12px; border-right: 1px solid var(--separator); font-style: italic; color: var(--muted); }
 .doc-fx__val { flex: 1 1 auto; min-width: 0; padding: 0 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.doc-viewer--sheet .doc-page--sheet { flex: 1 1 auto; max-width: none; margin: 0; border-radius: 0; box-shadow: none; display: flex; flex-direction: column; }
-.doc-viewer--sheet .doc-sheet { flex: 1 1 auto; }
-.doc-viewer--sheet .doc-sheet td { cursor: cell; }
-.doc-viewer--sheet .doc-sheet td.is-sel { box-shadow: inset 0 0 0 2px var(--accent); }
-.doc-viewer--sheet .doc-sheet__tabs { position: sticky; bottom: 0; }
+.doc-viewer--sheet .doc-page--sheet { flex: 1 1 auto; min-height: 0; max-width: none; margin: 0; border-radius: 0; box-shadow: none; display: flex; flex-direction: column; }
+.doc-viewer--sheet .doc-sheet__tabs { flex: none; position: sticky; bottom: 0; }
+.doc-viewer--sheet > .doc-gap { flex: none; margin: 8px auto; }
 
 /* Ask-about-a-selection toolbar */
 .doc-sel { position: absolute; z-index: var(--z-popover); display: flex; gap: 2px; padding: 4px; border-radius: var(--radius-3xl); background: var(--foreground); color: var(--background); box-shadow: var(--overlay-shadow); animation: rise var(--dur) var(--ease-out); }
@@ -217,8 +182,7 @@
   .rdr-rail { position: absolute; z-index: var(--z-sidebar); top: 0; right: 0; bottom: 0; width: min(380px, 100%); box-shadow: var(--overlay-shadow); }
   .rdr-scrim { display: block; position: absolute; inset: 0; z-index: calc(var(--z-sidebar) - 1); background: var(--backdrop); animation: fade var(--dur) var(--ease-out); }
   .doc-page { padding: 40px 40px; }
-  .doc-page--pdf, .doc-page--docx { padding: 64px 56px 56px; }
-  .doc-run { left: 56px; right: 56px; }
+  .doc-page--pdf { padding: 64px 56px 56px; }
 }
 /* Phones: the head is the title on one line (Ask, Save and ⋯ are icons in the top row). The meta lives in About, the zoom stays
    in the file's own app (only "Page n of N" remains), and the head slides away while reading down (.is-collapsed, set on
@@ -238,30 +202,103 @@
   .doc-viewer__bar { margin: 0 -12px 16px; }
   .doc-page { padding: 24px 20px; font-size: 14px; }
   /* Phones scale pages to the screen instead of keeping the paper ratio. */
-  .doc-page--pdf, .doc-page--docx { aspect-ratio: auto; padding: 44px 22px 40px; }
-  .doc-run { top: 16px; left: 22px; right: 22px; }
-  .doc-foot { bottom: 14px; }
+  .doc-page--pdf { aspect-ratio: auto; padding: 44px 22px 40px; }
   .doc-page--slide { padding: 24px 24px 32px; aspect-ratio: auto; min-height: 220px; font-size: 15px; }
   .doc-page--slide h3 { font-size: 20px; line-height: 26px; }
-  .doc-slide--title h2 { font-size: 28px; line-height: 34px; }
 }
 
-/* ───── Web only (HeroUI markup and stored page images) ───── */
+/* ───── Web only (HeroUI markup, pdf.js pages) ───── */
 /* The Ask composer is a HeroUI TextField wrapping the input. */
 .rdr-composer__field { flex: 1 1 auto; min-width: 0; }
 .rdr-composer__field .input { width: 100%; }
-/* A rendered source page (ingestion's page image): the document's own pixels on white paper, its
-   margins and page number included — a scanned page is not themeable. */
+/* The document surface draws straight into the canvas (its states and pages are the canvas's children). */
+.doc-surface { display: contents; }
+/* The item's cover drawn as page 1 while the file opens: its own pixels on white paper. */
 .doc-page--image { max-width: 816px; margin: 0 auto 20px; padding: 0; overflow: hidden; border-radius: 2px; background: var(--paper); box-shadow: var(--paper-shadow); line-height: 0; }
 .doc-page__img { display: block; width: 100%; height: auto; }
-/* Page 1 shows the item's cover (a small image drawn large) underneath until its own image paints over it; pages far from
-   the view are blanks of their exact size (no image mounted). */
-.doc-page--image { background-size: 100% auto; background-repeat: no-repeat; }
-/* Code blocks in a rendition. */
+/* Code blocks in Markdown. */
 .doc-page pre { margin: 0 0 12px; padding: 12px 14px; border-radius: var(--radius-md); background: var(--surface-secondary); font-family: var(--font-mono); font-size: 13px; line-height: 1.55; white-space: pre-wrap; }
 @container app (max-width: 1023px) {
   .doc-page--image { padding: 0; }
 }
+
+/* A PDF drawn by pdf.js: every page a box of its exact size (aspect ratio from the file) fitted to the width, a scanned page
+   is not themeable. Page 1 shows the item's cover underneath until its canvas is drawn; pages far from the view are blanks.
+   Layers: the canvas, the evidence boxes of cited passages, then the invisible text layer (selection, the browser's find). */
+.doc-pdf .doc-page.doc-pdf__page { position: relative; max-width: 816px; margin: 0 auto 20px; padding: 0; overflow: hidden; border-radius: 2px; background-color: var(--paper); background-repeat: no-repeat; background-size: 100% auto; box-shadow: var(--paper-shadow); line-height: 0; --scale-round-x: 1px; --scale-round-y: 1px; }
+.doc-pdf__layer { position: absolute; inset: 0; }
+.doc-pdf__canvas { display: block; width: 100%; height: 100%; }
+.doc-pdf mark.doc-pdf__mark { position: absolute; z-index: 1; padding: 0; border-radius: 2px; box-shadow: none; pointer-events: none; mix-blend-mode: multiply; }
+.doc-pdf mark.doc-pdf__mark.is-focus { box-shadow: 0 0 0 2px var(--evidence-strong); }
+.doc-pdf__text { z-index: 2; }
+/* pdf.js text layer (its viewer's `.textLayer` rules): transparent runs placed over the canvas at the page's scale. */
+.doc-pdf .textLayer { position: absolute; inset: 0; overflow: clip; opacity: 1; line-height: 1; text-align: initial; letter-spacing: normal; word-spacing: normal; -webkit-text-size-adjust: none; text-size-adjust: none; forced-color-adjust: none; transform-origin: 0 0; caret-color: CanvasText; color-scheme: only light; --min-font-size: 1; --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size)); --min-font-size-inv: calc(1 / var(--min-font-size)); }
+.doc-pdf .textLayer :is(span, br) { position: absolute; color: transparent; white-space: pre; cursor: text; transform-origin: 0% 0%; -webkit-user-select: text; user-select: text; }
+.doc-pdf .textLayer > :not(.markedContent), .doc-pdf .textLayer .markedContent span:not(.markedContent) { z-index: 1; --font-height: 0; font-size: calc(var(--text-scale-factor) * var(--font-height)); --scale-x: 1; --rotate: 0deg; transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv)); }
+.doc-pdf .textLayer .markedContent { display: contents; }
+.doc-pdf .textLayer span[role="img"] { -webkit-user-select: none; user-select: none; cursor: default; }
+.doc-pdf .textLayer ::selection { background: color-mix(in srgb, AccentColor, transparent 50%); color: transparent; }
+.doc-pdf .textLayer br::selection { background: transparent; }
+.doc-pdf .textLayer .endOfContent { display: block; position: absolute; inset: 100% 0 0; z-index: 0; cursor: default; -webkit-user-select: none; user-select: none; }
+
+/* A picture, fitted to the width of the canvas. */
+.doc-viewer--image { padding: 24px 0; }
+.doc-image { display: block; max-width: 100%; height: auto; margin: 0 auto; border-radius: 2px; background: var(--paper); box-shadow: var(--paper-shadow); }
+
+/* Notices beside the file: preparing the preview, a representation cut at the engine's bounds (with the download). */
+.doc-gap--action { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 4px 8px; padding: 4px 10px; }
+.doc-preparing { border-style: solid; }
+
+/* PDF: cited passages without boxes and search words, marked in the text layer (the runs stay transparent). */
+.doc-pdf .textLayer mark.doc-pdf__hit { padding: 0; margin: 0; border-radius: 1px; box-shadow: none; color: transparent; background: color-mix(in oklab, var(--evidence-strong) 60%, transparent); }
+.doc-pdf .textLayer mark.doc-pdf__hit.is-focus { background: color-mix(in oklab, var(--warning) 55%, transparent); }
+
+/* TABLE: a grid of fixed-width cells (the formula bar shows a whole value), sticky column letters and row numbers.
+   Rows come in groups of 100 that layout skips while off screen; the group holding the focused mark is always laid out. */
+.doc-grid-wrap { overflow: auto; max-height: 70vh; }
+.doc-grid { --grid-cols: 48px repeat(var(--cols), 140px); width: max-content; min-width: 100%; font-size: 13px; line-height: 20px; }
+.doc-grid__head, .doc-grid__group { display: grid; grid-template-columns: var(--grid-cols); }
+.doc-grid__head { position: sticky; top: 0; z-index: 2; }
+.doc-grid__group { content-visibility: auto; contain-intrinsic-size: auto calc(var(--rows) * 29px); }
+.doc-grid__group.is-focus { content-visibility: visible; }
+.doc-grid__row { display: contents; }
+.doc-grid__corner, .doc-grid__letter, .doc-grid__rn { background: var(--surface-secondary); color: var(--muted); font-size: 11px; text-align: center; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.doc-grid__corner, .doc-grid__letter { padding: 4px 8px; font-weight: 500; }
+.doc-grid__corner, .doc-grid__rn { position: sticky; left: 0; z-index: 1; }
+.doc-grid__rn { padding: 4px 4px; font-variant-numeric: tabular-nums; }
+.doc-grid__cell { padding: 4px 10px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); cursor: cell; }
+.doc-grid__cell.num { text-align: right; font-variant-numeric: tabular-nums; }
+.doc-grid__row--first .doc-grid__cell { font-weight: 600; background: var(--surface-tertiary); }
+.doc-sheet__tabs button { padding: 3px 12px; border-radius: var(--radius-md); color: var(--muted); white-space: nowrap; }
+.doc-sheet__tabs button.is-on { background: var(--surface); color: var(--foreground); box-shadow: var(--surface-shadow); font-weight: 500; }
+/* In the Reader the sheet fills the canvas and the grid scrolls inside it. */
+.rdr-canvas:has(.doc-viewer--sheet) { display: flex; flex-direction: column; overflow: hidden; }
+.rdr-canvas .doc-viewer--sheet { flex: 1 1 auto; min-height: 0; }
+.rdr-canvas .doc-viewer--sheet .doc-grid-wrap { flex: 1 1 0; min-height: 0; max-height: none; }
+
+/* TEXT: the monospaced page and its language. */
+.doc-page--text .doc-text { margin: 0; padding: 0; border-radius: 0; background: none; font: inherit; white-space: pre-wrap; }
+.doc-text__lang { display: inline-block; margin-bottom: 12px; padding: 0 8px; border-radius: var(--radius-md); background: var(--surface-secondary); color: var(--muted); font-size: 11px; line-height: 18px; }
+
+/* MEDIA: the browser's own player, centered on the desk. */
+.doc-viewer--media { display: flex; justify-content: center; padding: 24px 0; }
+.doc-media { display: block; width: 100%; max-width: 960px; max-height: 80vh; border-radius: 4px; background: #000; }
+.doc-media--audio { max-width: 640px; background: none; }
+
+/* ARCHIVE: the listing as a compact tree. */
+.doc-archive { list-style: none; margin: 0; padding: 0; font-size: 13px; line-height: 20px; }
+.doc-archive__row { display: flex; align-items: center; gap: 8px; padding: 4px 8px 4px calc(8px + var(--depth, 0) * 18px); border-bottom: 1px solid var(--separator); }
+.doc-archive__row > .i { flex: none; color: var(--muted); }
+.doc-archive__name { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.doc-archive__size { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* Processing state: a quiet line above the file (the file is shown whatever it says). */
+.doc-proc { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 4px 4px 4px 14px; border-radius: var(--radius-xl); background: var(--surface); box-shadow: inset 0 0 0 1px var(--card-border); font-size: 13px; line-height: 18px; color: var(--muted); }
+.doc-proc > .i { flex: none; }
+.doc-proc--danger > .i { color: var(--danger); }
+.doc-proc__text { flex: 1 1 auto; min-width: 0; padding: 6px 0; }
+.doc-proc__title { margin-right: 6px; font-weight: 500; color: var(--foreground); }
+
 @container app (max-width: 679px) {
   .doc-page--image { padding: 0; }
   /* The top row's Ask is an icon on phones (it keeps its accessible name). */

@@ -64,6 +64,7 @@ from bomesh.iam.sync import replace_role_permissions
 from bomesh.integrations.registry import ConnectionProviderRegistry
 from bomesh.runtime import AppRuntime
 from bomesh.services.identity.identity_store import IdentityStoreService
+from bomesh.services.previews.gotenberg import GotenbergClient
 from config.env_config import (
     AppConfig,
     IdentityConfig,
@@ -77,6 +78,7 @@ from config.env_config import (
 from fakes import (
     ATLASSIAN_REDIRECT_URI,
     FakeEmbedder,
+    FakeGotenberg,
     FakeIndexBackend,
     FakeObjectStorage,
     fake_connection_providers,
@@ -130,6 +132,7 @@ class Fakes:
     index_backend: FakeIndexBackend = field(default_factory=FakeIndexBackend)
     embedder: FakeEmbedder = field(default_factory=FakeEmbedder)
     providers: ConnectionProviderRegistry = field(default_factory=fake_connection_providers)
+    gotenberg: FakeGotenberg = field(default_factory=FakeGotenberg)
     #: Replace before the first ``runtime.agent()`` call to script the model.
     agent: ScriptedResponsesTransport = field(
         default_factory=lambda: ScriptedResponsesTransport([])
@@ -144,6 +147,7 @@ def build_runtime(sessions: Sessions, fakes: Fakes, config: AppConfig | None = N
     runtime._index = ItemIndex(backend=fakes.index_backend, embedder=fakes.embedder)  # type: ignore[arg-type]
     runtime._connection_providers = fakes.providers
     runtime._agent_transport = fakes.agent  # type: ignore[assignment]
+    runtime._gotenberg = GotenbergClient("http://gotenberg.test", transport=fakes.gotenberg.transport)
     return runtime
 
 

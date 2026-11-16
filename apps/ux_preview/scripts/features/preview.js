@@ -75,18 +75,14 @@
     }
 
     let body;
-    if (readable && X.rdr?.viewer && (p.loading || S.pageState === 'loading')) {
-      // Cover first: the list's cover is page 1 at once; the pages replace it when they arrive.
+    if (X.rdr?.fileView && (p.loading || S.pageState === 'loading')) {
+      // Cover first: the list's cover is page 1 at once; the file replaces it when it arrives.
       body = `<div class="pv-doc pv-doc--${X.docFormat(d)}">${X.rdr.coverPages(d)}</div>`;
-    } else if (readable && X.rdr?.viewer) {
-      const m = X.docModel(d);
-      if (c.quote) X.rdr.injectQuote(m, c.quote, c.page);
-      body = `<div class="pv-doc pv-doc--${m.format}">${X.rdr.viewer(m, { bar: false })}</div>`;
-    } else {
-      // Not processed yet: the message, then the cover (made when the content arrived) so the document is still recognisable.
-      const about = X.res.blurb?.(d) || '';
-      const cover = X.rdr?.coverPages?.(d, { loading: false }) || '';
-      body = `<div class="pv-none">${cover ? '' : fileIcon(d.type, 'lg')}<p class="pv-none__title">There’s no preview for this file yet</p>${about ? `<p class="pv-none__about">${esc(about)}</p>` : ''}<p class="pv-none__hint">Open it to read or download it.</p></div>${cover ? `<div class="pv-doc pv-doc--${X.docFormat(d)}">${cover}</div>` : ''}`;
+    } else if (X.rdr?.fileView) {
+      // The file itself, processed or not (GetItemPreview). A cited passage is marked on the processed text it came from.
+      const m = readable ? X.docModel(d) : null;
+      if (m && c.quote) X.rdr.injectQuote(m, c.quote, c.page);
+      body = `<div class="pv-doc pv-doc--${X.docFormat(d)}">${X.rdr.fileView(d, { model: m, bar: false })}</div>`;
     }
     return {
       size: 'preview',

@@ -17,7 +17,7 @@ import { mergeItem } from "../../api";
 import { duplicatePairs, QUEUE_HINT, type DuplicatePair } from "../../governance";
 import { useCurationPool, useInvalidateCuration } from "../../queries";
 import { CurationDrawer } from "../CurationDrawer";
-import { firstPageText, useFirstPage } from "../FirstPage";
+import { useFirstPageText } from "../FirstPage";
 import { DocCell, useQualityAbilities } from "../shared";
 
 const EXCERPT = 420;
@@ -182,8 +182,8 @@ function CompareDrawer({ pair, isOpen, swap, canMerge, merging, onSwap, onMerge,
 }
 
 function CompareColumn({ r, keep, newer, onSwap }: { r: Resource; keep: boolean; newer: boolean; onSwap: () => void }) {
-  const page = useFirstPage(r.item);
-  const text = firstPageText(page.data);
+  const page = useFirstPageText(r.item);
+  const text = page.data ?? "";
   const excerpt = text.length > EXCERPT ? `${text.slice(0, EXCERPT).replace(/\s+\S*$/, "")}…` : text;
   return (
     <section className="kh-cmp__col">

@@ -160,6 +160,13 @@ to the readers of its governing collection when it is `PUBLISHED`; editors
 also see `UNPUBLISHED` ones. A contributor's draft is a document in their
 personal collection, so "private", "draft" and "in review" need no Item
 state. `UNPUBLISHED` covers review-first sources and deliberate unpublishing.
+The output `document.collectionKind` (`PERSONAL` under a member's My files,
+else `STANDARD`) is derived from placement, not stored, and filterable, so a
+surface can tell the private scope from shared knowledge even for callers
+who read both (tenant admins, §9.2). Browse, the workspace's public knowledge,
+lists only `STANDARD`, `PUBLISHED` documents whose processing finished
+(`indexingState` `SUCCEEDED` or `OUTDATED`): an upload stays in My files; a
+contribution appears once it is approved (moved and published) and processed.
 
 **4.7 Contributions are a separate resource; approval never ingests.**
 Approval moves the candidate into the target collection and publishes it, or
@@ -219,7 +226,7 @@ if they were purged).
 | 8 | `reading_lists`, `reading_list_entries` (new) | no curation | Items of a new type (rejected, 4.2) | new tables | ReadingList resource |
 | 9 | `role_assignments.all_members` | no "everyone in the workspace can view" | a synthetic group per tenant (membership sync burden) | new column, extended principal CHECK | `workspaceMembers` principal |
 | 10 | partial index `items (tenant_id, parent_item_id) WHERE deleted_at IS NULL` | children/root listing scans tenant rows | none | new index | ListItems by `parentItem` |
-| 11 | `indexed_revision_number` (on `item_index_states` since #24) | content, passages and citations cannot say which revision they show once revisions exist | derive from `processed_version` (that is the configuration, not the content) | nullable; 1 for indexed documents | `document.indexedRevision`, `ItemContent.revision` |
+| 11 | `indexed_revision_number` (on `item_index_states` since #24) | passages and citations cannot say which revision they show once revisions exist | derive from `processed_version` (that is the configuration, not the content) | nullable; 1 for indexed documents | `document.indexedRevision`, `ItemPassage.revision` |
 | 12 | `payload_dirty_at` + partial index (on `item_index_states` since #24) | a failed post-commit Qdrant update after a move/publish/delete is lost | outbox table; Temporal workflow start inside the transaction (not transactional) | nullable | none (consistency) |
 | 13 | `saved_items`, `recent_items` (new) | draft `savedItems`/`recentItems` had no store | `users.preferences` JSON (unbounded, no FK, no per-item cleanup) | new tables | SavedItem, RecentItem |
 | 14 | `contributions.external_version`; `ingestion_run_items.revision_number`, `error_class`; `ingestion_runs.trigger_type` `platform_retry`; `scope.item_ids` | review-first dedupe, mid-run revision changes, platform retry and error classes had no column | keep in JSON | nullable columns, extended value list | `Contribution.externalVersion`, `IngestionTask.revision`/`errorClass`, `trigger` |
@@ -259,7 +266,7 @@ resource persistence".
    there, and it is PUBLISHED or the caller holds `items.update` there. This
    is what "readable" means everywhere in the API (lists, search, facets,
    counts, ingestion tasks, attachments, artifact sources, references).
-4. Contribution reviewers may GetItem, GetItemContent and download (`alt=media`)
+4. Contribution reviewers may GetItem, GetItemPreview and download (`alt=media`)
    the candidate of an *open* contribution — nothing else: not list, search,
    attach, cite, copy or move it. `relatedItem` links (duplicate flags,
    quality issues) and `ancestors` (field and facet) are shown only for items

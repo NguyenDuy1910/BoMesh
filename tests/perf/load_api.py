@@ -274,7 +274,7 @@ def preset(x: Ctx, op: Operation, param: str, prefix: str) -> str | None:
         rest = op.path.split("{member}", 1)[1]
         return ds.admin if rest.startswith("/") else ds.member
     if param == "item":
-        if op.op_id == "GetItemContent":
+        if op.op_id == "GetItemPreview":
             return ds.stored_documents[0] if ds.stored_documents else ds.published_documents[0]
         if "revisions" in op.path:
             return ds.multi_revision_documents[0]
@@ -431,7 +431,6 @@ GET_QUERY: dict[str, Callable[[Ctx], dict[str, Any]]] = {
 GET_EXPECT: dict[str, tuple[int, ...]] = {
     "GetPassage": (404,),
     "GetIncident": (404,),
-    "GetItemContent": (400,),  # FAILED_PRECONDITION until the worker renders the reader file
     "BrowseConnectionResources": (400, 409, 412, 502, 503),
 }
 

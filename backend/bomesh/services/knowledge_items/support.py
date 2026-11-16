@@ -36,9 +36,8 @@ from bomesh.services.knowledge_items.item_store import (
     is_personal,
     purpose,
 )
-from bomesh.services.knowledge_items.covers import resolve_cover
+from bomesh.services.knowledge_items import queries
 from bomesh.services.knowledge_items.names import item_name
-from bomesh.services.knowledge_items.preview import KnowledgePreview
 from bomesh.services.knowledge_items.records import (
     Ancestor,
     CollectionFacet,
@@ -48,6 +47,8 @@ from bomesh.services.knowledge_items.records import (
     Verification,
 )
 from bomesh.services.knowledge_items.spaces import space_names
+from bomesh.services.previews.covers import resolve_cover
+from bomesh.services.previews.engine import PreviewEngine
 from bomesh.storage import DocumentStorage
 
 if TYPE_CHECKING:
@@ -65,7 +66,7 @@ class KnowledgeDeps:
     sessions: SessionFactory
     storage: DocumentStorage
     index: ItemIndex
-    preview: KnowledgePreview
+    previews: PreviewEngine
     payloads: ItemIngestionService
     processing_version: Callable[[], str]
     request_hash_secret: bytes
@@ -82,7 +83,7 @@ class KnowledgeDeps:
             sessions=sessions,
             storage=runtime.object_storage(),
             index=index,
-            preview=runtime.knowledge_preview(),
+            previews=runtime.preview_engine(),
             payloads=ItemIngestionService(sessions, index=index),
             processing_version=runtime.processing_version,
             request_hash_secret=runtime.request_hash_secret(),
@@ -529,6 +530,11 @@ class Projector:
             if by_assistant:
                 assistant_topics.setdefault(item_id, []).append(code)
         uploaders = await self._uploaders([item.id for item in items if _awaits_upload(item)])
+        personal = set(
+            await self._session.scalars(
+                select(Item.id).where(Item.id.in_(ids), queries.COLLECTION_KIND == "PERSONAL")
+            )
+        )
         if self._processing_version is None:
             self._processing_version = self._deps.processing_version()
         if self._now is None:
@@ -548,6 +554,7 @@ class Projector:
                 owner_id=_uuid(item.metadata_.get("owner_user_id")),
                 content_state=_CONTENT_STATES.get(item.status, "PENDING"),
                 publication_state="UNPUBLISHED" if item.is_published is False else "PUBLISHED",
+                collection_kind="PERSONAL" if item.id in personal else "STANDARD",
                 indexing_state=indexing_state(item, self._processing_version),
                 revision=revisions.get(item.id),
                 indexed_revision=item.indexed_revision_number,

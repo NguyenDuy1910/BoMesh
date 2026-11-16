@@ -360,7 +360,7 @@ Table item_revisions {
   restored_from int [note: 'revision_number of the same Item a rollback reused']
   author varchar(16) [note: 'artifacts only, not null for them: assistant | user (ArtifactRevision.author); creator = created_by_user_id for user revisions']
   created_by_user_id uuid
-  exports jsonb [not null, default: `{}`, note: 'Derived outputs of this immutable revision; `preview` is its document-viewer manifest (document_viewer.md)']
+  exports jsonb [not null, default: `{}`, note: 'Derived outputs of this immutable revision: `representation` (+ `representation_failure`) is the preview engine manifest of a document (document_viewer.md); `preview` is an artifact revision viewer manifest']
   deleted_at timestamptz [note: 'Artifacts: DeleteArtifactRevision (newest user revision within 10 minutes)']
   created_at timestamptz [not null]
   indexes {

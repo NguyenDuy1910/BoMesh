@@ -1,9 +1,11 @@
 """Read a Document's stored original and produce its canonical content.
 
 Uploads and connector Items both keep their original in object storage; this
-is the one place it is parsed. Authorization happens before anything gets
-here (an Ingestion Run, or an authorized resource read), so nothing below
-checks who owns the bytes.
+is the one place it is parsed: :meth:`StoredFileContentService.canonicalize`
+for indexing (parsed and chunked), :meth:`StoredFileContentService.parse` for
+viewing (parsed only). Authorization happens before anything gets here (an
+Ingestion Run, or an authorized resource read), so nothing below checks who
+owns the bytes.
 """
 
 from __future__ import annotations
@@ -11,9 +13,10 @@ from __future__ import annotations
 import asyncio
 import base64
 import tempfile
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from bomesh.connector.file import (
     FileNoTextError,
@@ -23,6 +26,7 @@ from bomesh.connector.file import (
 )
 from bomesh.connector.protocol import (
     AccessPolicy,
+    DocumentItem,
     DocumentKind,
     Hierarchy,
     SourceIdentity,
@@ -50,6 +54,8 @@ _KIND_BY_DOCUMENT_TYPE = {
     "web_page": DocumentKind.WEB_PAGE,
 }
 
+_Parsed = TypeVar("_Parsed")
+
 
 class StoredFileContentService:
     """Resolve stored originals and produce canonical connector evidence."""
@@ -70,6 +76,38 @@ class StoredFileContentService:
     async def canonicalize(self, document: Item) -> CanonicalDocumentContent:
         """Stream one Document's stored original through the file connector."""
 
+        async with self._original(document) as path:
+            processed = await self.process_path(document, path)
+            return self._canonical_content(document, processed)
+
+    async def parse(self, document: Item, *, timeout_seconds: float | None = None) -> DocumentItem:
+        """The canonical document of one stored original, not chunked (a view of the file).
+
+        No chunking, embedding or classification happens; the same converter
+        as :meth:`canonicalize`, so element IDs agree with processing's.
+        ``timeout_seconds`` bounds the parse alone (``TimeoutError``), never the
+        download: a slow store is not a property of the file.
+        """
+
+        async with self._original(document) as path:
+            item = await asyncio.wait_for(
+                self._read(self._processor.parse_path, document, path), timeout_seconds
+            )
+        if item.id != str(document.id):
+            raise DocumentProcessingError(
+                "canonical document ID does not match its stored source"
+            )
+        return item
+
+    async def process_path(self, document: Item, path: Path) -> ProcessedFile:
+        """Parse a local copy of one Item's stored original through the file connector."""
+
+        return await self._read(self._processor.process_path, document, path)
+
+    @asynccontextmanager
+    async def _original(self, document: Item) -> AsyncIterator[Path]:
+        """A temporary local copy of the Document's stored original."""
+
         self._validate_size(document)
         if not document.storage_key:
             raise DocumentUnavailableError("the document has no stored original")
@@ -87,22 +125,19 @@ class StoredFileContentService:
                     "the original file is no longer in storage"
                 ) from exc
             self._validate_stored_size(document, stored.size_bytes)
-            processed = await self.process_path(document, path)
-            return self._canonical_content(document, processed)
+            yield path
 
-    async def process_path(self, document: Item, path: Path) -> ProcessedFile:
-        """Parse a local copy of one Item's stored original through the file connector.
+    async def _read(
+        self, read: Callable[..., _Parsed], document: Item, path: Path
+    ) -> _Parsed:
+        """Run the file connector on a local original.
 
         Whatever the parser raises is a property of the file, never a reason
         to retry.
         """
 
         try:
-            return await asyncio.to_thread(
-                self._processor.process_path,
-                path,
-                **self._processing_arguments(document),
-            )
+            return await asyncio.to_thread(read, path, **self._processing_arguments(document))
         except FileNoTextError as exc:
             raise DocumentProcessingError(
                 "the file has no text to index; text inside images is not indexed"

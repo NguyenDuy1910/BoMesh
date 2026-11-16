@@ -543,6 +543,29 @@ async def test_list_filter_on_publication_state(client, world):
     assert only_published == [item_name(published)]
 
 
+async def test_collection_kind_separates_my_files_from_shared_knowledge(client, world):
+    admin = await world.make_user()
+    ws = await world.make_workspace(admin)
+    member = await world.add_member(ws)
+    shared = await world.make_collection(ws, title="Policies")
+    shared_doc = await world.make_document(shared)
+    my_files = await world.make_collection(ws, personal_for=member)
+    uploaded = await world.make_document(my_files, creator=member)
+    folder = await world.make_collection(ws, my_files, title="Drafts")
+    nested = await world.make_document(folder, creator=member)
+    # Tenant admins read every member's My files; the field still tells the two scopes apart.
+    api = await client.as_(admin)
+
+    standard = listed(await list_items(api, ws, filter='document.collectionKind="STANDARD"'))
+    personal = listed(await list_items(api, ws, filter='document.collectionKind="PERSONAL"'))
+    shared_kind = (await api.get(item_url(shared_doc))).json()["document"]["collectionKind"]
+    nested_kind = (await api.get(item_url(nested))).json()["document"]["collectionKind"]
+
+    assert standard == [item_name(shared_doc)]
+    assert set(personal) == {item_name(uploaded), item_name(nested)}
+    assert (shared_kind, nested_kind) == ("STANDARD", "PERSONAL")
+
+
 async def test_list_filter_naming_unreadable_item_is_denied(client, world):
     admin = await world.make_user()
     ws = await world.make_workspace(admin)

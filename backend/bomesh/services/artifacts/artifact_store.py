@@ -49,12 +49,12 @@ from bomesh.services import (
     PreviewManifest,
     StoredFileContent,
 )
+from bomesh.services.artifacts.preview import KnowledgePreview, parse_manifest
 from bomesh.services.knowledge_items.item_store import (
     HIDDEN_KINDS,
     ItemService,
     new_revision_object_key,
 )
-from bomesh.services.knowledge_items.preview import KnowledgePreview, parse_manifest
 from bomesh.services.workspaces.audit_log import AuditService
 from bomesh.storage import DocumentStorage
 
@@ -198,7 +198,7 @@ class ArtifactService:
             except DocumentProcessingError:
                 # Unparsable content still gets its PDF pages, if it has any.
                 content = None
-            return await self._preview().generate(document, content=content)
+            return await self._preview().generate(document, page_images=True, content=content)
         except Exception as exc:  # noqa: BLE001 - a preview is best effort
             log.warning(
                 "artifact preview generation failed artifact_id=%s revision=%s error_type=%s",

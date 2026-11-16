@@ -1,18 +1,19 @@
 /* Knowledge — Browse (features/hub.js). Prefix: cat-.
-   Content first: search, topic shortcuts, a filter bar right above the
-   results (inline filter buttons → popovers; one Filters sheet on phones),
-   a document grid; the quick preview is a drawer. The document card lives in
-   resources.css. Tokens only. */
+   Content first: topic shortcuts, one bar right above the results (a compact
+   search field, inline filter buttons → popovers, one Filters sheet on phones;
+   views, sort and layout at its end), a document grid; the quick preview is a
+   drawer. The document card lives in resources.css. Tokens only. */
 
-/* ───── Search and topic shortcuts ───── */
-.cat-top { display: flex; flex-direction: column; gap: 12px; margin-bottom: 24px; }
-.cat-search { position: relative; display: flex; align-items: center; min-width: 0; }
-.cat-search .input { box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); transition: box-shadow var(--dur-fast); }
-.cat-search .input:focus { box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--accent), 0 0 0 3px var(--accent-soft); }
-/* Ask AI sits inside the field's end, after the clear button. */
-.cat-search:has(.cat-search__ask) .input { padding-right: 148px; }
-.cat-search:has(.cat-search__ask) .search-field__clear { right: 104px; }
-.cat-search__ask.button { position: absolute; right: 8px; height: 32px; }
+/* ───── Topic shortcuts and search ───── */
+.cat-top { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; }
+.cat-top:empty { display: none; }
+/* Search: the bar's first control, in the filter buttons' height and shape; a fixed width, so typing never reflows the filters. */
+.cat-search { display: flex; flex: 0 1 260px; min-width: 180px; }
+.cat-search .search-field { max-width: none; }
+.cat-search .input { height: 32px; border-radius: var(--radius-3xl); font-size: 13px; background: transparent; box-shadow: inset 0 0 0 1px var(--border); }
+.cat-search .input:hover { background: var(--default-soft); }
+.cat-search .input:focus { background: var(--surface); box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 3px var(--accent-soft); }
+.cat-search .input:placeholder-shown { padding-right: 12px; }
 .cat-pills { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
 .cat-pills::-webkit-scrollbar { display: none; }
 .cat-pill { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border-radius: var(--radius-full); background: var(--default-soft); color: var(--foreground); font-size: 13px; font-weight: 500; white-space: nowrap; transition: background-color var(--dur-fast), color var(--dur-fast); }
@@ -69,7 +70,7 @@
 .cat-locked:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 
 /* Skeletons */
-.cat-skel-search { display: block; height: 48px; border-radius: var(--radius-2xl); }
+.cat-skel-search { display: block; width: 260px; max-width: 100%; height: 32px; border-radius: var(--radius-3xl); }
 .cat-skel-pill { display: block; flex: none; height: 32px; border-radius: var(--radius-full); }
 .cat-skel-media { display: block; aspect-ratio: 16 / 10; border-radius: 0; }
 
@@ -113,10 +114,9 @@
 }
 @container app (max-width: 679px) {
   .cat-top { gap: 10px; margin-bottom: 16px; }
-  .cat-search .search-field--lg .input { height: 44px; font-size: 15px; }
-  .cat-search:has(.cat-search__ask) .input { padding-right: 120px; }
-  .cat-search:has(.cat-search__ask) .search-field__clear { right: 84px; }
-  .cat-search__ask.button { height: 30px; padding: 0 10px; }
+  /* Phones: search fills the bar beside Filters, views and sort. */
+  .cat-search { flex: 1 1 0; min-width: 0; }
+  .cat-search .input { height: 40px; font-size: 15px; }
   .cat-pills { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: -2px -16px; padding: 2px 16px; }
   /* Collections: one swipeable row of compact cards, so documents start near the top. */
   .cat-cols { margin-bottom: 20px; }

@@ -13,6 +13,7 @@ from sqlalchemy import ColumnElement, and_, case, exists, func, or_, select
 from sqlalchemy.orm import aliased
 
 from bomesh.db.models import Item, ItemRevision, ItemTopic, Topic
+from bomesh.iam.policy import PERSONAL_KIND
 from bomesh.services.knowledge_items.item_store import in_subtree
 
 CONTENT_STATE: ColumnElement[Any] = case(
@@ -27,6 +28,27 @@ PUBLICATION_STATE: ColumnElement[Any] = case(
 ITEM_TYPE: ColumnElement[Any] = func.upper(Item.item_type)
 PURPOSE: ColumnElement[Any] = func.upper(
     func.coalesce(Item.metadata_["purpose"].astext, "knowledge")
+)
+
+
+def _personal_tree() -> Any:
+    """CTE of every member's PERSONAL collection ("My files") and everything under it."""
+    root = aliased(Item, name="personal_root")
+    seed = select(root.id).where(
+        root.item_type == "collection", root.metadata_["system_kind"].astext == PERSONAL_KIND
+    )
+    tree = seed.cte("personal_tree", recursive=True)
+    child = aliased(Item, name="personal_child")
+    return tree.union_all(select(child.id).where(child.parent_item_id == tree.c.id))
+
+
+_PERSONAL_TREE = _personal_tree()
+#: ``document.collectionKind``: PERSONAL in a member's My files (their private scope),
+#: STANDARD in the workspace's shared collections; NULL for collections (a document field).
+COLLECTION_KIND: ColumnElement[Any] = case(
+    (Item.item_type != "document", None),
+    (Item.id.in_(select(_PERSONAL_TREE.c.id)), "PERSONAL"),
+    else_="STANDARD",
 )
 OWNER_ID: ColumnElement[Any] = Item.metadata_["owner_user_id"].astext
 #: ``document.origin.source``: the source's API ID (``ingestion_sources.code``).
@@ -116,6 +138,7 @@ def has_ancestor(item_id: UUID) -> ColumnElement[bool]:
 
 
 __all__ = [
+    "COLLECTION_KIND",
     "CONTENT_STATE",
     "HAS_ASSISTANT_TOPICS",
     "HAS_TOPICS",

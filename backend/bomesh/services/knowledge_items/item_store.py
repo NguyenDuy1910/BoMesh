@@ -14,8 +14,18 @@ from pathlib import PurePosixPath
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
-from sqlalchemy import ColumnElement, and_, func, literal, or_, select, text, update
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import (
+    ColumnElement,
+    and_,
+    func,
+    literal,
+    or_,
+    select,
+    text,
+    type_coerce,
+    update,
+)
+from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 from sqlalchemy.orm.attributes import set_committed_value
@@ -728,16 +738,27 @@ class ItemService:
     async def record_revision_preview(
         self, item_id: UUID, revision_number: int, manifest: Mapping[str, Any]
     ) -> None:
-        """Store a revision's viewer manifest; mirror it on the item while current."""
+        """Store a revision's viewer manifest; mirror it on the item while current.
+
+        Derived metadata, not an edit: the item's ``updated_at`` (and so its
+        etag) stays.
+        """
         revision = await self.revision(item_id, revision_number)
         if revision is None:
             return
         revision.exports = {**revision.exports, "preview": dict(manifest)}
         current = await self.current_revision(item_id)
         if current is not None and current.revision_number == revision_number:
-            item = await self._session.get(Item, item_id)
-            if item is not None:
-                item.metadata_ = {**item.metadata_, "preview": dict(manifest)}
+            await self._session.execute(
+                update(Item)
+                .where(Item.id == item_id, Item.storage_key == revision.storage_key)
+                .values(
+                    metadata_=Item.metadata_.op("||")(
+                        type_coerce({"preview": dict(manifest)}, JSONB)
+                    ),
+                    updated_at=Item.updated_at,
+                )
+            )
         await self._session.flush()
 
     async def referenced_object_keys(

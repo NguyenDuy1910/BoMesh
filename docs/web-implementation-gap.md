@@ -160,15 +160,15 @@ would be dead code):
   and layout. `document_viewer.md` ("Reading (web)") is explicit: *in the
   file's native format … there is no separate text view. PDFs keep page
   images.* Ingestion already renders one WebP per PDF page (verified: a
-  28-page lecture produced 28 `pageAssets`), and nothing consumed them. Added
-  `reader/components/PageImageView.tsx`; the Reader and the shared document
-  preview now draw those page images when a revision has them and fall back to
-  the rendition when it does not (Word, slides, spreadsheets, Markdown — the
-  backend renders page images for PDFs only). Still open: the `--paper*`
+  28-page lecture produced 28 `pageAssets`), and nothing consumed them. A
+  page-image view was added, then **superseded 2026-11-16** by the
+  processing-independent viewer (`document_viewer.md`): one
+  `reader/components/DocumentSurface.tsx` reads `GetItemPreview` and draws the
+  original — PDFs with pdf.js (`PdfView.tsx`, ranged reads, canvas + text
+  layer per page near the view), pictures, text files (`TextView.tsx`), and
+  the rendition only for DOCX/PPTX/XLSX/HTML. Still open: the `--paper*`
   tokens for non-PDF formats, so a DOCX or PPTX rendition keeps the app theme
   instead of looking print-like.
-  The rendition is still loaded and is still what the outline, Ask, citations
-  and search use — reading the document and indexing it are separate concerns.
 - **Browse still uses a Filters drawer instead of inline filter popovers.**
   `ux_preview/scripts/features/hub.js` renders a `cat-bar` of inline
   Type · Updated · Trust · Owner buttons opening `cat-pop` popovers with

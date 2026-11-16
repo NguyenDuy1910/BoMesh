@@ -2,14 +2,20 @@
 
 import { Button, Tooltip } from "@heroui/react";
 import { Minus, Plus } from "lucide-react";
-import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode, type RefObject } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 
 import { IconButton } from "@/components/ui/IconButton";
 
 import { PAGED_FORMATS, type DocFormat } from "../format";
-import { columnLetter } from "./RenditionView";
 
 const ZOOMS = [0.75, 0.9, 1, 1.15, 1.3, 1.5];
+
+const ViewerZoom = createContext(1);
+
+/** The viewer bar's zoom (CSS `zoom` on the pages): a PDF draws its canvases at this scale to stay sharp. */
+export function useViewerZoom(): number {
+  return useContext(ViewerZoom);
+}
 
 export interface DocumentViewerProps {
   format: DocFormat;
@@ -19,18 +25,15 @@ export interface DocumentViewerProps {
   bar?: boolean;
   /** The element that scrolls the pages, to follow the page in view. */
   scrollRef?: RefObject<HTMLElement | null>;
-  /** The pages (`RenditionView` or `PageImageView`). */
+  /** The pages (`PdfView`) or the text (`TextView`). */
   children: ReactNode;
 }
 
 /**
- * The native viewer around the document's pages (preview reader.js `viewerHtml`): paged files
- * (PDF, Word, slides) get a slim viewer bar with the page in view and zoom; spreadsheets get a
- * formula bar (select a cell to see its reference and value); web-like files read as one
- * continuous page.
+ * The native viewer around the document's pages (preview reader.js `viewerHtml`): paged files (PDF)
+ * get a slim viewer bar with the page in view and zoom; text reads as one continuous page.
  */
 export function DocumentViewer({ format, count, bar = true, scrollRef, children }: DocumentViewerProps) {
-  if (format === "sheet") return <SheetViewer>{children}</SheetViewer>;
   if (!PAGED_FORMATS[format]) {
     return (
       <article className={`doc-viewer doc-viewer--flow doc-viewer--${format}`} translate="no">
@@ -89,47 +92,8 @@ function PagedViewer({ format, count, bar, scrollRef, children }: Required<Pick<
         </div>
       ) : null}
       <div className="doc-viewer__pages" ref={pagesRef} style={{ "--doc-zoom": zoom } as CSSProperties} translate="no">
-        {children}
+        <ViewerZoom.Provider value={zoom}>{children}</ViewerZoom.Provider>
       </div>
-    </div>
-  );
-}
-
-/** Spreadsheets: selecting a cell shows its reference and value in the formula bar, as in the file's own app. */
-function SheetViewer({ children }: { children: ReactNode }) {
-  const root = useRef<HTMLDivElement>(null);
-  const [cell, setCell] = useState<{ ref: string; value: string; el?: HTMLElement }>({ ref: "A1", value: "" });
-
-  // Before a selection the formula bar shows A1 (the header row's first cell).
-  useEffect(() => {
-    const first = root.current?.querySelector<HTMLElement>(".doc-sheet__hdr td:not(.doc-sheet__rn)");
-    if (first) setCell((c) => (c.el || c.value === first.textContent ? c : { ref: "A1", value: first.textContent ?? "" }));
-  }, [children]);
-
-  const select = (e: MouseEvent<HTMLDivElement>) => {
-    const td = (e.target as Element).closest<HTMLElement>(".doc-sheet td");
-    if (!td || td.classList.contains("doc-sheet__rn")) return;
-    const tr = td.parentElement;
-    if (!tr) return;
-    const col = Array.prototype.indexOf.call(tr.children, td) - 1;
-    const row = tr.querySelector(".doc-sheet__rn")?.textContent ?? "";
-    cell.el?.classList.remove("is-sel");
-    td.classList.add("is-sel");
-    setCell({ ref: `${columnLetter(col)}${row}`, value: td.textContent ?? "", el: td });
-  };
-
-  return (
-    <div className="doc-viewer doc-viewer--sheet" ref={root} onClick={select}>
-      <div className="doc-fx" role="group" aria-label="Formula bar">
-        <span className="doc-fx__ref">{cell.ref}</span>
-        <span className="doc-fx__fn" aria-hidden>
-          fx
-        </span>
-        <span className="doc-fx__val" translate="no">
-          {cell.value}
-        </span>
-      </div>
-      {children}
     </div>
   );
 }

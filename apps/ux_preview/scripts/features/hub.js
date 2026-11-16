@@ -30,7 +30,7 @@
     const up = X.res.uploadBtn('primary');
     return emptyState({
       icon: 'book', title: 'No knowledge yet', boxed: true,
-      desc: up ? 'Contribute files or connect a source to start the catalog.' : 'Nothing has been shared with you yet.',
+      desc: up ? 'Documents appear here once they’re approved and processed. Contribute a file for review, or connect a source.' : 'Nothing has been shared with you yet.',
       actions: up + (can('knowledge.manage') ? btn('Create collection', { icon: 'plus', act: 'kb-create' }) : ''),
     });
   }
@@ -104,7 +104,7 @@
     return popBtn(label, { f: f.id }, on.length > 0, `cat-fb cat-fb--${f.id}`);
   }
   const popBtn = (label, data, set, cls = '', icon = '') => `<button type="button" class="${cx('filter-button', set && 'is-set', cls)}" data-popover="cat-f" ${dataAttrs(data)} aria-haspopup="dialog" aria-expanded="false">${icon ? ic(icon) : ''}<span class="truncate">${esc(label)}</span>${ic('chevron-down')}</button>`;
-  /** The bar right above the results: filters on the left; saved views, sort and layout on the right. */
+  /** The bar right above the results: search and filters on the left; saved views, sort and layout on the right. */
   function filterBar(p, r) {
     const more = moreFacets(p, r), nMore = nOn(p, more), nAll = nOn(p, filterFacets());
     const inline = inlineFacets().map(f => facetBtn(f, p)).join('') + (more.length ? popBtn(nMore ? `More filters · ${nMore}` : 'More filters', { f: 'more' }, nMore > 0, 'cat-fb') : '');
@@ -113,15 +113,14 @@
     const views = v || saveable || myViews().length ? btn(v ? v.name : 'Views', { v: 'ghost', size: 'sm', icon: 'layers', iconRight: 'chevron-down', menu: 'cat-views', cls: cx('cat-views', v && 'is-set'), aria: `aria-label="${esc(v ? `Saved view: ${v.name}` : 'Saved views')}"` }) : '';
     const sort = btn(SORTS_CATALOG[r.sort], { v: 'ghost', size: 'sm', icon: 'sort', iconRight: 'chevron-down', menu: 'cat-sort', cls: 'cat-sort', aria: 'aria-label="Sort: ' + esc(SORTS_CATALOG[r.sort]) + '"' });
     const layout = `<span class="cat-layoutsw">${seg({ value: p.view, options: LAYOUTS, act: 'cat-layout', label: 'Layout', iconOnly: true, size: 'sm' })}</span>`;
-    return `<div class="cat-bar" role="group" aria-label="Filter and sort"><div class="cat-bar__filters">${inline}</div>${all}<div class="cat-bar__end">${views}${sort}${layout}</div></div>`;
+    return `<div class="cat-bar" role="group" aria-label="Search, filter and sort">${searchBar(p)}<div class="cat-bar__filters">${inline}</div>${all}<div class="cat-bar__end">${views}${sort}${layout}</div></div>`;
   }
 
   /* ═══════════════ Search and topic shortcuts ═══════════════ */
-  /** One field. Typing searches documents (live); Ask AI turns the same words into a cited answer — two clearly named actions, never mixed.
-      The count lives in the results header, not repeated here. */
+  /** One compact field at the start of the filter bar — search is one more way to narrow the same results. Typing searches documents
+      (live); Ask AI sits in the results header. The count lives there too. */
   function searchBar(p) {
-    const ask = p.q ? btn('Ask AI', { v: 'secondary', icon: 'sparkles', act: 'cat-ask', cls: 'cat-search__ask', tip: 'Get an answer with sources from these documents' }) : '';
-    return `<div class="cat-search">${searchField({ act: 'cat-q', value: p.q, id: 'cat-q', size: 'lg', placeholder: 'Search documents' })}${ask}</div>`;
+    return `<div class="cat-search">${searchField({ act: 'cat-q', value: p.q, id: 'cat-q', placeholder: 'Search documents' })}</div>`;
   }
   const pill = (label, { on, value = '', count, act = 'cat-topic' } = {}) =>
     `<button type="button" class="${cx('cat-pill', on && 'is-on')}" data-act="${act}" data-v="${esc(value)}" aria-pressed="${!!on}">${esc(label)}${count != null ? `<span class="cat-pill__n">${fmtNum(count)}</span>` : ''}</button>`;
@@ -152,13 +151,13 @@
     return [one(d => d.kb) && 'kb', one(d => res(d).topics[0] || '') && 'topic'].filter(Boolean);
   }
   /** The result count with the choices that produced it: each filter a removable chip (the topic pill excepted — it shows itself),
-      Clear all (which clears the topic too), and, for a filtered set without a query, Ask about these. */
+      Clear all (which clears the topic too), and Ask AI about the set — the query's words, or the filtered documents. */
   function resultsHead(p, r) {
     const pt = pillTopic(p);
     const chips = facetsOn().flatMap(f => (p.filters[f.id] || []).filter(v => !(f.id === 'topic' && v === pt)).map(v => `<button type="button" class="cat-chip" data-act="cat-unfilter" data-f="${f.id}" data-v="${esc(v)}" aria-label="Remove filter ${esc(f.label)}: ${esc(f.name(v))}"><span class="cat-chip__k">${esc(f.label)}</span><span class="truncate">${esc(f.name(v))}</span>${ic('x', 'i-xs')}</button>`));
     const clear = chips.length ? linkBtn('Clear all', { act: 'cat-clear' }) : '';
-    // Ask AI lives in the search field while there is a query; without one it can still summarise a filtered set.
-    const ask = !p.q && activeFilterCount(p) && r.total ? btn('Ask about these', { v: 'ghost', size: 'sm', icon: 'sparkles', act: 'cat-ask', tip: 'Get an overview with sources from these documents' }) : '';
+    // Search narrows the set; Ask AI turns it into a cited answer — two clearly named actions, never mixed in one control.
+    const ask = (p.q || activeFilterCount(p)) && r.total ? btn(p.q ? 'Ask AI' : 'Ask about these', { v: 'ghost', size: 'sm', icon: 'sparkles', act: 'cat-ask', tip: p.q ? 'Get an answer with sources from these documents' : 'Get an overview with sources from these documents' }) : '';
     const title = isLanding(p) ? 'All documents' : p.q ? 'Results' : 'Documents';
     // The title already says "documents": the count is just the number (read out in full).
     return `<div class="cat-head"><h2 class="cat-head__title">${title}</h2><span class="cat-count" role="status"><span aria-hidden="true">${fmtNum(r.total)}</span><span class="sr-only">${plural(r.total, 'document')}</span></span>${chips.length ? `<div class="cat-chips">${chips.join('')}${clear}</div>` : ''}<span class="grow"></span>${ask}</div>`;
@@ -201,7 +200,7 @@
   function loadingBody() {
     const pills = `<div class="cat-pills" aria-hidden="true">${[44, 64, 72, 58, 66].map(w => `<span class="skeleton cat-skel-pill" style="width:${w}px"></span>`).join('')}</div>`;
     const cardSk = `<div class="doc-card" aria-hidden="true"><span class="skeleton cat-skel-media"></span><div class="doc-card__body"><span class="skeleton skeleton--line" style="width:70%"></span><span class="skeleton skeleton--line" style="width:95%;height:10px"></span><span class="skeleton skeleton--line" style="width:40%;height:10px"></span></div></div>`;
-    return `<div class="cat-top" aria-busy="true" aria-label="Loading"><span class="skeleton cat-skel-search"></span>${pills}</div><div class="cat-cards">${cardSk.repeat(6)}</div>`;
+    return `<div class="cat-top" aria-busy="true" aria-label="Loading">${pills}</div><div class="cat-bar" aria-hidden="true"><span class="skeleton cat-skel-search"></span></div><div class="cat-cards">${cardSk.repeat(6)}</div>`;
   }
 
   P.catalog = ({ query }) => {
@@ -215,7 +214,8 @@
         if (!sharedPool().length) return emptyKnowledge();
         const r = search(p), key = setKey(p);
         if (u.lastKey !== key) { u.page = 1; u.lastKey = key; }
-        return `<div class="cat-top">${searchBar(p)}${topicBar(p, r)}</div>${collectionsRow(p)}
+        const topics = topicBar(p, r);
+        return `${topics ? `<div class="cat-top">${topics}</div>` : ''}${collectionsRow(p)}
           <section class="cat-main" aria-label="Documents">${filterBar(p, r)}${resultsHead(p, r)}${r.total ? results(p, r) : noMatches(p)}</section>${lockedNote(p)}`;
       },
     });

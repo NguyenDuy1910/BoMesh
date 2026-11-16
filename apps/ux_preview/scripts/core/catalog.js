@@ -211,8 +211,9 @@ const isPublishedStage = d => !d.stage || d.stage === 'published';
 const readableResources = () => D.docs.filter(d => { const kb = kbById(d.kb); return !d.archived && isPublishedStage(d) && kb && !kb.archived && canReadKb(kb) && canReadFolder(docFolder(d)); });
 /** Every published resource the caller can use, My files included (search, ⌘K, the assistant). */
 const catalogPool = () => readableResources().filter(isReaderVisible);
-/** What Browse lists: the organization's knowledge. Personal files live in My library. */
-const sharedPool = () => catalogPool().filter(d => !kbById(d.kb)?.personal);
+/** What Browse lists: the organization's public knowledge — published (past review), processed (ready or outdated), in a
+    shared collection. Uploads stay in My files; a contribution appears once it is approved and processed. */
+const sharedPool = () => catalogPool().filter(d => isSearchable(d) && !kbById(d.kb)?.personal);
 const canOpenRes = doc => !!doc && !doc.archived && isPublishedStage(doc) && canReadKb(kbById(doc.kb)) && !kbById(doc.kb)?.archived && canReadFolder(docFolder(doc));
 /** Where a collection opens for reading: its documents in Browse (a locked base offers Request access there); My files in My library. */
 const kbHref = kb => (!kb ? '/knowledge' : kb.personal ? '/knowledge/library?tab=files' : catalogHref({ filters: { kb: [kb.id] } }));

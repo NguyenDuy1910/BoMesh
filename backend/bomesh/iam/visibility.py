@@ -11,7 +11,7 @@ through the deleted cohort; the published rule still applies).
 references. :class:`ItemVisibility` turns it into one SQL predicate for
 derived surfaces; :func:`require_visible_item` answers a Get with AIP-211
 semantics. The contribution-reviewer exception (:func:`is_contribution_reviewer`)
-applies only to GetItem, GetItemContent and ``alt=media``.
+applies only to GetItem, GetItemPreview and ``alt=media``.
 """
 
 from __future__ import annotations
@@ -212,7 +212,7 @@ async def require_visible_item(
     - Visible without ``permission`` → PERMISSION_DENIED.
     - DELETED: only with ``include_deleted`` and only for ``items.undelete``
       holders (resolved through the deleted cohort, published rule applies).
-    - ``reviewer_exception`` (GetItem, GetItemContent, ``alt=media`` only):
+    - ``reviewer_exception`` (GetItem, GetItemPreview, ``alt=media`` only):
       reviewers of an open contribution read its candidate with ``items.get``.
     - Otherwise the item answers like an absent one (AIP-211): NOT_FOUND when
       the caller holds ``permission`` on the workspace, else PERMISSION_DENIED.

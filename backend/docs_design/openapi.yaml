@@ -2973,7 +2973,7 @@ paths:
         - Knowledge
       operationId: ListItems
       summary: List items.
-      description: "Returns only visible items (visibility rule; never the reviewer exception). `showDeleted=true` adds DELETED items only for holders of `items.undelete` (resolved through the deleted cohort's ancestors; the published rule still applies). AIP-160 `filter` over `name` (batch read by name: `name = \"workspaces/w/items/a\" OR name = \"workspaces/w/items/b\"`; names the caller cannot read, or that do not exist, are simply absent instead of PERMISSION_DENIED; another workspace's name → INVALID_ARGUMENT), `parentItem` (`parentItem=\"\"` = roots), `ancestors:` (subtree; canonical tree only, item links never match), `itemType`, `displayName` (`displayName = \"*term*\"` matches a substring, case-insensitive: `*` is the wildcard of every string field, `!=` negates it, `%` and `_` are literal), `document.mimeType`, `document.documentType`, `document.purpose`, `document.topics:` (hierarchical: a DOMAIN also matches documents tagged with any topic under it), `document.assistantTopics:` (the same, over assistant-applied topics only), `document.owner`, `document.publicationState`, `document.contentState`, `document.indexingState`, `document.origin.source`, `document.verification.state`, `document.qualityIssues`, `updateTime`. A repeated field also takes the presence test `field:*` (at least one value), so `NOT document.topics:*` lists documents without a topic. The `document.qualityIssues` filter is for editors only; others get INVALID_ARGUMENT. A filter naming an item, topic, source or member the caller cannot read → PERMISSION_DENIED (403). `orderBy`: `displayName`, `updateTime`, `createTime`, `itemType`. `showLocked=true` adds discoverable roots as LOCKED; LOCKED items never carry counts and sort last by `displayName`."
+      description: "Returns only visible items (visibility rule; never the reviewer exception). `showDeleted=true` adds DELETED items only for holders of `items.undelete` (resolved through the deleted cohort's ancestors; the published rule still applies). AIP-160 `filter` over `name` (batch read by name: `name = \"workspaces/w/items/a\" OR name = \"workspaces/w/items/b\"`; names the caller cannot read, or that do not exist, are simply absent instead of PERMISSION_DENIED; another workspace's name → INVALID_ARGUMENT), `parentItem` (`parentItem=\"\"` = roots), `ancestors:` (subtree; canonical tree only, item links never match), `itemType`, `displayName` (`displayName = \"*term*\"` matches a substring, case-insensitive: `*` is the wildcard of every string field, `!=` negates it, `%` and `_` are literal), `document.mimeType`, `document.documentType`, `document.purpose`, `document.topics:` (hierarchical: a DOMAIN also matches documents tagged with any topic under it), `document.assistantTopics:` (the same, over assistant-applied topics only), `document.owner`, `document.publicationState`, `document.collectionKind` (`STANDARD` = the workspace's shared knowledge, `PERSONAL` = members' My files), `document.contentState`, `document.indexingState`, `document.origin.source`, `document.verification.state`, `document.qualityIssues`, `updateTime`. A repeated field also takes the presence test `field:*` (at least one value), so `NOT document.topics:*` lists documents without a topic. The `document.qualityIssues` filter is for editors only; others get INVALID_ARGUMENT. A filter naming an item, topic, source or member the caller cannot read → PERMISSION_DENIED (403). `orderBy`: `displayName`, `updateTime`, `createTime`, `itemType`. `showLocked=true` adds discoverable roots as LOCKED; LOCKED items never carry counts and sort last by `displayName`."
       x-permission: items.list
       parameters:
         - $ref: '#/components/parameters/Workspace'
@@ -3005,7 +3005,7 @@ paths:
         - Knowledge
       operationId: GetItem
       summary: Get an item.
-      description: "`view` FULL adds `ancestors`. `alt=media` (documents) answers 302 to the signed original of the current revision; on a COLLECTION → INVALID_ARGUMENT; on a DELETED item → NOT_FOUND. Deleted items: only holders of `items.undelete` (resolved through the deleted cohort's ancestors; the published rule still applies) see DELETED items, via `showDeleted` or Get. LOCKED projection: a discoverable root collection the caller cannot read is returned with only name, displayName, `collection.description`, `collection.ownerSummary` and `access: LOCKED`; it never carries counts. Get on a LOCKED root returns the same projection; an item neither visible nor discoverable → PERMISSION_DENIED (403), whether or not it exists. Reviewer exception — applies ONLY to GetItem, GetItemContent and `alt=media`: holders of `contributions.review` for an open contribution may read that contribution's candidate item through those three calls; nowhere else."
+      description: "`view` FULL adds `ancestors`. `alt=media` (documents) answers 302 to the signed original of the current revision; on a COLLECTION → INVALID_ARGUMENT; on a DELETED item → NOT_FOUND. Deleted items: only holders of `items.undelete` (resolved through the deleted cohort's ancestors; the published rule still applies) see DELETED items, via `showDeleted` or Get. LOCKED projection: a discoverable root collection the caller cannot read is returned with only name, displayName, `collection.description`, `collection.ownerSummary` and `access: LOCKED`; it never carries counts. Get on a LOCKED root returns the same projection; an item neither visible nor discoverable → PERMISSION_DENIED (403), whether or not it exists. Reviewer exception — applies ONLY to GetItem, GetItemPreview and `alt=media`: holders of `contributions.review` for an open contribution may read that contribution's candidate item through those three calls; nowhere else."
       x-permission: items.get
       parameters:
         - $ref: '#/components/parameters/Workspace'
@@ -3098,25 +3098,25 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
-  /api/v1/workspaces/{workspace}/items/{item}/content:
+  /api/v1/workspaces/{workspace}/items/{item}/preview:
     get:
       tags:
         - Knowledge
-      operationId: GetItemContent
-      summary: Get the reader representation of a document.
-      description: Signed page assets and rendition of the current or given `revision` (the response's `revision` names it); never reads the search index. A COLLECTION → INVALID_ARGUMENT; a DELETED item → NOT_FOUND; a `revision` with no stored preview → FAILED_PRECONDITION reason REVISION_NOT_RENDERED; not yet rendered at all → FAILED_PRECONDITION. The reviewer exception applies.
+      operationId: GetItemPreview
+      summary: Get how to show a document's file.
+      description: "What a viewer needs to show the document's own file, independent of processing (document_viewer.md): processing makes a document searchable and citable, never viewable. The preview engine maps the file's format to one of six representations (PDF, IMAGE, TABLE, TEXT, MEDIA, ARCHIVE): a PDF, picture or playable media file is its own representation (READY at once); other formats are converted once per revision — Office, OpenDocument, RTF, HTML and e-mail to PDF, spreadsheets and CSV to TABLE, text and code to normalized UTF-8 TEXT, uncommon pictures to IMAGE, ZIP archives to ARCHIVE — by the ingestion worker when the content arrives, or when this read finds it missing (`state: PREPARING`; the read asks for it; poll again). Unknown formats are UNAVAILABLE FORMAT_NOT_SUPPORTED. `original` always downloads the file. A COLLECTION → INVALID_ARGUMENT; a DELETED item → NOT_FOUND; content not uploaded yet (`contentState` not AVAILABLE) → FAILED_PRECONDITION reason CONTENT_NOT_AVAILABLE; an unknown `revision` → NOT_FOUND. Never reads the search index and never converts in the request. The reviewer exception applies."
       x-permission: items.get
       parameters:
         - $ref: '#/components/parameters/Workspace'
         - $ref: '#/components/parameters/PathItem'
-        - $ref: '#/components/parameters/ItemContentRevision'
+        - $ref: '#/components/parameters/ItemPreviewRevision'
       responses:
         '200':
           description: OK.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ItemContent'
+                $ref: '#/components/schemas/ItemPreview'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -8590,10 +8590,10 @@ components:
       schema:
         type: boolean
         default: false
-    ItemContentRevision:
+    ItemPreviewRevision:
       name: revision
       in: query
-      description: Revision name (`…/items/{item}/revisions/{revision}`) or revision number to render; default the current revision.
+      description: Revision name (`…/items/{item}/revisions/{revision}`) or revision number to view; default the current revision.
       schema:
         type: string
     PathContribution:
@@ -11199,6 +11199,13 @@ components:
           $ref: '#/components/schemas/ContentState'
         publicationState:
           $ref: '#/components/schemas/PublicationState'
+        collectionKind:
+          type: string
+          enum:
+            - STANDARD
+            - PERSONAL
+          description: 'Kind of the collection tree the document lives in: STANDARD = the workspace''s shared knowledge; PERSONAL = a member''s "My files", their private scope (uploads and contribution drafts). Browse lists only STANDARD, PUBLISHED documents that finished processing.'
+          readOnly: true
         indexingState:
           $ref: '#/components/schemas/IndexingState'
         indexingError:
@@ -11241,7 +11248,7 @@ components:
       additionalProperties: false
     Item:
       type: object
-      description: "One node of the workspace knowledge tree: a COLLECTION (holds items, carries access policies) or a DOCUMENT (holds content). Exactly one facet, matching `itemType`. Visibility rule: a caller sees a document iff it is ACTIVE, every ancestor is ACTIVE, the caller holds `items.get` on its governing collection (nearest COLLECTION ancestor; access inherits downward until a collection with `inheritAccess=false`; roots are always boundaries), and it is PUBLISHED or the caller holds `items.update` there. Throughout the API, \"visible\"/\"readable\" means this rule: List, Search, counts, reading lists, saved and recent items, artifacts, attachments, move, merge and every reference. Reviewer exception — applies ONLY to GetItem, GetItemContent and `alt=media`: holders of `contributions.review` for an open contribution may read that contribution's candidate item through those three calls; nowhere else. Deleted items: only holders of `items.undelete` (resolved through the deleted cohort's ancestors; the published rule still applies) see DELETED items, via `showDeleted` or Get. LOCKED projection: a discoverable root collection the caller cannot read is returned with only name, displayName, `collection.description`, `collection.ownerSummary` and `access: LOCKED`; it never carries counts. Item links (`…/items/{item}/links`) are reference shortcuts, not hierarchy."
+      description: "One node of the workspace knowledge tree: a COLLECTION (holds items, carries access policies) or a DOCUMENT (holds content). Exactly one facet, matching `itemType`. Visibility rule: a caller sees a document iff it is ACTIVE, every ancestor is ACTIVE, the caller holds `items.get` on its governing collection (nearest COLLECTION ancestor; access inherits downward until a collection with `inheritAccess=false`; roots are always boundaries), and it is PUBLISHED or the caller holds `items.update` there. Throughout the API, \"visible\"/\"readable\" means this rule: List, Search, counts, reading lists, saved and recent items, artifacts, attachments, move, merge and every reference. Reviewer exception — applies ONLY to GetItem, GetItemPreview and `alt=media`: holders of `contributions.review` for an open contribution may read that contribution's candidate item through those three calls; nowhere else. Deleted items: only holders of `items.undelete` (resolved through the deleted cohort's ancestors; the published rule still applies) see DELETED items, via `showDeleted` or Get. LOCKED projection: a discoverable root collection the caller cannot read is returned with only name, displayName, `collection.description`, `collection.ownerSummary` and `access: LOCKED`; it never carries counts. Item links (`…/items/{item}/links`) are reference shortcuts, not hierarchy."
       properties:
         name:
           type: string
@@ -11570,30 +11577,117 @@ components:
           type: integer
           format: int32
       additionalProperties: false
-    ItemContent:
+    ItemPreview:
       type: object
-      description: Reader representation of a document (singleton, output only). Read from PostgreSQL and object storage only, never from the search index (document_viewer.md); the document's text is its `rendition`.
+      description: How to show a document's file (singleton, output only), from the preview engine (document_viewer.md). The engine turns every supported format into one of six representations, so a viewer only knows those six. Independent of processing; read from PostgreSQL and object storage only, never from the search index, and never converting in the request.
       properties:
         name:
           type: string
-          description: '`workspaces/{workspace}/items/{item}/content`.'
+          description: '`workspaces/{workspace}/items/{item}/preview`.'
           readOnly: true
         revision:
           type: string
-          description: Revision name rendered (`workspaces/{workspace}/items/{item}/revisions/{revision}`).
+          description: Revision shown (`workspaces/{workspace}/items/{item}/revisions/{revision}`).
           readOnly: true
-        pageAssets:
-          type: array
-          items:
-            $ref: '#/components/schemas/ItemPageAsset'
+        state:
+          type: string
+          enum:
+            - READY
+            - PREPARING
+            - UNAVAILABLE
+          description: 'READY: draw `representation`. PREPARING: the representation is being made (the engine usually makes it when the content arrives; this read asked for it too) — poll again in a couple of seconds. UNAVAILABLE: nothing to draw (see `unavailableReason`); `original` still downloads the file.'
           readOnly: true
-        rendition:
-          $ref: '#/components/schemas/ItemRendition'
+        unavailableReason:
+          type: string
+          enum:
+            - FORMAT_NOT_SUPPORTED
+            - TOO_LARGE
+            - CONVERSION_FAILED
+          description: Set only when `state` is UNAVAILABLE. CONVERSION_FAILED is a property of this revision's file (not retried until its content changes).
+          readOnly: true
+        representation:
+          $ref: '#/components/schemas/ItemRepresentation'
+        original:
+          $ref: '#/components/schemas/ItemPreviewFile'
+      additionalProperties: false
+    ItemRepresentation:
+      type: object
+      readOnly: true
+      description: 'What the viewer draws; present only when READY. `kind` is the only branch a viewer takes. PDF: a PDF (the original, or the file converted to PDF) read page by page with `Range`. IMAGE: a picture the browser shows as is. TABLE: gzip JSON `application/vnd.bomesh.table+json` (sheets of rows, bounded). TEXT: UTF-8 text (bounded), `textFormat` MARKDOWN or PLAIN, `language` a hint for code. MEDIA: a file the browser plays (`mediaType` VIDEO or AUDIO). ARCHIVE: gzip JSON `application/vnd.bomesh.archive+json` (the entry list).'
+      properties:
+        kind:
+          type: string
+          enum:
+            - PDF
+            - IMAGE
+            - TABLE
+            - TEXT
+            - MEDIA
+            - ARCHIVE
+          readOnly: true
+        uri:
+          type: string
+          description: Signed GET URL; for a representation the engine made, the object is immutable and the URL stays the same within its signing window, so the browser cache serves repeat opens. A 403 from storage means it expired; read the preview again.
+          readOnly: true
+        mimeType:
+          type: string
+          readOnly: true
+        sizeBytes:
+          type: string
+          format: int64
+          readOnly: true
+        expireTime:
+          type: string
+          format: date-time
+          readOnly: true
+        textFormat:
+          type: string
+          enum:
+            - MARKDOWN
+            - PLAIN
+          description: TEXT only.
+          readOnly: true
+        language:
+          type: string
+          description: TEXT only, optional; the file's language for monospaced code (`json`, `python`, `sql` …).
+          readOnly: true
+        mediaType:
+          type: string
+          enum:
+            - VIDEO
+            - AUDIO
+          description: MEDIA only.
+          readOnly: true
+        truncated:
+          type: boolean
+          description: TEXT, TABLE and ARCHIVE only; true when the file is larger than the representation's bounds (the viewer points at `original`).
+          readOnly: true
+      additionalProperties: false
+    ItemPreviewFile:
+      type: object
+      readOnly: true
+      description: The revision's original file in object storage (the same object `alt=media` redirects to), for download.
+      properties:
+        uri:
+          type: string
+          description: Signed GET URL.
+          readOnly: true
+        mimeType:
+          type: string
+          readOnly: true
+        sizeBytes:
+          type: string
+          format: int64
+          readOnly: true
+        expireTime:
+          type: string
+          format: date-time
+          readOnly: true
       additionalProperties: false
     ItemRendition:
       type: object
       readOnly: true
-      description: Whole-document rendition (`application/vnd.bomesh.document+json`, gzip-encoded) of this revision, fetched directly from object storage (document_viewer.md). Absent when the revision has none.
+      description: Whole-document rendition (`application/vnd.bomesh.document+json`, gzip-encoded) of a conversation artifact's revision, fetched directly from object storage. Knowledge documents are shown through ItemPreview representations instead.
       properties:
         uri:
           type: string
@@ -11658,11 +11752,7 @@ components:
           type: array
           items:
             type: string
-          description: 'Element IDs of the parse the passage spans: the same values as the rendition''s block ids, so the viewer highlights these blocks. Page geometry for highlights lives on the passage (`boundingBoxes`), not on `ItemContent`.'
-          readOnly: true
-        pageAssetUri:
-          type: string
-          description: Signed page image.
+          description: 'Element IDs of the parse the passage spans (processing''s structure, the same values as `CitationSpan.element_id`). Viewers highlight a passage by `boundingBoxes` on a PDF page when present, else by finding `text` in the representation.'
           readOnly: true
         revision:
           type: string
@@ -12965,7 +13055,7 @@ components:
           description: Explicit documents; a non-DOCUMENT item is INVALID_ARGUMENT (400). On reads, only items visible to the caller are echoed.
         filter:
           type: string
-          description: 'AIP-160 filter over documents with the fields and semantics of ListItems `filter`: `ancestors:`, `parentItem`, `displayName`, `document.mimeType`, `document.documentType`, `document.topics:`, `document.owner`, `document.publicationState`, `document.contentState`, `document.indexingState`, `document.origin.source`, `document.verification.state`, `updateTime`. Example: `ancestors:"workspaces/w/items/c" AND document.indexingState = PENDING`. An item it names that the caller cannot read is PERMISSION_DENIED (403). On reads, echoed only to callers who can read every item it names.'
+          description: 'AIP-160 filter over documents with the fields and semantics of ListItems `filter`: `ancestors:`, `parentItem`, `displayName`, `document.mimeType`, `document.documentType`, `document.topics:`, `document.owner`, `document.publicationState`, `document.collectionKind`, `document.contentState`, `document.indexingState`, `document.origin.source`, `document.verification.state`, `updateTime`. Example: `ancestors:"workspaces/w/items/c" AND document.indexingState = PENDING`. An item it names that the caller cannot read is PERMISSION_DENIED (403). On reads, echoed only to callers who can read every item it names.'
     IngestionRunClassification:
       type: object
       additionalProperties: false

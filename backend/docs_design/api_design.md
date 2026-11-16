@@ -154,7 +154,7 @@ Workspaces
 
 Knowledge
   workspaces/{workspace}/items/{item}            (COLLECTION or DOCUMENT)
-    ◇ …/items/{item}/content                     (documents)
+    ◇ …/items/{item}/preview                     (documents; singleton: how to show the file)
     …/items/{item}/passages/{passage}
     …/items/{item}/revisions/{revision}
     …/items/{item}/links/{link}                  (collections: shortcuts to documents; link ID = document ID)
@@ -381,6 +381,8 @@ exactly one facet:
   (output: the subset of `topics` the assistant applied), `summary`,
   `languageCode`, `owner` (member), and output `contentState` (`PENDING`,
   `AVAILABLE`, `FAILED`), `publicationState` (`PUBLISHED`, `UNPUBLISHED`),
+  `collectionKind` (`STANDARD` = the workspace's shared knowledge, `PERSONAL`
+  = a member's My files, their private scope),
   `indexingState` (`PENDING`, `RUNNING`, `SUCCEEDED`, `FAILED`, `OUTDATED`,
   `UNSUPPORTED`), `indexingError`, `lastIngestionRun`, `revision`,
   `verification`, `origin`, `qualityIssues[]` (editors), `cover`,
@@ -410,7 +412,7 @@ collection, and it is `PUBLISHED` (or the caller holds `items.update` there).
 | CreateItem | `POST …/items` (`requestId`) → documents return `PENDING` + signed `uploadUri`; `POST /upload/api/v1/workspaces/{workspace}/items` multipart for one-call upload | `items.create` on `parentItem` (on the workspace for a root collection). Documents only under collections; new documents are `PUBLISHED`; non-editors contribute instead |
 | CompleteItemUpload | `POST …/items/{item}:completeUpload` (validates the stored object) | creator |
 | GetItem | `GET …/items/{item}` (`view`), `?alt=media` → 302 to the signed original | `items.get` |
-| ListItems | `GET …/items` — `filter` over `name` (batch read: `name = "…/items/a" OR name = "…/items/b"`; names the caller cannot read, or that do not exist, are simply absent, as GetItem would deny them), `parentItem` (`""` = roots), `ancestors:` (subtree), `itemType`, `displayName`, `document.*` (type, topics, assistant topics, owner, purpose, states, origin, verification, quality issues); presence `field:*` on repeated fields (`NOT document.topics:*` = without a topic); `orderBy`; `showDeleted`; `showLocked` | `items.list` (visible items only) |
+| ListItems | `GET …/items` — `filter` over `name` (batch read: `name = "…/items/a" OR name = "…/items/b"`; names the caller cannot read, or that do not exist, are simply absent, as GetItem would deny them), `parentItem` (`""` = roots), `ancestors:` (subtree), `itemType`, `displayName`, `document.*` (type, topics, assistant topics, owner, purpose, states, collection kind, origin, verification, quality issues); presence `field:*` on repeated fields (`NOT document.topics:*` = without a topic); `orderBy`; `showDeleted`; `showLocked` | `items.list` (visible items only) |
 | SearchItems | `POST …/items:search` `{query, filter, facetSpecs[], orderBy, relatedItem, contentSearchSpec, pageSize, pageToken}` → documents with snippets/passages, permission-filtered facets (value facets, and `intervals` buckets for `updateTime`) | `items.search`. The one catalog and retrieval search; hits are re-authorized in PostgreSQL |
 | UpdateItem | `PATCH` — `displayName`, collection settings, document metadata; `collection.inheritAccess` also needs `items.setIamPolicy` | `items.update` |
 | DeleteItem / UndeleteItem | `DELETE` (`force` for a non-empty collection; the live subtree is deleted together) / `POST …:undelete` (restores that cohort and its search visibility; 30-day retention). DELETED items are shown only to `items.undelete` holders and never serve content | `items.delete` / `.undelete` on every access boundary in the cohort (`SUBTREE_HAS_FOREIGN_BOUNDARY`); personal collections cannot be deleted |
@@ -418,7 +420,7 @@ collection, and it is `PUBLISHED` (or the caller holds `items.update` there).
 | PublishItem / UnpublishItem | `POST …:publish` / `:unpublish` (documents; never starts processing) | `items.publish` |
 | VerifyItem | `POST …:verify` | `items.verify` |
 | MergeItem | `POST …:merge` `{targetItem}` — this duplicate is deleted and records `mergedInto`; reading-list, saved and recent references resolve to the target at read time | `items.delete` here + `items.update` on target |
-| GetItemContent | ◇ `GET …/items/{item}/content` (`revision` optional; a revision without a stored preview is `REVISION_NOT_RENDERED`) — reader representation | `items.get` |
+| GetItemPreview | ◇ `GET …/items/{item}/preview` (`revision` optional) — how to show the document's own file, independent of processing, from the preview engine: `state` (READY, PREPARING, UNAVAILABLE), one `representation` of six kinds (PDF, IMAGE, TABLE, TEXT, MEDIA, ARCHIVE) the engine makes once per revision (worker, on content arrival or first read), and the `original` for download | `items.get` |
 | GetPassage / ListPassages | `GET …/passages/{passage}` (citation target; always of `document.indexedRevision`) / `GET …/passages` | `items.get` |
 | GetItemRevision / ListItemRevisions | `GET …/revisions[/{revision}]` — newest first; created by upload, approved new revisions, source versions and rollback | `items.get` |
 | RollbackItem | `POST …/revisions/{revision}:rollback` (reuses the stored object; not for source-managed documents) | `items.publish` |
@@ -449,7 +451,7 @@ Manage) wants the domain's documents; agent retrieval does not filter by
 topic.
 
 Asking for access is `CreateRequest` with `kind: COLLECTION_ACCESS`.
-Reviewers of an open contribution may `GetItem`, `GetItemContent` and
+Reviewers of an open contribution may `GetItem`, `GetItemPreview` and
 download its candidate document — nothing else. NEW_REVISION contributions
 always target the replaced document's governing collection; while a
 contribution is open its candidate cannot move, be deleted or change content,
@@ -795,9 +797,10 @@ FAILED, a revision returns it to ACTIVE). **Component** `components/{component}`
 | --- | --- |
 | Sign in, sign up, forgot password, choose workspace | CreateSession, CreateUser, SendPasswordReset, ResetPassword, ListWorkspaces, UpdateUserPreferences (`lastWorkspace`) |
 | Home | GetMemberHome; ask → CreateConversation + Converse; search → SearchItems |
-| Browse, ⌘K, `/search` | SearchItems (facets, snippets), ListItems (`parentItem=""` + `showLocked` for knowledge bases), ListReadingLists, ListSpaces, ListMembers |
+| Browse | SearchItems (facets, snippets) over the workspace's public knowledge only: `document.collectionKind = STANDARD AND document.publicationState = PUBLISHED AND (document.indexingState = SUCCEEDED OR document.indexingState = OUTDATED)` — members' My files, unpublished documents and documents not yet processed never appear (a contribution shows up once approved and processed); ListItems (`parentItem=""` + `showLocked` for knowledge bases), ListReadingLists, ListSpaces, ListMembers |
+| ⌘K, `/search` | SearchItems (facets, snippets) over everything the caller can read, My files included |
 | Knowledge base / folder view, breadcrumbs, move | ListItems(`parentItem=…`), GetItem(`view=FULL` → `ancestors`), CreateItem (collection), MoveItem, DeleteItem/UndeleteItem |
-| Reader | GetItem, GetItemContent, GetPassage, ListItemRevisions, SearchItems(`relatedItem`), CreateSavedItem, UpdateRecentItem(`allowMissing`), Converse (attachments) |
+| Reader, document preview | GetItem, GetItemPreview (the file through one of six representations, processed or not), GetPassage (citations by `boundingBoxes` on PDF pages, else by the passage text), ListItemRevisions, SearchItems(`relatedItem`), CreateSavedItem, UpdateRecentItem(`allowMissing`), Converse (attachments) |
 | My library | List saved / recent / saved searches, ListReadingLists, ListContributions(`contributor=me`), ListItems(`parentItem=` the member's `personalCollection`) |
 | Contribute, contributions, review | CreateItem (personal collection) → CreateContribution; Approve/RequestChanges/Reject/Withdraw/Resubmit; then, separately, CreateIngestionRun |
 | Manage → Documents (all, quality, topics) | ListItems(`filter`), Publish/Unpublish/Verify/Merge/Delete/Undelete, CreateIngestionRun, Topics methods |

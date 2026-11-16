@@ -12,12 +12,6 @@ from api.aip.filtering import FilterSchema, enum, resource_name
 from api.aip.messages import Int64, ProtoMessage, Timestamp
 from api.aip.ordering import OrderSchema
 from api.dto.conversations import CitationMessage, citation_message
-from api.dto.knowledge_items import (
-    ItemPageAsset,
-    ItemRendition,
-    page_asset_message,
-    rendition_message,
-)
 from api.dto.operations import register_response_message
 from bomesh import etag as etags
 from bomesh.db.models import Artifact, Item
@@ -30,6 +24,8 @@ from bomesh.services.artifacts.records import (
     CellKey,
     EvidenceReviewRecord,
     NewArtifact,
+    PageAsset,
+    Rendition,
     ReviewEntry,
     Revise,
     RevisionRecord,
@@ -267,6 +263,41 @@ class PublishArtifactResponse(ProtoMessage):
 
 
 # -- Revisions --------------------------------------------------------------------------------
+
+
+class ItemPageAsset(ProtoMessage):
+    page_number: int | None = None
+    image_uri: str | None = None
+    width_pixels: int | None = None
+    height_pixels: int | None = None
+
+
+class ItemRendition(ProtoMessage):
+    uri: str | None = None
+    version: int | None = None
+    size_bytes: Int64 | None = None
+    block_count: int | None = None
+    truncated: bool | None = None
+
+
+def page_asset_message(asset: PageAsset) -> ItemPageAsset:
+    return ItemPageAsset(
+        page_number=asset.page_number,
+        image_uri=asset.image_uri,
+        width_pixels=asset.width_pixels,
+        height_pixels=asset.height_pixels,
+    )
+
+
+def rendition_message(rendition: Rendition) -> ItemRendition:
+    return ItemRendition(
+        uri=rendition.uri,
+        version=rendition.version,
+        size_bytes=rendition.size_bytes,
+        block_count=rendition.block_count,
+        truncated=rendition.truncated,
+    )
+
 
 
 class ArtifactSnapshotMessage(ProtoMessage):

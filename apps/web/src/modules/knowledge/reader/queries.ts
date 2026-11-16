@@ -1,14 +1,14 @@
 "use client";
 
-import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useMutation, useQueries, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
+import { useCallback, useMemo } from "react";
 
 import { toast } from "@/components/ui/Toast";
 import { ApiError, errorMessage, resourceId } from "@/lib/api/client";
 import { useWorkspace } from "@/lib/workspace";
 import { createIngestionRun } from "@/modules/curation/api";
 
-import { getItem, getItemContent, itemName, listContributions, listReadingListEntries, searchItems, testItemPermissions, type ReadingList } from "../api";
+import { getItem, getItemPreview, itemName, listContributions, listReadingListEntries, searchItems, testItemPermissions, type ItemPreview, type ReadingList } from "../api";
 import { invalidateKnowledge, knowledgeKeys, useReadingLists } from "../queries";
 import { conversationCitations, getPassage, listItemRevisions } from "./api";
 
@@ -25,19 +25,39 @@ export function useReaderItem(item: string) {
   });
 }
 
+/** A preview is read again this long before its signed URLs expire, so a view never starts on a dead URL. */
+const URL_MARGIN_MS = 30_000;
+/** While the preview engine makes the representation (`PREPARING`). */
+const PREPARING_POLL_MS = 2_000;
+
+/** A document's preview query, with `refresh()` for a view whose signed URL stopped working. */
+export type ItemPreviewQuery = UseQueryResult<ItemPreview> & {
+  /** Reads the preview again (fresh signed URLs); resolves to it, or `undefined` when the read failed. */
+  refresh: () => Promise<ItemPreview | undefined>;
+};
+
 /**
- * Reader content of one revision (current when `revision` is empty). Signed URLs expire, so
- * a failed rendition download refetches this to re-sign them.
+ * How to show one revision of a document (current when `revision` is empty): `GetItemPreview`,
+ * independent of processing. Polled every two seconds while PREPARING; fresh until shortly before
+ * its signed URLs expire. `refresh()` is for a view whose storage read failed (a 403 from storage
+ * means the URL expired).
  */
-export function useReaderContent(item: string, revision: string | undefined, { enabled = true }: { enabled?: boolean } = {}) {
+export function useItemPreview(item: string, revision: string | undefined, { enabled = true }: { enabled?: boolean } = {}): ItemPreviewQuery {
   const { id } = useWorkspace();
-  return useQuery({
-    queryKey: [...knowledgeKeys.item(id, item), "content", revision ?? ""],
-    queryFn: () => getItemContent(id, item, revision),
+  const query = useQuery({
+    queryKey: [...knowledgeKeys.item(id, item), "preview", revision ?? ""],
+    queryFn: () => getItemPreview(id, item, revision),
     enabled,
-    staleTime: 4 * 60_000,
     retry: false,
+    staleTime: (q) => {
+      const expires = Date.parse(q.state.data?.representation?.expireTime ?? q.state.data?.original?.expireTime ?? "");
+      return Number.isFinite(expires) ? Math.max(0, expires - Date.now() - URL_MARGIN_MS) : 0;
+    },
+    refetchInterval: (q) => (q.state.data?.state === "PREPARING" ? PREPARING_POLL_MS : false),
   });
+  const { refetch } = query;
+  const refresh = useCallback(async () => (await refetch()).data, [refetch]);
+  return { ...query, refresh };
 }
 
 export function useRevisions(item: string, { enabled = true }: { enabled?: boolean } = {}) {
@@ -45,10 +65,10 @@ export function useRevisions(item: string, { enabled = true }: { enabled?: boole
   return useQuery({ queryKey: [...knowledgeKeys.item(id, item), "revisions"], queryFn: () => listItemRevisions(id, item), enabled, staleTime: 60_000 });
 }
 
-/** Cited passages (`?passage=`), each resolved through GetPassage; one that no longer resolves is `null`. */
+/** Cited passages (`?passage=`), each resolved through GetPassage; one that no longer resolves is `null`. Stable between renders while unchanged. */
 export function usePassages(item: string, passages: readonly string[]) {
   const { id } = useWorkspace();
-  const results = useQueries({
+  return useQueries({
     queries: passages.map((passage) => ({
       queryKey: [...knowledgeKeys.item(id, item), "passage", passage],
       queryFn: () => getPassage(id, item, passage).catch((error: unknown) => {
@@ -58,11 +78,12 @@ export function usePassages(item: string, passages: readonly string[]) {
       staleTime: 10 * 60_000,
       retry: 1,
     })),
+    combine: combinePassages,
   });
-  return {
-    isPending: results.some((r) => r.isPending),
-    data: results.map((r) => r.data ?? null),
-  };
+}
+
+function combinePassages<T>(results: readonly { isPending: boolean; data?: T | null }[]) {
+  return { isPending: results.some((r) => r.isPending), data: results.map((r) => r.data ?? null) };
 }
 
 /** Passages a conversation cited in this document (`?from=`); none when the conversation can't be read. */

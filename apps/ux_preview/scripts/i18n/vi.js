@@ -5462,6 +5462,11 @@ const I18N_VI = {
 "Background image": "Ảnh nền",
 "updated {0} by {1}": "cập nhật {0} bởi {1}",
 "updated {0}": "cập nhật {0}",
+"You can read it now. Search and Ask will work in a few minutes.": "Bạn đọc được ngay. Tìm kiếm và Hỏi sẽ dùng được sau vài phút.",
+"You can read it now. Search and Ask work once it’s processed.": "Bạn đọc được ngay. Tìm kiếm và Hỏi dùng được sau khi tài liệu được xử lý.",
+"This file can’t be shown here": "Không hiển thị được tệp này ở đây",
+"Download it to open it in its own app.": "Tải về để mở bằng ứng dụng của nó.",
+"Preparing the preview…": "Đang chuẩn bị bản xem…",
 };
 
 /** Counter nouns for plural(): singular English → Vietnamese (no plural form). */

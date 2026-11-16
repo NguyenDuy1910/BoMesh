@@ -31,7 +31,6 @@ from bomesh.services.knowledge_curation.contributions import (
 from bomesh.services.knowledge_curation.reading_lists import home_reading_lists
 from bomesh.services.knowledge_curation.records import TopicDomainSummary, TopicSummary
 from bomesh.services.knowledge_curation.topics import topic_count, topic_summaries
-from bomesh.services.knowledge_items.covers import resolve_cover
 from bomesh.services.knowledge_items.item_store import catalog_visibility
 from bomesh.services.knowledge_items.items import KnowledgeItemService
 from bomesh.services.knowledge_items.queries import PUBLISH_TIME, VERIFICATION_STATE
@@ -51,6 +50,7 @@ from bomesh.services.library.records import (
     ItemReference,
     MemberHomeRecord,
 )
+from bomesh.services.previews.covers import resolve_cover
 from bomesh.services.workspaces.members import holds_role
 from bomesh.services.workspaces.settings import assistant_settings
 from bomesh.storage import DocumentStorage

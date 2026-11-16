@@ -236,23 +236,47 @@ Never persist a presigned URL. Store the Item's `storage_key` and generate a
 short-lived upload or download URL only at runtime. A `SignatureDoesNotMatch`
 response means the API's key pair does not match the storage server's.
 
-Backend reads of an original (ingestion, preview rendering, agent attachments)
+Backend reads of an original (ingestion, preview production, agent attachments)
 issue one bounded `GET`: the size limit is checked from the response headers
 before any body byte is read, and files stream to a temporary path in 1 MiB
-blocks rather than into memory.
+blocks rather than into memory. A TEXT representation reads only the
+original's first MiB, with one `Range` GET.
 
-Image and PDF ingestion may also write versioned WebP objects below the owning
-Item's `previews/` prefix. These are derived presentation assets; the raw object
-remains authoritative. Bound rendering with `BOMESH_PREVIEW_MAX_SOURCE_BYTES`,
-`BOMESH_PREVIEW_MAX_PAGES`, `BOMESH_PREVIEW_MAX_DIMENSION`, and
-`BOMESH_PREVIEW_WEBP_QUALITY`. Preview URLs are signed at read time and use
-`BOMESH_PREVIEW_URL_SECONDS`.
+Knowledge documents are shown through the preview engine
+(`backend/bomesh/services/previews/`, `document_viewer.md`): the ingestion
+worker turns each revision's original into one representation (PDF, IMAGE,
+TABLE, TEXT, MEDIA or ARCHIVE) when its content arrives, stored once and
+immutable under the Item's `previews/rep-v1/` prefix; requests never convert.
+Office, OpenDocument, RTF, HTML and e-mail files become PDF through Gotenberg,
+which `make services` starts (`deployment/compose.yml`, image
+`gotenberg/gotenberg:8`, loopback port `GOTENBERG_PORT`, default 3010) and
+waits for on `/health`:
+
+```dotenv
+BOMESH_GOTENBERG_URL=http://127.0.0.1:3010   # http://gotenberg:3000 inside the Compose network
+BOMESH_PREVIEW_CONVERSIONS=2                 # Gotenberg conversions per worker at once
+```
+
+Gotenberg is internal only and receives file bytes, never URLs; Chromium runs
+without JavaScript and with every request but the uploaded page denied. A
+worker that cannot reach it records nothing: the next read or the ten-minute
+sweep converts again. Sources over 100 MiB are not converted, and a
+conversion stops after 120 s. Representation URLs are signed at the start of
+a `BOMESH_PREVIEW_URL_SECONDS` window (default 300), so a reopened document is
+served from the browser cache.
+
+Conversation artifacts may also write versioned WebP page images and a
+document rendition below the owning Item's `previews/` prefix. Bound rendering
+with `BOMESH_PREVIEW_MAX_SOURCE_BYTES`, `BOMESH_PREVIEW_MAX_PAGES`,
+`BOMESH_PREVIEW_MAX_DIMENSION`, and `BOMESH_PREVIEW_WEBP_QUALITY`.
 
 The ingestion worker also writes one immutable cover WebP per document
-content (`previews/cover-v1/…`, at most 480 px wide) when the content arrives;
-originals over 50 MB get none. Cover URLs are signed with a timestamp aligned
-to a `BOMESH_PREVIEW_COVER_URL_SECONDS` window (default 3600), so a list
-returns the same URL for the whole window and browsers reuse the cached image.
+content (`previews/cover-v1/…`, at most 480 px wide) after its representation:
+page one of a PDF representation, so office documents get their real first
+page; sources over 50 MB get none. Cover URLs are signed with a timestamp
+aligned to a `BOMESH_PREVIEW_COVER_URL_SECONDS` window (default 3600), so a
+list returns the same URL for the whole window and browsers reuse the cached
+image.
 
 ## Identity and credentials
 

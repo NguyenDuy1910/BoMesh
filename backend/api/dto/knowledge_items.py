@@ -42,17 +42,15 @@ from bomesh.services.knowledge_items.names import (
     revision_name,
 )
 from bomesh.services.knowledge_items.records import (
-    ContentRecord,
     Cover,
     ItemRecord,
     LinkRecord,
     NewCollection,
     NewDocument,
     NewItem,
-    PageAsset,
     PassageRecord,
     PolicyRecord,
-    Rendition,
+    PreviewRecord,
     RevisionRecord,
     SearchPage,
 )
@@ -143,6 +141,8 @@ class DocumentFacet(ProtoMessage):
     owner: str | None = None
     content_state: Literal["PENDING", "AVAILABLE", "FAILED"] | None = None
     publication_state: Literal["PUBLISHED", "UNPUBLISHED"] | None = None
+    #: Output only: PERSONAL in a member's My files, STANDARD in shared collections.
+    collection_kind: Literal["STANDARD", "PERSONAL"] | None = None
     indexing_state: (
         Literal["PENDING", "RUNNING", "SUCCEEDED", "FAILED", "OUTDATED", "UNSUPPORTED"] | None
     ) = None
@@ -265,6 +265,7 @@ def _document(record: ItemRecord) -> DocumentFacet:
         owner=member_name(ws, facet.owner_id) if facet.owner_id else None,
         content_state=facet.content_state,  # type: ignore[arg-type]
         publication_state=facet.publication_state,  # type: ignore[arg-type]
+        collection_kind=facet.collection_kind,  # type: ignore[arg-type]
         indexing_state=facet.indexing_state,  # type: ignore[arg-type]
         revision=revision_name(ws, item_id, facet.revision) if facet.revision else None,
         indexed_revision=(
@@ -425,55 +426,65 @@ def revision_message(record: RevisionRecord) -> ItemRevisionMessage:
 # -- Content and passages ------------------------------------------------------------
 
 
-class ItemPageAsset(ProtoMessage):
-    page_number: int | None = None
-    image_uri: str | None = None
-    width_pixels: int | None = None
-    height_pixels: int | None = None
-
-
-class ItemRendition(ProtoMessage):
+class ItemRepresentation(ProtoMessage):
+    kind: Literal["PDF", "IMAGE", "TABLE", "TEXT", "MEDIA", "ARCHIVE"] | None = None
     uri: str | None = None
-    version: int | None = None
+    mime_type: str | None = None
     size_bytes: Int64 | None = None
-    block_count: int | None = None
+    expire_time: Timestamp | None = None
+    text_format: Literal["MARKDOWN", "PLAIN"] | None = None
+    language: str | None = None
+    media_type: Literal["VIDEO", "AUDIO"] | None = None
     truncated: bool | None = None
 
 
-class ItemContent(ProtoMessage):
+class ItemPreviewFile(ProtoMessage):
+    uri: str | None = None
+    mime_type: str | None = None
+    size_bytes: Int64 | None = None
+    expire_time: Timestamp | None = None
+
+
+class ItemPreview(ProtoMessage):
     name: str | None = None
     revision: str | None = None
-    page_assets: list[ItemPageAsset] | None = None
-    rendition: ItemRendition | None = None
+    state: Literal["READY", "PREPARING", "UNAVAILABLE"] | None = None
+    unavailable_reason: (
+        Literal["FORMAT_NOT_SUPPORTED", "TOO_LARGE", "CONVERSION_FAILED"] | None
+    ) = None
+    representation: ItemRepresentation | None = None
+    original: ItemPreviewFile | None = None
 
 
-def content_message(record: ContentRecord) -> ItemContent:
+def preview_message(record: PreviewRecord) -> ItemPreview:
     ws, item_id = record.workspace_id, record.item_id
-    rendition = record.rendition
-    return ItemContent(
-        name=f"{item_name(ws, item_id)}/content",
+    representation, original = record.representation, record.original
+    return ItemPreview(
+        name=f"{item_name(ws, item_id)}/preview",
         revision=revision_name(ws, item_id, record.revision),
-        page_assets=[page_asset_message(asset) for asset in record.page_assets],
-        rendition=rendition_message(rendition) if rendition is not None else None,
-    )
-
-
-def page_asset_message(asset: PageAsset) -> ItemPageAsset:
-    return ItemPageAsset(
-        page_number=asset.page_number,
-        image_uri=asset.image_uri,
-        width_pixels=asset.width_pixels,
-        height_pixels=asset.height_pixels,
-    )
-
-
-def rendition_message(rendition: Rendition) -> ItemRendition:
-    return ItemRendition(
-        uri=rendition.uri,
-        version=rendition.version,
-        size_bytes=rendition.size_bytes,
-        block_count=rendition.block_count,
-        truncated=rendition.truncated,
+        state=record.state,  # type: ignore[arg-type]
+        unavailable_reason=record.unavailable_reason,  # type: ignore[arg-type]
+        representation=(
+            ItemRepresentation(
+                kind=representation.kind,  # type: ignore[arg-type]
+                uri=representation.uri,
+                mime_type=representation.mime_type,
+                size_bytes=representation.size_bytes,
+                expire_time=representation.expire_time,
+                text_format=representation.text_format,  # type: ignore[arg-type]
+                language=representation.language,
+                media_type=representation.media_type,  # type: ignore[arg-type]
+                truncated=representation.truncated,
+            )
+            if representation is not None
+            else None
+        ),
+        original=ItemPreviewFile(
+            uri=original.uri,
+            mime_type=original.mime_type,
+            size_bytes=original.size_bytes,
+            expire_time=original.expire_time,
+        ),
     )
 
 
@@ -491,7 +502,6 @@ class ItemPassage(ProtoMessage):
     page_number: int | None = None
     bounding_boxes: list[ItemPassageBoundingBox] | None = None
     element_ids: list[str] | None = None
-    page_asset_uri: str | None = None
     revision: str | None = None
 
 
@@ -517,7 +527,6 @@ def passage_message(record: PassageRecord) -> ItemPassage:
             for box in record.bounding_boxes
         ],
         element_ids=list(record.element_ids),
-        page_asset_uri=record.page_asset_uri,
         revision=revision_name(ws, item_id, record.revision) if record.revision else None,
     )
 
@@ -782,6 +791,7 @@ def item_filters(
                 lambda name: str(parse_member_name(name, workspace_id, field=field)),
             ),
             "document.publicationState": enum(queries.PUBLICATION_STATE, ("PUBLISHED", "UNPUBLISHED")),
+            "document.collectionKind": enum(queries.COLLECTION_KIND, ("STANDARD", "PERSONAL")),
             "document.contentState": enum(queries.CONTENT_STATE, ("PENDING", "AVAILABLE", "FAILED")),
             "document.indexingState": enum(
                 queries.indexing_state(processing_version),
@@ -864,9 +874,9 @@ __all__ = [
     "DocumentFacet",
     "EtagRequest",
     "GetIamPolicyRequest",
-    "ItemContent",
-    "ItemPageAsset",
-    "ItemRendition",
+    "ItemPreview",
+    "ItemPreviewFile",
+    "ItemRepresentation",
     "ItemLinkMessage",
     "ItemMessage",
     "ItemPassage",
@@ -885,18 +895,16 @@ __all__ = [
     "TestIamPermissionsRequest",
     "TestIamPermissionsResponse",
     "View",
-    "content_message",
     "facet_value_name",
     "item_changes",
     "item_filters",
     "item_message",
     "link_message",
     "new_item",
-    "page_asset_message",
     "passage_message",
     "policy_message",
+    "preview_message",
     "referenced_items",
-    "rendition_message",
     "revision_message",
     "search_response",
     "without_field",

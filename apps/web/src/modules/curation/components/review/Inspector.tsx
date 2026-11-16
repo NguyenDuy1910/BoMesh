@@ -7,7 +7,6 @@ import {
   ChevronDown,
   ChevronUp,
   Copy,
-  Download,
   ExternalLink,
   Eye,
   File as FileGlyph,
@@ -20,21 +19,21 @@ import {
 } from "lucide-react";
 import NextLink from "next/link";
 import { useRouter } from "next/navigation";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
-import { EmptyState, FileIcon, IconButton, LinkButton as TextLink, Tip, toast } from "@/components/ui";
-import { errorMessage, resourceId } from "@/lib/api/client";
+import { EmptyState, FileIcon, IconButton, LinkButton as TextLink, Tip } from "@/components/ui";
+import { resourceId } from "@/lib/api/client";
 import { rel } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
-import { downloadItem, type Topic } from "@/modules/knowledge/api";
+import type { Topic } from "@/modules/knowledge/api";
 import { LifecycleChip } from "@/modules/knowledge/components/LifecycleChip";
 import { RESOURCE_KINDS, topicTree } from "@/modules/knowledge/model";
 import { useItem } from "@/modules/knowledge/queries";
 
 import { isUnprocessable } from "../../lifecycle";
-import { hasFlag, lastEvent, topicsHref, versionOf, type Flag } from "../../model";
+import { lastEvent, topicsHref, versionOf, type Flag } from "../../model";
 import { useCollectionAudience } from "../../queries";
-import { FirstPageCanvas, useFirstPage } from "../FirstPage";
+import { FirstPage } from "../FirstPage";
 import { ConfBadge, PlainSelect, SourceName } from "../parts";
 import type { Draft, SubView } from "./types";
 
@@ -42,42 +41,9 @@ const relLow = (at: string) => rel(at).replace(/^(Just now|Yesterday)$/, (m) => 
 
 /** The document itself, in its own pane (preview `docPane`): the first page at reading size, scrolling on its own. */
 export function DocPane({ view: v }: { view: SubView }) {
-  const { id: ws } = useWorkspace();
   const item = v.sub.item;
-  const fmt = hasFlag(v.sub.contribution, "format");
-  const page = useFirstPage(fmt ? null : item);
-  const download = () => item?.name && downloadItem(ws, item.name, v.fileName).catch((e: unknown) => toast(errorMessage(e), { tone: "danger" }));
-  let canvas: ReactNode;
-  if (fmt || !item) {
-    canvas = (
-      <EmptyState
-        icon={FileGlyph}
-        compact
-        title="No preview for this file type"
-        description="Download it to check the content."
-        actions={
-          item ? (
-            <Button size="sm" variant="secondary" onPress={() => void download()}>
-              <Download className="i" aria-hidden />
-              Download
-            </Button>
-          ) : null
-        }
-      />
-    );
-  } else if (page.isPending) {
-    canvas = (
-      <div className="cur-analyzing">
-        <Spinner size="sm" />
-        <span>Loading the first page…</span>
-      </div>
-    );
-  } else if (page.data && page.data.kind !== "none") {
-    canvas = <FirstPageCanvas page={page.data} />;
-  } else {
-    canvas = <EmptyState icon={FileGlyph} compact title="No preview yet" />;
-  }
-  const pages = page.data?.kind === "page" ? page.data.pages : 1;
+  const [counted, setCounted] = useState<{ item: string; pages: number }>();
+  const pages = counted && counted.item === item?.name ? counted.pages : 1;
   return (
     <section className="cur-pane" aria-label="Preview">
       <header className="cur-pane__bar">
@@ -85,7 +51,7 @@ export function DocPane({ view: v }: { view: SubView }) {
         <span className="cur-pane__title truncate" title={v.title} translate="no">
           {v.title}
         </span>
-        {!fmt && item ? (
+        {item ? (
           <>
             <span className="cur-pane__meta num">{`Page 1 of ${pages}`}</span>
             <TextLink href={`/doc/${resourceId(item.name)}`} icon={ExternalLink}>
@@ -95,7 +61,11 @@ export function DocPane({ view: v }: { view: SubView }) {
         ) : null}
       </header>
       <div className="cur-pane__scroll" tabIndex={0}>
-        {canvas}
+        {item ? (
+          <FirstPage key={item.name} item={item} onPages={(n) => setCounted({ item: item.name ?? "", pages: n })} />
+        ) : (
+          <EmptyState icon={FileGlyph} compact title="No preview yet" />
+        )}
       </div>
     </section>
   );

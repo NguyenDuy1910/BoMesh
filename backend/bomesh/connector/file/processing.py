@@ -31,6 +31,7 @@ from bomesh.connector.processing import (
 )
 from bomesh.connector.protocol import (
     AccessPolicy,
+    DocumentItem,
     DocumentKind,
     Hierarchy,
     SourceIdentity,
@@ -42,7 +43,11 @@ _LINE_SENSITIVE_EXTENSIONS = frozenset({".jsonl", ".log", ".sql", ".tsv"})
 
 
 class FileProcessor:
-    """Validate, convert, normalize, and chunk one source file with Docling."""
+    """Validate, convert, normalize, and chunk one source file with Docling.
+
+    :meth:`parse_path` stops at the canonical :class:`DocumentItem` (a view of
+    the file); :meth:`process_path` also chunks it for indexing.
+    """
 
     def __init__(
         self,
@@ -66,6 +71,36 @@ class FileProcessor:
         self._mapper = mapper or DocumentMapper()
         self._chunker = chunker or DoclingChunker()
 
+    def parse_path(
+        self,
+        path: Path,
+        *,
+        file_name: str | None = None,
+        item_id: str | None = None,
+        title: str | None = None,
+        source: SourceIdentity | None = None,
+        document_kind: DocumentKind | None = None,
+        access: AccessPolicy | None = None,
+        hierarchy: Hierarchy | None = None,
+        metadata: dict[str, str | list[str]] | None = None,
+        original: StorageObject | None = None,
+    ) -> DocumentItem:
+        """The validated canonical document of a file, without chunking it."""
+        document, resolved_name, _ = self._convert_path(path, file_name=file_name)
+        item, _ = self._canonical_item(
+            document,
+            file_name=resolved_name,
+            item_id=item_id,
+            title=title,
+            source=source,
+            document_kind=document_kind,
+            access=access,
+            hierarchy=hierarchy,
+            metadata=metadata,
+            original=original,
+        )
+        return item
+
     def process_path(
         self,
         path: Path,
@@ -80,6 +115,23 @@ class FileProcessor:
         metadata: dict[str, str | list[str]] | None = None,
         original: StorageObject | None = None,
     ) -> ProcessedFile:
+        document, resolved_name, size_bytes = self._convert_path(path, file_name=file_name)
+        return self._canonical_output(
+            document,
+            file_name=resolved_name,
+            size_bytes=size_bytes,
+            item_id=item_id,
+            title=title,
+            source=source,
+            document_kind=document_kind,
+            access=access,
+            hierarchy=hierarchy,
+            metadata=metadata,
+            original=original,
+        )
+
+    def _convert_path(self, path: Path, *, file_name: str | None) -> tuple[Any, str, int]:
+        """Validate a local file and convert it with Docling: ``(document, name, size)``."""
         source_path = Path(path)
         if not source_path.is_file():
             raise FileProcessingError(f"Document path is not a file: {source_path}")
@@ -94,19 +146,7 @@ class FileProcessor:
             document = self._docling.process_path(source_path)
         except DoclingProcessingError as exc:
             raise _file_error(exc) from exc
-        return self._canonical_output(
-            document,
-            file_name=resolved_name,
-            size_bytes=size_bytes,
-            item_id=item_id,
-            title=title,
-            source=source,
-            document_kind=document_kind,
-            access=access,
-            hierarchy=hierarchy,
-            metadata=metadata,
-            original=original,
-        )
+        return document, resolved_name, size_bytes
 
     def process_bytes(
         self,
@@ -158,8 +198,57 @@ class FileProcessor:
         metadata: dict[str, str | list[str]] | None,
         original: StorageObject | None,
     ) -> ProcessedFile:
+        item, text = self._canonical_item(
+            document,
+            file_name=file_name,
+            item_id=item_id,
+            title=title,
+            source=source,
+            document_kind=document_kind,
+            access=access,
+            hierarchy=hierarchy,
+            metadata=metadata,
+            original=original,
+        )
+        try:
+            chunks = tuple(
+                self._chunker.chunk(
+                    document,
+                    item_id=item.id,
+                    strategy=(
+                        "line"
+                        if _extension(file_name) in _LINE_SENSITIVE_EXTENSIONS
+                        else "hybrid"
+                    ),
+                )
+            )
+        except DoclingChunkingError as exc:
+            raise FileProcessingError(str(exc)) from exc
+        return ProcessedFile(
+            file_name=file_name,
+            text=text,
+            size_bytes=size_bytes,
+            mime_type=mimetypes.guess_type(file_name)[0],
+            item=item,
+            chunks=chunks,
+        )
+
+    def _canonical_item(
+        self,
+        document: Any,
+        *,
+        file_name: str,
+        item_id: str | None,
+        title: str | None,
+        source: SourceIdentity | None,
+        document_kind: DocumentKind | None,
+        access: AccessPolicy | None,
+        hierarchy: Hierarchy | None,
+        metadata: dict[str, str | list[str]] | None,
+        original: StorageObject | None,
+    ) -> tuple[DocumentItem, str]:
+        """The canonical document of a converted file and its text, within the text bounds."""
         resolved_id = item_id or f"file::{file_name}"
-        mime_type = mimetypes.guess_type(file_name)[0]
         resolved_source = source or SourceIdentity(
             connector_id=SourceProvider.FILE.value,
             provider=SourceProvider.FILE,
@@ -171,7 +260,7 @@ class FileProcessor:
             **(metadata or {}),
             "file_name": file_name,
         }
-        resolved_kind = document_kind or _document_kind(mime_type)
+        resolved_kind = document_kind or _document_kind(mimetypes.guess_type(file_name)[0])
         item = self._mapper.to_item(
             document,
             item_id=resolved_id,
@@ -190,28 +279,7 @@ class FileProcessor:
             )
         if not text.strip():
             raise FileNoTextError(f"No extractable content found in {file_name}")
-        try:
-            chunks = tuple(
-                self._chunker.chunk(
-                    document,
-                    item_id=resolved_id,
-                    strategy=(
-                        "line"
-                        if _extension(file_name) in _LINE_SENSITIVE_EXTENSIONS
-                        else "hybrid"
-                    ),
-                )
-            )
-        except DoclingChunkingError as exc:
-            raise FileProcessingError(str(exc)) from exc
-        return ProcessedFile(
-            file_name=file_name,
-            text=text,
-            size_bytes=size_bytes,
-            mime_type=mime_type,
-            item=item,
-            chunks=chunks,
-        )
+        return item, text
 
     def _validate_input(self, file_name: str, *, size_bytes: int) -> None:
         if size_bytes < 1:

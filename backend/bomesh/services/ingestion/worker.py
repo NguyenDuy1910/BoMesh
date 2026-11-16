@@ -9,11 +9,15 @@ PostgreSQL frees its locks and the next worker recovers and resumes the run.
 
 Loops: claim runs and syncs (every ``poll_seconds``), open due schedules
 (every 30 s), re-apply dirty index payloads (every minute) and purge deleted
-Items (hourly); each maintenance pass runs on one replica at a time. Covers
-(``document_viewer.md`` "Cover on the Item"): documents whose content arrived
-are notified on ``bomesh_cover`` (LISTEN on the lock connection) and get
-their cover one at a time in a document slot; a sweep at start and every ten
-minutes produces the covers notifications missed.
+Items (hourly); each maintenance pass runs on one replica at a time. The
+preview engine (``document_viewer.md`` "Producing"): a document whose content
+arrived is notified on ``bomesh_cover`` and a read that found a revision's
+representation missing on ``bomesh_preview`` (``{item}:{revision}``), both
+LISTENed on the lock connection; the jobs wait in one deduplicated queue and
+run in the worker's document slots under the per-item ``item-preview`` lock
+(the representation, then — for the current revision — the cover), as many
+at once as ``BOMESH_PREVIEW_CONVERSIONS``. A sweep at start and every ten
+minutes (one replica at a time) catches what notifications missed.
 SIGTERM/SIGINT stop claiming and give back what runs: interrupted Documents
 are queued again for another worker.
 """
@@ -23,7 +27,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
-from collections import Counter
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import suppress
 from datetime import datetime
@@ -54,9 +57,10 @@ from bomesh.services.ingestion.run_engine import (
 from bomesh.services.ingestion.source_store import SYNC_RUNNING
 from bomesh.services.ingestion.source_sync import SourceSyncService
 from bomesh.services.knowledge_items.archive_expansion import ArchiveExpansionService
-from bomesh.services.knowledge_items.covers import COVER_CHANNEL, DocumentCovers
 from bomesh.services.knowledge_items.indexing import ItemIngestionService, reconcile_dirty_payloads
 from bomesh.services.knowledge_items.purge import purge_deleted_items
+from bomesh.services.previews.covers import COVER_CHANNEL
+from bomesh.services.previews.engine import PREVIEW_CHANNEL, PreviewEngine, parse_preview_request
 from config import IngestionWorkerConfig, get_config
 
 log = logging.getLogger(__name__)
@@ -71,10 +75,10 @@ SYNC_ATTEMPTS = 3
 #: Index upkeep: (name, interval, Items per pass).
 PAYLOAD_RECONCILIATION = ("payload-reconciliation", 60.0, 500)
 DELETED_ITEM_PURGE = ("deleted-item-purge", 3600.0, 100)
-#: Covers: the sweep's interval and page; notified documents queued at most.
-COVER_SWEEP_SECONDS = 600.0
-COVER_SWEEP_PAGE = 200
-COVER_QUEUE = 1000
+#: Preview engine: the sweep's interval and page; notified jobs queued at most.
+PREVIEW_SWEEP_SECONDS = 600.0
+PREVIEW_SWEEP_PAGE = 200
+PREVIEW_QUEUE = 1000
 
 #: ``(name, interval seconds, one bounded pass)``.
 MaintenanceJob = tuple[str, float, Callable[[], Awaitable[int]]]
@@ -192,7 +196,7 @@ class IngestionWorker:
         maintenance: Sequence[MaintenanceJob] = (),
         retry: BatchRetry = BatchRetry(),
         status_poll_seconds: float = STATUS_POLL_SECONDS,
-        covers: DocumentCovers | None = None,
+        previews: PreviewEngine | None = None,
     ) -> None:
         self._sessions = sessions
         self._runs = runs
@@ -209,13 +213,15 @@ class IngestionWorker:
         self._executions: dict[UUID, tuple[RunExecutor, asyncio.Task[None]]] = {}
         self._sync_tasks: dict[UUID, asyncio.Task[None]] = {}
         self._stopping = asyncio.Event()
-        #: ``None``: this worker keeps no covers.
-        self._covers = covers
-        #: Notified documents awaiting their cover, oldest first (an ordered set).
-        self._cover_queue: dict[UUID, None] = {}
-        self._cover_wake = asyncio.Event()
-        if covers is not None:
-            self._locks.listen(COVER_CHANNEL, self._cover_notified)
+        #: ``None``: this worker produces no representations or covers.
+        self._previews = previews
+        #: Notified ``(item, revision)`` jobs, oldest first (an ordered set);
+        #: ``revision`` ``None`` is the current one (content arrival: its cover too).
+        self._preview_queue: dict[tuple[UUID, int | None], None] = {}
+        self._preview_wake = asyncio.Event()
+        if previews is not None:
+            self._locks.listen(COVER_CHANNEL, self._content_notified)
+            self._locks.listen(PREVIEW_CHANNEL, self._preview_notified)
 
     @classmethod
     def from_runtime(cls, runtime: AppRuntime) -> IngestionWorker:
@@ -242,7 +248,7 @@ class IngestionWorker:
                     lambda: purge_deleted_items(sessions, index, storage, limit=purge_limit),
                 ),
             ),
-            covers=DocumentCovers(sessions, storage),
+            previews=runtime.preview_engine(),
         )
 
     # -- Lifecycle -------------------------------------------------------------------
@@ -268,10 +274,13 @@ class IngestionWorker:
             ),
             *(
                 (
-                    asyncio.create_task(self._produce_covers()),
-                    asyncio.create_task(self._every(COVER_SWEEP_SECONDS, self.sweep_covers)),
+                    *(
+                        asyncio.create_task(self._produce_previews())
+                        for _ in range(self._previews.conversions)
+                    ),
+                    asyncio.create_task(self._every(PREVIEW_SWEEP_SECONDS, self.sweep_previews)),
                 )
-                if self._covers is not None
+                if self._previews is not None
                 else ()
             ),
         ]
@@ -517,81 +526,90 @@ class IngestionWorker:
 
         return run
 
-    # -- Covers -----------------------------------------------------------------------
+    # -- Preview engine --------------------------------------------------------------
 
-    def _cover_notified(self, payload: str) -> None:
-        """``trg_items_cover`` fired: queue the document (the sweep catches overflow)."""
+    def _content_notified(self, payload: str) -> None:
+        """``trg_items_cover`` fired: the document's current content needs the engine."""
         try:
             item_id = UUID(payload)
         except ValueError:
             return
-        if item_id in self._cover_queue or len(self._cover_queue) < COVER_QUEUE:
-            self._cover_queue[item_id] = None
-            self._cover_wake.set()
+        self._enqueue((item_id, None))
 
-    async def _produce_covers(self) -> None:
-        """Produce the covers of notified documents, one at a time, in notification order."""
+    def _preview_notified(self, payload: str) -> None:
+        """A read found a revision's representation missing (the reader asks again)."""
+        request = parse_preview_request(payload)
+        if request is not None:
+            self._enqueue(request)
+
+    def _enqueue(self, job: tuple[UUID, int | None]) -> None:
+        # A full queue drops the job: the sweep or the reader's next poll asks again.
+        if job in self._preview_queue or len(self._preview_queue) < PREVIEW_QUEUE:
+            self._preview_queue[job] = None
+            self._preview_wake.set()
+
+    async def _produce_previews(self) -> None:
+        """Run queued jobs in notification order (one of ``conversions`` such loops)."""
         while True:
-            await self._cover_wake.wait()
-            self._cover_wake.clear()
-            while self._cover_queue and not self._stopping.is_set():
-                item_id = next(iter(self._cover_queue))
-                del self._cover_queue[item_id]
+            await self._preview_wake.wait()
+            self._preview_wake.clear()
+            while self._preview_queue and not self._stopping.is_set():
+                job = next(iter(self._preview_queue))
+                del self._preview_queue[job]
                 try:
-                    await self._cover(item_id)
-                except Exception:  # noqa: BLE001 - the sweep tries again
-                    log.warning("document cover failed item_id=%s", item_id, exc_info=True)
+                    await self._produce(*job)
+                except Exception:  # noqa: BLE001 - the sweep or the next read asks again
+                    log.warning(
+                        "preview engine job failed item_id=%s revision=%s", *job, exc_info=True
+                    )
 
-    async def sweep_covers(self) -> int:
-        """Produce every missing or outdated cover (one replica at a time); how many were stored.
+    async def sweep_previews(self) -> int:
+        """Settle every document the engine still owes (one replica at a time); how many changed.
 
         Catches what notifications missed (a worker that was down, a full
-        queue) and backfills documents that predate covers.
+        queue, a converter that was unreachable) and backfills documents that
+        predate the engine.
         """
-        if self._covers is None or self._stopping.is_set():
+        if self._previews is None or self._stopping.is_set():
             return 0
-        key = advisory_lock_key("ingestion-maintenance", "cover-sweep")
+        key = advisory_lock_key("ingestion-maintenance", "preview-sweep")
         if not await self._locks.try_lock(key):
             return 0
         claim = self._locks.claim(key)
-        stored: Counter[str] = Counter()
+        changed = 0
         try:
             after: UUID | None = None
             while not self._stopping.is_set():
-                page = await self._covers.stale(after=after, limit=COVER_SWEEP_PAGE)
+                page = await self._previews.pending(after=after, limit=PREVIEW_SWEEP_PAGE)
                 for item_id in page:
                     if self._stopping.is_set():
                         break
                     try:
-                        kind = await self._cover(item_id)
-                        if kind is not None:
-                            stored[kind] += 1
+                        changed += int(await self._produce(item_id, None))
                     except LockConnectionLost:
                         raise
                     except Exception:  # noqa: BLE001 - the next sweep tries again
-                        log.warning("document cover failed item_id=%s", item_id, exc_info=True)
-                if len(page) < COVER_SWEEP_PAGE:
+                        log.warning("preview engine job failed item_id=%s", item_id, exc_info=True)
+                if len(page) < PREVIEW_SWEEP_PAGE:
                     break
                 after = page[-1]
         finally:
             with suppress(LockConnectionLost):
                 await self._locks.unlock(claim)
-        total = sum(stored.values())
-        if total:
-            kinds = ", ".join(f"{count} {kind}" for kind, count in stored.most_common())
-            log.info("ingestion maintenance cover-sweep stored %s covers (%s)", total, kinds)
-        return total
+        if changed:
+            log.info("ingestion maintenance preview-sweep settled %s documents", changed)
+        return changed
 
-    async def _cover(self, item_id: UUID) -> str | None:
-        """Produce one cover in one of the worker's document slots, unless another worker is."""
-        assert self._covers is not None
-        key = advisory_lock_key("item-cover", item_id)
+    async def _produce(self, item_id: UUID, revision_number: int | None) -> bool:
+        """One engine job in one of the worker's document slots, unless another worker runs one."""
+        assert self._previews is not None
+        key = advisory_lock_key("item-preview", item_id)
         if not await self._locks.try_lock(key):
-            return None
+            return False
         claim = self._locks.claim(key)
         try:
             async with self._documents:
-                return await self._covers.refresh(item_id)
+                return await self._previews.produce(item_id, revision_number)
         finally:
             with suppress(LockConnectionLost):
                 await self._locks.unlock(claim)

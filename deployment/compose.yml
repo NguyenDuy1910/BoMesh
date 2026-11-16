@@ -38,6 +38,32 @@ services:
       retries: 12
     restart: unless-stopped
 
+  # The preview engine's converter (document_viewer.md "Gotenberg"): office
+  # documents, HTML and e-mail to PDF. Internal only: loopback on a laptop,
+  # the compose network otherwise; it receives file bytes, never URLs.
+  # Chromium runs without JavaScript and every request except the uploaded
+  # page (file:///tmp/…) is denied; LibreOffice fetches nothing. The API
+  # timeout sits above the engine's own 120 s bound, so a slow file is the
+  # engine's TIMEOUT (recorded), never Gotenberg's 503 (retried).
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    command:
+      - gotenberg
+      - --chromium-disable-javascript=true
+      - --chromium-deny-list=^(?!file:///tmp/).*
+      - --libreoffice-deny-list=^.*$$
+      - --libreoffice-auto-start=true
+      - --api-timeout=130s
+      - --webhook-disable=true
+    ports:
+      - "127.0.0.1:${GOTENBERG_PORT:-3010}:3000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:3000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
   # [temporal-disabled] Temporal is not used in this phase: ingestion runs in its
   # own worker process (python -m bomesh.services.ingestion.worker) with
   # PostgreSQL as the queue. Uncomment these services to bring Temporal back.

@@ -8,9 +8,10 @@ decisions: `item_model.md`.
 
 A document is an Item with `itemType: DOCUMENT` whose `parentItem` is a
 COLLECTION (a root collection, a nested collection, or the caller's PERSONAL
-collection). Its bytes are immutable revisions (`item_revisions`); the reader
-view (`GetItemContent`) and citation targets (`passages`) are derived by
-processing.
+collection). Its bytes are immutable revisions (`item_revisions`). Viewing
+shows the revision's own file (`GetItemPreview`, document_viewer.md) as soon
+as its content is AVAILABLE, processed or not; citation targets (`passages`)
+are derived by processing.
 
 ```text
 COLLECTION
@@ -104,8 +105,8 @@ title, a notes line) become text before the table, so the first real row is
 the column header chunks repeat. PDFium is not thread-safe: BoMesh and
 Docling share one process-wide lock (Docling's `pypdfium2_lock`) for every
 PDFium call; concurrent documents in a worker parse other formats in
-parallel. The same parse also yields the document's whole-document
-rendition, read by the document viewer; see `document_viewer.md`.
+parallel. Viewing never depends on this parse: the preview engine converts
+the original on its own (`document_viewer.md`).
 
 **Images are not knowledge in this phase.** An image (`.png .jpg .jpeg .gif
 .webp .bmp .tif .tiff .avif`) is accepted only as a `CONVERSATION_ATTACHMENT`

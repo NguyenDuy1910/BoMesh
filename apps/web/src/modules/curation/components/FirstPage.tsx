@@ -1,114 +1,78 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import ReactMarkdown, { type Components } from "react-markdown";
-import remarkGfm from "remark-gfm";
 
-import { ApiError, rawFetch, resourceId } from "@/lib/api/client";
+import { toast } from "@/components/ui/Toast";
+import { errorMessage, resourceId } from "@/lib/api/client";
 import { useWorkspace } from "@/lib/workspace";
-import { getItemContent, mediaPath, type Item } from "@/modules/knowledge/api";
-import { blockText, loadRendition, type RenditionBlock } from "@/modules/knowledge/reader/rendition";
+import { downloadItem, getItemPreview, type Item } from "@/modules/knowledge/api";
+import { DocumentSurface } from "@/modules/knowledge/reader/components/DocumentSurface";
+import { loadPdfJs, pdfSource } from "@/modules/knowledge/reader/pdf";
+import { surfaceView } from "@/modules/knowledge/reader/preview";
+import { parseTablePayload } from "@/modules/knowledge/reader/table";
 
 /**
- * What a reviewer can see of a document before it's published: the first page of its stored
- * rendition and page image when the document was processed (`GetItemContent`, never the search
- * index), else the original's text for text formats (`alt=media`, readable by reviewers of an
- * open submission). Anything else has no preview yet.
+ * What a reviewer can see of a document before it's published: its first page, drawn from the
+ * preview engine's representation (`GetItemPreview`, readable by reviewers of an open submission, and
+ * independent of processing) — a PDF's page 1, a table's first rows, a text's first lines, the picture.
  */
 
-const TEXT_MIME = /^(text\/|application\/(json|xml|yaml|x-yaml))/;
-const MAX_TEXT = 6000;
-
-export type FirstPage =
-  | { kind: "page"; pages: number; image?: string; blocks: RenditionBlock[] }
-  | { kind: "text"; markdown: boolean; text: string }
-  | { kind: "none" };
-
-async function loadFirstPage(ws: string, item: Item): Promise<FirstPage> {
-  const name = item.name ?? "";
-  try {
-    const content = await getItemContent(ws, name);
-    const rendition = content.rendition?.uri
-      ? await loadRendition(resourceId(name), { uri: content.rendition.uri, version: content.rendition.version ?? 1, revision: content.revision })
-      : null;
-    const all = rendition?.blocks ?? [];
-    const blocks = all.filter((b) => (b.page ?? 1) === 1);
-    const pages = Math.max(1, ...all.map((b) => b.page ?? 1), ...(content.pageAssets ?? []).map((a) => a.pageNumber ?? 1));
-    const image = content.pageAssets?.find((a) => a.pageNumber === 1)?.imageUri;
-    if (blocks.length || image) return { kind: "page", pages, image, blocks };
-  } catch (error) {
-    // Not rendered yet (FAILED_PRECONDITION) is expected before publishing; anything else is real.
-    if (!(error instanceof ApiError) || error.status >= 500) throw error;
-  }
-  const mime = item.document?.mimeType ?? "";
-  if (!TEXT_MIME.test(mime)) return { kind: "none" };
-  const response = await rawFetch(mediaPath(ws, name));
-  const text = (await response.text()).slice(0, MAX_TEXT);
-  return { kind: "text", markdown: /markdown/.test(mime) || /\.(md|markdown)$/i.test(item.document?.fileName ?? ""), text };
+/** The first page in the reader's page styling (the review pane), scrolling in its own pane. */
+export function FirstPage({ item, onPages }: { item: Item; onPages?: (count: number) => void }) {
+  const { id: ws } = useWorkspace();
+  const download = () =>
+    downloadItem(ws, item.name ?? "", item.document?.fileName || item.displayName || "document").catch((e: unknown) => toast(errorMessage(e), { tone: "danger" }));
+  return <DocumentSurface document={{ id: resourceId(item.name), cover: item.document?.cover }} variant="first" onPages={onPages} onDownload={() => void download()} />;
 }
 
-export function useFirstPage(item: Item | null | undefined) {
+/** Characters of first-page text kept for an excerpt. */
+const EXCERPT_CHARS = 6000;
+/** Rows of a table's first sheet, and lines of a text, that make its first page. */
+const FIRST_ROWS = 50;
+const FIRST_LINES = 60;
+
+async function readRepresentation(uri: string): Promise<Response> {
+  const response = await fetch(uri);
+  if (!response.ok) throw new Error(`The preview couldn’t be read (${response.status}).`);
+  return response;
+}
+
+/** Plain text of a document's first page (compare excerpts); `null` while its preview is being prepared. */
+async function loadFirstPageText(ws: string, item: Item): Promise<string | null> {
+  const view = surfaceView(await getItemPreview(ws, item.name ?? ""));
+  if (view.state === "PREPARING") return null;
+  if (view.state !== "READY") return "";
+  const { viewer, representation } = view;
+  let raw = "";
+  if (viewer === "pdf") {
+    const pdfjs = await loadPdfJs();
+    const task = pdfjs.getDocument(pdfSource(representation.uri, representation.sizeBytes));
+    try {
+      const page = await (await task.promise).getPage(1);
+      const content = await page.getTextContent();
+      raw = content.items.map((part) => ("str" in part ? part.str : "")).join(" ");
+    } finally {
+      void task.destroy();
+    }
+  } else if (viewer === "table") {
+    const { sheets } = parseTablePayload(await (await readRepresentation(representation.uri)).json());
+    raw = (sheets[0]?.rows ?? []).slice(0, FIRST_ROWS).map((row) => row.join(" ")).join(" ");
+  } else if (viewer === "text") {
+    const text = (await (await readRepresentation(representation.uri)).text()).split("\n", FIRST_LINES).join("\n");
+    raw = representation.textFormat === "MARKDOWN" ? text.replace(/[#>*_`|-]+/g, " ") : text;
+  }
+  return raw.replace(/\s+/g, " ").trim().slice(0, EXCERPT_CHARS);
+}
+
+/** First-page text of a document, for excerpts beside another document. */
+export function useFirstPageText(item: Item | null | undefined) {
   const { id } = useWorkspace();
   return useQuery({
-    queryKey: [id, "items", "first-page", resourceId(item?.name), item?.document?.revision ?? item?.etag ?? ""],
+    queryKey: [id, "items", "first-page-text", resourceId(item?.name), item?.document?.revision ?? item?.etag ?? ""],
     enabled: !!item?.name,
-    queryFn: () => loadFirstPage(id, item!),
+    queryFn: () => loadFirstPageText(id, item!),
     staleTime: 5 * 60_000,
     retry: false,
+    refetchInterval: (q) => (q.state.data === null ? 2_000 : false),
   });
-}
-
-/** Plain text of the first page (compare excerpts). */
-export function firstPageText(page: FirstPage | undefined): string {
-  if (!page || page.kind === "none") return "";
-  const raw = page.kind === "text" ? page.text.replace(/[#>*_`|-]+/g, " ") : page.blocks.map(blockText).join(" ");
-  return raw.replace(/\s+/g, " ").trim();
-}
-
-/* Headings start one level down: the page title is h2 in the reader's page styling. */
-const MD: Components = {
-  h1: ({ children }) => <h2>{children}</h2>,
-  h2: ({ children }) => <h3>{children}</h3>,
-  h3: ({ children }) => <h3>{children}</h3>,
-  h4: ({ children }) => <h3>{children}</h3>,
-  a: ({ children }) => <span>{children}</span>,
-  img: () => null,
-};
-
-/** The first page in the reader's page styling (`.doc-page`). Workspace content: not translated. */
-export function FirstPageCanvas({ page }: { page: Exclude<FirstPage, { kind: "none" }> }) {
-  if (page.kind === "page" && page.image && !page.blocks.length) {
-    return (
-      <div className="doc-page" translate="no">
-        {/* eslint-disable-next-line @next/next/no-img-element -- signed, short-lived page image */}
-        <img src={page.image} alt="First page" className="w-full" />
-      </div>
-    );
-  }
-  if (page.kind === "page") {
-    return (
-      <div className="doc-page" translate="no">
-        {page.blocks.map((b) =>
-          b.kind === "heading" ? (
-            b.level <= 1 ? <h2 key={b.id}>{b.text}</h2> : <h3 key={b.id}>{b.text}</h3>
-          ) : b.kind === "code" ? (
-            <pre key={b.id}>{b.text}</pre>
-          ) : (
-            <p key={b.id}>{blockText(b)}</p>
-          ),
-        )}
-      </div>
-    );
-  }
-  return (
-    <div className="doc-page" translate="no">
-      {page.markdown ? (
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD}>
-          {page.text}
-        </ReactMarkdown>
-      ) : (
-        <p className="whitespace-pre-wrap">{page.text}</p>
-      )}
-    </div>
-  );
 }

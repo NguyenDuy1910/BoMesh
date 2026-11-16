@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from io import BytesIO
 from typing import Any
 from uuid import UUID, uuid4
 
+import docx
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 
 from bomesh.db.models import (
     IngestionRun,
@@ -34,8 +36,8 @@ from bomesh.services.ingestion.run_engine import (
     run_lock_key,
 )
 from bomesh.services.ingestion.worker import IngestionWorker
-from bomesh.services.knowledge_items.covers import DocumentCovers
 from bomesh.services.knowledge_items.item_store import ItemService
+from bomesh.services.previews.engine import PREVIEW_CHANNEL, PreviewEngine, preview_request
 from config import IngestionWorkerConfig
 from harness import TEST_DATABASE_URL, Sessions, World
 from runs_support import document, held_lock, task_items
@@ -113,7 +115,7 @@ def _worker(
     *,
     max_concurrent_runs: int = 2,
     max_concurrent_documents: int = 4,
-    covers: DocumentCovers | None = None,
+    previews: PreviewEngine | None = None,
 ) -> IngestionWorker:
     return IngestionWorker(
         sessions=runtime.sessions(),
@@ -130,7 +132,7 @@ def _worker(
         ),
         retry=BatchRetry(initial_seconds=0.01, maximum_seconds=0.01),
         status_poll_seconds=0.05,
-        covers=covers,
+        previews=previews,
     )
 
 
@@ -535,9 +537,7 @@ async def test_covers_come_from_notifications_and_the_startup_sweep(
     older = await document(sessions, handbook, title="older.txt", size_bytes=6)
     assert older.storage_key is not None
     storage.put_bytes(b"older\n", older.storage_key, content_type="text/plain")
-    worker = _worker(
-        runtime, _Ingestion(sessions), covers=DocumentCovers(sessions, storage)
-    )
+    worker = _worker(runtime, _Ingestion(sessions), previews=runtime.preview_engine())
 
     task = asyncio.create_task(worker.run())
     try:
@@ -555,3 +555,87 @@ async def test_covers_come_from_notifications_and_the_startup_sweep(
         assert (await _until_cover(sessions, newer.id, timeout=5.0))["lines"] == ["newer"]
     finally:
         await _stop(worker, task)
+
+
+async def test_content_arrival_produces_the_representation_then_the_cover(
+    sessions: Sessions, world: World, runtime: AppRuntime
+) -> None:
+    workspace = await world.make_workspace(await world.make_user())
+    handbook = await world.make_collection(workspace, title="Handbook")
+    storage = runtime.object_storage()
+    word = docx.Document()
+    word.add_heading("Leave policy", level=1)
+    data = BytesIO()
+    word.save(data)
+    worker = _worker(runtime, _Ingestion(sessions), previews=runtime.preview_engine())
+
+    task = asyncio.create_task(worker.run())
+    try:
+        await asyncio.sleep(0.3)  # listening
+        unprocessed = await document(sessions, handbook, title="leave.docx", stored=False)
+        key = f"workspaces/{workspace.id}/items/{unprocessed.id}/1"
+        storage.put_bytes(data.getvalue(), key, content_type="application/octet-stream")
+        mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        async with sessions.begin() as session:
+            row = await session.get(Item, unprocessed.id)
+            assert row is not None
+            number = (
+                await ItemService(session).append_revision(
+                    row, storage_key=key, mime_type=mime, size_bytes=len(data.getvalue())
+                )
+            ).revision_number
+        cover = await _until_cover(sessions, unprocessed.id)
+    finally:
+        await _stop(worker, task)
+
+    async with sessions.begin() as session:
+        revision = await ItemService(session).revision(unprocessed.id, number)
+        assert revision is not None
+        representation = revision.exports["representation"]
+    assert representation["kind"] == "PDF" and representation["key"] in storage.objects  # type: ignore[attr-defined]
+    # The cover is page one of the converted PDF; viewing is no processing.
+    assert cover["kind"] == "page" and cover["key"] in storage.objects  # type: ignore[attr-defined]
+    assert await _index_statuses(sessions, [unprocessed.id]) == {"pending"}
+
+
+async def test_a_requested_representation_is_made_by_the_worker(
+    sessions: Sessions, world: World, runtime: AppRuntime
+) -> None:
+    workspace = await world.make_workspace(await world.make_user())
+    handbook = await world.make_collection(workspace, title="Handbook")
+    storage = runtime.object_storage()
+    older = await document(sessions, handbook, title="notes.csv", stored=False)
+    key = f"workspaces/{workspace.id}/items/{older.id}/1"
+    storage.put_bytes(b"a,b\n1,2\n", key, content_type="text/csv")
+    async with sessions.begin() as session:
+        row = await session.get(Item, older.id)
+        assert row is not None
+        number = (
+            await ItemService(session).append_revision(
+                row, storage_key=key, mime_type="text/csv", size_bytes=8
+            )
+        ).revision_number
+    worker = _worker(runtime, _Ingestion(sessions), previews=runtime.preview_engine())
+
+    task = asyncio.create_task(worker.run())
+    try:
+        deadline = asyncio.get_running_loop().time() + 30.0
+        representation = None
+        while representation is None:
+            # What GetItemPreview sends while the viewer polls.
+            async with sessions.begin() as session:
+                await session.execute(
+                    text("SELECT pg_notify(:channel, :payload)"),
+                    {"channel": PREVIEW_CHANNEL, "payload": preview_request(older.id, number)},
+                )
+            await asyncio.sleep(0.2)
+            async with sessions.begin() as session:
+                revision = await ItemService(session).revision(older.id, number)
+                assert revision is not None
+                representation = revision.exports.get("representation")
+            assert asyncio.get_running_loop().time() < deadline, "no representation in time"
+    finally:
+        await _stop(worker, task)
+
+    assert representation["kind"] == "TABLE" and representation["key"] in storage.objects  # type: ignore[attr-defined]
+    assert await _index_statuses(sessions, [older.id]) == {"pending"}

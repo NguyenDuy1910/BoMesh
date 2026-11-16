@@ -3,7 +3,7 @@
 import { Button, Modal } from "@heroui/react";
 import { ArrowUpRight, ChevronDown, ChevronUp, Lock, Quote, Search, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { FileIcon } from "@/components/ui/FileIcon";
 import { IconButton } from "@/components/ui/IconButton";
@@ -14,14 +14,10 @@ import { RequestAccessCta } from "../bases/components/RequestAccessDialog";
 import { ResDot } from "../components/ResourceRow";
 import { TrustChip, useTrust } from "../components/TrustChip";
 import type { Resource } from "../model";
-import { docFormat, PAGED_FORMATS } from "../reader/format";
+import { useDocumentOperations } from "../operations";
 import { readerHref } from "../reader/links";
-import { documentMarks, NO_MARKS, renditionText, searchNeedles } from "../reader/marks";
-import { DocumentViewer } from "../reader/components/DocumentViewer";
-import { renditionPageCount, RenditionView } from "../reader/components/RenditionView";
-import { coverPages, PageImageView } from "../reader/components/PageImageView";
-import { useRendition } from "../reader/components/useRendition";
-import { useReaderContent, usePassages } from "../reader/queries";
+import { DocumentSurface, type SurfaceHighlight, type SurfaceMarks } from "../reader/components/DocumentSurface";
+import { usePassages } from "../reader/queries";
 import { useItem, useKnowledgeModel } from "../queries";
 import type { PreviewCitation, PreviewRequest } from "./store";
 
@@ -50,103 +46,29 @@ function showing(request: PreviewRequest, index: number): Showing | null {
 /* ═══════════════ The document's own pages ═══════════════ */
 
 function PreviewDocument({ show, resource: r, hit, onTotal }: { show: Showing; resource: Resource; hit: number; onTotal: (total: number) => void }) {
-  const itemId = resourceId(show.item);
-  const content = useReaderContent(itemId, undefined, { enabled: r.readable });
-  // Page images are the document's own pages; the rendition is downloaded only when it is what the preview shows.
-  const pageImages = useMemo(
-    () => [...(content.data?.pageAssets ?? [])].filter((p) => p.imageUri).sort((a, b) => (a.pageNumber ?? 0) - (b.pageNumber ?? 0)),
-    [content.data],
-  );
-  const rendition = useRendition(itemId, content.data, { enabled: !pageImages.length });
-  const rd = rendition.doc;
-  const passages = usePassages(itemId, show.passages);
+  const ops = useDocumentOperations();
+  const passages = usePassages(resourceId(show.item), show.passages);
   const resolved = useMemo(() => passages.data.filter((p): p is NonNullable<typeof p> => !!p), [passages.data]);
-
-  const text = useMemo(() => (rd ? renditionText(rd) : ""), [rd]);
-  // A citation's quote is matched verbatim; a search is tokenised the way the Reader does.
-  const needles = useMemo(() => {
-    if (!rd) return [];
-    if (show.excerpt && !show.passages.length) return [show.excerpt];
-    return show.q ? searchNeedles(show.q, text, false) : [];
-  }, [rd, show.excerpt, show.passages.length, show.q, text]);
-  const marks = useMemo(
-    () => (rd && (resolved.length || needles.length) ? documentMarks(rd, { passages: resolved, needles }) : NO_MARKS),
-    [rd, resolved, needles],
+  // A citation's quote is matched verbatim; a search is tokenised the way the Reader does. Both need a processed document.
+  const quote = !!show.excerpt && !show.passages.length;
+  const highlight = useMemo<SurfaceHighlight | undefined>(
+    () => (r.readable ? { passages: resolved, q: quote ? show.excerpt : show.q, cited: quote } : undefined),
+    [r.readable, resolved, quote, show.excerpt, show.q],
   );
-  const focusHit = marks.total ? ((hit % marks.total) + marks.total) % marks.total : -1;
-  useEffect(() => onTotal(marks.total), [marks.total, onTotal]);
-
-  /* Bring the focused mark (or the cited page) into view on open and on every step, not on re-renders. */
-  const scroll = useRef<HTMLDivElement>(null);
-  const first = useRef(true);
-  useEffect(() => {
-    const sc = scroll.current?.closest<HTMLElement>(".modal__body");
-    if (!sc || (!rd && !pageImages.length)) return;
-    const mark = focusHit >= 0 ? sc.querySelector<HTMLElement>(`mark.evidence[data-hit="${focusHit}"]`) : null;
-    const target = mark ?? (show.page ? sc.querySelector<HTMLElement>(`.doc-page[data-page="${show.page}"]`) : null);
-    if (!target) {
-      if (first.current) sc.scrollTop = 0;
-      first.current = false;
-      return;
-    }
-    const top = sc.scrollTop + target.getBoundingClientRect().top - sc.getBoundingClientRect().top - (mark ? sc.clientHeight / 3 : 24);
-    sc.scrollTo({ top: Math.max(0, top), behavior: first.current ? "auto" : "smooth" });
-    first.current = false;
-  }, [focusHit, rd, pageImages.length, show.page, marks]);
-
-  const format = docFormat({ ext: r.ext, mime: r.mime });
-  // No rendition (not processed yet, or it failed): the message, then the cover made when the content arrived.
-  const coverBelow = coverPages(r.cover, format, { loading: false });
-  const none = (
-    <div ref={scroll}>
-      <div className="pv-none">
-        {coverBelow ? null : <FileIcon type={r.ext} mime={r.mime} name={r.fileName} size="lg" />}
-        <p className="pv-none__title">There’s no preview for this file yet</p>
-        {r.summary ? (
-          <p className="pv-none__about" translate="no">
-            {r.summary}
-          </p>
-        ) : null}
-        <p className="pv-none__hint">Open it to read or download it.</p>
-      </div>
-      {coverBelow ? <div className={`pv-doc pv-doc--${format}`}>{coverBelow}</div> : null}
-    </div>
-  );
-
-  if (!r.readable) return none;
-  if (content.isPending || rendition.loading) {
-    // Cover first: the card's cover is the first page (or slide, or sheet) at once while the pages or rendition load.
-    const cover = coverPages(r.cover, format);
-    if (cover) {
-      return (
-        <div className={`pv-doc pv-doc--${format}`} ref={scroll}>
-          {cover}
-        </div>
-      );
-    }
-    return (
-      <div className="pv-doc" ref={scroll} aria-busy="true" aria-label="Loading">
-        <span className="skeleton block" style={{ height: 420, borderRadius: "var(--radius-lg)" }} />
-      </div>
-    );
-  }
-  const assetPages = content.data?.pageAssets?.length ?? 0;
-  if (pageImages.length) {
-    return (
-      <div className="pv-doc pv-doc--pdf" ref={scroll}>
-        <DocumentViewer format={PAGED_FORMATS[format] ? format : "pdf"} count={assetPages} bar={false}>
-          <PageImageView pages={pageImages} focusPage={show.page ?? 0} coverUri={r.cover?.imageUri} />
-        </DocumentViewer>
-      </div>
-    );
-  }
-  if (!rd?.blocks.length || rendition.failed || content.isError) return none;
+  const [total, setTotal] = useState(0);
+  const onMarks = useCallback((m: SurfaceMarks) => setTotal(m.total), []);
+  useEffect(() => onTotal(total), [total, onTotal]);
+  const focusHit = total ? ((hit % total) + total) % total : -1;
   return (
-    <div className={`pv-doc pv-doc--${format}`} ref={scroll}>
-      <DocumentViewer format={format} count={renditionPageCount(rd, format, assetPages)} bar={false}>
-        <RenditionView rendition={rd} marks={marks} focusHit={focusHit} format={format} pageCount={assetPages} />
-      </DocumentViewer>
-    </div>
+    <DocumentSurface
+      document={r}
+      variant="preview"
+      highlight={highlight}
+      focusHit={focusHit}
+      page={show.page}
+      onMarks={onMarks}
+      onDownload={() => void ops.download(r)}
+    />
   );
 }
 

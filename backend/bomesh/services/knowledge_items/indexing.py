@@ -44,7 +44,6 @@ from bomesh.services.knowledge_curation.topics import classification_candidates
 from bomesh.services.knowledge_items.citations import CitationService
 from bomesh.services.knowledge_items.documents import apply_assistant_topics
 from bomesh.services.knowledge_items.item_store import ItemService
-from bomesh.services.knowledge_items.preview import KnowledgePreview
 
 if TYPE_CHECKING:
     from bomesh.services.ingestion.run_engine import RunClassification
@@ -132,12 +131,10 @@ class ItemIngestionService:
         *,
         index: ItemIndex,
         content: StoredFileContent | None = None,
-        preview: KnowledgePreview | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._index = index
         self._content = content
-        self._preview = preview
 
     def processing_version(self) -> str:
         """The version processing produces now; it marks what a run made ready."""
@@ -208,7 +205,6 @@ class ItemIngestionService:
                 await self._record_failure(document.id)
                 raise
 
-            await self._persist_preview(document, canonical.item, started.revision_number)
             return await self.process_item_content(
                 document,
                 canonical.item,
@@ -456,40 +452,6 @@ class ItemIngestionService:
             await items.set_index_state((item,), index_status="failed")
             if item.deleted_at is not None:
                 await items.mark_payload_dirty((item_id,), func.now())
-
-    async def _persist_preview(
-        self,
-        stored: Item,
-        content: DocumentItem | None = None,
-        revision_number: int | None = None,
-    ) -> None:
-        if self._preview is None or not stored.storage_key:
-            return
-        try:
-            manifest = await self._preview.generate(stored, content=content)
-            if manifest is None:
-                return
-            preview_metadata = manifest.model_dump(mode="json")
-            if stored.metadata_.get("preview") == preview_metadata:
-                return
-            async with transaction_scope(self._session_factory) as session:
-                items = ItemService(session)
-                if revision_number is None:
-                    await items.merge_metadata(stored.id, {"preview": preview_metadata})
-                else:
-                    await items.record_revision_preview(
-                        stored.id, revision_number, preview_metadata
-                    )
-            stored.metadata_ = {
-                **dict(stored.metadata_),
-                "preview": preview_metadata,
-            }
-        except Exception as exc:  # noqa: BLE001 - preview is best effort
-            log.warning(
-                "item preview generation failed item_id=%s error_type=%s",
-                stored.id,
-                type(exc).__name__,
-            )
 
     def _require_engine(self) -> AsyncEngine:
         engine = self._session_factory.kw.get("bind")

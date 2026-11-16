@@ -1,17 +1,34 @@
-"""Revisions, rollback, reader content and passages of documents (``item_model.md`` §4.8–§4.10)."""
+"""Revisions, rollback, the document preview and passages (``item_model.md`` §4.8–§4.10,
+``document_viewer.md``)."""
 
 from __future__ import annotations
 
+import asyncio
+import gzip
+import json
+import zipfile
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from hashlib import sha256
+from io import BytesIO
 from typing import Any
 from uuid import UUID
 
+import asyncpg
+import docx
 import pytest
-from sqlalchemy import select
+from PIL import Image
+from sqlalchemy import select, update
 
 from bomesh.db.engine import transaction_scope
 from bomesh.db.models import Item, ItemRevision
+from bomesh.runtime import AppRuntime
 from bomesh.services.knowledge_items.item_store import ItemService
-from knowledge_support import chunk_id, error_reason, item_name, item_url, upload
+from bomesh.services.previews.engine import PREVIEW_CHANNEL, PreviewEngine
+from bomesh.services.previews.results import ConverterUnavailable
+from bomesh.storage import ObjectStorageError
+from harness import TEST_DATABASE_URL
+from knowledge_support import chunk_id, error_reason, item_name, item_url, upload, ws_url
 
 pytestmark = pytest.mark.asyncio
 
@@ -75,45 +92,58 @@ async def _set_metadata(sessions: Any, item: Item, **values: Any) -> None:
         row.metadata_ = {**row.metadata_, **values}
 
 
-async def _write_preview(sessions: Any, document: Item, number: int, manifest: dict[str, Any]) -> None:
+def _docx(*paragraphs: str) -> bytes:
+    """A real Word document: a heading and ``paragraphs``."""
+    document = docx.Document()
+    document.add_heading("Leave policy", level=1)
+    for text in paragraphs:
+        document.add_paragraph(text)
+    output = BytesIO()
+    document.save(output)
+    return output.getvalue()
+
+
+def _engine(runtime: AppRuntime) -> PreviewEngine:
+    return runtime.preview_engine()
+
+
+@asynccontextmanager
+async def _preview_requests() -> AsyncIterator[asyncio.Queue[str]]:
+    """The payloads notified on ``bomesh_preview`` while the block runs."""
+    assert TEST_DATABASE_URL is not None
+    listener = await asyncpg.connect(TEST_DATABASE_URL.replace("+asyncpg", ""))
+    received: asyncio.Queue[str] = asyncio.Queue()
+    await listener.add_listener(PREVIEW_CHANNEL, lambda *args: received.put_nowait(args[-1]))
+    try:
+        yield received
+    finally:
+        await listener.close()
+
+
+async def _preview(api: Any, document: Item, **params: Any) -> dict[str, Any]:
+    response = await api.get(item_url(document, "/preview"), params=params or None)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def _signed(key: str) -> str:
+    return f"https://storage.test/test-bucket/{key}?expires="
+
+
+def _rep_key(document: Item, storage_key: str, extension: str) -> str:
+    digest = sha256(storage_key.encode()).hexdigest()
+    return f"tenants/{document.tenant_id}/items/{document.id}/previews/rep-v1/{digest}.{extension}"
+
+
+async def _revision_row(sessions: Any, document: Item, number: int = 1) -> ItemRevision:
     async with transaction_scope(sessions) as session:
-        revision = await session.scalar(
-            select(ItemRevision).where(
-                ItemRevision.item_id == document.id, ItemRevision.revision_number == number
-            )
-        )
-        assert revision is not None
-        revision.exports = {**revision.exports, "preview": manifest}
+        row = await ItemService(session).revision(document.id, number)
+        assert row is not None
+        return row
 
 
-def _prefix(document: Item) -> str:
-    return f"tenants/{document.tenant_id}/items/{document.id}/previews/"
-
-
-def _manifest(document: Item, *, rendition: bool = True) -> dict[str, Any]:
-    manifest: dict[str, Any] = {
-        "source_version": "source-v1",
-        "representation": "pages",
-        "assets": [
-            {
-                "key": f"{_prefix(document)}pages/1.webp",
-                "content_type": "image/webp",
-                "size_bytes": 120,
-                "width": 800,
-                "height": 1100,
-                "page": 1,
-            }
-        ],
-        "page_count": 1,
-    }
-    if rendition:
-        manifest["rendition"] = {
-            "key": f"{_prefix(document)}document-v1/source-v1/document.json.gz",
-            "size_bytes": 512,
-            "version": "document-v1",
-            "block_count": 4,
-        }
-    return manifest
+DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+IMMUTABLE = "private, max-age=31536000, immutable"
 
 
 def _revision(document: Item, number: int) -> str:
@@ -290,134 +320,418 @@ async def test_rollback_needs_publish_permission(client, world, knowledge, sessi
     assert response.status_code == 200, response.text
 
 
-# -- GetItemContent -------------------------------------------------------------------
+# -- GetItemPreview -------------------------------------------------------------------
 
 
-async def test_content_without_preview_is_failed_precondition(client, world, knowledge):
-    _, _, collection, api = await _setup(world, client)
-    document = await _uploaded(api, knowledge, collection)
-
-    response = await api.get(item_url(document, "/content"))
-    assert response.status_code == 400, response.text
-    assert response.json()["error"]["status"] == "FAILED_PRECONDITION"
-
-    response = await api.get(item_url(document, "/content"), params={"revision": "1"})
-    assert response.status_code == 400, response.text
-    assert error_reason(response) == "REVISION_NOT_RENDERED"
-
-
-async def test_content_resolves_page_assets_and_rendition(client, world, knowledge, sessions):
+async def test_preview_of_an_unprocessed_pdf_is_ready_at_once(
+    client, world, knowledge, fakes, monkeypatch
+):
     _, ws, collection, api = await _setup(world, client)
-    document = await _uploaded(api, knowledge, collection)
-    manifest = _manifest(document)
-    await _write_preview(sessions, document, 1, manifest)
-
-    viewer = await _viewer(world, client, ws, collection)
-    response = await viewer.get(item_url(document, "/content"))
-    assert response.status_code == 200, response.text
-    body = response.json()
-    assert body["name"] == f"{item_name(document)}/content"
-    assert body["revision"] == _revision(document, 1)
-    assert len(body["pageAssets"]) == 1
-    asset = body["pageAssets"][0]
-    assert asset["pageNumber"] == 1
-    assert asset["widthPixels"] == 800 and asset["heightPixels"] == 1100
-    assert asset["imageUri"].startswith(
-        f"https://storage.test/test-bucket/{manifest['assets'][0]['key']}?expires="
+    data = b"%PDF-1.4 unprocessed"
+    document = await _uploaded(
+        api, knowledge, collection, data=data, file_name="policy.pdf", mime_type="application/pdf"
     )
-    rendition = body["rendition"]
-    assert rendition["version"] == 1
-    assert rendition["uri"].startswith(
-        f"https://storage.test/test-bucket/{manifest['rendition']['key']}?expires="
-    )
-    assert rendition["blockCount"] == 4
-    assert not body.get("elements")
-
-    by_name = await api.get(
-        item_url(document, "/content"), params={"revision": _revision(document, 1)}
-    )
-    assert by_name.status_code == 200, by_name.text
-    assert by_name.json()["revision"] == _revision(document, 1)
-
-
-async def test_content_without_rendition(client, world, knowledge, sessions):
-    _, _, collection, api = await _setup(world, client)
-    document = await _uploaded(api, knowledge, collection)
-    await _write_preview(sessions, document, 1, _manifest(document, rendition=False))
-
-    response = await api.get(item_url(document, "/content"))
-    assert response.status_code == 200, response.text
-    assert response.json().get("rendition") is None
-    assert len(response.json()["pageAssets"]) == 1
-
-
-async def test_content_never_reads_the_index(client, world, knowledge, sessions, fakes, monkeypatch):
-    _, _, collection, api = await _setup(world, client)
-    document = await _uploaded(api, knowledge, collection)
-    await _write_preview(sessions, document, 1, _manifest(document))
-    await knowledge.index(document, ["first paragraph", "second paragraph"], page=1)
+    assert document.storage_key is not None
 
     async def unavailable(*args, **kwargs):
-        raise AssertionError("GetItemContent must not read the search index")
+        raise AssertionError("GetItemPreview must not read the search index")
 
     monkeypatch.setattr(fakes.index_backend, "get_item_points", unavailable)
     monkeypatch.setattr(fakes.index_backend, "search_item_points", unavailable)
+    viewer = await _viewer(world, client, ws, collection)
 
-    response = await api.get(item_url(document, "/content"))
-    assert response.status_code == 200, response.text
-    body = response.json()
-    assert "elements" not in body
-    assert body["rendition"]["blockCount"] == 4
-    assert len(body["pageAssets"]) == 1
+    async with _preview_requests() as requests:
+        body = await _preview(viewer, document)
+        await asyncio.sleep(0.2)
+        assert requests.empty()  # as is: nothing to ask the worker
+
+    assert body["name"] == f"{item_name(document)}/preview"
+    assert body["revision"] == _revision(document, 1)
+    assert body["state"] == "READY" and "unavailableReason" not in body
+    representation, original = body["representation"], body["original"]
+    assert representation["kind"] == "PDF"
+    assert representation["uri"].startswith(_signed(document.storage_key))
+    assert representation["mimeType"] == "application/pdf"
+    assert representation["sizeBytes"] == str(len(data))
+    assert representation["expireTime"]
+    assert "truncated" not in representation and "textFormat" not in representation
+    assert original["uri"] == representation["uri"]
+    assert (original["mimeType"], original["sizeBytes"]) == ("application/pdf", str(len(data)))
+    got = (await api.get(item_url(document))).json()
+    assert got["document"]["indexingState"] == "PENDING"
 
 
-async def test_content_of_older_revision(client, world, knowledge, sessions, fakes):
+async def test_preview_follows_each_revisions_file(client, world, knowledge, sessions, fakes):
     _, _, collection, api = await _setup(world, client)
-    document = await _uploaded(api, knowledge, collection)
-    await _write_preview(sessions, document, 1, _manifest(document))
-    await knowledge.index(document, ["first version text"])
-    await _append(sessions, fakes, document, data=b"%PDF newer", file_name="newer.pdf")
+    document = await _uploaded(
+        api, knowledge, collection, data=b"# Notes", file_name="notes.md", mime_type="text/markdown"
+    )
+    await _append(
+        sessions, fakes, document, data=b"\x89PNG", file_name="photo.png", mime_type="image/png"
+    )
+    await _append(
+        sessions, fakes, document, data=b"\x00\x00\x00\x18ftyp", file_name="clip.mp4", mime_type="video/mp4"
+    )
+    await _append(
+        sessions, fakes, document, data=b"\x00\x01", file_name="data.bin",
+        mime_type="application/octet-stream",
+    )
 
-    current = await api.get(item_url(document, "/content"))
-    assert current.status_code == 400, current.text
-    assert current.json()["error"]["status"] == "FAILED_PRECONDITION"
+    current = await _preview(api, document)
+    text = await _preview(api, document, revision=_revision(document, 1))
+    image = await _preview(api, document, revision="2")
+    video = await _preview(api, document, revision="3")
+    missing = await api.get(item_url(document, "/preview"), params={"revision": "9"})
 
-    older = await api.get(item_url(document, "/content"), params={"revision": "1"})
-    assert older.status_code == 200, older.text
-    assert older.json()["revision"] == _revision(document, 1)
-    assert len(older.json()["pageAssets"]) == 1
-    assert "elements" not in older.json()
-
-    missing = await api.get(item_url(document, "/content"), params={"revision": "5"})
+    assert current["revision"] == _revision(document, 4)
+    assert (current["state"], current["unavailableReason"]) == ("UNAVAILABLE", "FORMAT_NOT_SUPPORTED")
+    assert "representation" not in current
+    assert current["original"]["mimeType"] == "application/octet-stream"
+    assert (text["state"], text["revision"]) == ("PREPARING", _revision(document, 1))
+    assert "representation" not in text and text["original"]["mimeType"] == "text/markdown"
+    image_key = f"tenants/{document.tenant_id}/items/{document.id}/revisions/2/original"
+    assert (image["state"], image["representation"]["kind"]) == ("READY", "IMAGE")
+    assert image["representation"]["uri"].startswith(_signed(image_key))
+    assert (video["representation"]["kind"], video["representation"]["mediaType"]) == ("MEDIA", "VIDEO")
     assert missing.status_code == 404, missing.text
 
 
-async def test_content_of_collection_is_invalid(client, world):
+async def test_a_missing_representation_asks_the_worker_on_every_view(client, world, knowledge):
     _, _, collection, api = await _setup(world, client)
-    response = await api.get(item_url(collection, "/content"))
+    document = await _uploaded(
+        api, knowledge, collection, data=_docx("Twelve days."), file_name="leave.docx", mime_type=DOCX
+    )
+
+    async with _preview_requests() as requests:
+        first = await _preview(api, document)
+        assert await asyncio.wait_for(requests.get(), 5) == f"{document.id}:1"
+        await _preview(api, document)
+        assert await asyncio.wait_for(requests.get(), 5) == f"{document.id}:1"
+
+    assert first["state"] == "PREPARING"
+    assert "representation" not in first and "unavailableReason" not in first
+    assert first["original"]["mimeType"] == DOCX
+
+
+async def test_an_office_file_becomes_a_pdf_once_without_processing_or_an_edit(
+    client, world, knowledge, runtime, sessions, fakes
+):
+    _, _, collection, api = await _setup(world, client)
+    data = _docx("Employees take twelve days.", "Requests go to the manager.")
+    document = await _uploaded(
+        api, knowledge, collection, data=data, file_name="leave.docx", mime_type=DOCX
+    )
+    before = (await api.get(item_url(document))).json()
+    engine = _engine(runtime)
+
+    assert await engine.produce(document.id, 1)
+
+    assert [(route, name) for route, name, _ in fakes.gotenberg.conversions] == [
+        ("/forms/libreoffice/convert", "document.docx")
+    ]
+    assert fakes.gotenberg.conversions[0][2] == data
+    key = _rep_key(document, document.storage_key, "pdf")
+    stored = fakes.storage.objects[key]
+    assert stored.data.startswith(b"%PDF") and stored.content_type == "application/pdf"
+    assert stored.cache_control == IMMUTABLE and stored.content_encoding is None
+    body = await _preview(api, document)
+    assert body["state"] == "READY"
+    representation = body["representation"]
+    assert representation["kind"] == "PDF" and representation["mimeType"] == "application/pdf"
+    assert representation["uri"].startswith(_signed(key))
+    assert body["original"]["uri"].startswith(_signed(document.storage_key))
+    revision = await _revision_row(sessions, document)
+    assert revision.exports["representation"] == {
+        "version": 1,
+        "source": document.storage_key,
+        "kind": "PDF",
+        "key": key,
+        "mime_type": "application/pdf",
+        "size_bytes": len(stored.data),
+        "truncated": False,
+    }
+    assert (await knowledge.row(document)).metadata_["cover"]["kind"] == "page"
+    after = (await api.get(item_url(document))).json()
+    assert after["document"]["indexingState"] == "PENDING"
+    assert (after["etag"], after["updateTime"]) == (before["etag"], before["updateTime"])
+    assert not await engine.produce(document.id, 1)
+    assert not await engine.produce(document.id)
+    assert len(fakes.gotenberg.conversions) == 1
+
+
+def _zip(entries: dict[str, bytes]) -> bytes:
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for name, data in entries.items():
+            archive.writestr(name, data)
+    return buffer.getvalue()
+
+
+def _tiff() -> bytes:
+    buffer = BytesIO()
+    Image.new("RGB", (64, 48), "teal").save(buffer, "TIFF")
+    return buffer.getvalue()
+
+
+@pytest.mark.parametrize(
+    ("file_name", "mime_type", "data", "kind", "mime", "extension"),
+    [
+        (
+            "notes.txt",
+            "text/plain",
+            "Le café crème coûte trois euros à Paris; déjà très cher.\n".encode("cp1252") * 30,
+            "TEXT",
+            "text/plain; charset=utf-8",
+            "txt",
+        ),
+        ("data.json", "application/json", b'{"a":[1,2]}', "TEXT", "text/plain; charset=utf-8", "txt"),
+        ("ledger.csv", "text/csv", b"name;amount\nrent;1200\n", "TABLE", "application/vnd.bomesh.table+json", "table.json"),
+        ("bundle.zip", "application/zip", _zip({"a.txt": b"a", "dir/": b""}), "ARCHIVE", "application/vnd.bomesh.archive+json", "archive.json"),
+        ("scan.tiff", "image/tiff", _tiff(), "IMAGE", "image/webp", "webp"),
+    ],
+)
+async def test_each_produced_kind_is_stored_and_shown(
+    client, world, knowledge, runtime, sessions, fakes, file_name, mime_type, data, kind, mime,
+    extension,
+):
+    _, _, collection, api = await _setup(world, client)
+    document = await _uploaded(api, knowledge, collection)
+    # Appended directly: the engine shows formats an upload policy may not accept.
+    await _append(sessions, fakes, document, data=data, file_name=file_name, mime_type=mime_type)
+    document = await knowledge.row(document)
+
+    assert await _engine(runtime).produce(document.id)
+
+    body = await _preview(api, document)
+    representation = body["representation"]
+    key = _rep_key(document, document.storage_key, extension)
+    stored = fakes.storage.objects[key]
+    assert (body["state"], representation["kind"], representation["mimeType"]) == ("READY", kind, mime)
+    assert representation["uri"].startswith(_signed(key))
+    assert stored.cache_control == IMMUTABLE and stored.content_type == mime
+    assert fakes.gotenberg.conversions == []
+    if kind == "TEXT":
+        assert representation["textFormat"] == "PLAIN" and representation["truncated"] is False
+        assert stored.content_encoding is None
+        assert document.storage_key in fakes.storage.prefix_reads  # one Range read
+        if file_name == "data.json":
+            assert representation["language"] == "json"
+            assert stored.data == b'{\n  "a": [\n    1,\n    2\n  ]\n}'
+        else:
+            assert "language" not in representation
+            assert stored.data.decode("utf-8").startswith("Le café crème")
+    if kind in ("TABLE", "ARCHIVE"):
+        assert stored.content_encoding == "gzip" and representation["truncated"] is False
+        payload = json.loads(gzip.decompress(stored.data))
+        assert payload["schema"] == 1
+        if kind == "TABLE":
+            assert payload["sheets"][0]["rows"] == [["name", "amount"], ["rent", "1200"]]
+            assert payload["sheets"][0]["name"] == "ledger"
+        else:
+            assert [entry["path"] for entry in payload["entries"]] == ["a.txt", "dir/"]
+    if kind == "IMAGE":
+        assert "truncated" not in representation
+        with Image.open(BytesIO(stored.data)) as image:
+            assert (image.format, image.size) == ("WEBP", (64, 48))
+
+
+async def test_an_unreachable_converter_records_nothing(
+    client, world, knowledge, runtime, sessions, fakes
+):
+    _, _, collection, api = await _setup(world, client)
+    document = await _uploaded(
+        api, knowledge, collection, data=_docx("Twelve days."), file_name="leave.docx", mime_type=DOCX
+    )
+    engine = _engine(runtime)
+
+    fakes.gotenberg.statuses = [503]
+    with pytest.raises(ConverterUnavailable):
+        await engine.produce(document.id)
+    fakes.gotenberg.unreachable = True
+    with pytest.raises(ConverterUnavailable):
+        await engine.produce(document.id)
+
+    revision = await _revision_row(sessions, document)
+    assert "representation" not in revision.exports
+    assert "representation_failure" not in revision.exports
+    assert "cover" not in (await knowledge.row(document)).metadata_
+    assert document.id in await engine.pending(after=None, limit=10)
+    assert (await _preview(api, document))["state"] == "PREPARING"
+
+    fakes.gotenberg.unreachable = False
+    assert await engine.produce(document.id)
+    assert (await _preview(api, document))["state"] == "READY"
+    assert document.id not in await engine.pending(after=None, limit=10)
+
+
+async def test_a_storage_failure_is_not_a_conversion_failure(
+    client, world, knowledge, runtime, sessions, fakes, monkeypatch
+):
+    _, _, collection, api = await _setup(world, client)
+    document = await _uploaded(
+        api, knowledge, collection, data=b"a,b\n1,2\n", file_name="t.csv", mime_type="text/csv"
+    )
+    write = fakes.storage.put_bytes
+
+    def unavailable(*args, **kwargs):
+        raise ObjectStorageError("storage is down")
+
+    monkeypatch.setattr(fakes.storage, "put_bytes", unavailable)
+    with pytest.raises(ObjectStorageError):
+        await _engine(runtime).produce(document.id)
+
+    revision = await _revision_row(sessions, document)
+    assert "representation" not in revision.exports
+    assert "representation_failure" not in revision.exports
+    assert (await _preview(api, document))["state"] == "PREPARING"
+    monkeypatch.setattr(fakes.storage, "put_bytes", write)
+    assert await _engine(runtime).produce(document.id)
+    assert (await _preview(api, document))["state"] == "READY"
+
+
+async def test_a_file_the_converter_rejects_is_unavailable_and_not_converted_again(
+    client, world, knowledge, runtime, sessions, fakes
+):
+    _, _, collection, api = await _setup(world, client)
+    document = await _uploaded(
+        api, knowledge, collection, data=b"PK\x03\x04 not a document", file_name="broken.docx",
+        mime_type=DOCX,
+    )
+    engine = _engine(runtime)
+    fakes.gotenberg.statuses = [400]
+
+    assert await engine.produce(document.id)
+
+    revision = await _revision_row(sessions, document)
+    assert revision.exports["representation_failure"] == {
+        "source": revision.storage_key,
+        "reason": "CONVERSION_ERROR",
+    }
+    assert (await knowledge.row(document)).metadata_["cover"]["kind"] == "none"
+    async with _preview_requests() as requests:
+        body = await _preview(api, document)
+        await asyncio.sleep(0.2)
+        assert requests.empty()
+    assert (body["state"], body["unavailableReason"]) == ("UNAVAILABLE", "CONVERSION_FAILED")
+    assert "representation" not in body
+    assert body["original"]["uri"].startswith(_signed(revision.storage_key))
+
+    assert not await engine.produce(document.id)
+    assert len(fakes.gotenberg.conversions) == 1
+
+    await _append(
+        sessions, fakes, document, data=_docx("Fixed."), file_name="fixed.docx", mime_type=DOCX
+    )
+    assert (await _preview(api, document))["state"] == "PREPARING"
+    assert await engine.produce(document.id)
+    assert (await _preview(api, document))["state"] == "READY"
+
+
+async def test_the_manifest_lands_only_on_the_revision_that_still_holds_the_file(
+    client, world, knowledge, runtime, sessions, fakes, monkeypatch
+):
+    _, _, collection, api = await _setup(world, client)
+    document = await _uploaded(api, knowledge, collection, data=b"one\n", file_name="notes.txt")
+    number = await _append(
+        sessions, fakes, document, data=b"two\n", file_name="notes.txt", mime_type="text/plain"
+    )
+    engine = _engine(runtime)
+    produce = engine._output
+
+    async def replaced_meanwhile(*args, **kwargs):
+        output = await produce(*args, **kwargs)
+        async with transaction_scope(sessions) as session:
+            await session.execute(
+                update(ItemRevision)
+                .where(ItemRevision.item_id == document.id, ItemRevision.revision_number == number)
+                .values(deleted_at=ItemRevision.created_at)
+            )
+        return output
+
+    monkeypatch.setattr(engine, "_output", replaced_meanwhile)
+
+    assert not await engine.produce(document.id, number)
+
+    async with transaction_scope(sessions) as session:
+        stale = await session.scalar(
+            select(ItemRevision).where(
+                ItemRevision.item_id == document.id, ItemRevision.revision_number == number
+            )
+        )
+        assert stale is not None and "representation" not in stale.exports
+    assert "representation" not in (await _revision_row(sessions, document, 1)).exports
+
+
+async def test_an_original_over_the_limit_is_too_large(client, world, knowledge, sessions, fakes):
+    _, _, collection, api = await _setup(world, client)
+    document = await _uploaded(api, knowledge, collection)
+    key = f"tenants/{document.tenant_id}/items/{document.id}/revisions/2/original"
+    fakes.storage.put_bytes(b"PK", key, content_type=DOCX)
+    huge = 101 * 1024 * 1024
+    async with transaction_scope(sessions) as session:
+        row = await session.get(Item, document.id)
+        assert row is not None
+        await ItemService(session).append_revision(
+            row, storage_key=key, mime_type=DOCX, size_bytes=huge, file_name="huge.docx"
+        )
+
+    async with _preview_requests() as requests:
+        body = await _preview(api, document)
+        await asyncio.sleep(0.2)
+        assert requests.empty()
+
+    assert (body["state"], body["unavailableReason"]) == ("UNAVAILABLE", "TOO_LARGE")
+    assert body["original"]["sizeBytes"] == str(huge)
+
+
+async def test_preview_before_the_content_arrives_is_failed_precondition(client, world):
+    _, _, collection, api = await _setup(world, client)
+    created = await api.post(
+        f"{ws_url(collection.tenant_id)}/items",
+        json={
+            "itemType": "DOCUMENT",
+            "displayName": "Policy",
+            "parentItem": item_name(collection),
+            "document": {
+                "mimeType": "application/pdf",
+                "sizeBytes": "10",
+                "fileName": "policy.pdf",
+            },
+        },
+    )
+    assert created.status_code == 200, created.text
+
+    response = await api.get(f"/api/v1/{created.json()['name']}/preview")
+
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["status"] == "FAILED_PRECONDITION"
+    assert error_reason(response) == "CONTENT_NOT_AVAILABLE"
+
+
+async def test_preview_of_collection_is_invalid(client, world):
+    _, _, collection, api = await _setup(world, client)
+    response = await api.get(item_url(collection, "/preview"))
     assert response.status_code == 400, response.text
     assert response.json()["error"]["status"] == "INVALID_ARGUMENT"
 
 
-async def test_content_of_deleted_document(client, world, knowledge, sessions):
+async def test_preview_of_deleted_document(client, world, knowledge):
     _, ws, collection, api = await _setup(world, client)
     document = await _uploaded(api, knowledge, collection)
-    await _write_preview(sessions, document, 1, _manifest(document))
     viewer = await _viewer(world, client, ws, collection)
     await world.delete(document)
 
-    response = await api.get(item_url(document, "/content"))
+    response = await api.get(item_url(document, "/preview"))
     assert response.status_code == 404, response.text
-    response = await viewer.get(item_url(document, "/content"))
+    response = await viewer.get(item_url(document, "/preview"))
     assert response.status_code == 403, response.text
 
 
-async def test_content_of_unreadable_document(client, world, knowledge, sessions):
+async def test_preview_of_unreadable_document(client, world, knowledge):
     _, ws, collection, api = await _setup(world, client)
     document = await _uploaded(api, knowledge, collection)
-    await _write_preview(sessions, document, 1, _manifest(document))
     outsider = await client.as_(await world.add_member(ws))
-    response = await outsider.get(item_url(document, "/content"))
+    response = await outsider.get(item_url(document, "/preview"))
     assert response.status_code == 403, response.text
 
 
@@ -461,20 +775,6 @@ async def test_list_passages_paging(client, world, knowledge):
     assert second.status_code == 200, second.text
     assert [p["text"] for p in second.json()["passages"]] == ["three"]
     assert not second.json().get("nextPageToken")
-
-
-async def test_list_passages_page_asset_uri(client, world, knowledge, sessions):
-    _, _, collection, api = await _setup(world, client)
-    document = await _uploaded(api, knowledge, collection)
-    manifest = _manifest(document)
-    await _write_preview(sessions, document, 1, manifest)
-    await knowledge.index(document, ["on page one"], page=1)
-
-    response = await api.get(item_url(document, "/passages"))
-    assert response.status_code == 200, response.text
-    assert response.json()["passages"][0]["pageAssetUri"].startswith(
-        f"https://storage.test/test-bucket/{manifest['assets'][0]['key']}?expires="
-    )
 
 
 async def test_get_passage_and_unknown_passage(client, world, knowledge):

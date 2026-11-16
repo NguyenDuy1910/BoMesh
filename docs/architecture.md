@@ -70,9 +70,10 @@ Upload or Source sync (adds data; never processes)
 Item metadata + raw bytes in object storage, processing state pending
     ↓
 ├─ direct, access-checked resource reads / model file materialization
+├─ preview engine (worker, on content arrival): one representation per revision + cover
 └─ Ingestion Run (explicit: manual, API, schedule; one workflow per run)
       ↓
-   Docling → canonical Chunk[] (+ Preview → WebP assets, rendition)
+   Docling → canonical Chunk[]
     ↓
 ContextualChunk → embedding + BM25 payload → Qdrant
     ↓

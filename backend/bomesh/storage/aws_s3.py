@@ -369,6 +369,21 @@ class S3DocumentStorage:
         except BotoCoreError as exc:
             raise ObjectStorageError("S3 object read failed") from exc
 
+    async def read_prefix(self, key: str, *, max_bytes: int) -> bytes:
+        """The first ``max_bytes`` bytes of one object, in one ``Range`` GET."""
+
+        normalized_key = _object_key(key)
+        if max_bytes < 1:
+            raise ValueError("max_bytes must be greater than zero")
+        try:
+            return await asyncio.to_thread(self._read_prefix_sync, normalized_key, max_bytes)
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") == "InvalidRange":
+                return b""  # An empty object has no first byte to range over.
+            _raise_client_error(exc, operation="read")
+        except BotoCoreError as exc:
+            raise ObjectStorageError("S3 object read failed") from exc
+
     async def download_to_path(
         self,
         key: str,
@@ -420,6 +435,16 @@ class S3DocumentStorage:
                 f"raw document exceeds the {max_bytes} byte read limit"
             )
         return bytes(content)
+
+    def _read_prefix_sync(self, key: str, max_bytes: int) -> bytes:
+        response = self._client.get_object(
+            Bucket=self._bucket, Key=key, Range=f"bytes=0-{max_bytes - 1}"
+        )
+        body = response["Body"]
+        try:
+            return bytes(body.read(max_bytes))
+        finally:
+            body.close()
 
     def _download_to_path_sync(
         self,

@@ -10,7 +10,8 @@ size limits), and records what it was asked so tests can assert on it:
 - :class:`FakeWorkflows` — ``bomesh.services.workflow.service.TemporalWorkflowService``
   ([temporal-disabled]: not wired into the harness while Temporal is disabled);
 - :class:`FakeAtlassian` + :func:`fake_connection_providers` — the Atlassian
-  OAuth/Confluence HTTP endpoints behind a real ``AtlassianConnectionProvider``.
+  OAuth/Confluence HTTP endpoints behind a real ``AtlassianConnectionProvider``;
+- :class:`FakeGotenberg` — the Gotenberg HTTP API behind a real ``GotenbergClient``.
 
 The agent transport needs no fake here: ``native_responses.ScriptedResponsesTransport``
 replays native Responses events.
@@ -23,6 +24,7 @@ import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
+from io import BytesIO
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -30,6 +32,7 @@ from uuid import UUID
 
 import httpx
 import pytest
+from PIL import Image
 
 from bomesh.document_index import INDEX_SCHEMA_VERSION
 from bomesh.integrations import atlassian as atlassian_module
@@ -52,6 +55,7 @@ class FakeObject:
     content_type: str | None
     etag: str
     cache_control: str | None = None
+    content_encoding: str | None = None
 
 
 class FakeObjectStorage:
@@ -63,6 +67,8 @@ class FakeObjectStorage:
         self.objects: dict[str, FakeObject] = {}
         #: Keys presigned for download, in call order.
         self.presigned: list[str] = []
+        #: Keys read through ``read_prefix`` (a ``Range`` GET), in call order.
+        self.prefix_reads: list[str] = []
         self.closed = False
 
     @property
@@ -85,7 +91,11 @@ class FakeObjectStorage:
         if not data:
             raise ValueError("object storage bytes must not be empty")
         stored = FakeObject(
-            bytes(data), content_type, hashlib.md5(data).hexdigest(), cache_control
+            bytes(data),
+            content_type,
+            hashlib.md5(data).hexdigest(),
+            cache_control,
+            content_encoding,
         )
         self.objects[_object_key(key)] = stored
         return StoredObject(
@@ -134,6 +144,12 @@ class FakeObjectStorage:
         if len(stored.data) > max_bytes:
             raise ObjectStorageError(f"raw document exceeds the {max_bytes} byte read limit")
         return stored.data
+
+    async def read_prefix(self, key: str, *, max_bytes: int) -> bytes:
+        if max_bytes < 1:
+            raise ValueError("max_bytes must be greater than zero")
+        self.prefix_reads.append(key)
+        return self._get(key).data[:max_bytes]
 
     async def download_to_path(
         self, key: str, path: Path, *, max_bytes: int
@@ -548,16 +564,65 @@ def _routed_httpx(handler: Any) -> ModuleType:
     return module
 
 
+# -- Gotenberg -------------------------------------------------------------------
+
+
+def pdf_page(color: str = "#c0392b", *, size: tuple[int, int] = (1240, 1754)) -> bytes:
+    """A one-page PDF filled with ``color`` (Pillow), as a converter returns."""
+    output = BytesIO()
+    Image.new("RGB", size, color).save(output, "PDF", resolution=150)
+    return output.getvalue()
+
+
+class FakeGotenberg:
+    """Gotenberg behind ``httpx.MockTransport``: every conversion answers a one-page PDF.
+
+    ``statuses`` scripts the next answers (popped first); ``unreachable``
+    refuses connections. ``conversions`` records ``(route, uploaded file
+    name, uploaded bytes)``.
+    """
+
+    def __init__(self) -> None:
+        self.conversions: list[tuple[str, str, bytes]] = []
+        self.statuses: list[int] = []
+        self.unreachable = False
+        self.healthy = True
+        self.color = "#c0392b"
+        self.transport = httpx.MockTransport(self._handle)
+
+    def _handle(self, request: httpx.Request) -> httpx.Response:
+        if self.unreachable:
+            raise httpx.ConnectError("connection refused", request=request)
+        if request.url.path == "/health":
+            return httpx.Response(200 if self.healthy else 503, json={"status": "up"})
+        body = request.content
+        name = re.search(rb'filename="([^"]+)"', body)
+        header_end = body.find(b"\r\n\r\n")
+        boundary = body[: body.find(b"\r\n")]
+        uploaded = body[header_end + 4 : body.rfind(b"\r\n" + boundary)] if header_end >= 0 else b""
+        self.conversions.append(
+            (request.url.path, name.group(1).decode() if name else "", uploaded)
+        )
+        status = self.statuses.pop(0) if self.statuses else 200
+        if status != 200:
+            return httpx.Response(status, text=f"scripted HTTP {status}")
+        return httpx.Response(
+            200, content=pdf_page(self.color), headers={"Content-Type": "application/pdf"}
+        )
+
+
 __all__ = [
     "ATLASSIAN_ACCOUNT_ID",
     "ATLASSIAN_CLOUD_ID",
     "ATLASSIAN_REDIRECT_URI",
     "FakeAtlassian",
     "FakeEmbedder",
+    "FakeGotenberg",
     "FakeIndexBackend",
     "FakeObject",
     "FakeObjectStorage",
     "FakePoint",
     "FakeWorkflows",
     "fake_connection_providers",
+    "pdf_page",
 ]

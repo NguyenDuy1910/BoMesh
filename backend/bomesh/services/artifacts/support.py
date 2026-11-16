@@ -23,6 +23,7 @@ from bomesh.db.models import Artifact, EvidenceReviewCell, Item, ItemRevision
 from bomesh.errors import FailedPrecondition, NotFound, PermissionDenied
 from bomesh.iam.authorizer import ItemRef
 from bomesh.iam.visibility import visible_to
+from bomesh.services import DOCUMENT_RENDITION_VERSION, PreviewManifest
 from bomesh.services.artifacts.artifact_store import (
     ArtifactService,
     artifact_name,
@@ -34,10 +35,13 @@ from bomesh.services.artifacts.artifact_store import (
     source_ids,
     source_ids_of,
 )
+from bomesh.services.artifacts.preview import KnowledgePreview
 from bomesh.services.artifacts.records import (
     ArtifactRecord,
     CellRecord,
     EvidenceReviewRecord,
+    PageAsset,
+    Rendition,
     ReviewEntry,
     SnapshotRecord,
 )
@@ -53,11 +57,6 @@ from bomesh.services.conversations.references import conversation_codes
 from bomesh.services.kernel.context import RequestContext
 from bomesh.services.kernel.retention import is_purged, purge_time
 from bomesh.services.kernel.workspaces import WorkspaceResolver
-from bomesh.services.knowledge_items.content import (
-    resolve_page_assets,
-    resolve_rendition,
-)
-from bomesh.services.knowledge_items.records import PageAsset
 from bomesh.services.knowledge_items.summary import ItemSummary, get_item_summaries
 from bomesh.services.workspaces.members import active_member_ids
 
@@ -67,6 +66,8 @@ if TYPE_CHECKING:
 AUDIENCE_CANNOT_READ_SOURCES = "AUDIENCE_CANNOT_READ_SOURCES"
 UNAVAILABLE_TEXT = "[Unavailable: this part cites sources you cannot open now.]"
 TEXT_KINDS = frozenset({"draft", "study_guide", "quiz"})
+#: The rendition format version clients cache by (``document-v1`` → 1).
+RENDITION_FORMAT_VERSION = int(DOCUMENT_RENDITION_VERSION.rsplit("v", 1)[1])
 
 
 @dataclass(frozen=True, slots=True)
@@ -532,6 +533,37 @@ async def snapshot_record(
         content_uri=content_uri,
         page_assets=page_assets,
         rendition=rendition,
+    )
+
+
+def resolve_page_assets(
+    preview: KnowledgePreview, item: Item, manifest: PreviewManifest, *, expires_seconds: int
+) -> tuple[PageAsset, ...]:
+    """Signed page images of a revision's manifest, after the caller was authorized."""
+    return tuple(
+        PageAsset(
+            page_number=asset.page,
+            image_uri=asset.url,
+            width_pixels=asset.width,
+            height_pixels=asset.height,
+        )
+        for asset in preview.resolve_assets(item, manifest, expires_seconds=expires_seconds)
+    )
+
+
+def resolve_rendition(
+    preview: KnowledgePreview, item: Item, manifest: PreviewManifest, *, expires_seconds: int
+) -> Rendition | None:
+    """The signed whole-document rendition of a revision's manifest, if it has one."""
+    resolved = preview.resolve_rendition(item, manifest, expires_seconds=expires_seconds)
+    if resolved is None:
+        return None
+    return Rendition(
+        uri=resolved.url,
+        version=RENDITION_FORMAT_VERSION,
+        size_bytes=resolved.size_bytes,
+        block_count=resolved.block_count,
+        truncated=resolved.truncated,
     )
 
 

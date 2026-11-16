@@ -83,6 +83,10 @@ class DocumentStorage(Protocol):
 
     async def read(self, key: str, *, max_bytes: int) -> bytes: ...
 
+    async def read_prefix(self, key: str, *, max_bytes: int) -> bytes:
+        """The first ``max_bytes`` bytes of an object (one ``Range`` GET); all of a shorter one."""
+        ...
+
     async def download_to_path(
         self,
         key: str,

@@ -686,7 +686,7 @@ class UploadConfig:
 
 @dataclass(frozen=True, slots=True)
 class PreviewConfig:
-    """Rendering limits for stored document previews."""
+    """The preview engine (``document_viewer.md``) and the artifact page renderer."""
 
     max_source_bytes: int = DEFAULT_PREVIEW_MAX_SOURCE_BYTES
     max_pages: int = DEFAULT_PREVIEW_MAX_PAGES
@@ -695,6 +695,10 @@ class PreviewConfig:
     url_seconds: int = 300
     #: Lifetime and signing window of ``document.cover.imageUri`` (stable within it).
     cover_url_seconds: int = 3600
+    #: The Gotenberg service that converts office documents, HTML and e-mail to PDF.
+    gotenberg_url: str = "http://127.0.0.1:3010"
+    #: Gotenberg conversions one worker runs at once (inside its document slots).
+    conversions: int = 2
 
     @classmethod
     def from_environment(cls) -> PreviewConfig:
@@ -716,6 +720,8 @@ class PreviewConfig:
             ),
             url_seconds=integer("BOMESH_PREVIEW_URL_SECONDS", default=300),
             cover_url_seconds=integer("BOMESH_PREVIEW_COVER_URL_SECONDS", default=3600),
+            gotenberg_url=text("BOMESH_GOTENBERG_URL", "http://127.0.0.1:3010"),
+            conversions=max(1, integer("BOMESH_PREVIEW_CONVERSIONS", default=2)),
         )
 
 

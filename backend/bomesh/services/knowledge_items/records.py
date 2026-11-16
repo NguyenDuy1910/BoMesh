@@ -9,8 +9,11 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
+
+if TYPE_CHECKING:
+    from bomesh.services.previews.engine import PreviewFile, Representation
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +84,8 @@ class DocumentFacet:
     owner_id: UUID | None
     content_state: str
     publication_state: str
+    #: ``PERSONAL`` in a member's My files (their private scope), else ``STANDARD``.
+    collection_kind: str
     indexing_state: str
     revision: int | None
     indexed_revision: int | None
@@ -153,34 +158,22 @@ class PassageRecord:
     page_number: int | None
     bounding_boxes: tuple[BoundingBox, ...]
     element_ids: tuple[str, ...]
-    page_asset_uri: str | None
     revision: int | None
 
 
 @dataclass(frozen=True, slots=True)
-class PageAsset:
-    page_number: int | None
-    image_uri: str
-    width_pixels: int
-    height_pixels: int
+class PreviewRecord:
+    """``ItemPreview``: how a viewer shows one revision's own file."""
 
-
-@dataclass(frozen=True, slots=True)
-class Rendition:
-    uri: str
-    version: int
-    size_bytes: int
-    block_count: int
-    truncated: bool
-
-
-@dataclass(frozen=True, slots=True)
-class ContentRecord:
     workspace_id: UUID
     item_id: UUID
     revision: int
-    page_assets: tuple[PageAsset, ...]
-    rendition: Rendition | None
+    #: ``READY``, ``PREPARING`` or ``UNAVAILABLE``.
+    state: str
+    #: ``FORMAT_NOT_SUPPORTED``, ``TOO_LARGE`` or ``CONVERSION_FAILED`` when UNAVAILABLE.
+    unavailable_reason: str | None
+    representation: Representation | None
+    original: PreviewFile
 
 
 @dataclass(frozen=True, slots=True)
@@ -343,7 +336,6 @@ __all__ = [
     "Ancestor",
     "BoundingBox",
     "CollectionFacet",
-    "ContentRecord",
     "DocumentFacet",
     "Facet",
     "FacetRequest",
@@ -356,10 +348,9 @@ __all__ = [
     "NewDocument",
     "NewItem",
     "Origin",
-    "PageAsset",
     "PassageRecord",
     "PolicyRecord",
-    "Rendition",
+    "PreviewRecord",
     "RevisionRecord",
     "SearchPage",
     "SearchPassage",

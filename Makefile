@@ -10,6 +10,7 @@ COMPOSE = RUSTFS_ACCESS_KEY="$(call ROOT_ENV,RUSTFS_ACCESS_KEY)" RUSTFS_SECRET_K
 
 LOCAL_DATABASE_URL ?= postgresql+asyncpg://bomesh:bomesh@127.0.0.1:5432/bomesh
 LOCAL_QDRANT_URL ?= http://127.0.0.1:6333
+LOCAL_GOTENBERG_URL ?= http://127.0.0.1:3010
 LOCAL_S3_ENDPOINT ?= http://127.0.0.1:9000
 LOCAL_S3_BUCKET ?= bomesh
 # [temporal-disabled] LOCAL_TEMPORAL_TARGET ?= 127.0.0.1:7233
@@ -98,6 +99,7 @@ config: ## Create the root environment file, enforce local endpoints, and defaul
 	set_default .env BOMESH_S3_ENDPOINT_URL "$(LOCAL_S3_ENDPOINT)"; \
 	set_default .env BOMESH_S3_ADDRESSING_STYLE path; \
 	set_default .env BOMESH_S3_REGION us-east-1; \
+	set_default .env BOMESH_GOTENBERG_URL "$(LOCAL_GOTENBERG_URL)"; \
 	rustfs_access_key="$$(sed -n 's/^RUSTFS_ACCESS_KEY=//p' .env | tail -n 1)"; \
 	rustfs_secret_key="$$(sed -n 's/^RUSTFS_SECRET_KEY=//p' .env | tail -n 1)"; \
 	if [[ -z "$$rustfs_access_key" ]]; then update_env .env RUSTFS_ACCESS_KEY bomesh; fi; \
@@ -126,12 +128,12 @@ config: ## Create the root environment file, enforce local endpoints, and defaul
 
 # [temporal-disabled] services also started temporal temporal-admin-tools temporal-ui
 # and ran temporal-init.
-services: config ## Start PostgreSQL, Qdrant, and local RustFS unless BOMESH_S3_ENDPOINT_URL names a remote store.
+services: config ## Start PostgreSQL, Qdrant, Gotenberg, and local RustFS unless BOMESH_S3_ENDPOINT_URL names a remote store.
 	@set -euo pipefail
 	@s3_endpoint="$(call ROOT_ENV,BOMESH_S3_ENDPOINT_URL)"; \
 	local_storage=""; \
 	if [[ "$$s3_endpoint" == "$(LOCAL_S3_ENDPOINT)" ]]; then local_storage=rustfs; fi; \
-	$(COMPOSE) up -d postgres qdrant $$local_storage
+	$(COMPOSE) up -d postgres qdrant gotenberg $$local_storage
 	@for attempt in {1..30}; do \
 		if $(COMPOSE) exec -T postgres sh -c 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"' >/dev/null 2>&1; then break; fi; \
 		if [[ $$attempt -eq 30 ]]; then echo "PostgreSQL did not become ready." >&2; exit 1; fi; \
@@ -142,6 +144,11 @@ services: config ## Start PostgreSQL, Qdrant, and local RustFS unless BOMESH_S3_
 		if [[ $$attempt -eq 30 ]]; then echo "Qdrant did not become ready." >&2; exit 1; fi; \
 		sleep 1; \
 	done
+	@for attempt in {1..60}; do \
+		if curl --fail --silent --max-time 2 "$(LOCAL_GOTENBERG_URL)/health" >/dev/null; then break; fi; \
+		if [[ $$attempt -eq 60 ]]; then echo "Gotenberg did not become ready." >&2; exit 1; fi; \
+		sleep 1; \
+	done
 	@s3_endpoint="$(call ROOT_ENV,BOMESH_S3_ENDPOINT_URL)"; \
 	for attempt in {1..30}; do \
 		if curl --fail --silent --max-time 2 "$$s3_endpoint/health" >/dev/null; then break; fi; \
@@ -149,7 +156,7 @@ services: config ## Start PostgreSQL, Qdrant, and local RustFS unless BOMESH_S3_
 		sleep 1; \
 	done; \
 	if [[ "$$s3_endpoint" == "$(LOCAL_S3_ENDPOINT)" ]]; then $(COMPOSE) run --rm rustfs-init >/dev/null; fi
-	@echo "PostgreSQL, Qdrant, and object storage are accepting connections."
+	@echo "PostgreSQL, Qdrant, Gotenberg, and object storage are accepting connections."
 
 storage-migrate-minio: services ## Copy the legacy MinIO bucket into RustFS without deleting MinIO objects.
 	@set -euo pipefail
